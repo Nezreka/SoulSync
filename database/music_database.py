@@ -385,6 +385,22 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
 
+            # Notification history (Kazimir): every toast the UI raises is
+            # journaled here so a reflexive "Clear All" in the bell panel
+            # loses nothing — the History modal reads this, filterable +
+            # searchable, pruned per profile so it can't grow unbounded.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notification_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    type TEXT NOT NULL DEFAULT 'info',
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_notification_history_profile "
+                           "ON notification_history (profile_id, id)")
+
             # Watchlist table for storing artists to monitor for new releases
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS watchlist_artists (
@@ -10180,6 +10196,80 @@ class MusicDatabase:
                 return cursor.rowcount
         except Exception as e:
             logger.error("Error clearing wishlist ignore-list: %s", e)
+            return 0
+
+    # ── notification history (Kazimir) ────────────────────────────────────────
+
+    _NOTIFICATION_KEEP = 2000          # per profile — old rows prune on insert
+    _NOTIFICATION_TYPES = ('success', 'error', 'info', 'warning')
+
+    def add_notifications(self, entries, profile_id: int = 1) -> int:
+        """Journal a batch of UI notifications. Types are whitelisted,
+        messages capped at 500 chars, and the profile's history pruned to
+        the newest _NOTIFICATION_KEEP. Returns rows inserted."""
+        rows = []
+        for e in entries or []:
+            if not isinstance(e, dict):
+                continue
+            msg = str(e.get('message') or '').strip()[:500]
+            if not msg:
+                continue
+            t = str(e.get('type') or 'info').lower()
+            rows.append((int(profile_id), t if t in self._NOTIFICATION_TYPES else 'info', msg))
+        if not rows:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.executemany(
+                    "INSERT INTO notification_history (profile_id, type, message) VALUES (?, ?, ?)",
+                    rows)
+                cursor.execute(
+                    "DELETE FROM notification_history WHERE profile_id = ? AND id NOT IN "
+                    "(SELECT id FROM notification_history WHERE profile_id = ? "
+                    " ORDER BY id DESC LIMIT ?)",
+                    (int(profile_id), int(profile_id), self._NOTIFICATION_KEEP))
+                conn.commit()
+                return len(rows)
+        except Exception as e:
+            logger.error("Error journaling notifications: %s", e)
+            return 0
+
+    def get_notification_history(self, profile_id: int = 1, type_filter: str = None,
+                                 search: str = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """A profile's journaled notifications, newest first, optionally
+        filtered by type and/or a case-insensitive message substring."""
+        try:
+            q = "SELECT id, type, message, created_at FROM notification_history WHERE profile_id = ?"
+            args: list = [int(profile_id)]
+            if type_filter and type_filter in self._NOTIFICATION_TYPES:
+                q += " AND type = ?"
+                args.append(type_filter)
+            if search:
+                q += " AND message LIKE ? ESCAPE '\\'"
+                escaped = str(search).replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+                args.append(f"%{escaped}%")
+            q += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            args += [max(1, min(int(limit), 500)), max(0, int(offset))]
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(q, args)
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error reading notification history: %s", e)
+            return []
+
+    def clear_notification_history(self, profile_id: int = 1) -> int:
+        """Drop a profile's journaled notifications. Returns rows removed."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM notification_history WHERE profile_id = ?",
+                               (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Error clearing notification history: %s", e)
             return 0
 
     def get_wishlist_spotify_data(self, track_id: str, profile_id: int = 1) -> Dict[str, Any]:

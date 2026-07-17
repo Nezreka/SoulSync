@@ -6499,6 +6499,40 @@ const TOOL_HELP_CONTENT = {
                 <li><strong>Hits:</strong> Total number of times cached data was served instead of making an API call</li>
             </ul>
         `
+    },
+    'video-backups': {
+        title: 'Video Database Backups',
+        content: `
+            <h4>What is this?</h4>
+            <p>Automatic safety copies of the video library database (matches, wishlist, watchlist, settings — everything). A backup is taken on a schedule and kept in rotation; you can also take one on demand with <strong>Back up now</strong>.</p>
+
+            <h4>Restoring</h4>
+            <p>Restoring is <em>staged</em>: the backup you pick is applied on the next app restart, and the database it replaces is kept next to it as a <code>.pre-restore</code> copy — so even a restore is reversible. You can cancel a staged restore any time before restarting.</p>
+
+            <h4>Good to know</h4>
+            <ul>
+                <li>Backups only cover the video database — your actual media files are never touched.</li>
+                <li>The newest 8 backups are kept; older ones rotate out automatically.</li>
+                <li>Download a backup from the list to keep an off-machine copy.</li>
+            </ul>
+        `
+    },
+    'video-rename': {
+        title: 'Mass Rename',
+        content: `
+            <h4>What is this?</h4>
+            <p>Naming templates (Settings → Organization) normally apply only when a file is imported. If you change the templates later, your library ends up with two naming eras. Mass Rename re-renders <em>every</em> owned file name to the current templates.</p>
+
+            <h4>How it works</h4>
+            <p><strong>Preview</strong> lists every file whose on-disk name differs from what the templates say — nothing is touched. <strong>Apply renames</strong> then performs the moves: subtitles and other sidecar files travel with their video, and the database follows each move.</p>
+
+            <h4>Safety</h4>
+            <ul>
+                <li>An occupied destination is skipped with a reason — a rename never overwrites another file.</li>
+                <li>Files never move across library roots; they are renamed in place under the folder they already live in.</li>
+                <li>Your media server re-adopts the new names on its next library scan — run one after applying.</li>
+            </ul>
+        `
     }
 };
 

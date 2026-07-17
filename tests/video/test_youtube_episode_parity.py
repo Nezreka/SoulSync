@@ -57,11 +57,21 @@ def test_direct_download_enqueues_like_the_wishlist_drain(client, monkeypatch):
     # varies run to run). The guard is not what this test is about.
     monkeypatch.setattr(disk_guard, "has_room", lambda root, settings: (True, None))
 
+    # CI-only phantom (three mechanisms peeled so far): prove each link in the
+    # chain SEPARATELY so the next failure names the culprit outright.
+    import api.video as vapi
+    assert db.get_setting("youtube_path") == "/media/youtube", \
+        "the setting write did not stick on the test's own db handle"
+    assert vapi._video_db is db, \
+        f"videoapi._video_db was swapped mid-test: {vapi._video_db!r}"
+
     r = c.post("/api/video/youtube/download", json={
         "video_id": "vid42", "channel_id": "UC9", "channel_title": "Veritasium",
         "video_title": "Big Misconception", "published_at": "2026-07-01",
         "thumbnail_url": "https://yt/t.jpg"})
     out = r.get_json()
+    assert vapi._video_db is db, \
+        f"videoapi._video_db was swapped DURING the request: {vapi._video_db!r}"
     assert out.get("success") is True, f"download endpoint refused: {out}"
     assert out.get("started") is True and started == [1], \
         f"pump not kicked: {out}, started={started}"

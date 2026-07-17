@@ -78,7 +78,8 @@ def _as_int(v: Any) -> Optional[int]:
 
 def build_strategies(scope: str, title: Any, *, year: Any = None, season: Any = None,
                      episode: Any = None, imdb_id: Any = None, tmdb_id: Any = None,
-                     tvdb_id: Any = None) -> List[Tuple[str, str, List[tuple]]]:
+                     tvdb_id: Any = None, air_date: Any = None, absolute: Any = None,
+                     series_type: Any = None) -> List[Tuple[str, str, List[tuple]]]:
     """The set of Prowlarr searches to run for one request, as ``(type, query, extra)``.
 
     Pure (no I/O) so it's unit-tested. Always includes the scene-formatted text search;
@@ -112,7 +113,15 @@ def build_strategies(scope: str, title: Any, *, year: Any = None, season: Any = 
         if imdb:
             extra.append(("imdbid", imdb))
         strat.append(("tvsearch", t, extra))
-        strat.append(("search", build_query("episode", t, season=season, episode=episode), []))
+        # The text search speaks the scene's naming for this SERIES TYPE (P8):
+        # daily → 'Title 2026.07.08', anime → 'Title 1071'. The plain SxxExx text
+        # query stays as an extra strategy (some indexers normalize numbering).
+        q_typed = build_query("episode", t, season=season, episode=episode,
+                              air_date=air_date, absolute=absolute, series_type=series_type)
+        strat.append(("search", q_typed, []))
+        q_std = build_query("episode", t, season=season, episode=episode)
+        if q_std != q_typed:
+            strat.append(("search", q_std, []))
     elif scope == "season":
         extra = []
         if s_i is not None:
@@ -168,7 +177,8 @@ def _project(r: Any, url: str, want_proto: str) -> dict:
 
 def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = None,
                     episode: Any = None, source: str = "torrent", imdb_id: Any = None,
-                    tmdb_id: Any = None, tvdb_id: Any = None) -> dict:
+                    tmdb_id: Any = None, tvdb_id: Any = None, air_date: Any = None,
+                    absolute: Any = None, series_type: Any = None) -> dict:
     """Search Prowlarr for a video release with the multi-strategy (structured + text)
     approach. ``source`` picks the protocol to keep (``torrent`` | ``usenet``). Returns
     ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes."""
@@ -179,7 +189,8 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     cats = _categories(scope)
     ids = _indexer_ids()
     strategies = build_strategies(scope, title, year=year, season=season, episode=episode,
-                                  imdb_id=imdb_id, tmdb_id=tmdb_id, tvdb_id=tvdb_id)
+                                  imdb_id=imdb_id, tmdb_id=tmdb_id, tvdb_id=tvdb_id,
+                                  air_date=air_date, absolute=absolute, series_type=series_type)
     if not strategies:
         return {"configured": True, "hits": []}
 

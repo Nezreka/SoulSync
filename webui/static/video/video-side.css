@@ -593,7 +593,11 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-genres { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .vd-genre { padding: 5px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
     color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
-    backdrop-filter: blur(6px); }
+    backdrop-filter: blur(6px);
+    /* clickable (#1042): opens Discover filtered to this genre */
+    font-family: inherit; cursor: pointer; transition: color .15s, background .15s, border-color .15s; }
+.vd-genre:hover { color: #fff; background: rgba(var(--vd-accent-rgb), 0.16);
+    border-color: rgba(var(--vd-accent-rgb), 0.55); }
 .vd-meta-rating { padding: 1px 7px; border: 1px solid rgba(255,255,255,0.35); border-radius: 4px; font-size: 12px; }
 
 /* Subtitle availability (OpenSubtitles backfill) — a labeled chip row of the
@@ -947,8 +951,8 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border: 0; border-radius: 0; box-shadow: none;
 }
 .vd-prov--server .vd-prov-name { color: #6ee7a0; font-weight: 700; }
-/* streaming providers are informational badges (no per-provider link exists) */
-.vd-prov--badge { cursor: default; }
+/* streaming providers link out to the JustWatch aggregate page (#1042) */
+.vd-prov--badge { cursor: pointer; }
 /* the single real "where to watch" link (JustWatch/TMDB aggregate page) */
 .vd-prov--more .vd-prov-more-ic {
     display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800;
@@ -1041,6 +1045,19 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-card--skel { animation: none; cursor: default; pointer-events: none; }
 .vsr-card--skel .vsr-poster, .vsr-card--skel .vsr-studio-logo { box-shadow: none; border-color: rgba(255, 255, 255, 0.05); }
 .vsr-group { transition: opacity 0.24s ease; }
+
+/* recent searches — chips above the idle trending rail */
+.vsr-recent { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+.vsr-recent-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+    color: rgba(255, 255, 255, 0.35); margin-right: 2px; }
+.vsr-recent-chip { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.75); font-size: 12.5px; font-weight: 600; padding: 6px 13px;
+    border-radius: 999px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; transition: all 0.15s ease; }
+.vsr-recent-chip:hover { color: #fff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.24); }
+.vsr-recent-clear { border: 0; background: transparent; color: rgba(255, 255, 255, 0.3); font-size: 12px;
+    cursor: pointer; padding: 6px 8px; border-radius: 999px; transition: color 0.15s ease; }
+.vsr-recent-clear:hover { color: #f87171; }
 .vsr-group--gone { opacity: 0; }
 .vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(2) { animation-delay: 0.03s; }
 .vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(3) { animation-delay: 0.06s; }
@@ -1640,7 +1657,10 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-kw {
     padding: 5px 12px; border-radius: 999px; font-size: 12px; color: rgba(255, 255, 255, 0.7);
     background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+    /* clickable (#1042): runs a search for this keyword */
+    font-family: inherit; cursor: pointer; transition: color .15s, background .15s, border-color .15s;
 }
+.vd-kw:hover { color: #fff; background: rgba(var(--vd-accent-rgb), 0.16); border-color: rgba(var(--vd-accent-rgb), 0.45); }
 /* Studio chips → each opens its Studio page. A logo chip gets a bright ground so
    dark studio logos read; a name-only chip looks like a keyword pill. */
 .vd-studios { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
@@ -1829,6 +1849,8 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-ep-extra-still { width: 240px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; flex: 0 0 auto;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4); }
 .vd-ep-extra-body { flex: 1; min-width: 0; }
+/* Per-episode external deep-links (#1039) — a small badge row under the synopsis */
+.vd-ep-links { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .vd-ep-extra-ov { margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); }
 .vd-ep-extra-empty { color: rgba(255, 255, 255, 0.45); font-size: 13.5px; padding: 4px 0; }
 .vd-ep-extra-gh { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: rgba(255, 255, 255, 0.45); margin-bottom: 12px; }
@@ -2222,10 +2244,158 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcal-addmissing-ic { font-size: 15px; font-weight: 900; line-height: 1; }
 @media (max-width: 720px) { .vcal-head-row { flex-direction: column; align-items: stretch; } .vcal-controls { justify-content: space-between; } }
 
+/* Movies rail — wishlisted movies' release dates lead the guide */
+.vcal-rail--movies .vcal-rail-label { color: hsl(282, 85%, 76%); }
+.vcal-rail--movies small { color: hsla(282, 70%, 65%, 0.6); }
+.vcal-mv-chip { font-size: 11px; font-weight: 800; letter-spacing: 0.02em; padding: 3px 8px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); align-self: flex-start; }
+.vcal-mv--cinema .vcal-mv-chip { background: hsla(44, 90%, 58%, 0.16); color: hsl(44, 100%, 74%); }
+.vcal-mv--home .vcal-mv-chip { background: hsla(150, 65%, 45%, 0.16); color: hsl(150, 75%, 70%); }
+.vcal-ics-btn { width: 38px; height: 34px; border-radius: 11px; border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05); }
+.vcal-ics-btn:hover { border-color: rgba(255, 255, 255, 0.22); }
+
+/* Agenda view — the 8-col guide collapses into one chronological list */
+.vcal-grid.vcal-view--agenda .vcal-cols { display: flex; flex-direction: column; gap: 14px; max-width: 860px; margin: 0 auto; }
+.vcal-ag-day { border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 16px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.025); }
+.vcal-ag-day--today { border-color: rgba(var(--vcal-accent), 0.45); box-shadow: 0 10px 30px -18px rgba(var(--vcal-accent), 0.7); }
+.vcal-ag-day--past { opacity: 0.62; }
+.vcal-ag-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.vcal-ag-day--today .vcal-ag-head { background: rgba(var(--vcal-accent), 0.16); }
+.vcal-ag-head-label { font-size: 13.5px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
+.vcal-ag-head-n { font-size: 11px; font-weight: 800; color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.08); padding: 3px 9px; border-radius: 999px; }
+.vcal-ag-row { display: flex; align-items: center; gap: 14px; padding: 11px 16px; text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045); transition: background 0.13s ease; }
+.vcal-ag-row:last-child { border-bottom: 0; }
+.vcal-ag-row:hover { background: rgba(255, 255, 255, 0.05); }
+.vcal-ag-time { flex: 0 0 92px; font-size: 12px; font-weight: 800; color: hsl(var(--vcal-h, 232), 85%, 74%); }
+.vcal-ag-time.vcal-time--none { color: rgba(255, 255, 255, 0.32); }
+.vcal-ag-time.vcal-mv-chip { flex-basis: auto; }
+.vcal-ag-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.vcal-ag-title { font-size: 13.5px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vcal-ag-sub { font-size: 12px; color: rgba(255, 255, 255, 0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vcal-ag-row .vcal-flag { position: static; flex: 0 0 auto; }
+@media (max-width: 560px) { .vcal-ag-time { flex-basis: 72px; } .vcal-ag-row { gap: 10px; padding: 10px 12px; } }
+
+/* iCal subscribe modal (reuses the .vcm overlay chrome) */
+.vcal-ics-modal { width: min(560px, 100%); }
+.vcal-ics-body { padding: 26px 26px 22px; display: flex; flex-direction: column; gap: 12px; }
+.vcal-ics-title { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
+.vcal-ics-sub { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.66); }
+.vcal-ics-row { display: flex; gap: 8px; }
+.vcal-ics-url { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; font-size: 12.5px;
+    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.85); }
+.vcal-ics-note { margin: 0; font-size: 11.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.42); }
+.vcal-ics-note code { background: rgba(255, 255, 255, 0.08); padding: 1px 5px; border-radius: 5px; }
+
 /* ══════════════════════════════════════════════════════════════════════════
    Watchlist — shared "add to watchlist" button (.vwl-btn) + the Watchlist page
    (.vwlp-*). The button is the video mirror of the music ya-watchlist-btn.
    ══════════════════════════════════════════════════════════════════════════ */
+
+/* Per-title acquisition history (P9) */
+.vd-hist-row { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.vd-hist-row:last-child { border-bottom: 0; }
+.vd-hist-chip { flex: 0 0 auto; font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; margin-top: 2px; }
+.vd-hist-chip--ok { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+.vd-hist-chip--warn { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+.vd-hist-chip--bad { background: rgba(248, 113, 113, 0.14); color: #f87171; }
+.vd-hist-chip--mut { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.55); }
+.vd-hist-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vd-hist-rel { font-size: 13px; color: rgba(255, 255, 255, 0.85); word-break: break-all; }
+.vd-hist-sub { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); }
+
+/* Requests page (P4) — the in-app Overseerr */
+.vreq-page { padding: 26px 30px 60px; max-width: 900px; margin: 0 auto; }
+.vreq-head { margin-bottom: 20px; }
+.vreq-title-h { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
+.vreq-sub-h { margin: 6px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.55); }
+.vreq-row { display: flex; gap: 14px; align-items: flex-start; padding: 14px; border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.025); margin-bottom: 12px; }
+.vreq-poster { width: 52px; height: 78px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; }
+.vreq-poster--ph { display: flex; align-items: center; justify-content: center; font-size: 22px;
+    background: rgba(255, 255, 255, 0.06); }
+.vreq-main { flex: 1; min-width: 0; }
+.vreq-title { font-size: 15px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vreq-sub { font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-top: 3px; }
+.vreq-note { font-size: 12.5px; color: rgba(255, 255, 255, 0.68); margin-top: 6px; font-style: italic; }
+.vreq-note--admin { font-style: normal; color: #93c5fd; }
+.vreq-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 3px 8px; border-radius: 999px; }
+.vreq-st--pending { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+.vreq-st--approved { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+.vreq-st--denied { background: rgba(248, 113, 113, 0.14); color: #f87171; }
+.vreq-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.vreq-btn { padding: 8px 14px; border-radius: 10px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.05); color: #fff; }
+.vreq-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.vreq-btn:disabled { opacity: 0.5; cursor: default; }
+.vreq-btn--ok { border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.14); }
+.vreq-btn--ok:hover { background: rgba(34, 197, 94, 0.3); }
+.vreq-btn--no { border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1); color: #fca5a5; }
+.vreq-btn--no:hover { background: rgba(239, 68, 68, 0.25); }
+.vreq-denybox { display: flex; gap: 8px; margin-top: 10px; }
+.vreq-denybox.hidden { display: none; }
+.vreq-denyin { flex: 1; padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
+    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
+.vreq-empty { padding: 40px 0; text-align: center; color: rgba(255, 255, 255, 0.45); font-size: 13.5px; }
+@media (max-width: 640px) { .vreq-row { flex-wrap: wrap; } .vreq-actions { width: 100%; justify-content: flex-end; } }
+
+/* Custom Formats editor rows (P3) */
+.vq-fmt-row { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr 74px 74px 30px; gap: 8px;
+    align-items: center; margin-bottom: 8px; }
+.vq-fmt-in { padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
+    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
+.vq-fmt-num { text-align: center; }
+.vq-fmt-del { width: 28px; height: 30px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.3); color: rgba(255, 255, 255, 0.55); cursor: pointer; }
+.vq-fmt-del:hover { background: rgba(239, 68, 68, 0.8); color: #fff; border-color: transparent; }
+@media (max-width: 900px) { .vq-fmt-row { grid-template-columns: 1fr 1fr; } }
+/* backups card (P10) */
+.vbk-list { margin: 10px 0; max-height: 180px; overflow-y: auto; }
+.vbk-row { display: flex; align-items: center; gap: 8px; padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 12.5px; }
+.vbk-row:last-child { border-bottom: 0; }
+.vbk-name { flex: 1; color: rgba(255, 255, 255, 0.75); }
+.vbk-btn { padding: 4px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; text-decoration: none;
+    border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.05); color: #fff; }
+.vbk-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.vbk-btn--restore { border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; }
+.vbk-empty { padding: 8px 0; font-size: 12px; color: rgba(255, 255, 255, 0.4); }
+.vbk-pending { margin: 8px 0; padding: 9px 12px; border-radius: 10px; font-size: 12.5px;
+    color: #fbbf24; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3);
+    display: flex; align-items: center; gap: 10px; }
+.vbk-pending.hidden { display: none; }
+.vbk-cancel { margin-left: auto; padding: 3px 10px; border-radius: 8px; font-size: 11.5px; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.2); background: transparent; color: #fff; }
+
+/* notification connections (P11) */
+.vq-nt-block { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.vq-nt-row { grid-template-columns: 1fr 0.9fr 1.6fr 1fr 0.7fr 60px 34px 30px; }
+.vq-nt-test { padding: 6px 10px; font-size: 12px; }
+.vq-nt-events { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.vq-nt-ev { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.6); cursor: pointer; }
+@media (max-width: 900px) { .vq-nt-row { grid-template-columns: 1fr 1fr; } }
+
+/* import-list rows reuse the format grid with different column weights (P6) */
+.vq-implist-row { grid-template-columns: 1fr 1fr 1.2fr 0.8fr 1fr 34px 30px; }
+.vq-il-on { display: flex; align-items: center; justify-content: center; }
+@media (max-width: 900px) { .vq-implist-row { grid-template-columns: 1fr 1fr; } }
+
+/* Follow-time monitor menu (P2): what to wish when following a SHOW. */
+.vwl-menu { position: fixed; z-index: 10000; min-width: 280px; padding: 6px; border-radius: 12px;
+    background: rgba(18, 18, 24, 0.97); border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55); backdrop-filter: blur(10px); }
+.vwl-menu-it { display: block; width: 100%; text-align: left; border: 0; background: transparent;
+    color: rgba(255, 255, 255, 0.82); font-size: 13px; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.vwl-menu-it:hover { background: rgba(255, 255, 255, 0.09); color: #fff; }
+.vwl-menu-it--default { font-weight: 700; color: #fff; }
 
 /* Shared eye button — overlaid top-right on a show poster / person photo. */
 .vwl-btn {
@@ -2864,7 +3034,15 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     border-radius: 14px; background: rgba(16, 16, 22, 0.92); border: 1px solid rgba(255, 255, 255, 0.08);
     position: sticky; top: 8px; z-index: 5; backdrop-filter: blur(10px); }
 .vdsc-filterbar.hidden { display: none; }
+/* Collapsed (QT3496 #1040): hide the filter rows but keep the bar's toggle
+   reachable via the grid-head button. Animates the height away for more grid. */
+.vdsc-filterbar--collapsed { display: none; }
 .vdsc-filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Show/Hide-filters toggle in the grid head (pushed to the far right) */
+.vdsc-filter-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.vdsc-filter-toggle.hidden { display: none; }
+.vdsc-filter-toggle[aria-expanded="false"] svg { opacity: 0.5; }
 
 /* ── Endless "Keep exploring" feed ────────────────────────────────────────── */
 .vdsc-explore { margin-top: 26px; }
@@ -3356,6 +3534,8 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-nebula .vwsh-ep-dot--downloading { background: #8ab0ff; box-shadow: 0 0 6px rgba(100, 149, 237, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--downloaded { background: #4ade80; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--failed { background: #f87171; box-shadow: 0 0 6px rgba(248, 113, 113, 0.6); }
+.vwsh-nebula .vwsh-ep-dot--monitored { background: rgba(255, 255, 255, 0.45); }
+.vwsh-nebula .vwsh-ep-dot--upgrade { background: hsl(282, 85%, 68%); box-shadow: 0 0 6px hsla(282, 85%, 62%, 0.6); }
 
 /* #5 sort select — custom chevron (no native arrow), matched height/radius/ring */
 .vwsh-sort { height: 42px; padding: 0 36px 0 14px; box-sizing: border-box; border-radius: 12px;
@@ -3488,7 +3668,43 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-st--downloading { background: rgba(100, 149, 237, 0.18); color: #8ab0ff; }
 .vwsh-st--done { background: rgba(34, 197, 94, 0.18); color: #4ade80; }
 .vwsh-st--failed { background: rgba(248, 113, 113, 0.16); color: #f87171; }
+.vwsh-st--monitored { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.65); }
+.vwsh-st--upgrade { background: hsla(282, 80%, 62%, 0.18); color: hsl(282, 90%, 78%); }
 .vwsh-movie-art .vwsh-st { position: absolute; top: 8px; left: 8px; z-index: 2; backdrop-filter: blur(6px); }
+
+/* 'Search now' — per-item manual search (movie art / episode row / season side) */
+.vwsh-hunt { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.6); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
+.vwsh-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); border-color: transparent; color: #fff; }
+.vwsh-hunt:disabled { opacity: 0.4; cursor: default; }
+.vwsh-hunt--busy svg { animation: vwsh-hunt-spin 0.9s linear infinite; }
+@keyframes vwsh-hunt-spin { to { transform: rotate(360deg); } }
+.vwsh-movie-art .vwsh-hunt { position: absolute; top: 8px; right: 40px; z-index: 3; opacity: 0; }
+.vwsh-movie:hover .vwsh-movie-art .vwsh-hunt { opacity: 1; }
+.vwsh-nebula .vwsh-epc-hunt { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.vwsh-nebula .vwsh-epc:hover .vwsh-epc-hunt { opacity: 1; }
+.vwsh-nebula .vwsh-epc-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); color: #fff; }
+.vwsh-nebula .vwsh-epc-hunt:disabled { opacity: 0.35; cursor: default; }
+.vwsh-nebula .vwsh-szn-hunt { position: absolute; top: 4px; right: 30px; width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: rgba(0, 0, 0, 0.45); color: rgba(255, 255, 255, 0.65); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-hunt { opacity: 1; }
+.vwsh-nebula .vwsh-szn-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); color: #fff; }
+@media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, .vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }
+
+/* 'Search all missing' — toolbar sibling of Clear all */
+.vwsh-searchall { margin-left: auto; height: 42px; padding: 0 16px; box-sizing: border-box; border-radius: 12px;
+    display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.4); color: #fff;
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.14); transition: all 0.15s ease; }
+.vwsh-searchall:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.3);
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.7); }
+.vwsh-searchall:disabled { opacity: 0.5; cursor: default; }
+.vwsh-searchall[hidden] { display: none; }
+.vwsh-searchall + .vwsh-clear { margin-left: 0; }
 
 .vwsh-rm { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.6); font-size: 17px; line-height: 1; cursor: pointer;
@@ -4328,11 +4544,15 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 /* ── Library cards: rating · watched tick · show status chip · progress line ── */
 .vlib-rate { color: #fbbf24; font-weight: 700; white-space: nowrap; }
 .vlib-watched { color: #2bd17e; font-weight: 800; }
-.vlib-chip { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.68rem;
-    font-weight: 700; letter-spacing: 0.02em; vertical-align: 1px; border: 1px solid transparent; }
-.vlib-chip--airing { color: #2bd17e; background: rgba(34, 197, 94, 0.13); border-color: rgba(34, 197, 94, 0.32); }
-.vlib-chip--ended { color: rgba(255, 255, 255, 0.55); background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.14); }
-.vlib-chip--upcoming { color: #60a5fa; background: rgba(96, 165, 250, 0.12); border-color: rgba(96, 165, 250, 0.3); }
+/* Show lifecycle on the poster corner (movies wear resolution there) — the
+   stat line is too tight on small cards to carry it. */
+.library-artist-card .video-card-badge--airing { color: #2bd17e; background: rgba(10, 40, 22, 0.82);
+    border: 1px solid rgba(34, 197, 94, 0.4); }
+.library-artist-card .video-card-badge--ended { color: rgba(255, 255, 255, 0.72); background: rgba(20, 20, 24, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.18); }
+.library-artist-card .video-card-badge--upcoming { color: #60a5fa; background: rgba(12, 25, 48, 0.82);
+    border: 1px solid rgba(96, 165, 250, 0.38); }
+
 /* slim owned-episodes progress under a show card's stats */
 .vlib-prog { margin-top: 7px; height: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.09); overflow: hidden; }
 .vlib-prog-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(164, 114, 245, 0.65), rgb(164, 114, 245)); }

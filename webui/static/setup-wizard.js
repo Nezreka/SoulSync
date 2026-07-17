@@ -510,7 +510,7 @@ function _renderPaths(el) {
             <h2>Paths & Media Server</h2>
             <p class="setup-subtitle">Where should downloaded music go?</p>
             <div class="setup-info-box">
-                <strong>Two-folder system:</strong> Music downloads to the <strong>Input Folder</strong> first as raw files. After post-processing (metadata tagging, file organization), finished tracks are moved to the <strong>Output Folder</strong> organized into Artist/Album subfolders. Point your media server at the output folder.
+                <strong>Two-folder system:</strong> Music downloads to the <strong>Download Folder</strong> first as raw files. After post-processing (metadata tagging, file organization), finished tracks are moved to the <strong>Music Library Folder</strong> organized into Artist/Album subfolders. Point your media server at the Music Library Folder.
             </div>
             <div class="setup-input-group">
                 <label>Input Folder (where raw downloads land)</label>

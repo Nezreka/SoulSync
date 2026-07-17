@@ -2,9 +2,9 @@
 
 Persists the video download configuration in video.db's ``video_settings`` KV
 table — fully separate from the music ``soulseek.*`` paths so the two libraries
-never share a folder or collide. The actual download fulfillment engine (wishlist
-→ search → grab) is a later roadmap phase; these endpoints just store/serve the
-config the Settings → Downloads tab edits.
+never share a folder or collide — plus the queue/history/blocklist endpoints the
+Downloads page reads. The fulfillment engine itself lives in the wishlist drain
+(``core/automation/handlers/video_process_wishlist``) + ``download_monitor``.
 
 Folders:
   - INPUT (download) folder is SHARED with the music side — it's the same
@@ -70,7 +70,7 @@ def _parse_text(hit) -> str:
 
 
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
-                   want_title=None, blocked_users=None, want_date=None) -> list:
+                   want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
     Shared by the mock search and the live slskd start/poll endpoints.
 
@@ -79,8 +79,16 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     them up. Blocked hits stay VISIBLE in manual search (greyed, with the reason — the
     Sonarr behaviour) but are never `accepted`, so every auto-picker skips them; a manual
     grab of one is a deliberate user override."""
+    from core.video.custom_formats import format_score, load_formats
     from core.video.quality_eval import evaluate_release
     from core.video.release_parse import parse_release
+    # Custom formats (P3): loaded once per evaluation batch; scored per hit
+    # under THIS profile's overrides. Failure = no formats, never a 500.
+    try:
+        from . import get_video_db as _gdb
+        _formats = load_formats(_gdb())
+    except Exception:   # noqa: BLE001
+        _formats = []
     if blocked is None or blocked_users is None:
         try:
             from . import get_video_db
@@ -98,7 +106,19 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
-                                   want_title=want_title, want_date=want_date)
+                                   want_title=want_title, want_date=want_date,
+                                   want_absolute=want_absolute)
+        # Custom formats: matched formats ADD their (per-profile) score; a
+        # summed score under the profile's floor hard-rejects (Radarr's
+        # min custom format score).
+        fscore, fnames = (0, [])
+        if _formats:
+            fscore, fnames = format_score(_parse_text(hit), _formats, profile)
+            verdict = {**verdict, "score": verdict["score"] + fscore}
+            floor = (profile or {}).get("min_format_score") or 0
+            if floor and verdict["accepted"] and fscore < floor:
+                verdict = {**verdict, "accepted": False,
+                           "rejected": "Format score %d is below your minimum %d" % (fscore, floor)}
         user = hit.get("username")
         is_blocked = bool(user and user in blocked_users) or (user, hit.get("filename")) in blocked
         if user and user in blocked_users:
@@ -125,6 +145,7 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "folder_size_bytes": hit.get("folder_size_bytes") or 0,
             "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
             "rejected": verdict["rejected"], "score": verdict["score"], "blocked": is_blocked,
+            "format_score": fscore, "formats": fnames,
             "resolution": parsed.get("resolution"), "source": parsed.get("source"),
             "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
             "audio": parsed.get("audio"), "group": parsed.get("group"),
@@ -207,6 +228,80 @@ def register_routes(bp):
             config_manager.set(_SHARED_DOWNLOAD_KEY, (str(body.get("download_path") or "")).strip())
         save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
+
+    # ── import lists (arr-parity P6). Nested under /downloads/config so the
+    #    blueprint's write-admin gate covers mutations automatically. ─────────
+    @bp.route("/downloads/config/import-lists", methods=["GET"])
+    def video_import_lists_get():
+        from core.video.import_lists import load_lists
+
+        from . import get_video_db
+        return jsonify({"lists": load_lists(get_video_db())})
+
+    @bp.route("/downloads/config/import-lists", methods=["POST"])
+    def video_import_lists_save():
+        from core.video.import_lists import save_list
+
+        from . import get_video_db
+        entry = save_list(get_video_db(), request.get_json(silent=True) or {})
+        if not entry:
+            return jsonify({"success": False,
+                            "error": "A list needs a valid source (and a list id/ref)."}), 400
+        return jsonify({"success": True, **entry})
+
+    @bp.route("/downloads/config/import-lists/<int:list_id>", methods=["DELETE"])
+    def video_import_lists_delete(list_id):
+        from core.video.import_lists import delete_list
+
+        from . import get_video_db
+        if not delete_list(get_video_db(), list_id):
+            return jsonify({"success": False, "error": "Unknown list."}), 404
+        return jsonify({"success": True})
+
+    # ── mass rename (arr-parity P7). Under /organization so the blueprint's
+    #    admin gate covers it (renaming the library is management). ───────────
+    @bp.route("/organization/rename/preview", methods=["GET"])
+    def video_rename_preview():
+        """Kick off (or report) the background rename preview. Scanning a big
+        library resolves every stored path against the filesystem, which is too
+        slow to block the request — so it runs on a worker and the UI polls this.
+        Returns {success, ready, done, total, entries?, unresolved?, error?}."""
+        from core.video.mass_rename import start_preview
+        st = start_preview()
+        # If a fresh result is already sitting there, hand it straight back.
+        ready = (not st["running"]) and (st["result"] is not None or st["error"])
+        out = {"success": True, "ready": bool(ready),
+               "done": st["done"], "total": st["total"]}
+        if st["error"]:
+            out.update(success=False, error=st["error"])
+        elif ready and st["result"]:
+            out.update(st["result"])
+        return jsonify(out)
+
+    @bp.route("/organization/rename/preview/status", methods=["GET"])
+    def video_rename_preview_status():
+        """Poll the in-flight preview without starting a new one."""
+        from core.video.mass_rename import preview_state
+        st = preview_state()
+        ready = (not st["running"]) and (st["result"] is not None or st["error"])
+        out = {"success": True, "ready": bool(ready),
+               "running": st["running"], "done": st["done"], "total": st["total"]}
+        if st["error"]:
+            out.update(success=False, error=st["error"])
+        elif ready and st["result"]:
+            out.update(st["result"])
+        return jsonify(out)
+
+    @bp.route("/organization/rename/apply", methods=["POST"])
+    def video_rename_apply():
+        """Apply renames from a fresh preview. Body: {keys?: [...]} — omitted
+        keys means everything the preview found."""
+        from core.video.mass_rename import apply as apply_renames
+        body = request.get_json(silent=True) or {}
+        res = apply_renames(body.get("keys"))
+        if res.get("status") == "skipped":
+            return jsonify({"success": False, "error": "A rename run is already in progress."}), 409
+        return jsonify({"success": True, **res})
 
     @bp.route("/downloads/blocklist", methods=["GET"])
     def video_downloads_blocklist():
@@ -386,6 +481,89 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         return jsonify(save(get_video_db(), body))
 
+    # ── named quality profiles (per-title assignment; arr-parity P2) ─────────
+    @bp.route("/downloads/quality/profiles", methods=["GET"])
+    def video_quality_profiles_list():
+        """Every selectable profile, Default (id 0) first."""
+        from . import get_video_db
+        from core.video.quality_profile import list_profiles
+        return jsonify({"profiles": list_profiles(get_video_db())})
+
+    @bp.route("/downloads/quality/profiles", methods=["POST"])
+    def video_quality_profiles_save():
+        """Create (no id) or update (id) a named profile; id 0 = the Default."""
+        from . import get_video_db
+        from core.video.quality_profile import save_named
+        body = request.get_json(silent=True) or {}
+        entry = save_named(get_video_db(), body.get("id"), body.get("name"), body.get("profile"))
+        return jsonify({"success": True, **entry})
+
+    @bp.route("/downloads/quality/profiles/<int:profile_id>", methods=["DELETE"])
+    def video_quality_profiles_delete(profile_id):
+        """Remove a named profile. Titles pointing at it fall back to Default."""
+        from . import get_video_db
+        from core.video.quality_profile import delete_named
+        if not delete_named(get_video_db(), profile_id):
+            return jsonify({"success": False, "error": "Unknown profile (Default can't be deleted)."}), 404
+        return jsonify({"success": True})
+
+    # ── custom formats (scored release matchers; arr-parity P3) ──────────────
+    @bp.route("/downloads/quality/formats", methods=["GET"])
+    def video_custom_formats_list():
+        from core.video.custom_formats import load_formats
+
+        from . import get_video_db
+        return jsonify({"formats": load_formats(get_video_db())})
+
+    @bp.route("/downloads/quality/formats", methods=["POST"])
+    def video_custom_formats_save():
+        """Create (no id) or update a format:
+        {id?, name, include: [term|/regex/], exclude: [...], score}."""
+        from core.video.custom_formats import save_format
+
+        from . import get_video_db
+        f = save_format(get_video_db(), request.get_json(silent=True) or {})
+        if not f:
+            return jsonify({"success": False,
+                            "error": "A format needs a name and at least one term."}), 400
+        return jsonify({"success": True, **f})
+
+    @bp.route("/downloads/quality/formats/<int:format_id>", methods=["DELETE"])
+    def video_custom_formats_delete(format_id):
+        from core.video.custom_formats import delete_format
+
+        from . import get_video_db
+        if not delete_format(get_video_db(), format_id):
+            return jsonify({"success": False, "error": "Unknown format."}), 404
+        return jsonify({"success": True})
+
+    @bp.route("/detail/<kind>/<int:library_id>/quality-profile", methods=["PUT"])
+    def video_title_quality_profile(kind, library_id):
+        """Assign a quality profile to an owned movie/show (0/null = Default).
+        The title's wishlist rows follow so in-flight wishes are judged the
+        same way."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        body = request.get_json(silent=True) or {}
+        ok = get_video_db().set_title_quality_profile(kind, library_id, body.get("profile_id"))
+        if not ok:
+            return jsonify({"success": False, "error": "Title not found."}), 404
+        return jsonify({"success": True})
+
+    @bp.route("/detail/show/<int:library_id>/series-type", methods=["PUT"])
+    def video_show_series_type(library_id):
+        """Set a show's series type (P8): standard | daily | anime. Drives how the
+        drain queries for its episodes (SxxExx vs air date vs absolute number)."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        st = str(body.get("series_type") or "").strip().lower()
+        if st not in ("standard", "daily", "anime"):
+            return jsonify({"success": False, "error": "series_type must be standard|daily|anime"}), 400
+        if not get_video_db().set_show_series_type(library_id, st):
+            return jsonify({"success": False, "error": "Show not found."}), 404
+        return jsonify({"success": True})
+
     @bp.route("/organization", methods=["GET"])
     def video_organization():
         """The library-organisation settings: naming templates + post-process toggles."""
@@ -412,6 +590,23 @@ def register_routes(bp):
         profile = load(get_video_db())
         return jsonify(evaluate_owned(body.get("file"), profile))
 
+    def _profile_for_request(db, src):
+        """The quality profile a get-modal search/grab should be judged under:
+        the title's own assignment (resolved from tmdb_id when the client sends
+        it) → else the Default profile (P2, per-title profiles)."""
+        from core.video.quality_profile import profile_by_id
+        pid = src.get("quality_profile_id")
+        if pid in (None, "", 0, "0"):
+            tmdb = src.get("tmdb_id") or src.get("media_id")
+            scope = str(src.get("scope") or src.get("kind") or "movie").lower()
+            kind = "movie" if scope == "movie" else "show"
+            if tmdb and str(src.get("media_source") or "tmdb") == "tmdb":
+                try:
+                    pid = db.quality_profile_id_for(kind, tmdb_id=int(tmdb))
+                except (TypeError, ValueError):
+                    pid = None
+        return profile_by_id(db, pid), pid
+
     @bp.route("/downloads/search", methods=["POST"])
     def video_downloads_search():
         """Search a scope (movie / episode / season / series) and return candidates
@@ -421,14 +616,13 @@ def register_routes(bp):
         Body: {scope, title, year?, season?, episode?, season_end?}."""
         from . import get_video_db
         from core.video.mock_search import mock_search
-        from core.video.quality_profile import load as load_profile
 
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()
         want_season, want_episode, season_end = _search_ints(body)
-        profile = load_profile(get_video_db())
+        profile, _pid = _profile_for_request(get_video_db(), body)
         live = False
         if source == "soulseek":
             from core.video.slskd_search import build_query, slskd_search
@@ -462,7 +656,6 @@ def register_routes(bp):
         like the music side) — fixes 'no results' from waiting too briefly."""
         from . import get_video_db
         from core.video.mock_search import mock_search
-        from core.video.quality_profile import load as load_profile
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
@@ -482,7 +675,7 @@ def register_routes(bp):
             # how long the client should keep polling (slskd keeps searching this long).
             return jsonify({"id": res["id"], "live": True, "complete": False,
                             "poll_ms": search_timeout_ms() + 8000})
-        profile = load_profile(get_video_db())
+        profile, _pid = _profile_for_request(get_video_db(), body)
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
             # (no polling id), so the client renders immediately.
@@ -506,14 +699,13 @@ def register_routes(bp):
         """Current ranked results for an in-flight slskd search. Query: id, scope,
         title, season?, episode?. The client polls until it stops growing or times out."""
         from . import get_video_db
-        from core.video.quality_profile import load as load_profile
         from core.video.slskd_search import poll_search
         sid = request.args.get("id")
         scope = str(request.args.get("scope") or "movie").lower()
         want_season, want_episode, _ = _search_ints(request.args)
         if not sid:
             return jsonify({"results": [], "live": True, "total_files": 0})
-        profile = load_profile(get_video_db())
+        profile, _pid = _profile_for_request(get_video_db(), request.args)
         polled = poll_search(sid)
         return jsonify({"live": True, "total_files": polled["total_files"],
                         "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode, want_year=request.args.get("year"), want_title=request.args.get("title"))})
@@ -563,6 +755,7 @@ def register_routes(bp):
         import json as _json
         from core.video.slskd_search import build_query
         ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
+        _prof, _pid = _profile_for_request(db, body)
         common = {
             "kind": str(body.get("kind") or "movie"), "title": body.get("title"),
             "release_title": body.get("release_title") or body.get("filename") or body.get("title"),
@@ -571,6 +764,7 @@ def register_routes(bp):
             "media_id": (str(body.get("media_id")) if body.get("media_id") is not None else None),
             "media_source": body.get("media_source"), "year": body.get("year"),
             "poster_url": body.get("poster_url"), "search_ctx": _json.dumps(ctx), "attempts": 0,
+            "quality_profile_id": _pid,   # the profile this grab is judged under (P2)
         }
         if source == "soulseek":
             started = start_download(username, filename, body.get("size_bytes") or 0)

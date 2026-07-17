@@ -5610,7 +5610,30 @@ const _notifState = {
     currentToast: null,
     toastTimer: null,
     maxHistory: 50,
+    filter: 'all',       // panel type filter: all | success | error | warning | info
+    pending: [],         // toasts awaiting the fire-and-forget journal flush
+    flushTimer: null,
 };
+
+// Journal toasts to the server so a reflexive "Clear All" loses nothing —
+// batched, fire-and-forget, never blocks the UI.
+function _flushNotifJournal() {
+    if (!_notifState.pending.length) return;
+    const entries = _notifState.pending.splice(0, 50);
+    fetch('/api/notifications/log', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries }), keepalive: true,
+    }).catch(() => { /* journaling is best-effort */ });
+}
+
+function _queueNotifJournal(type, message) {
+    _notifState.pending.push({ type, message });
+    if (!_notifState.flushTimer) {
+        _notifState.flushTimer = setInterval(_flushNotifJournal, 8000);
+        window.addEventListener('beforeunload', _flushNotifJournal);
+    }
+    if (_notifState.pending.length >= 25) _flushNotifJournal();
+}
 const _recentToastKeys = new Map();
 
 const _notifIcons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
@@ -5869,6 +5892,7 @@ function showToast(message, type = 'success', helpSection = null) {
     if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
     _notifState.unreadCount++;
     _updateNotifBadge();
+    _queueNotifJournal(type, message);
 
     // Show compact toast — dismiss current if showing
     const container = document.getElementById('toast-container');
@@ -5944,27 +5968,12 @@ function _openNotifPanel() {
     panel.innerHTML = `
         <div class="notif-panel-header">
             <span class="notif-panel-title">Notifications</span>
+            <button class="notif-panel-clear" onclick="_openNotifHistory()">History</button>
             ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
         </div>
+        <div class="notif-filter-row">${_notifFilterChipsHTML()}</div>
         <div class="notif-active-host" data-notif-active-host>${_overlayActiveHTML()}</div>
-        <div class="notif-panel-body">
-            ${entries.length === 0 ? '<div class="notif-panel-empty">No notifications yet</div>' :
-            entries.map(e => {
-                const icon = _notifIcons[e.type] || 'ℹ';
-                const ago = _notifTimeAgo(e.timestamp);
-                const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
-                const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
-                return `
-                    <div class="notif-entry notif-entry-${e.type}">
-                        ${unreadDot}
-                        <span class="notif-entry-icon notif-icon-${e.type}">${icon}</span>
-                        <div class="notif-entry-body">
-                            <div class="notif-entry-msg">${_escToast(e.message)}</div>
-                            <div class="notif-entry-meta">${ago}${learnMore}</div>
-                        </div>
-                    </div>`;
-            }).join('')}
-        </div>
+        <div class="notif-panel-body">${_notifEntriesHTML()}</div>
     `;
 
     document.body.appendChild(panel);
@@ -6004,10 +6013,169 @@ function _closeNotifPanel() {
 }
 
 function _clearNotifHistory() {
+    // Panel-only: the server journal keeps everything (see History).
     _notifState.history = [];
     _notifState.unreadCount = 0;
     _updateNotifBadge();
     _closeNotifPanel();
+}
+
+// ── panel filter (Kazimir: "is there a place to filter notifications?") ─────
+const _NOTIF_FILTERS = [
+    ['all', 'All'], ['success', '✓'], ['error', '✕'], ['warning', '⚠'], ['info', 'ℹ'],
+];
+
+function _notifFilterChipsHTML() {
+    return _NOTIF_FILTERS.map(([key, label]) =>
+        `<button class="notif-filter-chip${_notifState.filter === key ? ' active' : ''}"
+                 onclick="_setNotifFilter('${key}')" title="${key}">${label}</button>`).join('');
+}
+
+function _notifEntriesHTML() {
+    const entries = _notifState.filter === 'all'
+        ? _notifState.history
+        : _notifState.history.filter(e => e.type === _notifState.filter);
+    if (entries.length === 0) {
+        return `<div class="notif-panel-empty">${_notifState.filter === 'all'
+            ? 'No notifications yet' : 'Nothing with this filter'}</div>`;
+    }
+    return entries.map(e => {
+        const icon = _notifIcons[e.type] || 'ℹ';
+        const ago = _notifTimeAgo(e.timestamp);
+        const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
+        const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
+        return `
+            <div class="notif-entry notif-entry-${e.type}">
+                ${unreadDot}
+                <span class="notif-entry-icon notif-icon-${e.type}">${icon}</span>
+                <div class="notif-entry-body">
+                    <div class="notif-entry-msg">${_escToast(e.message)}</div>
+                    <div class="notif-entry-meta">${ago}${learnMore}</div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function _setNotifFilter(key) {
+    _notifState.filter = key;
+    const panel = document.getElementById('notif-panel');
+    if (!panel) return;
+    const row = panel.querySelector('.notif-filter-row');
+    const body = panel.querySelector('.notif-panel-body');
+    if (row) row.innerHTML = _notifFilterChipsHTML();
+    if (body) body.innerHTML = _notifEntriesHTML();
+}
+
+// ── persistent history modal (server journal; survives Clear All) ───────────
+const _notifHistState = { type: '', q: '', offset: 0, pageSize: 100 };
+
+function _openNotifHistory() {
+    _closeNotifPanel();
+    _closeNotifHistory();
+    const overlay = document.createElement('div');
+    overlay.id = 'notif-history-overlay';
+    overlay.className = 'notif-history-overlay';
+    overlay.innerHTML = `
+        <div class="notif-history-modal">
+            <div class="notif-history-header">
+                <span class="notif-history-title">🔔 Notification History</span>
+                <button class="notif-history-close" onclick="_closeNotifHistory()">✕</button>
+            </div>
+            <div class="notif-history-controls">
+                <select class="notif-history-type" onchange="_notifHistFilterChanged()">
+                    <option value="">All types</option>
+                    <option value="success">Success</option>
+                    <option value="error">Error</option>
+                    <option value="warning">Warning</option>
+                    <option value="info">Info</option>
+                </select>
+                <input class="notif-history-search" type="text" placeholder="Search messages…"
+                       oninput="_notifHistSearchChanged(this.value)">
+                <button class="notif-panel-clear" onclick="_clearServerNotifHistory()">Clear history</button>
+            </div>
+            <div class="notif-history-body" data-notif-history-list>
+                <div class="notif-panel-empty">Loading…</div>
+            </div>
+            <div class="notif-history-footer">
+                <button class="notif-history-more hidden" data-notif-history-more
+                        onclick="_loadNotifHistory(false)">Load more</button>
+            </div>
+        </div>`;
+    overlay.addEventListener('click', e => { if (e.target === overlay) _closeNotifHistory(); });
+    document.body.appendChild(overlay);
+    _notifHistState.type = '';
+    _notifHistState.q = '';
+    _loadNotifHistory(true);
+}
+
+function _closeNotifHistory() {
+    const el = document.getElementById('notif-history-overlay');
+    if (el) el.remove();
+}
+
+let _notifHistSearchTimer = null;
+function _notifHistSearchChanged(value) {
+    _notifHistState.q = value.trim();
+    clearTimeout(_notifHistSearchTimer);
+    _notifHistSearchTimer = setTimeout(() => _loadNotifHistory(true), 300);
+}
+
+function _notifHistFilterChanged() {
+    const sel = document.querySelector('.notif-history-type');
+    _notifHistState.type = sel ? sel.value : '';
+    _loadNotifHistory(true);
+}
+
+async function _loadNotifHistory(reset) {
+    const list = document.querySelector('[data-notif-history-list]');
+    const more = document.querySelector('[data-notif-history-more]');
+    if (!list) return;
+    if (reset) _notifHistState.offset = 0;
+    const params = new URLSearchParams({
+        limit: String(_notifHistState.pageSize),
+        offset: String(_notifHistState.offset),
+    });
+    if (_notifHistState.type) params.set('type', _notifHistState.type);
+    if (_notifHistState.q) params.set('q', _notifHistState.q);
+    try {
+        const res = await fetch('/api/notifications/history?' + params.toString());
+        const data = res.ok ? await res.json() : null;
+        const rows = (data && data.notifications) || [];
+        const html = rows.map(r => {
+            const icon = _notifIcons[r.type] || 'ℹ';
+            const when = r.created_at ? String(r.created_at).replace('T', ' ').slice(0, 19) : '';
+            return `
+                <div class="notif-entry notif-entry-${r.type}">
+                    <span class="notif-entry-icon notif-icon-${r.type}">${icon}</span>
+                    <div class="notif-entry-body">
+                        <div class="notif-entry-msg">${_escToast(r.message)}</div>
+                        <div class="notif-entry-meta">${when}</div>
+                    </div>
+                </div>`;
+        }).join('');
+        if (reset) {
+            list.innerHTML = html || '<div class="notif-panel-empty">Nothing here yet</div>';
+        } else if (html) {
+            list.insertAdjacentHTML('beforeend', html);
+        }
+        _notifHistState.offset += rows.length;
+        if (more) more.classList.toggle('hidden', rows.length < _notifHistState.pageSize);
+    } catch (e) {
+        if (reset) list.innerHTML = "<div class=\"notif-panel-empty\">Couldn't load history</div>";
+    }
+}
+
+function _clearServerNotifHistory() {
+    const doClear = () => fetch('/api/notifications/history', { method: 'DELETE' })
+        .then(() => _loadNotifHistory(true))
+        .catch(() => { /* best-effort */ });
+    if (typeof showConfirmDialog === 'function') {
+        showConfirmDialog({
+            title: 'Clear notification history?',
+            message: 'This permanently removes your journaled notifications. The bell panel is unaffected.',
+            confirmText: 'Clear', destructive: true,
+        }).then(ok => { if (ok) doClear(); });
+    } else { doClear(); }
 }
 
 function _notifTimeAgo(ts) {
@@ -6804,28 +6972,46 @@ async function checkForUpdates() {
         const btn = document.querySelector('.version-button');
         if (!btn) return;
         if (data.update_available) {
+            // Kazimir's severity glow: green = routine release, yellow = major
+            // version, red = critical/security. Dismissal is per-version — a
+            // NEW release glows again — and a critical release never stays
+            // dismissed.
+            const updateKey = data.latest_version || data.latest_sha;
+            const severity = data.severity || 'update';
             const dismissed = localStorage.getItem('soulsync-update-dismissed');
-            if (dismissed !== data.latest_sha) {
-                // Add glow class
-                btn.classList.add('update-available');
-                // Add UPDATE badge if not already present
-                if (!btn.querySelector('.update-badge')) {
-                    const badge = document.createElement('span');
+            if (dismissed !== updateKey || severity === 'critical') {
+                btn.classList.remove('update-available--update', 'update-available--major',
+                                     'update-available--critical');
+                btn.classList.add('update-available', 'update-available--' + severity);
+                btn.title = data.latest_version
+                    ? ('v' + data.latest_version + ' is available'
+                        + (severity === 'critical' ? ' — critical update'
+                            : severity === 'major' ? ' — major release' : ''))
+                    : 'A new update is available';
+                let badge = btn.querySelector('.update-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
                     badge.className = 'update-badge';
-                    badge.textContent = 'UPDATE';
                     btn.appendChild(badge);
                 }
+                badge.textContent = severity === 'critical' ? 'CRITICAL'
+                    : severity === 'major' ? 'MAJOR' : 'UPDATE';
                 // Show toast on first detection (not if already notified this session)
                 const notified = sessionStorage.getItem('soulsync-update-notified');
-                if (notified !== data.latest_sha) {
-                    sessionStorage.setItem('soulsync-update-notified', data.latest_sha);
+                if (notified !== updateKey) {
+                    sessionStorage.setItem('soulsync-update-notified', updateKey);
+                    const what = data.latest_version
+                        ? `SoulSync v${data.latest_version} is available!`
+                        : 'A new SoulSync update is available!';
                     showToast(data.is_docker
-                        ? 'A new SoulSync update has been pushed to the repo — Docker image will be updated soon!'
-                        : 'A new SoulSync update is available!', 'info');
+                        ? what + ' The Docker image will be updated soon.'
+                        : what, severity === 'critical' ? 'error' : 'info');
                 }
             }
         } else {
-            btn.classList.remove('update-available');
+            btn.classList.remove('update-available', 'update-available--update',
+                                 'update-available--major', 'update-available--critical');
+            btn.removeAttribute('title');
             const badge = btn.querySelector('.update-badge');
             if (badge) badge.remove();
         }
@@ -6840,17 +7026,20 @@ async function showVersionInfo() {
     const btn = document.querySelector('.version-button');
     const hadUpdate = btn && btn.classList.contains('update-available');
 
-    // Dismiss update glow when user opens the modal
+    // Dismiss update glow when user opens the modal (per-version — a newer
+    // release glows again; a critical one re-glows on the next check).
     if (hadUpdate) {
-        btn.classList.remove('update-available');
+        btn.classList.remove('update-available', 'update-available--update',
+                             'update-available--major', 'update-available--critical');
         const badge = btn.querySelector('.update-badge');
         if (badge) badge.remove();
         try {
             const updateRes = await fetch('/api/update-check');
             if (updateRes.ok) {
                 updateInfo = await updateRes.json();
-                if (updateInfo.latest_sha) {
-                    localStorage.setItem('soulsync-update-dismissed', updateInfo.latest_sha);
+                const key = updateInfo.latest_version || updateInfo.latest_sha;
+                if (key) {
+                    localStorage.setItem('soulsync-update-dismissed', key);
                 }
             }
         } catch (e) { /* ignore */ }
@@ -6871,6 +7060,16 @@ async function showVersionInfo() {
         subtitle: version ? `Version ${version} — Latest Changes` : 'Latest Changes',
         sections,
     };
+
+    // The version modal shows the same What's New content the helper's badge
+    // points at — mark it seen here too, or the helper button's red dot never
+    // clears for users who read release notes this way (Kazimir's stuck dot).
+    try {
+        if (typeof _getLatestWhatsNewVersion === 'function') {
+            localStorage.setItem('soulsync_helper_version_seen', _getLatestWhatsNewVersion());
+            if (typeof _updateHelperBadge === 'function') _updateHelperBadge();
+        }
+    } catch (e) { /* badge sync is cosmetic */ }
 
     try {
         populateVersionModal(versionData, hadUpdate ? updateInfo : null);
@@ -6910,13 +7109,23 @@ function populateVersionModal(versionData, updateInfo) {
         const banner = document.createElement('div');
         banner.className = 'version-update-banner';
         const isDocker = updateInfo.is_docker;
+        const sev = updateInfo.severity;
+        const heading = sev === 'critical' ? 'Critical update available'
+            : sev === 'major' ? 'Major release available'
+            : (isDocker ? 'Update detected' : 'New update available');
+        const detail = updateInfo.latest_version
+            ? `You're on v${updateInfo.current_version || '?'} &mdash; v${updateInfo.latest_version} is out.`
+                + (isDocker ? ' The Docker image updates shortly after each release.' : '')
+                + (updateInfo.release_url
+                    ? ` <a href="${updateInfo.release_url}" target="_blank" rel="noopener">Release notes</a>` : '')
+            : (isDocker
+                ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
+                : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`);
         banner.innerHTML = `
             <div class="version-update-banner-icon">&#x2B06;</div>
             <div class="version-update-banner-text">
-                <strong>${isDocker ? 'Repo update detected' : 'New update available'}</strong>
-                <span>${isDocker
-                ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
-                : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`}</span>
+                <strong>${heading}</strong>
+                <span>${detail}</span>
             </div>
         `;
         container.appendChild(banner);

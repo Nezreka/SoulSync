@@ -24,6 +24,21 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
     function hueOf(s) { var h = 0, t = String(s || ''); for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h % 360; }
+    // Perf: the orbs render at ~110px but the raw poster_urls are full-size
+    // (1000px+). Ask for a right-sized image instead — the poster proxy honors
+    // ?w=, and a TMDB url's /t/p/<size>/ segment rewrites to a small bucket.
+    // 28 shows × full-res bitmaps was the wishlist lag.
+    function sized(url, w) {
+        if (!url) return url;
+        if (url.indexOf('/api/video/poster/') !== -1) {
+            return url + (url.indexOf('?') === -1 ? '?' : '&') + 'w=' + w;
+        }
+        if (url.indexOf('image.tmdb.org') !== -1) {
+            var b = w <= 185 ? 185 : (w <= 342 ? 342 : (w <= 500 ? 500 : 780));
+            return url.replace(/\/t\/p\/[^/]+\//, '/t/p/w' + b + '/');
+        }
+        return url;
+    }
     var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     function fmtDate(iso) {
         var p = String(iso || '').split('-');
@@ -35,28 +50,53 @@
         wanted: ['Wanted', 'vwsh-st--wanted'], searching: ['Searching', 'vwsh-st--searching'],
         downloading: ['Downloading', 'vwsh-st--downloading'], downloaded: ['Done', 'vwsh-st--done'],
         failed: ['Failed', 'vwsh-st--failed'],
+        monitored: ['Not out yet', 'vwsh-st--monitored'],
+        upgrade: ['⇪ Upgrading', 'vwsh-st--upgrade'],
     };
-    function statusPill(status) {
+    // The pill tells the TRUTH, not the stale status column: an active download
+    // row wins, then the upgrade watch (owned below cutoff), then the column.
+    function liveStatus(it) {
+        if (it.downloading) return 'downloading';
+        if (it.upgrade_from) return 'upgrade';
+        return STATUS[it.status] ? it.status : 'wanted';
+    }
+    function statusPill(status, tip) {
         var s = STATUS[status] || STATUS.wanted;
-        return '<span class="vwsh-st ' + s[1] + '">' + s[0] + '</span>';
+        return '<span class="vwsh-st ' + s[1] + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + s[0] + '</span>';
     }
     function rmBtn(scope, attrs) {
         return '<button class="vwsh-rm" type="button" title="Remove" aria-label="Remove" ' +
             'data-vwsh-rm="' + scope + '"' + attrs + '>&times;</button>';
+    }
+    // "Search now" — the manual override Sonarr users expect: skips the release
+    // gate for THIS item and runs the drain's search/pick/enqueue immediately.
+    function huntBtn(scope, attrs) {
+        return '<button class="vwsh-hunt" type="button" title="Search now" aria-label="Search now" ' +
+            'data-vwsh-hunt="' + scope + '"' + attrs + '>' +
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+            'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
+            '</button>';
     }
 
     // ── movie card ────────────────────────────────────────────────────────────
     function movieCard(it) {
         var owned = it.library_id != null;
         var art = it.poster_url
-            ? '<img class="vwsh-movie-img" src="' + esc(it.poster_url) + '" alt="" loading="lazy" ' +
+            ? '<img class="vwsh-movie-img" src="' + esc(sized(it.poster_url, 342)) + '" alt="" loading="lazy" ' +
               'onerror="this.style.display=\'none\'">'
             : '<div class="vwsh-movie-ph">🎬</div>';
-        var meta = [it.year, owned ? 'In library' : null].filter(Boolean).join(' · ');
+        var meta = [it.year,
+            it.upgrade_from ? ('⇪ from ' + it.upgrade_from) : (owned ? 'In library' : null)]
+            .filter(Boolean).join(' · ');
+        var st = liveStatus(it);
+        var tip = st === 'upgrade' ? ('Own it in ' + it.upgrade_from + ' — watching for a better copy')
+            : st === 'monitored' ? 'Not released yet — grabs automatically once it\'s out' : null;
         return '<div class="vwsh-movie" data-vwsh-open-movie="' + esc(it.tmdb_id) +
             '" data-vwsh-src="' + (owned ? 'library' : 'tmdb') + '" data-vwsh-id="' + esc(owned ? it.library_id : it.tmdb_id) + '">' +
             '<div class="vwsh-movie-art">' + art + '<div class="vwsh-movie-scrim"></div>' +
-            statusPill(it.status) + rmBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') + '</div>' +
+            statusPill(st, tip) +
+            (st === 'downloading' ? '' : huntBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"')) +
+            rmBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') + '</div>' +
             '<div class="vwsh-movie-info"><span class="vwsh-movie-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span>' + (meta ? '<span class="vwsh-movie-meta">' + esc(meta) + '</span>' : '') +
             '</div></div>';
@@ -88,7 +128,7 @@
         // fall back to the newest video's thumbnail so the orb is never blank.
         var poster = sh.poster_url || (yt && (sh.seasons || [])[0] ? sh.seasons[0].poster_url : null);
         var img = poster
-            ? '<img class="wl-orb-img" src="' + esc(pimg(poster)) + '" alt="" ' +
+            ? '<img class="wl-orb-img" src="' + esc(sized(pimg(poster), 240)) + '" alt="" ' +
               'onerror="this.outerHTML=\'<div class=&quot;wl-orb-initials&quot;>' + esc(initials(sh.title)) + '</div>\'">'
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         // Episodes are shown grouped under a clickable season header (header →
@@ -97,7 +137,7 @@
         var seasons = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
             var posterUrl = se.poster_url || sh.poster_url || null;
-            var thumb = posterUrl ? '<img src="' + esc(pimg(posterUrl)) + '" alt="">' : '<span class="vwsh-szn-ph">📺</span>';
+            var thumb = posterUrl ? '<img src="' + esc(sized(pimg(posterUrl), 342)) + '" alt="" loading="lazy">' : '<span class="vwsh-szn-ph">📺</span>';
             var cards = (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('');
             var sName = yt ? (se.season_number ? se.season_number : 'Undated') : ('Season ' + se.season_number);
             var sRm = yt
@@ -109,6 +149,10 @@
                     '<div class="vwsh-szn-name">' + esc(sName) + '</div>' +
                     '<div class="vwsh-szn-count">' + n + (yt ? ' video' : ' episode') + (n === 1 ? '' : 's') + '</div>' +
                     '<div class="vwsh-szn-go">' + (yt ? 'View channel' : 'View show') + ' &rarr;</div>' +
+                    (yt ? '' : '<button class="vwsh-szn-hunt" type="button" data-vwsh-hunt="season" ' +
+                        'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Search this season now">' +
+                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+                        'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
                     '<button class="vwsh-szn-rm" type="button" ' + sRm + ' title="Remove">&#10005;</button>' +
                 '</div>' +
                 '<div class="vwsh-ep-grid">' + cards + '</div>' +
@@ -118,7 +162,8 @@
         // --orb-hue on the GROUP so the music orb styles + my cinematic-expand
         // backdrop (--vwsh-poster) both resolve; poster bleeds in only when expanded.
         var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
-            (poster ? ";--vwsh-poster:url('" + esc(poster) + "')" : '');
+            // the expand backdrop is heavily blurred, so a 500px source is plenty
+            (poster ? ";--vwsh-poster:url('" + esc(sized(pimg(poster), 500)) + "')" : '');
         var prog = total ? Math.max(0, Math.min(1, (sh.done || 0) / total)) : 0;   // #4 acquisition progress
         // Header is a 3-column row that FLANKS the poster: synopsis (left) · poster
         // (middle) · cast (right). When collapsed (or no data) the side columns are
@@ -263,12 +308,13 @@
         var yt = sh.source === 'youtube';
         var pimg = function (u) { return (yt && window.VideoYoutube) ? VideoYoutube.img(u) : u; };
         var t = e.title || (yt ? 'Untitled' : ('Episode ' + e.episode_number));
-        var st = STATUS[e.status] ? e.status : 'wanted';
+        var st = liveStatus(e);
         var date = fmtDate(e.air_date);
         // TMDB shows the SxEx label; a YouTube video shows just its upload date.
-        var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : ''));
+        var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
+            (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : ''));
         var thumb = e.still_url
-            ? '<span class="vwsh-epc-thumb"><img src="' + esc(pimg(e.still_url)) + '" alt="" loading="lazy" ' +
+            ? '<span class="vwsh-epc-thumb"><img src="' + esc(sized(pimg(e.still_url), 342)) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'
             : '<span class="vwsh-epc-thumb vwsh-epc-thumb--none"></span>';
         var rm = yt
@@ -280,6 +326,11 @@
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
                 '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + (yt ? esc(metaTxt) : metaTxt) + '</div>' +
             '</div>' +
+            (yt || st === 'downloading' ? ''
+                : '<button class="vwsh-epc-hunt" type="button" data-vwsh-hunt="episode" data-tmdb="' + esc(sh.tmdb_id) +
+                  '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Search now">' +
+                  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+                  'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
             '<button class="vwsh-epc-rm" type="button" ' + rm + ' title="Remove">&#10005;</button>' +
         '</div>';
     }
@@ -329,6 +380,64 @@
             : state.tab === 'show' ? state.counts.show > 0
             : (state.ytVideo > 0 || state.ytChannel > 0);
         btn.hidden = !has;
+        // "Search all missing" — TMDB tabs only (YouTube has its own drain), and
+        // only when there's something to search.
+        var sa = $('[data-vwsh-searchall]');
+        if (sa) sa.hidden = state.tab === 'youtube' || !has;
+    }
+
+    // ── manual acquisition (per-item 'Search now' + 'Search all missing') ─────
+    function doHunt(btn) {
+        if (btn.disabled) return;
+        var payload = { scope: btn.getAttribute('data-vwsh-hunt'),
+            tmdb_id: parseInt(btn.getAttribute('data-tmdb'), 10) };
+        if (btn.hasAttribute('data-s')) payload.season_number = parseInt(btn.getAttribute('data-s'), 10);
+        if (btn.hasAttribute('data-e')) payload.episode_number = parseInt(btn.getAttribute('data-e'), 10);
+        btn.disabled = true; btn.classList.add('vwsh-hunt--busy');
+        fetch('/api/video/wishlist/search', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                if (typeof showToast === 'function') {
+                    showToast(res.queued
+                        ? 'Searching for ' + res.queued + ' item' + (res.queued === 1 ? '' : 's') + '… grabs land in Downloads'
+                        : (res.total ? 'Already downloading or being searched' : 'Nothing on the wishlist for that'),
+                        res.queued ? 'success' : 'info');
+                }
+                btn.classList.remove('vwsh-hunt--busy');
+                if (!res.queued) btn.disabled = false;   // queued items keep the button dead until reload
+            })
+            .catch(function () {
+                btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                if (typeof showToast === 'function') showToast('Search could not start', 'error');
+            });
+    }
+    function searchAllMissing() {
+        var btn = $('[data-vwsh-searchall]'); if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        fetch('/api/video/wishlist/search-all', { method: 'POST' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                var k = res.kinds || {};
+                var going = [];
+                if (k.movie === 'started') going.push('movies');
+                if (k.episode === 'started') going.push('episodes');
+                if (typeof showToast === 'function') {
+                    showToast(going.length
+                        ? 'Searching wishlist ' + going.join(' + ') + ' now — grabs land in Downloads'
+                        : (k.movie === 'busy' || k.episode === 'busy'
+                            ? 'A wishlist search is already running'
+                            : 'Nothing eligible to search right now'),
+                        going.length ? 'success' : 'info');
+                }
+                btn.disabled = false;
+            })
+            .catch(function () {
+                btn.disabled = false;
+                if (typeof showToast === 'function') showToast('Search could not start', 'error');
+            });
     }
     // Keep the YouTube tab badge fresh without switching to the tab.
     function refreshYtCount() {
@@ -535,6 +644,8 @@
     }
 
     function onGridClick(e) {
+        var hunt = e.target.closest('[data-vwsh-hunt]');
+        if (hunt) { e.preventDefault(); e.stopPropagation(); doHunt(hunt); return; }
         var rm = e.target.closest('[data-vwsh-rm]');
         if (rm) { e.preventDefault(); e.stopPropagation(); doRemove(rm); return; }
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -601,6 +712,8 @@
         if (sortSel) sortSel.addEventListener('change', function () { state.sort = sortSel.value; state.page = 1; load(); });
         var clearBtn = $('[data-vwsh-clear]');
         if (clearBtn) clearBtn.addEventListener('click', clearAll);
+        var saBtn = $('[data-vwsh-searchall]');
+        if (saBtn) saBtn.addEventListener('click', searchAllMissing);
         var prev = $('[data-vwsh-prev]');
         if (prev) prev.addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
         var next = $('[data-vwsh-next]');

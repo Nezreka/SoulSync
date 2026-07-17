@@ -971,6 +971,30 @@ class WebUIDownloadMonitor:
             else:
                 # Unknown state with no progress (e.g., "Requested", "Initializing")
                 # Treat like 0% stuck — start/keep the downloading timer running
+                #
+                # EXCEPT for streaming-engine downloads: the engine SERIALIZES
+                # downloads per source (semaphore + rate-limit gap), so
+                # 'Initializing' there means QUEUED behind the worker — a big
+                # wishlist batch legitimately queues for many minutes. As long
+                # as some download from the same source is actively running,
+                # the queue is moving and this one is just waiting its turn.
+                # Cancelling it here churned variants forever: a YouTube cancel
+                # can't interrupt yt-dlp, so the "cancelled" file still landed
+                # in downloads/ with no record to claim it (the 10GB bleed).
+                _ti_src = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+                _src_name = str(task.get('username') or _ti_src.get('username') or '').lower()
+                if (_src_name in _STREAMING_SOURCE_NAMES
+                        and str(state_str).strip().lower() in ('initializing', 'queued', 'requested')):
+                    _queue_moving = any(
+                        isinstance(row, dict)
+                        and str(row.get('username') or '').lower() == _src_name
+                        and 'InProgress' in str(row.get('state') or '')
+                        for row in live_transfers_lookup.values()
+                    )
+                    if _queue_moving:
+                        task.pop('downloading_start_time', None)
+                        task.pop('stuck_retry_count', None)
+                        return False
                 if 'downloading_start_time' not in task:
                     task['downloading_start_time'] = current_time
                 download_time = current_time - task['downloading_start_time']

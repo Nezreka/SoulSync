@@ -1142,8 +1142,192 @@
         wire();
         loadStatus();
         loadJobs();
+        loadBackups();
+        wireRename();
         // Seed live progress for a job already running before this page opened.
         jget(API + '/progress').then(function (p) { if (p) updateProgress(p); });
+    }
+
+    // ── Mass Rename card (arr-parity P7) ──────────────────────────────────────
+    function wireRename() {
+        var card = document.querySelector('[data-video-rename-card]');
+        if (!card) return;
+        if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) {
+            card.style.display = 'none';
+            return;
+        }
+        if (card._vrnWired) return;
+        card._vrnWired = true;
+        var listEl = card.querySelector('[data-vrn-list]');
+        var applyBtn = card.querySelector('[data-vrn-apply]');
+        card.addEventListener('click', function (e) {
+            var pv = e.target.closest('[data-vrn-preview]');
+            if (pv) {
+                pv.disabled = true;
+                applyBtn.style.display = 'none';
+                // Preview runs on a server worker (resolving every path against the
+                // filesystem is minutes on a big library). Kick it off, then poll
+                // for a live count so the button is never a silent no-op.
+                var render = function (d) {
+                    pv.disabled = false;
+                    if (!d || !d.success) {
+                        listEl.innerHTML = '<div class="vbk-empty">Preview failed' +
+                            (d && d.error ? ' — ' + esc(String(d.error)) : '') +
+                            '. Check the app log for details.</div>';
+                        toast('Rename preview failed', 'error');
+                        return;
+                    }
+                    var n = (d.entries || []).length;
+                    listEl.innerHTML = n
+                        ? '<div class="vbk-row"><span class="vbk-name"><strong>' + n + ' file(s)</strong> differ from your templates' +
+                          (d.unresolved ? ' · ' + d.unresolved + ' unresolved path(s) skipped' : '') + '</span></div>' +
+                          d.entries.slice(0, 8).map(function (en) {
+                              return '<div class="vbk-row"><span class="vbk-name" title="' +
+                                  esc(en.current + ' → ' + en.proposed) + '">' +
+                                  esc(en.title) + '</span></div>';
+                          }).join('') + (n > 8 ? '<div class="vbk-empty">…and ' + (n - 8) + ' more</div>' : '')
+                        // Empty can mean "already tidy" OR "we couldn't resolve any
+                        // path" — call the second case out so it isn't mistaken for a no-op.
+                        : (d.unresolved
+                            ? '<div class="vbk-empty">No renames — none of your ' + d.unresolved +
+                              ' file path(s) could be resolved to a file on disk (check Settings → Organization library paths).</div>'
+                            : '<div class="vbk-empty">Everything already matches your naming templates.</div>');
+                    applyBtn.style.display = n ? '' : 'none';
+                };
+                var scanning = function (d) {
+                    var t = d && d.total, done = (d && d.done) || 0;
+                    listEl.innerHTML = '<div class="vbk-empty">Scanning your library…' +
+                        (t ? ' (' + done + ' / ' + t + ')' : '') + '</div>';
+                };
+                var poll = function () {
+                    fetch('/api/video/organization/rename/preview/status', { headers: { 'Accept': 'application/json' } })
+                        .then(function (r) { return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; }); })
+                        .then(function (d) {
+                            if (d && d.success && !d.ready) { scanning(d); setTimeout(poll, 1500); return; }
+                            render(d);
+                        })
+                        .catch(function () { render({ success: false, error: 'could not reach the server' }); });
+                };
+                scanning(null);
+                // Start the job. A fresh cached result comes back ready immediately;
+                // otherwise begin polling.
+                fetch('/api/video/organization/rename/preview', { headers: { 'Accept': 'application/json' } })
+                    .then(function (r) { return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; }); })
+                    .then(function (d) {
+                        if (d && d.success && !d.ready) { scanning(d); setTimeout(poll, 1500); return; }
+                        render(d);
+                    })
+                    .catch(function () { render({ success: false, error: 'could not reach the server' }); });
+                return;
+            }
+            var ap = e.target.closest('[data-vrn-apply]');
+            if (ap) {
+                var run = function () {
+                    ap.disabled = true;
+                    fetch('/api/video/organization/rename/apply', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }, body: '{}' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            ap.disabled = false;
+                            if (d && d.success) {
+                                if (typeof showToast === 'function') {
+                                    showToast(d.renamed + ' file(s) renamed' +
+                                        (d.skipped ? ', ' + d.skipped + ' skipped' : ''), 'success');
+                                }
+                                applyBtn.style.display = 'none';
+                                listEl.innerHTML = '<div class="vbk-empty">Done — run a library scan so the server re-adopts the names.</div>';
+                            } else if (typeof showToast === 'function') {
+                                showToast((d && d.error) || 'Rename failed', 'error');
+                            }
+                        })
+                        .catch(function () { ap.disabled = false; });
+                };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({
+                        title: 'Rename these files on disk?',
+                        message: 'Every previewed file is moved to its template name. Sidecars travel along; occupied destinations are skipped, never overwritten.',
+                        confirmText: 'Rename', destructive: true,
+                    }).then(function (ok) { if (ok) run(); });
+                } else { run(); }
+            }
+        });
+    }
+
+    // ── Backups card (arr-parity P10) ─────────────────────────────────────────
+    function loadBackups() {
+        var card = document.querySelector('[data-video-backups-card]');
+        if (!card) return;
+        if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) {
+            card.style.display = 'none';
+            return;
+        }
+        wireBackups(card);
+        fetch('/api/video/backups', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success) return;
+                var pend = card.querySelector('[data-vbk-pending]');
+                if (pend) pend.classList.toggle('hidden', !d.pending_restore);
+                var host = card.querySelector('[data-vbk-list]');
+                if (!host) return;
+                host.innerHTML = (d.backups || []).map(function (b) {
+                    var sz = b.size_bytes >= 1e6 ? (Math.round(b.size_bytes / 1e5) / 10 + ' MB')
+                                                 : Math.round(b.size_bytes / 1e3) + ' KB';
+                    return '<div class="vbk-row">' +
+                        '<span class="vbk-name">' + (b.created_at || '').replace('T', ' ') + ' · ' + sz + '</span>' +
+                        '<a class="vbk-btn" href="/api/video/backups/' + encodeURIComponent(b.name) + '/download">⭳</a>' +
+                        '<button type="button" class="vbk-btn vbk-btn--restore" data-vbk-restore="' + b.name + '">Restore</button>' +
+                        '</div>';
+                }).join('') || '<div class="vbk-empty">No backups yet — the nightly automation makes them, or hit "Back up now".</div>';
+            })
+            .catch(function () { /* non-critical */ });
+    }
+
+    function wireBackups(card) {
+        if (card._vbkWired) return;
+        card._vbkWired = true;
+        card.addEventListener('click', function (e) {
+            var mk = e.target.closest('[data-vbk-create]');
+            if (mk) {
+                mk.disabled = true;
+                fetch('/api/video/backups', { method: 'POST' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        mk.disabled = false;
+                        if (d && d.success) { if (typeof showToast === 'function') showToast('Backup created', 'success'); loadBackups(); }
+                        else if (typeof showToast === 'function') showToast((d && d.error) || 'Backup failed', 'error');
+                    })
+                    .catch(function () { mk.disabled = false; });
+                return;
+            }
+            var rs = e.target.closest('[data-vbk-restore]');
+            if (rs) {
+                var doStage = function () {
+                    fetch('/api/video/backups/restore', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: rs.getAttribute('data-vbk-restore') }) })
+                        .then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            if (d && d.success) { if (typeof showToast === 'function') showToast('Restore staged — restart SoulSync to apply', 'success'); loadBackups(); }
+                            else if (typeof showToast === 'function') showToast((d && d.error) || 'Could not stage the restore', 'error');
+                        })
+                        .catch(function () { /* toast skipped */ });
+                };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({
+                        title: 'Restore this backup?',
+                        message: 'On the next restart, the video database is swapped for this backup. Your current database is set aside (kept), so this can be undone.',
+                        confirmText: 'Stage restore', destructive: true,
+                    }).then(function (ok) { if (ok) doStage(); });
+                } else { doStage(); }
+                return;
+            }
+            if (e.target.closest('[data-vbk-cancel]')) {
+                fetch('/api/video/backups/restore', { method: 'DELETE' })
+                    .then(function () { loadBackups(); })
+                    .catch(function () { /* ignore */ });
+            }
+        });
     }
 
     document.addEventListener('soulsync:video-page-shown', onPageShown);

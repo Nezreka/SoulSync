@@ -61,7 +61,16 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
     # "Downloading 100%" forever. A file that isn't settled on disk yet is handled below
     # (find_video returns nothing → we keep polling), so treating 100% as done is safe.
     if state != "completed" and pct < 100.0:
-        return {"status": "downloading", "progress": pct}
+        speed = int(getattr(status, "download_speed", 0) or 0)
+        eta = getattr(status, "eta", None)
+        # clients report a huge sentinel (qBittorrent: 8640000s) for "unknown";
+        # fall back to computing from speed, else no estimate
+        if eta is None or eta >= 604800:
+            size = int(getattr(status, "size", 0) or 0)
+            done = int(getattr(status, "downloaded", 0) or 0)
+            eta = int((size - done) / speed) if (speed > 0 and size > done) else None
+        return {"status": "downloading", "progress": pct,
+                "speed_bps": speed, "eta_seconds": eta}
     # Completed → locate THIS job's finished video file, then import. Prefer the client's
     # exact content_path (this torrent's own file/folder) — the reliable anti-cross-attribution
     # signal: the shared save_path DIR holds every concurrent grab, and the torrent NAME often

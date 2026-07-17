@@ -1,8 +1,10 @@
 """Video wishlist API — the curated 'get this' list (movies + episodes).
 
 Atomic units are movies and episodes; adding a whole show or a season just hands
-us the explicit episodes to expand into rows. v1 manages membership + the tabbed
-Movies/TV page; the search/download engine that fulfils a wish is a later phase.
+us the explicit episodes to expand into rows. Manages membership + the tabbed
+Movies/TV page, the live-state annotations (downloading / upgrade watch), and
+manual acquisition ('Search now' / 'Search all missing' via
+``core/video/wishlist_search``); the hourly drain does the rest.
 Reads/writes only video_library.db via the shared VideoDatabase.
 """
 
@@ -27,6 +29,69 @@ def _server():
         return None
 
 
+def _annotate_live_state(db, kind, items):
+    """Stamp reality onto the page's rows: ``downloading`` (an active download
+    row exists for the item) and ``upgrade_from`` (owned below the profile
+    cutoff — the invisible 'upgrade watch' finally rendered). Best-effort:
+    the wishlist must still load if the quality/downloads side hiccups."""
+    try:
+        from core.automation.handlers.video_process_wishlist import active_download_keys
+        from core.video.quality_eval import resolution_rank
+        keys = active_download_keys(db.get_active_video_downloads())
+        owned = db.wishlist_owned_media_resolutions()
+        from core.video.quality_profile import profile_by_id
+        _cutoff_memo: dict = {}
+
+        def cutoff_for_title(item_kind, tmdb):
+            """Per-title cutoff rank (P2): the title's own profile when
+            assigned, else Default. Memoized per profile id per page."""
+            try:
+                pid = db.quality_profile_id_for(item_kind, tmdb_id=tmdb) or 0
+                if pid not in _cutoff_memo:
+                    _cutoff_memo[pid] = resolution_rank(
+                        (profile_by_id(db, pid) or {}).get("cutoff_resolution"))
+                return _cutoff_memo[pid]
+            except Exception:   # noqa: BLE001
+                return 0
+
+        def best_res(csv):
+            rs = [x.strip() for x in str(csv or "").split(",") if x.strip()]
+            if not rs:
+                return 0, None
+            top = max(rs, key=resolution_rank)
+            return resolution_rank(top), top
+
+        if kind == "movie":
+            for it in items:
+                if ("movie", str(it.get("tmdb_id"))) in keys:
+                    it["downloading"] = True
+                rank, label = best_res(owned.get("movie:%s" % it.get("tmdb_id")))
+                # below cutoff (or no cutoff = always chasing) → live upgrade watch
+                if rank:
+                    cutoff = cutoff_for_title("movie", it.get("tmdb_id"))
+                    if not cutoff or rank < cutoff:
+                        it["upgrade_from"] = label
+        else:
+            for show in items:
+                dl = up = 0
+                cutoff = cutoff_for_title("show", show.get("tmdb_id"))
+                for season in show.get("seasons") or []:
+                    sn = season.get("season_number")
+                    for ep in season.get("episodes") or []:
+                        en = ep.get("episode_number")
+                        if ("episode", str(show.get("tmdb_id")), int(sn or 0), int(en or 0)) in keys:
+                            ep["downloading"] = True
+                            dl += 1
+                        rank, label = best_res(owned.get("ep:%s:%s:%s" % (show.get("tmdb_id"), sn, en)))
+                        if rank and (not cutoff or rank < cutoff):
+                            ep["upgrade_from"] = label
+                            up += 1
+                show["downloading_count"] = dl
+                show["upgrade_count"] = up
+    except Exception:   # noqa: BLE001
+        logger.exception("wishlist live-state annotation failed")
+
+
 def register_routes(bp):
     @bp.route("/wishlist", methods=["GET"])
     def video_wishlist_list():
@@ -41,6 +106,7 @@ def register_routes(bp):
                 res = db.query_wishlist(
                     kind, search=request.args.get("search", ""), sort=request.args.get("sort", "added"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60))
+                _annotate_live_state(db, kind, res.get("items") or [])
                 return jsonify({"success": True, "kind": kind, "counts": counts, **res})
             return jsonify({"success": True, "counts": counts})
         except Exception:
@@ -64,6 +130,41 @@ def register_routes(bp):
         except Exception:
             logger.exception("Failed to count video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500
+
+    @bp.route("/wishlist/search", methods=["POST"])
+    def video_wishlist_search_now():
+        """User-initiated 'Search now' for ONE wished item (or a season/show of
+        episodes) — bypasses the release-window gate (the click is the override,
+        like Sonarr's manual search) but keeps upgrade-until-cutoff semantics.
+        Non-blocking: the search runs in the background; the downloads page /
+        badge shows what it grabs. Body: {scope, tmdb_id, season_number?,
+        episode_number?}."""
+        try:
+            data = request.get_json(silent=True) or {}
+            scope = str(data.get("scope") or "").lower()
+            tmdb_id = data.get("tmdb_id")
+            if scope not in _SCOPES or not tmdb_id:
+                return jsonify({"success": False, "error": "scope + tmdb_id required"}), 400
+            from core.video.wishlist_search import manual_search
+            res = manual_search(scope, tmdb_id,
+                                season_number=data.get("season_number"),
+                                episode_number=data.get("episode_number"))
+            return jsonify({"success": True, **res})
+        except Exception:
+            logger.exception("wishlist manual search failed")
+            return jsonify({"success": False, "error": "Search failed to start"}), 500
+
+    @bp.route("/wishlist/search-all", methods=["POST"])
+    def video_wishlist_search_all():
+        """Search every eligible wished item NOW instead of waiting for the
+        hourly drain tick. Gates stay intact (no hunting unreleased films);
+        overlap with a running drain is refused per kind ('busy')."""
+        try:
+            from core.video.wishlist_search import search_all
+            return jsonify({"success": True, "kinds": search_all()})
+        except Exception:
+            logger.exception("wishlist search-all failed")
+            return jsonify({"success": False, "error": "Search failed to start"}), 500
 
     @bp.route("/wishlist/add", methods=["POST"])
     def video_wishlist_add():

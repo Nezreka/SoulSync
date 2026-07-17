@@ -292,6 +292,10 @@
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');
                 if (ms) ms.value = _videoMode;
+                setP('video-seed-ratio', d.seed_ratio_goal != null ? d.seed_ratio_goal : 0);
+                setP('video-seed-hours', d.seed_time_goal_hours != null ? d.seed_time_goal_hours : 0);
+                var srd = document.getElementById('video-seed-remove-data');
+                if (srd) srd.checked = d.seed_remove_data !== false;
                 renderVideoHybrid();
                 updateVideoSourceUI();
             })
@@ -309,9 +313,243 @@
                 youtube_path: val('video-youtube-path'),
                 download_mode: _videoMode,
                 hybrid_order: _videoHybrid,
+                seed_ratio_goal: parseFloat(val('video-seed-ratio')) || 0,
+                seed_time_goal_hours: parseInt(val('video-seed-hours'), 10) || 0,
+                seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });
+    }
+
+    // ── import lists editor (arr-parity P6) ─────────────────────────────────
+    var IMPLIST_URL = DOWNLOADS_URL + '/import-lists';
+    var _vqImpLists = [];
+
+    function loadImportLists() {
+        fetch(IMPLIST_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                _vqImpLists = d.lists || [];
+                renderImportLists();
+                wireImportLists();
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    function _sel(options, value) {
+        return options.map(function (o) {
+            return '<option value="' + o[0] + '"' + (o[0] === value ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('');
+    }
+
+    function renderImportLists() {
+        var host = document.getElementById('vq-implist-rows');
+        if (!host) return;
+        host.innerHTML = _vqImpLists.map(function (l) {
+            return '<div class="vq-fmt-row vq-implist-row" data-vq-implist="' + l.id + '">' +
+                '<input class="vq-fmt-in" data-vq-il-f="name" value="' + escA(l.name) + '" placeholder="Name">' +
+                '<select class="vq-fmt-in" data-vq-il-f="source">' +
+                    _sel([['tmdb_list', 'TMDB list'], ['tmdb_chart', 'TMDB chart'],
+                          ['imdb_list', 'IMDb list'], ['plex_watchlist', 'Plex Watchlist']], l.source) + '</select>' +
+                '<input class="vq-fmt-in" data-vq-il-f="ref" value="' + escA(l.ref) + '" placeholder="list id / chart / ls…">' +
+                '<select class="vq-fmt-in" data-vq-il-f="media">' +
+                    _sel([['both', 'Both'], ['movie', 'Movies'], ['show', 'Shows']], l.media) + '</select>' +
+                '<select class="vq-fmt-in" data-vq-il-f="monitor" title="Shows: what to wish when followed">' +
+                    _sel([['future', 'Future eps'], ['all', 'All aired'], ['latest_season', 'Latest season'],
+                          ['first_season', 'First season'], ['pilot', 'Pilot']], l.monitor) + '</select>' +
+                '<label class="vq-il-on" title="Enabled"><input type="checkbox" data-vq-il-f="enabled"' + (l.enabled ? ' checked' : '') + '></label>' +
+                '<button class="vq-fmt-del" type="button" data-vq-implist-del="' + l.id + '" title="Delete list">✕</button>' +
+                '</div>';
+        }).join('') || '<div class="settings-hint" style="padding:6px 0;">No import lists yet.</div>';
+    }
+
+    function _impListFromRow(row) {
+        var val = function (k) {
+            var el = row.querySelector('[data-vq-il-f="' + k + '"]');
+            return el ? (el.type === 'checkbox' ? el.checked : el.value) : '';
+        };
+        return { id: parseInt(row.getAttribute('data-vq-implist'), 10),
+                 name: val('name'), source: val('source'), ref: val('ref'),
+                 media: val('media'), monitor: val('monitor'), enabled: val('enabled') };
+    }
+
+    function wireImportLists() {
+        var host = document.getElementById('vq-implist-rows');
+        if (!host || host._vqWired) return;
+        host._vqWired = true;
+        host.addEventListener('change', function (e) {
+            var row = e.target.closest('[data-vq-implist]');
+            if (!row) return;
+            fetch(IMPLIST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(_impListFromRow(row)) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) { toast('A list needs a valid source + ref', 'error'); return; }
+                    for (var i = 0; i < _vqImpLists.length; i++) {
+                        if (_vqImpLists[i].id === res.id) _vqImpLists[i] = res;
+                    }
+                })
+                .catch(function () { toast('Couldn’t save the list', 'error'); });
+        });
+        host.addEventListener('click', function (e) {
+            var del = e.target.closest('[data-vq-implist-del]');
+            if (!del) return;
+            fetch(IMPLIST_URL + '/' + del.getAttribute('data-vq-implist-del'), { method: 'DELETE' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) throw new Error();
+                    _vqImpLists = _vqImpLists.filter(function (l) { return String(l.id) !== del.getAttribute('data-vq-implist-del'); });
+                    renderImportLists();
+                })
+                .catch(function () { toast('Couldn’t delete the list', 'error'); });
+        });
+        var add = document.querySelector('[data-vq-implist-add]');
+        if (add && !add._vqWired) {
+            add._vqWired = true;
+            add.addEventListener('click', function () {
+                fetch(IMPLIST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'New list', source: 'tmdb_chart', ref: 'trending_movies' }) })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqImpLists.push(res);
+                        renderImportLists();
+                    })
+                    .catch(function () { toast('Couldn’t add a list', 'error'); });
+            });
+        }
+    }
+
+    // ── notification connections (arr-parity P11) ────────────────────────────
+    var NOTIFY_URL = '/api/video/notifications';
+    var _vqNotify = [];
+    var _vqNotifyEvents = [];
+    var _NOTIFY_EVENT_LABEL = {
+        video_download_completed: 'Imported', video_upgrade_completed: 'Upgraded',
+        video_import_failed: 'Import failed', video_download_failed: 'Failed',
+        video_wishlist_item_added: 'Wishlisted', video_watchlist_added: 'Followed',
+    };
+
+    function loadNotify() {
+        fetch(NOTIFY_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                _vqNotify = d.connections || [];
+                _vqNotifyEvents = d.events || [];
+                renderNotify();
+                wireNotify();
+            })
+            .catch(function () { /* non-admins get a 403 — section stays empty */ });
+    }
+
+    function renderNotify() {
+        var host = document.getElementById('vq-notify-rows');
+        if (!host) return;
+        host.innerHTML = _vqNotify.map(function (c) {
+            var tg = c.type === 'telegram';
+            var evs = _vqNotifyEvents.map(function (ev) {
+                return '<label class="vq-nt-ev"><input type="checkbox" data-vq-nt-ev="' + ev + '"' +
+                    (c.events.indexOf(ev) > -1 ? ' checked' : '') + '>' +
+                    (_NOTIFY_EVENT_LABEL[ev] || ev) + '</label>';
+            }).join('');
+            return '<div class="vq-nt-block" data-vq-notify="' + c.id + '">' +
+                '<div class="vq-fmt-row vq-nt-row">' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="name" value="' + escA(c.name) + '" placeholder="Name">' +
+                    '<select class="vq-fmt-in" data-vq-nt-f="type">' +
+                        _sel([['discord', 'Discord'], ['webhook', 'Webhook'], ['telegram', 'Telegram']], c.type) + '</select>' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="url" value="' + escA(c.url) + '" placeholder="Webhook URL"' + (tg ? ' style="display:none"' : '') + '>' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="token" value="' + escA(c.token) + '" placeholder="Bot token"' + (tg ? '' : ' style="display:none"') + '>' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="chat_id" value="' + escA(c.chat_id) + '" placeholder="Chat id"' + (tg ? '' : ' style="display:none"') + '>' +
+                    '<button class="test-button vq-nt-test" type="button" data-vq-notify-test="' + c.id + '">Test</button>' +
+                    '<label class="vq-il-on" title="Enabled"><input type="checkbox" data-vq-nt-f="enabled"' + (c.enabled ? ' checked' : '') + '></label>' +
+                    '<button class="vq-fmt-del" type="button" data-vq-notify-del="' + c.id + '" title="Delete">✕</button>' +
+                '</div>' +
+                '<div class="vq-nt-events">' + evs + '</div>' +
+                '</div>';
+        }).join('') || '<div class="settings-hint" style="padding:6px 0;">No connections yet.</div>';
+    }
+
+    function _notifyFromBlock(block) {
+        var val = function (k) {
+            var el = block.querySelector('[data-vq-nt-f="' + k + '"]');
+            return el ? (el.type === 'checkbox' ? el.checked : el.value) : '';
+        };
+        var events = [];
+        Array.prototype.forEach.call(block.querySelectorAll('[data-vq-nt-ev]'), function (cb) {
+            if (cb.checked) events.push(cb.getAttribute('data-vq-nt-ev'));
+        });
+        return { id: parseInt(block.getAttribute('data-vq-notify'), 10),
+                 name: val('name'), type: val('type'), url: val('url'),
+                 token: val('token'), chat_id: val('chat_id'),
+                 enabled: val('enabled'), events: events };
+    }
+
+    function wireNotify() {
+        var host = document.getElementById('vq-notify-rows');
+        if (!host || host._vqWired) return;
+        host._vqWired = true;
+        host.addEventListener('change', function (e) {
+            var block = e.target.closest('[data-vq-notify]');
+            if (!block) return;
+            var conn = _notifyFromBlock(block);
+            fetch(NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(conn) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) { toast('Connection needs a valid target (URL or token + chat id)', 'error'); return; }
+                    for (var i = 0; i < _vqNotify.length; i++) {
+                        if (_vqNotify[i].id === res.id) _vqNotify[i] = res;
+                    }
+                    if (e.target.getAttribute('data-vq-nt-f') === 'type') renderNotify();   // swap target inputs
+                })
+                .catch(function () { toast('Couldn’t save the connection', 'error'); });
+        });
+        host.addEventListener('click', function (e) {
+            var del = e.target.closest('[data-vq-notify-del]');
+            if (del) {
+                fetch(NOTIFY_URL + '/' + del.getAttribute('data-vq-notify-del'), { method: 'DELETE' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqNotify = _vqNotify.filter(function (c) { return String(c.id) !== del.getAttribute('data-vq-notify-del'); });
+                        renderNotify();
+                    })
+                    .catch(function () { toast('Couldn’t delete the connection', 'error'); });
+                return;
+            }
+            var tb = e.target.closest('[data-vq-notify-test]');
+            if (tb) {
+                var block = tb.closest('[data-vq-notify]');
+                tb.disabled = true;
+                fetch(NOTIFY_URL + '/test', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(_notifyFromBlock(block)) })
+                    .then(function (r) { return r.json().catch(function () { return null; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+                    .then(function (res) {
+                        tb.disabled = false;
+                        if (res.ok && res.j && res.j.success) toast('Test sent — check the channel', 'success');
+                        else toast((res.j && res.j.error) || 'Test failed', 'error');
+                    })
+                    .catch(function () { tb.disabled = false; toast('Test failed', 'error'); });
+            }
+        });
+        var add = document.querySelector('[data-vq-notify-add]');
+        if (add && !add._vqWired) {
+            add._vqWired = true;
+            add.addEventListener('click', function () {
+                fetch(NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'Discord', type: 'discord',
+                                           url: 'https://discord.com/api/webhooks/REPLACE-ME' }) })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqNotify.push(res);
+                        renderNotify();
+                    })
+                    .catch(function () { toast('Couldn’t add a connection', 'error'); });
+            });
+        }
     }
 
     // Hybrid chain — reuses music's .hybrid-source-item markup/CSS for visual
@@ -451,11 +689,214 @@
     }
 
     // ── Video quality profile (resolution tiers + source/codec/HDR/size) ──
+    // ── named profiles (per-title assignment; arr-parity P2) ─────────────────
+    // The editor edits ONE profile at a time; the bar above it picks which.
+    // id 0 = Default (the classic single profile), >=1 = named profiles.
+    var _vqProfiles = [];
+    var _vqSelectedId = 0;
+
+    function _vqSelected() {
+        for (var i = 0; i < _vqProfiles.length; i++) {
+            if (_vqProfiles[i].id === _vqSelectedId) return _vqProfiles[i];
+        }
+        return _vqProfiles[0] || null;
+    }
+
+    function renderProfileBar() {
+        var sel = document.querySelector('[data-vq-profile-select]');
+        if (!sel) return;
+        sel.innerHTML = _vqProfiles.map(function (p) {
+            return '<option value="' + p.id + '"' + (p.id === _vqSelectedId ? ' selected' : '') + '>' +
+                String(p.name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</option>';
+        }).join('');
+        var named = _vqSelectedId > 0;
+        var nameIn = document.querySelector('[data-vq-profile-name]');
+        if (nameIn) {
+            nameIn.classList.toggle('hidden', !named);
+            if (named) nameIn.value = (_vqSelected() || {}).name || '';
+        }
+        var del = document.querySelector('[data-vq-profile-delete]');
+        if (del) del.classList.toggle('hidden', !named);
+    }
+
     function loadQuality() {
-        fetch(QUALITY_URL, { headers: { 'Accept': 'application/json' } })
+        fetch(QUALITY_URL + '/profiles', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) { _videoQuality = d; renderQuality(); } })
+            .then(function (d) {
+                if (!d || !Array.isArray(d.profiles) || !d.profiles.length) return;
+                _vqProfiles = d.profiles;
+                var cur = _vqSelected();
+                _vqSelectedId = cur ? cur.id : 0;
+                _videoQuality = (cur || d.profiles[0]).profile;
+                renderProfileBar();
+                renderQuality();
+                wireProfileBar();
+                loadFormats();
+            })
             .catch(function () { /* ignore */ });
+    }
+
+    // ── custom formats (arr-parity P3) ───────────────────────────────────────
+    var _vqFormats = [];
+
+    function loadFormats() {
+        fetch(QUALITY_URL + '/formats', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                _vqFormats = d.formats || [];
+                renderFormats();
+                wireFormats();
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    function renderFormats() {
+        var host = document.getElementById('vq-format-rows');
+        if (!host) return;
+        var overrides = (_videoQuality && _videoQuality.format_scores) || {};
+        host.innerHTML = _vqFormats.map(function (f) {
+            var ov = overrides[String(f.id)];
+            return '<div class="vq-fmt-row" data-vq-fmt="' + f.id + '">' +
+                '<input class="vq-fmt-in" data-vq-fmt-f="name" value="' + escA(f.name) + '" placeholder="Name">' +
+                '<input class="vq-fmt-in" data-vq-fmt-f="include" value="' + escA((f.include || []).join(', ')) + '" placeholder="match: term, /regex/">' +
+                '<input class="vq-fmt-in" data-vq-fmt-f="exclude" value="' + escA((f.exclude || []).join(', ')) + '" placeholder="never: term, /regex/">' +
+                '<input class="vq-fmt-in vq-fmt-num" data-vq-fmt-f="score" type="number" value="' + f.score + '" title="Default score">' +
+                '<input class="vq-fmt-in vq-fmt-num" data-vq-fmt-f="override" type="number" value="' + (ov == null ? '' : ov) + '" placeholder="—" title="Score for the selected profile (blank = default)">' +
+                '<button class="vq-fmt-del" type="button" data-vq-fmt-del="' + f.id + '" title="Delete format">✕</button>' +
+                '</div>';
+        }).join('') || '<div class="settings-hint" style="padding:6px 0;">No custom formats yet — releases rank purely by the ladder + tie-breakers.</div>';
+        var minIn = document.getElementById('vq-min-format-score');
+        if (minIn) minIn.value = (_videoQuality && _videoQuality.min_format_score) || 0;
+    }
+
+    function escA(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+    function _fmtFromRow(row) {
+        var val = function (k) { var el = row.querySelector('[data-vq-fmt-f="' + k + '"]'); return el ? el.value : ''; };
+        var split = function (s) { return s.split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
+        return { id: parseInt(row.getAttribute('data-vq-fmt'), 10),
+                 name: val('name'), include: split(val('include')), exclude: split(val('exclude')),
+                 score: parseInt(val('score'), 10) || 0 };
+    }
+
+    function wireFormats() {
+        var host = document.getElementById('vq-format-rows');
+        if (!host || host._vqWired) return;
+        host._vqWired = true;
+        host.addEventListener('change', function (e) {
+            var row = e.target.closest('[data-vq-fmt]');
+            if (!row) return;
+            if (e.target.matches('[data-vq-fmt-f="override"]')) {
+                // per-profile score override lives on the SELECTED profile
+                if (!_videoQuality) return;
+                var fs = _videoQuality.format_scores || (_videoQuality.format_scores = {});
+                var v = e.target.value.trim();
+                if (v === '') delete fs[row.getAttribute('data-vq-fmt')];
+                else fs[row.getAttribute('data-vq-fmt')] = parseInt(v, 10) || 0;
+                saveQuality(true);
+                return;
+            }
+            var f = _fmtFromRow(row);
+            fetch(QUALITY_URL + '/formats', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(f)
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (res) {
+                  if (!res || !res.success) { toast('A format needs a name and at least one term', 'error'); return; }
+                  for (var i = 0; i < _vqFormats.length; i++) {
+                      if (_vqFormats[i].id === res.id) { _vqFormats[i] = { id: res.id, name: res.name, include: res.include, exclude: res.exclude, score: res.score }; }
+                  }
+              })
+              .catch(function () { toast('Couldn’t save the format', 'error'); });
+        });
+        host.addEventListener('click', function (e) {
+            var del = e.target.closest('[data-vq-fmt-del]');
+            if (!del) return;
+            var fid = del.getAttribute('data-vq-fmt-del');
+            fetch(QUALITY_URL + '/formats/' + fid, { method: 'DELETE' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) throw new Error();
+                    _vqFormats = _vqFormats.filter(function (f) { return String(f.id) !== fid; });
+                    renderFormats();
+                })
+                .catch(function () { toast('Couldn’t delete the format', 'error'); });
+        });
+        var add = document.querySelector('[data-vq-format-add]');
+        if (add && !add._vqWired) {
+            add._vqWired = true;
+            add.addEventListener('click', function () {
+                fetch(QUALITY_URL + '/formats', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'New format', include: ['REPLACE-ME'], score: 10 })
+                }).then(function (r) { return r.ok ? r.json() : null; })
+                  .then(function (res) {
+                      if (!res || !res.success) throw new Error();
+                      _vqFormats.push({ id: res.id, name: res.name, include: res.include, exclude: res.exclude, score: res.score });
+                      renderFormats();
+                  })
+                  .catch(function () { toast('Couldn’t add a format', 'error'); });
+            });
+        }
+        var minIn = document.getElementById('vq-min-format-score');
+        if (minIn && !minIn._vqWired) {
+            minIn._vqWired = true;
+            minIn.addEventListener('change', function () {
+                if (!_videoQuality) return;
+                _videoQuality.min_format_score = parseInt(minIn.value, 10) || 0;
+                saveQuality(true);
+            });
+        }
+    }
+
+    function wireProfileBar() {
+        var sel = document.querySelector('[data-vq-profile-select]');
+        if (!sel || sel._vqWired) return;
+        sel._vqWired = true;
+        sel.addEventListener('change', function () {
+            _vqSelectedId = parseInt(sel.value, 10) || 0;
+            var cur = _vqSelected();
+            if (cur) { _videoQuality = cur.profile; renderProfileBar(); renderQuality(); renderFormats(); }
+        });
+        var nameIn = document.querySelector('[data-vq-profile-name]');
+        if (nameIn) nameIn.addEventListener('change', function () { saveQuality(true); });
+        var nb = document.querySelector('[data-vq-profile-new]');
+        if (nb) nb.addEventListener('click', function () {
+            fetch(QUALITY_URL + '/profiles', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'New profile', profile: _videoQuality })
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (res) {
+                  if (!res || !res.success) throw new Error();
+                  _vqSelectedId = res.id;
+                  toast('Profile created — rename it, tweak it, then assign it from a title’s Manage panel', 'success');
+                  loadQuality();
+              })
+              .catch(function () { toast('Couldn’t create the profile', 'error'); });
+        });
+        var db = document.querySelector('[data-vq-profile-delete]');
+        if (db) db.addEventListener('click', function () {
+            if (_vqSelectedId <= 0) return;
+            var doDelete = function () {
+                fetch(QUALITY_URL + '/profiles/' + _vqSelectedId, { method: 'DELETE' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqSelectedId = 0;
+                        toast('Profile deleted — titles using it fall back to Default', 'success');
+                        loadQuality();
+                    })
+                    .catch(function () { toast('Couldn’t delete the profile', 'error'); });
+            };
+            if (typeof showConfirmDialog === 'function') {
+                showConfirmDialog({
+                    title: 'Delete this quality profile?',
+                    message: 'Titles assigned to it will use the Default profile instead.',
+                    confirmText: 'Delete', destructive: true,
+                }).then(function (ok) { if (ok) doDelete(); });
+            } else { doDelete(); }
+        });
     }
 
     function _vqSizeLabel(id, v) {
@@ -539,6 +980,23 @@
 
     function saveQuality(silent) {
         if (!_videoQuality) return Promise.resolve();
+        if (_vqSelectedId > 0) {
+            // a NAMED profile — routed through the profiles endpoint (P2)
+            var nameIn = document.querySelector('[data-vq-profile-name]');
+            var cur = _vqSelected() || {};
+            return fetch(QUALITY_URL + '/profiles', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ id: _vqSelectedId,
+                                       name: (nameIn && nameIn.value.trim()) || cur.name || 'Unnamed profile',
+                                       profile: _videoQuality })
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (d) {
+                  if (d && d.profile) { _videoQuality = d.profile; cur.name = d.name; cur.profile = d.profile; }
+                  renderProfileBar();
+                  if (!silent) toast('Quality profile saved', 'success');
+              })
+              .catch(function () { /* ignore */ });
+        }
         return fetch(QUALITY_URL, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify(_videoQuality)
@@ -832,6 +1290,8 @@
         load();
         loadKeys();
         loadDownloads();
+        loadImportLists();
+        loadNotify();
         wireDownloads();
         loadQuality();
         wireQuality();

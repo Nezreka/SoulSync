@@ -108,6 +108,41 @@
             ? '/api/video/img?u=' + encodeURIComponent(url) : (url || '');
     }
     function pct(s) { return s.episode_total ? Math.round(s.episode_owned / s.episode_total * 100) : 0; }
+    // Interactive metadata chips (#1042): a genre opens Discover pre-filtered to
+    // that genre + this title's kind; a keyword opens a video search for it.
+    // tmdb preview items stay in-app all the same. Non-clickable for a bare
+    // fallback (no data hook) so nothing breaks if the router is absent.
+    function genreChip(name) {
+        return '<button type="button" class="vd-genre" data-vd-genre="' + esc(name) + '">' + esc(name) + '</button>';
+    }
+    function kwChip(name) {
+        return '<button type="button" class="vd-kw" data-vd-kw="' + esc(name) + '">' + esc(name) + '</button>';
+    }
+
+    // Per-provider "where to watch" links (#1042). TMDB only hands us ONE aggregate
+    // /watch link per title, so every provider icon would otherwise share it. We map
+    // the known services to a search on their OWN site for the title instead — not an
+    // exact deep link (that needs a per-provider content id we don't have), but each
+    // icon lands you on the right service. Unknown providers return '' and the caller
+    // falls back to the TMDB aggregate page. Substring match so "Amazon Prime Video",
+    // "Amazon Video", "Apple TV", "Apple TV Store", etc. all resolve.
+    function providerSearchUrl(name, title) {
+        var t = String(title || '').trim();
+        if (!t) return '';
+        var q = encodeURIComponent(t);
+        var n = String(name || '').toLowerCase();
+        if (n.indexOf('amazon') >= 0)      return 'https://www.amazon.com/s?k=' + q + '&i=instant-video';
+        if (n.indexOf('apple') >= 0)       return 'https://tv.apple.com/search?term=' + q;
+        if (n.indexOf('google play') >= 0) return 'https://play.google.com/store/search?q=' + q + '&c=movies';
+        if (n.indexOf('youtube') >= 0)     return 'https://www.youtube.com/results?search_query=' + q;
+        if (n.indexOf('netflix') >= 0)     return 'https://www.netflix.com/search?q=' + q;
+        if (n.indexOf('disney') >= 0)      return 'https://www.disneyplus.com/search?q=' + q;
+        if (n.indexOf('hulu') >= 0)        return 'https://www.hulu.com/search?q=' + q;
+        if (n === 'max' || n.indexOf('hbo') >= 0) return 'https://play.max.com/search?q=' + q;
+        if (n.indexOf('paramount') >= 0)   return 'https://www.paramountplus.com/search/?query=' + q;
+        if (n.indexOf('peacock') >= 0)     return 'https://www.peacocktv.com/search?q=' + q;
+        return '';
+    }
 
     function badge(logo, fallback, title, url) {
         var inner = logo
@@ -194,7 +229,7 @@
             renderActions(d);
             var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
             var gg = q('[data-vd-genres]');
-            if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(function (gn) { return '<span class="vd-genre">' + esc(gn) + '</span>'; }).join('');
+            if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(genreChip).join('');
             renderRatings(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
             return;
         }
@@ -232,13 +267,18 @@
             if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB',
                 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id));
             if (d.tvdb_id) badges.push(badge(TVDB_LOGO, 'TVDB', 'TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series'));
+            // Letterboxd is film-only; it deep-links by TMDB id (redirects to the
+            // film page). #1039 (QT3496).
+            if (d.kind === 'movie' && d.tmdb_id) {
+                badges.push(badge('', 'Lbxd', 'Letterboxd', 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/'));
+            }
             if (d.wikidata_url) badges.push(badge('', 'Official Site', 'Official Site', d.wikidata_url));
             l.innerHTML = badges.join('');
         }
         var g = q('[data-vd-genres]');
         if (g) {
             g.innerHTML = (d.genres || []).slice(0, 6).map(function (gn) {
-                return '<span class="vd-genre">' + esc(gn) + '</span>';
+                return genreChip(gn);
             }).join('');
         }
         renderSubtitles(d);
@@ -452,7 +492,17 @@
         // Watchlist (follow an AIRING show to wishlist its new episodes) applies whether
         // the show is owned or a TMDB preview — the curated watchlist is keyed by
         // tmdb_id. Ended/cancelled shows are terminal (isAiringShow=false) → no button.
-        if (isAiringShow) {
+        // Requests (arr-parity P4): a profile WITHOUT download rights has no
+        // acquisition path at all — give it the ask-an-admin button instead of
+        // the Get/Watchlist controls (those APIs are gated for this profile).
+        var _canDl = (typeof canDownload !== 'function') || canDownload();
+        if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id) {
+            html +=
+                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="request">' +
+                '<span class="watchlist-icon">🙋</span>' +
+                '<span class="watchlist-text">Request</span></button>';
+        }
+        if (isAiringShow && _canDl) {
             html +=
                 '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
                 '" type="button" data-vd-act="watchlist">' +
@@ -462,7 +512,7 @@
         // Movies are terminal — no "watch for new" follow, so give them the shared
         // Get control instead (unowned → add to wishlist, owned → re-download /
         // upgrade). Opens the same VideoGet modal the discover/search cards use.
-        if (d.kind === 'movie' && window.VideoGet) {
+        if (d.kind === 'movie' && window.VideoGet && _canDl) {
             var wished = !!d._wl_wished;
             // TWO buttons, like the shows' follow+get pair: 'Get' is ALWAYS
             // visible (the modal offers download-now / manual search / grab),
@@ -495,7 +545,7 @@
         // Missing" (fill the gaps), one you don't have reads "Get Show" (grab it
         // all). A library-sourced page is inherently owned; a TMDB page keys off
         // d.owned (the same flag that drives the "In library" badge).
-        if (d.kind === 'show' && window.VideoGet) {
+        if (d.kind === 'show' && window.VideoGet && _canDl) {
             var haveShow = (d.source !== 'tmdb') || !!d.owned;
             var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
             html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
@@ -666,12 +716,49 @@
         host.innerHTML = html;
     }
 
+    // ── per-title acquisition history (arr-parity P9) ─────────────────────────
+    // Every grab/import/upgrade/failure this title has ever had, from the
+    // permanent archive. Library-source pages only (the id keys the lookup).
+    var _HIST_OUTCOME = {
+        completed: ['Imported', 'vd-hist-chip--ok'],
+        import_failed: ['Needs import', 'vd-hist-chip--warn'],
+        failed: ['Failed', 'vd-hist-chip--bad'],
+        cancelled: ['Cancelled', 'vd-hist-chip--mut'],
+    };
+    function loadTitleHistory(kind, id) {
+        var section = q('[data-vd-history-section]'), host = q('[data-vd-history]');
+        if (!section || !host) return;
+        fetch('/api/video/detail/' + kind + '/' + id + '/history', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var rows = (d && d.history) || [];
+                if (!rows.length) { section.hidden = true; return; }
+                host.innerHTML = rows.map(function (h) {
+                    var oc = _HIST_OUTCOME[h.outcome] || _HIST_OUTCOME.completed;
+                    var se = (h.season_number != null && h.episode_number != null)
+                        ? 'S' + String(h.season_number).padStart(2, '0') + 'E' + String(h.episode_number).padStart(2, '0') + ' · '
+                        : '';
+                    var bits = [h.quality_label, h.source,
+                        h.size_bytes ? (Math.round(h.size_bytes / 1e8) / 10 + ' GB') : null,
+                        (h.created_at || '').slice(0, 10)].filter(Boolean).join(' · ');
+                    return '<div class="vd-hist-row">' +
+                        '<span class="vd-hist-chip ' + oc[1] + '">' + oc[0] + '</span>' +
+                        '<span class="vd-hist-main"><span class="vd-hist-rel">' + se +
+                            esc(h.release_title || h.filename || '?') + '</span>' +
+                        '<span class="vd-hist-sub">' + esc(bits) + '</span></span>' +
+                        '</div>';
+                }).join('');
+                section.hidden = false;
+            })
+            .catch(function () { section.hidden = true; });
+    }
+
     // ── live TMDB extras (trailer / where-to-watch / similar) ─────────────────
     function resetExtras() {
         ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
-         '[data-vd-review-section]', '[data-vd-cast-all]'].forEach(function (s) {
+         '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
@@ -736,11 +823,17 @@
                     '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
                     sicon + '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
             }
-            // Streaming providers: TMDB only gives ONE aggregate 'where to watch'
-            // link (not per-provider), so showing N identical links is misleading.
-            // Render the logos as availability BADGES, then a single link to the
-            // watch page. (Drop a provider matching your server tile, e.g. Plex.)
+            // Streaming providers (#1042: make every icon interactive, not a dead
+            // badge). Each icon links to a SEARCH on that provider's own site for
+            // this title (providerSearchUrl). TMDB only gives ONE aggregate /watch
+            // link per title, so any provider we don't have a search URL for falls
+            // back to that page, or a JustWatch search when TMDB has no link either.
+            // (Drop a provider matching your server tile, e.g. Plex.)
             var link = ex.providers_link || '';
+            var jwSearch = 'https://www.justwatch.com/us/search?q=' +
+                encodeURIComponent(String(data && data.title || '').trim());
+            var aggHref = link || jwSearch;
+            var aggVia = link ? 'TMDB' : 'JustWatch';   // fallback tooltip must match the href
             var srvName = (ex.server && ex.server.server || '').toLowerCase();
             var provs = (ex.providers || []).filter(function (p) {
                 return (p.name || '').toLowerCase() !== srvName;
@@ -749,15 +842,14 @@
                 html += provs.map(function (p) {
                     var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
                         : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
-                    return '<div class="vd-prov vd-prov--badge" title="' + esc(p.name) + '">' + img +
-                        '<span class="vd-prov-name">' + esc(p.name) + '</span></div>';
+                    var direct = providerSearchUrl(p.name, data && data.title);
+                    var href = direct || aggHref;   // per-service search, else TMDB/JustWatch aggregate
+                    var tip = direct ? 'Search ' + esc(p.name) + ' for this title'
+                                     : 'Watch on ' + esc(p.name) + ' (via ' + aggVia + ')';
+                    return '<a class="vd-prov vd-prov--badge" href="' + esc(href) +
+                        '" target="_blank" rel="noopener" title="' + tip + '">' + img +
+                        '<span class="vd-prov-name">' + esc(p.name) + '</span></a>';
                 }).join('');
-                if (link) {
-                    html += '<a class="vd-prov vd-prov--more" href="' + esc(link) +
-                        '" target="_blank" rel="noopener" title="See where to watch (JustWatch)">' +
-                        '<span class="vd-prov-ph vd-prov-more-ic">↗</span>' +
-                        '<span class="vd-prov-name">Where to watch</span></a>';
-                }
             }
             ps.hidden = !html;
             ph.innerHTML = html;
@@ -847,7 +939,7 @@
             }).join('');
         }
         if (kwh) {
-            kwh.innerHTML = keywords.map(function (k) { return '<span class="vd-kw">' + esc(k) + '</span>'; }).join('');
+            kwh.innerHTML = keywords.map(kwChip).join('');
         }
         if (sec) sec.hidden = !(rows.length || keywords.length || studios.length);
     }
@@ -1326,10 +1418,26 @@
         fetch('/api/video/episode/' + tmdb + '/' + parts[0] + '/' + parts[1],
             { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (ex) { renderEpisodeExtra(panel, ex && !ex.error ? ex : {}); })
+            .then(function (ex) { renderEpisodeExtra(panel, ex && !ex.error ? ex : {}, tmdb, parts[0], parts[1]); })
             .catch(function () { panel.innerHTML = ''; });
     }
-    function renderEpisodeExtra(panel, ex) {
+    // External deep-links for one EPISODE (#1039). TMDB episode page is always
+    // constructible from the show's tmdb id + season/episode; IMDb only when the
+    // episode's own id is known. tmdb passthrough items keep everything in-app.
+    function episodeLinks(showTmdb, season, episode, ex) {
+        if (data && data.source === 'tmdb') return '';
+        var links = [];
+        if (showTmdb) {
+            links.push(badge(TMDB_LOGO, 'TMDB', 'TMDB episode',
+                'https://www.themoviedb.org/tv/' + showTmdb + '/season/' + season + '/episode/' + episode));
+        }
+        if (ex && ex.imdb_id) {
+            links.push(badge('', 'IMDb', 'IMDb episode', 'https://www.imdb.com/title/' + ex.imdb_id + '/'));
+        }
+        return links.length
+            ? '<div class="vd-ep-links">' + links.join('') + '</div>' : '';
+    }
+    function renderEpisodeExtra(panel, ex, showTmdb, season, episode) {
         var html = '';
         if (ex.still_url) {
             html += '<img class="vd-ep-extra-still" src="' + esc(ex.still_url) + '" alt="" loading="lazy">';
@@ -1349,6 +1457,7 @@
                         : '<div class="vd-guest">' + inner + '</div>';
                 }).join('') + '</div>';
         }
+        html += episodeLinks(showTmdb, season, episode, ex);
         html += '</div>';
         panel.innerHTML = html || '<div class="vd-ep-extra-empty">No extra info.</div>';
     }
@@ -1562,6 +1671,7 @@
                 } else {
                     maybeRefreshMovie(id);
                     loadExtras('movie', id);
+                    loadTitleHistory('movie', id);    // acquisition history (P9)
                     watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
@@ -1636,6 +1746,7 @@
                 } else {
                     maybeRefreshArt(id);
                     loadExtras('show', id);
+                    loadTitleHistory('show', id);     // acquisition history (P9)
                 }
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load show'); });
@@ -2197,6 +2308,23 @@
                 { detail: { kind: 'studio', id: stid, source: 'tmdb' } }));
             return;
         }
+        var gchip = e.target.closest('[data-vd-genre]');
+        if (gchip && r.contains(gchip)) {   // genre → Discover filtered to it (#1042)
+            e.preventDefault();
+            var gkind = (data && data.kind === 'show') ? 'show' : 'movie';
+            document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-discover' }));
+            document.dispatchEvent(new CustomEvent('soulsync:video-discover-browse',
+                { detail: { genre: gchip.getAttribute('data-vd-genre'), kind: gkind } }));
+            return;
+        }
+        var kchip = e.target.closest('[data-vd-kw]');
+        if (kchip && r.contains(kchip)) {   // keyword → video search for it (#1042)
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-search' }));
+            document.dispatchEvent(new CustomEvent('soulsync:video-search-query',
+                { detail: { q: kchip.getAttribute('data-vd-kw') } }));
+            return;
+        }
         var shot = e.target.closest('[data-vd-shot]');
         if (shot && r.contains(shot)) { openLightbox(parseInt(shot.getAttribute('data-vd-shot'), 10) || 0); return; }
         var vid = e.target.closest('[data-vd-video]');
@@ -2255,6 +2383,7 @@
         if (act && r.contains(act)) {
             var which = act.getAttribute('data-vd-act');
             if (which === 'watchlist') toggleWatchlist();
+            else if (which === 'request') sendRequest(act);
             else if (which === 'wishtoggle') toggleMovieWishlist(act);
             else if (which === 'get') openGetModal();
             else if (which === 'missing') openGetModal(true);
@@ -2269,6 +2398,32 @@
         var mt = e.target.closest('[data-vd-missing-toggle]');
         if (mt && r.contains(mt)) { toggleMissing(); return; }
         if (menuOpen && !e.target.closest('[data-vd-season-nav]')) { menuOpen = false; renderSeasonNav(); }
+    }
+
+    // Requests (P4): the no-download-rights acquisition path — ask an admin.
+    function sendRequest(btn) {
+        if (!data || !data.tmdb_id || btn.disabled) return;
+        btn.disabled = true;
+        fetch('/api/video/requests', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: data.kind, tmdb_id: data.tmdb_id,
+                title: data.title, year: data.year,
+                poster_url: data.poster_url || data.poster || null }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                if (typeof showToast === 'function') {
+                    showToast(res.already ? 'Already requested — an admin will review it'
+                                          : 'Request sent — an admin will review it', 'success');
+                }
+                var txt = btn.querySelector('.watchlist-text');
+                if (txt) txt.textContent = 'Requested';
+                btn.classList.add('watching');
+            })
+            .catch(function () {
+                btn.disabled = false;
+                if (typeof showToast === 'function') showToast('Couldn’t send the request', 'error');
+            });
     }
 
     function toggleMissing() {

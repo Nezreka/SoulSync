@@ -2553,6 +2553,9 @@ const _autoIcons = {
     video_full_cleanup: '\uD83E\uDDF9', video_backup_database: '\uD83D\uDCBE',
     video_apply_overlays: '\uD83C\uDFA8', video_clean_plex_images: '\uD83D\uDDBC\uFE0F',
     video_sync_collections: '\uD83D\uDDC2\uFE0F',
+    // Arr-parity acquisition automations (P1/P5/P6)
+    video_rss_sync: '\uD83D\uDCE1', video_seeding_sweep: '\uD83C\uDF31',
+    video_import_lists: '\uD83D\uDCE5',
     // Video event triggers + maintenance action
     monthly_time: '\uD83D\uDCC5',
     video_batch_complete: '\u2705', video_library_scan_completed: '\uD83D\uDCE1',
@@ -4218,6 +4221,9 @@ function _autoFormatAction(type) {
         video_full_cleanup: 'Full Cleanup', video_backup_database: 'Backup Database',
         video_apply_overlays: 'Auto-Update Overlays', video_clean_plex_images: 'Clean Up Plex Images',
         video_sync_collections: 'Sync Collections',
+        video_rss_sync: 'RSS Release Sync',
+        video_seeding_sweep: 'Seeding Goal Sweep',
+        video_import_lists: 'Sync Import Lists',
     };
     return labels[type] || type || 'Unknown';
 }

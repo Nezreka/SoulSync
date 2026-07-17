@@ -1,9 +1,10 @@
 """Background monitor that drives video downloads to completion.
 
-A daemon thread polls slskd for the active video downloads, updates their progress,
-and when one finishes MOVES the file from the shared download folder into the right
-per-type library folder (Movies / TV / YouTube) and marks it completed. Simple v1:
-slskd source only, flat move by basename.
+A daemon thread polls the active video downloads — slskd transfers AND
+torrent/usenet client jobs (``client_download``) — updates their progress +
+live speed/ETA, and when one finishes runs the importer (parse → verify →
+templated rename into the right Movies / TV / YouTube library folder), with
+auto-retry through the ranked candidates and requery when they run dry.
 
 The per-download decision (``process_download``) is pure — filesystem + slskd are
 injected — so it's unit-tested; the thread loop is thin glue.
@@ -24,6 +25,7 @@ from utils.logging_config import get_logger
 from core.video.download_pipeline import dest_path_for, find_completed_file
 from core.video.slskd_download import (
     classify_state,
+    eta_seconds,
     find_transfer,
     list_downloads,
     progress_pct,
@@ -76,9 +78,10 @@ def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mo
         return {"_missing": True}
     state = classify_state(t.get("state"))
     if state == "queued":
-        return {"status": "queued", "progress": progress_pct(t)}
+        return {"status": "queued", "progress": progress_pct(t), "speed_bps": 0, "eta_seconds": None}
     if state == "active":
-        return {"status": "downloading", "progress": progress_pct(t)}
+        return {"status": "downloading", "progress": progress_pct(t),
+                "speed_bps": int(t.get("speed") or 0), "eta_seconds": eta_seconds(t)}
     if state == "cancelled":
         return {"status": "cancelled", "error": "Cancelled on Soulseek"}
     if state == "failed":
@@ -352,9 +355,10 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
             return
         try:
             from core.video.quality_eval import meets_cutoff, resolution_rank
-            from core.video.quality_profile import load as load_profile
+            from core.video.quality_profile import profile_by_id
             label = (upd or {}).get("quality_label") or dl.get("quality_label") or ""
-            profile = load_profile(db)
+            # judged under the profile the grab was made with (per-title, P2)
+            profile = profile_by_id(db, dl.get("quality_profile_id"))
             if resolution_rank(label) and not meets_cutoff(label, profile):
                 logger.info("video download %s: '%s' landed below the cutoff — kept on the "
                             "wishlist for a future upgrade", dl.get("id"), label)
@@ -509,14 +513,16 @@ def _search_for_retry(query, max_seconds=55):
 
 def _requery_worker(dl_id) -> None:
     from core.video.quality_eval import evaluate_release
-    from core.video.quality_profile import load as load_profile
+    from core.video.quality_profile import profile_by_id
     from core.video.release_parse import parse_release
     from core.video.retry import merge_candidates, plan_retry
     try:
         db = _db_provider() if _db_provider else None
         if db is None:
             return
-        profile = load_profile(db)
+        first = db.get_video_download(dl_id) or {}
+        # requery under the profile the ORIGINAL grab was judged with (P2)
+        profile = profile_by_id(db, first.get("quality_profile_id"))
         for _ in range(8):   # hard loop cap on top of the attempt budget
             row = db.get_video_download(dl_id)
             if not row or row.get("status") != "searching":
@@ -551,6 +557,7 @@ def _requery_worker(dl_id) -> None:
                                      want_year=ctx.get("year"),
                                      want_title=ctx.get("titles") or ctx.get("title"),
                                      want_date=ctx.get("air_date"),
+                                     want_absolute=ctx.get("absolute"),
                                      size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
                     accepted.append(hit)

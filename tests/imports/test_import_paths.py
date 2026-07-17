@@ -822,3 +822,56 @@ def test_single_disc_album_still_reuses_existing_folder(monkeypatch, tmp_path):
     )
     assert created is True
     assert final_path == str(existing / "13 - Song One.flac")
+
+
+# ── TheHomeGuy: multi-artist singles must honor the Collaborative Artist mode ──
+
+def _single_ctx():
+    return {
+        "artist": "Larry June, Currensy & The Alchemist",
+        "albumartist": "Larry June, Currensy & The Alchemist",
+        "album": "Orange Villa", "title": "Orange Villa",
+        "track_number": 1, "disc_number": 1, "year": "2023",
+        "quality": "", "albumtype": "Single",
+        "_artists_list": [{"name": "Larry June"}, {"name": "Currensy"},
+                          {"name": "The Alchemist"}],
+    }
+
+
+def _collab_cfg(templates=None, mode="first"):
+    return _Config({
+        "file_organization.enabled": True,
+        "file_organization.templates": templates or {},
+        "file_organization.collab_artist_mode": mode,
+    })
+
+
+def test_default_single_template_files_under_the_main_artist(monkeypatch):
+    # The old default used $artist, which NEVER collab-reduces — every
+    # multi-artist single landed under "A, B & C" no matter the setting.
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg())
+    folder, filename = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder.split(os.sep)[0] == "Larry June"
+    assert filename == "Orange Villa"
+
+
+def test_persisted_old_default_single_template_upgrades(monkeypatch):
+    # The settings page used to seed + persist the old default on Save —
+    # a stored value that IS the old default is treated as never-customized.
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg(
+        templates={"single_path": "$artist/$artist - $title/$title"}))
+    folder, _ = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder.split(os.sep)[0] == "Larry June"
+
+
+def test_custom_single_template_is_untouched(monkeypatch):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg(
+        templates={"single_path": "$artist/$title"}))
+    folder, _ = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder == "Larry June, Currensy & The Alchemist"
+
+
+def test_collab_mode_all_keeps_the_combined_folder(monkeypatch):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg(mode="all"))
+    folder, _ = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder.split(os.sep)[0] == "Larry June, Currensy & The Alchemist"

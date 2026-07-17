@@ -565,8 +565,16 @@ def test_enrichment_endpoints(tmp_path):
         assert st["enabled"] is True and st["stats"]["pending"] == 1
 
         db.enrichment_apply("tmdb", "movie", mid, matched=False)
+        # CI-only phantom: prove each link separately so the next failure
+        # names the culprit (write not sticking vs engine/db swapped mid-test).
+        direct = db.enrichment_breakdown("tmdb")
+        assert direct.get("movie", {}).get("not_found") == 1, \
+            f"enrichment_apply did not stick on the test's own db handle: {direct}"
+        assert eng_mod._engine is not None and eng_mod._engine.db is db, \
+            f"engine/db swapped mid-test: engine={eng_mod._engine!r}"
         bd = client.get("/api/video/enrichment/tmdb/breakdown").get_json()
-        assert bd["breakdown"]["movie"]["not_found"] == 1
+        assert bd["breakdown"]["movie"]["not_found"] == 1, \
+            f"endpoint disagrees with the direct read: {bd}"
         un = client.get("/api/video/enrichment/tmdb/unmatched?kind=movie&status=not_found").get_json()
         assert un["total"] == 1 and un["kind"] == "movie"
 
@@ -648,7 +656,9 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
         # Defaults: empty folders, soulseek mode. Shared input + per-type libraries.
         assert client.get("/api/video/downloads/config").get_json() == {
             "download_path": "", "movies_path": "", "tv_path": "", "youtube_path": "",
-            "download_mode": "soulseek", "hybrid_order": ["soulseek"]}
+            "download_mode": "soulseek", "hybrid_order": ["soulseek"],
+            # seeding lifecycle (arr-parity P5) rides the same config payload
+            "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True}
         # Round-trips: libraries → video.db, the INPUT folder → the SHARED music key.
         client.post("/api/video/downloads/config",
                     json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
@@ -657,7 +667,8 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
         assert client.get("/api/video/downloads/config").get_json() == {
             "download_path": "/mnt/v/dl", "movies_path": "/media/movies",   # trimmed
             "tv_path": "/media/tv", "youtube_path": "/media/yt",
-            "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]}
+            "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
+            "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True}
         # The input folder is the SHARED soulseek.download_path (so music sees it too);
         # it is NOT stored in video.db.
         assert fake.get("soulseek.download_path") == "/mnt/v/dl"
@@ -965,7 +976,7 @@ def test_watchlist_add_check_list_remove_roundtrip(tmp_path):
     r = client.post("/api/video/watchlist/add", json={
         "kind": "show", "tmdb_id": 1399, "title": "Game of Thrones",
         "poster_url": "/p.jpg", "library_id": 7})
-    assert r.get_json() == {"success": True, "watched": True}
+    assert r.get_json() == {"success": True, "watched": True, "wished": 0}   # P2: follow reports the policy expansion
     client.post("/api/video/watchlist/add", json={
         "kind": "person", "tmdb_id": 287, "title": "Brad Pitt"})
 

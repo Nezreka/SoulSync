@@ -43,7 +43,9 @@ function initializeLibraryPage() {
 
     } catch (error) {
         console.error("❌ Error initializing Library page:", error);
-        showToast("Failed to initialize Library page", "error");
+        // Name the real error so bug reports carry the cause, not just the symptom
+        const why = error && error.message ? `: ${error.message}` : "";
+        showToast(`Failed to initialize Library page${why}`, "error");
     }
 }
 

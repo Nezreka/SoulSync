@@ -48,14 +48,20 @@ class _FakeDB:
         self._kv[key] = value
 
 
+# seeding lifecycle keys (arr-parity P5) ride the same config payload
+_SEED_DEFAULTS = {"seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True}
+
+
 def test_load_defaults():
-    assert load(_FakeDB()) == {"download_mode": "soulseek", "hybrid_order": ["soulseek"]}
+    assert load(_FakeDB()) == {"download_mode": "soulseek", "hybrid_order": ["soulseek"],
+                               **_SEED_DEFAULTS}
 
 
 def test_save_validates_and_roundtrips():
     db = _FakeDB()
     out = save(db, {"download_mode": "hybrid", "hybrid_order": ["torrent", "bogus", "torrent", "usenet"]})
-    assert out == {"download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]}
+    assert out == {"download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
+                   **_SEED_DEFAULTS}
     assert load(db) == out                                  # persisted + reloads identically
 
 

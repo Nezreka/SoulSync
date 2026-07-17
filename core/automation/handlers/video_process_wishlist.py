@@ -52,7 +52,8 @@ def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[D
     return None
 
 
-def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int) -> List[Dict[str, Any]]:
+def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int,
+                      cutoff_for: Optional[Callable[[Dict[str, Any]], int]] = None) -> List[Dict[str, Any]]:
     """Upgrade-until-cutoff eligibility over the wishlist rows (pure).
 
     Unowned items pass through untouched. Owned items (the queries annotate
@@ -64,7 +65,11 @@ def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int) -> List[Dic
       · resolution unreadable → skipped (can't prove an upgrade; the audit job
                                 surfaces these)
     An empty cutoff ('always chase the best') means owned items are never
-    'done' — they stay upgrade-eligible forever."""
+    'done' — they stay upgrade-eligible forever.
+
+    ``cutoff_for`` (P2, per-title profiles): when given, each owned item is
+    judged against ITS OWN profile's cutoff instead of the global
+    ``cutoff_rank``. Still pure — the callable is injected."""
     from core.video.quality_eval import resolution_rank
     out = []
     for it in items or []:
@@ -76,12 +81,21 @@ def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int) -> List[Dic
         cur = max(rks, default=0)
         if cur == 0:
             continue
-        if cutoff_rank and cur >= cutoff_rank:
+        eff_cutoff = cutoff_for(it) if cutoff_for is not None else cutoff_rank
+        if eff_cutoff and cur >= eff_cutoff:
             continue
         it = dict(it)
         it["_min_rank"] = cur
         out.append(it)
     return out
+
+
+def _cutoff_rank_for_item(item: Dict[str, Any]) -> int:
+    """The cutoff rank under the item's OWN profile (per-title, P2)."""
+    from api.video import get_video_db
+    from core.video.quality_eval import resolution_rank
+    from core.video.quality_profile import load_for_item
+    return resolution_rank((load_for_item(get_video_db(), item) or {}).get("cutoff_resolution"))
 
 
 def _default_cutoff_rank() -> int:
@@ -155,6 +169,20 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
                # full air date — daily series (Daily Show / Kimmel / soaps) release by
                # DATE, not SxxExx; the ranker + retry queries key off this.
                "air_date": (str(item.get("air_date") or "")[:10] or None)}
+        # Series type (P8): daily/anime shows QUERY differently. Anime also carries
+        # the wanted ABSOLUTE episode number (scene anime is numbered 'Show - 1071',
+        # no season) — derived from the library's episode list, best-effort.
+        stype = str(item.get("series_type") or "").strip().lower()
+        if stype in ("daily", "anime"):
+            ctx["series_type"] = stype
+        if stype == "anime":
+            try:
+                from api.video import get_video_db
+                ctx["absolute"] = get_video_db().episode_absolute_number(
+                    item.get("show_tmdb_id"), item.get("season_number"),
+                    item.get("episode_number"))
+            except Exception:   # noqa: BLE001 - a numbering assist must never break a grab
+                ctx["absolute"] = None
         tmdb_id, kind = item.get("show_tmdb_id"), "show"
     titles = _acceptable_titles(ctx["title"], kind, tmdb_id)
     if len(titles) > 1:
@@ -182,6 +210,9 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
         "target_dir": target_dir, "status": "downloading",
         "media_id": media_id, "media_source": "tmdb", "year": ctx.get("year"),
         "poster_url": item.get("poster_url"), "search_ctx": json.dumps(ctx), "attempts": 0,
+        # the profile this grab was judged under — the monitor's cutoff/requery
+        # decisions stay consistent even if the title is reassigned mid-flight
+        "quality_profile_id": item.get("quality_profile_id"),
     }
     if source == "soulseek":
         rest = [c for c in (candidates or []) if c.get("filename") != best.get("filename")]
@@ -249,14 +280,16 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     torrent/usenet via Prowlarr. Returns (None, error) when the search couldn't run."""
     from api.video import get_video_db
     from api.video.downloads import _evaluate_hits
-    from core.video.quality_profile import load as load_profile
+    from core.video.quality_profile import load_for_item
     ctx = search_context(item, media_type)
-    profile = load_profile(get_video_db())
+    profile = load_for_item(get_video_db(), item)   # per-title profile (P2)
     if source == "soulseek":
         from core.video.download_monitor import _search_for_retry
         from core.video.slskd_search import build_query
         query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                            season=ctx.get("season"), episode=ctx.get("episode"))
+                            season=ctx.get("season"), episode=ctx.get("episode"),
+                            air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                            series_type=ctx.get("series_type"))
         res = _search_for_retry(query) or {}
         if res.get("started") is False:
             return None, res.get("error")
@@ -264,7 +297,9 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     elif source in ("torrent", "usenet"):
         from core.video.prowlarr_search import prowlarr_search
         pres = prowlarr_search(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                               season=ctx.get("season"), episode=ctx.get("episode"), source=source)
+                               season=ctx.get("season"), episode=ctx.get("episode"), source=source,
+                               air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                               series_type=ctx.get("series_type"))
         if not pres.get("configured"):
             return None, "Prowlarr not configured"
         if pres.get("error"):
@@ -275,7 +310,7 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
                            want_year=ctx.get("year"),
                            want_title=ctx.get("titles") or ctx.get("title"),
-                           want_date=ctx.get("air_date"))
+                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"))
     for c in cands:
         c["source"] = source
     return cands, None
@@ -408,7 +443,12 @@ def auto_video_process_wishlist(
                 cutoff_rank = _default_cutoff_rank()
             except Exception:   # noqa: BLE001 - no profile → treat as no cutoff
                 cutoff_rank = 0
-            items = annotate_upgrades(items, cutoff_rank)
+            # per-title profiles: judge each owned item against ITS profile's
+            # cutoff when any assignment exists (the common no-assignment case
+            # stays on the single global read)
+            per_item = _cutoff_rank_for_item if any(
+                it.get("quality_profile_id") for it in items) else None
+            items = annotate_upgrades(items, cutoff_rank, cutoff_for=per_item)
         active = set(active_keys(media_type) or set())
         todo = [it for it in items if item_key(it, media_type) not in active]
         if not todo:

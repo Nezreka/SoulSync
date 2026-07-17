@@ -37,6 +37,7 @@ under a passing pinning test.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
@@ -236,6 +237,18 @@ class BackgroundDownloadWorker:
                         )
                         time.sleep(wait_time)
 
+                # A cancel that arrived while this download sat QUEUED must
+                # win: without this check the InProgress write below CLOBBERS
+                # the Cancelled state and the download runs to completion as
+                # if nothing happened. A removed record means the same thing.
+                current = self._engine.get_record(source_name, download_id)
+                if current is None or current.get('state') == 'Cancelled':
+                    logger.info(
+                        "%s download %s was cancelled while queued — skipping",
+                        source_name, download_id,
+                    )
+                    return
+
                 self._engine.update_record(source_name, download_id, {
                     'state': 'InProgress, Downloading',
                 })
@@ -259,7 +272,7 @@ class BackgroundDownloadWorker:
                     # Atomic write — preserve Cancelled if user cancelled
                     # between impl returning and this write. Same guard
                     # _mark_terminal uses; Cin flagged both split sites.
-                    self._engine.update_record_unless_state(
+                    applied = self._engine.update_record_unless_state(
                         source_name, download_id,
                         {
                             'state': 'Completed, Succeeded',
@@ -268,10 +281,32 @@ class BackgroundDownloadWorker:
                         },
                         skip_if_state_in=('Cancelled',),
                     )
-                    logger.info(
-                        "%s download %s completed: %s",
-                        source_name, download_id, file_path,
-                    )
+                    if applied:
+                        logger.info(
+                            "%s download %s completed: %s",
+                            source_name, download_id, file_path,
+                        )
+                    else:
+                        # The record was cancelled — or cancelled AND removed —
+                        # while the impl was still writing (a streaming cancel
+                        # can't interrupt yt-dlp mid-stream). The finished file
+                        # just landed with no record to claim it: nothing will
+                        # ever post-process or delete it, so it bleeds the
+                        # downloads folder forever. Remove it here.
+                        try:
+                            if os.path.isfile(file_path):
+                                os.remove(file_path)
+                                logger.info(
+                                    "%s download %s was cancelled while landing — "
+                                    "removed unclaimed file: %s",
+                                    source_name, download_id, file_path,
+                                )
+                        except OSError as rm_exc:
+                            logger.warning(
+                                "%s download %s cancelled but its file could not "
+                                "be removed (%s): %s",
+                                source_name, download_id, rm_exc, file_path,
+                            )
                 else:
                     self._mark_terminal(source_name, download_id, success=False)
                     logger.error(

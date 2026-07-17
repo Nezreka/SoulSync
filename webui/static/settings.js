@@ -1491,6 +1491,9 @@ async function loadSettingsData() {
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
+        const minFree = document.getElementById('min-free-disk-gb');
+        if (minFree) minFree.value = settings.soulseek?.min_free_disk_gb ?? 5;
+        applyPathsEnvironment(settings);
         document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
         document.getElementById('music-videos-path').value = settings.library?.music_videos_path || './MusicVideos';
         document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
@@ -1634,7 +1637,15 @@ async function loadSettingsData() {
         // Populate File Organization settings
         document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
-        document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
+        // $albumartist honors the Collaborative Album Artist mode; the old
+        // $artist default filed multi-artist singles under "A, B & C". A
+        // stored old-default upgrades server-side too (core/imports/paths.py).
+        {
+            const _sp = settings.file_organization?.templates?.single_path;
+            document.getElementById('template-single-path').value =
+                (!_sp || _sp === '$artist/$artist - $title/$title')
+                    ? '$albumartist/$albumartist - $title/$title' : _sp;
+        }
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
         document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
@@ -4337,6 +4348,7 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('soulseek-api-key').value,
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value,
+            min_free_disk_gb: Math.max(0, parseFloat(document.getElementById('min-free-disk-gb')?.value) || 0),
             search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
             search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
             search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
@@ -6112,6 +6124,24 @@ const PATH_INPUT_IDS = {
     'playlists-materialize': 'playlists-materialize-path',
     'm3u-entry-base': 'm3u-entry-base-path'
 };
+
+// Deployment-aware folder-paths guidance (+ the fresh-install disk landmine).
+// Docker installs must NOT touch the container paths; bare-metal/LXC installs
+// MUST edit them. A non-Docker install still on the ./Transfer default is
+// silently filling the install disk (a Proxmox LXC root is typically 8GB and
+// hangs when full — reported live on Discord), so that state warns loudly.
+function applyPathsEnvironment(settings) {
+    const docker = !!(settings._environment && settings._environment.docker);
+    document.querySelectorAll('[data-paths-guide]').forEach(el => {
+        el.classList.toggle('hidden', (el.getAttribute('data-paths-guide') === 'docker') !== docker);
+    });
+    const warn = document.querySelector('[data-paths-default-warning]');
+    if (warn) {
+        const out = (settings.soulseek?.transfer_path || './Transfer').trim();
+        const isDefault = out === '' || out === '.' || out.startsWith('./') || out.startsWith('.\\');
+        warn.classList.toggle('hidden', docker || !isDefault);
+    }
+}
 
 function togglePathLock(pathType, btn) {
     const input = document.getElementById(PATH_INPUT_IDS[pathType]);

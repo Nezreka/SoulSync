@@ -18,7 +18,8 @@
     var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     var MO_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
         'September', 'October', 'November', 'December'];
-    var state = { loaded: false, eps: {}, data: null, offset: 0, filter: 'all', view: 'compact', scope: 'watchlist' };
+    var state = { loaded: false, eps: {}, data: null, offset: 0, filter: 'all', view: 'compact', scope: 'watchlist',
+        movieTypes: { cinema: true, available: true } };
 
     function $(s) { return document.querySelector(s); }
     function esc(s) {
@@ -65,12 +66,14 @@
         var eps = d.episodes || [], n = eps.length;
         var owned = 0; for (var i = 0; i < n; i++) if (eps[i].has_file) owned++;
         var miss = n - owned;
+        var mv = (d.movies || []).length;
         var parts = [range];
         if (n) {
             parts.push(n + (n === 1 ? ' episode' : ' episodes'));
             if (owned) parts.push(owned + ' in library');
             if (miss) parts.push(miss + ' missing');
-        } else { parts.push('nothing scheduled'); }
+        } else if (!mv) { parts.push('nothing scheduled'); }
+        if (mv) parts.push(mv + ' movie release' + (mv === 1 ? '' : 's'));
         el.textContent = parts.join('  ·  ');
     }
 
@@ -102,6 +105,47 @@
                 '</span>' +
             '</span>' +
             '</a>';
+    }
+
+    // Movie release event card — lives on the dedicated "Movies" rail. Typed:
+    // 'cinema' (theatrical premiere) or 'available' (home release, the date the
+    // wishlist drain can actually act on).
+    var MOVIE_TYPE = {
+        cinema: { chip: '🎬 In Cinemas', cls: 'vcal-mv--cinema' },
+        available: { chip: '🏠 Home Release', cls: 'vcal-mv--home' }
+    };
+    function movieCell(m, idx) {
+        var t = MOVIE_TYPE[m.type] || MOVIE_TYPE.available;
+        // click lookup by identity in the rendered event list — never by render
+        // order (the stagger counter is animation-only)
+        var evIdx = (state.movieEvents || []).indexOf(m);
+        var hue = showHue(m.title || '');
+        var img = m.poster_url ? '<img class="vcal-cell-img" src="' + esc(m.poster_url) + '" alt="" loading="lazy" decoding="async" ' +
+            'onload="this.classList.add(\'vcal-loaded\')" onerror="this.style.display=\'none\'">' : '';
+        var flag = m.owned ? '<span class="vcal-flag" title="In your library">✓</span>' : '';
+        var href = m.owned && m.library_id
+            ? '/video-detail/library/movie/' + m.library_id
+            : '/video-detail/tmdb/movie/' + m.tmdb_id;
+        return '<a class="vcal-cell vcal-mv ' + t.cls + (m.owned ? ' vcal-cell--owned' : '') + '" ' +
+            'style="--vcal-h:' + hue + ';--i:' + (idx % 24) + '" href="' + href + '" ' +
+            'data-cal-movie="' + evIdx + '" ' +
+            'title="' + esc(m.title) + (m.year ? ' (' + m.year + ')' : '') + '">' +
+            '<span class="vcal-glow" aria-hidden="true"></span>' +
+            '<span class="vcal-card">' +
+                '<span class="vcal-art">' + img + '<span class="vcal-art-scrim"></span>' + flag + '</span>' +
+                '<span class="vcal-info">' +
+                    '<span class="vcal-time vcal-mv-chip">' + t.chip + '</span>' +
+                    '<span class="vcal-show">' + esc(m.title) + '</span>' +
+                    (m.year ? '<span class="vcal-meta"><span class="vcal-se">' + m.year + '</span></span>' : '') +
+                '</span>' +
+            '</span>' +
+            '</a>';
+    }
+    function filterMovies(movies) {
+        var out = (movies || []).filter(function (m) { return state.movieTypes[m.type] !== false; });
+        if (state.filter === 'owned') return out.filter(function (m) { return m.owned; });
+        if (state.filter === 'missing') return out.filter(function (m) { return !m.owned; });
+        return out;
     }
 
     // Time-of-day bands — the rows of the guide. A real shared time axis so
@@ -147,6 +191,13 @@
                 }
             }
         });
+        // Movie releases get their own rail (they carry a date, not a time slot).
+        var movieByDay = []; for (var i = 0; i < COLS; i++) movieByDay.push([]);
+        (d.movies || []).forEach(function (m) {
+            for (var i = 0; i < COLS; i++) {
+                if (m.date === isoOf(days[i])) { movieByDay[i].push(m); dayCount[i]++; break; }
+            }
+        });
         var byTime = function (a, b) {
             var ma = airMins(a.airs_time), mb = airMins(b.airs_time);
             if (ma == null && mb == null) return 0;
@@ -172,6 +223,22 @@
         // the live time-of-day intersection like a TV guide.
         var nowD = new Date();
         var nowBand = bandKeyFor(nowD.getHours() * 60 + nowD.getMinutes());
+        // "Movies" rail first — releases lead the guide when the week has any.
+        var anyMovies = false;
+        for (var mi = 0; mi < COLS; mi++) if (movieByDay[mi].length) { anyMovies = true; break; }
+        if (anyMovies) {
+            html += '<div class="vcal-rail vcal-rail--movies">' +
+                '<span class="vcal-rail-label">Movies</span>' +
+                '<small>Releases</small></div>';
+            for (var mj = 0; mj < COLS; mj++) {
+                var mday = isoOf(days[mj]); var mtoday = mday === d.today; var mpast = mday < d.today;
+                var minner = movieByDay[mj].length
+                    ? movieByDay[mj].map(function (m) { return movieCell(m, stagger++); }).join('')
+                    : '<span class="vcal-slot-dot" aria-hidden="true"></span>';
+                html += '<div class="vcal-slot' + (mtoday ? ' vcal-slot--today' : (mpast ? ' vcal-slot--past' : '')) +
+                    (movieByDay[mj].length ? '' : ' vcal-slot--empty') + '">' + minner + '</div>';
+            }
+        }
         BANDS.forEach(function (b) {
             var anyEps = false;
             for (var i = 0; i < COLS; i++) if (grid[b.key][i].length) { anyEps = true; break; }
@@ -191,6 +258,58 @@
                     (cell.length ? '' : ' vcal-slot--empty') + '">' + inner + '</div>';
             }
         });
+        cols.innerHTML = html;
+    }
+
+    // ── agenda view — one chronological list, day by day ─────────────────────
+    // Same data, linear shape: the scannable "what's coming" list (and the
+    // mobile-first answer to the 7-column grid). Movies lead each day.
+    function renderAgenda(d) {
+        var cols = $('[data-video-cal-cols]'); if (!cols) return;
+        var start = parseISO(d.start);
+        var byTime = function (a, b) {
+            var ma = airMins(a.airs_time), mb = airMins(b.airs_time);
+            if (ma == null && mb == null) return 0;
+            if (ma == null) return 1; if (mb == null) return -1;
+            return ma - mb;
+        };
+        var html = '';
+        for (var i = 0; i < COLS; i++) {
+            var dt = new Date(start); dt.setDate(start.getDate() + i);
+            var iso = isoOf(dt), today = iso === d.today, past = iso < d.today;
+            var eps = (d.episodes || []).filter(function (e) { return e.air_date === iso; }).sort(byTime);
+            var movies = (d.movies || []).filter(function (m) { return m.date === iso; });
+            if (!eps.length && !movies.length) continue;
+            var label = (today ? 'Today' : WD_FULL[dt.getDay()]) + ' · ' + MO[dt.getMonth()] + ' ' + dt.getDate();
+            html += '<div class="vcal-ag-day' + (today ? ' vcal-ag-day--today' : (past ? ' vcal-ag-day--past' : '')) + '">' +
+                '<div class="vcal-ag-head"><span class="vcal-ag-head-label">' + label + '</span>' +
+                '<span class="vcal-ag-head-n">' + (eps.length + movies.length) + '</span></div>';
+            movies.forEach(function (m) {
+                var t = MOVIE_TYPE[m.type] || MOVIE_TYPE.available;
+                var idx = (state.movieEvents || []).indexOf(m);
+                html += '<a class="vcal-ag-row vcal-ag-row--movie" data-cal-movie="' + idx + '" ' +
+                    'href="' + (m.owned && m.library_id ? '/video-detail/library/movie/' + m.library_id
+                        : '/video-detail/tmdb/movie/' + m.tmdb_id) + '">' +
+                    '<span class="vcal-ag-time vcal-mv-chip">' + t.chip + '</span>' +
+                    '<span class="vcal-ag-main"><span class="vcal-ag-title">' + esc(m.title) + '</span>' +
+                    (m.year ? '<span class="vcal-ag-sub">' + m.year + '</span>' : '') + '</span>' +
+                    (m.owned ? '<span class="vcal-flag" title="In your library">✓</span>' : '') +
+                    '</a>';
+            });
+            eps.forEach(function (ep) {
+                var tl = fmtMins(airMins(ep.airs_time));
+                var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
+                html += '<a class="vcal-ag-row" data-cal-ep="' + ep.id + '" ' +
+                    'href="/video-detail/library/show/' + ep.show_id + '" ' +
+                    'style="--vcal-h:' + showHue(ep.show_title || '') + '">' +
+                    '<span class="vcal-ag-time' + (tl ? '' : ' vcal-time--none') + '">' + (tl || 'Anytime') + '</span>' +
+                    '<span class="vcal-ag-main"><span class="vcal-ag-title">' + esc(ep.show_title) + '</span>' +
+                    '<span class="vcal-ag-sub">' + se + (ep.title ? ' · ' + esc(ep.title) : '') + '</span></span>' +
+                    (ep.has_file ? '<span class="vcal-flag" title="In your library">✓</span>' : '') +
+                    '</a>';
+            });
+            html += '</div>';
+        }
         cols.innerHTML = html;
     }
 
@@ -272,6 +391,10 @@
         var fbs = document.querySelectorAll('[data-video-cal-filter]');
         for (var i = 0; i < fbs.length; i++)
             fbs[i].classList.toggle('vcal-filter-btn--on', fbs[i].getAttribute('data-video-cal-filter') === state.filter);
+        var mbs = document.querySelectorAll('[data-video-cal-movietype]');
+        for (var j = 0; j < mbs.length; j++)
+            mbs[j].classList.toggle('vcal-filter-btn--on',
+                state.movieTypes[mbs[j].getAttribute('data-video-cal-movietype')] !== false);
     }
     // Render from the cached payload + the active filter (no refetch).
     function render() {
@@ -280,11 +403,17 @@
         var hero = $('[data-video-cal-hero]'), cols = $('[data-video-cal-cols]');
         if (!d) { showEmpty(true); if (hero) hero.innerHTML = ''; if (cols) cols.innerHTML = ''; return; }
         var eps = filterEps(d.episodes || []);
-        var view = { episodes: eps, total: eps.length, today: d.today, start: d.start, end: d.end, days: d.days };
-        var has = eps.length > 0;
+        var movies = filterMovies(d.movies || []);
+        state.movieEvents = movies;   // click lookup for data-cal-movie
+        var mwrap = $('[data-video-cal-movies-wrap]');
+        if (mwrap) mwrap.classList.toggle('hidden', !(d.movies || []).length);
+        var view = { episodes: eps, movies: movies, total: eps.length,
+            today: d.today, start: d.start, end: d.end, days: d.days };
+        var has = eps.length > 0 || movies.length > 0;
         showEmpty(!has);
         if (has) {
-            renderHero(view); renderGrid(view);
+            renderHero(view);
+            if (state.view === 'agenda') renderAgenda(view); else renderGrid(view);
             // Card entrance only on a fresh load/week-change — NOT on filter
             // re-renders (those would re-stagger every click and feel busy).
             if (state.fresh && cols) {
@@ -403,11 +532,64 @@
     }
 
     function openFrom(target) {
+        var mv = target.closest('[data-cal-movie]');
+        if (mv) {
+            var m = (state.movieEvents || [])[+mv.getAttribute('data-cal-movie')];
+            if (m) document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                detail: m.owned && m.library_id
+                    ? { kind: 'movie', id: m.library_id, source: 'library' }
+                    : { kind: 'movie', id: m.tmdb_id, source: 'tmdb' },
+            }));
+            return true;
+        }
         var el = target.closest('[data-cal-ep]');
         if (!el) return false;
         var ep = state.eps[el.getAttribute('data-cal-ep')];
         if (ep) openModal(ep);
         return true;
+    }
+
+    // ── iCal subscribe (feed already served at /api/video/calendar.ics) ──────
+    function openIcsModal() {
+        var url = window.location.origin + '/api/video/calendar.ics?scope=' + (state.scope || 'watchlist');
+        var ov = document.createElement('div');
+        ov.className = 'vcm-overlay vcal-ics-overlay';
+        ov.innerHTML =
+            '<div class="vcm-modal vcal-ics-modal" role="dialog" aria-modal="true" aria-label="Subscribe to calendar">' +
+                '<button class="vcm-close" type="button" data-vcm-close aria-label="Close">×</button>' +
+                '<div class="vcal-ics-body">' +
+                    '<h3 class="vcal-ics-title">📅 Subscribe to your calendar</h3>' +
+                    '<p class="vcal-ics-sub">Add this feed to Google Calendar, Apple Calendar or Outlook ' +
+                        '("add calendar from URL") and upcoming episodes + movie releases show up there, ' +
+                        'kept in sync automatically.</p>' +
+                    '<div class="vcal-ics-row">' +
+                        '<input class="vcal-ics-url" type="text" readonly value="' + esc(url) + '" data-vcal-ics-url>' +
+                        '<button class="vcm-btn vcm-btn--primary" type="button" data-vcal-ics-copy>Copy</button>' +
+                    '</div>' +
+                    '<p class="vcal-ics-note">Covers the next 14 days (add <code>?days=60</code> for more). ' +
+                        'Airing episodes carry their air time; movie releases are all-day events.</p>' +
+                '</div>' +
+            '</div>';
+        document.body.appendChild(ov);
+        requestAnimationFrame(function () { ov.classList.add('vcm-open'); });
+        function close() {
+            ov.classList.remove('vcm-open');
+            document.removeEventListener('keydown', onKey);
+            setTimeout(function () { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 220);
+        }
+        function onKey(e) { if (e.key === 'Escape') close(); }
+        document.addEventListener('keydown', onKey);
+        ov.addEventListener('click', function (e) {
+            if (e.target === ov || e.target.closest('[data-vcm-close]')) { close(); return; }
+            if (e.target.closest('[data-vcal-ics-copy]')) {
+                var inp = ov.querySelector('[data-vcal-ics-url]');
+                inp.select();
+                var done = function () { if (typeof showToast === 'function') showToast('Feed URL copied', 'success'); };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(inp.value).then(done).catch(function () { document.execCommand('copy'); done(); });
+                } else { document.execCommand('copy'); done(); }
+            }
+        });
     }
     // Cursor-following 3D tilt (delegated, one element at a time).
     function wireTilt(container, sel, deg) {
@@ -431,7 +613,7 @@
         var cols = $('[data-video-cal-cols]');
         if (cols) cols.addEventListener('click', function (e) {
             if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-            if (e.target.closest('[data-cal-ep]') && cols.contains(e.target)) { e.preventDefault(); openFrom(e.target); }
+            if (e.target.closest('[data-cal-ep],[data-cal-movie]') && cols.contains(e.target)) { e.preventDefault(); openFrom(e.target); }
         });
         var hero = $('[data-video-cal-hero]');
         if (hero) {
@@ -464,6 +646,17 @@
         })(sbs[j]);
         var addBtn = $('[data-video-cal-addmissing]');
         if (addBtn) addBtn.addEventListener('click', addMissing);
+        var icsBtn = $('[data-video-cal-ical]');
+        if (icsBtn) icsBtn.addEventListener('click', openIcsModal);
+        var mbs = document.querySelectorAll('[data-video-cal-movietype]');
+        for (var q = 0; q < mbs.length; q++) (function (b) {
+            b.addEventListener('click', function () {
+                var t = b.getAttribute('data-video-cal-movietype');
+                state.movieTypes[t] = state.movieTypes[t] === false;   // toggle
+                try { localStorage.setItem('vcalMovieTypes', JSON.stringify(state.movieTypes)); } catch (e) { /* private mode */ }
+                render();
+            });
+        })(mbs[q]);
 
         // Keyboard nav for a page users live in: ← / → step weeks, T jumps to
         // today. Only when the calendar is the visible page, no modal is open,
@@ -651,16 +844,22 @@
             .catch(function () { /* modal already shows payload data */ });
     }
 
-    // View switcher (cards ↔ compact). Just toggles a class on the stable grid
-    // wrapper — no refetch/re-render needed — and remembers the choice.
+    // View switcher (cards ↔ compact ↔ agenda). Cards/compact is a pure CSS
+    // class flip; crossing the agenda boundary rebuilds the list from the
+    // cached payload (still no refetch). Remembers the choice.
     function setView(v) {
+        var wasAgenda = state.view === 'agenda';
         state.view = v;
         try { localStorage.setItem('vcalView', v); } catch (e) { /* private mode */ }
         applyView();
+        if (state.data && (wasAgenda || v === 'agenda')) render();
     }
     function applyView() {
         var grid = $('[data-video-cal-grid]');
-        if (grid) grid.classList.toggle('vcal-view--compact', state.view === 'compact');
+        if (grid) {
+            grid.classList.toggle('vcal-view--compact', state.view === 'compact');
+            grid.classList.toggle('vcal-view--agenda', state.view === 'agenda');
+        }
         var vbs = document.querySelectorAll('[data-video-cal-view]');
         for (var i = 0; i < vbs.length; i++)
             vbs[i].classList.toggle('vcal-view-btn--on', vbs[i].getAttribute('data-video-cal-view') === state.view);
@@ -702,6 +901,10 @@
         wire();
         try { var sv = localStorage.getItem('vcalView'); if (sv) state.view = sv; } catch (e) { /* private mode */ }
         try { var sc = localStorage.getItem('vcalScope'); if (sc === 'watchlist' || sc === 'all') state.scope = sc; } catch (e) { /* private mode */ }
+        try {
+            var mt = JSON.parse(localStorage.getItem('vcalMovieTypes') || 'null');
+            if (mt && typeof mt === 'object') state.movieTypes = { cinema: mt.cinema !== false, available: mt.available !== false };
+        } catch (e) { /* private mode / bad json */ }
         applyView();
         applyScope();
         document.addEventListener('soulsync:video-page-shown', onPageShown);

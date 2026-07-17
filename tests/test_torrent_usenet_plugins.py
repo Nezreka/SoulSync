@@ -248,6 +248,67 @@ def test_torrent_finalize_picks_first_audio_file(tmp_path: Path) -> None:
     assert row['file_path'].endswith('a.mp3')
 
 
+def _inflight_row():
+    return {
+        'id': 'dl-1', 'filename': 'x', 'username': 'torrent',
+        'display_name': 'X', 'state': 'InProgress, Downloading',
+        'progress': 50.0, 'size': 0, 'transferred': 0, 'speed': 0,
+        'file_path': None, 'torrent_hash': 'h1', 'error': None,
+    }
+
+
+def test_torrent_finalize_walks_only_this_torrents_release_folder(tmp_path: Path) -> None:
+    """save_path is the client's save DIRECTORY — on a shared root, walking
+    it whole donated the 'first audio file' of some OTHER torrent. With the
+    torrent's name known, only <save_path>/<name> is walked."""
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    other = tmp_path / 'Another Album [FLAC]'
+    other.mkdir()
+    (other / 'aaa-other.mp3').write_bytes(b'ID3')          # sorts first in a full walk
+    mine = tmp_path / 'My Release'
+    mine.mkdir()
+    (mine / 'track.mp3').write_bytes(b'ID3')
+    plugin._finalize_download('dl-1', str(tmp_path), torrent_name='My Release')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'].endswith('track.mp3')          # never the other torrent's file
+
+
+def test_torrent_finalize_single_file_torrent_still_walks_the_save_dir(tmp_path: Path) -> None:
+    # A single-FILE torrent's name points at the file itself; the audio
+    # walker only walks directories, so the narrowing must not apply.
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    (tmp_path / 'Artist - Song.mp3').write_bytes(b'ID3')
+    plugin._finalize_download('dl-1', str(tmp_path), torrent_name='Artist - Song.mp3')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'].endswith('Artist - Song.mp3')
+
+
+def test_torrent_finalize_rescues_a_wrong_reported_mount(tmp_path: Path, monkeypatch) -> None:
+    """TheHomeGuy: qBittorrent reports '/downloads' (its container view); a
+    same-named dir exists here but is empty, while the release actually
+    landed under the configured download root."""
+    from core.download_plugins import album_bundle as ab
+    wrong = tmp_path / 'downloads'
+    wrong.mkdir()
+    real_root = tmp_path / 'real'
+    release = real_root / 'My Release'
+    release.mkdir(parents=True)
+    (release / 'track.mp3').write_bytes(b'ID3')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'soulseek.download_path' else default)})())
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    plugin._finalize_download('dl-1', str(wrong), torrent_name='My Release')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'] == str(release / 'track.mp3')
+
+
 def test_torrent_finalize_marks_error_when_no_audio(tmp_path: Path) -> None:
     plugin = TorrentDownloadPlugin()
     plugin.active_downloads['dl-1'] = {

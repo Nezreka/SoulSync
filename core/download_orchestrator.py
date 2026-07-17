@@ -473,6 +473,18 @@ class DownloadOrchestrator:
         Returns:
             download_id: Unique download ID for tracking
         """
+        # Minimum-free-disk guard (every music download — Soulseek AND
+        # streaming — funnels through here). A full disk mid-download is far
+        # worse than a refused grab: on a Proxmox LXC the 8GB root fills until
+        # the whole container hangs.
+        from core.disk_guard import music_has_room
+        ok_room, free, floor = music_has_room()
+        if not ok_room:
+            raise RuntimeError(
+                f"Download refused: only {free:.1f} GB free on the download disk "
+                f"(minimum {floor:.0f} GB). Free up space, or change the floor in "
+                f"Settings → Soulseek (min_free_disk_gb).")
+
         # Streaming sources are dispatched by name match; anything
         # unrecognized falls through to Soulseek (peer username case).
         spec = self.registry.get_spec(username) if username else None

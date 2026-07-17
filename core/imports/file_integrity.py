@@ -32,13 +32,56 @@ real-world corruption.
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
+import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
 
 
 logger = get_logger("imports.file_integrity")
+
+
+def _find_ffmpeg() -> Optional[str]:
+    ff = shutil.which('ffmpeg')
+    if ff:
+        return ff
+    cand = Path(__file__).parent.parent.parent / 'tools' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+    return str(cand) if cand.exists() else None
+
+
+def _parse_ffmpeg_time(stderr_text: str) -> float:
+    """The last ``time=HH:MM:SS.xx`` ffmpeg prints while decoding — the REAL
+    decoded length, immune to a faked container/STREAMINFO duration. 0.0 if
+    not found."""
+    last = 0.0
+    for m in re.finditer(r'time=(\d+):(\d+):(\d+(?:\.\d+)?)', stderr_text or ''):
+        last = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    return last
+
+
+def probe_decoded_duration(file_path: str, timeout: int = 180) -> float:
+    """Decode the audio with ffmpeg and return its REAL length in seconds.
+
+    This is the ground truth a HiFi preview can't fake: a 30s clip whose
+    container/STREAMINFO claims full length still decodes to 30s. 0.0 when
+    ffmpeg is unavailable or on any error — callers treat 0.0 as 'unknown',
+    never as 'preview'."""
+    ff = _find_ffmpeg()
+    if not ff:
+        return 0.0
+    try:
+        proc = subprocess.run(
+            [ff, '-hide_banner', '-nostdin', '-i', str(file_path),
+             '-map', '0:a:0', '-f', 'null', '-'],
+            capture_output=True, text=True, timeout=timeout)
+        return _parse_ffmpeg_time(proc.stderr)
+    except Exception:   # noqa: BLE001 - probe failure is 'unknown', never a reject
+        return 0.0
 
 # Minimum plausible audio file size. A 1-second 64kbps mp3 is ~8KB; a
 # 1-second FLAC is much larger. Anything under this is a broken stub.
@@ -219,15 +262,43 @@ def check_audio_integrity(
         # total_samples=0 in its STREAMINFO even though every audio frame is
         # present and the file plays fine. HiFi is the common trigger: it
         # assembles FLAC from HLS segments and demuxes with `ffmpeg -c copy`,
-        # which preserves total_samples=0, so mutagen computes length 0 and the
-        # file was wrongly quarantined (#756). Treat it as unknown length:
-        # accept the file and skip the duration cross-check we can't perform
-        # without a length. mutagen never decoded/validated frame data anyway,
-        # so accepting here doesn't weaken real corruption detection.
+        # which preserves total_samples=0, so mutagen computes length 0 (#756).
+        #
+        # This exact zero is ALSO how a HiFi 30s PREVIEW arrives — the faked
+        # STREAMINFO reads total_samples=0 while only ~30s of frames exist —
+        # and blindly accepting here is how those clips replaced real library
+        # files (sella's incident). So when we have an expected duration, DECODE
+        # the real length with ffmpeg (the one signal a preview can't fake)
+        # before trusting a zero-length file. No expected duration or no ffmpeg:
+        # fall back to the old accept (a good streamed FLAC must not be
+        # quarantined), and the replace-side length guard is the backstop.
+        if expected_duration_ms and expected_duration_ms > 0:
+            decoded_s = probe_decoded_duration(file_path)
+            checks["decoded_length_s"] = decoded_s
+            if decoded_s > 0:
+                expected_s = expected_duration_ms / 1000.0
+                if decoded_s < expected_s * 0.8:
+                    return IntegrityResult(
+                        ok=False,
+                        reason=f"Decoded audio is only {decoded_s:.0f}s of an "
+                               f"expected {expected_s:.0f}s (zero-length header) — "
+                               "a preview clip or truncated download",
+                        checks={**checks, "mutagen_parse": "zero_length_decoded_short"},
+                    )
+                logger.info(
+                    "[Integrity] %s reports length 0 but decodes to %.0fs (expected "
+                    "%.0fs) — accepting (streamed/fragmented FLAC)",
+                    os.path.basename(file_path), decoded_s, expected_s,
+                )
+                return IntegrityResult(
+                    ok=True,
+                    checks={**checks, "mutagen_parse": "zero_length_decoded_ok",
+                            "length_check": "passed_decoded"},
+                )
         logger.warning(
             "[Integrity] %s parsed cleanly (%d bytes, format=%s) but reports "
-            "length 0 — treating as unknown length (likely streamed/fragmented "
-            "FLAC), not rejecting",
+            "length 0 and no decode was possible — treating as unknown length "
+            "(likely streamed/fragmented FLAC), not rejecting",
             os.path.basename(file_path), size, type(audio).__name__,
         )
         return IntegrityResult(

@@ -66,6 +66,7 @@ def flatten_downloads(data: Any) -> list:
                     "username": un, "filename": f.get("filename", ""), "id": f.get("id", ""),
                     "state": f.get("state", ""), "size": f.get("size", 0) or 0,
                     "transferred": f.get("bytesTransferred", 0) or 0,
+                    "speed": f.get("averageSpeed", 0) or 0,   # bytes/sec while moving
                 })
     return out
 
@@ -109,6 +110,18 @@ def cancel_download(username: str, filename: str) -> dict:
         return {"ok": True}
     except Exception as e:   # noqa: BLE001 - surface the failure; the row is marked cancelled anyway
         return {"ok": False, "error": str(e)}
+
+
+def eta_seconds(transfer: dict) -> int | None:
+    """Remaining seconds from size/transferred/averageSpeed — None when the
+    transfer isn't moving (speed 0) or the size is unknown. Pure."""
+    transfer = transfer or {}
+    size = transfer.get("size", 0) or 0
+    speed = transfer.get("speed", 0) or 0
+    if not size or speed <= 0:
+        return None
+    left = max(0, size - (transfer.get("transferred", 0) or 0))
+    return int(left / speed)
 
 
 def progress_pct(transfer: dict) -> float:

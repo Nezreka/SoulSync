@@ -14,7 +14,7 @@
     var LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('');
 
     var state = { tab: 'movies', search: '', letter: 'all', sort: 'title',
-                  status: 'all', genre: '', page: 1, limit: 75, loaded: false,
+                  status: 'all', genre: '', resolution: '', page: 1, limit: 75, loaded: false,
                   // Bulk select mode: id→true map (persists across pages), the
                   // open action popover, and the running-job poll timer.
                   selecting: false, selected: {}, bulkPop: null, bulkTimer: null };
@@ -32,6 +32,13 @@
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function fmtSize(bytes) {
+        bytes = +bytes || 0; if (!bytes) return '';
+        if (bytes >= 1e12) return (Math.round(bytes / 1e11) / 10) + ' TB';
+        if (bytes >= 1e9) return (Math.round(bytes / 1e8) / 10) + ' GB';
+        return Math.max(1, Math.round(bytes / 1e6)) + ' MB';
     }
 
     function resLabel(res) {
@@ -109,6 +116,10 @@
         if (kind === 'movie') {
             var rl = resLabel(it.resolution);
             if (rl) badge = '<div class="video-card-badge">' + rl + '</div>';
+        } else if (kind === 'show') {
+            // Airing/Ended/Upcoming rides the poster corner (movies keep their
+            // resolution there) — the stat line is too tight to fit it.
+            badge = showStatusBadge(it.status);
         }
 
         // Stat line: year · ★ rating · owned-state (+ watched tick). Parts are
@@ -118,11 +129,11 @@
         if (it.rating) meta.push('<span class="vlib-rate">★ ' + (Math.round(it.rating * 10) / 10) + '</span>');
         if (kind === 'movie') {
             meta.push(it.has_file ? 'Owned' : 'Wanted');
+            if (it.size_bytes) meta.push(fmtSize(it.size_bytes));
             if (it.play_count) meta.push('<span class="vlib-watched" title="Watched on your server">✓</span>');
         } else {
             meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
-            var chip = showStatusChip(it.status);
-            if (chip) meta.push(chip);
+            if (it.size_bytes) meta.push(fmtSize(it.size_bytes));
         }
 
         // Shows: a slim owned-episodes progress line under the stats — collection
@@ -147,17 +158,17 @@
     }
 
     // Show lifecycle chip: the server/TMDB status strings collapse to three states.
-    function showStatusChip(status) {
+    function showStatusBadge(status) {
         var st = String(status || '').toLowerCase();
         if (!st) return '';
         if (st.indexOf('continu') > -1 || st.indexOf('return') > -1 || st.indexOf('air') > -1) {
-            return '<span class="vlib-chip vlib-chip--airing">Airing</span>';
+            return '<div class="video-card-badge video-card-badge--airing">Airing</div>';
         }
         if (st.indexOf('end') > -1 || st.indexOf('cancel') > -1) {
-            return '<span class="vlib-chip vlib-chip--ended">Ended</span>';
+            return '<div class="video-card-badge video-card-badge--ended">Ended</div>';
         }
         if (st.indexOf('upcoming') > -1 || st.indexOf('production') > -1 || st.indexOf('planned') > -1) {
-            return '<span class="vlib-chip vlib-chip--upcoming">Upcoming</span>';
+            return '<div class="video-card-badge video-card-badge--upcoming">Upcoming</div>';
         }
         return '';
     }
@@ -208,13 +219,16 @@
         box.classList.toggle('hidden', p.total_pages <= 1);
     }
 
-    function setCount(n) {
+    function setCount(n, sizeBytes) {
         var c = $('[data-video-lib-count]');
         var lbl = $('[data-video-lib-count-label]');
         if (c) c.textContent = n;
         if (lbl) {
-            lbl.textContent = state.tab === 'movies' ? 'Movies'
+            var name = state.tab === 'movies' ? 'Movies'
                 : state.tab === 'shows' ? 'Shows' : 'Channels';
+            // size-on-disk for the current filtered set, right in the header
+            var sz = fmtSize(sizeBytes);
+            lbl.textContent = sz ? name + ' · ' + sz : name;
         }
     }
 
@@ -226,6 +240,7 @@
         var params = new URLSearchParams({
             kind: apiKind, search: state.search, letter: state.letter, sort: state.sort,
             status: state.status, genre: state.genre, page: state.page, limit: state.limit });
+        if (state.resolution && apiKind === 'movies') params.set('resolution', state.resolution);
         fetch(LIBRARY_URL + '?' + params.toString(), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -233,7 +248,7 @@
                 if (!d || d.error) { renderItems([], cardKind); updatePagination(null); setCount(0); return; }
                 renderItems(d.items || [], cardKind);
                 updatePagination(d.pagination);
-                setCount(d.pagination ? d.pagination.total_count : 0);
+                setCount(d.pagination ? d.pagination.total_count : 0, d.total_size_bytes);
             })
             .catch(function () { showLoading(false); renderItems([], cardKind); updatePagination(null); setCount(0); });
     }
@@ -258,6 +273,26 @@
                     }).join('');
             })
             .catch(function () { /* the dropdown just stays on All Genres */ });
+    }
+
+    // Movie-file resolutions actually in the library → the resolution filter
+    // (movies tab only). Loaded once; a scan changing the set is rare enough
+    // that a page reload picking it up is fine.
+    function loadResolutions() {
+        var sel = $('[data-video-lib-res]');
+        if (!sel || sel._loaded) return;
+        fetch('/api/video/library/resolutions', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                sel._loaded = true;
+                sel.innerHTML = '<option value="">Any Quality</option>' +
+                    (d.resolutions || []).map(function (x) {
+                        return '<option value="' + esc(x) + '"' +
+                            (x === state.resolution ? ' selected' : '') + '>' + esc(resLabel(x) || x) + '</option>';
+                    }).join('');
+            })
+            .catch(function () { /* stays on Any Quality */ });
     }
 
     // ── Bulk select mode + action bar ────────────────────────────────────────
@@ -546,14 +581,31 @@
                     var selBtn = $('[data-video-lib-select]');
                     if (selBtn) selBtn.style.display = isCh ? 'none' : '';
                     var status = $('[data-video-lib-status]');
-                    if (status) status.style.display = isCh ? 'none' : '';
+                    if (status) {
+                        status.style.display = isCh ? 'none' : '';
+                        // 'Missing episodes' only means something on shows
+                        var miss = status.querySelector('option[value="missing"]');
+                        if (miss) miss.hidden = state.tab !== 'shows';
+                        if (state.status === 'missing' && state.tab !== 'shows') {
+                            state.status = 'all'; status.value = 'all';
+                        }
+                    }
                     var genreSel = $('[data-video-lib-genre]');
                     if (genreSel) {
                         genreSel.style.display = isCh ? 'none' : '';
                         // movie/show genre sets differ — reset the pick on a tab switch
                         state.genre = ''; genreSel.value = '';
                     }
+                    // resolution filter is a movie-file concept
+                    var resSel = $('[data-video-lib-res]');
+                    if (resSel) {
+                        resSel.style.display = state.tab === 'movies' ? '' : 'none';
+                        if (state.tab !== 'movies' && state.resolution) {
+                            state.resolution = ''; resSel.value = '';
+                        }
+                    }
                     loadGenres();
+                    if (state.tab === 'movies') loadResolutions();
                     reload();
                 });
             })(tabs[i]);
@@ -572,6 +624,8 @@
         if (status) status.addEventListener('change', function () { state.status = status.value; reload(); });
         var genreSel = $('[data-video-lib-genre]');
         if (genreSel) genreSel.addEventListener('change', function () { state.genre = genreSel.value; reload(); });
+        var resSel = $('[data-video-lib-res]');
+        if (resSel) resSel.addEventListener('change', function () { state.resolution = resSel.value; reload(); });
         var prev = $('[data-video-lib-prev]');
         if (prev) prev.addEventListener('click', function () {
             if (state.page > 1) { state.page--; load(); }
@@ -626,6 +680,7 @@
         if (!e || e.detail !== PAGE_ID) return;
         checkServer();
         loadGenres();
+        if (state.tab === 'movies') loadResolutions();
         if (!state.loaded) load();
     }
 

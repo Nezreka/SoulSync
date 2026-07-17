@@ -1100,6 +1100,96 @@ def _inert_video_download_monitor():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _inert_music_disk_guard():
+    """Pin the music min-free-disk guard OFF for the whole suite.
+
+    music_has_room() probes the REAL filesystem's free space (rule 3b: CI
+    runner fill varies run to run) on every DownloadOrchestrator.download().
+    Tests of the guard itself monkeypatch the probe and reset the override.
+    """
+    import core.disk_guard as dg
+    dg._floor_override = 0.0
+    yield
+    dg._floor_override = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _video_db_lazy_create_tripwire():
+    """Name the poisoner: log a full stack whenever get_video_db() LAZILY
+    CREATES the module-global VideoDatabase during the suite.
+
+    Tests that want a DB install their own (`videoapi._video_db = db`); the
+    lazy-create branch firing mid-suite means some code path — usually a
+    daemon thread outliving its test — reached for the global after a test's
+    teardown set it to None. That freshly-created instance then shadows the
+    NEXT test's install (the split-brain phantom: a setting written on the
+    test's handle reads back empty through the endpoint). The stack printed
+    here is the culprit, thread name included. Diagnostic only: behavior is
+    unchanged, and the env redirects above make the created DB a temp one.
+    """
+    import io
+    import threading
+    import traceback
+
+    import api.video as videoapi
+
+    orig = videoapi.get_video_db
+
+    def traced():
+        if videoapi._video_db is None:
+            buf = io.StringIO()
+            traceback.print_stack(file=buf)
+            print("\n[video-db tripwire] get_video_db() LAZY-CREATE on thread %r:\n%s"
+                  % (threading.current_thread().name, buf.getvalue()), flush=True)
+        return orig()
+
+    videoapi.get_video_db = traced
+    try:
+        yield
+    finally:
+        videoapi.get_video_db = orig
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _video_db_assignment_tripwire():
+    """Log EVERY assignment to api.video._video_db — one compact line with the
+    currently-running test, the assigning caller, and the thread.
+
+    The split-brain phantom's smoking gun (caught by the parity test's
+    diagnostic assert) is _video_db pointing at a DIFFERENT VideoDatabase than
+    the one the test's own fixture just installed, with the lazy-create path
+    proven silent — so some test-side code ASSIGNS the global out of turn.
+    Modules accept a __class__ swap to a ModuleType subclass, which lets us
+    hook attribute assignment without touching production code."""
+    import os
+    import threading
+    import traceback
+
+    import api.video as videoapi
+
+    base = type(videoapi)
+
+    class _TracedModule(base):
+        def __setattr__(self, name, value):
+            if name == "_video_db":
+                frames = traceback.extract_stack(limit=4)[:-1]
+                caller = " <- ".join("%s:%s" % (os.path.basename(f.filename), f.lineno)
+                                     for f in reversed(frames))
+                print("[assign tripwire] _video_db=%s thread=%r test=%r via %s"
+                      % ("None" if value is None else hex(id(value)),
+                         threading.current_thread().name,
+                         os.environ.get("PYTEST_CURRENT_TEST", "?"), caller),
+                      flush=True)
+            super().__setattr__(name, value)
+
+    videoapi.__class__ = _TracedModule
+    try:
+        yield
+    finally:
+        videoapi.__class__ = base
+
+
 @pytest.fixture(autouse=True)
 def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     """Reset all mutable state between tests."""
@@ -1115,6 +1205,10 @@ def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     # between tests like any other module-global.
     from core.slskd_throttle import _reset_for_tests
     _reset_for_tests()
+    # Enrichment status TTL cache (core.enrichment.api): a cached stats dict
+    # must never leak into the next test's registry (same service id, new fake).
+    from core.enrichment.api import _invalidate_status_cache
+    _invalidate_status_cache()
     # Reset to defaults
     _status_cache.clear()
     _status_cache.update(copy.deepcopy(_DEFAULT_STATUS_CACHE))

@@ -76,7 +76,9 @@ def create_video_blueprint() -> Blueprint:
                    "/api/video/repair",
                    "/api/video/server-config", "/api/video/jellyfin", "/api/video/libraries",
                    "/api/video/organization", "/api/video/downloads/slskd",
-                   "/api/video/enrichment/config", "/api/video/enrichment/priority")
+                   "/api/video/enrichment/config", "/api/video/enrichment/priority",
+                   "/api/video/notifications",   # P11: GETs return webhook URLs/bot tokens
+                   "/api/video/backups")         # P10: restore/download the whole database
         # Config the Settings page WRITES but content views (download modal / grab)
         # legitimately READ — gate the writes, leave the GETs open.
         if writing:
@@ -89,7 +91,10 @@ def create_video_blueprint() -> Blueprint:
             # views only READ metadata (the detail GET stays open); these MUTATE the library.
             admin = admin or _p("/api/video/bulk", "/api/video/monitor",
                                  "/api/video/poster/set", "/api/video/downloads/blocklist") \
-                or path.endswith(("/metadata", "/lock", "/refresh-art"))
+                or path.endswith(("/metadata", "/lock", "/refresh-art",
+                                  # per-title acquisition settings (P2/P8) — management,
+                                  # same as the metadata edits above
+                                  "/quality-profile", "/series-type"))
         if admin and not is_admin:
             return jsonify({"error": "Admin only."}), 403
 
@@ -120,6 +125,9 @@ def create_video_blueprint() -> Blueprint:
     from .bulk import register_routes as reg_bulk
     from .repair import register_routes as reg_repair
     from .issues import register_routes as reg_issues
+    from .requests import register_routes as reg_requests
+    from .notifications import register_routes as reg_notifications
+    from .backups import register_routes as reg_backups
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -141,5 +149,8 @@ def create_video_blueprint() -> Blueprint:
     reg_bulk(bp)
     reg_repair(bp)
     reg_issues(bp)
+    reg_requests(bp)
+    reg_notifications(bp)
+    reg_backups(bp)
 
     return bp

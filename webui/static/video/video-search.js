@@ -173,12 +173,37 @@
     }
 
     // Idle state: a "Trending this week" rail so the page isn't a blank box.
+    // ── recent searches (remembered on COMMIT — opening a result — not on
+    //    every debounced keystroke, so the list holds real queries, not typos) ─
+    function recents() {
+        try { var r = JSON.parse(localStorage.getItem('vsRecent') || '[]'); return Array.isArray(r) ? r : []; }
+        catch (e) { return []; }
+    }
+    function rememberSearch(q) {
+        q = (q || '').trim();
+        if (!q || q.length < 2) return;
+        var r = recents().filter(function (x) { return x.toLowerCase() !== q.toLowerCase(); });
+        r.unshift(q);
+        try { localStorage.setItem('vsRecent', JSON.stringify(r.slice(0, 8))); } catch (e) { /* private mode */ }
+    }
+    function recentsHTML() {
+        var r = recents();
+        if (!r.length) return '';
+        return '<div class="vsr-recent"><span class="vsr-recent-label">Recent</span>' +
+            r.map(function (q) {
+                return '<button class="vsr-recent-chip" type="button" data-vsr-recent="' + esc(q) + '">' + esc(q) + '</button>';
+            }).join('') +
+            '<button class="vsr-recent-clear" type="button" data-vsr-recent-clear title="Clear recent searches">✕</button>' +
+            '</div>';
+    }
+
     function renderTrending() {
         var host = $('[data-video-search-results]');
         if (!host || !trendingCache || !trendingCache.length) return;
         show('[data-video-search-hint]', false);
         show('[data-video-search-empty]', false);
-        host.innerHTML = '<div class="vsr-group"><h2 class="vsr-group-title">' +
+        host.innerHTML = recentsHTML() +
+            '<div class="vsr-group"><h2 class="vsr-group-title">' +
             '<span class="vsr-group-ic" aria-hidden="true">🔥</span>Trending this week</h2>' +
             '<div class="vsr-grid">' + trendingCache.map(titleCard).join('') + '</div></div>';
         if (window.VideoWatchlist) VideoWatchlist.hydrate(host);
@@ -197,7 +222,7 @@
         if (trendingCache && trendingCache.length) { renderTrending(); return; }
         show('[data-video-search-empty]', false);
         show('[data-video-search-hint]', true);
-        var host = $('[data-video-search-results]'); if (host) host.innerHTML = '';
+        var host = $('[data-video-search-results]'); if (host) host.innerHTML = recentsHTML();
         loadTrending();
     }
 
@@ -336,6 +361,7 @@
         var kind = card.getAttribute('data-vsr-open');
         var id = parseInt(card.getAttribute('data-vsr-id'), 10);
         if (isNaN(id)) return;
+        rememberSearch(lastQuery);   // a picked result marks the query as a keeper
         if (kind === 'person') {
             document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
                 { detail: { kind: 'person', id: id, source: 'tmdb' } }));
@@ -349,12 +375,41 @@
         if (wired) return;
         wired = true;
         var input = $('[data-video-search-input]');
-        if (input) input.addEventListener('input', function () { onInput(input.value); });
+        if (input) {
+            input.addEventListener('input', function () { onInput(input.value); });
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    if (input.value) { input.value = ''; onInput(''); }
+                    return;
+                }
+                if (e.key !== 'Enter' || !input.value.trim()) return;   // idle page: Enter is a no-op
+                // Enter = open the top result (the fast path when the first hit is right)
+                var host = $('[data-video-search-results]');
+                var first = host && host.querySelector('[data-vsr-open]');
+                if (first) { e.preventDefault(); openCard(first); }
+            });
+        }
 
         var results = $('[data-video-search-results]');
         if (results) {
             results.addEventListener('click', function (e) {
                 if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                var rc = e.target.closest('[data-vsr-recent]');
+                if (rc && results.contains(rc)) {
+                    e.preventDefault();
+                    var q = rc.getAttribute('data-vsr-recent') || '';
+                    var inp = $('[data-video-search-input]');
+                    if (inp) { inp.value = q; try { inp.focus(); } catch (err) { /* ignore */ } }
+                    onInput(q);
+                    return;
+                }
+                var rcl = e.target.closest('[data-vsr-recent-clear]');
+                if (rcl && results.contains(rcl)) {
+                    e.preventDefault();
+                    try { localStorage.removeItem('vsRecent'); } catch (err) { /* ignore */ }
+                    showIdle();
+                    return;
+                }
                 var fb = e.target.closest('[data-vyt-follow]');
                 if (fb && results.contains(fb)) { e.preventDefault(); toggleFollow(fb); return; }
                 var pfb = e.target.closest('[data-vyt-follow-playlist]');
@@ -385,9 +440,29 @@
         if (!e || e.detail !== PAGE_ID) return;
         wire();
         var input = $('[data-video-search-input]');
+        if (_pendingQuery && input) {   // a keyword chip navigated here (#1042)
+            input.value = _pendingQuery;
+            onInput(_pendingQuery);
+            _pendingQuery = null;
+            return;
+        }
         if (input) { try { input.focus(); } catch (err) { /* ignore */ } }
         if (!lastQuery) loadTrending();               // fill the idle page
     }
+
+    // Cross-page search-a-keyword (#1042): a keyword chip on a detail page
+    // navigates here with a query. Stash it; onPageShown (fired by the nav) runs
+    // it. Apply immediately too when we're already the active page.
+    var _pendingQuery = null;
+    document.addEventListener('soulsync:video-search-query', function (e) {
+        var qv = e && e.detail && (e.detail.q || e.detail);
+        if (typeof qv !== 'string' || !qv.trim()) return;
+        _pendingQuery = qv.trim();
+        if (document.body.getAttribute('data-video-page') === PAGE_ID) {
+            var input = $('[data-video-search-input]');
+            if (input) { input.value = _pendingQuery; onInput(_pendingQuery); _pendingQuery = null; }
+        }
+    });
 
     function init() {
         document.addEventListener('soulsync:video-page-shown', onPageShown);

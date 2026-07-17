@@ -61,6 +61,11 @@ _AUDIO = [
 _RANGE = re.compile(r"\bS(\d{1,2})\s*[-–]\s*S?(\d{1,2})\b", re.I)   # S01-S05
 # Season allows 3 digits — long-running dailies really do reach S277 (House Hunters).
 _SXXEXX = re.compile(r"\bS(\d{1,3})[\s.]?E(\d{1,3})\b", re.I)        # S02E03 / S277E05
+# Multi-episode file (Sonarr's S01E01E02 shapes): E01E02[E03…], E01-E02, or E01-02.
+# The bare -NN tail must not swallow a resolution ('S01E01-1080p') — the lookahead
+# rejects a digit run that continues or ends in 'p'.
+_SXXEXX_SPAN = re.compile(
+    r"\bS(\d{1,3})[\s.]?E(\d{1,3})((?:[-.\s]?E\d{1,3})+|-\d{1,3}(?![\dp]))\b", re.I)
 _SXX = re.compile(r"\bS(\d{1,3})\b", re.I)                          # S02 (pack)
 _SEASON_WORD = re.compile(r"\bseason[\s.]?(\d{1,2})\b", re.I)        # Season 2
 _COMPLETE = re.compile(r"\b(complete|collection|all\s?seasons)\b", re.I)
@@ -101,6 +106,7 @@ def parse_release(title: Any) -> dict:
         "season": None,
         "season_end": None,
         "episode": None,
+        "episode_end": None,
         "air_date": None,
         "is_season_pack": False,
         "is_series_pack": False,
@@ -113,11 +119,18 @@ def parse_release(title: Any) -> dict:
         out["air_date"] = ad.group(1) + "-" + ad.group(2) + "-" + ad.group(3)
 
     rng = _RANGE.search(t)
+    span = _SXXEXX_SPAN.search(t)
     m = _SXXEXX.search(t)
     if rng:
         out["season"] = int(rng.group(1))
         out["season_end"] = int(rng.group(2))
         out["is_series_pack"] = True
+    elif span:
+        first, last = int(span.group(2)), int(re.findall(r"\d+", span.group(3))[-1])
+        out["season"] = int(span.group(1))
+        out["episode"] = first
+        if last > first:
+            out["episode_end"] = last   # a nonsense span (E05-04) degrades to E05
     elif m:
         out["season"] = int(m.group(1))
         out["episode"] = int(m.group(2))
@@ -181,6 +194,25 @@ def extract_title(release_name: Any) -> str:
     return _spaces(t[:cut])
 
 
+def has_absolute_episode(release_name: Any, absolute: Any) -> bool:
+    """True when the release carries this ABSOLUTE episode number as a standalone
+    token in its title region — anime naming ('[SubsPlease] One Piece - 1071
+    (1080p)', 'Show.E1071.1080p', '0523v2'). Only the text BEFORE the first
+    quality/scope token is searched, so audio channels ('DDP5.1') and resolution
+    digits can't false-match. Consulted only for releases with no SxxExx numbering,
+    and only ACCEPTS — a miss means 'not proven', never a rejection by itself."""
+    try:
+        n = int(absolute)
+    except (TypeError, ValueError):
+        return False
+    if n <= 0:
+        return False
+    t = str(release_name or "")
+    m = _META_BOUNDARY.search(t)
+    head = _spaces(t[:m.start()] if m else t)
+    return bool(re.search(r"(?<!\w)[Ee]?0*%d(?:v\d+)?(?!\w)" % n, head))
+
+
 def normalize_title(s: Any) -> str:
     """Fold a title to a comparable key: strip accents, lowercase, '&'→'and',
     punctuation → space, drop a single leading article. 'The Dark Knight' and
@@ -242,4 +274,4 @@ def titles_match(release_name: Any, want_title: Any) -> bool:
 
 
 __all__ = ["parse_release", "extract_title", "normalize_title",
-           "acceptable_titles", "titles_match"]
+           "acceptable_titles", "titles_match", "has_absolute_episode"]

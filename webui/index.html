@@ -421,6 +421,10 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" opacity="0.2" stroke="currentColor"/></svg></span>
                     <span class="nav-text">Discover</span>
                 </a>
+                <a class="nav-button" data-video-page="video-calendar" href="/video-calendar">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+                    <span class="nav-text">Calendar</span>
+                </a>
                 <button type="button" class="nav-section-label" data-section="video-content" onclick="toggleNavSection(this)">
                     <span class="nav-section-title">Video</span>
                     <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -444,9 +448,10 @@
                     <span class="nav-text">Downloads</span>
                     <span class="dl-nav-badge hidden" data-video-downloads-badge>0</span>
                 </a>
-                <a class="nav-button" data-video-page="video-calendar" href="/video-calendar">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
-                    <span class="nav-text">Calendar</span>
+                <a class="nav-button" data-video-page="video-requests" href="/video-requests">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></span>
+                    <span class="nav-text">Requests</span>
+                    <span class="dl-nav-badge hidden" data-video-requests-badge>0</span>
                 </a>
                 <!-- Import page hidden for now: on the video side the media server does
                      the identification, so this only ever surfaced the rare download the
@@ -1077,13 +1082,18 @@
                                         <option value="year">Year</option>
                                         <option value="added">Recently Added</option>
                                         <option value="rating">Rating</option>
+                                        <option value="size">Largest</option>
                                     </select>
                                     <select class="library-source-filter-select" data-video-lib-status title="Filter">
                                         <option value="all">All</option>
                                         <option value="owned">Owned</option>
                                         <option value="wanted">Wanted</option>
+                                        <option value="missing" hidden>Missing episodes</option>
                                         <option value="watched">Watched</option>
                                         <option value="unwatched">Unwatched</option>
+                                    </select>
+                                    <select class="library-source-filter-select" data-video-lib-res title="Quality">
+                                        <option value="">Any Quality</option>
                                     </select>
                                     <select class="library-source-filter-select" data-video-lib-genre title="Genre">
                                         <option value="">All Genres</option>
@@ -1231,6 +1241,11 @@
                             <div class="vdsc-grid-head">
                                 <button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-clear>&larr; Discover</button>
                                 <h2 class="vdsc-grid-title" data-vdsc-grid-title></h2>
+                                <button class="vdsc-btn vdsc-btn--ghost vdsc-filter-toggle hidden" type="button"
+                                        data-vdsc-filter-toggle aria-expanded="true" title="Show or hide the filters">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                    <span data-vdsc-filter-toggle-label>Hide filters</span>
+                                </button>
                             </div>
                             <!-- Live filter bar — only shown for Browse (tiles / Browse all); a
                                  rail's See-all keeps its fixed query. Every change re-queries
@@ -1329,6 +1344,10 @@
                                             <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="2.4" width="14" height="2.3" rx="1.1"/><rect x="1" y="6.85" width="14" height="2.3" rx="1.1"/><rect x="1" y="11.3" width="14" height="2.3" rx="1.1"/></svg>
                                             <span>Compact</span>
                                         </button>
+                                        <button class="vcal-view-btn" type="button" data-video-cal-view="agenda" title="Agenda — one chronological list, day by day">
+                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="2" width="3" height="3" rx="1"/><rect x="6" y="2.4" width="9" height="2.2" rx="1.1"/><rect x="1" y="8" width="3" height="3" rx="1"/><rect x="6" y="8.4" width="9" height="2.2" rx="1.1"/></svg>
+                                            <span>Agenda</span>
+                                        </button>
                                     </div>
                                     <div class="vcal-filter" role="group" aria-label="Source">
                                         <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-scope="watchlist" title="Only shows on your watchlist">Watchlist</button>
@@ -1339,10 +1358,18 @@
                                         <button class="vcal-filter-btn" type="button" data-video-cal-filter="owned">In library</button>
                                         <button class="vcal-filter-btn" type="button" data-video-cal-filter="missing">Missing</button>
                                     </div>
+                                    <div class="vcal-filter hidden" role="group" aria-label="Movie releases" data-video-cal-movies-wrap>
+                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-movietype="cinema" title="Theatrical premieres of wishlisted movies">🎬 Cinema</button>
+                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-movietype="available" title="Home releases (digital/physical) of wishlisted movies">🏠 Home</button>
+                                    </div>
                                     <button class="vcal-addmissing hidden" type="button" data-video-cal-addmissing
                                             title="Add already-aired missing episodes to your wishlist">
                                         <span class="vcal-addmissing-ic" aria-hidden="true">&#43;</span>
                                         <span data-video-cal-addmissing-label>Add missing to wishlist</span>
+                                    </button>
+                                    <button class="vcal-nav-btn vcal-ics-btn" type="button" data-video-cal-ical
+                                            title="Subscribe to this calendar from Google/Apple/Outlook (iCal feed)" aria-label="Subscribe (iCal feed)">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="13.5" x2="12" y2="18.5"/><line x1="9.5" y1="16" x2="14.5" y2="16"/></svg>
                                     </button>
                                 </div>
                             </div>
@@ -1430,6 +1457,18 @@
                         </div>
                     </div>
                 </section>
+                <!-- Requests (arr-parity P4): the in-app Overseerr. Members ask,
+                     admins approve/deny; approval feeds acquisition. Built by
+                     video/video-requests.js, styled by .vreq-* in video-side.css. -->
+                <section class="video-subpage" data-video-subpage="video-requests" hidden>
+                    <div class="vreq-page">
+                        <div class="vreq-head">
+                            <h1 class="vreq-title-h">Requests</h1>
+                            <p class="vreq-sub-h">Titles members asked for — approving one sends it straight into acquisition.</p>
+                        </div>
+                        <div class="vreq-list" data-vreq-list></div>
+                    </div>
+                </section>
                 <!-- Wishlist (nav page): movies + wanted episodes, split by a
                      Movies/TV tab. TV groups show -> season -> episode. Built by
                      video/video-wishlist.js, styled by .vwsh-* in video-side.css. -->
@@ -1466,6 +1505,11 @@
                                 <option value="wanted">Most wanted</option>
                                 <option value="title">A&ndash;Z</option>
                             </select>
+                            <button class="vwsh-searchall" type="button" data-vwsh-searchall hidden
+                                    title="Search every eligible wishlist item now instead of waiting for the hourly automation">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                                Search all missing
+                            </button>
                             <button class="vwsh-clear" type="button" data-vwsh-clear hidden>
                                 <svg class="vwsh-clear-ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
                                 Clear all
@@ -1712,6 +1756,10 @@
                                 <h2 class="vd-section-h">More Like This</h2>
                                 <div class="vd-similar" data-vd-similar></div>
                             </div>
+                            <div class="vd-history-section" data-vd-history-section hidden>
+                                <h2 class="vd-section-h">Acquisition History</h2>
+                                <div class="vd-history" data-vd-history></div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -1788,6 +1836,10 @@
                             <div class="vd-similar-section" data-vd-similar-section hidden>
                                 <h2 class="vd-section-h">More Like This</h2>
                                 <div class="vd-similar" data-vd-similar></div>
+                            </div>
+                            <div class="vd-history-section" data-vd-history-section hidden>
+                                <h2 class="vd-section-h">Acquisition History</h2>
+                                <div class="vd-history" data-vd-history></div>
                             </div>
                         </div>
                     </div>
@@ -1908,6 +1960,33 @@
                         <div class="tools-section">
                             <h3 class="tools-section-title">Database &amp; Scanning</h3>
                             <div class="tools-grid">
+                                <div class="tool-card" data-video-backups-card>
+                                    <div class="tool-card-header">
+                                        <h4 class="tool-card-title">💾 Backups</h4>
+                                        <button class="tool-help-button" data-tool="video-backups" title="Learn more about this tool">?</button>
+                                    </div>
+                                    <p class="tool-card-info">Verified snapshots of the video database (wishlist, watchlist, history, settings). The nightly automation keeps a rolling set; restore stages a swap for the next restart — your current database is set aside, never deleted.</p>
+                                    <div class="vbk-pending hidden" data-vbk-pending>
+                                        ⏳ A restore is staged — it applies on the next restart.
+                                        <button type="button" class="vbk-cancel" data-vbk-cancel>Cancel</button>
+                                    </div>
+                                    <div class="vbk-list" data-vbk-list></div>
+                                    <div class="tool-card-controls">
+                                        <button type="button" data-vbk-create>Back up now</button>
+                                    </div>
+                                </div>
+                                <div class="tool-card" data-video-rename-card>
+                                    <div class="tool-card-header">
+                                        <h4 class="tool-card-title">✏️ Mass Rename</h4>
+                                        <button class="tool-help-button" data-tool="video-rename" title="Learn more about this tool">?</button>
+                                    </div>
+                                    <p class="tool-card-info">Re-render every file name to your current naming templates (Settings → Organization). Preview first — nothing moves until you apply. Subtitles and sidecars travel with their file; the server re-adopts the names on its next scan.</p>
+                                    <div class="vbk-list" data-vrn-list></div>
+                                    <div class="tool-card-controls">
+                                        <button type="button" data-vrn-preview>Preview</button>
+                                        <button type="button" data-vrn-apply style="display:none">Apply renames</button>
+                                    </div>
+                                </div>
                                 <div class="tool-card">
                                     <div class="tool-card-header">
                                         <h4 class="tool-card-title" data-video-scan-title>Library Scan</h4>
@@ -6996,6 +7075,41 @@
                                     <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want — downloads try each enabled source in order.</div>
                                     <div class="hybrid-source-list" id="video-hybrid-rows"></div>
                                 </div>
+                                <!-- Seeding lifecycle (arr-parity P5) — torrent grabs only -->
+                                <div class="form-group" id="video-seeding-goals">
+                                    <label>Seeding goals (torrents):</label>
+                                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                                        <span class="settings-hint">Ratio</span>
+                                        <input type="number" id="video-seed-ratio" min="0" step="0.1" style="max-width:90px;" placeholder="0">
+                                        <span class="settings-hint">or hours seeded</span>
+                                        <input type="number" id="video-seed-hours" min="0" step="1" style="max-width:90px;" placeholder="0">
+                                        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px;">
+                                            <input type="checkbox" id="video-seed-remove-data" checked> also delete the client's copy
+                                        </label>
+                                    </div>
+                                    <small class="settings-hint">Once a completed grab hits either goal, it's removed from the torrent client (your imported library copy is separate and never touched). Both at 0 = never remove — exactly the old behavior.</small>
+                                </div>
+                                <!-- Import lists (arr-parity P6) -->
+                                <div class="form-group" id="video-import-lists">
+                                    <label>Import lists:</label>
+                                    <small class="settings-hint" style="display:block; margin-bottom:8px;">
+                                        Everything on a list enters acquisition automatically (movies → wishlist, shows → follow with the chosen monitor policy).
+                                        Only NEW list members are added, so removing something never boomerangs back. Synced by the "Sync Import Lists" automation.
+                                        Ref: a TMDB list id, a chart key (trending_movies, top_shows, …), an IMDb ls-id/URL — Plex Watchlist needs no ref.
+                                    </small>
+                                    <div id="vq-implist-rows"></div>
+                                    <button class="test-button" type="button" data-vq-implist-add>+ Add list</button>
+                                </div>
+                                <!-- Notifications (arr-parity P11) -->
+                                <div class="form-group" id="video-notifications">
+                                    <label>Notifications:</label>
+                                    <small class="settings-hint" style="display:block; margin-bottom:8px;">
+                                        Get told when things happen — a Discord webhook, any generic webhook (raw JSON), or a Telegram bot.
+                                        Each connection picks which events it cares about.
+                                    </small>
+                                    <div id="vq-notify-rows"></div>
+                                    <button class="test-button" type="button" data-vq-notify-add>+ Add connection</button>
+                                </div>
                             </div>
                             <!-- slskd connection — SHARED with Music (one slskd instance). Writes the
                                  app-wide soulseek.* config, not video.db. Collapsible; shown when soulseek
@@ -7063,7 +7177,15 @@
                             <div class="settings-section-body collapsed" data-stg="quality" data-video-only>
                             <div class="settings-group" data-stg="quality" data-video-only>
                                 <div class="setting-help-text">
-                                    One profile for every video source (slskd · torrent · usenet). Quality is read from the release name — pick the ladder you'll accept, where to stop upgrading, what to reject outright, then the soft tie-breakers.
+                                    Profiles apply <strong>per title</strong>: everything uses <strong>Default</strong> unless you assign another profile from a movie/show's Manage panel. Quality is read from the release name — pick the ladder you'll accept, where to stop upgrading, what to reject outright, then the soft tie-breakers.
+                                </div>
+                                <div class="form-group" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                    <select class="library-source-filter-select" data-vq-profile-select title="Which profile you're editing">
+                                        <option value="0">Default</option>
+                                    </select>
+                                    <input type="text" class="hidden" data-vq-profile-name placeholder="Profile name" style="max-width:180px;">
+                                    <button class="test-button" type="button" data-vq-profile-new title="Duplicate what's on screen as a new named profile">+ New profile</button>
+                                    <button class="test-button hidden" type="button" data-vq-profile-delete style="background:#663333;">Delete</button>
                                 </div>
                                 <div class="vq-block">
                                     <div class="vq-label">Quality ladder <span class="vq-hint">toggle what you'll accept · rank best&rarr;worst with the arrows</span></div>
@@ -7130,6 +7252,23 @@
                                             <input type="range" id="vq-episode-size" class="vq-slider" min="0" max="200" step="1" value="0">
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                            <!-- Custom Formats (arr-parity P3): scored release-name matchers -->
+                            <div class="settings-group" data-stg="quality" data-video-only>
+                                <h3>Custom Formats</h3>
+                                <div class="setting-help-text">
+                                    Score releases by their <strong>name</strong> — prefer trusted groups, bury x265, chase freeleech, anything a pattern can see.
+                                    Terms are plain substrings, or regex written <code>/x265|hevc/</code>. A format matches when <em>all</em> "match" terms hit and <em>no</em> "never" term does;
+                                    matching formats add their score to a release's rank (negative buries without rejecting).
+                                    The "this profile" column overrides a format's score for the profile selected above.
+                                </div>
+                                <div id="vq-format-rows"></div>
+                                <button class="test-button" type="button" data-vq-format-add>+ Add format</button>
+                                <div class="form-group" style="margin-top:10px;">
+                                    <label>Minimum format score (this profile):</label>
+                                    <input type="number" id="vq-min-format-score" style="max-width:120px;" value="0">
+                                    <small class="settings-hint">Releases whose summed format score falls below this are rejected outright. 0 = off.</small>
                                 </div>
                             </div>
                             </div>
@@ -7437,6 +7576,9 @@
                                         </div>
                                         <div class="setting-help-text" style="margin-top: 6px;">
                                             Free lossless downloads via community-run hifi-api instances. No authentication or subscription needed.
+                                        </div>
+                                        <div class="hifi-preview-warning" style="margin-top: 8px; padding: 9px 11px; border-radius: 8px; background: rgba(241, 196, 15, 0.08); border: 1px solid rgba(241, 196, 15, 0.28); color: #f1c40f; font-size: 12px; line-height: 1.5;">
+                                            <strong>Heads up:</strong> some HiFi instances only have 30-second Tidal previews for certain tracks, with headers faked to look like the full song. SoulSync decodes every HiFi download to catch these and never lets a shorter clip replace a good library file, but if a track just won't come through at full length here, grab it from another source.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -8346,23 +8488,50 @@
                             <div class="settings-group" data-stg="library">
                                 <h3>Folder Paths</h3>
                                 <div class="setting-help-text" style="margin-bottom: 4px;">
-                                    Container-internal paths. Only change them if you know what you're doing — wrong values break downloads.
+                                    How files flow: <strong>Download Folder</strong> (raw downloads land here) → post-processing
+                                    (tagging, artwork, organizing) → <strong>Music Library Folder</strong> (their final home — point
+                                    your media server here). Keeping the two separate stops half-finished files being scanned.
+                                </div>
+                                <!-- One of these shows, picked by the detected deployment (settings.js
+                                     reads _environment.docker); both render until detection lands. -->
+                                <div class="setting-help-text" style="margin-bottom: 4px;" data-paths-guide="docker">
+                                    <strong>Docker / Unraid detected:</strong> leave these as the container-internal paths and map your
+                                    real folders in the container config — wrong values here break downloads.
+                                </div>
+                                <div class="setting-help-text" style="margin-bottom: 4px;" data-paths-guide="native">
+                                    <strong>Bare metal / Proxmox LXC / systemd:</strong> there is no container, so you're expected to
+                                    unlock these and point them at your real folders.
+                                </div>
+                                <div class="setting-help-text hidden" style="margin-bottom: 4px; color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px 12px; background: rgba(239, 68, 68, 0.08);"
+                                     data-paths-default-warning>
+                                    ⚠️ <strong>Your Music Library Folder is still the install-folder default.</strong> Every finished
+                                    download is landing on the disk SoulSync is installed on — on a Proxmox LXC that's typically an
+                                    8&nbsp;GB root that fills until the container hangs. Unlock the field and point it at your real
+                                    music folder.
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Input Folder (Download Dir):</label>
+                                    <label>Download Folder (input):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="download-path" placeholder="./downloads" readonly>
                                         <button class="browse-button locked" onclick="togglePathLock('download', this)">Unlock</button>
                                     </div>
+                                    <small class="settings-hint">Where new downloads land before processing. Match this to your slskd download folder.</small>
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Output Folder (Music Library):</label>
+                                    <label>Music Library Folder (output):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="transfer-path" placeholder="./Transfer" readonly>
                                         <button class="browse-button locked" onclick="togglePathLock('transfer', this)">Unlock</button>
                                     </div>
+                                    <small class="settings-hint">Your main music library. Finished tracks are moved here, organized into Artist/Album folders.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Minimum free disk space (GB):</label>
+                                    <input type="number" id="min-free-disk-gb" min="0" step="0.5" placeholder="5">
+                                    <small class="settings-hint">New downloads are refused when the download disk drops below this. Stops a full disk from hanging the whole system (0 = off).</small>
                                 </div>
 
                                 <div class="form-group">
@@ -8446,7 +8615,7 @@
                                 <div class="form-group">
                                     <label>Single Path Template:</label>
                                     <input type="text" id="template-single-path"
-                                        placeholder="$artist/$artist - $title/$title">
+                                        placeholder="$albumartist/$albumartist - $title/$title">
                                     <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     <small class="settings-hint setting-help-body" hidden>Variables: <code>$albumartist</code>, <code>$artist</code>, <code>$artistletter</code>, <code>$title</code>, <code>$track</code> (01), <code>$album</code>, <code>$albumtype</code>, <code>$year</code>, <code>$quality</code> (filename only). Use <code>${var}</code> to append text: <code>${albumtype}s</code> → Singles</small>
                                 </div>
@@ -8496,7 +8665,7 @@
                                         <option value="all">All Artists Combined</option>
                                     </select>
                                     <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    <small class="settings-hint setting-help-body" hidden>How <code>$albumartist</code> resolves for albums with multiple artists. "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y &amp; The Alchemist"). Full artist list is always preserved in file metadata tags.</small>
+                                    <small class="settings-hint setting-help-body" hidden>How <code>$albumartist</code> resolves when a release has multiple artists — this governs the FOLDER your music sorts into for both albums and singles (the default templates use <code>$albumartist</code>). "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y &amp; The Alchemist"). Full artist list is always preserved in file metadata tags.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -8547,15 +8716,17 @@
                                 </div>
                             </div>
 
-                            <!-- Music Library Paths (moved into Paths & Organization) -->
+                            <!-- Additional Music Libraries (moved into Paths & Organization) -->
                             <div class="settings-group" data-stg="library">
-                                <h3>Music Library Paths</h3>
+                                <h3>Additional Music Libraries</h3>
 
                                 <div class="help-text" style="margin-bottom: 12px;">
-                                    Tell SoulSync where your music files live. Required for tag writing, streaming, and file detection
-                                    when your media server stores files at a different path than SoulSync can see.
-                                    <strong>Docker users:</strong> mount your music folder(s) into the SoulSync container with read-write access,
-                                    then add the <em>container-side</em> path here (e.g. <code>/music</code>).
+                                    Your Music Library Folder above is already covered — <strong>you don't need to repeat it here.</strong>
+                                    Add entries only for <em>extra</em> libraries SoulSync should read (a second collection, an archive
+                                    drive), or when your media server sees the same files at a different path than SoulSync can.
+                                    Used for tag writing, streaming, and file detection.
+                                    <strong>Docker users:</strong> mount the extra folder(s) into the SoulSync container with read-write access,
+                                    then add the <em>container-side</em> path here (e.g. <code>/music2</code>).
                                 </div>
 
                                 <div id="music-paths-list"></div>
@@ -10065,6 +10236,17 @@
                                 <button id="backup-now-button">Backup Now</button>
                             </div>
                             <div id="backup-list-container" class="backup-list-container"></div>
+                        </div>
+
+                        <!-- Config Migration Card (export/import settings for both sides) -->
+                        <div class="tool-card" id="config-migration-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Config Migration</h4>
+                            </div>
+                            <p class="tool-card-info">Export every setting (music + video) as one JSON file to move to a new install, or import one here.</p>
+                            <div class="tool-card-controls">
+                                <button id="config-export-button" onclick="openConfigExportModal()">Export / Import Config</button>
+                            </div>
                         </div>
 
                         <!-- Metadata Cache Tool Card -->
@@ -11629,10 +11811,12 @@
     <script src="{{ url_for('static', filename='video/video-subscriptions.js', v=static_v) }}"></script>
     <!-- Video wishlist page (isolated; tabbed movies / TV, grouped show tree) -->
     <script src="{{ url_for('static', filename='video/video-wishlist.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-requests.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-import.js', v=static_v) }}"></script>
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='config-migration.js', v=static_v) }}"></script>
 </body>
 
 </html>

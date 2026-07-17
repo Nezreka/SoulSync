@@ -165,6 +165,7 @@
         { id: 'video-watchlist', label: 'Watchlist' },
         { id: 'video-wishlist', label: 'Wishlist' },
         { id: 'video-downloads', label: 'Downloads' },
+        { id: 'video-requests', label: 'Requests' },
         { id: 'video-calendar', label: 'Calendar' },
         { id: 'video-automations', label: 'Automations' },
         { id: 'video-tools', label: 'Tools' },

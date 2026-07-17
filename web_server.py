@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.0.5"
+_SOULSYNC_BASE_VERSION = "3.1.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1450,6 +1450,15 @@ def _register_automation_handlers():
                 lambda etype, data: automation_engine.emit(etype, data or {}))
         except Exception:
             logger.exception("Could not wire video events -> automation engine")
+    # Notifications (arr-parity P11): a second forwarder fans the same events
+    # out to configured Discord/webhook/Telegram connections. Independent of
+    # the engine — notify still works if automations are off.
+    try:
+        from core.video.download_events import register_event_forwarder as _reg_fw
+        from core.video.notifications import handle_event as _notify_handle
+        _reg_fw(_notify_handle)
+    except Exception:
+        logger.exception("Could not wire video events -> notifications")
 
     logger.info("Automation action handlers registered")
 
@@ -3602,6 +3611,13 @@ def handle_settings():
                 data['_source_status'] = download_orchestrator.get_source_status()
             except Exception as e:
                 logger.debug("download source status read failed: %s", e)
+            # Deployment environment: the folder-paths guidance differs by world
+            # (Docker: leave container paths alone / bare-metal-LXC: you MUST edit
+            # them). A fresh non-Docker install still on the ./Transfer default
+            # dumps every download onto the install disk — Proxmox LXCs default
+            # to an 8GB root, which fills until the container hangs — so the UI
+            # needs to know which story to tell and when to warn.
+            data['_environment'] = {'docker': os.path.exists('/.dockerenv')}
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -4372,6 +4388,62 @@ def settings_config_status_endpoint():
     except Exception as e:
         logger.error(f"config-status error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ── Config export / import (Kazimir: "checkout" menu for migrating installs) ──
+@app.route('/api/config/export', methods=['GET'])
+@admin_only
+def export_config_bundle():
+    """One portable JSON bundle for BOTH sides. ?secrets=1 embeds real
+    credentials (plaintext — the UI gates this behind an explicit opt-in);
+    default redacts them so the export is safe to share."""
+    if not config_manager:
+        return jsonify({"error": "Config manager unavailable"}), 500
+    from datetime import datetime, timezone
+
+    from api.video import get_video_db
+    from core.config_export import build_bundle
+    include_secrets = request.args.get('secrets', '0') in ('1', 'true', 'yes')
+    # Plaintext-credential export is the ONLY endpoint that leaks real secrets,
+    # so it must sit behind actual authentication. With login OFF, @admin_only
+    # trusts every LAN request as admin — refuse, or anyone who can reach the
+    # port could pull every key. The redacted export stays available to all.
+    if include_secrets and not _require_login_enabled():
+        return jsonify({
+            "success": False,
+            "error": "Exporting credentials requires login mode. Enable "
+                     "Settings → Security → Require login first, or export "
+                     "without credentials (they'll be re-entered on the new install).",
+        }), 403
+    bundle = build_bundle(
+        config_manager, get_video_db(),
+        include_secrets=include_secrets,
+        exported_at=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        app_version=SOULSYNC_VERSION.split('+')[0],
+    )
+    return jsonify(bundle)
+
+
+@app.route('/api/config/import', methods=['POST'])
+@admin_only
+def import_config_bundle():
+    """Apply a config bundle exported from another install. Validates the
+    marker/version first; a secrets-redacted bundle never blanks existing
+    credentials (the config_manager's per-leaf guard skips the mask)."""
+    if not config_manager:
+        return jsonify({"error": "Config manager unavailable"}), 500
+    from api.video import get_video_db
+    from core.config_export import apply_bundle
+    data = request.get_json(silent=True)
+    try:
+        summary = apply_bundle(config_manager, get_video_db(), data or {})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:   # noqa: BLE001
+        logger.exception("config import failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **summary,
+                    "note": "Config imported. Restart SoulSync so every service picks it up."})
 
 
 # ── Per-service verify cache ──
@@ -17264,12 +17336,24 @@ def _get_current_commit_sha():
 _current_commit_sha = _get_current_commit_sha()
 
 def _check_for_updates():
-    """Check GitHub for the latest commit SHA on main branch."""
+    """Check GitHub for the latest RELEASE (version + severity) and, as a
+    fallback signal for git-pull users running between releases, the latest
+    commit SHA on main."""
     import time as _time
     now = _time.time()
     if now - _update_cache['last_check'] < _UPDATE_CHECK_INTERVAL:
         return  # Still fresh
     _update_cache['last_check'] = now
+    # Releases first — this is what drives the version glow (green routine /
+    # yellow major / red critical) and gives the user a number, not a hash.
+    try:
+        from core.update_check import evaluate_update, fetch_releases
+        releases = fetch_releases(_GITHUB_REPO)
+        _update_cache['release_info'] = evaluate_update(_SOULSYNC_BASE_VERSION, releases)
+        _update_cache['error'] = None
+    except Exception as e:
+        _update_cache['error'] = str(e)
+        logger.debug(f"Release check failed: {e}")
     try:
         import urllib.request
         import json as _json
@@ -17280,24 +17364,65 @@ def _check_for_updates():
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read().decode())
             _update_cache['latest_sha'] = data.get('sha')
-            _update_cache['error'] = None
     except Exception as e:
         _update_cache['error'] = str(e)
         logger.debug(f"Update check failed: {e}")
 
 @app.route('/api/update-check', methods=['GET'])
 def check_for_update():
-    """Check if a newer version is available on GitHub."""
+    """Check if a newer version is available on GitHub. Release-aware: a
+    published release newer than the running base version reports its
+    number + severity; the commit-SHA comparison stays as the fallback
+    signal when no release info is available."""
     _check_for_updates()
     current = _current_commit_sha
     latest = _update_cache.get('latest_sha')
-    update_available = bool(current and latest and current != latest)
+    rel = _update_cache.get('release_info') or {}
+    sha_update = bool(current and latest and current != latest)
+    update_available = bool(rel.get('available')) or (not rel and sha_update)
     return jsonify({
         'update_available': update_available,
         'current_sha': current[:8] if current else None,
         'latest_sha': latest[:8] if latest else None,
+        'current_version': _SOULSYNC_BASE_VERSION,
+        'latest_version': rel.get('latest_version'),
+        'severity': rel.get('severity'),
+        'release_url': rel.get('release_url'),
         'is_docker': os.path.exists('/.dockerenv'),
     })
+
+
+# ── Notification history (Kazimir) ───────────────────────────────
+@app.route('/api/notifications/log', methods=['POST'])
+def log_notifications():
+    """Journal a batch of UI toasts so 'Clear All' in the bell panel loses
+    nothing. The frontend flushes these fire-and-forget every few seconds."""
+    from database.music_database import get_database
+    body = request.get_json(silent=True) or {}
+    entries = body.get('entries')
+    if not isinstance(entries, list):
+        return jsonify({'success': False, 'error': 'entries must be a list'}), 400
+    logged = get_database().add_notifications(entries[:50], profile_id=get_current_profile_id())
+    return jsonify({'success': True, 'logged': logged})
+
+
+@app.route('/api/notifications/history', methods=['GET', 'DELETE'])
+def notification_history():
+    """The persistent notification journal for the ACTIVE profile —
+    filterable by type, searchable, paginated. DELETE clears it."""
+    from database.music_database import get_database
+    db = get_database()
+    pid = get_current_profile_id()
+    if request.method == 'DELETE':
+        return jsonify({'success': True, 'removed': db.clear_notification_history(pid)})
+    rows = db.get_notification_history(
+        pid,
+        type_filter=request.args.get('type'),
+        search=request.args.get('q'),
+        limit=request.args.get('limit', default=100, type=int) or 100,
+        offset=request.args.get('offset', default=0, type=int) or 0,
+    )
+    return jsonify({'success': True, 'notifications': rows})
 
 
 def _simple_monitor_task():
@@ -27445,13 +27570,26 @@ def hydrate_artist_bubbles():
         # Update bubble statuses with live data
         hydrated_bubbles = {}
         for artist_id, bubble_data in saved_bubbles.items():
+            # A malformed snapshot entry (no artist dict / no downloads list) must be
+            # dropped here — hydrating it breaks the client's Library page init (#1038).
+            if not isinstance(bubble_data, dict) or not isinstance(bubble_data.get('artist'), dict) \
+                    or bubble_data.get('artist', {}).get('id') is None:
+                logger.warning(f"Skipping malformed artist bubble snapshot entry: {artist_id}")
+                continue
             hydrated_bubble = {
                 'artist': bubble_data['artist'],
                 'downloads': [],
                 'hasCompletedDownloads': False
             }
-            
-            for download in bubble_data.get('downloads', []):
+
+            downloads = bubble_data.get('downloads') or []
+            if not isinstance(downloads, list):
+                downloads = []
+            for download in downloads:
+                if not isinstance(download, dict) or not isinstance(download.get('album'), dict) \
+                        or not download.get('virtualPlaylistId'):
+                    logger.warning(f"Skipping malformed download in bubble snapshot for artist {artist_id}")
+                    continue
                 virtual_playlist_id = download['virtualPlaylistId']
                 
                 # Determine current live status

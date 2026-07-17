@@ -17,8 +17,10 @@ Template tokens
   Movies:   $title $titlefirst $year $quality $resolution $source $codec $edition
             $tmdbid $imdbid
   Episodes: $series $season $seasonraw $episode $episodetitle $year $quality
-            $resolution $source $codec $tvdbid
-  ($season/$episode are zero-padded to 2; $seasonraw is the bare number.)
+            $resolution $source $codec $tvdbid $airdate
+  ($season/$episode are zero-padded to 2; $seasonraw is the bare number; a
+  multi-episode file renders its span through $episode — 'S01E01-E02'; $airdate
+  is the episode's YYYY-MM-DD air date, for daily-show naming.)
 
 Pure data + a pure renderer (no DB, no FS) so it's unit-tested in isolation. Isolated —
 stdlib + sibling video ``library_paths`` only; nothing from the music side.
@@ -187,12 +189,20 @@ def _movie_values(f: dict) -> dict:
 
 def _episode_values(f: dict) -> dict:
     series = f.get("series") or f.get("title") or "Unknown"
+    # A multi-episode file renders its whole span through the ordinary $episode
+    # token: episode=1 + episode_end=2 → '01-E02', so the default template's
+    # 'S$seasonE$episode' comes out as 'S01E01-E02' (the Sonarr/Plex convention).
+    episode = _pad2(f.get("episode"))
+    if f.get("episode_end"):
+        episode = "%s-E%s" % (episode, _pad2(f.get("episode_end")))
     return {
         "series": series,
         "season": _pad2(f.get("season")),
         "seasonraw": _str(f.get("season")),
-        "episode": _pad2(f.get("episode")),
+        "episode": episode,
         "episodetitle": _str(f.get("episode_title")),
+        # daily-show naming (P8): $airdate = the episode's YYYY-MM-DD air date
+        "airdate": str(f.get("air_date") or "")[:10],
         "year": _str(f.get("year")) if _plausible_year(f.get("year")) else "",
         "quality": _str(f.get("quality")),
         "resolution": _str(f.get("resolution")),

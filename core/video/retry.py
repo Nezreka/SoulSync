@@ -35,10 +35,19 @@ def next_query(ctx: dict, tried: Any) -> str | None:
         cands.append(title)
     elif scope == "episode" and ctx.get("season") is not None and ctx.get("episode") is not None:
         s, e = int(ctx["season"]), int(ctx["episode"])
+        stype = str(ctx.get("series_type") or "").lower()
+        ad = str(ctx.get("air_date") or "")[:10]
+        # Series type (P8) front-loads the identity the scene actually uses:
+        # dailies lead with the air date, anime with the absolute number. The
+        # SxxExx variants stay in the ladder as fallbacks either way.
+        if stype == "daily" and len(ad) == 10:
+            cands.append("%s %s" % (title, ad.replace("-", ".")))   # Title 2026.07.08
+            cands.append("%s %s" % (title, ad.replace("-", " ")))   # Title 2026 07 08
+        if stype == "anime" and ctx.get("absolute"):
+            cands.append("%s %s" % (title, ctx["absolute"]))        # Title 1071
         cands.append("%s S%02dE%02d" % (title, s, e))
         cands.append("%s %dx%02d" % (title, s, e))
-        ad = str(ctx.get("air_date") or "")[:10]
-        if len(ad) == 10:
+        if len(ad) == 10 and stype != "daily":
             cands.append("%s %s" % (title, ad.replace("-", " ")))   # Title 2026 07 08
             cands.append("%s %s" % (title, ad.replace("-", ".")))   # Title 2026.07.08
     elif scope == "season" and ctx.get("season") is not None:

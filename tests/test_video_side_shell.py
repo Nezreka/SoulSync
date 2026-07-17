@@ -24,9 +24,9 @@ _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
     "video-dashboard", "video-search", "video-discover", "video-library",
-    "video-watchlist", "video-wishlist", "video-downloads", "video-calendar",
-    "video-automations", "video-tools", "video-import", "video-settings",
-    "video-issues", "video-help",
+    "video-watchlist", "video-wishlist", "video-downloads", "video-requests",
+    "video-calendar", "video-automations", "video-tools", "video-import",
+    "video-settings", "video-issues", "video-help",
 }
 
 # Reads of sibling VIDEO-side module handles + standard DOM/browser APIs are fine —
@@ -548,13 +548,18 @@ def test_library_toolbar_has_rating_sort_watched_filter_and_genre_dropdown():
     assert "/api/video/library/genres?kind=" in _LIB_JS
 
 
-def test_library_cards_show_rating_show_progress_and_status_chip():
+def test_library_cards_show_rating_show_progress_and_status_badge():
     assert "vlib-rate" in _LIB_JS                      # ★ rating in the stat line
     assert "vlib-watched" in _LIB_JS                   # watched tick on movie cards
-    assert "function showStatusChip(" in _LIB_JS       # Airing/Ended/Upcoming chip
+    # Airing/Ended/Upcoming moved to the POSTER CORNER (Boulder: the stat line
+    # is too tight on small cards to fit it after year/★/eps/size)
+    assert "function showStatusBadge(" in _LIB_JS
+    assert 'video-card-badge video-card-badge--airing' in _LIB_JS
+    assert "showStatusChip" not in _LIB_JS             # the stat-line chip is gone
     assert "vlib-prog" in _LIB_JS                      # owned-episodes progress line
     css = _CSS_PATH.read_text(encoding="utf-8")
-    for cls in (".vlib-rate", ".vlib-chip--airing", ".vlib-chip--ended", ".vlib-prog-fill"):
+    for cls in (".vlib-rate", ".video-card-badge--airing", ".video-card-badge--ended",
+                ".video-card-badge--upcoming", ".vlib-prog-fill"):
         assert cls in css, cls
 
 
@@ -566,3 +571,13 @@ def test_video_side_remembers_per_page_scroll():
     assert "_scrollMemo" in _JS
     # detail subpages are reused between titles — they must always reopen at the top
     assert "DETAIL_PAGES[meta.id] ? 0" in _JS
+
+
+def test_discover_filter_bar_has_collapse_toggle():
+    # QT3496 #1040: the Browse filter bar can eat the viewport; a toggle
+    # collapses it for more grid room, and the choice persists.
+    disc_js = (_ROOT / "webui" / "static" / "video" / "video-discover.js").read_text(encoding="utf-8")
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert "data-vdsc-filter-toggle" in _INDEX
+    assert "_toggleFilterCollapsed" in disc_js and "vdsc-filters-collapsed" in disc_js
+    assert "vdsc-filterbar--collapsed" in disc_js and ".vdsc-filterbar--collapsed" in css

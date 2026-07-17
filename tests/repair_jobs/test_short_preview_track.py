@@ -189,3 +189,71 @@ def test_fix_missing_file_still_wishlists_and_drops_row(tmp_path: Path):
     conn = db._get_connection()
     assert conn.execute("SELECT COUNT(*) FROM tracks WHERE id=1").fetchone()[0] == 0
     conn.close()
+
+
+# ── HiFi fragmented-FLAC previews (sella): stored duration 0, decode to find them ──
+
+def test_scan_decodes_zero_duration_hifi_previews(tmp_path: Path, monkeypatch):
+    # HiFi HLS-assembled FLAC stores duration 0 (total_samples=0). The old query
+    # (duration > 0) missed these entirely — the exact clips that replaced
+    # sella's tracks. verify_zero_length (default on) decodes them.
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _seed(db)
+    clip = tmp_path / 'hifi_preview.flac'
+    clip.write_bytes(b'fake flac')
+    full = tmp_path / 'hifi_full.flac'
+    full.write_bytes(b'fake flac')
+    _track(db, 1, 0, str(clip), spotify_id='sp_long')   # decodes to 30s, source 200s → FLAG
+    _track(db, 2, 0, str(full), spotify_id='sp_long')   # decodes to 199s, source 200s → skip
+
+    import core.repair_jobs.short_preview_track as spt
+    monkeypatch.setattr(
+        spt, 'resolve_library_file_path',
+        lambda p, **_k: p, raising=False)
+    monkeypatch.setattr(
+        'core.imports.file_integrity.probe_decoded_duration',
+        lambda p, *a, **k: 30.0 if 'preview' in str(p) else 199.0)
+
+    findings = []
+    result = ShortPreviewTrackJob().scan(_ctx(db, findings, _FakeSpotify()))
+    assert len(findings) == 1
+    assert findings[0]['entity_id'] == '1'
+    assert findings[0]['details']['file_duration_s'] == pytest.approx(30.0)
+    assert result.scanned == 2
+
+
+def test_zero_duration_that_cannot_be_decoded_is_skipped(tmp_path: Path, monkeypatch):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _seed(db)
+    f = tmp_path / 'x.flac'
+    f.write_bytes(b'fake')
+    _track(db, 1, 0, str(f), spotify_id='sp_long')
+
+    import core.repair_jobs.short_preview_track as spt
+    monkeypatch.setattr(spt, 'resolve_library_file_path', lambda p, **_k: p, raising=False)
+    monkeypatch.setattr('core.imports.file_integrity.probe_decoded_duration',
+                        lambda *a, **k: 0.0)   # ffmpeg unavailable / undecodable
+
+    findings = []
+    res = ShortPreviewTrackJob().scan(_ctx(db, findings, _FakeSpotify()))
+    assert findings == [] and res.skipped == 1
+
+
+def test_verify_zero_off_keeps_the_old_stored_duration_behavior(tmp_path: Path):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _seed(db)
+    _track(db, 1, 0, '/m/zero.flac', spotify_id='sp_long')     # zero-duration → NOT scanned when off
+    _track(db, 2, 28_000, '/m/short.flac', spotify_id='sp_long')
+
+    class _CM:
+        def get(self, key, default=None):
+            return False if key.endswith('verify_zero_length') else default
+
+    ctx = JobContext(
+        db=db, transfer_folder='/tmp', config_manager=_CM(),
+        spotify_client=_FakeSpotify(),
+        create_finding=lambda **kw: True,
+        should_stop=lambda: False, is_paused=lambda: False,
+    )
+    res = ShortPreviewTrackJob().scan(ctx)
+    assert res.scanned == 1     # only the 28s row; the zero-duration row is excluded
