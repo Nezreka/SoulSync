@@ -110,6 +110,46 @@ def _release_year_of(release: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _canonical_pin_denies_card(db, db_album: Any, card_source: Optional[str],
+                               card_id: Any) -> bool:
+    """True when the matched local album is PINNED to a different release of the
+    card's own source — the user's files are a known specific edition, and this
+    card is not it (the re-release problem: a name match must not light up a
+    sibling edition once we know exactly which release the files are).
+
+    Deliberately strict about proof so it can never false-deny:
+      • no pin / no card id / pin from another source → False (old behavior)
+      • the card id must actually RESOLVE in the pin's source (its tracklist
+        loads) — a card that slipped in from a fallback source carries an id
+        from a different id-space and must not be compared against the pin
+    """
+    if not card_source or not card_id:
+        return False
+    local_album_id = _extract_lookup_value(db_album, 'id')
+    get_canonical = getattr(db, 'get_album_canonical', None)
+    if not local_album_id or not callable(get_canonical):
+        return False
+    canonical = get_canonical(local_album_id)
+    if not canonical:
+        return False
+    pin_source = str(_extract_lookup_value(
+        canonical, 'source', 'canonical_source', default='') or '').strip().lower()
+    pin_id = str(_extract_lookup_value(
+        canonical, 'album_id', 'canonical_album_id', default='') or '').strip()
+    if not pin_source or not pin_id:
+        return False
+    if pin_source != str(card_source).strip().lower():
+        return False
+    if pin_id == str(card_id).strip():
+        return False
+    try:
+        items = _extract_track_items(
+            get_album_tracks_for_source(pin_source, str(card_id)))
+    except Exception:
+        return False   # can't prove the card belongs to the pin's source
+    return bool(items)
+
+
 def _resolve_canonical_album_completion(db, db_album: Any) -> Optional[Dict[str, Any]]:
     """Recalculate completion from a local album's exact pinned release.
 
@@ -195,6 +235,26 @@ def check_album_completion(
                 strict_discography_match=True,
                 expected_year=_release_year_of(album_data),
             )
+
+            # Canonical pin deny: the files are pinned to a specific release of
+            # this card's source, and this card is a different one — a name
+            # match must not credit it (re-releases-as-owned, second layer).
+            if db_album is not None and _canonical_pin_denies_card(
+                    db, db_album, source_chain[0] if source_chain else None, album_id):
+                logger.debug(
+                    "Canonical pin denies '%s' (%s): local album %s is pinned to a different release",
+                    album_name, album_id, _extract_lookup_value(db_album, 'id'))
+                return {
+                    "id": album_id,
+                    "name": album_name,
+                    "status": "missing",
+                    "owned_tracks": 0,
+                    "expected_tracks": total_tracks,
+                    "completion_percentage": 0,
+                    "confidence": 0.0,
+                    "found_in_db": False,
+                    "formats": [],
+                }
 
             canonical_completion = _resolve_canonical_album_completion(db, db_album)
             if canonical_completion is not None:
