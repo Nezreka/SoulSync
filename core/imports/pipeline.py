@@ -121,6 +121,21 @@ def _replacement_length_is_safe(existing_path: str, incoming_path: str,
     return incoming_s >= existing_s * min_ratio
 
 
+def _batch_force_replace(context: dict) -> bool:
+    """True when the user explicitly forced this download (the 'Force
+    download' toggle on the download modal). An explicit re-download of a
+    track they already own is replace-intent — the metadata-protection skip
+    must not silently discard it (#1045). Anything missing or unreadable →
+    False, i.e. the protective default."""
+    try:
+        batch_id = (context or {}).get('batch_id')
+        if not batch_id:
+            return False
+        return bool((download_batches.get(batch_id) or {}).get('force_download_all'))
+    except Exception:   # noqa: BLE001 - protection is the safe default
+        return False
+
+
 def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
     bypass = context.get('_skip_quarantine_check')
     if bypass == 'all':
@@ -945,6 +960,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             except (json.JSONDecodeError, TypeError):
                 _enhance_source_info = {}
         is_enhance_download = _enhance_source_info.get('enhance', False)
+        # "Force download" is replace-intent: the user explicitly re-downloaded
+        # something they already own, so the metadata-protection skip must not
+        # discard it (#1045). Rides the same replace path as enhance — the
+        # short-file replacement guard above still applies.
+        force_replace = _batch_force_replace(context)
 
         logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
@@ -991,7 +1011,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 from mutagen import File as MutagenFile
                 existing_file = MutagenFile(final_path)
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2
-                if has_metadata and not is_enhance_download:
+                if has_metadata and not is_enhance_download and not force_replace:
                     _replace_lower = _resolve_context_quality_profile(context).get(
                         'replace_lower_quality',
                         config_manager.get('import.replace_lower_quality', False))
@@ -1026,8 +1046,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         except Exception as e:
                             logger.error(f"[Protection] Error removing redundant file: {e}")
                         return
-                elif is_enhance_download:
-                    logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
+                elif is_enhance_download or force_replace:
+                    if is_enhance_download:
+                        logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
+                    else:
+                        logger.info(f"[Force] User-forced re-download — replacing existing file: {os.path.basename(final_path)}")
                     try:
                         os.remove(final_path)
                     except Exception as e:
