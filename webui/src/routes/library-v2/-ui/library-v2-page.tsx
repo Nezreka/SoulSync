@@ -1276,6 +1276,7 @@ export function ArtistSettingsModal({
       const jobId = await bulkMonitorLibraryV2Releases(artist.id, scope, monitored);
       const error = await awaitBulkJob(queryClient, jobId);
       if (error) throw new Error(error);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       setBulkMessage({ tone: 'ok', text: `${label} applied.` });
     } catch (caught) {
       setBulkMessage({
@@ -4454,6 +4455,7 @@ export function SectionBulkMonitorButton({
       const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, targetMonitored, albumIds);
       const jobError = await awaitBulkJob(queryClient, jobId);
       if (jobError) throw new Error(jobError);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     } catch (caught) {
       setError(mutationErrorMessage(caught, `Could not update ${title.toLowerCase()}`));
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });

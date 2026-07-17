@@ -39,6 +39,9 @@
 > präzisiert: Jeder bestätigte Wishlist-/Acquisition-Intent materialisiert
 > lib2 sofort, unabhängig davon, ob er aus Search, Playlist-Sync, Watchlist-
 > Scanner oder einem anderen Eingangspfad stammt.
+> Die Bulk-Monitoring-UI invalidiert nach abgeschlossenen Jobs ebenfalls
+> den Library-Query-Cache; explizite Track-Entscheidungen werden dadurch
+> unmittelbar und ohne stale Anzeige sichtbar.
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
