@@ -139,7 +139,7 @@ class ShortPreviewTrackJob(RepairJob):
                 context.db, context.config_manager,
             ):
                 duration = subject.get("duration") or 0
-                if not duration or duration > max_dur_ms:
+                if duration > max_dur_ms or (duration <= 0 and not verify_zero):
                     continue
                 file_path = str(subject["path"])
                 native_subjects[file_path] = subject
@@ -306,12 +306,14 @@ class ShortPreviewTrackJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             max_dur_ms = self._setting_int(context, "max_duration_seconds", 30) * 1000
+            verify_zero = self._setting_bool(context, "verify_zero_length", True)
             from core.library2.maintenance_subjects import active_file_subjects
 
             return sum(
                 1 for subject in active_file_subjects(
                     context.db, context.config_manager,
-                ) if 0 < int(subject.get("duration") or 0) <= max_dur_ms
+                ) if int(subject.get("duration") or 0) <= max_dur_ms
+                and (verify_zero or int(subject.get("duration") or 0) > 0)
             )
         except Exception:
             return 0
