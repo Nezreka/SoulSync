@@ -24,6 +24,21 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
     function hueOf(s) { var h = 0, t = String(s || ''); for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h % 360; }
+    // Perf: the orbs render at ~110px but the raw poster_urls are full-size
+    // (1000px+). Ask for a right-sized image instead — the poster proxy honors
+    // ?w=, and a TMDB url's /t/p/<size>/ segment rewrites to a small bucket.
+    // 28 shows × full-res bitmaps was the wishlist lag.
+    function sized(url, w) {
+        if (!url) return url;
+        if (url.indexOf('/api/video/poster/') !== -1) {
+            return url + (url.indexOf('?') === -1 ? '?' : '&') + 'w=' + w;
+        }
+        if (url.indexOf('image.tmdb.org') !== -1) {
+            var b = w <= 185 ? 185 : (w <= 342 ? 342 : (w <= 500 ? 500 : 780));
+            return url.replace(/\/t\/p\/[^/]+\//, '/t/p/w' + b + '/');
+        }
+        return url;
+    }
     var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     function fmtDate(iso) {
         var p = String(iso || '').split('-');
@@ -67,7 +82,7 @@
     function movieCard(it) {
         var owned = it.library_id != null;
         var art = it.poster_url
-            ? '<img class="vwsh-movie-img" src="' + esc(it.poster_url) + '" alt="" loading="lazy" ' +
+            ? '<img class="vwsh-movie-img" src="' + esc(sized(it.poster_url, 342)) + '" alt="" loading="lazy" ' +
               'onerror="this.style.display=\'none\'">'
             : '<div class="vwsh-movie-ph">🎬</div>';
         var meta = [it.year,
@@ -113,7 +128,7 @@
         // fall back to the newest video's thumbnail so the orb is never blank.
         var poster = sh.poster_url || (yt && (sh.seasons || [])[0] ? sh.seasons[0].poster_url : null);
         var img = poster
-            ? '<img class="wl-orb-img" src="' + esc(pimg(poster)) + '" alt="" ' +
+            ? '<img class="wl-orb-img" src="' + esc(sized(pimg(poster), 240)) + '" alt="" ' +
               'onerror="this.outerHTML=\'<div class=&quot;wl-orb-initials&quot;>' + esc(initials(sh.title)) + '</div>\'">'
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         // Episodes are shown grouped under a clickable season header (header →
@@ -122,7 +137,7 @@
         var seasons = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
             var posterUrl = se.poster_url || sh.poster_url || null;
-            var thumb = posterUrl ? '<img src="' + esc(pimg(posterUrl)) + '" alt="">' : '<span class="vwsh-szn-ph">📺</span>';
+            var thumb = posterUrl ? '<img src="' + esc(sized(pimg(posterUrl), 342)) + '" alt="" loading="lazy">' : '<span class="vwsh-szn-ph">📺</span>';
             var cards = (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('');
             var sName = yt ? (se.season_number ? se.season_number : 'Undated') : ('Season ' + se.season_number);
             var sRm = yt
@@ -147,7 +162,8 @@
         // --orb-hue on the GROUP so the music orb styles + my cinematic-expand
         // backdrop (--vwsh-poster) both resolve; poster bleeds in only when expanded.
         var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
-            (poster ? ";--vwsh-poster:url('" + esc(poster) + "')" : '');
+            // the expand backdrop is heavily blurred, so a 500px source is plenty
+            (poster ? ";--vwsh-poster:url('" + esc(sized(pimg(poster), 500)) + "')" : '');
         var prog = total ? Math.max(0, Math.min(1, (sh.done || 0) / total)) : 0;   // #4 acquisition progress
         // Header is a 3-column row that FLANKS the poster: synopsis (left) · poster
         // (middle) · cast (right). When collapsed (or no data) the side columns are
@@ -298,7 +314,7 @@
         var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
             (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : ''));
         var thumb = e.still_url
-            ? '<span class="vwsh-epc-thumb"><img src="' + esc(pimg(e.still_url)) + '" alt="" loading="lazy" ' +
+            ? '<span class="vwsh-epc-thumb"><img src="' + esc(sized(pimg(e.still_url), 342)) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'
             : '<span class="vwsh-epc-thumb vwsh-epc-thumb--none"></span>';
         var rm = yt
