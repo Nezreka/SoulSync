@@ -155,6 +155,10 @@ class DatabaseUpdateWorker:
                         self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
                         logger.info("Connected Navidrome progress callback")
 
+                # A full refresh re-reads the whole server — stale listings
+                # cached by earlier runs must not survive into it.
+                self._clear_media_cache("before full refresh (full server re-read)")
+
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
@@ -177,6 +181,11 @@ class DatabaseUpdateWorker:
                                 logger.info(f"Merged {merged} duplicate artists")
                         except Exception as e:
                             logger.warning(f"Could not merge duplicate artists: {e}")
+                    # This early exit used to skip the end-of-run cache clear:
+                    # the "nothing new" probe itself caches album/track listings
+                    # on the singleton client, and that pre-import view then
+                    # poisoned the NEXT deep scan (#torrent-album-missing).
+                    self._clear_media_cache("after incremental (no new content)")
                     self._emit_finished(0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
@@ -200,8 +209,12 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Could not record full refresh completion: {e}")
             
-            # Clear cache after full refresh to free memory
-            if self.full_refresh and self.server_type in ["jellyfin", "navidrome"]:
+            # Clear cache after EVERY run (was full-refresh-only): the client
+            # is a process-wide singleton, so an incremental run's cached
+            # album/track listings used to outlive it and poison the next
+            # deep scan / full refresh with a pre-import view of the library
+            # (#torrent-album-missing).
+            if self.server_type in ["jellyfin", "navidrome"]:
                 try:
                     if hasattr(self.media_client, 'get_cache_stats'):
                         cache_stats = self.media_client.get_cache_stats()
@@ -209,7 +222,7 @@ class DatabaseUpdateWorker:
                     else:
                         freed_items = "cache data"
                     self.media_client.clear_cache()
-                    logger.info(f"Cleared {self.server_type} cache after full refresh - freed ~{freed_items} items from memory")
+                    logger.info(f"Cleared {self.server_type} cache after scan - freed ~{freed_items} items from memory")
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
@@ -296,6 +309,11 @@ class DatabaseUpdateWorker:
                 self._emit_signal('phase_changed', "Deep scan: Connecting to Navidrome...")
                 if hasattr(self.media_client, 'set_progress_callback'):
                     self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
+
+            # A deep scan is a full re-read of the server — it must not trust
+            # album/track listings cached by earlier (incremental) runs, or a
+            # newly imported album is invisible to it (#torrent-album-missing).
+            self._clear_media_cache("before deep scan (full server re-read)")
 
             # Fetch ALL artists from server (does NOT clear server data)
             artists = self._get_all_artists()
@@ -444,6 +462,23 @@ class DatabaseUpdateWorker:
             except Exception as e:
                 logger.error(f"Deep scan: Error processing artist {artist_name}: {e}")
                 self._emit_signal('artist_processed', artist_name, False, f"Error: {str(e)}", 0, 0)
+
+    def _clear_media_cache(self, when: str) -> None:
+        """Drop the media client's cached per-artist album / per-album track
+        listings (jellyfin + navidrome keep them on a process-wide singleton).
+
+        Scans that promise a full server re-read (deep scan, full refresh)
+        MUST clear BEFORE fetching: the caches survive across scans, so an
+        earlier incremental run leaves a pre-import view behind and a newly
+        imported album silently never reaches the database — it then shows
+        as MISSING even though the server has it (#torrent-album-missing)."""
+        if self.server_type not in ("jellyfin", "navidrome"):
+            return
+        try:
+            self.media_client.clear_cache()
+            logger.info(f"Cleared {self.server_type} cache {when}")
+        except Exception as e:
+            logger.warning(f"Could not clear {self.server_type} cache {when}: {e}")
 
     def _get_all_artists(self) -> List:
         """Get all artists from media server library.
