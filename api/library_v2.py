@@ -99,6 +99,42 @@ def _reset_artwork_cache_state() -> None:
         )
 
 
+def _start_reconcile_job_background(get_database: Callable[[], Any]) -> str:
+    """Start the reconcile-artists job in the background and return its job_id."""
+    job = _job_registry.start("reconcile-artists")
+    job_id = job["job_id"]
+
+    def _run():
+        db = get_database()
+        try:
+            conn = db._get_connection()
+            try:
+                from core.library2.native_enrich import (
+                    reconcile_unmapped_native_artists,
+                )
+
+                def _progress(current, total):
+                    try:
+                        _job_registry.update(job_id, current=current, total=total)
+                        conn.commit()  # persist incrementally; job is re-runnable
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("reconcile progress update failed: %s", exc)
+
+                stats = reconcile_unmapped_native_artists(conn, progress=_progress)
+                conn.commit()
+                _job_registry.update(job_id, result=stats)
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001
+            logger.error("Reconcile unmapped artists failed: %s", e, exc_info=True)
+            _job_registry.update(job_id, error=str(e))
+        finally:
+            _job_registry.finish(job_id)
+
+    threading.Thread(target=_run, name="lib2-reconcile-artists", daemon=True).start()
+    return job_id
+
+
 def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -> bool:
     """Start the non-critical artwork stage without extending import time."""
     with _artwork_cache_lock:
@@ -126,6 +162,12 @@ def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -
             )
             with _artwork_cache_lock:
                 _artwork_cache_state["stats"] = stats
+
+            # Auto-reconcile unmapped artists when caching finishes successfully
+            try:
+                _start_reconcile_job_background(get_database)
+            except Exception as exc:
+                logger.warning("Could not auto-start reconcile job after artwork cache: %s", exc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Library v2 background artwork cache failed: %s", exc)
             with _artwork_cache_lock:
@@ -2493,54 +2535,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/maintenance/reconcile-unmapped-artists", methods=["POST"])
     def lib2_reconcile_unmapped_artists():
-        """Heal the unmapped-native-artist backlog.
+        """Heal the unmapped-artist backlog.
 
         Featured/wishlist/discography artists have no legacy row, so the legacy
         enrichment workers never reach them and every provider chip stays
-        ``pending`` with no cover. This resolves each still-unmapped native
-        artist by name and writes its provider id + artwork straight onto the
-        lib2 row. Collaboration names no provider models as one entity stay
+        ``pending`` with no cover. This resolves each still-unmapped native/legacy
+        combined artist by name/split and writes its provider id + artwork straight
+        onto the lib2 row. Collaboration names no provider models as one entity stay
         unmatched (counted, never fabricated). Background job; poll
         ``/api/library/v2/jobs/status``."""
         guard = _guard()
         if guard:
             return guard
         try:
-            job = _job_registry.start("reconcile-artists")
+            job_id = _start_reconcile_job_background(get_database)
         except JobAlreadyRunning as exc:
             return jsonify({
                 "success": False, "error": str(exc), "job_id": exc.state["job_id"],
             }), 409
-        job_id = job["job_id"]
-
-        def _run():
-            db = get_database()
-            try:
-                conn = db._get_connection()
-                try:
-                    from core.library2.native_enrich import (
-                        reconcile_unmapped_native_artists,
-                    )
-
-                    def _progress(current, total):
-                        try:
-                            _job_registry.update(job_id, current=current, total=total)
-                            conn.commit()  # persist incrementally; job is re-runnable
-                        except Exception as exc:  # noqa: BLE001
-                            logger.debug("reconcile progress update failed: %s", exc)
-
-                    stats = reconcile_unmapped_native_artists(conn, progress=_progress)
-                    conn.commit()
-                    _job_registry.update(job_id, result=stats)
-                finally:
-                    conn.close()
-            except Exception as e:  # noqa: BLE001
-                logger.error("Reconcile unmapped artists failed: %s", e, exc_info=True)
-                _job_registry.update(job_id, error=str(e))
-            finally:
-                _job_registry.finish(job_id)
-
-        threading.Thread(target=_run, name="lib2-reconcile-artists", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/maintenance/reconcile-wishlist", methods=["POST"])
