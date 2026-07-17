@@ -261,12 +261,12 @@ def _get_or_create_component_artist(
 def _rehome_and_delete_combined(
     conn, combined_id: int, primary_id: int, component_ids: List[int]
 ) -> None:
-    """Move every reference off the ghost combined artist, then delete it.
+    """Move every reference off the ghost combined artist, then delete/alias it.
 
     ORDER IS SAFETY-CRITICAL: ``lib2_albums.primary_artist_id`` is
     ``ON DELETE CASCADE``, so the ghost's primary albums (and their tracks/files)
     would be destroyed if it were deleted while still their primary. We reassign
-    primaries and rewrite junctions FIRST; the final delete then finds nothing
+    primaries and rewrite junctions FIRST; the final action then finds nothing
     depending on the ghost.
     """
     # 1) Reassign albums where the ghost is primary → the first component.
@@ -313,7 +313,7 @@ def _rehome_and_delete_combined(
             )
     conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (combined_id,))
 
-    # 4) Best-effort: drop the ghost's monitor rules so they don't linger.
+    # 4) Drop the ghost's monitor rules so they don't linger.
     try:
         conn.execute(
             "DELETE FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
@@ -322,8 +322,21 @@ def _rehome_and_delete_combined(
     except Exception as exc:  # noqa: BLE001 — table optional/absent on minimal DBs
         logger.debug("ghost monitor-rule cleanup skipped (%s): %s", combined_id, exc)
 
-    # 5) The ghost is now unreferenced by any primary or junction — safe to delete.
-    conn.execute("DELETE FROM lib2_artists WHERE id=?", (combined_id,))
+    # 5) The ghost is now unreferenced by any primary or junction.
+    # If it is legacy-backed, keep it as an alias so future legacy imports
+    # don't recreate it; otherwise delete it.
+    row = conn.execute(
+        "SELECT legacy_artist_id FROM lib2_artists WHERE id=?", (combined_id,)
+    ).fetchone()
+    is_legacy = row and row["legacy_artist_id"] is not None
+
+    if is_legacy:
+        conn.execute(
+            "UPDATE lib2_artists SET canonical_artist_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (primary_id, combined_id),
+        )
+    else:
+        conn.execute("DELETE FROM lib2_artists WHERE id=?", (combined_id,))
 
 
 def smart_split_combined_artist(
@@ -332,20 +345,20 @@ def smart_split_combined_artist(
     *,
     resolver: Optional[ArtistResolver] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Split a native combined-name artist ("A & B") into its real components.
+    """Split a combined-name artist ("A & B") into its real components.
 
-    Runs only as a fallback for a native artist that no provider recognizes as a
+    Runs only as a fallback for an artist that no provider recognizes as a
     single entity (the caller tries a single-entity resolve first). It splits the
     display name and requires **every** component to resolve to a real provider
     artist — a strong guard: a genuine band name like "Hall & Oates" is
     recognized as one entity upstream and never reaches here, so this only ever
     fires on true concatenations. When all components resolve, each becomes a
     real (enriched) artist, the release re-homes to the first component with the
-    rest credited, and the ghost combined row is deleted (see
+    rest credited, and the ghost combined row is deleted/aliased (see
     ``_rehome_and_delete_combined`` for the cascade-safe ordering).
 
     Returns a summary dict on a split, or ``None`` when it declines (not a
-    combined name, legacy-backed, or a component didn't resolve).
+    combined name or a component didn't resolve).
     """
     if resolver is None:
         resolver = default_artist_resolver
@@ -354,7 +367,7 @@ def smart_split_combined_artist(
         "SELECT id, name, legacy_artist_id FROM lib2_artists WHERE id=?",
         (int(artist_id),),
     ).fetchone()
-    if row is None or row["legacy_artist_id"] is not None:
+    if row is None:
         return None
 
     from core.library2.importer import split_artist_credits
@@ -387,12 +400,11 @@ def smart_split_combined_artist(
     }
 
 
-def _pending_native_artist_ids(conn, limit: Optional[int]) -> List[int]:
-    """Native artists (no legacy backref) that still carry no provider id."""
+def _pending_unmapped_artists(conn, limit: Optional[int]) -> List[Dict[str, Any]]:
+    """Artists (both native and legacy) that still carry no provider id."""
     sql = (
-        "SELECT id FROM lib2_artists "
-        "WHERE legacy_artist_id IS NULL "
-        "  AND (spotify_id IS NULL OR spotify_id='') "
+        "SELECT id, legacy_artist_id FROM lib2_artists "
+        "WHERE (spotify_id IS NULL OR spotify_id='') "
         "  AND (musicbrainz_id IS NULL OR musicbrainz_id='') "
         "  AND (external_ids IS NULL OR external_ids='' OR external_ids='{}') "
         "ORDER BY id"
@@ -402,7 +414,7 @@ def _pending_native_artist_ids(conn, limit: Optional[int]) -> List[int]:
         rows = conn.execute(sql, (int(limit),)).fetchall()
     else:
         rows = conn.execute(sql).fetchall()
-    return [int(r["id"]) for r in rows]
+    return [dict(r) for r in rows]
 
 
 def reconcile_unmapped_native_artists(
@@ -412,34 +424,39 @@ def reconcile_unmapped_native_artists(
     limit: Optional[int] = None,
     progress: Optional[Callable[[int, int], None]] = None,
 ) -> Dict[str, Any]:
-    """Resolve every still-unmapped native artist by name (the backlog healer).
+    """Resolve every still-unmapped artist by name (the backlog healer).
 
     This is the on-demand maintenance pass behind the "Reconcile unmapped
-    artists" action: it walks native artists with no provider id and tries to
-    resolve+enrich each. Collaboration names that no provider models as one
-    entity simply stay unmatched — counted, never fabricated.
+    artists" action: it walks artists with no provider id and tries to
+    resolve+enrich (for native) or split them. Collaboration names that no provider
+    models as one entity simply stay unmatched — counted, never fabricated.
     """
     if resolver is None:
         resolver = default_artist_resolver
 
-    ids = _pending_native_artist_ids(conn, limit)
-    total = len(ids)
+    artists = _pending_unmapped_artists(conn, limit)
+    total = len(artists)
     stats = {"scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0}
-    for index, artist_id in enumerate(ids):
+    for index, art in enumerate(artists):
+        artist_id = art["id"]
+        legacy_artist_id = art["legacy_artist_id"]
         try:
-            result = resolve_and_enrich_native_artist(conn, artist_id, resolver=resolver)
             stats["scanned"] += 1
-            if result.get("success"):
-                stats["matched"] += 1
-            elif smart_split_combined_artist(conn, artist_id, resolver=resolver):
-                # No single provider entity, but every component is a real
-                # artist — split into them and delete the ghost.
+            if legacy_artist_id is None:
+                # Native artist: try single-entity resolve first
+                result = resolve_and_enrich_native_artist(conn, artist_id, resolver=resolver)
+                if result.get("success"):
+                    stats["matched"] += 1
+                    continue
+            
+            # Legacy-backed (or native single-entity match failed): try to split
+            if smart_split_combined_artist(conn, artist_id, resolver=resolver):
                 stats["split"] += 1
             else:
                 stats["unmatched"] += 1
         except Exception as exc:  # noqa: BLE001 — one bad row must not abort the pass
             stats["errors"] += 1
-            logger.debug("native reconcile failed for artist %s: %s", artist_id, exc)
+            logger.debug("reconcile failed for artist %s: %s", artist_id, exc)
         if progress is not None:
             progress(index + 1, total)
     return stats

@@ -313,3 +313,38 @@ def test_reconcile_matches_pending_native_skips_matched_and_legacy(imported_conn
         ).fetchone()["spotify_id"]
         == "SP_Afrojack"
     )
+
+
+def test_smart_split_legacy_backed_artist_becomes_alias(imported_conn):
+    # Insert a combined legacy-backed artist
+    combined = _insert_native_artist(imported_conn, "A & B")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET legacy_artist_id=9999 WHERE id=?", (combined,)
+    )
+    album_id, track_id = _make_collab_release(imported_conn, combined)
+
+    result = NE.smart_split_combined_artist(
+        imported_conn, combined, resolver=_component_resolver
+    )
+
+    assert result is not None
+    # Ghost is not deleted (legacy ID preserved) but becomes an alias
+    row = imported_conn.execute(
+        "SELECT id, legacy_artist_id, canonical_artist_id FROM lib2_artists WHERE id=?",
+        (combined,),
+    ).fetchone()
+    assert row is not None
+    assert row["legacy_artist_id"] == 9999
+    
+    # Resolves to components
+    a_id = _artist_id_by_name(imported_conn, "A")
+    b_id = _artist_id_by_name(imported_conn, "B")
+    assert a_id is not None and b_id is not None
+    assert row["canonical_artist_id"] == a_id
+
+    # Album survived and re-homed to A
+    alb = imported_conn.execute(
+        "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (album_id,)
+    ).fetchone()
+    assert alb["primary_artist_id"] == a_id
+
