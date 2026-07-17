@@ -232,6 +232,11 @@
             if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB',
                 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id));
             if (d.tvdb_id) badges.push(badge(TVDB_LOGO, 'TVDB', 'TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series'));
+            // Letterboxd is film-only; it deep-links by TMDB id (redirects to the
+            // film page). #1039 (QT3496).
+            if (d.kind === 'movie' && d.tmdb_id) {
+                badges.push(badge('', 'Lbxd', 'Letterboxd', 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/'));
+            }
             if (d.wikidata_url) badges.push(badge('', 'Official Site', 'Official Site', d.wikidata_url));
             l.innerHTML = badges.join('');
         }
@@ -1373,10 +1378,26 @@
         fetch('/api/video/episode/' + tmdb + '/' + parts[0] + '/' + parts[1],
             { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (ex) { renderEpisodeExtra(panel, ex && !ex.error ? ex : {}); })
+            .then(function (ex) { renderEpisodeExtra(panel, ex && !ex.error ? ex : {}, tmdb, parts[0], parts[1]); })
             .catch(function () { panel.innerHTML = ''; });
     }
-    function renderEpisodeExtra(panel, ex) {
+    // External deep-links for one EPISODE (#1039). TMDB episode page is always
+    // constructible from the show's tmdb id + season/episode; IMDb only when the
+    // episode's own id is known. tmdb passthrough items keep everything in-app.
+    function episodeLinks(showTmdb, season, episode, ex) {
+        if (data && data.source === 'tmdb') return '';
+        var links = [];
+        if (showTmdb) {
+            links.push(badge(TMDB_LOGO, 'TMDB', 'TMDB episode',
+                'https://www.themoviedb.org/tv/' + showTmdb + '/season/' + season + '/episode/' + episode));
+        }
+        if (ex && ex.imdb_id) {
+            links.push(badge('', 'IMDb', 'IMDb episode', 'https://www.imdb.com/title/' + ex.imdb_id + '/'));
+        }
+        return links.length
+            ? '<div class="vd-ep-links">' + links.join('') + '</div>' : '';
+    }
+    function renderEpisodeExtra(panel, ex, showTmdb, season, episode) {
         var html = '';
         if (ex.still_url) {
             html += '<img class="vd-ep-extra-still" src="' + esc(ex.still_url) + '" alt="" loading="lazy">';
@@ -1396,6 +1417,7 @@
                         : '<div class="vd-guest">' + inner + '</div>';
                 }).join('') + '</div>';
         }
+        html += episodeLinks(showTmdb, season, episode, ex);
         html += '</div>';
         panel.innerHTML = html || '<div class="vd-ep-extra-empty">No extra info.</div>';
     }
