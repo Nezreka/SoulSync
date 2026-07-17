@@ -98,6 +98,18 @@ def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[
     return 0
 
 
+def _release_year_of(release: Dict[str, Any]) -> Optional[str]:
+    """The card's release year ('2024') or None — feeds the matcher's re-release
+    year gate. Never raises; unknown/blank stays None (gate stays off)."""
+    year = _extract_lookup_value(release, 'year')
+    if year:
+        return str(year)
+    release_date = _extract_lookup_value(release, 'release_date')
+    if release_date:
+        return str(release_date)[:4]
+    return None
+
+
 def _resolve_canonical_album_completion(db, db_album: Any) -> Optional[Dict[str, Any]]:
     """Recalculate completion from a local album's exact pinned release.
 
@@ -181,6 +193,7 @@ def check_album_completion(
                 server_source=active_server,
                 candidate_albums=candidate_albums,
                 strict_discography_match=True,
+                expected_year=_release_year_of(album_data),
             )
 
             canonical_completion = _resolve_canonical_album_completion(db, db_album)
@@ -301,6 +314,7 @@ def check_single_completion(
                     server_source=active_server,
                     candidate_albums=candidate_albums,
                     strict_discography_match=True,
+                    expected_year=_release_year_of(single_data),
                 )
             except Exception as db_error:
                 logger.error(f"Database error for EP '{single_name}': {db_error}")
