@@ -10,6 +10,7 @@ never crosses library roots. All against a real tmp filesystem.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -33,11 +34,12 @@ def env(tmp_path):
 
 
 def _seed_movie_file(db, movies_dir, *, name="heat.1995.x264-GRP.mkv",
-                     title="Heat", year=1995, resolution="1080p"):
+                     title="Heat", year=1995, resolution="1080p",
+                     server_id="m1", tmdb_id=949):
     p = movies_dir / name
     p.write_bytes(b"x" * 1024)
     mid = db.upsert_movie("plex", {
-        "server_id": "m1", "title": title, "year": year, "tmdb_id": 949,
+        "server_id": server_id, "title": title, "year": year, "tmdb_id": tmdb_id,
         "file": {"relative_path": str(p), "resolution": resolution,
                  "size_bytes": p.stat().st_size, "video_codec": "h264"}})
     conn = db._get_connection()
@@ -144,3 +146,70 @@ def test_ui_and_api_wiring():
     assert "data-video-rename-card" in index
     assert "wireRename()" in repair_js and "showConfirmDialog" in repair_js
     assert '"/organization/rename/preview"' in dl_api and '"/organization/rename/apply"' in dl_api
+    # background preview: the UI polls the status endpoint for a live count
+    assert '"/organization/rename/preview/status"' in dl_api
+    assert "rename/preview/status" in repair_js and "Scanning your library" in repair_js
+
+
+# ── background preview (slow-library fix) ─────────────────────────────────────
+
+def test_preview_reports_progress(env):
+    db, movies = env
+    for i in range(3):
+        _seed_movie_file(db, movies, name="m%d.1999.x264-GRP.mkv" % i,
+                         title="Film %d" % i, year=1999,
+                         server_id="mov%d" % i, tmdb_id=1000 + i)
+    seen = []
+    out = mr.preview(progress=lambda done, total: seen.append((done, total)))
+    assert out["status"] == "completed"
+    # always a final 100% tick, and total reflects the real file count
+    assert seen and seen[-1] == (3, 3)
+
+
+def test_dir_cache_resolves_every_file_in_a_shared_folder(env):
+    # Several files under one folder must all resolve — the per-directory cache
+    # maps the rest off the first without ever hitting the wrong file.
+    db, movies = env
+    sub = movies / "Pack"
+    sub.mkdir()
+    for i in range(4):
+        _seed_movie_file(db, sub, name="p%d.2000.x264-GRP.mkv" % i,
+                         title="Pack %d" % i, year=2000,
+                         server_id="pack%d" % i, tmdb_id=2000 + i)
+    out = mr.preview()
+    assert len(out["entries"]) == 4 and out["unresolved"] == 0
+    # each resolves to its OWN distinct file (cache didn't collapse them)
+    currents = {e["current"] for e in out["entries"]}
+    assert len(currents) == 4
+
+
+def test_start_preview_runs_in_background_and_finishes(env):
+    db, movies = env
+    _seed_movie_file(db, movies)
+    # reset shared module state so a prior test's run can't leak in
+    with mr._preview_lock:
+        mr._preview_state.update(running=False, done=0, total=0, result=None,
+                                 error=None, finished_at=0.0)
+    mr.start_preview()
+    for _ in range(200):                       # up to ~10s
+        st = mr.preview_state()
+        if not st["running"] and st["result"] is not None:
+            break
+        time.sleep(0.05)
+    st = mr.preview_state()
+    assert st["running"] is False and st["error"] is None
+    assert st["result"] and st["result"]["status"] == "completed"
+    assert len(st["result"]["entries"]) == 1
+
+
+def test_start_preview_is_idempotent_while_running(env):
+    # a second start while one is in flight must not spawn a competing run
+    db, movies = env
+    _seed_movie_file(db, movies)
+    with mr._preview_lock:
+        mr._preview_state.update(running=True, done=0, total=0, result=None,
+                                 error=None, finished_at=0.0)
+    st = mr.start_preview()               # should just return the running snapshot
+    assert st["running"] is True
+    with mr._preview_lock:                # cleanup so we don't wedge later tests
+        mr._preview_state.update(running=False)
