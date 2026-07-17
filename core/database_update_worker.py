@@ -464,8 +464,13 @@ class DatabaseUpdateWorker:
             artists = self.media_client.get_all_artists()
             logger.info(f"_get_all_artists: Received {len(artists) if artists else 0} artists from {self.server_type}")
             # Only an actual list counts as a verified answer — a client that
-            # swallowed an error into None must stay untrusted.
-            self._artists_fetch_verified = isinstance(artists, list)
+            # swallowed an error into None must stay untrusted. The real
+            # clients additionally mark last_fetch_failed when they swallowed
+            # an API failure into [] (they all do), so a failing artists
+            # endpoint on a reachable server can never read as "empty library".
+            self._artists_fetch_verified = (
+                isinstance(artists, list)
+                and not getattr(self.media_client, 'last_fetch_failed', False))
             return artists or []
 
         except Exception as e:

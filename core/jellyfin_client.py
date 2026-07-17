@@ -665,13 +665,16 @@ class JellyfinClient(MediaServerClient):
     
     def get_all_artists(self) -> List[JellyfinArtist]:
         """Get all artists from the music library - matches Plex interface"""
+        # last_fetch_failed lets callers tell "library is genuinely empty"
+        # from "the fetch failed" — both come back as [] (#stale-artists).
+        self.last_fetch_failed = True
         if not self.ensure_connection() or not self.music_library_id:
             logger.error("Not connected to Jellyfin server or no music library")
             return []
-        
+
         # PERFORMANCE OPTIMIZATION: Pre-populate ALL caches upfront for massive speedup
         self._populate_aggressive_cache()
-        
+
         try:
             # Use proper AlbumArtists endpoint to match Jellyfin's "Album Artists" tab
             # This should return 3,966 artists including Weird Al
@@ -684,18 +687,21 @@ class JellyfinClient(MediaServerClient):
 
             response = self._make_request('/Artists/AlbumArtists', params)
             if not response:
+                # a failed/empty HTTP response is a FAILURE, not an empty
+                # library — an empty library still answers with Items: []
                 return []
-            
+
             artists = []
             for item in response.get('Items', []):
                 artist = JellyfinArtist(item, self)
                 # Cache the artist for quick lookup
                 self._artist_cache[artist.ratingKey] = artist
                 artists.append(artist)
-            
+
             logger.info(f"Retrieved {len(artists)} album artists from Jellyfin AlbumArtists endpoint (with aggressive caching)")
+            self.last_fetch_failed = False
             return artists
-            
+
         except Exception as e:
             logger.error(f"Error getting artists from Jellyfin: {e}")
             return []
