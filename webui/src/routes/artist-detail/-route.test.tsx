@@ -42,6 +42,24 @@ describe('artist-detail route', () => {
     });
   });
 
+  it('survives an all-digits artist name (311) in ?name=', async () => {
+    // TanStack's search parser JSON-parses param values, so name=311 arrives
+    // as a NUMBER. A bare z.string() schema threw SearchParamError, the route
+    // died in its error boundary, and clicking the artist "did nothing".
+    renderArtistDetailRoute(['/artist-detail/deezer/2481?name=311']);
+
+    await waitFor(() => {
+      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
+        '2481',
+        '311',
+        'deezer',
+        {
+          skipRouteChange: true,
+        },
+      );
+    });
+  });
+
   it('passes the ?name= search param through to the legacy shell', async () => {
     // Bandcamp (and any other source with no numeric-ID lookup API) can only
     // resolve an artist by name — the URL is the only channel that survives
