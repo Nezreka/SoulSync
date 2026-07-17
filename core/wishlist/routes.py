@@ -591,6 +591,20 @@ def add_album_track_to_wishlist(
 
         if success:
             runtime.logger.info("Added track '%s' by '%s' to wishlist", track.get("name"), artist.get("name"))
+            # §52.8: a confirmed "Add to Wishlist" click is a confirmed
+            # acquisition intent — materialize the lib2 Artist/Release/Track
+            # now so the entity is readable even if the later download fails,
+            # quarantines, or never starts. Best-effort/fail-open (never
+            # raises), so it can't affect the already-succeeded wishlist add.
+            from core.library2.materialize import materialize_wishlist_intent
+            materialize_wishlist_intent({
+                "id": track.get("id"),
+                "name": track.get("name"),
+                "artists": [artist],
+                "album": album,
+                "track_number": track.get("track_number"),
+                "disc_number": track.get("disc_number"),
+            })
             return {"success": True, "message": f"Added '{track.get('name')}' to wishlist"}, 200
 
         runtime.logger.error("Failed to add track '%s' to wishlist", track.get("name"))

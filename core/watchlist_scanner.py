@@ -2375,16 +2375,31 @@ class WatchlistScanner:
                 'is_local': False
             }
             
-            # Library v2 (opt-in): a per-artist quality-profile assignment must
-            # also govern releases the watchlist scan queues, not only the ones
-            # lib2 mirrors itself. Fail-open None → app-wide default profile.
+            # Library v2 (opt-in, §52.8): a new-release detection is a
+            # confirmed acquisition intent, so materialize the concrete lib2
+            # Artist/Release/Track now — not just the artist-level profile
+            # lookup this used to do — so the entity exists before the scan's
+            # own dispatch and any per-track/album profile override (not just
+            # the artist's) is honoured. Fail-open: falls back to the old
+            # artist-only lookup when materialization is unavailable/fails.
             lib2_profile_id = None
             try:
-                from core.library2.profile_lookup import lib2_quality_profile_for_artist
-                lib2_profile_id = lib2_quality_profile_for_artist(
-                    self.database, watchlist_artist.artist_name)
+                from core.library2.materialize import materialize_wishlist_intent
+                lib2_result = materialize_wishlist_intent(
+                    spotify_track_data,
+                    profile_id=getattr(watchlist_artist, 'profile_id', 1),
+                )
+                if lib2_result:
+                    lib2_profile_id = lib2_result["quality_profile"]["id"]
             except Exception:
-                lib2_profile_id = None
+                lib2_result = None
+            if lib2_result is None:
+                try:
+                    from core.library2.profile_lookup import lib2_quality_profile_for_artist
+                    lib2_profile_id = lib2_quality_profile_for_artist(
+                        self.database, watchlist_artist.artist_name)
+                except Exception:
+                    lib2_profile_id = None
 
             # Add to wishlist with watchlist context (scoped to artist's profile)
             success = self.database.add_to_wishlist(

@@ -6122,12 +6122,13 @@ folgen erst nach §52.12.1.
 - Frontend Format + OXLint-Typecheck → **0 Warnungen / 0 Fehler**; TypeScript
   `--noEmit` ebenfalls grün.
 
-§52.3/§52.4 und §52.11 wurden im anschließenden Slice §54 geschlossen.
-Weiterhin offen und nicht als erledigt dargestellt: die reichere Provider-
-Match-Karte aus §52.5 (Follower/Popularität/Match-Provenienz), Replacement-
-Teil von §52.6, §52.7 Manual-Grab-Policy, §52.8 Early Materialization und
-§52.9 Correlation-History/Stepper. Die fünf sichtbaren Entscheidungen aus
-§52.12 bleiben unverändert Voraussetzung für ihre jeweiligen Teilstücke.
+§52.3/§52.4 und §52.11 wurden im anschließenden Slice §54 geschlossen; §52.8
+Early Materialization wurde (mit Ausnahme der legacy Search-/Download-Routen)
+im Slice §55 geschlossen. Weiterhin offen und nicht als erledigt dargestellt:
+die reichere Provider-Match-Karte aus §52.5 (Follower/Popularität/Match-
+Provenienz), Replacement-Teil von §52.6, §52.7 Manual-Grab-Policy und §52.9
+Correlation-History/Stepper. Die fünf sichtbaren Entscheidungen aus §52.12
+bleiben unverändert Voraussetzung für ihre jeweiligen Teilstücke.
 
 ---
 
@@ -6210,3 +6211,103 @@ die Artist-Settings-UI sowie derselbe Delete-Dialog aus beiden
 Einstiegspunkten. Offen bleibt ausschließlich der schon in §53.3 und §52.12
 benannte Scope; insbesondere wurden keine H-/I-Gaps außerhalb der durch §52
 verbindlich angenommenen Funktionen stillschweigend umgesetzt.
+
+---
+
+## 55. §52.8 dritter vertikaler Slice — Early Materialization für bestätigte Wishlist-/Acquisition-Intents — ✅ teilweise umgesetzt (2026-07-17)
+
+Dieser Slice adressiert §52.8, den einzigen in §53.3 verbliebenen Punkt, dessen
+zugrundeliegende Produktentscheidung bereits abschließend getroffen ist
+(§52.12 Punkt 2: „✅ entschieden"). Die übrigen offenen §52-Punkte
+(Manual-Grab-Policy §52.7, Replacement-Aufbewahrung §52.6, die reichere
+Match-Karte §52.5, Correlation-History/Stepper §52.9) bleiben unverändert
+entweder an eine offene §52.12-Entscheidung gebunden oder ein eigener
+größerer Schnitt und wurden hier nicht angefasst.
+
+### 55.1 Gemeinsamer Resolver
+
+`core/library2/materialize.py` ist neu und bündelt das Reuse-First-Muster,
+das der Post-Download-Autolink (`core/library2/autolink.py`) bereits kennt,
+für den Zeitpunkt VOR Search/Download:
+
+- `materialize_track_intent(conn, ...)` löst Artist/Release/Track über die
+  bestehenden `find_or_create_*`-Helfer auf (jetzt öffentlich benannte
+  Aliase der bisherigen `_find_or_create_*`-Funktionen in `autolink.py`,
+  keine Logikänderung), setzt bei explizit gewähltem Profil
+  `assign_quality_profile(conn, "tracks", track_id, explicit_profile_id)`,
+  markiert **nur den konkreten Track** über `record_rule(..., "track", ...)`
+  plus `recompute_wanted_for_entity` als monitored/wanted — ausdrücklich ohne
+  auf Album/Artist zu kaskadieren — und liefert die aufgelösten IDs plus das
+  effektive Profil zurück. Committet nicht selbst und mirrort nicht selbst in
+  die Wishlist; das bleibt Sache des jeweiligen Aufrufers.
+- `materialize_from_spotify_track(conn, spotify_track_data, ...)` adaptiert
+  die im Code weit verbreitete `spotify_track_data`-Form
+  (`{"id","name","artists":[...],"album":{...},"track_number",...}`) auf den
+  Resolver; liefert `None` ohne Seiteneffekt, wenn Titel oder Artist fehlen
+  (z. B. ein Wing-it-Platzhalter).
+- `materialize_wishlist_intent(spotify_track_data, ...)` ist der Best-Effort-
+  Einstiegspunkt für Aufrufer außerhalb von `core.library2`: eigene
+  Connection, eigener Commit, fail-open wie
+  `autolink.link_download_into_library_v2` — eine Materialisierung darf einen
+  bereits erfolgreichen Wishlist-Write niemals nachträglich zum Scheitern
+  bringen.
+
+### 55.2 Verkabelte Einstiegspunkte
+
+Von den in §52.8 genannten Pfaden („insbesondere Search-Aktionen,
+Playlist-Sync, Watchlist-Scanner, direkte Track-Suche und manuelle
+Wishlist-Aktionen") sind jetzt verkabelt:
+
+- **Manuelle Wishlist-Aktion / Search-Seite „Add to Wishlist"**
+  (`core/wishlist/routes.py::add_album_track_to_wishlist`): nach einem
+  erfolgreichen Legacy-Wishlist-Add materialisiert derselbe Aufruf sofort
+  das lib2-Trio aus `track`/`artist`/`album`. Schlägt der Wishlist-Add selbst
+  fehl, wird nicht materialisiert (kein „unverbindlicher" Write).
+- **Playlist-Sync** (`services/sync_service.py`, Auto-Add nicht gematchter
+  Tracks): jeder erfolgreiche `add_spotify_track_to_wishlist`-Aufruf
+  materialisiert direkt danach denselben `spotify_track_data`.
+- **Watchlist-Scanner** (`core/watchlist_scanner.py::add_track_to_wishlist`):
+  ersetzt die bisherige, nur-artist-level `lib2_quality_profile_for_artist`-
+  Abfrage durch einen vollen Materialize-Aufruf (Artist **und** Album **und**
+  Track werden aufgelöst/angelegt, nicht nur der Artist-Profil-Wert gelesen);
+  bei Fehlschlag/deaktiviertem Feature-Flag fällt der Code auf die alte
+  artist-only-Abfrage zurück, damit das Verhalten nie schlechter als vorher
+  wird.
+- **Direkte Track-Suche** benötigte keine Änderung — sie materialisiert
+  bereits seit §53.2 idempotent, nur ohne die volle Artist/Album/Track-
+  Neuanlage (dort existiert die Entity immer schon, weil Automatic Search nur
+  auf bestehenden lib2-Entities läuft).
+
+**Bewusst nicht angefasst:** die legacy `/api/search`- und
+`/api/download`-Routen in `web_server.py` (Search-Seite „Begin Analysis" /
+„Force Download"). Das ist der mit Abstand größte Blast-Radius im
+Repository (der zentrale Such-/Grab-Hotpath für praktisch jeden Download)
+und der einfache Track-Grab-Zweig führt dort teils nur `title`/`artist` ohne
+Album- oder Provider-IDs — ein Materialize-Aufruf würde für viele nicht mit
+Spotify verknüpfte Downloads Alben aus dem bloßen Tracktitel raten. Diese
+beiden Routen bleiben offener Scope für einen eigenen, vorsichtigeren Slice.
+
+### 55.3 Verifikation und Rest-Scope
+
+- Backend: `python -m pytest tests/library2` → **657 passed** (+15 neue Tests
+  in `tests/library2/test_materialize.py` für Resolver-Idempotenz,
+  Deduplizierung, explizite-Profil-Präzedenz und Nicht-Kaskadieren aufs
+  Artist-Monitoring).
+- Gezielte Wiring-Tests für zwei der drei verkabelten Aufrufer:
+  `tests/wishlist/test_routes.py` (Materialize wird bei Erfolg aufgerufen,
+  bei Fehlschlag nicht) und das neue
+  `tests/test_watchlist_scanner_materialize.py` (voller Materialize-Pfad plus
+  Fallback bei `None`/Exception). Für den dritten Aufrufer
+  (`services/sync_service.py`) existiert **keine** dedizierte Unit-Test-
+  Abdeckung — `sync_playlist` ist eine sehr große, tief mit Media-Client/
+  Matching-Engine verzahnte Methode; ein isolierter Test dafür wäre ein
+  eigenes, unverhältnismäßig großes Test-Scaffolding gewesen. Die Änderung
+  dort folgt exakt demselben, an den anderen beiden Stellen bereits
+  verifizierten Aufrufmuster.
+- Kein H-/I-Gap wurde außerhalb des durch §52 angenommenen Scopes
+  angefasst.
+
+Weiterhin offen: §52.5 (reichere Match-Karte), §52.6-Replacement-Teil,
+§52.7 Manual-Grab-Policy, §52.9 Correlation-History/Stepper — alle wie in
+§53.3 benannt, jetzt zusätzlich die legacy Search-/Download-Routen aus
+§55.2.

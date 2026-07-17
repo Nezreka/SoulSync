@@ -188,6 +188,14 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
     return track_id
 
 
+# Public aliases for reuse outside this module (§52.8 early materialization,
+# core/library2/materialize.py) — same resolve-or-create semantics the
+# post-download autolink path above already relies on.
+find_or_create_artist = _find_or_create_artist
+find_or_create_album = _find_or_create_album
+find_or_create_track = _find_or_create_track
+
+
 def _acoustid_status_for(raw: Any) -> Optional[str]:
     """Map the pipeline's raw AcoustID outcome to the schema's narrower
     ``acoustid_status`` vocabulary. 'disabled'/'error'/unset make no claim
@@ -399,4 +407,9 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         return None
 
 
-__all__ = ["link_download_into_library_v2"]
+__all__ = [
+    "find_or_create_album",
+    "find_or_create_artist",
+    "find_or_create_track",
+    "link_download_into_library_v2",
+]

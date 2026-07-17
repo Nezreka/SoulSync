@@ -490,6 +490,58 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
     assert add_call["track_data"]["explicit"] is True
 
 
+def test_add_album_track_to_wishlist_materializes_lib2_entity_on_success(monkeypatch):
+    """§52.8: a confirmed 'Add to Wishlist' click must materialize the lib2
+    Artist/Release/Track — best-effort, never affecting the response."""
+    import core.library2.materialize as materialize_module
+
+    calls = []
+    monkeypatch.setattr(
+        materialize_module, "materialize_wishlist_intent",
+        lambda payload, **kwargs: calls.append((payload, kwargs)))
+
+    runtime, service, _db, _logger, _activity_calls = _build_runtime()
+    track = {"id": "track-1", "name": "Song One", "track_number": 2, "disc_number": 1}
+    artist = {"id": "artist-1", "name": "Artist One"}
+    album = {"id": "album-1", "name": "Album One"}
+
+    payload, status = add_album_track_to_wishlist(
+        runtime, track=track, artist=artist, album=album,
+    )
+
+    assert status == 200
+    assert len(calls) == 1
+    materialize_payload, _kwargs = calls[0]
+    assert materialize_payload["id"] == "track-1"
+    assert materialize_payload["name"] == "Song One"
+    assert materialize_payload["artists"] == [artist]
+    assert materialize_payload["album"] == album
+    assert materialize_payload["track_number"] == 2
+    assert materialize_payload["disc_number"] == 1
+
+
+def test_add_album_track_to_wishlist_skips_materialize_when_add_fails(monkeypatch):
+    import core.library2.materialize as materialize_module
+
+    calls = []
+    monkeypatch.setattr(
+        materialize_module, "materialize_wishlist_intent",
+        lambda payload, **kwargs: calls.append((payload, kwargs)))
+
+    runtime, service, _db, _logger, _activity_calls = _build_runtime()
+    service.add_track_to_wishlist = lambda **kwargs: False
+
+    payload, status = add_album_track_to_wishlist(
+        runtime,
+        track={"id": "track-1", "name": "Song One"},
+        artist={"id": "artist-1", "name": "Artist One"},
+        album={"id": "album-1", "name": "Album One"},
+    )
+
+    assert payload["success"] is False
+    assert calls == []
+
+
 def test_set_wishlist_cycle_rejects_invalid_cycle():
     runtime, _service, _db, _logger, _activity_calls = _build_runtime()
 
