@@ -106,7 +106,12 @@
             var foot = overlay.querySelector('#cfgx-footer');
             body.innerHTML = '<div class="arec-loading">Loading config…</div>';
             fetch('/api/config/export?secrets=' + (_withSecrets ? '1' : '0'))
-                .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+                .then(function (r) {
+                    return r.json().then(function (j) {
+                        if (!r.ok) throw new Error(j && j.error);
+                        return j;
+                    });
+                })
                 .then(function (b) {
                     _bundle = b;
                     body.innerHTML = '<pre class="cfgx-json">' + esc(JSON.stringify(b, null, 2)) + '</pre>';
@@ -119,7 +124,18 @@
                             ? '<b style="color:#f1c40f">credentials included</b>'
                             : 'credentials redacted') + '</span>';
                 })
-                .catch(function () { body.innerHTML = '<div class="arec-error">Could not load config.</div>'; });
+                .catch(function (err) {
+                    // e.g. the login-mode gate on a credentials export — surface it
+                    // and revert the toggle so the safe redacted view comes back.
+                    var msg = (err && err.message) || 'Could not load config.';
+                    body.innerHTML = '<div class="arec-error">' + esc(msg) + '</div>';
+                    if (_withSecrets) {
+                        _withSecrets = false;
+                        var cb = overlay.querySelector('#cfgx-secrets');
+                        if (cb) cb.checked = false;
+                        toast(msg, 'error');
+                    }
+                });
         }
 
         function showImport() {

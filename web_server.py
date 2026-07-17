@@ -4404,6 +4404,17 @@ def export_config_bundle():
     from api.video import get_video_db
     from core.config_export import build_bundle
     include_secrets = request.args.get('secrets', '0') in ('1', 'true', 'yes')
+    # Plaintext-credential export is the ONLY endpoint that leaks real secrets,
+    # so it must sit behind actual authentication. With login OFF, @admin_only
+    # trusts every LAN request as admin — refuse, or anyone who can reach the
+    # port could pull every key. The redacted export stays available to all.
+    if include_secrets and not _require_login_enabled():
+        return jsonify({
+            "success": False,
+            "error": "Exporting credentials requires login mode. Enable "
+                     "Settings → Security → Require login first, or export "
+                     "without credentials (they'll be re-entered on the new install).",
+        }), 403
     bundle = build_bundle(
         config_manager, get_video_db(),
         include_secrets=include_secrets,
