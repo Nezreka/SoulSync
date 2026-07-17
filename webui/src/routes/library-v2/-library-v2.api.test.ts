@@ -430,6 +430,37 @@ describe('library v2 match-status api', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('applies and clears matches for lib2-native entities without a legacy id', async () => {
+    server.use(
+      http.put('/api/library/v2/artists/77/manual-match', async ({ request }) => {
+        expect(await request.json()).toEqual({ service: 'spotify', service_id: 'sp-native' });
+        return HttpResponse.json({ success: true });
+      }),
+      http.delete('/api/library/v2/artists/77/manual-match', async ({ request }) => {
+        expect(await request.json()).toEqual({ service: 'spotify' });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    await expect(
+      manualMatchLibraryV2Entity({
+        entity_type: 'artist',
+        legacy_entity_id: null,
+        library_v2_entity_id: 77,
+        service: 'spotify',
+        service_id: 'sp-native',
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      clearLibraryV2EntityMatch({
+        entity_type: 'artist',
+        legacy_entity_id: null,
+        library_v2_entity_id: 77,
+        service: 'spotify',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('loads exact-provider album context for an artist candidate', async () => {
     server.use(
       http.post('/api/library/match-artist-releases', async ({ request }) => {

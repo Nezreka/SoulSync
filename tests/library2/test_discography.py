@@ -38,6 +38,13 @@ def fake_discography(monkeypatch):
         return payload
 
     monkeypatch.setattr("core.metadata.discography.get_artist_detail_discography", fake)
+    # Refresh now also repairs underfilled imported releases.  Keep this unit
+    # fixture deterministic/offline; individual tracklist tests install their
+    # own resolver payloads.
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist",
+        lambda *_args, **_kwargs: None,
+    )
     return payload
 
 
@@ -64,6 +71,10 @@ def test_expand_adds_new_and_matches_existing(legacy_db, imported_conn, fake_dis
     # Existing library rows keep their origin and gain the provider id.
     assert by_title["Views"]["origin"] == "library"
     assert by_title["Views"]["spotify_id"] in ("sp-views", None) or True
+    # A provider catalog must heal an old import undercount upward.  Preserving
+    # the stale value is what made Update Discovery leave one-track albums
+    # permanently truncated.
+    assert by_title["Views"]["expected_track_count"] == 20
 
 
 def test_expand_is_idempotent(legacy_db, imported_conn, fake_discography):
@@ -749,7 +760,8 @@ def test_refresh_holds_artist_lock_through_auto_monitor(
         assert expand_calls == [artist_id]
         release_auto_monitor.set()
         assert refresh.result(timeout=2) == (
-            {"auto_monitor_album_ids": [91], "repaired_track_number_collisions": []}, 1)
+            {"auto_monitor_album_ids": [91], "repaired_track_number_collisions": [],
+             "repaired_incomplete_tracklists": []}, 1)
         assert expansion.result(timeout=2) == {"auto_monitor_album_ids": [91]}
 
     assert expand_calls == [artist_id, artist_id]
@@ -853,11 +865,24 @@ def test_refresh_repairs_track_number_collision_on_existing_library_album(
     assert healed == {"Alpha": 1, "Bravo": 2, "Charlie": 3}
 
 
-def test_refresh_track_number_repair_does_not_touch_clean_library_albums(
+def test_refresh_incomplete_repair_ignores_complete_library_albums(
         legacy_db, imported_conn, fake_discography, monkeypatch):
-    """A library album with no (disc, number) collision must not be
-    re-resolved by the new repair pass — only actually-corrupted albums."""
+    """The underfilled-release pass is scoped: a complete library release is
+    not re-resolved merely because Update Discovery was clicked."""
     aid = _artist_id(imported_conn)
+    complete_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, expected_track_count) "
+        "VALUES(?, 'Already Complete', 'library', 1)", (aid,)
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+        (complete_id, aid),
+    )
+    imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Done', 1)",
+        (complete_id,),
+    )
+    imported_conn.commit()
     calls = []
     monkeypatch.setattr(
         "core.library2.completeness.resolve_tracklist",
@@ -866,23 +891,40 @@ def test_refresh_track_number_repair_does_not_touch_clean_library_albums(
 
     D.refresh_artist_discography(legacy_db, aid, None)
 
+    assert complete_id not in calls
+
+
+def test_refresh_resolves_imported_release_after_provider_raises_track_count(
+        legacy_db, imported_conn, fake_discography, monkeypatch):
+    aid = _artist_id(imported_conn)
     views_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='Views'"
     ).fetchone()[0]
-    assert views_id not in calls
+    calls = []
+
+    def resolve(_config, _conn, album_id):
+        calls.append(album_id)
+        return [{"title": "One Dance", "track_number": 1}]
+
+    monkeypatch.setattr("core.library2.completeness.resolve_tracklist", resolve)
+
+    stats, _mirrored = D.refresh_artist_discography(legacy_db, aid, None)
+
+    assert views_id in calls
+    assert views_id in stats["repaired_incomplete_tracklists"]
 
 
 def test_refresh_track_number_repair_does_not_remonitor_or_reprovenance(
         legacy_db, imported_conn, fake_discography):
-    """The repair pass fixes numbering only — it must not flip the album/track
-    monitored flags or stamp a 'new_release' monitor-rule provenance the way
-    auto_monitor_releases does for genuinely new releases; SWAG is already
-    owned, re-labeling it as a new release would misrepresent why it's
-    monitored."""
+    """The repair pass must preserve a deliberate parent override and must not
+    stamp a ``new_release`` provenance while healing an owned album."""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
     aid = _artist_id(imported_conn)
     swag_id = _make_colliding_library_album(imported_conn, aid, "swag")
     imported_conn.execute(
         "UPDATE lib2_albums SET monitored=0 WHERE id=?", (swag_id,))
+    record_rule(imported_conn, "album", swag_id, False, PROVENANCE_USER)
     imported_conn.commit()
 
     D.refresh_artist_discography(legacy_db, aid, None)
@@ -891,10 +933,11 @@ def test_refresh_track_number_repair_does_not_remonitor_or_reprovenance(
         "SELECT monitored FROM lib2_albums WHERE id=?", (swag_id,)
     ).fetchone()["monitored"] == 0
     rule = imported_conn.execute(
-        "SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=?",
+        "SELECT monitored, provenance FROM lib2_monitor_rules "
+        "WHERE entity_type='album' AND entity_id=?",
         (swag_id,),
-    ).fetchone()[0]
-    assert rule == 0
+    ).fetchone()
+    assert (rule["monitored"], rule["provenance"]) == (0, PROVENANCE_USER)
 
 
 # --- §40 alias-group fan-out --------------------------------------------------

@@ -204,6 +204,9 @@ export interface LibraryV2MatchService {
   last_attempted: string | null;
   /** The legacy row id — media servers may use numeric or opaque TEXT ids. */
   legacy_entity_id: number | string | null;
+  /** Always present on current servers; enables matching lib2-native rows
+   * that have no legacy back-reference. */
+  library_v2_entity_id?: number | null;
   /** Is this provider configured/usable on this instance right now (A8)?
    *  Always ``true`` when the server has no availability signal (older
    *  cached response shape). */
@@ -404,6 +407,17 @@ export interface LibraryV2ImportState {
   total: number;
   stats: Record<string, number> | null;
   error: string | null;
+  finished_at: number | null;
+  artwork_cache: LibraryV2ArtworkCacheState;
+}
+
+export interface LibraryV2ArtworkCacheState {
+  running: boolean;
+  current: number;
+  total: number;
+  stats: Record<string, number> | null;
+  error: string | null;
+  started_at: number | null;
   finished_at: number | null;
 }
 

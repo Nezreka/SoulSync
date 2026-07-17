@@ -375,11 +375,13 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
                 WHERE id=?""",
             (remaining_count, album_id),
         )
-    # Every newly materialized provider row enters the authoritative wanted
-    # projection immediately, even when browsing (not monitoring) created it.
-    if touched_ids:
-        from core.library2.wanted import recompute_wanted
-        recompute_wanted(conn, track_ids=sorted(touched_ids))
+    # Canonical materialization can be the moment an imported release becomes
+    # provably complete (every track covered by a file or Wishlist rule).  Keep
+    # the derived parent state and every child's wanted projection coherent.
+    from core.library2.importer import reconcile_import_monitoring
+    reconcile_import_monitoring(conn.cursor(), album_ids=[album_id])
+    from core.library2.wanted import recompute_wanted_for_entity
+    recompute_wanted_for_entity(conn, "album", album_id)
     return changed
 
 

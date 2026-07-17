@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from utils.logging_config import get_logger
 
@@ -1111,15 +1111,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "WHERE track_id IS NOT NULL AND path IS NOT NULL"
             ).fetchall()
         }
-        # A newly-created track's own ``monitored`` flag must agree with its
-        # album's (§16.2 follow-up): the wanted projection's album rule always
-        # decides an un-ruled track's wanted state over its own flag (see
-        # wanted.py's priority order — album rule outranks a mere legacy_import
-        # track rule), and the runtime album-monitor cascade already applies
-        # this same album-wins convention to every non-explicit child track
-        # (api/library_v2.py ``lib2_set_monitored``, "albums" branch). Reading
-        # it fresh here (not the local per-album loop var) also covers
-        # existing/updated albums, whose monitored flag isn't recomputed above.
+        # A file is concrete track-level coverage.  The release flag is derived
+        # later, after Wishlist rows have also been seeded; it must not suppress
+        # an individually-owned track on a partial album.
         album_monitored_by_id = {
             int(r["id"]): int(r["monitored"])
             for r in cursor.execute("SELECT id, monitored FROM lib2_albums").fetchall()
@@ -1186,7 +1180,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 )
                 track_id = existing
             else:
-                track_monitored = album_monitored_by_id.get(album_id, 1)
+                track_monitored = 1 if _pick(row, "file_path") else \
+                    album_monitored_by_id.get(album_id, 0)
                 legacy_profile_id = _pick(row, "quality_profile_id")
                 try:
                     legacy_profile_id = (
@@ -1263,6 +1258,18 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "VALUES(?,?,?,?)",
                     [(track_id, aid, role, position) for aid, role, position in credits],
                 )
+                # Album appearances must be reachable from every credited
+                # artist.  Without this junction a featured artist accumulated
+                # track stats but its My Library/All Releases views were empty.
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+                    "VALUES(?,?,?)",
+                    [
+                        (album_id, aid,
+                         "primary" if aid == primary_lib2 else "featured")
+                        for aid, _role, _position in credits
+                    ],
+                )
 
             # Track file from legacy file_path.
             file_path = _pick(row, "file_path")
@@ -1303,6 +1310,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
         stats["linked_duplicates"] = link_single_album_duplicates(cursor)
         apply_monitoring_from_watchlist_wishlist(cursor, profile_id)
+        stats["monitoring_reconciled"] = reconcile_import_monitoring(
+            cursor, profile_id=profile_id or 1
+        )
         # Mint provider-less stable ids for everything this run inserted
         # (audit P1-12) — the schema-ensure backfill ran before the inserts.
         from core.library2.stable_ids import backfill_stable_ids
@@ -1490,8 +1500,6 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             "WHERE spotify_id IS NOT NULL AND spotify_id<>''"
         ).fetchall()
     }
-    albums_to_recount: Set[int] = set()
-
     for row in rows:
         try:
             payload = json.loads(row["spotify_data"] or "{}")
@@ -1591,6 +1599,14 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         )
 
         existing_track_id = track_by_spotify.get((int(album_id), track_id))
+        preserved_explicit_rule = None
+        if existing_track_id is not None:
+            preserved_explicit_rule = cursor.execute(
+                """SELECT monitored, provenance FROM lib2_monitor_rules
+                    WHERE entity_type='track' AND entity_id=? AND profile_id=?
+                      AND provenance='user_explicit'""",
+                (existing_track_id, profile_id or 1),
+            ).fetchone()
         entity_key = (album_id, track_id)
         previous_assignment = assigned_profiles.get(entity_key)
         if previous_assignment and previous_assignment[0] != quality_profile_id:
@@ -1645,15 +1661,20 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             PROVENANCE_WISHLIST,
             profile_id=profile_id or 1,
         )
-
-        # Wishlist payloads often contain the Spotify release's total_tracks but
-        # not the titles for the other release tracks. For albums that only exist
-        # because of wishlist rows, keep the expected size to the known wishlist
-        # rows so the UI does not invent unnamed "Track N - missing" placeholders.
-        # Discography rows are excluded: their expected_track_count came from the
-        # provider catalog, and clamping it here would make the later tracklist
-        # materialization truncate the release to the wishlisted tracks.
-        albums_to_recount.add(int(album_id))
+        if preserved_explicit_rule is not None:
+            # A non-destructive re-import may rediscover a still-present
+            # Wishlist row after the user explicitly overrode that track in
+            # Library v2.  The explicit decision is the stronger intent.
+            explicit_value = bool(preserved_explicit_rule["monitored"])
+            cursor.execute(
+                "UPDATE lib2_tracks SET monitored=? WHERE id=?",
+                (1 if explicit_value else 0, lib2_track_id),
+            )
+            from core.library2.monitor_rules import PROVENANCE_USER
+            record_rule(
+                cursor.connection, "track", lib2_track_id, explicit_value,
+                PROVENANCE_USER, profile_id=profile_id or 1,
+            )
 
         cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (lib2_track_id,))
         linked_artists: Set[int] = set()
@@ -1679,33 +1700,153 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                 "VALUES(?,?,?,?)",
                 (lib2_track_id, aid, "primary" if pos == 0 else "featured", pos),
             )
-
-    for album_id in albums_to_recount:
-        cursor.execute(
-            """
-            UPDATE lib2_albums
-               SET track_count = (
-                       SELECT COUNT(*) FROM lib2_tracks WHERE album_id = ?
-                   ),
-                   expected_track_count = (
-                       SELECT COUNT(*) FROM lib2_tracks WHERE album_id = ?
-                   ),
-                   updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?
-               AND legacy_album_id IS NULL
-               AND COALESCE(origin, 'library') <> 'discography'
-               AND NOT EXISTS (
-                   SELECT 1
-                     FROM lib2_tracks t
-                     JOIN lib2_track_files tf ON tf.track_id = t.id
-                    WHERE t.album_id = ?
-                      AND COALESCE(tf.file_state,'active')<>'deleted'
-               )
-            """,
-            (album_id, album_id, album_id, album_id),
-        )
+            cursor.execute(
+                "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+                "VALUES(?,?,?)",
+                (album_id, aid, "primary" if aid == artist_id else "featured"),
+            )
 
     return created_or_updated
+
+
+def reconcile_import_monitoring(cursor, *, profile_id: int = 1,
+                                album_ids: Optional[Iterable[int]] = None) -> Dict[str, int]:
+    """Reconcile import-derived track and release monitoring.
+
+    A track is covered when it owns an active file or has a positive imported
+    Wishlist rule.  A library release is monitored only when its full expected
+    tracklist is represented and every represented track is covered.  Rules
+    created by an explicit user/runtime action are never overwritten.
+
+    ``album_ids`` scopes the repair for tracklist materialization; an import
+    omits it and reconciles the complete snapshot in one set of reads.
+    """
+    from core.library2.monitor_rules import (
+        PROVENANCE_FILE,
+        PROVENANCE_LEGACY,
+        PROVENANCE_WISHLIST,
+        record_rule,
+    )
+
+    scope = sorted({int(album_id) for album_id in album_ids or []})
+    scope_sql = ""
+    scope_args: List[int] = []
+    if scope:
+        marks = ",".join("?" for _ in scope)
+        scope_sql = f" AND t.album_id IN ({marks})"
+        scope_args = scope
+
+    track_rows = cursor.execute(
+        """SELECT t.id, t.album_id, t.monitored,
+                  r.monitored AS rule_monitored, r.provenance,
+                  EXISTS(
+                      SELECT 1 FROM lib2_track_files tf
+                       WHERE tf.track_id=t.id
+                         AND tf.path IS NOT NULL AND TRIM(tf.path)<>''
+                         AND COALESCE(tf.file_state,'active')
+                             NOT IN ('missing_confirmed','deleted')
+                  ) AS has_file
+             FROM lib2_tracks t
+             LEFT JOIN lib2_monitor_rules r
+                    ON r.entity_type='track' AND r.entity_id=t.id
+                   AND r.profile_id=?
+            WHERE 1=1""" + scope_sql,
+        (int(profile_id), *scope_args),
+    ).fetchall()
+
+    file_tracks = 0
+    cleared_file_tracks = 0
+    for row in track_rows:
+        provenance = row["provenance"]
+        if row["has_file"]:
+            if provenance in (None, PROVENANCE_LEGACY, PROVENANCE_FILE):
+                cursor.execute(
+                    "UPDATE lib2_tracks SET monitored=1 WHERE id=?", (row["id"],)
+                )
+                record_rule(
+                    cursor.connection, "track", row["id"], True,
+                    PROVENANCE_FILE, profile_id=profile_id,
+                )
+                file_tracks += 1
+        elif provenance == PROVENANCE_FILE:
+            # A previously imported file disappeared.  Drop only our derived
+            # positive intent; Wishlist/user/cascade rules are separate rows
+            # and therefore cannot arrive in this branch.
+            cursor.execute(
+                "UPDATE lib2_tracks SET monitored=0 WHERE id=?", (row["id"],)
+            )
+            record_rule(
+                cursor.connection, "track", row["id"], False,
+                PROVENANCE_LEGACY, profile_id=profile_id,
+            )
+            cleared_file_tracks += 1
+
+    album_scope_sql = ""
+    album_scope_args: List[int] = []
+    if scope:
+        marks = ",".join("?" for _ in scope)
+        album_scope_sql = f" AND al.id IN ({marks})"
+        album_scope_args = scope
+    albums = cursor.execute(
+        """SELECT al.id, al.track_count, al.expected_track_count,
+                  r.provenance,
+                  (SELECT COUNT(*) FROM lib2_tracks t
+                    WHERE t.album_id=al.id) AS known_tracks,
+                  (SELECT COUNT(*) FROM lib2_tracks t
+                    WHERE t.album_id=al.id
+                      AND (
+                          EXISTS(
+                              SELECT 1 FROM lib2_track_files tf
+                               WHERE tf.track_id=t.id
+                                 AND tf.path IS NOT NULL AND TRIM(tf.path)<>''
+                                 AND COALESCE(tf.file_state,'active')
+                                     NOT IN ('missing_confirmed','deleted')
+                          )
+                          OR EXISTS(
+                              SELECT 1 FROM lib2_monitor_rules tr
+                               WHERE tr.entity_type='track'
+                                 AND tr.entity_id=t.id AND tr.profile_id=?
+                                 AND tr.monitored=1 AND tr.provenance=?
+                          )
+                      )) AS covered_tracks
+             FROM lib2_albums al
+             LEFT JOIN lib2_monitor_rules r
+                    ON r.entity_type='album' AND r.entity_id=al.id
+                   AND r.profile_id=?
+            WHERE COALESCE(al.origin,'library')='library'""" + album_scope_sql,
+        (int(profile_id), PROVENANCE_WISHLIST, int(profile_id), *album_scope_args),
+    ).fetchall()
+
+    releases_updated = 0
+    for album in albums:
+        # A non-legacy parent rule is deliberate state and survives re-import.
+        if album["provenance"] not in (None, PROVENANCE_LEGACY):
+            continue
+        expected = max(
+            int(album["expected_track_count"] or 0),
+            int(album["track_count"] or 0),
+            int(album["known_tracks"] or 0),
+        )
+        monitored = bool(
+            expected > 0
+            and int(album["known_tracks"] or 0) >= expected
+            and int(album["covered_tracks"] or 0) == int(album["known_tracks"] or 0)
+        )
+        cursor.execute(
+            "UPDATE lib2_albums SET monitored=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (1 if monitored else 0, album["id"]),
+        )
+        record_rule(
+            cursor.connection, "album", album["id"], monitored,
+            PROVENANCE_LEGACY, profile_id=profile_id,
+        )
+        releases_updated += 1
+
+    return {
+        "file_tracks": file_tracks,
+        "cleared_file_tracks": cleared_file_tracks,
+        "releases": releases_updated,
+    }
 
 
 def _table_exists(cursor, name: str) -> bool:
@@ -1797,6 +1938,7 @@ __all__ = [
     "import_legacy_library",
     "link_single_album_duplicates",
     "apply_monitoring_from_watchlist_wishlist",
+    "reconcile_import_monitoring",
     "split_artist_credits",
     "featured_from_title",
     "normalize_name",

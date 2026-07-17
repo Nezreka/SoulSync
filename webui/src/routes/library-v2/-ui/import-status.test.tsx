@@ -9,6 +9,7 @@ import type { LibraryV2ImportState } from '../-library-v2.types';
 
 import {
   describeLibraryV2ImportCompletion,
+  describeLibraryV2ArtworkCacheProgress,
   describeLibraryV2ImportProgress,
   ImportButton,
 } from './library-v2-page';
@@ -22,6 +23,15 @@ function importState(overrides: Partial<LibraryV2ImportState> = {}): LibraryV2Im
     stats: null,
     error: null,
     finished_at: null,
+    artwork_cache: {
+      running: false,
+      current: 0,
+      total: 0,
+      stats: null,
+      error: null,
+      started_at: null,
+      finished_at: null,
+    },
     ...overrides,
   };
 }
@@ -47,6 +57,26 @@ describe('library v2 import progress', () => {
         }),
       ),
     ).toBe('Import complete — 1 artist · 2 albums · 3 tracks.');
+  });
+
+  it('labels artwork as non-blocking background work with bounded progress', () => {
+    expect(
+      describeLibraryV2ArtworkCacheProgress(
+        importState({
+          running: false,
+          stage: 'done',
+          artwork_cache: {
+            running: true,
+            current: 9,
+            total: 6,
+            stats: null,
+            error: null,
+            started_at: 1,
+            finished_at: null,
+          },
+        }),
+      ),
+    ).toBe('Library ready to browse · Caching artwork in the background · 6/6 · 100%');
   });
 
   it('reattaches to a running import and refreshes queries after completion', async () => {
@@ -97,14 +127,40 @@ describe('library v2 import progress', () => {
         runningPolls += 1;
         return HttpResponse.json(
           runningPolls === 1
-            ? importState({ stage: 'artwork', current: 3, total: 6 })
-            : importState({
-                running: false,
-                stage: 'done',
-                current: 6,
-                total: 6,
-                stats: { artists: 2, albums: 4, tracks: 8 },
-              }),
+            ? importState({ stage: 'tracks', current: 6, total: 8 })
+            : runningPolls === 2
+              ? importState({
+                  running: false,
+                  stage: 'done',
+                  current: 0,
+                  total: 0,
+                  stats: { artists: 2, albums: 4, tracks: 8 },
+                  artwork_cache: {
+                    running: true,
+                    current: 3,
+                    total: 6,
+                    stats: null,
+                    error: null,
+                    started_at: 1,
+                    finished_at: null,
+                  },
+                })
+              : importState({
+                  running: false,
+                  stage: 'done',
+                  current: 6,
+                  total: 6,
+                  stats: { artists: 2, albums: 4, tracks: 8 },
+                  artwork_cache: {
+                    running: false,
+                    current: 6,
+                    total: 6,
+                    stats: { artists: 2, albums: 4 },
+                    error: null,
+                    started_at: 1,
+                    finished_at: 2,
+                  },
+                }),
         );
       }),
     );
@@ -118,7 +174,9 @@ describe('library v2 import progress', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Import library' }));
 
-    expect(await screen.findByText('Caching artwork · 3/6 · 50%')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Library ready to browse · Caching artwork in the background/),
+    ).toBeInTheDocument();
     expect(
       await screen.findByText('Import complete — 2 artists · 4 albums · 8 tracks.'),
     ).toBeInTheDocument();

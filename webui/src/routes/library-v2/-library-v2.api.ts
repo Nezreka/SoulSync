@@ -247,23 +247,39 @@ export async function unlinkLibraryV2ArtistAlias(artistId: number): Promise<void
  *  endpoint (keys on the legacy row id carried by the match chip). */
 export async function manualMatchLibraryV2Entity(input: {
   entity_type: 'artist' | 'album' | 'track';
-  legacy_entity_id: number | string;
+  legacy_entity_id?: number | string | null;
+  library_v2_entity_id?: number | null;
   service: string;
   service_id: string;
   artist_legacy_id?: number | string;
   watchlist_row_id?: number;
 }): Promise<void> {
+  const useLegacy = input.legacy_entity_id != null;
+  if (!useLegacy && input.library_v2_entity_id == null) {
+    throw new Error('No matchable entity id');
+  }
   const payload = await readJson<{ success: boolean; error?: string }>(
-    apiClient.put('library/manual-match', {
-      json: {
-        entity_type: input.entity_type,
-        entity_id: input.legacy_entity_id,
-        service: input.service,
-        service_id: input.service_id,
-        ...(input.artist_legacy_id ? { artist_id: input.artist_legacy_id } : {}),
-        ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
-      },
-    }),
+    useLegacy
+      ? apiClient.put('library/manual-match', {
+          json: {
+            entity_type: input.entity_type,
+            entity_id: input.legacy_entity_id,
+            service: input.service,
+            service_id: input.service_id,
+            ...(input.artist_legacy_id ? { artist_id: input.artist_legacy_id } : {}),
+            ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
+          },
+        })
+      : apiClient.put(
+          `library/v2/${input.entity_type}s/${input.library_v2_entity_id}/manual-match`,
+          {
+            json: {
+              service: input.service,
+              service_id: input.service_id,
+              ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
+            },
+          },
+        ),
   );
   if (!payload.success) throw new Error(payload.error || 'Manual match failed');
 }
@@ -272,19 +288,34 @@ export async function manualMatchLibraryV2Entity(input: {
  * row in the same transaction as the legacy library row. */
 export async function clearLibraryV2EntityMatch(input: {
   entity_type: 'artist' | 'album' | 'track';
-  legacy_entity_id: number | string;
+  legacy_entity_id?: number | string | null;
+  library_v2_entity_id?: number | null;
   service: string;
   watchlist_row_id?: number;
 }): Promise<void> {
+  const useLegacy = input.legacy_entity_id != null;
+  if (!useLegacy && input.library_v2_entity_id == null) {
+    throw new Error('No matchable entity id');
+  }
   const payload = await readJson<{ success: boolean; error?: string }>(
-    apiClient.put('library/clear-match', {
-      json: {
-        entity_type: input.entity_type,
-        entity_id: input.legacy_entity_id,
-        service: input.service,
-        ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
-      },
-    }),
+    useLegacy
+      ? apiClient.put('library/clear-match', {
+          json: {
+            entity_type: input.entity_type,
+            entity_id: input.legacy_entity_id,
+            service: input.service,
+            ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
+          },
+        })
+      : apiClient.delete(
+          `library/v2/${input.entity_type}s/${input.library_v2_entity_id}/manual-match`,
+          {
+            json: {
+              service: input.service,
+              ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
+            },
+          },
+        ),
   );
   if (!payload.success) throw new Error(payload.error || 'Clear match failed');
 }
@@ -1232,7 +1263,10 @@ export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'import-status'],
     queryFn: fetchLibraryV2ImportStatus,
-    refetchInterval: (query) => (query.state.data?.running ? refetchIntervalMs : false),
+    refetchInterval: (query) =>
+      query.state.data?.running || query.state.data?.artwork_cache.running
+        ? refetchIntervalMs
+        : false,
   });
 }
 

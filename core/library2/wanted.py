@@ -18,14 +18,23 @@ Priority (the audit demands this be pinned in tests before use; see
 3. **projected track rule** (``cascade`` / ``new_release``) — the most
    recent bulk action projected onto this track (album toggle cascade,
    profile-assign opt-in, new-release enforcement).
-4. **album rule** — any provenance; decides tracks with no own rule (e.g.
-   rows materialized from a provider tracklist after the album was toggled).
-5. **artist rule** — any provenance. Note: artist toggles never cascade
+4. **deliberate album rule** (anything except ``legacy_import``) — a runtime
+   parent choice still beats file-derived upgrade monitoring.
+5. **imported file track rule** (``file_import``) — a concrete local file is
+   monitored for upgrades even when its release has a derived, incomplete
+   ``legacy_import`` baseline.
+6. **derived album rule** (``legacy_import``) — decides otherwise unruled
+   tracks imported under the release.
+7. **artist rule** — any provenance. Note: artist toggles never cascade
    flags onto tracks, so this level is exactly the "monitored heißt nicht
    gesucht" gap (P1-13) the projection closes.
-6. **legacy track rule** (``legacy_import``) — a flag whose origin is
+8. **legacy track rule** (``legacy_import``) — a flag whose origin is
    unknown ranks below deliberate parent rules but above the default.
-7. **default: unmonitored** — no recorded intent anywhere means not wanted.
+9. **default: unmonitored** — no recorded intent anywhere means not wanted.
+
+Album rules therefore retain their old authority when they reflect a user or
+runtime action. Only the importer's derived incomplete-parent baseline is
+overridden by concrete file coverage.
 
 ``wanted`` is the effective *intent*: whether acquisition should consider
 the track at all. Whether a wanted track actually queues (missing file,
@@ -41,7 +50,7 @@ from utils.logging_config import get_logger
 
 logger = get_logger("library2.wanted")
 
-PROJECTION_VERSION = 1
+PROJECTION_VERSION = 2
 
 LIB2_WANTED_TRACKS_DDL = """
 CREATE TABLE IF NOT EXISTS lib2_wanted_tracks (
@@ -75,6 +84,10 @@ def _decide(trk_mon: Optional[int], trk_prov: Optional[str],
         return bool(trk_mon), "track_rule:wishlist_import"
     if trk_prov in ("cascade", "new_release"):
         return bool(trk_mon), f"track_rule:{trk_prov}"
+    if alb_mon is not None and alb_prov != "legacy_import":
+        return bool(alb_mon), f"album_rule:{alb_prov}"
+    if trk_prov == "file_import":
+        return bool(trk_mon), "track_rule:file_import"
     if alb_mon is not None:
         return bool(alb_mon), f"album_rule:{alb_prov}"
     if art_mon is not None:

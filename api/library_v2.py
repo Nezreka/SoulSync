@@ -36,17 +36,26 @@ _import_state: Dict[str, Any] = {"running": False, "stage": None, "current": 0,
                                  "total": 0, "stats": None, "error": None,
                                  "finished_at": None}
 
+# Artwork is deliberately not part of the import's completion boundary.  Its
+# own state keeps the UI informed while the already-materialized library is
+# queryable.  A separate lock makes start/status snapshots coherent.
+_artwork_cache_lock = threading.Lock()
+_artwork_cache_state: Dict[str, Any] = {
+    "running": False,
+    "current": 0,
+    "total": 0,
+    "stats": None,
+    "error": None,
+    "started_at": None,
+    "finished_at": None,
+}
+
 # Background jobs are independent by opaque id. Duplicate kinds serialize;
 # monitor/upgrade/retag may run concurrently without overwriting each other.
 _job_registry = JobRegistry()
 
 _MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
-
-# Serializes slow-path artwork resolution per entity so a page of 75 uncached
-# covers doesn't fire 75 concurrent provider lookups for the same image.
-_artwork_locks: Dict[str, threading.Lock] = {}
-_artwork_locks_guard = threading.Lock()
 
 # A track is "consolidated away" when it deliberately has no file while its
 # canonical duplicate partner (either link direction) owns one — the user just
@@ -72,13 +81,74 @@ _NOT_CONSOLIDATED_SQL = """
 """
 
 
-def _artwork_lock(kind: str, eid: int) -> threading.Lock:
-    key = f"{kind}:{eid}"
-    with _artwork_locks_guard:
-        lock = _artwork_locks.get(key)
-        if lock is None:
-            lock = _artwork_locks.setdefault(key, threading.Lock())
-        return lock
+def _artwork_cache_snapshot() -> Dict[str, Any]:
+    with _artwork_cache_lock:
+        return dict(_artwork_cache_state)
+
+
+def _reset_artwork_cache_state() -> None:
+    with _artwork_cache_lock:
+        _artwork_cache_state.update(
+            running=False,
+            current=0,
+            total=0,
+            stats=None,
+            error=None,
+            started_at=None,
+            finished_at=None,
+        )
+
+
+def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -> bool:
+    """Start the non-critical artwork stage without extending import time."""
+    with _artwork_cache_lock:
+        if _artwork_cache_state["running"]:
+            return False
+        _artwork_cache_state.update(
+            running=True,
+            current=0,
+            total=0,
+            stats=None,
+            error=None,
+            started_at=time.time(),
+            finished_at=None,
+        )
+
+    def _run() -> None:
+        def _progress(_stage, current, total):
+            with _artwork_cache_lock:
+                _artwork_cache_state.update(current=current, total=total)
+
+        try:
+            from core.library2.artwork import precache_all_artwork
+            stats = precache_all_artwork(
+                get_database(), config_manager, progress=_progress
+            )
+            with _artwork_cache_lock:
+                _artwork_cache_state["stats"] = stats
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Library v2 background artwork cache failed: %s", exc)
+            with _artwork_cache_lock:
+                _artwork_cache_state["error"] = str(exc)
+        finally:
+            with _artwork_cache_lock:
+                _artwork_cache_state.update(
+                    running=False,
+                    finished_at=time.time(),
+                )
+
+    try:
+        threading.Thread(target=_run, name="lib2-artwork-cache", daemon=True).start()
+    except Exception as exc:  # noqa: BLE001 - optional presentation worker
+        logger.warning("Could not start Library v2 artwork cache worker: %s", exc)
+        with _artwork_cache_lock:
+            _artwork_cache_state.update(
+                running=False,
+                error=str(exc),
+                finished_at=time.time(),
+            )
+        return False
+    return True
 
 
 def register_library_v2_routes(app, *, get_database: Callable[[], Any],
@@ -1385,6 +1455,84 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, **bundle})
 
     @app.route(
+        "/api/library/v2/<entity_type>/<int:entity_id>/manual-match",
+        methods=["PUT", "DELETE"],
+    )
+    def lib2_native_manual_match(entity_type, entity_id):
+        """Match rows that were born in lib2 and have no legacy backref.
+
+        Legacy-backed chips keep using the established legacy endpoint.  This
+        closes the dead-end for Wishlist/provider/featured-credit artists whose
+        chips were visible but disabled because no legacy numeric id existed.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        service = str(body.get("service") or "").strip().lower()
+        service_id = str(body.get("service_id") or "").strip()
+        if not service or (request.method == "PUT" and not service_id):
+            return jsonify({
+                "success": False,
+                "error": "service and service_id are required",
+            }), 400
+        conn = _conn()
+        try:
+            from core.library2.match_status import set_library_v2_match
+            set_library_v2_match(
+                conn, entity_type, entity_id, service,
+                service_id if request.method == "PUT" else None,
+                actor=f"profile:{_profile()}",
+            )
+
+            # Artist settings deliberately reuse the legacy Watchlist.  Keep a
+            # supplied, identity-checked row in sync just like the legacy match
+            # endpoint does.
+            watchlist_row_id = body.get("watchlist_row_id")
+            if watchlist_row_id is not None:
+                if entity_type not in ("artist", "artists"):
+                    raise ValueError("Watchlist sync is only valid for artists")
+                from core.library2.artist_settings import WATCHLIST_PROVIDER_FIELDS
+                column = WATCHLIST_PROVIDER_FIELDS.get(service)
+                if not column:
+                    raise ValueError(
+                        f"Watchlist does not support provider {service!r}"
+                    )
+                artist = conn.execute(
+                    "SELECT name FROM lib2_artists WHERE id=?", (entity_id,)
+                ).fetchone()
+                watchlist = conn.execute(
+                    "SELECT id, artist_name FROM watchlist_artists WHERE id=?",
+                    (int(watchlist_row_id),),
+                ).fetchone()
+                if not artist or not watchlist or str(artist["name"] or "").casefold() \
+                        != str(watchlist["artist_name"] or "").casefold():
+                    return jsonify({
+                        "success": False,
+                        "error": "Watchlist artist does not match this Library v2 artist",
+                    }), 409
+                columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(watchlist_artists)")
+                }
+                if column not in columns:
+                    raise ValueError(f"Watchlist column {column!r} is unavailable")
+                conn.execute(
+                    f"UPDATE watchlist_artists SET {column}=? WHERE id=?",
+                    (service_id if request.method == "PUT" else None,
+                     int(watchlist_row_id)),
+                )
+            conn.commit()
+        except LookupError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 404
+        except ValueError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+        return jsonify({"success": True})
+
+    @app.route(
         "/api/library/v2/albums/<int:album_id>/missing-tracks/materialize",
         methods=["POST"],
     )
@@ -1721,18 +1869,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     full.unlink()
                 except OSError:
                     pass
-        # Slow path: resolve + cache (opens a DB connection). Serialized per
-        # entity so concurrent first-views don't stampede the providers; the
-        # second waiter finds the file cached and returns without resolving.
-        with _artwork_lock(kind, eid):
-            if not force and artwork_file(db, kind, eid).exists():
-                path = str(artwork_file(db, kind, eid))
-            else:
-                conn = db._get_connection()
-                try:
-                    path = build_artwork(db, conn, config_manager, kind, eid, force=force)
-                finally:
-                    conn.close()
+        # Slow path: build_artwork owns the shared per-entity single-flight
+        # lock, so HTTP requests and the background precache cannot duplicate
+        # provider/NAS work.
+        conn = db._get_connection()
+        try:
+            path = build_artwork(db, conn, config_manager, kind, eid, force=force)
+        finally:
+            conn.close()
         if not path:
             return "", 404
         target = thumb_file(db, kind, eid) if want_thumb else artwork_file(db, kind, eid)
@@ -3835,6 +3979,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         with _import_lock:
             if _import_state["running"]:
                 return jsonify({"success": False, "error": "Import already running"}), 409
+            if _artwork_cache_snapshot()["running"]:
+                return jsonify({
+                    "success": False,
+                    "error": "Artwork caching is still running; retry when it finishes",
+                }), 409
+            _reset_artwork_cache_state()
             _import_state.update(running=True, stage="starting", current=0, total=0,
                                  stats=None, error=None, finished_at=None)
 
@@ -3869,14 +4019,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 except Exception as e:  # noqa: BLE001
                     logger.debug("tag cache precache failed: %s", e)
 
-                _import_state.update(stage="artwork", current=0, total=0)
-                try:
-                    from core.library2.artwork import precache_all_artwork
-                    precache_all_artwork(get_database(), config_manager, progress=_progress)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("artwork precache failed: %s", e)
-
-                _import_state.update(stage="done")
+                # Artwork is optional presentation data: rows, monitoring,
+                # tracklists, tag facts and §63 dedup/namespace repairs are all
+                # committed already.  Mark the import complete and let artwork
+                # continue independently so the UI can browse immediately.
+                _import_state.update(stage="done", current=0, total=0)
+                _start_artwork_cache(get_database, config_manager)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")
@@ -3891,7 +4039,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        return jsonify({"success": True, **_import_state})
+        return jsonify({
+            "success": True,
+            **_import_state,
+            "artwork_cache": _artwork_cache_snapshot(),
+        })
 
     logger.info("Library v2 routes registered (/api/library/v2/*)")
 

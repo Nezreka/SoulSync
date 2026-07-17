@@ -106,7 +106,15 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
 
     rows = conn.execute(
         f"""
-        WITH album_stats AS (
+        WITH artist_albums AS (
+            SELECT aa.artist_id, aa.album_id
+              FROM lib2_album_artists aa
+            UNION
+            SELECT ta.artist_id, t.album_id
+              FROM lib2_track_artists ta
+              JOIN lib2_tracks t ON t.id=ta.track_id
+        ),
+        album_stats AS (
             SELECT aa.artist_id,
                    COUNT(DISTINCT CASE
                        WHEN al.album_type <> 'single'
@@ -116,7 +124,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                        WHEN al.album_type = 'single'
                         AND (al.origin='library' OR al.monitored=1)
                        THEN al.id END) AS single_count
-              FROM lib2_album_artists aa
+              FROM artist_albums aa
               JOIN lib2_albums al ON al.id=aa.album_id
              GROUP BY aa.artist_id
         ),
@@ -284,8 +292,19 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "SELECT * FROM quality_profiles WHERE id = ?", (artist_profile["id"],)
     ).fetchone()
 
+    group_marks = ",".join("?" for _ in group)
     album_rows = conn.execute(
         f"""
+        WITH artist_albums AS (
+            SELECT aa.album_id
+              FROM lib2_album_artists aa
+             WHERE aa.artist_id IN ({group_marks})
+            UNION
+            SELECT t.album_id
+              FROM lib2_track_artists ta
+              JOIN lib2_tracks t ON t.id=ta.track_id
+             WHERE ta.artist_id IN ({group_marks})
+        )
         SELECT al.id, al.title, al.album_type, al.release_date, al.year,
                al.image_url, al.monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
@@ -300,16 +319,15 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                     AND COALESCE(tf.file_state, 'active')
                         NOT IN ('missing_confirmed','deleted')
                    THEN t.id END) AS files_present
-        FROM lib2_album_artists aa
+        FROM artist_albums aa
         JOIN lib2_albums al ON al.id = aa.album_id
         JOIN lib2_artists pa ON pa.id=al.primary_artist_id
         LEFT JOIN lib2_tracks t ON t.album_id=al.id
         LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
-        WHERE aa.artist_id IN ({",".join("?" for _ in group)})
         GROUP BY al.id
         ORDER BY al.year DESC, al.title COLLATE NOCASE
         """,
-        tuple(group),
+        (*tuple(group), *tuple(group)),
     ).fetchall()
 
     projected_albums = project_metadata_many(

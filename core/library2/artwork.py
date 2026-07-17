@@ -21,14 +21,51 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.artwork")
+
+
+# The import precache and the HTTP slow path may discover the same uncached
+# entity at the same time.  Keep one lock boundary in this module (rather than
+# an API-only lock) so every caller shares the same single-flight guarantee.
+_build_locks: Dict[tuple[str, str, int], tuple[threading.Lock, int]] = {}
+_build_locks_guard = threading.Lock()
+
+
+@contextmanager
+def _build_lock(database, kind: str, entity_id: int) -> Iterator[None]:
+    """Reference-counted per-entity lock; entries disappear when idle.
+
+    A full first import may touch hundreds of thousands of entities, so a
+    permanent lock registry would trade the provider stampede for a memory
+    leak.  Counting owners + waiters lets us safely prune without allowing a
+    third caller to create a second lock while another waiter still exists.
+    """
+    key = (str(database.database_path), kind, int(entity_id))
+    with _build_locks_guard:
+        current = _build_locks.get(key)
+        lock, references = current if current is not None else (threading.Lock(), 0)
+        _build_locks[key] = (lock, references + 1)
+    lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
+        with _build_locks_guard:
+            current = _build_locks.get(key)
+            if current is not None and current[0] is lock:
+                references = current[1] - 1
+                if references <= 0:
+                    _build_locks.pop(key, None)
+                else:
+                    _build_locks[key] = (lock, references)
 
 
 def artwork_dir(database) -> Path:
@@ -54,8 +91,14 @@ def is_cached_jpeg(path: Path) -> bool:
         return False
 
 
-def _normalize_jpeg(data: bytes) -> Optional[bytes]:
-    """Validate arbitrary image bytes and encode the one cache format: JPEG."""
+def _normalize_jpeg_variants(data: bytes, thumb_height: int = 256) -> Optional[tuple[bytes, bytes]]:
+    """Validate once and encode the full JPEG plus its list thumbnail.
+
+    Keeping both encodes on the same decoded/transposed RGB image avoids
+    reopening and decoding the just-written full JPEG for every entity.  The
+    P2-04 format boundary remains unchanged: arbitrary source bytes are fully
+    decoded, EXIF-transposed and normalized to RGB JPEG.
+    """
     try:
         from PIL import Image, ImageOps
 
@@ -69,12 +112,38 @@ def _normalize_jpeg(data: bytes) -> Optional[bytes]:
                 image = background
             else:
                 image = image.convert("RGB")
+
+            thumbnail = image.copy()
+            width, height = thumbnail.size
+            if height > thumb_height:
+                thumbnail = thumbnail.resize(
+                    (max(1, int(width * thumb_height / height)), thumb_height),
+                    Image.LANCZOS,
+                )
+
             output = BytesIO()
             image.save(output, "JPEG", quality=90, optimize=True)
-            return output.getvalue()
+            thumb_output = BytesIO()
+            thumbnail.save(thumb_output, "JPEG", quality=82, optimize=True)
+            return output.getvalue(), thumb_output.getvalue()
     except Exception as exc:  # noqa: BLE001
         logger.debug("artwork image validation failed: %s", exc)
         return None
+
+
+def _normalize_jpeg(data: bytes) -> Optional[bytes]:
+    """Validate arbitrary image bytes and encode the one cache format: JPEG."""
+    variants = _normalize_jpeg_variants(data)
+    return variants[0] if variants else None
+
+
+def _write_thumbnail_bytes(dst: Path, data: bytes) -> None:
+    try:
+        tmp = dst.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, dst)
+    except OSError as exc:
+        logger.debug("thumbnail generation failed for %s: %s", dst, exc)
 
 
 def _write_thumbnail(src: Path, dst: Path, height: int = 256) -> None:
@@ -119,7 +188,10 @@ def _embedded_art_for_album(conn, config_manager, album_id: int) -> Optional[byt
     ).fetchall()
     for row in rows:
         abs_path = _resolve_abs(row["path"], config_manager)
-        if abs_path and os.path.exists(abs_path):
+        # resolve_lib2_path already guarantees an existing path.  Avoid a
+        # duplicate stat here; it is especially costly on NAS mounts.  The
+        # canonical extractor still performs its own file-type guard.
+        if abs_path:
             data = extract_embedded_art(abs_path)
             if data:
                 return data
@@ -249,8 +321,18 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
     """Resolve + cache artwork for an artist/album; return the on-disk jpg path.
 
     ``kind`` is 'artist' or 'album'. Returns None when no art could be found.
-    Idempotent: a cached file is reused unless ``force`` is set.
+    Idempotent: a cached file is reused unless ``force`` is set.  Concurrent
+    callers for the same database/entity are single-flighted so an immediate
+    UI browse cannot duplicate a running background provider/NAS lookup.
     """
+    with _build_lock(database, kind, entity_id):
+        return _build_artwork_unlocked(
+            database, conn, config_manager, kind, entity_id, force=force
+        )
+
+
+def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id: int,
+                            *, force: bool = False) -> Optional[str]:
     out = artwork_file(database, kind, entity_id)
     if out.exists() and not force:
         if is_cached_jpeg(out):
@@ -318,27 +400,37 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
 
     if not data:
         return None
-    data = _normalize_jpeg(data)
-    if not data:
+    variants = _normalize_jpeg_variants(data)
+    if not variants:
         return None
+    data, thumbnail = variants
     try:
         tmp = out.with_suffix(".writing")
         tmp.write_bytes(data)
         os.replace(tmp, out)
-        _write_thumbnail(out, thumb_file(database, kind, entity_id))
+        _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
         return str(out)
     except OSError as e:
         logger.debug("artwork write failed (%s %s): %s", kind, entity_id, e)
         return None
 
 
-def _precache_max_workers(config_manager, default: int = 3) -> int:
-    """Shared pool-size knob with ``core.auto_import_worker`` — same config
-    key, same default, so one setting controls all background lib2 workers."""
+def _precache_max_workers(config_manager, default: int = 6) -> int:
+    """Return bounded artwork concurrency.
+
+    Artwork is predominantly independent NAS/network I/O, unlike the heavier
+    auto-import pipeline.  It therefore gets a dedicated optional knob and a
+    higher default, while retaining ``auto_import.max_workers`` as a backwards-
+    compatible fallback for installations that already tuned it.  The hard cap
+    prevents an accidental setting from stampeding providers or a NAS.
+    """
     if config_manager is None:
         return default
     try:
-        return max(1, int(config_manager.get("auto_import.max_workers", default)))
+        configured = config_manager.get("library_v2.artwork_cache_workers", None)
+        if configured is None:
+            configured = config_manager.get("auto_import.max_workers", default)
+        return min(16, max(1, int(configured)))
     except Exception:  # noqa: BLE001
         return default
 
@@ -369,11 +461,15 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
         conn.close()
 
     total = len(artist_ids) + len(album_ids)
+    # Compute cache paths from one directory snapshot.  artwork_file() ensures
+    # the directory exists on every call; doing that thousands of times here is
+    # unnecessary filesystem work even when every image is already cached.
+    cache_dir = artwork_dir(database)
     pending = [
         (kind, eid)
         for kind, ids in (("album", album_ids), ("artist", artist_ids))
         for eid in ids
-        if not artwork_file(database, kind, eid).exists()
+        if not (cache_dir / f"{kind}_{int(eid)}.jpg").exists()
     ]
     progress_lock = threading.Lock()
     done = [total - len(pending)]
@@ -395,7 +491,7 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
 
     try:
         if pending:
-            max_workers = _precache_max_workers(config_manager)
+            max_workers = min(len(pending), _precache_max_workers(config_manager))
             with ThreadPoolExecutor(
                 max_workers=max_workers, thread_name_prefix="Lib2Artwork"
             ) as executor:
@@ -443,9 +539,10 @@ def apply_manual_artwork(
     data = download_image_bytes(url)
     if not data:
         return False
-    data = _normalize_jpeg(data)
-    if not data:
+    variants = _normalize_jpeg_variants(data)
+    if not variants:
         return False
+    data, thumbnail = variants
 
     from core.library2.metadata_overrides import set_field_override
     set_field_override(
@@ -454,15 +551,19 @@ def apply_manual_artwork(
         reason="manual cover pick",
     )
 
-    out = artwork_file(database, kind, entity_id)
-    try:
-        tmp = out.with_suffix(".writing")
-        tmp.write_bytes(data)
-        os.replace(tmp, out)
-        _write_thumbnail(out, thumb_file(database, kind, entity_id))
-    except OSError as e:
-        logger.debug("manual artwork write failed (%s %s): %s", kind, entity_id, e)
-        return False
+    # Serialize the final cache replacement with background/on-demand builds.
+    # The override is already persisted on this connection, so whichever build
+    # follows will also resolve to the user's pinned URL.
+    with _build_lock(database, kind, entity_id):
+        out = artwork_file(database, kind, entity_id)
+        try:
+            tmp = out.with_suffix(".writing")
+            tmp.write_bytes(data)
+            os.replace(tmp, out)
+            _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
+        except OSError as e:
+            logger.debug("manual artwork write failed (%s %s): %s", kind, entity_id, e)
+            return False
     return True
 
 

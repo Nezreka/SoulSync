@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from core.library2.monitor_rules import (
     PROVENANCE_CASCADE,
+    PROVENANCE_FILE,
     PROVENANCE_LEGACY,
     PROVENANCE_USER,
     explicit_track_rules_for_album,
@@ -27,13 +28,19 @@ def _rule(conn, entity_type, entity_id, profile_id=1):
         (entity_type, entity_id, profile_id)).fetchone()
 
 
-def test_import_labels_flags_as_legacy(imported_conn):
+def test_import_labels_flags_with_import_provenance(imported_conn):
     conn = imported_conn
-    track = conn.execute("SELECT id, monitored FROM lib2_tracks LIMIT 1").fetchone()
+    track = conn.execute(
+        "SELECT id, monitored FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()
     rule = _rule(conn, "track", track["id"])
     assert rule is not None
-    assert rule["provenance"] == PROVENANCE_LEGACY
+    assert rule["provenance"] == PROVENANCE_FILE
     assert rule["monitored"] == track["monitored"]
+    missing = conn.execute(
+        "SELECT id, monitored FROM lib2_tracks WHERE legacy_track_id=101"
+    ).fetchone()
+    assert _rule(conn, "track", missing["id"])["provenance"] == PROVENANCE_LEGACY
     # Every imported entity got labelled.
     for entity_type, table in (("artist", "lib2_artists"),
                                ("album", "lib2_albums"),

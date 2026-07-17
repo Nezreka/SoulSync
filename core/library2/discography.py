@@ -472,7 +472,10 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                            image_url = COALESCE(image_url, ?),
                            release_date = COALESCE(release_date, ?),
                            year = COALESCE(year, ?),
-                           expected_track_count = COALESCE(expected_track_count, ?),
+                           expected_track_count = MAX(
+                               COALESCE(expected_track_count, 0),
+                               COALESCE(?, 0)
+                           ),
                            external_ids = ?,
                            updated_at = CURRENT_TIMESTAMP
                        WHERE id = ?""",
@@ -716,6 +719,48 @@ def repair_track_number_collisions(database, config_manager, artist_id: int) -> 
     return repaired
 
 
+def repair_incomplete_library_tracklists(
+    database, config_manager, artist_id: int,
+) -> List[int]:
+    """Materialize canonical rows for underfilled imported releases.
+
+    Discography refresh first raises a stale imported expectation from the
+    provider catalog.  This second pass then resolves any library release whose
+    persisted rows are still fewer than that expectation.  It intentionally
+    calls ``resolve_tracklist`` directly: browsing repair must not auto-monitor
+    the missing tracks or stamp a ``new_release`` rule.
+    """
+    from core.library2.completeness import resolve_tracklist
+
+    conn = database._get_connection()
+    repaired: List[int] = []
+    try:
+        album_ids = [row["id"] for row in conn.execute(
+            """SELECT DISTINCT al.id
+                  FROM lib2_album_artists aa
+                  JOIN lib2_albums al ON al.id=aa.album_id
+                 WHERE aa.artist_id=?
+                   AND COALESCE(al.origin,'library')='library'
+                   AND MAX(COALESCE(al.expected_track_count, 0),
+                           COALESCE(al.track_count, 0)) >
+                       (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id=al.id)
+                 ORDER BY al.id""",
+            (artist_id,),
+        ).fetchall()]
+        for album_id in album_ids:
+            try:
+                if resolve_tracklist(config_manager, conn, album_id):
+                    repaired.append(album_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Incomplete library tracklist repair failed for album %s: %s",
+                    album_id, e,
+                )
+    finally:
+        conn.close()
+    return repaired
+
+
 def _refresh_one_artist(
     database, artist_id: int, config_manager, *, wishlist_profile_id: int,
 ) -> tuple[Dict[str, Any], int]:
@@ -733,6 +778,8 @@ def _refresh_one_artist(
                 wishlist_profile_id=wishlist_profile_id,
             )
         stats["repaired_track_number_collisions"] = repair_track_number_collisions(
+            database, config_manager, artist_id)
+        stats["repaired_incomplete_tracklists"] = repair_incomplete_library_tracklists(
             database, config_manager, artist_id)
         return stats, mirrored
 

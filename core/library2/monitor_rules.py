@@ -20,6 +20,9 @@ chose this" from "an import copied a flag" (P1-13).
 - ``wishlist_import`` — a concrete track was present in the admin's legacy
   Wishlist at import time; it beats inherited parent intent but remains
   distinguishable from a direct Library-v2 click.
+- ``file_import`` — the track had an active local file during import.  Like a
+  Wishlist item this is concrete track-level coverage and therefore beats an
+  incomplete release's derived (unmonitored) parent baseline.
 - ``legacy_import`` — the flag existed before rules were introduced (or came
   from the legacy import); provenance unknown, never blocks a cascade.
 
@@ -39,6 +42,7 @@ PROVENANCE_USER = "user_explicit"
 PROVENANCE_CASCADE = "cascade"
 PROVENANCE_NEW_RELEASE = "new_release"
 PROVENANCE_WISHLIST = "wishlist_import"
+PROVENANCE_FILE = "file_import"
 PROVENANCE_LEGACY = "legacy_import"
 
 _ENTITY_TABLES = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_tracks"}
@@ -216,6 +220,7 @@ def prune_orphaned_rules(cursor) -> int:
 
 __all__ = [
     "PROVENANCE_CASCADE",
+    "PROVENANCE_FILE",
     "PROVENANCE_LEGACY",
     "PROVENANCE_NEW_RELEASE",
     "PROVENANCE_USER",

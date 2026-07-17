@@ -87,9 +87,31 @@ def test_entity_without_legacy_backref_returns_synthetic_pending_chips(imported_
     assert by_service["spotify"]["status"] == "matched"
     assert by_service["spotify"]["external_id"] == "ghost_sp"
     assert by_service["spotify"]["legacy_entity_id"] is None
+    assert by_service["spotify"]["library_v2_entity_id"] == new_id
 
     assert by_service["musicbrainz"]["status"] == "pending"
     assert by_service["musicbrainz"]["legacy_entity_id"] is None
+
+
+def test_lib2_native_entity_can_be_manually_matched_and_cleared(imported_conn):
+    artist_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name) VALUES('Native', 'Native')"
+    ).lastrowid
+
+    MS.set_library_v2_match(
+        imported_conn, "artist", artist_id, "deezer", "dz-native"
+    )
+    rows = MS.entity_match_status(imported_conn, "artist", artist_id)
+    deezer = next(row for row in rows if row["service"] == "deezer")
+    assert deezer["status"] == "matched"
+    assert deezer["external_id"] == "dz-native"
+    assert deezer["library_v2_entity_id"] == artist_id
+
+    MS.set_library_v2_match(imported_conn, "artist", artist_id, "deezer", None)
+    rows = MS.entity_match_status(imported_conn, "artist", artist_id)
+    deezer = next(row for row in rows if row["service"] == "deezer")
+    assert deezer["status"] == "pending"
+    assert deezer["external_id"] is None
 
 
 def test_track_match_reads_legacy_track_row(imported_conn):

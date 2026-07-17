@@ -6,16 +6,19 @@ fixed in tests before the projection is used:
 1. explicit track rule    (beats everything, both directions)
 2. imported Wishlist rule (wishlist_import)
 3. projected track rule   (cascade / new_release)
-4. album rule             (any provenance)
-5. artist rule            (any provenance)
-6. legacy track rule      (legacy_import)
-7. default                (unmonitored)
+4. deliberate album rule  (non-legacy provenance)
+5. imported file rule     (file_import)
+6. derived album rule     (legacy_import)
+7. artist rule            (any provenance)
+8. legacy track rule      (legacy_import)
+9. default                (unmonitored)
 """
 
 from __future__ import annotations
 
 from core.library2.monitor_rules import (
     PROVENANCE_CASCADE,
+    PROVENANCE_FILE,
     PROVENANCE_LEGACY,
     PROVENANCE_NEW_RELEASE,
     PROVENANCE_USER,
@@ -93,6 +96,26 @@ def test_imported_wishlist_track_beats_parent_import_state(imported_conn):
     record_rule(conn, "track", track, True, PROVENANCE_WISHLIST)
     recompute_wanted(conn, track_ids=[track])
     assert _projected(conn, track) == (True, "track_rule:wishlist_import")
+
+
+def test_imported_file_track_beats_incomplete_parent_import_state(imported_conn):
+    conn = imported_conn
+    _, album, track = _seed_chain(conn)
+    record_rule(conn, "album", album, False, PROVENANCE_LEGACY)
+    record_rule(conn, "track", track, True, PROVENANCE_FILE)
+    recompute_wanted(conn, track_ids=[track])
+    assert _projected(conn, track) == (True, "track_rule:file_import")
+
+
+def test_deliberate_album_rule_beats_imported_file_rule(imported_conn):
+    """A reset-restored or direct parent choice stays authoritative; only the
+    derived incomplete-import baseline is weaker than concrete file coverage."""
+    conn = imported_conn
+    _, album, track = _seed_chain(conn)
+    record_rule(conn, "album", album, False, PROVENANCE_USER)
+    record_rule(conn, "track", track, True, PROVENANCE_FILE)
+    recompute_wanted(conn, track_ids=[track])
+    assert _projected(conn, track) == (False, "album_rule:user_explicit")
 
 
 def test_album_rule_decides_ruleless_tracks(imported_conn):

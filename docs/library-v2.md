@@ -3515,6 +3515,15 @@ Die Album-Monitor-Intent-Snapshot/Restore-Logik (`snapshot_album_monitor_intent`
 - Track-Flag-Folgefix (Commit `d76a8222`): der Track-INSERT setzt `monitored` jetzt konsistent aus dem Album-Flag, damit die Roh-Flag-Spalte nicht mehr von der `wanted`-Projektion abweicht (ein Missing-Track eines Teil-Albums liest damit auch als Flag `0`, nicht mehr Schema-Default `1`).
 - Zwei Tests, die das alte Blanket-Monitoring kodierten, wurden auf die korrigierte Semantik aktualisiert (`test_queries.py`, `test_wanted_projection.py`); neuer Regressionstest `test_partial_album_is_not_blanket_monitored_on_import`.
 
+**Präzisierung 2026-07-17 (§67 supersedes die Track-Flag-Aussage):** Eine
+vorhandene Datei ist selbst konkrete Track-Abdeckung und bleibt deshalb auch
+innerhalb eines partiellen Albums individuell monitored/wanted. Dafür existiert
+die eigene Provenienz `file_import`, die eine rein abgeleitete negative
+`legacy_import`-Album-Baseline überstimmt. Der Parent wird genau bei
+vollständiger Abdeckung gesetzt: jeder kanonische Slot hat entweder eine aktive
+Datei oder eine positive `wishlist_import`-Regel. Explizite Benutzerregeln
+bleiben stärker.
+
 **Priorität:** Hoch — verfälscht das Monitoring-Verhalten für jeden Nutzer, der nur Teile eines Albums wollte, und führt zu ungewollten Auto-Downloads/Upgrade-Scans für nie gewünschte Tracks.
 
 ---
@@ -7159,3 +7168,168 @@ die konkrete Produktions-ID `01MoTj8w4VkVtgdPOijUUE`, prüfen Import +
 Re-Import, fehlende Provider-Namespace-Kontamination sowie alle genannten
 Brücken. Verifikation: 216 fokussierte Backend-Tests (inkl. §63 Discography,
 Editions, MB-Reconcile und Dedup-Repair) und 57 betroffene Frontend-Tests grün.
+
+---
+
+## 66. Import-Abschluss von Artwork-Precache entkoppelt + Cache beschleunigt — ✅ umgesetzt (2026-07-17)
+
+### 66.1 Bottleneck und neue Abschlussgrenze
+
+Der eigentliche Legacy→lib2-Import bleibt der in §17.6 beschriebene lokale
+SQLite-Pfad. Langsam war weiterhin die nachgelagerte Artwork-Stufe: pro
+ungecachtem Artist/Album können Pfadauflösung und Datei-`stat` auf einem NAS,
+Mutagen-Reads des Embedded Covers, Pillow-Decode/JPEG/Thumbnail-Encoding sowie
+synchrone Provider-Auflösung und Bild-Download anfallen. Die Parallelisierung
+aus §20 verkürzte diese Stufe, ließ sie aber weiterhin im selben
+`_import_state.running`-Lebenszyklus. Die UI invalidierte ihre Library-Queries
+daher erst nach dem letzten Cover.
+
+Artwork ist jetzt eine eigene, nicht-kritische Background-Stufe mit dem
+Statusobjekt `artwork_cache` (`running/current/total/stats/error/started_at/
+finished_at`) im bestehenden Import-Statusendpoint. Der verbindliche Import
+gilt nach folgenden weiterhin synchron garantierten Schritten als fertig:
+
+1. Artists/Alben/Tracks/Files + Monitoring/Wanted/Editionen,
+2. Post-Import-Dedup und Namespace-Sanierung aus §63,
+3. Tracklist-Materialisierung,
+4. Tag-Cache (Lyrics/ReplayGain/Gap-Fakten).
+
+Danach wechselt der Hauptstatus auf `done`, `running=false`; die UI invalidiert
+sofort `LIBRARY_V2_QUERY_KEY` und zeigt „Library ready to browse“, während sie
+den Artwork-Fortschritt separat weiterpollt. Ein Artwork-Fehler macht einen
+erfolgreichen Import nie nachträglich fehlgeschlagen: fehlende Covers werden
+über den bestehenden HTTP-Slowpath weiterhin on demand aufgelöst. Ein Re-Import
+wird während des kurzen Background-Jobs abgewiesen, um einen destruktiven
+`reset` nicht mit offenen Artwork-DB-Reads zu überlappen.
+
+### 66.2 Beschleunigung ohne Semantikänderung
+
+- Artwork hat einen eigenen optionalen Worker-Key
+  `library_v2.artwork_cache_workers`, Default 6, Hard-Cap 16. Fehlt der Key,
+  bleibt ein vorhandenes `auto_import.max_workers` als kompatibler Fallback
+  wirksam. Tracklist- und Tag-Worker werden nicht ungefragt hochgedreht.
+- UI-Slowpath und Precache teilen jetzt denselben Per-DB/Entity-Single-Flight-
+  Lock in `core/library2/artwork.py`. Sofortiges Browsen während des Precaches
+  erzeugt daher keinen doppelten Provider-/NAS-Read und keine konkurrierenden
+  `.writing`-Dateien; manuelle Art-Picks nutzen dieselbe Schreibgrenze.
+- Der Pending-Scan erzeugt das Cache-Verzeichnis einmal statt über
+  `artwork_file()` pro Entity. Nach `resolve_lib2_path` entfällt ein redundanter
+  zweiter `exists()`-Call auf den Mediendateipfad.
+- Full-JPEG und Thumbnail werden nach genau einem Pillow-Decode/EXIF-Transpose
+  aus demselben RGB-Bild erzeugt. Die P2-04-Garantie bleibt vollständig
+  erhalten: beliebige Embedded-/Provider-Bytes werden validiert, Transparenz
+  wird auf Weiß komponiert, Cachedatei und Thumbnail sind echte JPEGs. Es wird
+  lediglich das erneute Öffnen und Dekodieren des gerade geschriebenen Full-
+  JPEGs eingespart.
+
+### 66.3 Abgrenzung zu §63/§65 und Verifikation
+
+Nicht verändert wurden Titel-/Datum-/Trackcount-Matching, Editionen,
+MusicBrainz-Reconcile, Artist-Adoption/Dedup, Provider-Namespaces und opaque
+Legacy-Backrefs. Artwork bleibt medienserver-unabhängig und alle Dateizugriffe
+laufen weiterhin über `resolve_lib2_path`.
+
+Verifikation: `tests/library2` **736 passed**; gezielter Artwork/API-Block
+**149 passed**; Frontend Format/Lint/Typecheck ohne Fehler, Vitest **38 Dateien /
+224 Tests passed**. Die neuen Verträge prüfen den vorgezogenen Importabschluss
+bei absichtlich blockiertem Artwork-Worker, Background-Polling/UX,
+Single-Flight, Worker-Cap, JPEG+Thumbnail-Normalisierung und den vermiedenen
+doppelten NAS-`stat`. Der repository-weite Python-Lauf erreichte **10.445
+passed, 3 skipped, 2 deselected** bei 21 Failures: 20 reproduzieren isoliert in
+den bereits in §41 dokumentierten, unberührten Baseline-Dateien
+`test_cross_batch_dedup.py`/`test_normalize_version_symmetry.py` (20 failed,
+4 passed); der einzelne Video-Fehler ist Cross-File-Pollution und läuft isoliert
+mit der ganzen Datei grün (8 passed). Production-Build erfolgreich; nur der
+bekannte Main-Chunk-Größenhinweis bleibt.
+
+---
+
+## 67. Import-Monitoring, vollständige Tracklisten und „tote Artists“ — ✅ umgesetzt (2026-07-17)
+
+### 67.1 Verbindliche Monitoring-Regel
+
+Der Import unterscheidet jetzt Parent-Intent und konkrete Track-Abdeckung:
+
+1. Ein Track mit aktiver lokaler Datei erhält `file_import`; ein Track aus der
+   Admin-Wishlist erhält `wishlist_import`. Beide sind individuell monitored
+   und wanted, auch wenn ihr Album nicht vollständig ist.
+2. Album/EP/Single werden nur dann als Parent monitored, wenn die kanonische
+   Gesamtgröße bekannt/repräsentiert ist und **jeder** Track entweder eine
+   aktive Datei oder eine Wishlist-Regel besitzt.
+3. Daraus folgen die gewünschten Fälle ohne Sonderheuristik: ein 1-Track-
+   Single mit Datei/Wishlist ist vollständig; ein partielles Album bleibt als
+   Parent aus, seine vorhandenen/gewünschten Tracks bleiben einzeln an; Dateien
+   plus Wishlist für sämtliche übrigen Slots machen das Album vollständig an.
+4. `user_explicit`, `cascade` und `new_release` werden beim Reimport nicht von
+   dieser abgeleiteten Import-Baseline überschrieben. Die Wanted-Projektion
+   wurde wegen der neuen `file_import`-Prioritätsstufe auf Version 2 erhöht.
+
+### 67.2 Root Cause „Dangerous zeigt nur Track 7“ und Discovery-Reparatur
+
+`seed_wishlist_tracks()` übernahm zunächst korrekt
+`album.total_tracks`, setzte danach aber für Wishlist-only-Releases sowohl
+`track_count` als auch `expected_track_count` wieder auf die Zahl der bereits
+angelegten Wishlist-Rows. Aus „Dangerous, 14 Tracks, Wishlist Track 7“ wurde so
+„1 erwartet, 1 vorhanden“. `_partial_album_rows()` sah keine Lücke und der
+Tracklist-Precache lief nie. Artwork war daran nicht beteiligt.
+
+Der Clamp ist entfernt. Bis zur Provider-Auflösung zeigt die Detailansicht alle
+erwarteten Slots als Missing-Placeholder; der weiterhin importkritische
+Tracklist-Precache materialisiert anschließend echte Titel/Nummern. Ein
+fehlgeschlagener Provider-Call reduziert die erwartete Größe nicht wieder.
+
+„Update Discovery“ heilt außerdem Bestandsimporte:
+
+- Provider-Trackcounts konvergieren jetzt monoton nach oben (`MAX`) statt einen
+  alten Wert durch `COALESCE` für immer festzuhalten.
+- Nach dem Discography-Abgleich werden unterfüllte `origin='library'`-Releases
+  gezielt über `resolve_tracklist()` materialisiert. Das ist reine
+  Browse-/Metadaten-Reparatur: keine `new_release`-Regel, keine pauschale
+  Monitor-Kaskade.
+- Nach jeder kanonischen Materialisierung wird die vollständige
+  Datei/Wishlist-Abdeckung erneut berechnet.
+
+### 67.3 Root Cause „Artist hat Stats, aber keine Releases“
+
+Der Import schrieb zusätzliche Credits nur nach `lib2_track_artists`. Die
+Artist-Liste zählte deshalb den Track, während `get_artist()` Releases korrekt
+über `lib2_album_artists` liest. Ein Featured Artist konnte somit „1
+present/missing“ anzeigen und gleichzeitig leere My-Library-/All-Releases-
+Bereiche haben.
+
+Der Import schreibt für jeden Track-Credit nun auch eine idempotente
+Album-Appearance (`role='featured'`; der Album-Artist bleibt `primary`). Damit
+zeigt die Artist-Seite wenigstens das Release, auf dem der gezählte Track
+tatsächlich vorkommt, und Discovery kann denselben Artist-/Album-Junction-Pfad
+verwenden. Für bereits importierte Produktionsdaten vereinigt das Read-Model
+zusätzlich Album-Junctions mit den über `lib2_track_artists` belegten
+Appearances; die leere Artist-Seite ist damit direkt nach dem Update behoben,
+noch bevor ein Reimport die dauerhafte Junction nachzieht.
+
+Native lib2-Zeilen ohne `legacy_artist_id`/`legacy_album_id`/`legacy_track_id`
+waren zusätzlich im Frontend nicht manuell matchbar: die Chips waren hart an
+den Legacy-Endpoint gekoppelt und disabled. Match-Status liefert nun immer eine
+`library_v2_entity_id`; ein eigener admin-gated PUT/DELETE-Pfad schreibt
+dedizierte Spotify-/MusicBrainz-IDs bzw. namespace-korrekte `external_ids` und
+manuelle Provenienz. Legacy-backed Rows benutzen weiterhin unverändert den
+Legacy-Pfad.
+
+### 67.4 Abgrenzung zu §63/§65
+
+Die Identitätsregeln bleiben unverändert: opaque Legacy-TEXT-IDs werden nicht
+zu Provider-IDs umgedeutet; manuelle native Matches verlangen einen expliziten
+Provider-Namespace; Discography-Matching, Editions, MB-Reconcile und
+Duplicate-Repair aus §63 bleiben bestehen. Die neue unterfüllte-Tracklist-
+Reparatur reichert nur bereits gematchte Release-Rows an und führt weder einen
+neuen unsicheren Title-Fold noch eine Namespace-Konvertierung ein.
+
+### 67.5 Verifikation
+
+- Library-v2-Backend: **744 passed**.
+- Frontend: Format/Lint/Typecheck ohne Fehler; Vitest **38 Dateien / 226 Tests
+  passed**; Production-Build erfolgreich (nur bekannter Chunk-Hinweis).
+- Repository-weiter Python-Lauf: **10.454 passed, 3 skipped, 2 deselected**.
+  Die verbleibenden 20 Failures sind exakt die bereits dokumentierten,
+  unberührten Baseline-Dateien `tests/downloads/test_cross_batch_dedup.py` (6)
+  und `tests/matching/test_normalize_version_symmetry.py` (14); keine neue
+  Library-v2-Regression.

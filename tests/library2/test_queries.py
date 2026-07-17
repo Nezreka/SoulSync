@@ -57,6 +57,7 @@ def test_list_artists_stats(imported_conn):
     assert drake["tracks_missing"] == 0
     # Wizkid shows the one track it's credited on (multi-artist via junction).
     assert by_name["Wizkid"]["track_count"] == 1
+    assert by_name["Wizkid"]["album_count"] == 1
 
 
 def test_list_artist_track_files_scopes_paginates_and_excludes_deleted(imported_conn):
@@ -163,6 +164,37 @@ def test_get_artist_groups_albums_and_singles(imported_conn):
     data = Q.get_artist(imported_conn, drake_id)
     assert [a["title"] for a in data["albums"]] == ["Views"]
     assert [s["title"] for s in data["singles"]] == ["One Dance"]
+
+
+def test_featured_artist_detail_includes_its_library_appearance(imported_conn):
+    """A credited artist must not be an empty/dead detail page while its
+    overview card already counts the credited track."""
+    wizkid_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Wizkid'"
+    ).fetchone()[0]
+
+    data = Q.get_artist(imported_conn, wizkid_id)
+
+    assert [album["title"] for album in data["albums"]] == ["Views"]
+
+
+def test_featured_artist_read_model_repairs_pre_fix_missing_album_junction(imported_conn):
+    """Existing production imports had only track credits.  Reads must expose
+    their appearance immediately, before the next re-import backfills the
+    durable album junction."""
+    wizkid_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Wizkid'"
+    ).fetchone()[0]
+    imported_conn.execute(
+        "DELETE FROM lib2_album_artists WHERE artist_id=?", (wizkid_id,)
+    )
+
+    artists, _total = Q.list_artists(imported_conn)
+    wizkid = next(artist for artist in artists if artist["id"] == wizkid_id)
+    data = Q.get_artist(imported_conn, wizkid_id)
+
+    assert wizkid["album_count"] == 1
+    assert [album["title"] for album in data["albums"]] == ["Views"]
 
 
 # --- §40 alias registry -------------------------------------------------------

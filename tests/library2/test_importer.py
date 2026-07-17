@@ -174,15 +174,9 @@ def test_partial_album_is_not_blanket_monitored_on_import(legacy_db):
         ).fetchone()
         assert wanted is not None and wanted["wanted"] == 0
 
-        # The album rule always decides a track's wanted state over an
-        # unranked/legacy_import track rule (wanted.py's documented priority),
-        # so a track's own raw ``monitored`` flag must inherit its album's
-        # value at import time — exactly like the runtime album-monitor
-        # cascade does for every non-explicit child track (api/library_v2.py
-        # lib2_set_monitored, "albums" branch). Otherwise the flag lies about
-        # what the projection actually decided. This holds regardless of
-        # whether the individual track already has a file (One Dance/Views is
-        # present but still inherits the partial album's unmonitored state).
+        # Concrete file ownership is track-level monitoring even when the
+        # parent release is incomplete.  Only the absent, non-Wishlist sibling
+        # stays unmonitored.
         def _monitored(legacy_track_id: int) -> int:
             return conn.execute(
                 "SELECT monitored FROM lib2_tracks WHERE legacy_track_id=?",
@@ -190,8 +184,15 @@ def test_partial_album_is_not_blanket_monitored_on_import(legacy_db):
             ).fetchone()["monitored"]
 
         assert _monitored(101) == 0  # Hotline Bling, Views (partial album)
-        assert _monitored(100) == 0  # One Dance, Views (same partial album)
+        assert _monitored(100) == 1  # One Dance, Views (file present)
         assert _monitored(102) == 1  # One Dance, single (fully-owned album)
+        present_wanted = conn.execute(
+            "SELECT wanted, reason FROM lib2_wanted_tracks WHERE track_id=("
+            "SELECT id FROM lib2_tracks WHERE legacy_track_id=100) AND profile_id=1"
+        ).fetchone()
+        assert (present_wanted["wanted"], present_wanted["reason"]) == (
+            1, "track_rule:file_import"
+        )
     finally:
         conn.close()
 
@@ -1036,6 +1037,13 @@ def test_multi_artist_split(imported_conn):
     # Wizkid was created as a new artist (not a legacy mirror row).
     wiz = _q(imported_conn, "SELECT legacy_artist_id FROM lib2_artists WHERE name='Wizkid'")
     assert wiz and wiz[0]["legacy_artist_id"] is None
+    appearance = imported_conn.execute(
+        """SELECT aa.role FROM lib2_album_artists aa
+             JOIN lib2_artists ar ON ar.id=aa.artist_id
+             JOIN lib2_albums al ON al.id=aa.album_id
+            WHERE ar.name='Wizkid' AND al.title='Views'"""
+    ).fetchone()
+    assert appearance is not None and appearance["role"] == "featured"
 
 
 def test_single_album_linkage(imported_conn):
@@ -1335,8 +1343,11 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     assert stats["wishlist_tracks"] == 1
     assert artist["monitored"] == 0
     assert album["monitored"] == 0
-    assert album["track_count"] == 1
-    assert album["expected_track_count"] == 1
+    # Keep the provider's canonical size.  The detail view can immediately
+    # show missing slots and the critical tracklist precache can resolve their
+    # real titles instead of considering this a complete one-track release.
+    assert album["track_count"] == 3
+    assert album["expected_track_count"] == 3
     assert track["monitored"] == 1
     assert file_count == 0
 
@@ -1345,11 +1356,92 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     detail = Q.get_album(conn, album["id"])
     conn.close()
 
-    assert detail["track_count"] == 1
-    assert detail["tracks_missing"] == 1
-    assert [t["title"] for t in detail["tracks"]] == ["Only Wanted Song"]
+    assert detail["track_count"] == 3
+    assert detail["tracks_missing"] == 3
+    assert [t["title"] for t in detail["tracks"]] == [
+        "Only Wanted Song", None, None,
+    ]
     assert detail["monitored"] is False
     assert detail["tracks"][0]["monitored"] is True
+
+    # A later non-destructive re-import must not replace an explicit Library-v2
+    # override with the still-present legacy Wishlist row.
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    conn = legacy_db._get_connection()
+    record_rule(conn, "track", track["id"], False, PROVENANCE_USER)
+    conn.execute("UPDATE lib2_tracks SET monitored=0 WHERE id=?", (track["id"],))
+    conn.commit()
+    conn.close()
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    rule = conn.execute(
+        "SELECT monitored, provenance FROM lib2_monitor_rules "
+        "WHERE entity_type='track' AND entity_id=? AND profile_id=1",
+        (track["id"],),
+    ).fetchone()
+    projected = conn.execute(
+        "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1",
+        (track["id"],),
+    ).fetchone()
+    conn.close()
+    assert (rule["monitored"], rule["provenance"]) == (0, PROVENANCE_USER)
+    assert projected["wanted"] == 0
+
+
+def test_album_parent_is_monitored_when_files_and_wishlist_cover_every_track(legacy_db):
+    """A release-level monitor is safe when every canonical slot is covered,
+    even when that coverage is a mix of downloaded and Wishlist tracks."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("ALTER TABLE tracks ADD COLUMN spotify_track_id TEXT")
+    conn.execute("UPDATE tracks SET spotify_track_id='sp-hotline' WHERE id=101")
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    payload = {
+        "id": "sp-hotline",
+        "name": "Hotline Bling",
+        "artists": [{"id": "sp1", "name": "Drake"}],
+        "album": {
+            "name": "Views", "album_type": "album", "total_tracks": 2,
+            "artists": [{"id": "sp1", "name": "Drake"}],
+        },
+        "track_number": 2,
+    }
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data) VALUES(?,?)",
+        ("sp-hotline", json.dumps(payload)),
+    )
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    views = conn.execute(
+        "SELECT id, monitored FROM lib2_albums WHERE title='Views'"
+    ).fetchone()
+    tracks = conn.execute(
+        "SELECT title, monitored FROM lib2_tracks WHERE album_id=? ORDER BY track_number",
+        (views["id"],),
+    ).fetchall()
+    wanted = conn.execute(
+        "SELECT COUNT(*) FROM lib2_wanted_tracks w JOIN lib2_tracks t ON t.id=w.track_id "
+        "WHERE t.album_id=? AND w.profile_id=1 AND w.wanted=1",
+        (views["id"],),
+    ).fetchone()[0]
+    conn.close()
+
+    assert views["monitored"] == 1
+    assert [(row["title"], row["monitored"]) for row in tracks] == [
+        ("One Dance", 1), ("Hotline Bling", 1),
+    ]
+    assert wanted == 2
 
 
 def test_wishlist_seed_preserves_valid_track_profile_only(legacy_db, caplog):

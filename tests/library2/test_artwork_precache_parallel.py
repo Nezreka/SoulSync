@@ -3,8 +3,9 @@ per-entity ``build_artwork`` calls to a bounded ``ThreadPoolExecutor`` instead
 of building one artist/album at a time. For a first-time migration of
 thousands of tracks, each uncached album/artist can trigger a synchronous
 provider network call, so a serial loop is the actual "import takes forever"
-bottleneck (see docs §17.6). Mirrors the existing max_workers contract in
-``core.auto_import_worker`` (default 3, config key ``auto_import.max_workers``).
+bottleneck (see docs §17.6). Artwork has a bounded I/O-oriented default of 6,
+an optional ``library_v2.artwork_cache_workers`` knob, and retains
+``auto_import.max_workers`` as its compatibility fallback.
 """
 
 from __future__ import annotations
@@ -23,8 +24,8 @@ def _database(legacy_db):
 
 
 def test_precache_all_artwork_runs_builds_concurrently(legacy_db_factory, monkeypatch):
-    """7 uncached entities (6 albums + 1 artist), default pool size 3 —
-    peak in-flight builds must reach 3, proving real concurrency rather
+    """7 uncached entities (6 albums + 1 artist), default pool size 6 —
+    peak in-flight builds must reach 6, proving real concurrency rather
     than a one-at-a-time loop."""
     database = _database(legacy_db_factory(n_albums=6))
 
@@ -52,12 +53,62 @@ def test_precache_all_artwork_runs_builds_concurrently(legacy_db_factory, monkey
     t = threading.Thread(target=run)
     t.start()
     time.sleep(0.3)
-    assert peak[0] == 3, (
-        f"Expected 3 concurrent artwork builds (default max_workers), "
+    assert peak[0] == 6, (
+        f"Expected 6 concurrent artwork builds (default max_workers), "
         f"peaked at {peak[0]} — precache_all_artwork looks serial."
     )
     proceed.set()
     t.join(timeout=5)
+
+
+def test_artwork_specific_worker_setting_wins_and_is_safely_capped():
+    config = MagicMock()
+    config.get = MagicMock(
+        side_effect=lambda key, default: (
+            99 if key == "library_v2.artwork_cache_workers" else default
+        )
+    )
+
+    assert artwork._precache_max_workers(config) == 16
+
+
+def test_build_artwork_single_flights_same_entity(monkeypatch, tmp_path):
+    """Background caching and immediate HTTP rendering must not duplicate the
+    same provider/NAS lookup concurrently."""
+    database = MagicMock(database_path=str(tmp_path / "library.db"))
+    entered = threading.Event()
+    proceed = threading.Event()
+    in_flight = [0]
+    peak = [0]
+    lock = threading.Lock()
+
+    def slow_build(*_args, **_kwargs):
+        with lock:
+            in_flight[0] += 1
+            peak[0] = max(peak[0], in_flight[0])
+            entered.set()
+        proceed.wait(timeout=2)
+        with lock:
+            in_flight[0] -= 1
+        return None
+
+    monkeypatch.setattr(artwork, "_build_artwork_unlocked", slow_build)
+    threads = [
+        threading.Thread(
+            target=artwork.build_artwork,
+            args=(database, object(), None, "album", 42),
+        )
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    assert entered.wait(timeout=1)
+    time.sleep(0.1)
+    assert peak[0] == 1
+    proceed.set()
+    for thread in threads:
+        thread.join(timeout=2)
+    assert artwork._build_locks == {}
 
 
 def test_precache_all_artwork_max_workers_caps_concurrency(legacy_db_factory, monkeypatch):

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
+import time
 from io import BytesIO
 
 import pytest
@@ -424,6 +426,36 @@ def test_match_status_routes_apply_the_configured_services_getter(tmp_path):
     by_service = {r["service"]: r["available"] for r in response.get_json()["services"]}
     assert by_service["spotify"] is True
     assert by_service["musicbrainz"] is False
+
+
+def test_lib2_native_manual_match_route_updates_provider_identity(api):
+    client, db, ids = api
+
+    response = client.put(
+        f"/api/library/v2/artists/{ids['artist']}/manual-match",
+        json={"service": "deezer", "service_id": "dz-native"},
+    )
+    assert response.status_code == 200
+
+    conn = _conn(db)
+    import json
+    external_ids = json.loads(conn.execute(
+        "SELECT external_ids FROM lib2_artists WHERE id=?", (ids["artist"],)
+    ).fetchone()[0])
+    conn.close()
+    assert external_ids["deezer"] == "dz-native"
+
+    response = client.delete(
+        f"/api/library/v2/artists/{ids['artist']}/manual-match",
+        json={"service": "deezer"},
+    )
+    assert response.status_code == 200
+    conn = _conn(db)
+    external_ids = json.loads(conn.execute(
+        "SELECT external_ids FROM lib2_artists WHERE id=?", (ids["artist"],)
+    ).fetchone()[0])
+    conn.close()
+    assert "deezer" not in external_ids
 
 
 def test_eps_get_local_artwork_urls(api):
@@ -1906,6 +1938,83 @@ def test_import_is_hard_limited_to_admin_profile(legacy_db=None):
 
     with _pytest.raises(ValueError, match="admin-only"):
         import_legacy_library(None, profile_id=7)
+
+
+def test_import_completes_while_artwork_continues_in_background(api, monkeypatch):
+    """Artwork is presentation-only: the imported rows become browseable and
+    the main status turns terminal before a deliberately blocked cache worker
+    is released."""
+    from api import library_v2 as api_module
+    from core.library2 import artwork, completeness, importer, tag_cache
+
+    client, _db, _ids = api
+    artwork_started = threading.Event()
+    release_artwork = threading.Event()
+
+    monkeypatch.setattr(
+        importer,
+        "import_legacy_library",
+        lambda *_args, **_kwargs: {"artists": 1, "albums": 3, "tracks": 3},
+    )
+    monkeypatch.setattr(completeness, "precache_tracklists", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(tag_cache, "precache_tag_cache", lambda *_args, **_kwargs: {})
+
+    def blocked_artwork(_database, _config_manager, *, progress=None):
+        if progress:
+            progress("artwork", 1, 4)
+        artwork_started.set()
+        release_artwork.wait(timeout=3)
+        if progress:
+            progress("artwork", 4, 4)
+        return {"artists": 1, "albums": 3}
+
+    monkeypatch.setattr(artwork, "precache_all_artwork", blocked_artwork)
+    api_module._import_state.update(
+        running=False,
+        stage=None,
+        current=0,
+        total=0,
+        stats=None,
+        error=None,
+        finished_at=None,
+    )
+    api_module._reset_artwork_cache_state()
+
+    try:
+        response = client.post("/api/library/v2/import", json={})
+        assert response.status_code == 200
+        assert artwork_started.wait(timeout=2)
+
+        deadline = time.monotonic() + 2
+        state = None
+        while time.monotonic() < deadline:
+            state = client.get("/api/library/v2/import/status").get_json()
+            if state and not state["running"]:
+                break
+            time.sleep(0.01)
+
+        assert state is not None
+        assert state["running"] is False
+        assert state["stage"] == "done"
+        assert state["stats"] == {"artists": 1, "albums": 3, "tracks": 3}
+        assert state["artwork_cache"]["running"] is True
+        assert state["artwork_cache"]["current"] == 1
+        assert client.get("/api/library/v2/artists").status_code == 200
+
+        overlapping = client.post("/api/library/v2/import", json={})
+        assert overlapping.status_code == 409
+        assert "artwork" in overlapping.get_json()["error"].lower()
+    finally:
+        release_artwork.set()
+
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        state = client.get("/api/library/v2/import/status").get_json()
+        if not state["artwork_cache"]["running"]:
+            break
+        time.sleep(0.01)
+    assert state["artwork_cache"]["running"] is False
+    assert state["artwork_cache"]["stats"] == {"artists": 1, "albums": 3}
 
 
 def test_artist_list_rejects_non_numeric_page(api):

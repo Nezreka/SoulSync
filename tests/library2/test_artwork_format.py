@@ -31,6 +31,21 @@ def test_normalizes_png_with_alpha_to_real_jpeg():
         assert image.mode == "RGB"
 
 
+def test_normalization_builds_full_and_thumbnail_from_one_decode():
+    source = _image_bytes("PNG", "RGB")
+
+    variants = artwork._normalize_jpeg_variants(source, thumb_height=2)
+
+    assert variants is not None
+    full, thumbnail = variants
+    with Image.open(BytesIO(full)) as image:
+        assert image.format == "JPEG"
+        assert image.size == (4, 3)
+    with Image.open(BytesIO(thumbnail)) as image:
+        assert image.format == "JPEG"
+        assert image.size == (2, 2)
+
+
 def test_build_artwork_writes_only_valid_jpeg(
         imported_conn, legacy_db, monkeypatch):
     album_id = imported_conn.execute("SELECT id FROM lib2_albums LIMIT 1").fetchone()[0]
