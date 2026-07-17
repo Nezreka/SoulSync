@@ -132,6 +132,31 @@ def test_none_answer_is_not_trusted_as_empty(dbpath):
     assert _counts(dbpath) == (1, 10)
 
 
+def test_client_marked_fetch_failure_is_not_trusted_as_empty(dbpath):
+    # the real clients swallow API failures into [] internally (a reachable
+    # server whose artists endpoint 500s). they mark last_fetch_failed for
+    # exactly this — an [] carrying that mark must never wipe the library.
+    _seed(dbpath, n_tracks=10)
+    client = _FakeClient(answers=[[], []])
+    client.last_fetch_failed = True
+    w = _worker(dbpath, client)
+    w.run_deep_scan()
+    assert w.events["error"], "a marked-failed fetch must surface as an error"
+    assert _counts(dbpath) == (1, 10)
+
+
+def test_all_real_clients_mark_fetch_failures():
+    # contract: every media client's get_all_artists must set last_fetch_failed
+    # (True on its swallowed-failure branches, False on a real answer) — a new
+    # client without it would reopen the wipe-on-API-failure hole.
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    for name in ("plex_client.py", "jellyfin_client.py", "navidrome_client.py"):
+        src = (root / "core" / name).read_text(encoding="utf-8")
+        assert "self.last_fetch_failed = True" in src, f"{name} missing failure mark"
+        assert "self.last_fetch_failed = False" in src, f"{name} missing success mark"
+
+
 def test_transient_empty_answer_recovers_on_second_fetch(dbpath):
     # first answer empty, second answer has the artist — scan proceeds with
     # the real list and removes nothing it saw

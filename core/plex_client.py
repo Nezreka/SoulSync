@@ -1123,6 +1123,9 @@ class PlexClient(MediaServerClient):
         doesn't show "Drake" twice when Drake is in two sections.
         Single-library mode is unaffected — dedup helper is a no-op.
         """
+        # last_fetch_failed lets callers tell "library is genuinely empty"
+        # from "the fetch failed" — both come back as [] (#stale-artists).
+        self.last_fetch_failed = True
         if not self.ensure_connection() or not self._can_query():
             logger.error("Not connected to Plex server or no music library")
             return []
@@ -1137,6 +1140,7 @@ class PlexClient(MediaServerClient):
                 )
             else:
                 logger.info(f"Found {len(artists)} artists in Plex library")
+            self.last_fetch_failed = False
             return artists
         except Exception as e:
             logger.error(f"Error getting all artists: {e}")
