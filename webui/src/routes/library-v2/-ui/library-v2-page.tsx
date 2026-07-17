@@ -6650,6 +6650,7 @@ const FILE_TAG_REPLAYGAIN_KEYS = [
   'replaygain_album_peak',
 ];
 const FILE_TAG_LYRICS_KEYS = ['lyrics', 'unsyncedlyrics'];
+const FILE_TAG_DUPLICATE_KEYS = new Set(['quality']);
 const FILE_TAG_SOURCE_SERVICES = [
   { name: 'MusicBrainz', prefix: 'musicbrainz_' },
   { name: 'Spotify', prefix: 'spotify_' },
@@ -6660,6 +6661,7 @@ const FILE_TAG_SOURCE_SERVICES = [
   { name: 'JioSaavn', prefix: 'jiosaavn_' },
   { name: 'Genius', prefix: 'genius_' },
   { name: 'Last.fm', prefix: 'lastfm_' },
+  { name: 'Beatport', prefix: 'beatport_' },
 ];
 
 function fileTagLabel(key: string): string {
@@ -6675,6 +6677,45 @@ function isSourceIdTagKey(key: string): boolean {
 }
 
 type FileTagsQuery = UseQueryResult<LibraryV2FileTags>;
+
+export interface GroupedFileTags {
+  track: [string, string][];
+  album: [string, string][];
+  replaygain: [string, string][];
+  source: Record<string, [string, string][]>;
+  other: [string, string][];
+}
+
+/** Keep the Track Detail tag inspector on the same grouping contract as the
+ * quarantine/download-audit inspector. Lyrics have their own tab and values
+ * already represented by the file-info strip (currently `quality`) are not
+ * repeated as an opaque catch-all row. */
+export function groupFileTags(tags: Record<string, string>): GroupedFileTags {
+  const buckets: GroupedFileTags = {
+    track: [],
+    album: [],
+    replaygain: [],
+    source: {},
+    other: [],
+  };
+  Object.keys(tags)
+    .sort()
+    .forEach((key) => {
+      const value = tags[key];
+      if (!value || FILE_TAG_LYRICS_KEYS.includes(key) || FILE_TAG_DUPLICATE_KEYS.has(key)) return;
+      if (FILE_TAG_TRACK_KEYS.includes(key)) buckets.track.push([key, value]);
+      else if (FILE_TAG_ALBUM_KEYS.includes(key)) buckets.album.push([key, value]);
+      else if (FILE_TAG_REPLAYGAIN_KEYS.includes(key)) buckets.replaygain.push([key, value]);
+      else if (isSourceIdTagKey(key)) {
+        const svc = FILE_TAG_SOURCE_SERVICES.find((s) => key.startsWith(s.prefix));
+        const slot = svc ? svc.name : 'Other Sources';
+        (buckets.source[slot] ??= []).push([key, value]);
+      } else {
+        buckets.other.push([key, value]);
+      }
+    });
+  return buckets;
+}
 
 function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: number }) {
   const queryClient = useQueryClient();
@@ -6718,35 +6759,7 @@ function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: num
     return <p>{data?.reason || 'File tags not available.'}</p>;
   }
   const tags = data.tags ?? {};
-  const buckets: {
-    track: [string, string][];
-    album: [string, string][];
-    replaygain: [string, string][];
-    source: Record<string, [string, string][]>;
-    other: [string, string][];
-  } = {
-    track: [],
-    album: [],
-    replaygain: [],
-    source: {},
-    other: [],
-  };
-  Object.keys(tags)
-    .sort()
-    .forEach((key) => {
-      const value = tags[key];
-      if (!value || FILE_TAG_LYRICS_KEYS.includes(key)) return;
-      if (FILE_TAG_TRACK_KEYS.includes(key)) buckets.track.push([key, value]);
-      else if (FILE_TAG_ALBUM_KEYS.includes(key)) buckets.album.push([key, value]);
-      else if (FILE_TAG_REPLAYGAIN_KEYS.includes(key)) buckets.replaygain.push([key, value]);
-      else if (isSourceIdTagKey(key)) {
-        const svc = FILE_TAG_SOURCE_SERVICES.find((s) => key.startsWith(s.prefix));
-        const slot = svc ? svc.name : 'Other Sources';
-        (buckets.source[slot] ??= []).push([key, value]);
-      } else {
-        buckets.other.push([key, value]);
-      }
-    });
+  const buckets = groupFileTags(tags);
 
   const handleStartEdit = (key: string, value: string) => {
     setEditingKey(key);
@@ -6763,11 +6776,11 @@ function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: num
     editMutation.mutate({ key: k, value });
   };
 
-  const section = (title: string, entries: [string, string][]) =>
+  const section = (title: string, entries: [string, string][], compact = false) =>
     entries.length === 0 ? null : (
-      <div key={title}>
-        <p className={styles.sourceInfoHistory}>{title}</p>
-        <div className={styles.sourceInfoBody}>
+      <section key={title} className={compact ? styles.fileTagSourceCard : styles.fileTagGroup}>
+        <h4 className={styles.fileTagGroupTitle}>{title}</h4>
+        <div>
           {entries.map(([key, value]) => {
             const isEditing = editingKey === key;
             if (isEditing) {
@@ -6818,12 +6831,12 @@ function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: num
             return (
               <div
                 key={key}
-                className={`${styles.sourceInfoRow} ${styles.tagRowClickable}`}
+                className={`${styles.fileTagRow} ${styles.tagRowClickable}`}
                 title="Click to edit tag"
                 onClick={() => handleStartEdit(key, value)}
               >
-                <span className={styles.sourceInfoLabel}>{fileTagLabel(key)}</span>
-                <span className={styles.sourceInfoValue}>
+                <span className={styles.fileTagKey}>{fileTagLabel(key)}</span>
+                <span className={styles.fileTagValue}>
                   {value}
                   <span className={styles.editIndicator}>
                     <SvgIcon name="edit" />
@@ -6833,34 +6846,45 @@ function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: num
             );
           })}
         </div>
-      </div>
+      </section>
     );
 
+  const sourceSections = [...FILE_TAG_SOURCE_SERVICES.map((s) => s.name), 'Other Sources']
+    .map((name) => section(name, buckets.source[name] ?? [], true))
+    .filter(Boolean);
+
   return (
-    <div className={styles.sourceInfoBody}>
+    <div>
       {error ? (
         <div className={styles.searchError} style={{ margin: '8px 0' }}>
           {error}
         </div>
       ) : null}
-      <SourceInfoRow label="Format" value={data.format ?? '—'} />
-      {data.bitrate ? (
-        <SourceInfoRow label="Bitrate" value={`${Math.round(data.bitrate / 1000)} kbps`} />
+      <div className={styles.fileTagChips} aria-label="File properties">
+        {data.format ? <span className={styles.fileTagChip}>{data.format}</span> : null}
+        {data.bitrate ? (
+          <span className={styles.fileTagChip}>{Math.round(data.bitrate / 1000)} kbps</span>
+        ) : null}
+        {data.duration ? (
+          <span className={styles.fileTagChip}>
+            {Math.floor(data.duration / 60)}:
+            {String(Math.round(data.duration % 60)).padStart(2, '0')}
+          </span>
+        ) : null}
+        <span className={styles.fileTagChip}>Cover {data.has_picture ? '✓' : '—'}</span>
+      </div>
+      <div className={styles.fileTagGrid}>
+        {section('Track', buckets.track)}
+        {section('Album', buckets.album)}
+        {section('ReplayGain', buckets.replaygain)}
+        {section('Other', buckets.other)}
+      </div>
+      {sourceSections.length > 0 ? (
+        <section className={`${styles.fileTagGroup} ${styles.fileTagSources}`}>
+          <h4 className={styles.fileTagGroupTitle}>Source IDs</h4>
+          <div className={styles.fileTagSourceGrid}>{sourceSections}</div>
+        </section>
       ) : null}
-      {data.duration ? (
-        <SourceInfoRow
-          label="Duration"
-          value={`${Math.floor(data.duration / 60)}:${String(Math.round(data.duration % 60)).padStart(2, '0')}`}
-        />
-      ) : null}
-      <SourceInfoRow label="Cover Art" value={data.has_picture ? 'Embedded' : 'None'} />
-      {section('Track', buckets.track)}
-      {section('Album', buckets.album)}
-      {section('ReplayGain', buckets.replaygain)}
-      {[...FILE_TAG_SOURCE_SERVICES.map((s) => s.name), 'Other Sources'].map((name) =>
-        section(name, buckets.source[name] ?? []),
-      )}
-      {section('Other', buckets.other)}
       {buckets.track.length +
         buckets.album.length +
         buckets.replaygain.length +

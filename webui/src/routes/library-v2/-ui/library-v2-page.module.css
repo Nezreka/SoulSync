@@ -2064,6 +2064,105 @@ button.featureTag:disabled {
   color: rgba(255, 255, 255, 0.85);
 }
 
+/* Track-detail tag inspector. This mirrors the quarantine/download-audit
+   hierarchy: compact file facts, two-column metadata cards and a distinct
+   provider-ID grid instead of one long undifferentiated key/value list. */
+.fileTagChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.fileTagChip {
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.fileTagGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fileTagGroup {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.fileTagGroupTitle {
+  margin: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.fileTagRow {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.7fr) minmax(0, 1.3fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  font-size: 12px;
+}
+
+.fileTagRow:last-child {
+  border-bottom: 0;
+}
+
+.fileTagKey {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.fileTagValue {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.fileTagSources {
+  margin-top: 10px;
+}
+
+.fileTagSourceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+
+.fileTagSourceCard {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+@media (max-width: 700px) {
+  .fileTagGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fileTagRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+}
+
 /* --- tag editing UI --- */
 .tagRowClickable {
   cursor: pointer;
