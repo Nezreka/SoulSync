@@ -303,15 +303,19 @@ body.max-performance .sidebar::after {
 
 .sidebar-header {
     min-height: 115px;
-    /* Translucent so the backdrop-filter blur below is visible — the dark tint
-       keeps the header readable while nav items scrolling behind it read as a
-       soft frosted blur instead of a sharp bleed-through. */
+    /* Accent tint layered over an OPAQUE dark base. The old translucent-only
+       gradient depended on backdrop-filter for legibility — browsers without
+       it (or with it disabled) painted scrolled nav items straight through
+       the header, so the Music/Video toggle and profile chip sat on top of
+       nav text (#1040). The opaque base keeps the exact same tinted look
+       while guaranteeing zero bleed-through everywhere. */
     background:
         linear-gradient(180deg,
             rgba(var(--accent-rgb), 0.16) 0%,
             rgba(var(--accent-rgb), 0.10) 30%,
             rgba(24, 24, 24, 0.62) 70%,
-            rgba(18, 18, 18, 0.72) 100%);
+            rgba(18, 18, 18, 0.72) 100%),
+        linear-gradient(180deg, rgb(21, 21, 23) 0%, rgb(14, 14, 16) 100%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     padding: 20px 24px;
     display: flex;
@@ -320,9 +324,10 @@ body.max-performance .sidebar::after {
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Same stacking level as the nav (z-index:1) — sits in the normal sidebar
-       flow rather than forced above everything. */
-    z-index: 1;
+    /* Above the nav (which sits at z-index:1) — a sticky header sharing the
+       nav's stacking level paints in DOM order, letting scrolled nav items
+       win over the header in some engines (#1040). */
+    z-index: 2;
     overflow: hidden;
     flex-shrink: 0;
 
@@ -29359,8 +29364,15 @@ div.artist-hero-badge {
 
 .artist-enrich-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    /* auto-fit so the coverage circles WRAP within the middle column instead
+       of forcing a fixed 5-wide track that overflowed into the Artist Tracks
+       column (#1040). Still lands ~5-per-row at the normal column width and
+       reflows to fewer when the column is narrow. */
+    grid-template-columns: repeat(auto-fit, minmax(48px, 1fr));
     gap: 12px 10px;
+}
+.artist-enrich-circle {
+    min-width: 0;
 }
 
 .artist-enrich-circle {
@@ -49127,8 +49139,16 @@ textarea.enhanced-meta-field-input {
 /* Album Grid */
 .enhanced-album-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+}
+/* Grid children default to min-width:auto, so a wide album row refused to
+   shrink and overflowed the right column at full width — clipped at desktop,
+   fine only once the mobile breakpoint collapsed it to one column (#1040).
+   minmax(0,1fr) on the tracks + min-width:0 here lets the cells shrink so the
+   row's own ellipsis engages instead of spilling past the container. */
+.enhanced-album-wrapper {
+    min-width: 0;
 }
 .enhanced-album-wrapper.expanded {
     grid-column: 1 / -1;
