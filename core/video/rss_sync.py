@@ -21,6 +21,7 @@ acquisition stays the drain's job.
 
 from __future__ import annotations
 
+import re
 import threading
 from typing import Any, Callable, Dict, List, Optional
 
@@ -65,21 +66,43 @@ def fetch_recent_releases(limit: int = _FETCH_LIMIT) -> Optional[List[Dict[str, 
     return list(hits.values())
 
 
+# Words too common to distinguish a title — a release containing only these is
+# not a match. "The Oval" vs "…The Mummy" both share 'the'; without this every
+# wishlist title matched every release (the RSS flood Boulder's logs caught).
+_STOPWORDS = frozenset({
+    "the", "and", "a", "an", "of", "to", "in", "on", "for", "with", "at",
+    "by", "from", "his", "her", "its", "is", "are", "be",
+})
+
+
+def _tokens(text: Any) -> List[str]:
+    """Word tokens of a title/release name: lowercased, punctuation split out
+    (so apostrophes/dots don't fuse or hide words). Length >= 2 kept."""
+    return [w for w in re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split()
+            if len(w) >= 2]
+
+
+def _significant(tokens: List[str]) -> set:
+    """The distinguishing words of a title — stopwords + 1-char noise dropped.
+    Falls back to the raw tokens when a title is ALL stopwords (rare)."""
+    sig = {w for w in tokens if len(w) >= 3 and w not in _STOPWORDS}
+    return sig or set(tokens)
+
+
 def _prescreen(hits: List[Dict[str, Any]], titles: List[str]) -> List[Dict[str, Any]]:
-    """Cheap title filter before the real ranker runs: keep hits whose release
-    name contains ANY significant word of a wanted title. Pure recall shield —
-    ``_evaluate_hits`` still does the strict matching."""
-    words: set = set()
-    for t in titles:
-        for w in str(t or "").lower().split():
-            if len(w) >= 3:
-                words.add(w)
-    if not words:
+    """Cheap recall shield before the real ranker runs: keep a hit only when a
+    wanted title's DISTINGUISHING words ALL appear as whole words in the release
+    name. WORD-level (not substring — 'all' must not match 'Cornwall') and
+    stopword-aware ('the' alone never qualifies). ``_evaluate_hits`` still does
+    the authoritative title/scope/quality gate; this just stops the feed's
+    every-release-matches-every-title flood from reaching it."""
+    wanted = [s for s in (_significant(_tokens(t)) for t in titles) if s]
+    if not wanted:
         return []
     out = []
     for h in hits:
-        name = str(h.get("title") or "").lower()
-        if any(w in name for w in words):
+        htoks = set(_tokens(h.get("title")))
+        if any(sig <= htoks for sig in wanted):
             out.append(h)
     return out
 
