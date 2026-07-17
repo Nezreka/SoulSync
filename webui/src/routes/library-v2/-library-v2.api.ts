@@ -272,6 +272,10 @@ export interface LibraryV2MatchSearchResult {
   extra?: string;
   image?: string;
   provider?: string;
+  /** §52.5: only Spotify and Deezer artist search actually supply these —
+   *  0/undefined means "not provided by this provider", not a real zero. */
+  followers?: number;
+  popularity?: number;
 }
 
 /** Search a provider for candidate matches (reuses the app-wide endpoint). */

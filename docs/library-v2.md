@@ -6311,3 +6311,69 @@ Weiterhin offen: §52.5 (reichere Match-Karte), §52.6-Replacement-Teil,
 §52.7 Manual-Grab-Policy, §52.9 Correlation-History/Stepper — alle wie in
 §53.3 benannt, jetzt zusätzlich die legacy Search-/Download-Routen aus
 §55.2.
+
+---
+
+## 56. §52.5 Follower-/Popularitäts-Daten in der Match-Kandidatenliste — ✅ teilweise umgesetzt (2026-07-17)
+
+Dieser Slice schließt einen Teil der in §54.1 offen gelassenen Lücke
+„Follower, Popularität und automatische-vs.-manuelle Match-Provenienz
+bleiben offen" — konkret die Follower-/Popularitäts-Hälfte, für die
+Kandidatenliste des manuellen Providersuche-Modals (`ManualMatchModal`).
+
+### 56.1 Was umgesetzt wurde
+
+- `core/library/service_search.py`: die Spotify-Artist-Suche liefert jetzt
+  `followers`/`popularity` mit — Daten, die die geteilte `Artist`-Dataclass
+  (Spotify, SpotipyFree UND der iTunes-/Deezer-Fallback dieses selben
+  Zweigs) bei jedem Suchtreffer bereits mitführt, nach der bestehenden
+  Konvention „Spotify-only; 0 elsewhere". Kein zusätzlicher API-Call. Die
+  separate, rohe Deezer-Such-Route (eigener API-Zweig, nicht die
+  `Artist`-Dataclass) liefert zusätzlich die Fan-Zahl als `followers`.
+  Andere Provider (iTunes, MusicBrainz, Last.fm, Genius, Tidal, Qobuz,
+  Discogs, AudioDB, Amazon, Bandcamp, JioSaavn) bleiben unverändert, da sie
+  keine vergleichbare, eindeutig benennbare Kennzahl liefern (Last.fms
+  „listeners" ist z. B. KEIN Follower-Äquivalent und wurde bewusst nicht
+  umgelabelt).
+- `webui/src/routes/library-v2/-library-v2.api.ts`:
+  `LibraryV2MatchSearchResult` trägt jetzt optionale `followers`/
+  `popularity`-Felder.
+- `webui/.../-ui/library-v2-page.tsx`: `ManualMatchModal`s Kandidatenzeile
+  zeigt eine zusätzliche Zeile („54M followers · 97 popularity"), sobald
+  ein Kandidat diese Werte trägt; `formatMatchStat`/`formatCompactNumber`
+  behandeln `0` weiterhin als „vom Provider nicht geliefert", nicht als
+  echten Wert — konsistent mit der bestehenden Backend-Konvention.
+
+### 56.2 Bewusst nicht in diesem Slice
+
+- **Die aktuell verknüpfte Artist-Karte** (`ArtistSettingsModal`s Watchlist-
+  Identity-Bereich, gespeist aus `watchlist_artists` statt einer Live-
+  Providerabfrage) zeigt weiterhin keine Follower/Popularität — das würde
+  entweder eine neue Spalte plus Schreibpfad in jedem Match-Worker oder
+  einen zusätzlichen Live-API-Call bei jedem Settings-Laden erfordern,
+  beides ein größerer, eigener Schnitt als die hier umgesetzte
+  Kandidatenliste (die diese Daten ohnehin schon live abruft).
+- **Match-Provenienz (automatisch vs. manuell):** alle ~12 Enrichment-
+  Worker UND `library_manual_match()` schreiben denselben
+  `{service}_match_status = 'matched'` ohne Herkunftsunterscheidung — es
+  gibt heute keinerlei Signal, ob eine Zuordnung automatisch oder manuell
+  entstand. Das zu beheben bräuchte eine neue Spalte/Konvention plus
+  Schreibpfad-Änderungen in jedem einzelnen Worker (audiodb, amazon, tidal,
+  lastfm, discogs, qobuz, itunes, spotify, genius, …) — deutlich größerer
+  Blast-Radius (legacy-Code, von der Enhanced View mitgenutzt) als in einem
+  Nebenschlag sinnvoll. Bleibt offener Scope.
+
+### 56.3 Verifikation
+
+- Backend: neue `tests/library/test_service_search_social_stats.py`
+  (Spotify mit echten Werten, Spotify-Ergebnis vom iTunes-Fallback bedient
+  mit 0/0, Deezer-Fan-Zahl) — `pytest tests/library tests/library2` →
+  **818 passed**.
+- Frontend: 2 neue Tests in `match-chips.test.tsx` (Stats-Zeile erscheint/
+  bleibt weg) — `vitest run` → **208 passed**; `npm run check` (oxfmt +
+  oxlint --type-check) und `tsc --noEmit` beide grün.
+
+Weiterhin offen aus §52: die aktuelle-Match-Karte (§56.2), Match-Provenienz
+(§56.2), §52.6-Replacement-Teil, §52.7 Manual-Grab-Policy, §52.9
+Correlation-History/Stepper, sowie die legacy Search-/Download-Routen aus
+§55.2.

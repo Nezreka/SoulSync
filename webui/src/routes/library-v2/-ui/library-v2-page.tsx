@@ -87,6 +87,7 @@ import {
   type LibraryV2AlbumType,
   type LibraryV2ArtistTrackFile,
   type LibraryV2HistoryCategory,
+  type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
@@ -563,6 +564,22 @@ function matchChipClass(status: string): string {
   return styles.matchPending;
 }
 
+/** §52.5: only Spotify/Deezer artist search results carry these — the
+ *  shared backend convention treats 0 as "not provided", not a real value,
+ *  so this returns null rather than printing "0 followers". */
+function formatMatchStat(result: LibraryV2MatchSearchResult): string | null {
+  const parts: string[] = [];
+  if (result.followers) parts.push(`${formatCompactNumber(result.followers)} followers`);
+  if (result.popularity) parts.push(`${result.popularity} popularity`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
+  return value.toLocaleString('en-US');
+}
+
 function getServiceAbbreviation(service: string): string {
   switch (service.toLowerCase()) {
     case 'spotify':
@@ -773,6 +790,9 @@ function ManualMatchModal({
             <div className={styles.matchResultInfo}>
               <span className={styles.matchResultName}>{r.name || 'Unknown'}</span>
               {r.extra ? <span className={styles.matchResultExtra}>{r.extra}</span> : null}
+              {formatMatchStat(r) ? (
+                <span className={styles.matchResultExtra}>{formatMatchStat(r)}</span>
+              ) : null}
               <span className={styles.matchResultId}>
                 ID: {r.id}
                 {r.provider && r.provider !== service.service ? ` (${r.provider})` : ''}

@@ -134,7 +134,14 @@ def _search_service(service, entity_type, query):
             # Detect actual provider from result IDs — Spotify IDs are alphanumeric,
             # iTunes/Deezer IDs are purely numeric. Prevents storing wrong IDs.
             provider = _detect_provider(items, client)
-            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else '', 'provider': provider} for a in items]
+            # §52.5: every Artist dataclass (Spotify, SpotipyFree, and the
+            # iTunes/Deezer fallback this branch can silently resolve to)
+            # already carries followers/popularity — 0 where a provider
+            # doesn't supply it (see core/metadata's "Spotify-only; 0
+            # elsewhere" convention) — so surfacing them is free, no extra
+            # API call regardless of which source actually served this hit.
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else '', 'provider': provider,
+                     'followers': a.followers, 'popularity': a.popularity} for a in items]
         elif entity_type == 'album':
             items = client.search_albums(query, limit=8)
             provider = _detect_provider(items, client)
@@ -200,7 +207,8 @@ def _search_service(service, entity_type, query):
         for item in data:
             if entity_type == 'artist':
                 results.append({'id': str(item.get('id', '')), 'name': item.get('name', ''),
-                                'image': item.get('picture_medium'), 'extra': f"{item.get('nb_fan', 0)} fans"})
+                                'image': item.get('picture_medium'), 'extra': f"{item.get('nb_fan', 0)} fans",
+                                'followers': item.get('nb_fan', 0)})
             elif entity_type == 'album':
                 artist_name = item.get('artist', {}).get('name', '') if isinstance(item.get('artist'), dict) else ''
                 results.append({'id': str(item.get('id', '')), 'name': item.get('title', ''),
