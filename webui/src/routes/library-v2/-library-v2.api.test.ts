@@ -153,6 +153,7 @@ describe('library v2 artist settings api', () => {
 
     const loaded = await fetchLibraryV2ArtistSettings(7);
     expect(loaded.settings.watchlist_row_id).toBe(11);
+    expect(loaded.artist_stats).toBeNull();
     await expect(
       updateLibraryV2ArtistSettings(7, {
         ...loaded.settings,
@@ -162,6 +163,41 @@ describe('library v2 artist settings api', () => {
     ).resolves.toMatchObject({
       settings: { auto_download: false, preferred_metadata_source: 'deezer' },
     });
+  });
+
+  it('§56.2: surfaces live artist_stats when the backend provides them', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/7/settings', () =>
+        HttpResponse.json({
+          success: true,
+          settings: {
+            artist_id: 7,
+            watchlist_row_id: 11,
+            watchlist_name: 'Drake',
+            watchlist_image_url: null,
+            provider_ids: { spotify: 'sp-drake' },
+            monitor_new_items: 'all',
+            include_albums: true,
+            include_eps: true,
+            include_singles: true,
+            include_live: false,
+            include_remixes: false,
+            include_acoustic: false,
+            include_compilations: false,
+            include_instrumentals: false,
+            auto_download: true,
+            lookback_days: null,
+            preferred_metadata_source: null,
+          },
+          metadata_sources: ['spotify'],
+          global_metadata_source: 'spotify',
+          artist_stats: { followers: 45000000, popularity: 96 },
+        }),
+      ),
+    );
+
+    const loaded = await fetchLibraryV2ArtistSettings(7);
+    expect(loaded.artist_stats).toEqual({ followers: 45000000, popularity: 96 });
   });
 });
 

@@ -373,10 +373,19 @@ export async function editLibraryV2Artist(
   if (!payload.success) throw new Error(payload.error || 'Edit failed');
 }
 
+/** §52.5/§56.2: on-demand Spotify stats for the current-match identity card —
+ *  omitted entirely when the artist has no linked spotify id or the live
+ *  lookup failed/was rate-limited, never a fake zero. */
+export interface LibraryV2ArtistStats {
+  followers: number;
+  popularity: number;
+}
+
 export interface LibraryV2ArtistSettingsResponse {
   settings: LibraryV2ArtistSettings;
   metadata_sources: string[];
   global_metadata_source: string | null;
+  artist_stats: LibraryV2ArtistStats | null;
 }
 
 export async function fetchLibraryV2ArtistSettings(
@@ -388,6 +397,7 @@ export async function fetchLibraryV2ArtistSettings(
     settings?: LibraryV2ArtistSettings;
     metadata_sources?: string[];
     global_metadata_source?: string | null;
+    artist_stats?: LibraryV2ArtistStats | null;
   }>(apiClient.get(`library/v2/artists/${artistId}/settings`));
   if (!payload.success || !payload.settings) {
     throw new Error(payload.error || 'Artist settings could not be loaded');
@@ -396,6 +406,7 @@ export async function fetchLibraryV2ArtistSettings(
     settings: payload.settings,
     metadata_sources: payload.metadata_sources ?? [],
     global_metadata_source: payload.global_metadata_source ?? null,
+    artist_stats: payload.artist_stats ?? null,
   };
 }
 
@@ -448,6 +459,7 @@ export async function updateLibraryV2ArtistSettings(
     settings: payload.settings,
     metadata_sources: payload.metadata_sources ?? [],
     global_metadata_source: payload.global_metadata_source ?? null,
+    artist_stats: null,
   };
 }
 

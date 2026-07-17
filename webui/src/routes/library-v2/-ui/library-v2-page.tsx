@@ -89,7 +89,6 @@ import {
   type LibraryV2AlbumType,
   type LibraryV2ArtistTrackFile,
   type LibraryV2HistoryCategory,
-  type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
@@ -566,10 +565,11 @@ function matchChipClass(status: string): string {
   return styles.matchPending;
 }
 
-/** §52.5: only Spotify/Deezer artist search results carry these — the
- *  shared backend convention treats 0 as "not provided", not a real value,
- *  so this returns null rather than printing "0 followers". */
-function formatMatchStat(result: LibraryV2MatchSearchResult): string | null {
+/** §52.5/§56.2: only Spotify/Deezer artist search results and the live
+ *  artist_stats lookup carry these — the shared backend convention treats 0
+ *  as "not provided", not a real value, so this returns null rather than
+ *  printing "0 followers". */
+function formatMatchStat(result: { followers?: number; popularity?: number }): string | null {
   const parts: string[] = [];
   if (result.followers) parts.push(`${formatCompactNumber(result.followers)} followers`);
   if (result.popularity) parts.push(`${result.popularity} popularity`);
@@ -1347,6 +1347,12 @@ export function ArtistSettingsModal({
                 </span>
                 {artist.genres.length > 0 ? (
                   <span className={styles.muted}>{artist.genres.join(', ')}</span>
+                ) : null}
+                {settingsQuery.data?.artist_stats &&
+                formatMatchStat(settingsQuery.data.artist_stats) ? (
+                  <span className={styles.muted}>
+                    {formatMatchStat(settingsQuery.data.artist_stats)}
+                  </span>
                 ) : null}
                 {providerIds.length > 0 ? (
                   <div className={styles.artistSettingsProviderIds}>

@@ -40894,6 +40894,29 @@ _LIB2_MATCH_SERVICE_ENRICHMENT_KEYS = {
 }
 
 
+def _library_v2_live_artist_stats(spotify_id):
+    """On-demand single-artist Spotify lookup for the settings modal's
+    current-match identity card (§52.5/§56.2) — same pattern the legacy
+    ``/api/watchlist/artist/<id>/config`` endpoint already uses: one call per
+    load, gated on auth + the global rate-limit flag, ``None`` on any
+    failure so the identity card just omits the stat row."""
+    if not spotify_client or not spotify_client.is_authenticated() or _spotify_rate_limited():
+        return None
+    try:
+        from core.api_call_tracker import api_call_tracker
+        api_call_tracker.record_call('spotify', endpoint='artist')
+        artist_data = spotify_client.sp.artist(spotify_id)
+    except Exception as e:
+        logger.debug(f"live artist stats fetch failed for {spotify_id}: {e}")
+        return None
+    if not artist_data:
+        return None
+    return {
+        'followers': artist_data.get('followers', {}).get('total', 0),
+        'popularity': artist_data.get('popularity', 0),
+    }
+
+
 def _library_v2_configured_match_services() -> set:
     """Which match_status.SERVICES ids are actually configured on this
     instance right now (deep-dive A8) — reuses the exact 'configured' flags
@@ -40925,6 +40948,7 @@ _register_library_v2_routes(
     run_enrichment=_run_single_enrichment,
     scoped_wishlist_search_dispatcher=_library_v2_scoped_wishlist_search,
     configured_match_services_getter=_library_v2_configured_match_services,
+    live_artist_stats_getter=_library_v2_live_artist_stats,
 )
 
 

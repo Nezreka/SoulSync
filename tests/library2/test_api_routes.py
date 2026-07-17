@@ -478,6 +478,108 @@ def test_artist_settings_route_updates_the_existing_watchlist_contract(api):
     conn.close()
 
 
+def test_artist_settings_surfaces_live_followers_and_popularity(api):
+    """§56.2: the settings modal's current-match identity card gets live
+    Spotify stats the same way the legacy watchlist config endpoint already
+    does — a single on-demand call, gated behind having a spotify id."""
+    client, db, ids = api
+    conn = _conn(db)
+    from tests.library2.test_artist_settings import WATCHLIST_DDL
+    conn.execute(WATCHLIST_DDL)
+    conn.execute(
+        """INSERT INTO watchlist_artists(
+               spotify_artist_id, artist_name, include_albums, include_eps,
+               include_singles, auto_download, profile_id)
+           VALUES('sp-drake', 'Drake', 1, 1, 1, 1, 1)"""
+    )
+    conn.commit()
+    conn.close()
+
+    calls = []
+
+    def fake_stats(spotify_id):
+        calls.append(spotify_id)
+        return {"followers": 12345, "popularity": 77}
+
+    app = flask.Flask(__name__)
+    from api.library_v2 import register_library_v2_routes
+    register_library_v2_routes(
+        app,
+        get_database=lambda: db,
+        config_get=lambda key, default=None: db.config.get(key, default),
+        config_manager=None,
+        profile_id_getter=lambda: db.active_profile,
+        live_artist_stats_getter=fake_stats,
+    )
+
+    response = app.test_client().get(f"/api/library/v2/artists/{ids['artist']}/settings")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["artist_stats"] == {"followers": 12345, "popularity": 77}
+    assert calls == ["sp-drake"]
+
+
+def test_artist_settings_omits_stats_without_spotify_id(api):
+    client, db, ids = api
+    conn = _conn(db)
+    from tests.library2.test_artist_settings import WATCHLIST_DDL
+    conn.execute(WATCHLIST_DDL)
+    conn.execute(
+        """INSERT INTO watchlist_artists(
+               artist_name, include_albums, include_eps,
+               include_singles, auto_download, profile_id)
+           VALUES('Drake', 1, 1, 1, 1, 1)"""
+    )
+    conn.commit()
+    conn.close()
+
+    calls = []
+
+    def fake_stats(spotify_id):
+        calls.append(spotify_id)
+        return {"followers": 1, "popularity": 1}
+
+    app = flask.Flask(__name__)
+    from api.library_v2 import register_library_v2_routes
+    register_library_v2_routes(
+        app,
+        get_database=lambda: db,
+        config_get=lambda key, default=None: db.config.get(key, default),
+        config_manager=None,
+        profile_id_getter=lambda: db.active_profile,
+        live_artist_stats_getter=fake_stats,
+    )
+
+    response = app.test_client().get(f"/api/library/v2/artists/{ids['artist']}/settings")
+
+    assert response.status_code == 200
+    assert response.get_json().get("artist_stats") is None
+    assert calls == []
+
+
+def test_artist_settings_tolerates_missing_stats_getter(api):
+    """No injected getter (e.g. legacy watchlist unavailable) must not break
+    the settings route — it predates this feature and stays optional."""
+    client, db, ids = api
+    conn = _conn(db)
+    from tests.library2.test_artist_settings import WATCHLIST_DDL
+    conn.execute(WATCHLIST_DDL)
+    conn.execute(
+        """INSERT INTO watchlist_artists(
+               spotify_artist_id, artist_name, include_albums, include_eps,
+               include_singles, auto_download, profile_id)
+           VALUES('sp-drake', 'Drake', 1, 1, 1, 1, 1)"""
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(f"/api/library/v2/artists/{ids['artist']}/settings")
+
+    assert response.status_code == 200
+    assert response.get_json().get("artist_stats") is None
+
+
 def test_acquisition_request_resolves_server_owned_profiles_and_is_idempotent(api):
     client, _db, ids = api
     payload = {

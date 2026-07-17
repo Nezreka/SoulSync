@@ -94,6 +94,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                    Optional[Callable[[List[str], int], Dict[str, Any]]] = None,
                                configured_match_services_getter:
                                    Optional[Callable[[], Any]] = None,
+                               live_artist_stats_getter:
+                                   Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
                                ) -> None:
     """Attach the Library v2 routes to ``app``.
 
@@ -115,6 +117,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     instance right now (A8), same "configured" flags the Settings
     enrichment-status cards show. ``None``/omitted means "assume all
     available" (match-status chips carry no availability signal).
+    ``live_artist_stats_getter(spotify_id) -> {"followers", "popularity"} | None``
+    — the same on-demand single-artist Spotify lookup the legacy
+    ``/api/watchlist/artist/<id>/config`` endpoint already does (§52.5/§56.2);
+    injected for the same circular-import reason as ``run_enrichment``.
+    ``None``/omitted means the settings response carries no ``artist_stats``.
     """
 
     def _enabled() -> bool:
@@ -2564,11 +2571,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 global_source = get_primary_source()
             except Exception:  # noqa: BLE001
                 global_source = None
+            artist_stats = None
+            spotify_id = (settings.get("provider_ids") or {}).get("spotify")
+            if request.method == "GET" and live_artist_stats_getter and spotify_id:
+                try:
+                    artist_stats = live_artist_stats_getter(spotify_id)
+                except Exception:  # noqa: BLE001 - identity card degrades gracefully
+                    logger.debug("live artist stats fetch failed for %s", spotify_id, exc_info=True)
             return jsonify({
                 "success": True,
                 "settings": settings,
                 "metadata_sources": sources,
                 "global_metadata_source": global_source,
+                **({"artist_stats": artist_stats} if artist_stats else {}),
             })
         except ArtistSettingsError as exc:
             conn.rollback()

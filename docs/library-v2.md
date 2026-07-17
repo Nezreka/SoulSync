@@ -6516,3 +6516,66 @@ Match-Provenienz (§56.2), §52.6-Replacement-Teil, §52.7 Manual-Grab-Policy,
 das granulare `quality_checked`/`acoustic_id_checked`-Eventvokabular sowie
 die legacy Search-/Download-Routen aus §55.2 — jeweils entweder an eine
 §52.12-Entscheidung gebunden oder ein eigener größerer Schreibpfad-Slice.
+
+---
+
+## 59. §56.2 aktuelle-Match-Karte — Live-Follower/Popularity im Artist-Settings-Modal — ✅ umgesetzt (2026-07-17)
+
+Schließt die in §56.2 offen gelassene Hälfte: „die CURRENT-match Identity-Karte
+in `ArtistSettingsModal` (sourced aus der `watchlist_artists`-DB-Zeile, kein
+Live-Fetch) — Follower dort hinzuzufügen bräuchte entweder eine neue
+gecachte Spalte + Schreibpfad, oder einen zusätzlichen Live-API-Call pro
+Settings-Load." Die zweite Option ist bereits ein etabliertes,
+produktionserprobtes Muster im selben Repo — der legacy
+`/api/watchlist/artist/<id>/config`-Endpoint macht exakt das seit Langem
+(ein `spotify_client.sp.artist(id)`-Call pro Config-Load, hinter
+`is_authenticated()` + globalem Rate-Limit-Flag, stiller Fallback auf 0 bei
+Fehlern) — reiner Wiederverwendungs-Slice, keine neue Schema-Entscheidung.
+
+### 59.1 Umsetzung
+
+- `web_server.py::_library_v2_live_artist_stats(spotify_id)` — portiert exakt
+  dasselbe Auth-/Rate-Limit-/Fehler-Gating wie der Legacy-Endpoint, gibt
+  `{"followers", "popularity"} | None` zurück. Injiziert in
+  `register_library_v2_routes` als neuer optionaler
+  `live_artist_stats_getter`-Parameter (gleiches Injection-Muster wie
+  `run_enrichment`/`scoped_wishlist_search_dispatcher`, um den
+  Zirkularimport zurück in `web_server.py` zu vermeiden).
+- `GET /api/library/v2/artists/<id>/settings` ruft den Getter nur bei GET
+  (nicht bei PUT) und nur wenn ein `provider_ids.spotify` vorhanden ist auf;
+  das Ergebnis landet als `artist_stats`-Top-Level-Key in der JSON-Antwort,
+  komplett weggelassen (nicht `null`, kein Key) wenn kein Getter injiziert
+  wurde, kein Spotify-Link existiert, oder der Live-Call scheitert — die
+  Karte degradiert exakt so still wie die bisherige Watchlist-identity-Karte.
+- Frontend: `formatMatchStat` (bisher an `LibraryV2MatchSearchResult`
+  gebunden, §56) auf den strukturellen Typ `{followers?, popularity?}`
+  verallgemeinert und in `ArtistSettingsModal`s „Watchlist identity"-Karte
+  wiederverwendet — dieselbe Kompaktzahl-Formatierung („45.2M followers · 61
+  popularity") wie in der Match-Kandidatenliste.
+
+### 59.2 Verifikation
+
+- Backend: 3 neue Tests (Stats erscheinen bei vorhandener Spotify-ID,
+  bleiben weg ohne Spotify-ID, Route bleibt funktionsfähig ganz ohne
+  injizierten Getter) — `pytest tests/library2` → **674 passed**. `ruff
+  check` clean.
+- Frontend: 2 neue API-Layer-Tests — `vitest run src/routes/library-v2/` →
+  **21 Dateien, 119 Tests grün**; `npm run check` und `tsc --noEmit` beide
+  grün.
+- Live gegen die echte Dev-DB verifiziert (Playwright, `dev.py`): für
+  „Hiroyuki Sawano" (echte Spotify-ID `0Riv2KnFcLZA3JSVryRg4y` verlinkt)
+  liefert sowohl der neue lib2-Endpoint als auch der legacy
+  `/api/watchlist/artist/<id>/config`-Endpoint `followers: 0`/kein
+  `artist_stats` — diese Dev-Instanz hat keine authentifizierte
+  Spotify-Session, exakt dasselbe stille Zero-Fallback-Verhalten wie das
+  Legacy-Muster, kein Fehler. Um den datentragenden Pfad zu verifizieren,
+  wurde die `/settings`-Response per Playwright-Routen-Interception um
+  `artist_stats: {followers: 45230000, popularity: 61}` ergänzt — die Karte
+  rendert korrekt „45.2M followers · 61 popularity" unterhalb des
+  Artist-Namens, Layout unverändert.
+
+Damit bleibt aus §52 offen: Match-Provenienz (§56.2, größerer Blast-Radius
+über ~12 Enrichment-Worker), §52.6-Replacement-Teil, §52.7
+Manual-Grab-Policy, das granulare
+`quality_checked`/`acoustic_id_checked`-Eventvokabular sowie die legacy
+Search-/Download-Routen aus §55.2.
