@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
@@ -121,7 +121,11 @@ function qualityProfileSourceLabel(source?: LibraryV2QualityProfileSource): stri
 }
 
 function profileLabel(name: string, source?: LibraryV2QualityProfileSource): string {
-  return `${name} (${qualityProfileSourceLabel(source)})`;
+  const srcLabel = qualityProfileSourceLabel(source);
+  if (srcLabel === 'App default') {
+    return name;
+  }
+  return `${name} (${srcLabel})`;
 }
 
 /** Single clamp for every derived progress percent (P2-20): counters can
@@ -5199,10 +5203,12 @@ function TrackTableOptionsMenu({
   columns,
   columnOrder,
   showAllProviders,
+  availableProviders,
 }: {
   columns: LibraryV2TrackTableColumns;
   columnOrder: (keyof LibraryV2TrackTableColumns)[];
   showAllProviders: boolean;
+  availableProviders?: Set<string> | null;
 }) {
   const mutation = useUiPreferencesMutation();
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
@@ -5286,7 +5292,9 @@ function TrackTableOptionsMenu({
 
           <div className={styles.tableOptionsDivider} />
           <div className={styles.tableOptionsGroupLabel}>Match Providers</div>
-          {MATCH_PROVIDERS.map((provider) => {
+          {MATCH_PROVIDERS.filter(
+            (provider) => !availableProviders || availableProviders.has(provider.key),
+          ).map((provider) => {
             const isVisible = visibleProviders[provider.key] ?? true;
             return (
               <label key={provider.key} className={styles.tableOptionsItem}>
@@ -5665,6 +5673,20 @@ function AlbumTrackTable({
   const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
 
+  const availableProviders = useMemo(() => {
+    if (!matchQuery.data) return null;
+    const set = new Set<string>();
+    for (const s of matchQuery.data.album) {
+      if (s.available !== false) set.add(s.service);
+    }
+    for (const trackServices of Object.values(matchQuery.data.tracks)) {
+      for (const s of trackServices) {
+        if (s.available !== false) set.add(s.service);
+      }
+    }
+    return set;
+  }, [matchQuery.data]);
+
   const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
     'play',
     'disc',
@@ -5779,6 +5801,7 @@ function AlbumTrackTable({
           columns={columns}
           columnOrder={orderedKeys}
           showAllProviders={showAllProviders}
+          availableProviders={availableProviders}
         />
       </div>
       {selected.size > 0 ? (

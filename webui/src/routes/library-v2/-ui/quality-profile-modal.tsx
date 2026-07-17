@@ -68,7 +68,8 @@ export function QualityProfilePicker({
     <>
       <div className={styles.qpHeadRow}>
         <span className={styles.qpManagedHint}>
-          Effective: {currentProfile?.name ?? `Profile ${currentProfileId}`} ({sourceLabel})
+          Effective: {currentProfile?.name ?? `Profile ${currentProfileId}`}
+          {sourceLabel !== 'App default' ? ` (${sourceLabel})` : ''}
         </span>
         <button
           type="button"

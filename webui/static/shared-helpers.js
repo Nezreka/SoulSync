@@ -1463,7 +1463,7 @@ async function initializeConfirmedSearchQualityProfile(playlistId) {
             throw new Error(data.error || 'No quality profiles available');
         }
         select.innerHTML = data.profiles.map(profile =>
-            `<option value="${Number(profile.id)}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (App default)' : ''}</option>`
+            `<option value="${Number(profile.id)}">${escapeHtml(profile.name || `Profile ${profile.id}`)}</option>`
         ).join('');
         const selected = data.profiles.find(profile => profile.is_default) || data.profiles[0];
         select.value = String(selected.id);
