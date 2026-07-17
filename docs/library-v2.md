@@ -35,6 +35,10 @@
 > unmonitored und §52.10 Edit-Icon/Herkunftsanzeige umgesetzt); am 2026-07-17
 > Abschnitt 54 ergänzt (§52.3/§52.4 gemeinsame Artist-/Watchlist-Settings und
 > §52.11 einheitlicher DB-only/permanenter Datei-Entfernungsflow umgesetzt).
+> Am 2026-07-17 wurde außerdem die Materialisierungsentscheidung aus §52.12.2
+> präzisiert: Jeder bestätigte Wishlist-/Acquisition-Intent materialisiert
+> lib2 sofort, unabhängig davon, ob er aus Search, Playlist-Sync, Watchlist-
+> Scanner oder einem anderen Eingangspfad stammt.
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -5887,6 +5891,17 @@ keine zuverlässige Library-v2-Entity, an der der Versuch und die Quarantäne
 sichtbar werden. Der heutige Search-Request führt außerdem noch keine
 `quality_profile_id`; diese Lücke ist Teil dieses Scopes.
 
+**Verbindlicher allgemeiner Vertrag:** Das gilt nicht nur für die globale
+Search-Seite. Jeder Eingangspfad, der einen bestätigten Track-/Release-Intent
+in die Wishlist oder Acquisition schreibt — insbesondere Search-Aktionen,
+Playlist-Sync, Watchlist-Scanner, direkte Track-Suche und manuelle Wishlist-
+Aktionen — muss denselben idempotenten Materialisierungs- und Profilresolver
+verwenden. Die lib2-Entity muss nach diesem bestätigten Write sofort lesbar
+sein, auch wenn noch keine Datei existiert und der spätere Download scheitert,
+quarantänisiert oder nie gestartet wird. Ein unverbindlicher Klick auf ein
+Suchresultat ohne bestätigten Wishlist-/Acquisition-Write materialisiert noch
+nichts.
+
 Das explizite Track-Monitoring weitet sich standardmäßig **nicht** auf alle
 Releases des Artists. Der Artist wird als korrekter Parent angelegt; die
 gesamte Artist-Watchlist wird nur über das Bookmark/Artist Settings aktiviert.
@@ -6011,11 +6026,13 @@ technische Annahme sichtbares Nutzerverhalten festlegen würde:
    gewinnen? Empfehlung: „strengstes erreichbares Profil" nur verwenden,
    wenn Quality-Ränge profilübergreifend eindeutig vergleichbar sind;
    ansonsten Konflikt anzeigen und explizite Auswahl verlangen.
-2. **Search-Materialisierungszeitpunkt:** Empfehlung ist der serverseitige
-   Submit von „Add to Wishlist"/„Begin Analysis"/„Force Download", nicht
-   schon ein unverbindlicher Klick auf ein Suchresultat. Soll „Begin
-   Analysis" allein den Track bereits dauerhaft monitoren oder erst die
-   bestätigte Download-/Wishlist-Aktion?
+2. **Search-Materialisierungszeitpunkt:** ✅ entschieden. Sobald ein
+   bestätigter Search-, Playlist-, Watchlist- oder anderer Acquisition-Intent
+   tatsächlich in die Wishlist/Acquisition geschrieben wird, materialisiert
+   der Server Artist, Release und Track idempotent **vor** Search/Download und
+   mit dem aufgelösten expliziten Profil. Ein unverbindlicher Klick auf ein
+   Suchresultat materialisiert weiterhin nichts. Die technische Umsetzung
+   bleibt §52.8; die Produktentscheidung ist nicht mehr offen.
 3. **Artist-Monitoring bei globaler Track-Suche:** Empfehlung: nur den Track
    monitoren und den Artist als Parent anlegen; die gesamte Watchlist nur bei
    gesetztem Bookmark. Bestätigen, ob der User stattdessen automatisch den

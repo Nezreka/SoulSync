@@ -380,7 +380,11 @@ Reuse-first, keine zweite Pipeline:
 ebenfalls geschlossen (§53): eine direkt ausgelöste Track-Suche darf einen
 unmonitored Track einmalig in Wishlist/Dispatcher geben, ohne dessen
 Monitorflag oder Wanted-Regel zu verändern. Artist-/Album-Scope bleibt
-wanted-only.
+wanted-only. Ergänzend ist die Produktentscheidung für frühe Materialisierung
+jetzt verbindlich: Jeder bestätigte Wishlist-/Acquisition-Write aus Search,
+Playlist-Sync, Watchlist-Scanner oder einem anderen Eingangspfad muss die
+zugehörigen lib2-Entities samt explizitem Profil **vor** dem Download
+idempotent anlegen; der technische Restumfang bleibt library-v2.md §52.8.
 
 ### C2. Manage Tracks → Lidarr „Manage Track Files" — ✅ behoben (siehe library-v2.md §30)
 
