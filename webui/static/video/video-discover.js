@@ -708,12 +708,39 @@
         if (pbtn) { pbtn.setAttribute('aria-expanded', 'false'); pbtn.classList.remove('vdsc-btn--active'); }
         var ex = $('[data-vdsc-explore]'); if (ex) ex.hidden = true;
         var fb = $('[data-vdsc-filterbar]'); if (fb) fb.classList.toggle('hidden', !browse);
+        // The collapse toggle only makes sense in Browse (where the filter bar
+        // shows). Reset it to expanded each time Browse opens.
+        var ftog = $('[data-vdsc-filter-toggle]');
+        if (ftog) {
+            ftog.classList.toggle('hidden', !browse);
+            if (browse) {
+                var saved = '0';
+                try { saved = localStorage.getItem('vdsc-filters-collapsed') || '0'; } catch (e) { /* ignore */ }
+                _setFilterCollapsed(saved === '1');
+            }
+        }
         var wrap = $('[data-vdsc-grid-wrap]'); wrap.classList.remove('hidden');
         var ttl = $('[data-vdsc-grid-title]'); if (ttl) ttl.textContent = title;
         $('[data-vdsc-grid]').innerHTML = '';
         try { wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ }
         loadGrid(true);
     }
+    // Collapse/expand the Browse filter bar (QT3496 #1040): more grid room on
+    // demand. Preference persists so it stays how you left it.
+    function _setFilterCollapsed(collapsed) {
+        var fb = $('[data-vdsc-filterbar]');
+        var tog = $('[data-vdsc-filter-toggle]');
+        var lbl = $('[data-vdsc-filter-toggle-label]');
+        if (fb) fb.classList.toggle('vdsc-filterbar--collapsed', collapsed);
+        if (tog) tog.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        if (lbl) lbl.textContent = collapsed ? 'Show filters' : 'Hide filters';
+        try { localStorage.setItem('vdsc-filters-collapsed', collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+    function _toggleFilterCollapsed() {
+        var fb = $('[data-vdsc-filterbar]');
+        _setFilterCollapsed(!(fb && fb.classList.contains('vdsc-filterbar--collapsed')));
+    }
+
     function closeCategory() {
         state.mode = 'shelves';
         $('[data-vdsc-grid-wrap]').classList.add('hidden');
@@ -1004,6 +1031,7 @@
         var igBtn = $('[data-vdsc-ignore-open]'); if (igBtn && !igBtn._wired) { igBtn._wired = 1; igBtn.addEventListener('click', openIgnoreModal); }
         wireNotInterested();
         var clear = $('[data-vdsc-clear]'); if (clear) clear.addEventListener('click', closeCategory);
+        var ftog = $('[data-vdsc-filter-toggle]'); if (ftog) ftog.addEventListener('click', _toggleFilterCollapsed);
         var more = $('[data-vdsc-more]'); if (more) more.addEventListener('click', function () { loadGrid(false); });
 
         var hide = $('[data-vdsc-hideowned]');
