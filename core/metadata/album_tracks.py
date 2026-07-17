@@ -526,6 +526,52 @@ def get_album_for_source(source: str, album_id: str, artist_name: str = '', albu
         return None
 
 
+def resolve_artist_identity(
+    artist_name: str,
+    *,
+    options: Optional[MetadataLookupOptions] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve an artist NAME to a single provider identity.
+
+    Walks the source-priority chain; for each source it searches by name and
+    takes the strict ``_pick_best_artist_match`` result (exact name wins; the
+    §62.5 catalog-weight tiebreak; a ≥0.85 fuzzy at most; never an unrelated
+    popular artist). Returns the first source that yields a match as
+    ``{source, artist_id, name, image_url, genres}``, or ``None`` when no
+    provider models this exact name as one artist — the expected outcome for a
+    genuine collaboration string like "Ian Asher & Galantis".
+    """
+    name = str(artist_name or '').strip()
+    if not name:
+        return None
+    options = options or MetadataLookupOptions()
+    for source in _get_source_chain_for_lookup(options):
+        client = metadata_registry.get_client_for_source(source)
+        if not client:
+            continue
+        results = _search_artists_for_source(source, client, name, limit=5)
+        best = _pick_best_artist_match(results, name)
+        if best is None:
+            continue
+        provider_id = _extract_lookup_value(best, 'id', 'artist_id')
+        if not provider_id:
+            continue
+        genres = _extract_lookup_value(best, 'genres', default=[]) or []
+        return {
+            'source': source,
+            'artist_id': str(provider_id),
+            'name': str(
+                _extract_lookup_value(best, 'name', 'artist_name', 'title') or name
+            ),
+            'image_url': _extract_lookup_value(
+                best, 'image_url', 'picture_xl', 'picture_big', 'picture',
+                'thumb_url', 'image',
+            ),
+            'genres': list(genres) if isinstance(genres, (list, tuple)) else [],
+        }
+    return None
+
+
 def get_artist_albums_for_source(
     source: str,
     artist_id: str,

@@ -1,0 +1,466 @@
+"""Resolve + enrich Library-v2 *native* artists (no legacy back-reference).
+
+Artists born inside lib2 — featured credits (``_featured_names_for_import``),
+wishlist rows, discography discoveries — carry ``legacy_artist_id = NULL``. The
+whole metadata/enrichment machine is legacy-row-based (``web_server.
+_run_single_enrichment`` writes the legacy ``artists`` row, then
+``core.library2.enrich.resync_entity_from_legacy`` mirrors it back), so a native
+artist can never be reached by it: the Enrich endpoint rejects it and a manual
+match records an id but pulls no artwork. Result: every provider chip is stuck
+``pending`` and no cover art loads.
+
+This module gives native artists the missing path. It resolves the provider
+identity *by name* through SoulSync's existing source-priority search
+(``core.metadata.album_tracks``), then writes the resolved id + artwork/genres
+STRAIGHT onto the lib2 row — no legacy row required. Once the id is stored the
+match-status chips flip to ``matched`` (``match_status`` synthesizes them from
+the row's own ``spotify_id``/``external_ids``) and the artist becomes eligible
+for the normal discography/artwork pipeline.
+
+Legacy-backed artists are intentionally rejected here — they keep using the
+established legacy enrichment path so its columns stay authoritative.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Callable, Dict, List, Optional
+
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.native_enrich")
+
+# resolver(name) -> {"source", "artist_id", "name", "image_url"?, "genres"?} | None
+ArtistResolver = Callable[[str], Optional[Dict[str, Any]]]
+
+
+def _normalize_genres(raw: Any) -> Optional[str]:
+    """Coerce a genre list/string into lib2's JSON-array storage, or None."""
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+    else:
+        parts = [str(g).strip() for g in raw if str(g).strip()]
+    return json.dumps(parts) if parts else None
+
+
+def _persist_identity(
+    conn,
+    artist_id: int,
+    *,
+    source: str,
+    provider_id: str,
+    image_url: Optional[str],
+    genres: Optional[str],
+    existing_external_ids: Any,
+) -> None:
+    """Write the resolved provider id (namespace-correct) + artwork onto the row.
+
+    Spotify/MusicBrainz ids live in their dedicated columns (the chip synth and
+    the rest of lib2 read them there); every other provider id is merged into
+    ``external_ids`` without disturbing ids other providers already left.
+    """
+    assignments = ["updated_at=CURRENT_TIMESTAMP"]
+    params: List[Any] = []
+
+    if source == "spotify":
+        assignments.append("spotify_id=?")
+        params.append(provider_id)
+    elif source == "musicbrainz":
+        assignments.append("musicbrainz_id=?")
+        params.append(provider_id)
+    else:
+        try:
+            ids = json.loads(existing_external_ids or "{}")
+        except (TypeError, ValueError):
+            ids = {}
+        if not isinstance(ids, dict):
+            ids = {}
+        ids[source] = provider_id
+        assignments.append("external_ids=?")
+        params.append(json.dumps(ids, sort_keys=True, separators=(",", ":")))
+
+    if image_url:
+        assignments.append("image_url=?")
+        params.append(str(image_url))
+    if genres:
+        assignments.append("genres=?")
+        params.append(genres)
+
+    params.append(int(artist_id))
+    conn.execute(
+        f"UPDATE lib2_artists SET {', '.join(assignments)} WHERE id=?", params
+    )
+
+
+def resolve_and_enrich_native_artist(
+    conn,
+    artist_id: int,
+    *,
+    resolver: Optional[ArtistResolver] = None,
+) -> Dict[str, Any]:
+    """Resolve one native artist by name and persist id + artwork onto its row.
+
+    Returns ``{"success": True, "source", "provider_id", "image_url"}`` on a
+    match, or ``{"success": False, "attempted": True, "reason": "not_found"}``
+    when no provider had the artist as a single entity (the expected outcome for
+    genuine collaboration names like "Ian Asher & Galantis").
+    """
+    if resolver is None:
+        resolver = default_artist_resolver
+
+    row = conn.execute(
+        "SELECT id, name, legacy_artist_id, spotify_id, musicbrainz_id, external_ids "
+        "FROM lib2_artists WHERE id=?",
+        (int(artist_id),),
+    ).fetchone()
+    if row is None:
+        raise LookupError(f"Library v2 artist {artist_id} not found")
+    if row["legacy_artist_id"] is not None:
+        raise ValueError(
+            f"Library v2 artist {artist_id} is legacy-backed; use the legacy enrich path"
+        )
+
+    name = str(row["name"] or "").strip()
+    identity = resolver(name) if name else None
+    source = str((identity or {}).get("source") or "").strip().lower()
+    provider_id = str((identity or {}).get("artist_id") or "").strip()
+    if not identity or not source or not provider_id:
+        return {
+            "success": False, "attempted": True, "artist_id": int(artist_id),
+            "reason": "not_found",
+        }
+
+    _persist_identity(
+        conn, int(artist_id),
+        source=source,
+        provider_id=provider_id,
+        image_url=identity.get("image_url"),
+        genres=_normalize_genres(identity.get("genres")),
+        existing_external_ids=row["external_ids"],
+    )
+    return {
+        "success": True, "artist_id": int(artist_id), "source": source,
+        "provider_id": provider_id, "image_url": identity.get("image_url"),
+    }
+
+
+ArtworkFetcher = Callable[[str, Dict[str, str]], Optional[str]]
+
+
+def _stored_source_ids(row: Any) -> Dict[str, str]:
+    ids: Dict[str, str] = {}
+    if row["spotify_id"]:
+        ids["spotify"] = str(row["spotify_id"])
+    if row["musicbrainz_id"]:
+        ids["musicbrainz"] = str(row["musicbrainz_id"])
+    try:
+        extra = json.loads(row["external_ids"] or "{}")
+        if isinstance(extra, dict):
+            for source, value in extra.items():
+                if source and value:
+                    ids[str(source)] = str(value)
+    except (TypeError, ValueError):
+        pass
+    return ids
+
+
+def enrich_native_artist_artwork(
+    conn,
+    artist_id: int,
+    *,
+    artwork_fetcher: Optional[ArtworkFetcher] = None,
+) -> bool:
+    """Pull artwork for a native artist that already has provider id(s).
+
+    Setting an id (e.g. via a manual match) flips the chip but does not fetch a
+    cover — this closes that gap: it reads the row's stored provider ids and
+    asks the artwork engine for an image, writing it onto the row. No-op (returns
+    False) when the row has no provider id or the engine finds nothing.
+    """
+    row = conn.execute(
+        "SELECT id, name, image_url, spotify_id, musicbrainz_id, external_ids "
+        "FROM lib2_artists WHERE id=?",
+        (int(artist_id),),
+    ).fetchone()
+    if row is None:
+        return False
+    source_ids = _stored_source_ids(row)
+    if not source_ids:
+        return False
+    fetch = artwork_fetcher or default_artwork_fetcher
+    url = fetch(str(row["name"] or ""), source_ids)
+    if not url:
+        return False
+    conn.execute(
+        "UPDATE lib2_artists SET image_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (str(url), int(artist_id)),
+    )
+    return True
+
+
+def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[str]:
+    """Resolve an artist image URL from stored provider ids (production adapter)."""
+    from core.library2.provider_adapters import fetch_artwork_url
+
+    result = fetch_artwork_url("artist", artist_name=name, source_ids=source_ids)
+    return result.url if result is not None else None
+
+
+def _get_or_create_component_artist(
+    conn, name: str, identity: Dict[str, Any]
+) -> int:
+    """Resolve a split component to a lib2 artist id, creating + enriching it.
+
+    Reuses an existing row (matched case-insensitively by name) so a split never
+    duplicates an artist the library already has. A brand-new component is
+    created native and enriched from the resolved identity; an existing *native,
+    still-unmapped* row is enriched too. A legacy-backed match is left untouched
+    (it keeps the authoritative legacy path).
+    """
+    existing = conn.execute(
+        "SELECT id, legacy_artist_id, spotify_id, musicbrainz_id, external_ids "
+        "FROM lib2_artists WHERE name=? COLLATE NOCASE ORDER BY id LIMIT 1",
+        (name,),
+    ).fetchone()
+    if existing is not None:
+        cid = int(existing["id"])
+        unmapped = (
+            existing["legacy_artist_id"] is None
+            and not existing["spotify_id"]
+            and not existing["musicbrainz_id"]
+            and (existing["external_ids"] or "{}") in ("", "{}")
+        )
+        if unmapped:
+            _persist_identity(
+                conn, cid,
+                source=str(identity["source"]).strip().lower(),
+                provider_id=str(identity["artist_id"]).strip(),
+                image_url=identity.get("image_url"),
+                genres=_normalize_genres(identity.get("genres")),
+                existing_external_ids=existing["external_ids"],
+            )
+        return cid
+
+    cur = conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)", (name, name)
+    )
+    cid = int(cur.lastrowid)
+    _persist_identity(
+        conn, cid,
+        source=str(identity["source"]).strip().lower(),
+        provider_id=str(identity["artist_id"]).strip(),
+        image_url=identity.get("image_url"),
+        genres=_normalize_genres(identity.get("genres")),
+        existing_external_ids="{}",
+    )
+    return cid
+
+
+def _rehome_and_delete_combined(
+    conn, combined_id: int, primary_id: int, component_ids: List[int]
+) -> None:
+    """Move every reference off the ghost combined artist, then delete it.
+
+    ORDER IS SAFETY-CRITICAL: ``lib2_albums.primary_artist_id`` is
+    ``ON DELETE CASCADE``, so the ghost's primary albums (and their tracks/files)
+    would be destroyed if it were deleted while still their primary. We reassign
+    primaries and rewrite junctions FIRST; the final delete then finds nothing
+    depending on the ghost.
+    """
+    # 1) Reassign albums where the ghost is primary → the first component.
+    primary_album_ids = [
+        int(r["id"]) for r in conn.execute(
+            "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (combined_id,)
+        )
+    ]
+    for album_id in primary_album_ids:
+        conn.execute(
+            "UPDATE lib2_albums SET primary_artist_id=?, updated_at=CURRENT_TIMESTAMP "
+            "WHERE id=?",
+            (primary_id, album_id),
+        )
+
+    # 2) Credit every component on every album the ghost was on (incl. reassigned).
+    album_ids = set(primary_album_ids)
+    for r in conn.execute(
+        "SELECT album_id FROM lib2_album_artists WHERE artist_id=?", (combined_id,)
+    ):
+        album_ids.add(int(r["album_id"]))
+    for album_id in album_ids:
+        for cid in component_ids:
+            role = "primary" if cid == primary_id else "featured"
+            conn.execute(
+                "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+                "VALUES(?, ?, ?)",
+                (album_id, cid, role),
+            )
+    conn.execute("DELETE FROM lib2_album_artists WHERE artist_id=?", (combined_id,))
+
+    # 3) Same for track credits — preserve the ghost's role, fan out to components.
+    track_rows = conn.execute(
+        "SELECT track_id, role, position FROM lib2_track_artists WHERE artist_id=?",
+        (combined_id,),
+    ).fetchall()
+    for tr in track_rows:
+        base_pos = int(tr["position"] or 0)
+        for offset, cid in enumerate(component_ids):
+            conn.execute(
+                "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position) "
+                "VALUES(?, ?, ?, ?)",
+                (int(tr["track_id"]), cid, tr["role"], base_pos + offset),
+            )
+    conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (combined_id,))
+
+    # 4) Best-effort: drop the ghost's monitor rules so they don't linger.
+    try:
+        conn.execute(
+            "DELETE FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
+            (combined_id,),
+        )
+    except Exception as exc:  # noqa: BLE001 — table optional/absent on minimal DBs
+        logger.debug("ghost monitor-rule cleanup skipped (%s): %s", combined_id, exc)
+
+    # 5) The ghost is now unreferenced by any primary or junction — safe to delete.
+    conn.execute("DELETE FROM lib2_artists WHERE id=?", (combined_id,))
+
+
+def smart_split_combined_artist(
+    conn,
+    artist_id: int,
+    *,
+    resolver: Optional[ArtistResolver] = None,
+) -> Optional[Dict[str, Any]]:
+    """Split a native combined-name artist ("A & B") into its real components.
+
+    Runs only as a fallback for a native artist that no provider recognizes as a
+    single entity (the caller tries a single-entity resolve first). It splits the
+    display name and requires **every** component to resolve to a real provider
+    artist — a strong guard: a genuine band name like "Hall & Oates" is
+    recognized as one entity upstream and never reaches here, so this only ever
+    fires on true concatenations. When all components resolve, each becomes a
+    real (enriched) artist, the release re-homes to the first component with the
+    rest credited, and the ghost combined row is deleted (see
+    ``_rehome_and_delete_combined`` for the cascade-safe ordering).
+
+    Returns a summary dict on a split, or ``None`` when it declines (not a
+    combined name, legacy-backed, or a component didn't resolve).
+    """
+    if resolver is None:
+        resolver = default_artist_resolver
+
+    row = conn.execute(
+        "SELECT id, name, legacy_artist_id FROM lib2_artists WHERE id=?",
+        (int(artist_id),),
+    ).fetchone()
+    if row is None or row["legacy_artist_id"] is not None:
+        return None
+
+    from core.library2.importer import split_artist_credits
+
+    components = split_artist_credits(row["name"])
+    if len(components) < 2:
+        return None
+
+    identities: List[tuple] = []
+    for component in components:
+        identity = resolver(component)
+        if not identity or not str(identity.get("artist_id") or "").strip():
+            return None  # not confident — leave the combined row intact
+        identities.append((component, identity))
+
+    component_ids: List[int] = []
+    for component, identity in identities:
+        cid = _get_or_create_component_artist(conn, component, identity)
+        if cid not in component_ids:
+            component_ids.append(cid)
+    if len(component_ids) < 2 or int(artist_id) in component_ids:
+        return None
+
+    primary_id = component_ids[0]
+    _rehome_and_delete_combined(conn, int(artist_id), primary_id, component_ids)
+    return {
+        "combined_id": int(artist_id),
+        "primary_id": primary_id,
+        "component_ids": component_ids,
+    }
+
+
+def _pending_native_artist_ids(conn, limit: Optional[int]) -> List[int]:
+    """Native artists (no legacy backref) that still carry no provider id."""
+    sql = (
+        "SELECT id FROM lib2_artists "
+        "WHERE legacy_artist_id IS NULL "
+        "  AND (spotify_id IS NULL OR spotify_id='') "
+        "  AND (musicbrainz_id IS NULL OR musicbrainz_id='') "
+        "  AND (external_ids IS NULL OR external_ids='' OR external_ids='{}') "
+        "ORDER BY id"
+    )
+    if limit is not None:
+        sql += " LIMIT ?"
+        rows = conn.execute(sql, (int(limit),)).fetchall()
+    else:
+        rows = conn.execute(sql).fetchall()
+    return [int(r["id"]) for r in rows]
+
+
+def reconcile_unmapped_native_artists(
+    conn,
+    *,
+    resolver: Optional[ArtistResolver] = None,
+    limit: Optional[int] = None,
+    progress: Optional[Callable[[int, int], None]] = None,
+) -> Dict[str, Any]:
+    """Resolve every still-unmapped native artist by name (the backlog healer).
+
+    This is the on-demand maintenance pass behind the "Reconcile unmapped
+    artists" action: it walks native artists with no provider id and tries to
+    resolve+enrich each. Collaboration names that no provider models as one
+    entity simply stay unmatched — counted, never fabricated.
+    """
+    if resolver is None:
+        resolver = default_artist_resolver
+
+    ids = _pending_native_artist_ids(conn, limit)
+    total = len(ids)
+    stats = {"scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0}
+    for index, artist_id in enumerate(ids):
+        try:
+            result = resolve_and_enrich_native_artist(conn, artist_id, resolver=resolver)
+            stats["scanned"] += 1
+            if result.get("success"):
+                stats["matched"] += 1
+            elif smart_split_combined_artist(conn, artist_id, resolver=resolver):
+                # No single provider entity, but every component is a real
+                # artist — split into them and delete the ghost.
+                stats["split"] += 1
+            else:
+                stats["unmatched"] += 1
+        except Exception as exc:  # noqa: BLE001 — one bad row must not abort the pass
+            stats["errors"] += 1
+            logger.debug("native reconcile failed for artist %s: %s", artist_id, exc)
+        if progress is not None:
+            progress(index + 1, total)
+    return stats
+
+
+def default_artist_resolver(name: str) -> Optional[Dict[str, Any]]:
+    """Resolve an artist name to a provider identity via source-priority search.
+
+    Thin production adapter over ``core.metadata.album_tracks`` — imported lazily
+    so tests (which inject a fake resolver) never pull the metadata stack.
+    """
+    from core.metadata.album_tracks import resolve_artist_identity
+
+    return resolve_artist_identity(name)
+
+
+__all__ = [
+    "resolve_and_enrich_native_artist",
+    "reconcile_unmapped_native_artists",
+    "smart_split_combined_artist",
+    "enrich_native_artist_artwork",
+    "default_artist_resolver",
+    "default_artwork_fetcher",
+]

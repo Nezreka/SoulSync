@@ -1485,6 +1485,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 actor=f"profile:{_profile()}",
             )
 
+            # Setting an id flips the chip but pulls no cover — the user expects
+            # artwork to appear too. Best-effort artist artwork fetch from the
+            # id just stored (native artists only; legacy-backed rows enrich via
+            # the legacy path). Never fails the match.
+            if request.method == "PUT" and entity_type in ("artist", "artists"):
+                try:
+                    from core.library2.native_enrich import enrich_native_artist_artwork
+                    enrich_native_artist_artwork(conn, int(entity_id))
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("native artist artwork fetch failed (%s): %s",
+                                 entity_id, exc)
+
             # Artist settings deliberately reuse the legacy Watchlist.  Keep a
             # supplied, identity-checked row in sync just like the legacy match
             # endpoint does.
@@ -2478,6 +2490,58 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             logger.error("Duplicate repair failed: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
         return jsonify({"success": True, **stats})
+
+    @app.route("/api/library/v2/maintenance/reconcile-unmapped-artists", methods=["POST"])
+    def lib2_reconcile_unmapped_artists():
+        """Heal the unmapped-native-artist backlog.
+
+        Featured/wishlist/discography artists have no legacy row, so the legacy
+        enrichment workers never reach them and every provider chip stays
+        ``pending`` with no cover. This resolves each still-unmapped native
+        artist by name and writes its provider id + artwork straight onto the
+        lib2 row. Collaboration names no provider models as one entity stay
+        unmatched (counted, never fabricated). Background job; poll
+        ``/api/library/v2/jobs/status``."""
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            job = _job_registry.start("reconcile-artists")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False, "error": str(exc), "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
+
+        def _run():
+            db = get_database()
+            try:
+                conn = db._get_connection()
+                try:
+                    from core.library2.native_enrich import (
+                        reconcile_unmapped_native_artists,
+                    )
+
+                    def _progress(current, total):
+                        try:
+                            _job_registry.update(job_id, current=current, total=total)
+                            conn.commit()  # persist incrementally; job is re-runnable
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug("reconcile progress update failed: %s", exc)
+
+                    stats = reconcile_unmapped_native_artists(conn, progress=_progress)
+                    conn.commit()
+                    _job_registry.update(job_id, result=stats)
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.error("Reconcile unmapped artists failed: %s", e, exc_info=True)
+                _job_registry.update(job_id, error=str(e))
+            finally:
+                _job_registry.finish(job_id)
+
+        threading.Thread(target=_run, name="lib2-reconcile-artists", daemon=True).start()
+        return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/maintenance/duplicate-findings", methods=["GET"])
     def lib2_duplicate_findings():
@@ -3942,6 +4006,41 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
 
         if legacy_id is None:
+            if singular == "artist":
+                # Native artist (featured credit / wishlist / discography): it
+                # has no legacy row, so the legacy enrichment workers can never
+                # reach it. Resolve its provider identity by name and write the
+                # id + artwork straight onto the lib2 row instead. The specific
+                # ``service`` chip is not honored here — native resolve is
+                # holistic across the source-priority chain.
+                conn = _conn()
+                try:
+                    from core.library2.native_enrich import (
+                        resolve_and_enrich_native_artist,
+                    )
+                    native = resolve_and_enrich_native_artist(conn, eid)
+                    conn.commit()
+                except Exception as exc:  # noqa: BLE001
+                    conn.rollback()
+                    logger.debug("native artist enrich failed (%s): %s", eid, exc)
+                    return jsonify({
+                        "success": False, "error": "Native enrichment failed",
+                    }), 500
+                finally:
+                    conn.close()
+                if native.get("success"):
+                    return jsonify({
+                        "success": True,
+                        "message": f"Resolved via {native.get('source')}",
+                        "resynced": True,
+                        "source": native.get("source"),
+                    })
+                return jsonify({
+                    "success": False,
+                    "attempted": True,
+                    "message": ("No metadata provider has this artist as a single "
+                                "entity — match it manually."),
+                })
             return jsonify({
                 "success": False,
                 "error": ("This entry has no legacy library record to enrich "

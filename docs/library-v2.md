@@ -7333,3 +7333,163 @@ neuen unsicheren Title-Fold noch eine Namespace-Konvertierung ein.
   unberührten Baseline-Dateien `tests/downloads/test_cross_batch_dedup.py` (6)
   und `tests/matching/test_normalize_version_symmetry.py` (14); keine neue
   Library-v2-Regression.
+
+---
+
+## 68. „Unmapped Artists" — native Artists enrichbar machen + smart-split — ✅ umgesetzt (2026-07-17)
+
+**Auslöser:** Nutzer-Bugreport (`~/Desktop/Artist not matchet failiuers`, drei
+Fälle: Afrojack #1209, „Big Sean and BabyTron" #1214, „Ian Asher & Galantis"
+#1153). Importierte „Artists" zeigen alle Provider-Chips `pending`/`not_found`,
+kein Cover, keine Metadaten. Genaue Analyse ergab **zwei** verschiedene
+Ursachen.
+
+### 68.1 Root Cause RC1 — native Artists haben keinen Enrichment-Pfad
+
+Artists, die INNERHALB von lib2 entstehen — Featured-Credits
+(`_featured_names_for_import`), Wishlist-Zeilen, Discography-Discoveries —
+tragen `legacy_artist_id = NULL`. Die gesamte Metadaten-/Enrichment-Maschine ist
+legacy-zeilen-basiert (`web_server._run_single_enrichment` schreibt die Legacy-
+`artists`-Zeile, `core.library2.enrich.resync_entity_from_legacy` spiegelt
+zurück). Für einen nativen Artist ist damit **jeder Pfad eine Sackgasse**:
+
+- **Enrich** lehnt `legacy_id IS NULL` hart ab (`api/library_v2.py`).
+- **Manual-Match** (§67) schreibt zwar die ID, zieht aber **kein Artwork**.
+- **Discography-Expand** löst zwar per Name auf, wirft die gefundene Artist-
+  Provider-ID aber weg (`discography.py` schreibt nur `discography_synced_at`;
+  `provider_adapters.fetch_artist_discography` echot nur die Eingabe-ID) und
+  braucht Monitoring als Trigger.
+
+⇒ §67 machte native Artists *matchbar*, aber nie *enrichbar*. Die Match-Status-
+Chips synthetisieren für native Zeilen aus den eigenen `spotify_id`/
+`external_ids` — leer ⇒ alles `pending`.
+
+**Fix:**
+
+- `core/metadata/album_tracks.py::resolve_artist_identity(name)` — läuft die
+  Source-Priority-Kette, nimmt den strikten `_pick_best_artist_match` (#988/
+  §62.5) und gibt `{source, artist_id, name, image_url, genres}` zurück oder
+  `None`. Das war der fehlende Baustein: die Namensauflösung existierte in
+  `get_artist_discography`, die gefundene Artist-ID wurde aber nie
+  herausgereicht.
+- Neues Modul `core/library2/native_enrich.py`:
+  - `resolve_and_enrich_native_artist` — löst per Name auf und schreibt ID
+    (Spotify/MB in die dedizierte Spalte, sonst namespace-korrekt in
+    `external_ids`) + Cover + Genres **direkt** auf die lib2-Zeile; lehnt
+    legacy-backed Zeilen ab.
+  - `enrich_native_artist_artwork` — zieht Cover aus bereits gespeicherten IDs
+    (für den Manual-Match-Pfad).
+  - `reconcile_unmapped_native_artists` — Backlog-Heiler über alle nativen
+    Artists ohne Provider-ID.
+  - Resolver/Artwork-Fetcher sind injizierbar (DI), damit Tests nie den
+    Metadaten-Stack ziehen.
+- Verdrahtung (`api/library_v2.py`): **Enrich**-Endpoint bekommt einen nativen
+  Artist-Zweig (statt 409); **Manual-Match** zieht nach dem ID-Setzen jetzt
+  best-effort das Cover; neuer Background-Job
+  `POST /api/library/v2/maintenance/reconcile-unmapped-artists`.
+- Frontend: Button **„Reconcile Unmapped Artists"** in der Maintenance-Modal
+  (pollt `jobs/status`, zeigt `scanned/matched/split/unmatched`).
+- **Bewusst NICHT umgesetzt:** Provenienz-Badge für native Zeilen.
+  `metadata_match_provenance` hat `CHECK(entity_type IN artist/album/track)` —
+  eine Erweiterung bräuchte einen Tabellen-Rebuild; der Chip flippt ohnehin
+  über die gespeicherte ID auf `matched`, der Origin-Badge ist kosmetisch und
+  wird bei Bedarf später nachgezogen.
+
+### 68.2 Root Cause RC2 — Kollab-Namen sind kein einzelner Provider-Artist
+
+„Big Sean and BabyTron", „Ian Asher & Galantis" sind zwei Artists per `and`/`&`.
+Der P2-24-Guard (§41) teilt mehrdeutige `and`/`&`/Komma-Credits bewusst NICHT
+(schützt echte Bandnamen wie „Hall & Oates"). Folge: solche Zeilen existieren
+als ein Artist, den kein Provider als eine Entität kennt (Ian Asher & Galantis
+wurde tatsächlich versucht → überall `not_found` außer einer Last.fm-Fuzzy-
+Seite).
+
+**Fix — smart-split mit Provider-Sicherheitscheck** (Nutzer-Entscheid: Variante
+A, destruktiv, Ghost löschen). `native_enrich.smart_split_combined_artist`:
+
+- Läuft nur als Fallback, wenn der Single-Entity-Resolve fehlschlägt. Ein echter
+  Bandname wie „Hall & Oates" wird upstream als eine Entität gematcht und
+  erreicht den Split nie — starke Garantie: gesplittet wird **nur** bei echten
+  Konkatenationen.
+- Teilt den Namen (`split_artist_credits`) und verlangt, dass **jede** Komponente
+  zu einem echten Provider-Artist auflöst; sonst Abbruch (kein Phantom).
+- Jede Komponente wird zu einem echten (enrichten) Artist
+  (`_get_or_create_component_artist` — bestehende Zeile wird wiederverwendet,
+  nie dupliziert); der Release wird auf die erste Komponente umgehängt, die
+  übrigen als Credits ergänzt, der kombinierte Ghost gelöscht.
+- **Cascade-Sicherheit (kritisch):** `lib2_albums.primary_artist_id` ist
+  `ON DELETE CASCADE` — würde der Ghost gelöscht, solange er Primary eines Albums
+  ist, riss es Album + Tracks + Files mit. `_rehome_and_delete_combined` hängt
+  daher ZUERST alle Primaries um und schreibt die Junctions neu; der finale
+  Delete findet dann keine Abhängigkeit mehr. Reihenfolge ist getestet.
+- Im Reconcile-Job zwischen `matched` und `unmatched` eingehängt; Ergebnis
+  zählt `split`.
+
+### 68.3 Verifikation
+
+- Library-v2-Backend: **760 passed** (16 neue Tests: `test_native_enrich.py` 13,
+  `test_resolve_artist_identity.py` 4 — sowie `test_enrich_endpoint.py` +3).
+- Ruff für alle geänderten Python-Dateien sauber.
+- Frontend: `npm run check` (Format + Typecheck + oxlint) 0 Warnungen/0 Fehler;
+  Vitest **226 passed**; Production-Build erfolgreich (nur bekannter Chunk-
+  Hinweis).
+- **Reale Bestätigung steht beim Nutzer aus:** die drei Beispiel-Artists liegen
+  auf seinem Prod-Server (nicht in der Dev-DB). Endgültiger Beweis = „Reconcile
+  Unmapped Artists" dort klicken (Afrojack → auto-matched; Kollab-Namen →
+  gesplittet oder manuell matchbar MIT Cover).
+
+---
+
+## 69. Offene Nutzer-Reports 2026-07-17 — Watchlist/Wishlist-Sync + Manual-Grab/Auto-Search — 🔍 gemeldet, noch NICHT untersucht
+
+Aus derselben Session wie §68. **Reine Erfassung der gemeldeten Symptome** —
+noch keine Root-Cause-Analyse, noch keine Umsetzung. Reihenfolge nach Nutzer-
+Priorität: erst §68 (erledigt), dann §69.1, dann §69.2. Für §69.1 besteht
+Dev-DB-Zugriff.
+
+### 69.1 Watchlist ↔ Library-Monitored muss BEIDSEITIG synchron sein
+
+**Gemeldet:** Der Sync ist derzeit nur einseitig.
+
+- ✅ **Library → Watchlist funktioniert:** einen Artist auf *Monitored* setzen
+  legt ihn in der Watchlist an (`enqueue_artist_watchlist`, `api/library_v2.py`).
+- ❌ **Watchlist → Library fehlt:**
+  - *„Clear Watchlist"* muss ALLE zugehörigen Library-Artists wieder
+    **demonitoren** — sonst bleibt es bei uns `monitored`, ist aber nicht mehr
+    in der Watchlist (Zustände laufen auseinander).
+  - Einen Artist in der Watchlist **löschen** muss denselben Artist in der
+    Library demonitoren. Und umgekehrt.
+- ❌ **Track-Monitored ↔ Wishlist-Gap (gleiche Klasse Bug):** Songs sind bei uns
+  `monitored`, stehen aber NICHT in der Wishlist. Konkretes Beispiel des
+  Nutzers: **„Lost and Found" von SawanoHiroyuki[nZk]** — monitored, aber nicht
+  in der Wishlist. Ein monitored *missing* Track muss in der Wishlist landen und
+  umgekehrt.
+
+**Zu untersuchen:** die Library→Watchlist-Kante (`enqueue_artist_watchlist`,
+`core/library2/wishlist_mirror.py`, `mirror_outbox.py`, `core/watchlist_scanner.py`)
+und die fehlende Rück-Kante (Watchlist-Delete/Clear → lib2 demonitor) bauen;
+plus den Track-`monitored` → Wishlist-Mirror reparieren, warum ein monitored
+missing Track (Sawano) nicht projiziert wurde. Beidseitig, idempotent.
+
+### 69.2 Manual Grab (Interactive Search) — geht nicht in die Download-Pipeline
+
+**Gemeldet:** Manual-Grab/Interactive-Search scheint end-to-end nicht zu
+funktionieren. UI zeigt „Downloading"/„gegrabbt", aber:
+- es geht offenbar nicht in die Download-Pipeline,
+- der Track erscheint **nie** in Library V2,
+- in der **Quarantäne** ist ebenfalls nichts zu finden.
+
+⇒ Wahrscheinlich noch nicht (vollständig) implementiert. **Muss neu analysiert
+werden:** wohin der Manual-Grab-Dispatch geht, ob er die Download-/Post-
+Processing-Pipeline überhaupt erreicht, und wo er verloren geht. (Vgl. §60
+„Manual-Grab-Force-Confirm" — die Force-Bestätigung wurde umgesetzt, aber der
+Ende-zu-Ende-Durchlauf offenbar nicht verifiziert.)
+
+### 69.3 Automatic Search eines einzelnen Tracks — Wishlist wird nicht ausgeführt
+
+**Gemeldet:** Ein *Automatic Search* auf einen bestimmten Track legt ihn zwar in
+die Wishlist, führt ihn aber nicht sofort aus. Erwartet: **genau dieser eine
+Track** wird direkt regulär gesucht/abgearbeitet — wie jeder andere Wishlist-
+Track — **ohne die gesamte Wishlist zu starten**. (Verwandt mit §69.1 Track-
+Wishlist-Kante und §29/C1 scoped Automatic Search; hier fehlt die sofortige
+Einzel-Track-Ausführung nach dem Wishlist-Insert.)

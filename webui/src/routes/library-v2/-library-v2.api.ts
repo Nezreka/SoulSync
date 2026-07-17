@@ -957,6 +957,20 @@ export async function runRepairJob(
   if (payload.error) throw new Error(payload.error);
 }
 
+/** Heal the unmapped-native-artist backlog: resolve featured/wishlist/
+ *  discography artists (no legacy row) by name — id + artwork — and split true
+ *  collaboration names into their real components. Returns a job id to poll via
+ *  fetchLibraryV2JobStatus; the result carries `{scanned, matched, split,
+ *  unmatched}`. */
+export async function reconcileUnmappedArtists(): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+    apiClient.post('library/v2/maintenance/reconcile-unmapped-artists', { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Reconcile failed');
+  if (!payload.job_id) throw new Error('Reconcile did not return a job id');
+  return payload.job_id;
+}
+
 export async function startLibraryV2UpgradeScan(): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post('library/v2/upgrade-scan', { json: {} }),

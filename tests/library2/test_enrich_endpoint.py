@@ -242,6 +242,75 @@ def test_enrich_409_when_entity_has_no_legacy_record(api):
     assert calls == []
 
 
+def _insert_native_artist(db, name):
+    conn = db._get_connection()
+    cur = conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)", (name, name)
+    )
+    conn.commit()
+    aid = cur.lastrowid
+    conn.close()
+    return aid
+
+
+def test_enrich_native_artist_resolves_by_name_and_matches(api, monkeypatch):
+    """A native artist (no legacy row) enriches via by-name provider resolution
+    instead of the old 409 dead-end."""
+    client, db, _ids, _calls = api
+    aid = _insert_native_artist(db, "Afrojack")
+
+    import core.library2.native_enrich as NE
+    monkeypatch.setattr(
+        NE, "default_artist_resolver",
+        lambda name: {"source": "spotify", "artist_id": "SP_AFRO",
+                      "name": name, "image_url": "http://img/a", "genres": []},
+    )
+
+    resp = client.post(f"/api/library/v2/artists/{aid}/enrich",
+                       json={"service": "spotify"})
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["source"] == "spotify"
+    conn = db._get_connection()
+    row = conn.execute(
+        "SELECT spotify_id, image_url FROM lib2_artists WHERE id=?", (aid,)
+    ).fetchone()
+    conn.close()
+    assert row["spotify_id"] == "SP_AFRO"
+    assert row["image_url"] == "http://img/a"
+
+
+def test_enrich_native_artist_no_provider_match_is_not_a_dead_end(api, monkeypatch):
+    """A genuine collaboration name resolves to nothing — a clear 'match
+    manually' result, not the legacy 409."""
+    client, db, _ids, _calls = api
+    aid = _insert_native_artist(db, "Big Sean and BabyTron")
+
+    import core.library2.native_enrich as NE
+    monkeypatch.setattr(NE, "default_artist_resolver", lambda name: None)
+
+    resp = client.post(f"/api/library/v2/artists/{aid}/enrich",
+                       json={"service": "spotify"})
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is False
+    assert body["attempted"] is True
+    assert "match it manually" in body["message"]
+
+
+def test_reconcile_unmapped_artists_endpoint_starts_a_job(api):
+    client, _db, _ids, _calls = api
+    resp = client.post("/api/library/v2/maintenance/reconcile-unmapped-artists")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["started"] is True
+    assert body["job_id"]
+
+
 def test_enrich_returns_503_when_not_wired(tmp_path):
     """register_library_v2_routes without run_enrichment (e.g. an older
     web_server.py wiring) must fail closed with a clear error, not 500."""

@@ -73,6 +73,7 @@ import {
   searchLibraryV2MatchService,
   refreshLibraryV2,
   refreshLibraryV2Discography,
+  reconcileUnmappedArtists,
   retryLibraryV2Mirror,
   runRepairJob,
   runLibraryV2PlaylistPipeline,
@@ -2663,6 +2664,35 @@ function MaintenanceModal({
   onClose: () => void;
 }) {
   const [state, setState] = useState<Record<string, 'queued' | 'error'>>({});
+  const [reconcile, setReconcile] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [reconcileResult, setReconcileResult] = useState<string | null>(null);
+
+  const runReconcile = () => {
+    setReconcile('running');
+    setReconcileResult(null);
+    void reconcileUnmappedArtists()
+      .then(async (jobId) => {
+        for (let i = 0; i < 900; i += 1) {
+          const s = await fetchLibraryV2JobStatus(jobId);
+          if (!s.running) {
+            const r = (s.result ?? {}) as Record<string, number>;
+            setReconcile('done');
+            setReconcileResult(
+              `Scanned ${r.scanned ?? 0} · matched ${r.matched ?? 0} · split ${r.split ?? 0} · still unmatched ${r.unmatched ?? 0}`,
+            );
+            return;
+          }
+          await new Promise((res) => setTimeout(res, 1000));
+        }
+        setReconcile('error');
+        setReconcileResult('Timed out waiting for the job');
+      })
+      .catch((e) => {
+        setReconcile('error');
+        setReconcileResult(e instanceof Error ? e.message : 'Reconcile failed');
+      });
+  };
+
   return (
     <ModalShell title="Maintenance" onClose={onClose}>
       <p className={styles.qpSubtitle}>
@@ -2671,6 +2701,25 @@ function MaintenanceModal({
         Repair jobs.
       </p>
       <div className={styles.qpList}>
+        <button
+          type="button"
+          className={styles.qpOption}
+          disabled={reconcile === 'running'}
+          onClick={runReconcile}
+        >
+          <span className={styles.qpName}>
+            Reconcile Unmapped Artists
+            <span className={styles.qpBasis}>{MAINTENANCE_BASIS_LABEL.lib2}</span>
+            {reconcile === 'running' ? <span className={styles.statusOk}>running…</span> : null}
+            {reconcile === 'done' ? <span className={styles.statusOk}>done</span> : null}
+            {reconcile === 'error' ? <span className={styles.statusWarn}>failed</span> : null}
+          </span>
+          <span className={styles.qpDesc}>
+            Resolve featured/wishlist/discography artists that never matched a provider (id + cover
+            art), and split true collaboration names into their real artists.
+            {reconcileResult ? ` — ${reconcileResult}` : ''}
+          </span>
+        </button>
         {MAINTENANCE_JOBS.map((job) => (
           <button
             key={job.id}
