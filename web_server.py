@@ -4390,6 +4390,51 @@ def settings_config_status_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Config export / import (Kazimir: "checkout" menu for migrating installs) ──
+@app.route('/api/config/export', methods=['GET'])
+@admin_only
+def export_config_bundle():
+    """One portable JSON bundle for BOTH sides. ?secrets=1 embeds real
+    credentials (plaintext — the UI gates this behind an explicit opt-in);
+    default redacts them so the export is safe to share."""
+    if not config_manager:
+        return jsonify({"error": "Config manager unavailable"}), 500
+    from datetime import datetime, timezone
+
+    from api.video import get_video_db
+    from core.config_export import build_bundle
+    include_secrets = request.args.get('secrets', '0') in ('1', 'true', 'yes')
+    bundle = build_bundle(
+        config_manager, get_video_db(),
+        include_secrets=include_secrets,
+        exported_at=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        app_version=SOULSYNC_VERSION.split('+')[0],
+    )
+    return jsonify(bundle)
+
+
+@app.route('/api/config/import', methods=['POST'])
+@admin_only
+def import_config_bundle():
+    """Apply a config bundle exported from another install. Validates the
+    marker/version first; a secrets-redacted bundle never blanks existing
+    credentials (the config_manager's per-leaf guard skips the mask)."""
+    if not config_manager:
+        return jsonify({"error": "Config manager unavailable"}), 500
+    from api.video import get_video_db
+    from core.config_export import apply_bundle
+    data = request.get_json(silent=True)
+    try:
+        summary = apply_bundle(config_manager, get_video_db(), data or {})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:   # noqa: BLE001
+        logger.exception("config import failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **summary,
+                    "note": "Config imported. Restart SoulSync so every service picks it up."})
+
+
 # ── Per-service verify cache ──
 # Stores the last verify result per service for 5 minutes to prevent
 # hammering external APIs when the user rapidly expands/collapses cards.

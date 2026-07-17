@@ -1806,6 +1806,43 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def all_video_settings(self, exclude=frozenset()) -> dict:
+        """Every video_settings key/value (for the config export). Values are
+        stored as strings/JSON-strings; parsed back to objects where possible so
+        the export is real JSON, not strings-of-JSON. ``exclude`` drops
+        one-time/internal keys that shouldn't migrate."""
+        import json as _json
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("SELECT key, value FROM video_settings").fetchall()
+        finally:
+            conn.close()
+        out = {}
+        for r in rows:
+            k = r["key"]
+            if k in exclude:
+                continue
+            v = r["value"]
+            try:
+                out[k] = _json.loads(v) if isinstance(v, str) else v
+            except (ValueError, TypeError):
+                out[k] = v
+        return out
+
+    def replace_video_settings(self, settings: dict) -> int:
+        """Import: upsert a dict of video settings (config migration). Objects
+        are re-serialized to their stored JSON-string form. Returns the count
+        written."""
+        import json as _json
+        if not isinstance(settings, dict):
+            return 0
+        n = 0
+        for k, v in settings.items():
+            stored = v if isinstance(v, str) else _json.dumps(v)
+            self.set_setting(str(k), stored)
+            n += 1
+        return n
+
     # ── video downloads (the grab → transfer pipeline) ────────────────────────
     _DL_FIELDS = ("kind", "title", "release_title", "source", "username", "filename",
                   "size_bytes", "quality_label", "target_dir", "status",

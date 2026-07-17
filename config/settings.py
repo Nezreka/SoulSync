@@ -870,6 +870,34 @@ class ConfigManager:
 
         return value
 
+    def get_full_config(self) -> Dict[str, Any]:
+        """Deep copy of the live, DECRYPTED config — including secrets. Used by
+        the config export ONLY when the user opts into embedding credentials;
+        never sent to the browser on the normal settings fetch (that's
+        ``redacted_config``)."""
+        return copy.deepcopy(self.config_data)
+
+    def apply_config_dict(self, incoming: Dict[str, Any]) -> int:
+        """Merge an imported config dict (config migration). Walks to LEAVES and
+        routes each through ``set()`` so its guards apply — a round-tripped
+        REDACTED_SENTINEL (a secrets-redacted export) is skipped instead of
+        blanking an existing secret. Returns the number of leaves written."""
+        count = 0
+
+        def _walk(node, prefix):
+            nonlocal count
+            for k, v in (node or {}).items():
+                path = f"{prefix}.{k}" if prefix else str(k)
+                if isinstance(v, dict) and v:
+                    _walk(v, path)
+                else:
+                    self.set(path, v)
+                    count += 1
+
+        if isinstance(incoming, dict):
+            _walk(incoming, "")
+        return count
+
     def redacted_config(self) -> Dict[str, Any]:
         """Deep copy of the live config with every sensitive value masked.
 
