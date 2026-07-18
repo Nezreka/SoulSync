@@ -2,13 +2,42 @@
 // ============================================================================
 
 /**
+ * Bundled status hydrate: every per-service status reader below goes through
+ * this instead of its own /api/enrichment/<id>/status request — one
+ * /status-all response serves all ~13 of them (the load-time flood fix).
+ * Returns a Response-compatible object so the call sites stay untouched;
+ * unknown ids / a failed bundle fall back to the real per-service request.
+ */
+let _enrStatusBundle = null;   // { t, promise }
+function _enrichmentStatusFetch(id) {
+    const now = Date.now();
+    if (!_enrStatusBundle || now - _enrStatusBundle.t > 3000) {
+        _enrStatusBundle = {
+            t: now,
+            promise: fetch('/api/enrichment/status-all')
+                .then(r => (r.ok ? r.json() : null))
+                .catch(() => null),
+        };
+    }
+    return _enrStatusBundle.promise.then(bundle => {
+        const payload = bundle && bundle.services ? bundle.services[id] : null;
+        if (payload && !payload.error) {
+            return new Response(JSON.stringify(payload), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        }
+        return fetch(`/api/enrichment/${id}/status`);
+    });
+}
+
+/**
  * Poll MusicBrainz status every 2 seconds and update UI
  */
 async function updateMusicBrainzStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/musicbrainz/status');
+        const response = await _enrichmentStatusFetch('musicbrainz');
         if (!response.ok) { console.warn('MusicBrainz status endpoint unavailable'); return; }
         const data = await response.json();
         updateMusicBrainzStatusFromData(data);
@@ -146,7 +175,7 @@ async function updateAudioDBStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/audiodb/status');
+        const response = await _enrichmentStatusFetch('audiodb');
         if (!response.ok) { console.warn('AudioDB status endpoint unavailable'); return; }
         const data = await response.json();
         updateAudioDBStatusFromData(data);
@@ -323,7 +352,7 @@ async function updateDeezerStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/deezer/status');
+        const response = await _enrichmentStatusFetch('deezer');
         if (!response.ok) { console.warn('Deezer status endpoint unavailable'); return; }
         const data = await response.json();
         updateDeezerStatusFromData(data);
@@ -442,7 +471,7 @@ async function updateJioSaavnStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/jiosaavn/status');
+        const response = await _enrichmentStatusFetch('jiosaavn');
         if (!response.ok) { console.warn('JioSaavn status endpoint unavailable'); return; }
         const data = await response.json();
         updateJioSaavnStatusFromData(data);
@@ -548,7 +577,7 @@ async function updateSpotifyEnrichmentStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/spotify/status');
+        const response = await _enrichmentStatusFetch('spotify');
         if (!response.ok) { console.warn('Spotify enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateSpotifyEnrichmentStatusFromData(data);
@@ -714,7 +743,7 @@ async function updateiTunesEnrichmentStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/itunes/status');
+        const response = await _enrichmentStatusFetch('itunes');
         if (!response.ok) { console.warn('iTunes enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateiTunesEnrichmentStatusFromData(data);
@@ -833,7 +862,7 @@ async function updateLastFMEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/lastfm/status');
+        const response = await _enrichmentStatusFetch('lastfm');
         if (!response.ok) { console.warn('Last.fm status endpoint unavailable'); return; }
         const data = await response.json();
         updateLastFMEnrichmentStatusFromData(data);
@@ -960,7 +989,7 @@ async function updateGeniusEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/genius/status');
+        const response = await _enrichmentStatusFetch('genius');
         if (!response.ok) { console.warn('Genius status endpoint unavailable'); return; }
         const data = await response.json();
         updateGeniusEnrichmentStatusFromData(data);
@@ -1086,7 +1115,7 @@ async function updateBandcampEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/bandcamp/status');
+        const response = await _enrichmentStatusFetch('bandcamp');
         if (!response.ok) { console.warn('Bandcamp status endpoint unavailable'); return; }
         const data = await response.json();
         updateBandcampEnrichmentStatusFromData(data);
@@ -1208,7 +1237,7 @@ async function updateTidalEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/tidal/status');
+        const response = await _enrichmentStatusFetch('tidal');
         if (!response.ok) { console.warn('Tidal status endpoint unavailable'); return; }
         const data = await response.json();
         updateTidalEnrichmentStatusFromData(data);
@@ -1333,7 +1362,7 @@ async function updateQobuzEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/qobuz/status');
+        const response = await _enrichmentStatusFetch('qobuz');
         if (!response.ok) { console.warn('Qobuz status endpoint unavailable'); return; }
         const data = await response.json();
         updateQobuzEnrichmentStatusFromData(data);
@@ -1458,7 +1487,7 @@ async function updateAmazonEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/amazon/status');
+        const response = await _enrichmentStatusFetch('amazon');
         if (!response.ok) { console.warn('Amazon enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateAmazonEnrichmentStatusFromData(data);
@@ -1564,7 +1593,7 @@ async function updateSimilarArtistsEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/similar_artists/status');
+        const response = await _enrichmentStatusFetch('similar_artists');
         if (!response.ok) return;
         updateSimilarArtistsEnrichmentStatusFromData(await response.json());
     } catch (error) {

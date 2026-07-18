@@ -128,11 +128,22 @@
             .catch(function () { return null; });
     }
     function refreshAll() {
-        return Promise.all(WORKERS.map(function (w) {
-            return getJSON('/api/video/enrichment/' + w.id + '/status').then(function (d) {
-                state.statuses[w.id] = d || { enabled: false };
-            });
-        }));
+        // One bundled request for the whole rail (~15 workers) instead of one
+        // request per worker — falls back to per-worker only if the bundle
+        // endpoint fails entirely.
+        return getJSON('/api/video/enrichment/status-all').then(function (bundle) {
+            if (bundle && bundle.services) {
+                WORKERS.forEach(function (w) {
+                    state.statuses[w.id] = bundle.services[w.id] || { enabled: false };
+                });
+                return;
+            }
+            return Promise.all(WORKERS.map(function (w) {
+                return getJSON('/api/video/enrichment/' + w.id + '/status').then(function (d) {
+                    state.statuses[w.id] = d || { enabled: false };
+                });
+            }));
+        });
     }
     function loadBreakdown(id) {
         return getJSON('/api/video/enrichment/' + id + '/breakdown').then(function (d) {

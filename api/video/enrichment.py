@@ -159,6 +159,28 @@ def register_routes(bp):
                 logger.exception("video enrichment: engine rebuild after key change failed")
         return jsonify({"status": "saved"})
 
+    @bp.route("/enrichment/status-all", methods=["GET"])
+    def video_enrichment_status_all():
+        """Every video enrichment worker's status in ONE response — the
+        page-load hydrate (replaces ~15 individual /status requests). Workers
+        are in-process objects so collection is cheap; a failing one degrades
+        to its own error field, never the whole bundle."""
+        out = {}
+        try:
+            for sid, w in (engine().workers or {}).items():
+                try:
+                    out[sid] = w.get_stats()
+                except Exception as e:   # noqa: BLE001 - per-service isolation
+                    logger.exception("status-all: %s failed", sid)
+                    out[sid] = {"error": str(e)}
+        except Exception:
+            logger.exception("status-all: engine unavailable")
+        try:
+            out["youtube"] = _yt_enricher().stats()
+        except Exception as e:   # noqa: BLE001
+            out["youtube"] = {"error": str(e)}
+        return jsonify({"services": out})
+
     @bp.route("/enrichment/<service>/status", methods=["GET"])
     def video_enrichment_status(service):
         if service == "youtube":   # the standalone date enricher (not an engine worker)
