@@ -40263,6 +40263,16 @@ _configure_enrichment_api(
 
 app.register_blueprint(_create_enrichment_blueprint())
 
+# Soulseek chat (rooms + PMs through slskd) — side-neutral, absolute /api/chat
+# paths, mounted OUTSIDE the video blueprint so music-only profiles reach it.
+from api.chat import configure as _configure_chat_api, create_blueprint as _create_chat_blueprint
+_configure_chat_api(
+    client_getter=lambda: download_orchestrator.client("soulseek"),
+    run_async=run_async,
+    config_get=lambda key, default=None: config_manager.get(key, default),
+)
+app.register_blueprint(_create_chat_blueprint())
+
 # Video side API (isolated: reads database/video_library.db only, never music)
 from api.video import create_video_blueprint as _create_video_blueprint
 app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
