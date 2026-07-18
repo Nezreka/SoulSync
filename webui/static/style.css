@@ -71778,3 +71778,31 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .chat-li { display: block; padding-left: 10px; }
 .chat-link-domain { font-size: 11px; color: rgba(255,255,255,0.35); margin-left: 4px; }
 .chat-msg-text u { text-underline-offset: 2px; }
+
+/* chat: Discord-style messages (chatux P3) — groups, avatars, day separators */
+.chat-group {
+    display: grid; grid-template-columns: 40px 1fr; gap: 12px;
+    padding: 6px 8px; border-radius: 8px; margin: 2px 0;
+}
+.chat-group:hover { background: rgba(255,255,255,0.03); }
+.chat-avatar {
+    width: 38px; height: 38px; border-radius: 50%; margin-top: 2px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 800; color: rgba(255,255,255,0.92);
+    user-select: none; flex: none;
+}
+.chat-group-body { min-width: 0; }
+.chat-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 1px; }
+.chat-group-head .chat-msg-user { font-size: 14.5px; }
+.chat-group--ext .chat-avatar { filter: saturate(0.35) brightness(0.8); }
+.chat-line {
+    font-size: 14px; line-height: 1.45; color: rgba(255,255,255,0.85);
+    word-break: break-word; white-space: pre-wrap; padding: 1px 0;
+}
+.chat-day-sep {
+    display: flex; align-items: center; gap: 12px; margin: 14px 0 6px;
+    color: rgba(255,255,255,0.35); font-size: 11.5px; font-weight: 700;
+}
+.chat-day-sep::before, .chat-day-sep::after {
+    content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.08);
+}
