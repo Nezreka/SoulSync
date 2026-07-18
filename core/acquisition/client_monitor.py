@@ -108,6 +108,7 @@ class MonitorRunResult:
     cancelled: Tuple[str, ...] = ()
     cancel_failed: Tuple[str, ...] = ()
     imports: Optional[Any] = None
+    persistent_reconciliation: Optional[Any] = None
     skipped_reason: Optional[str] = None
 
 
@@ -419,6 +420,7 @@ class UsenetAcquisitionMonitor:
         interval_getter: Optional[Callable[[], Any]] = None,
         process_started_at: Optional[str] = None,
         import_pipeline_runner: Optional[Callable[[], Any]] = None,
+        persistent_reconciler_runner: Optional[Callable[[], Any]] = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._adapter_getter = adapter_getter or self._default_adapter
@@ -426,6 +428,7 @@ class UsenetAcquisitionMonitor:
         self._interval_getter = interval_getter or (lambda: 15.0)
         self._import_pipeline_runner = (
             import_pipeline_runner or self._default_import_pipeline)
+        self._persistent_reconciler_runner = persistent_reconciler_runner
         self._process_started_at = process_started_at or datetime.now(
             timezone.utc,
         ).strftime("%Y-%m-%d %H:%M:%S")
@@ -455,6 +458,18 @@ class UsenetAcquisitionMonitor:
         except Exception as exc:  # noqa: BLE001 - monitor must stay alive
             logger.warning(
                 "Acquisition import pipeline cycle failed: %s",
+                redact_sensitive_text(exc),
+            )
+            return None
+
+    def _run_persistent_reconciler(self) -> Any:
+        if self._persistent_reconciler_runner is None:
+            return None
+        try:
+            return self._persistent_reconciler_runner()
+        except Exception as exc:  # noqa: BLE001 - one audit must not stop monitor
+            logger.warning(
+                "Persistent acquisition reconciliation failed: %s",
                 redact_sensitive_text(exc),
             )
             return None
@@ -587,6 +602,10 @@ class UsenetAcquisitionMonitor:
                 skipped_reason="cycle_in_progress",
             )
         try:
+            persistent_result = self._run_persistent_reconciler()
+            # Evidence reconciliation must precede the import coordinator's
+            # legacy seven-day fallback sweep.  That preserves a real indexed
+            # completion or quarantine sidecar instead of aging it out first.
             imports_result = self._run_import_pipeline()
             grabs, stale = self._read_open_grabs()
             if not grabs:
@@ -594,6 +613,7 @@ class UsenetAcquisitionMonitor:
                     open_grabs=0,
                     stale_submissions_failed=stale,
                     imports=imports_result,
+                    persistent_reconciliation=persistent_result,
                     skipped_reason="no_open_grabs",
                 )
                 self._record_success(result)
@@ -605,6 +625,7 @@ class UsenetAcquisitionMonitor:
                     open_grabs=len(grabs),
                     stale_submissions_failed=stale,
                     imports=imports_result,
+                    persistent_reconciliation=persistent_result,
                     skipped_reason="client_unconfigured",
                 )
                 self._record_success(result)
@@ -632,6 +653,7 @@ class UsenetAcquisitionMonitor:
                 cancelled=cancelled,
                 cancel_failed=cancel_failed,
                 imports=imports_result,
+                persistent_reconciliation=persistent_result,
             )
             self._record_success(result)
             if reconciliation.ambiguous:

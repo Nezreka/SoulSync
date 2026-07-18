@@ -149,6 +149,7 @@ from core.wishlist.processing import (
     cleanup_wishlist_against_library as _cleanup_wishlist_against_library,
     build_wishlist_source_context as _build_wishlist_source_context,
     finalize_auto_wishlist_completion as _finalize_auto_wishlist_completion,
+    start_direct_track_download_batch as _start_direct_track_download_batch,
     start_manual_wishlist_download_batch as _start_manual_wishlist_download_batch,
     process_wishlist_automatically as _process_wishlist_automatically_impl,
     recover_uncaptured_failed_tracks as _recover_uncaptured_failed_tracks,
@@ -1038,6 +1039,11 @@ try:
             "usenet_client.category", "soulsync"),
         interval_getter=lambda: config_manager.get(
             "usenet_client.acquisition_monitor_interval_seconds", 15),
+        # Resolved when the monitor starts (after module initialization).  The
+        # same evidence-based runner also powers the admin dry-run endpoint.
+        persistent_reconciler_runner=lambda: (
+            _run_persistent_acquisition_reconciliation(dry_run=False)
+        ),
     )
     logger.info("  Usenet acquisition monitor initialized")
 except Exception as e:
@@ -8747,7 +8753,40 @@ def approve_quarantine_item(entry_id):
                 context_key, context, restored_path, _task_id, _batch_id,
             )
         else:
-            _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
+            def _reprocess():
+                _post_process_matched_download(context_key, context, restored_path)
+                # A manager approval can outlive its original in-memory task.
+                # Without a batch completion callback, external media servers
+                # never learn about the newly imported file. Request the same
+                # coalesced scan used by direct downloads, but only after the
+                # pipeline produced a real final file and no rejection flag.
+                try:
+                    from core.imports.pipeline import import_rejection_reason
+                    final_path = (
+                        context.get('_final_processed_path')
+                        or context.get('_final_path')
+                    )
+                    auto_scan_on = (
+                        automation_engine is None
+                        or automation_engine.is_event_action_enabled(
+                            'batch_complete', 'scan_library'
+                        )
+                    )
+                    if (
+                        web_scan_manager
+                        and auto_scan_on
+                        and final_path
+                        and os.path.isfile(final_path)
+                        and import_rejection_reason(context) is None
+                    ):
+                        web_scan_manager.request_scan(
+                            "Quarantine approval completed"
+                        )
+                except Exception as scan_exc:
+                    logger.warning(
+                        "[Quarantine] Post-approval media scan failed: %s",
+                        scan_exc,
+                    )
         threading.Thread(target=_reprocess, daemon=True).start()
         logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
         # #876: once one alternative for a song is accepted, the other
@@ -9168,9 +9207,20 @@ def approve_verification_item(history_id):
                 conn.execute(
                     "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
                     (HUMAN_VERIFIED, p))
+            from core.library2.verification import mark_file_verification_status
+            lib2_updated = mark_file_verification_status(
+                conn,
+                {p for p in (file_path, on_disk) if p},
+                HUMAN_VERIFIED,
+                config_manager=config_manager,
+            )
             conn.commit()
         tag_written = bool(on_disk) and write_verification_status(on_disk, HUMAN_VERIFIED)
-        return jsonify({"success": True, "tag_written": tag_written})
+        return jsonify({
+            "success": True,
+            "tag_written": tag_written,
+            "lib2_files_updated": lib2_updated,
+        })
     except Exception as e:
         logger.error(f"[Verification] Approve failed for {history_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -9245,12 +9295,21 @@ def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
     can manually finish via the existing Import flow."""
     try:
-        from core.imports.quarantine import recover_to_staging
+        from core.acquisition.recovery import recover_quarantine_entry_to_staging
         from core.imports.staging import get_staging_path
-        target = recover_to_staging(_get_quarantine_dir(), get_staging_path(), entry_id)
-        if not target:
+        recovery = recover_quarantine_entry_to_staging(
+            get_database()._get_connection,
+            quarantine_dir=_get_quarantine_dir(),
+            staging_dir=get_staging_path(),
+            entry_id=entry_id,
+        )
+        if not recovery:
             return jsonify({"success": False, "error": "Entry not found"}), 404
-        return jsonify({"success": True, "staged_path": target})
+        return jsonify({
+            "success": True,
+            "staged_path": recovery.staged_path,
+            "recovery": recovery.to_public_dict(),
+        })
     except Exception as e:
         logger.error(f"[Quarantine] Error recovering {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -17655,14 +17714,31 @@ def _post_process_matched_download_with_verification(context_key, context, file_
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
     Only sets task status to 'completed' after successful file verification and move operation.
     """
-    from core.imports.pipeline import post_process_matched_download_with_verification
-    return post_process_matched_download_with_verification(
+    from core.acquisition.recovery import (
+        attach_recovered_staging_context,
+        record_recovered_staging_result,
+    )
+    recovered_context = attach_recovered_staging_context(
+        get_database()._get_connection, file_path, context,
+    )
+    context.clear()
+    context.update(recovered_context)
+    from core.imports.pipeline import (
+        import_rejection_reason,
+        post_process_matched_download_with_verification,
+    )
+    result = post_process_matched_download_with_verification(
         context_key,
         context,
         file_path,
         task_id,
         batch_id,
-        _build_import_pipeline_runtime(),
+        _build_import_pipeline_runtime(
+            automation_engine=automation_engine,
+            on_download_completed=_on_download_completed,
+            web_scan_manager=web_scan_manager,
+            repair_worker=repair_worker,
+        ),
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
@@ -17678,6 +17754,20 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
         ),
     )
+    if context.get('_quarantine_recovery_entry_id'):
+        final_path = context.get('_final_processed_path') or context.get('_final_path')
+        rejection = import_rejection_reason(context)
+        success = bool(final_path and os.path.isfile(str(final_path)) and not rejection)
+        record_recovered_staging_result(
+            get_database()._get_connection,
+            context,
+            success=success,
+            error=rejection or (
+                None if success
+                else 'Shared import pipeline did not produce a final file'
+            ),
+        )
+    return result
 
 
 def _safe_move_file(src, dst):
@@ -17783,12 +17873,26 @@ def _post_process_matched_download(context_key, context, file_path):
     Also handles simple downloads (from search page "Download" button) which
     just move files to /Transfer without metadata enhancement.
     """
-    from core.imports.pipeline import post_process_matched_download
-    return post_process_matched_download(
+    from core.acquisition.recovery import (
+        attach_recovered_staging_context,
+        record_recovered_staging_result,
+    )
+    recovered_context = attach_recovered_staging_context(
+        get_database()._get_connection, file_path, context,
+    )
+    context.clear()
+    context.update(recovered_context)
+    from core.imports.pipeline import import_rejection_reason, post_process_matched_download
+    result = post_process_matched_download(
         context_key,
         context,
         file_path,
-        _build_import_pipeline_runtime(),
+        _build_import_pipeline_runtime(
+            automation_engine=automation_engine,
+            on_download_completed=_on_download_completed,
+            web_scan_manager=web_scan_manager,
+            repair_worker=repair_worker,
+        ),
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
@@ -17804,6 +17908,20 @@ def _post_process_matched_download(context_key, context, file_path):
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
         ),
     )
+    if context.get('_quarantine_recovery_entry_id'):
+        final_path = context.get('_final_processed_path') or context.get('_final_path')
+        rejection = import_rejection_reason(context)
+        success = bool(final_path and os.path.isfile(str(final_path)) and not rejection)
+        record_recovered_staging_result(
+            get_database()._get_connection,
+            context,
+            success=success,
+            error=rejection or (
+                None if success
+                else 'Shared import pipeline did not produce a final file'
+            ),
+        )
+    return result
 
 # Track stale transfer keys (completed in slskd but no context — e.g., from before app restart)
 # so we only log the warning once per key instead of spamming every poll cycle
@@ -41112,6 +41230,31 @@ def _library_v2_scoped_wishlist_search(track_ids, profile_id):
     return payload
 
 
+def _library_v2_scoped_direct_search(tracks, profile_id):
+    """Run transient Library-v2 payloads through the shared download engine.
+
+    Unlike the Wishlist-scoped adapter above, this is used for one concrete
+    track click and never persists the track in Wishlist merely to make the
+    existing worker see it.
+    """
+    from database.music_database import MusicDatabase
+    db = MusicDatabase()
+    runtime = _WishlistManualDownloadRuntime(
+        get_music_database=lambda: db,
+        download_batches=download_batches,
+        tasks_lock=tasks_lock,
+        missing_download_executor=scoped_search_executor,
+        album_bundle_executor=album_bundle_executor,
+        run_full_missing_tracks_process=_run_full_missing_tracks_process,
+        get_batch_max_concurrent=_get_batch_max_concurrent,
+        add_activity_item=add_activity_item,
+        active_server=config_manager.get_active_media_server(),
+        profile_id=profile_id,
+    )
+    payload, _status = _start_direct_track_download_batch(runtime, tracks)
+    return payload
+
+
 # core.library2.match_status.SERVICES ids that spell their "configured" flag
 # under a different key in _get_enrichment_status() (the enrichment workers'
 # keys carry a '_enrichment' suffix for some services; others match as-is).
@@ -41175,6 +41318,163 @@ def _library_v2_configured_match_services() -> set:
     return configured
 
 
+def _acquisition_runtime_evidence():
+    """Take short, lock-protected copies before any client or DB I/O."""
+    with tasks_lock:
+        runtime_tasks = {
+            str(task_id): dict(task)
+            for task_id, task in download_tasks.items()
+            if isinstance(task, dict)
+        }
+    with matched_context_lock:
+        matched_contexts = [
+            dict(context)
+            for context in matched_downloads_context.values()
+            if isinstance(context, dict)
+        ]
+    from core.imports.quarantine import (
+        get_quarantine_entry_context,
+        list_quarantine_entries,
+    )
+    quarantine_entries = []
+    for entry in list_quarantine_entries(_get_quarantine_dir()):
+        item = dict(entry)
+        item["context"] = get_quarantine_entry_context(
+            _get_quarantine_dir(), str(entry.get("id") or ""),
+        )
+        quarantine_entries.append(item)
+    return runtime_tasks, matched_contexts, quarantine_entries
+
+
+def _acquisition_client_observations():
+    if download_orchestrator is None:
+        return {}
+    try:
+        statuses = run_async(download_orchestrator.get_all_downloads()) or []
+    except Exception as exc:  # external evidence is optional, never inferred
+        logger.warning("Persistent acquisition client snapshot failed: %s", exc)
+        return {}
+    observations = {}
+    for status in statuses:
+        download_id = str(getattr(status, "id", "") or "").strip()
+        if not download_id:
+            continue
+        observations[download_id] = {
+            "state": getattr(status, "state", None),
+            "file_path": getattr(status, "file_path", None),
+            "filename": getattr(status, "filename", None),
+        }
+    return observations
+
+
+def _run_persistent_acquisition_reconciliation(*, dry_run=True):
+    """Reconcile restart-lost legacy grabs from independently observed facts."""
+    from core.acquisition import ensure_acquisition_schema
+    from core.acquisition.reconciler import reconcile_persistent_grabs
+
+    runtime_tasks, matched_contexts, quarantine_entries = (
+        _acquisition_runtime_evidence()
+    )
+    client_observations = _acquisition_client_observations()
+    conn = get_database()._get_connection()
+    try:
+        ensure_acquisition_schema(conn)
+        report = reconcile_persistent_grabs(
+            conn,
+            runtime_tasks=runtime_tasks,
+            matched_contexts=matched_contexts,
+            client_observations=client_observations,
+            quarantine_entries=quarantine_entries,
+            dry_run=bool(dry_run),
+            evidence_ttl_seconds=config_manager.get(
+                "acquisition.reconciliation_evidence_ttl_seconds", 24 * 60 * 60,
+            ),
+        )
+        if dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+        return report.to_public_dict()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _library_v2_media_server_state():
+    active_server = config_manager.get_active_media_server()
+    connected = False
+    if media_server_engine is not None:
+        try:
+            connected = bool(media_server_engine.is_connected())
+        except Exception as exc:
+            logger.debug("Integrity report media-server probe failed: %s", exc)
+    return {
+        "available": media_server_engine is not None,
+        "active_server": active_server,
+        "connected": connected,
+        # The cross-server contract has no uniform full track-path read.  The
+        # persisted tracks.server_source projection is the comparable index.
+        "path_projection": "tracks.file_path",
+    }
+
+
+def _run_library_v2_integrity_report(*, max_findings=1000):
+    """One read-only cross-index snapshot; no schema ensure or repair writes."""
+    from core.acquisition.reconciler import reconcile_persistent_grabs
+    from core.library2.integrity_reconciler import build_integrity_report
+
+    runtime_tasks, matched_contexts, quarantine_entries = (
+        _acquisition_runtime_evidence()
+    )
+    client_observations = _acquisition_client_observations()
+    conn = get_database()._get_connection()
+    try:
+        has_acquisition = all(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone() is not None
+            for table in ("acquisition_requests", "acquisition_grabs")
+        )
+        acquisition_report = None
+        if has_acquisition:
+            acquisition_report = reconcile_persistent_grabs(
+                conn,
+                runtime_tasks=runtime_tasks,
+                matched_contexts=matched_contexts,
+                client_observations=client_observations,
+                quarantine_entries=quarantine_entries,
+                dry_run=True,
+                evidence_ttl_seconds=config_manager.get(
+                    "acquisition.reconciliation_evidence_ttl_seconds",
+                    24 * 60 * 60,
+                ),
+            ).to_public_dict()
+        report = build_integrity_report(
+            conn,
+            runtime_tasks=runtime_tasks,
+            matched_contexts=matched_contexts,
+            client_observations=client_observations,
+            quarantine_entries=quarantine_entries,
+            quarantine_dir=_get_quarantine_dir(),
+            acquisition_report=acquisition_report,
+            media_server=_library_v2_media_server_state(),
+            config_manager=config_manager,
+            max_findings=max_findings,
+        )
+        # A read endpoint owns no commit boundary, even if a future path helper
+        # accidentally begins a transaction.
+        conn.rollback()
+        return report.to_public_dict()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 _register_library_v2_routes(
     app,
     get_database=get_database,
@@ -41184,10 +41484,15 @@ _register_library_v2_routes(
     acquisition_submission_adapter_getter=_library_v2_submission_adapter,
     run_enrichment=_run_single_enrichment,
     scoped_wishlist_search_dispatcher=_library_v2_scoped_wishlist_search,
+    scoped_track_search_dispatcher=_library_v2_scoped_direct_search,
     configured_match_services_getter=_library_v2_configured_match_services,
     live_artist_stats_getter=_library_v2_live_artist_stats,
     make_context_key=_make_context_key,
     get_cached_transfer_data=get_cached_transfer_data,
+    acquisition_reconciliation_runner=(
+        _run_persistent_acquisition_reconciliation
+    ),
+    integrity_report_runner=_run_library_v2_integrity_report,
 )
 
 

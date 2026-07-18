@@ -127,6 +127,54 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     }
 
 
+def track_direct_download_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
+    """Build one transient pipeline input for a scoped track search.
+
+    This intentionally does *not* write a Wishlist row.  It adapts the same
+    server-resolved payload the Wishlist mirror uses into the shape consumed by
+    ``run_full_missing_tracks_process`` so Automatic Search can run one track
+    through the established candidate/retry/import pipeline without turning a
+    one-shot user action into persistent monitoring state.
+    """
+    payload = track_wishlist_payload(conn, track_id)
+    if not payload or not payload.get("_should_queue"):
+        return None
+
+    source_info = dict(payload.get("_source_info") or {})
+    track_data = {
+        key: value for key, value in payload.items()
+        if not key.startswith("_")
+    }
+    album = dict(track_data.get("album") or {})
+    artists = list(track_data.get("artists") or [])
+    artist = artists[0] if artists else {"name": "Unknown Artist"}
+    if not isinstance(artist, dict):
+        artist = {"name": str(artist)}
+
+    # The download worker consumes these top-level fields.  ``spotify_data``
+    # remains a compatibility name for a provider-neutral, Spotify-shaped
+    # payload; the provider/source fields inside it remain authoritative.
+    return {
+        "track_id": track_data.get("id"),
+        "spotify_track_id": track_data.get("id"),
+        "track_data": track_data,
+        "spotify_data": track_data,
+        "source_info": source_info,
+        "quality_profile_id": track_data.get("quality_profile_id"),
+        "id": track_data.get("id"),
+        "name": track_data.get("name"),
+        "artists": artists,
+        "album": album,
+        "duration_ms": track_data.get("duration_ms", 0),
+        "track_number": track_data.get("track_number"),
+        "disc_number": track_data.get("disc_number"),
+        "_explicit_album_context": album,
+        "_explicit_artist_context": artist,
+        "_is_explicit_album_download": True,
+        "_lib2_direct_search": True,
+    }
+
+
 def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
                            *, profile_id: int = 1,
                            user_initiated: bool = False) -> int:
@@ -232,6 +280,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
 __all__ = [
     "mirror_projected_tracks_wishlist",
     "mirror_tracks_wishlist",
+    "track_direct_download_payload",
     "track_wishlist_payload",
     "upgrade_candidate_track_ids",
 ]

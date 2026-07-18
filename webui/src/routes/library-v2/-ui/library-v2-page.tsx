@@ -5,28 +5,6 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type {
-  LibraryV2AlbumDetail,
-  LibraryV2AlbumSummary,
-  LibraryV2ArtistDetail,
-  LibraryV2ArtistSettings,
-  LibraryV2ArtistSummary,
-  LibraryV2ArtistTableColumns,
-  LibraryV2FileTags,
-  LibraryV2ImportState,
-  LibraryV2JobState,
-  LibraryV2ManualSkip,
-  LibraryV2MatchService,
-  LibraryV2PlaylistPipelineState,
-  LibraryV2PlaylistSummary,
-  LibraryV2PlaylistTrack,
-  LibraryV2QualityProfileSource,
-  LibraryV2QueueStatusEntry,
-  LibraryV2Track,
-  LibraryV2TrackFile,
-  LibraryV2TrackTableColumns,
-} from '../-library-v2.types';
-
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -68,6 +46,7 @@ import {
   libraryV2TrackFileTagsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
   libraryV2UiPreferencesQueryOptions,
+  libraryV2WantedQueryOptions,
   linkLibraryV2ArtistAlias,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
@@ -99,6 +78,30 @@ import {
   type LibraryV2MatchRelease,
   type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
+import {
+  LIBRARY_V2_WANTED_KINDS,
+  type LibraryV2AlbumDetail,
+  type LibraryV2AlbumSummary,
+  type LibraryV2ArtistDetail,
+  type LibraryV2ArtistSettings,
+  type LibraryV2ArtistSummary,
+  type LibraryV2ArtistTableColumns,
+  type LibraryV2FileTags,
+  type LibraryV2ImportState,
+  type LibraryV2JobState,
+  type LibraryV2ManualSkip,
+  type LibraryV2MatchService,
+  type LibraryV2PlaylistPipelineState,
+  type LibraryV2PlaylistSummary,
+  type LibraryV2PlaylistTrack,
+  type LibraryV2QualityProfileSource,
+  type LibraryV2QueueStatusEntry,
+  type LibraryV2Track,
+  type LibraryV2TrackFile,
+  type LibraryV2TrackTableColumns,
+  type LibraryV2WantedKind,
+  type LibraryV2WantedRow,
+} from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
@@ -3441,6 +3444,8 @@ export function LibraryV2Page() {
         <ArtistDetailView artistId={search.artist} />
       ) : search.section === 'playlists' ? (
         <PlaylistIndexView />
+      ) : search.section === 'wanted' ? (
+        <WantedIndexView />
       ) : (
         <ArtistIndexView />
       )}
@@ -3696,6 +3701,25 @@ function LibrarySectionTabs() {
       >
         Playlists
       </button>
+      <button
+        type="button"
+        className={search.section === 'wanted' ? styles.viewActive : ''}
+        onClick={() =>
+          void navigate({
+            search: (previous) => ({
+              ...previous,
+              section: 'wanted',
+              q: '',
+              playlist: undefined,
+              artist: undefined,
+              album: undefined,
+              page: 1,
+            }),
+          })
+        }
+      >
+        Wanted
+      </button>
     </div>
   );
 }
@@ -3885,6 +3909,192 @@ function PlaylistIndexView() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// --- wanted (§64 I2; library-wide Missing / Cutoff Unmet, Lidarr-style) ----
+
+const WANTED_KIND_LABELS: Record<LibraryV2WantedKind, string> = {
+  missing: 'Missing',
+  cutoff_unmet: 'Cutoff Unmet',
+};
+
+/** Same format/resolution summary as `QualityDisplay`, standalone — a wanted
+ *  row's `file` only carries the handful of quality fields the backend
+ *  evaluated against, not the full `LibraryV2TrackFile` shape. */
+export function formatWantedFileQuality(file: LibraryV2WantedRow['file']): string | null {
+  if (!file) return null;
+  const fmt = (file.format ?? '').toUpperCase() || null;
+  const bitDepth = file.bit_depth ? `${file.bit_depth}bit` : null;
+  const sampleRate = file.sample_rate
+    ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
+    : null;
+  const bitrate =
+    !bitDepth && !sampleRate && file.bitrate ? `${Math.round(file.bitrate)}kbps` : null;
+  const resolution = [bitDepth, sampleRate, bitrate].filter(Boolean).join('/');
+  return [fmt, resolution || null].filter(Boolean).join(' · ') || null;
+}
+
+function WantedIndexView() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const search = Route.useSearch();
+  const searchDebounce = useRef<number | undefined>(undefined);
+  const [banner, setBanner] = useState<{ tone: 'busy' | 'ok' | 'err'; text: string } | null>(null);
+  const wantedQuery = useQuery(
+    libraryV2WantedQueryOptions({ q: search.q, page: search.page, wantedKind: search.wantedKind }),
+  );
+  const rows = wantedQuery.data?.tracks ?? [];
+  const pagination = wantedQuery.data?.pagination;
+
+  function setKind(kind: LibraryV2WantedKind) {
+    void navigate({ search: (p) => ({ ...p, wantedKind: kind, page: 1 }) });
+  }
+
+  function runSearch(trackId: number) {
+    setBanner({ tone: 'busy', text: 'Searching…' });
+    void runScopedSearch(queryClient, 'tracks', trackId).then(setBanner);
+  }
+
+  return (
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div>
+          <h1 className={styles.title}>Library</h1>
+          <p className={styles.subtitle}>
+            {pagination
+              ? `${pagination.total_count} ${WANTED_KIND_LABELS[search.wantedKind].toLowerCase()} track${pagination.total_count === 1 ? '' : 's'}`
+              : 'Wanted tracks across the whole library'}
+          </p>
+        </div>
+      </header>
+
+      {banner ? (
+        <div className={`${styles.grabBanner} ${styles[`grab_${banner.tone}`]}`}>
+          <span>{banner.text}</span>
+          <button type="button" className={styles.grabBannerClose} onClick={() => setBanner(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
+
+      <div className={styles.toolbar}>
+        <LibrarySectionTabs />
+        <div className={styles.viewToggle} aria-label="Wanted kind">
+          {LIBRARY_V2_WANTED_KINDS.map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className={search.wantedKind === kind ? styles.viewActive : ''}
+              onClick={() => setKind(kind)}
+            >
+              {WANTED_KIND_LABELS[kind]}
+            </button>
+          ))}
+        </div>
+        <input
+          className={styles.searchInput}
+          type="text"
+          placeholder="Filter by track, album or artist…"
+          defaultValue={search.q}
+          onChange={(e) => {
+            const value = e.target.value;
+            window.clearTimeout(searchDebounce.current);
+            searchDebounce.current = window.setTimeout(() => {
+              void navigate({ search: (p) => ({ ...p, q: value, page: 1 }) });
+            }, 300);
+          }}
+        />
+      </div>
+
+      {wantedQuery.isLoading ? (
+        <div className={styles.loading}>Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className={styles.emptyState}>
+          <h2>Nothing here</h2>
+          <p>
+            {search.wantedKind === 'missing'
+              ? 'Every monitored track you want is already on disk.'
+              : 'Every monitored track on disk already meets its quality profile.'}
+          </p>
+        </div>
+      ) : (
+        <table className={styles.trackTable}>
+          <thead>
+            <tr>
+              <th>Artist</th>
+              <th>Album</th>
+              <th>Track</th>
+              {search.wantedKind === 'cutoff_unmet' ? <th>Quality</th> : null}
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row: LibraryV2WantedRow) => (
+              <tr key={row.track_id}>
+                <td>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() =>
+                      void navigate({
+                        search: (p) => ({ ...p, artist: row.artist.id, album: undefined }),
+                      })
+                    }
+                  >
+                    {row.artist.name}
+                  </button>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() =>
+                      void navigate({ search: (p) => ({ ...p, album: row.album.id }) })
+                    }
+                  >
+                    {row.album.title}
+                  </button>
+                </td>
+                <td>{row.title}</td>
+                {search.wantedKind === 'cutoff_unmet' ? (
+                  <td>{formatWantedFileQuality(row.file) ?? '—'}</td>
+                ) : null}
+                <td className={styles.trackActions}>
+                  <IconActionButton
+                    icon="automatic"
+                    title="Search this track"
+                    onClick={() => runSearch(row.track_id)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {pagination && pagination.total_pages > 1 ? (
+        <div className={styles.pagination}>
+          <button
+            type="button"
+            disabled={!pagination.has_prev}
+            onClick={() => void navigate({ search: (p) => ({ ...p, page: p.page - 1 }) })}
+          >
+            ←
+          </button>
+          <span>
+            Page {pagination.page} of {pagination.total_pages}
+          </span>
+          <button
+            type="button"
+            disabled={!pagination.has_next}
+            onClick={() => void navigate({ search: (p) => ({ ...p, page: p.page + 1 }) })}
+          >
+            →
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -6458,6 +6668,15 @@ export function TrackLyricsBadge({
 function InlineFileStatus({ status }: { status: LibraryV2Track['file_status'] }) {
   if (status === 'duplicate_single')
     return <span className={styles.inlineDuplicate}>also on album</span>;
+  if (status === 'missing_suspected')
+    return (
+      <span
+        className={styles.inlineMissingSuspected}
+        title="The file was absent during one healthy storage scan. A second scan is required before it is treated as missing."
+      >
+        checking missing
+      </span>
+    );
   return null;
 }
 

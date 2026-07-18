@@ -155,4 +155,56 @@ describe('library v2 album track table', () => {
     expect(await screen.findByRole('table')).toBeInTheDocument();
     expect(screen.queryByText(/Downloading|Queued|Searching|Processing/)).not.toBeInTheDocument();
   });
+
+  it('shows the first physical miss as pending confirmation', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([
+            track({
+              file_status: 'missing_suspected',
+              file: {
+                file_id: 17,
+                path: '/music/temporarily-unreachable.flac',
+                format: 'flac',
+                bitrate: null,
+                sample_rate: null,
+                bit_depth: null,
+                size: null,
+                quality_tier: 'unknown',
+                import_status: null,
+                verification_status: null,
+                source: null,
+                file_state: 'missing_suspected',
+              },
+            }),
+          ]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('checking missing')).toHaveAttribute(
+      'title',
+      expect.stringContaining('second scan'),
+    );
+  });
 });

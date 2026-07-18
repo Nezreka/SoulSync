@@ -159,6 +159,24 @@ class TestGetQueueStatus:
         assert result["tracks"][20]["status"] == "processing"
         assert result["albums"] == {6: 1}  # not double-counted
 
+    @pytest.mark.parametrize("terminal_status", [
+        "completed", "failed", "cancelled", "not_found", "skipped", "already_owned",
+    ])
+    def test_terminal_task_suppresses_stale_shadow_manual_context(self, terminal_status):
+        """A leaked correlation context must not resurrect terminal work as Queued."""
+        download_tasks["t1"] = {
+            "status": terminal_status,
+            "track_info": {"source_info": {"lib2_track_id": 20, "lib2_album_id": 6}},
+        }
+        matched_downloads_context["ctx1"] = {
+            "lib2_entity": {"track_id": 20, "album_id": 6},
+            "search_result": {"username": "bob", "filename": "track.mp3"},
+        }
+
+        result = get_queue_status([20], **_deps())
+
+        assert result == {"tracks": {}, "albums": {}}
+
     def test_albums_rollup_counts_multiple_active_tracks(self):
         download_tasks["t1"] = {
             "status": "downloading",

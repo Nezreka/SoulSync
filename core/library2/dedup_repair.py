@@ -281,8 +281,13 @@ def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
 
 
 def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
-    """Fold no-conflict same-name artist twins (then their album twins);
-    alias-link conflicting same-name groups. Idempotent."""
+    """Fold artist twins by normalized name or shared catalog identity.
+
+    Conflicting same-name groups remain alias-linked. Different display names
+    carrying the same provider id are merged only when their other stored ids
+    do not conflict — this heals fragments such as ``Odetari w`` that were
+    later matched to Odetari's exact Spotify identity.
+    """
     stats: Dict[str, Any] = {
         "artists_merged": 0, "alias_linked": 0,
         "albums_folded": 0, "album_review": 0,
@@ -304,7 +309,7 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
             if key:
                 by_name.setdefault(key, []).append(row)
 
-        touched_artists: List[int] = []
+        touched_artists: set[int] = set()
         for members in by_name.values():
             if len(members) < 2:
                 continue
@@ -333,7 +338,52 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
                 logger.info(
                     "Merged duplicate artist %s into %s (%r)",
                     duplicate["id"], survivor["id"], survivor["name"])
-            touched_artists.append(int(survivor["id"]))
+            touched_artists.add(int(survivor["id"]))
+
+        # A spelling/parser fragment can receive the exact same catalog id as
+        # the real artist during later enrichment while retaining a different
+        # normalized name. Name-only repair can never see that pair. Group a
+        # fresh post-merge snapshot by authoritative provider id and fold only
+        # conflict-free groups.
+        provider_rows = conn.execute(
+            "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
+            "legacy_artist_id, image_url, canonical_artist_id "
+            "FROM lib2_artists"
+        ).fetchall()
+        by_provider_id: Dict[tuple[str, str], List[Any]] = {}
+        catalog_sources = {"spotify", "musicbrainz", "deezer", "tidal", "qobuz"}
+        for row in provider_rows:
+            for source, value in _stored_ids(row).items():
+                if source in catalog_sources and value:
+                    by_provider_id.setdefault((source, value), []).append(row)
+
+        for (source, value), members in by_provider_id.items():
+            if len(members) < 2:
+                continue
+            active_members: List[Any] = []
+            for member in members:
+                current = conn.execute(
+                    "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
+                    "legacy_artist_id, image_url, canonical_artist_id "
+                    "FROM lib2_artists WHERE id=?",
+                    (member["id"],),
+                ).fetchone()
+                if current is not None:
+                    active_members.append(current)
+            if len(active_members) < 2 or _group_has_conflict(active_members):
+                continue
+            active_members.sort(key=_survivor_key, reverse=True)
+            survivor = active_members[0]
+            for duplicate in active_members[1:]:
+                _merge_artist(cursor, survivor, duplicate)
+                stats["artists_merged"] += 1
+                logger.info(
+                    "Merged catalog-identity artist %s into %s "
+                    "(%s=%s, %r -> %r)",
+                    duplicate["id"], survivor["id"], source, value,
+                    duplicate["name"], survivor["name"],
+                )
+            touched_artists.add(int(survivor["id"]))
 
         for artist_id in touched_artists:
             _fold_albums_within_artist(conn, cursor, artist_id, stats)

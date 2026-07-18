@@ -25,6 +25,9 @@ def test_file_status():
     assert file_status(
         {"path": "/x.flac", "file_state": "missing_confirmed"}, None
     ) == "missing"
+    assert file_status(
+        {"path": "/x.flac", "file_state": "missing_suspected"}, None
+    ) == "missing_suspected"
 
 
 def test_metadata_gaps_uses_db_and_tags():
@@ -466,6 +469,30 @@ def test_get_album_preserves_unknown_present_file_quality(imported_conn):
     assert track["file_status"] == "present"
     assert track["meets_profile"] is None
     assert track["upgrade_candidate"] is None
+
+
+def test_get_album_surfaces_first_missing_scan_without_marking_track_missing(imported_conn):
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET file_state='missing_suspected', "
+        "missing_scan_count=1 WHERE track_id=?",
+        (track_id,),
+    )
+
+    album = Q.get_album(imported_conn, album_id)
+    track = next(item for item in album["tracks"] if item["id"] == track_id)
+
+    assert track["file_status"] == "missing_suspected"
+    assert track["file"]["file_state"] == "missing_suspected"
+    # First miss is diagnostic only: it still counts as present and cannot
+    # activate the wanted/redownload projection before confirmation.
+    assert album["tracks_present"] == 1
+    assert album["tracks_missing"] == 1
 
 
 def test_get_album_single_is_duplicate(imported_conn):

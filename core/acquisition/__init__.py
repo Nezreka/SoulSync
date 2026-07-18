@@ -15,6 +15,7 @@ def ensure_acquisition_schema(conn: Any) -> None:
     from core.acquisition.history import ensure_acquisition_history_schema
     from core.acquisition.imports import ensure_acquisition_imports_schema
     from core.acquisition.requests import ensure_acquisition_requests_schema
+    from core.acquisition.recovery import ensure_quarantine_recovery_schema
     from core.acquisition.retry_state import ensure_retry_state_schema
 
     ensure_acquisition_requests_schema(conn)
@@ -25,6 +26,7 @@ def ensure_acquisition_schema(conn: Any) -> None:
     ensure_release_blocklist_schema(conn)
     ensure_acquisition_imports_schema(conn)
     ensure_retry_state_schema(conn)
+    ensure_quarantine_recovery_schema(conn)
     ensure_correlation_coverage_schema(conn)
 
 

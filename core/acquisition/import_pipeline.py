@@ -107,6 +107,8 @@ def advance_import(
             return "missing"
         if record.status == "needs_review":
             return "needs_review"
+        if record.status == "recovered_to_staging":
+            return "recovered_to_staging"
         if record.status in {"completed", "failed"}:
             return record.status
         if record.result.get("quarantined"):
@@ -245,7 +247,8 @@ def advance_open_imports(
     try:
         records = [
             record for record in list_open_imports(conn)
-            if record.status != "needs_review" and is_due(record, now=timestamp)
+            if record.status not in {"needs_review", "recovered_to_staging"}
+            and is_due(record, now=timestamp)
         ][:max(int(limit), 0)]
     finally:
         conn.close()

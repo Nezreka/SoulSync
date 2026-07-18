@@ -31,6 +31,8 @@ import type {
   LibraryV2ArtistTableColumns,
   LibraryV2TrackTableColumns,
   LibraryV2UiPreferences,
+  LibraryV2WantedKind,
+  LibraryV2WantedRow,
 } from './-library-v2.types';
 
 export const LIBRARY_V2_QUERY_KEY = ['library-v2'] as const;
@@ -84,6 +86,38 @@ export async function fetchLibraryV2Artists(
   );
   if (!payload.success) throw new Error(payload.error || 'Failed to load library');
   return payload;
+}
+
+interface WantedResponse {
+  success: boolean;
+  kind: LibraryV2WantedKind;
+  tracks: LibraryV2WantedRow[];
+  pagination: LibraryV2Pagination;
+  error?: string;
+}
+
+/** §64 I2: library-wide Missing / Cutoff Unmet lists. */
+export async function fetchLibraryV2Wanted(
+  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'>,
+): Promise<WantedResponse> {
+  const params = new URLSearchParams();
+  params.set('kind', search.wantedKind);
+  if (search.q) params.set('search', search.q);
+  params.set('page', String(search.page));
+  const payload = await readJson<WantedResponse>(
+    apiClient.get('library/v2/wanted', { searchParams: params }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to load wanted tracks');
+  return payload;
+}
+
+export function libraryV2WantedQueryOptions(
+  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'>,
+) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'wanted', search.wantedKind, search.q, search.page],
+    queryFn: () => fetchLibraryV2Wanted(search),
+  });
 }
 
 export async function setLibraryV2Monitored(

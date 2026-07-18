@@ -28,6 +28,7 @@ import {
   fetchLibraryV2TrackHistory,
   fetchLibraryV2TrackSourceInfo,
   fetchLibraryV2UiPreferences,
+  fetchLibraryV2Wanted,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   previewLibraryV2AlbumReorganize,
@@ -542,6 +543,82 @@ describe('library v2 replaygain api', () => {
       ),
     );
     await expect(analyzeLibraryV2TrackReplayGain(12)).resolves.toBe(-3.2);
+  });
+});
+
+describe('library v2 wanted views api (§64 I2)', () => {
+  it('requests the missing kind by default and returns the rows', async () => {
+    server.use(
+      http.get('/api/library/v2/wanted', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('kind')).toBe('missing');
+        expect(url.searchParams.get('page')).toBe('1');
+        return HttpResponse.json({
+          success: true,
+          kind: 'missing',
+          tracks: [
+            {
+              track_id: 10,
+              title: 'Hotline Bling',
+              track_number: 1,
+              disc_number: 1,
+              monitored: true,
+              album: { id: 5, title: 'Views', album_type: 'album' },
+              artist: { id: 1, name: 'Drake' },
+            },
+          ],
+          pagination: {
+            page: 1,
+            limit: 75,
+            total_count: 1,
+            total_pages: 1,
+            has_prev: false,
+            has_next: false,
+          },
+        });
+      }),
+    );
+    const result = await fetchLibraryV2Wanted({ q: '', page: 1, wantedKind: 'missing' });
+    expect(result.tracks).toHaveLength(1);
+    expect(result.tracks[0]?.title).toBe('Hotline Bling');
+  });
+
+  it('sends the cutoff_unmet kind and search term', async () => {
+    server.use(
+      http.get('/api/library/v2/wanted', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('kind')).toBe('cutoff_unmet');
+        expect(url.searchParams.get('search')).toBe('drake');
+        return HttpResponse.json({
+          success: true,
+          kind: 'cutoff_unmet',
+          tracks: [],
+          pagination: {
+            page: 1,
+            limit: 75,
+            total_count: 0,
+            total_pages: 0,
+            has_prev: false,
+            has_next: false,
+          },
+        });
+      }),
+    );
+    await fetchLibraryV2Wanted({ q: 'drake', page: 1, wantedKind: 'cutoff_unmet' });
+  });
+
+  it('surfaces a server error', async () => {
+    server.use(
+      http.get('/api/library/v2/wanted', () =>
+        HttpResponse.json(
+          { success: false, error: 'kind must be missing or cutoff_unmet' },
+          { status: 400 },
+        ),
+      ),
+    );
+    await expect(fetchLibraryV2Wanted({ q: '', page: 1, wantedKind: 'missing' })).rejects.toThrow(
+      'kind must be missing or cutoff_unmet',
+    );
   });
 });
 

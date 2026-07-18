@@ -21,6 +21,7 @@ from core.library2 import queries as Q
     ("Drake feat. Rihanna", ["Drake", "Rihanna"]),
     ("A ft. B", ["A", "B"]),
     ("A featuring B", ["A", "B"]),
+    ("Odetari w/ 9lives", ["Odetari", "9lives"]),
     ("A, B & C", ["A", "B", "C"]),
     ("Calvin Harris x Dua Lipa", ["Calvin Harris", "Dua Lipa"]),
     ("Drake feat. Wizkid & Kyla", ["Drake", "Wizkid", "Kyla"]),
@@ -36,6 +37,9 @@ def test_split_dedupes_case_insensitive():
 
 def test_featured_from_title():
     assert featured_from_title("One Dance (feat. Wizkid & Kyla)") == ["Wizkid", "Kyla"]
+    assert featured_from_title("I LOVE YOU HOE (w/ Trippie Redd & 9lives)") == [
+        "Trippie Redd", "9lives",
+    ]
     assert featured_from_title("Plain Title") == []
 
 

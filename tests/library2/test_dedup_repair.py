@@ -177,6 +177,49 @@ def test_repair_is_idempotent(repair_db):
     assert stats2["alias_linked"] == 0
 
 
+def test_different_names_with_same_catalog_id_are_merged(repair_db):
+    legacy_db, conn = repair_db
+    real = _artist(
+        conn, "Odetari", spotify_id="7ITMCzIU9uII8gwRg8JAhc",
+        legacy_artist_id=42,
+    )
+    fragment = _artist(conn, "Odetari w", spotify_id="7ITMCzIU9uII8gwRg8JAhc")
+    fragment_album = _album(conn, fragment, "I LOVE YOU HOE", with_track=True)
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["artists_merged"] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM lib2_artists "
+        "WHERE spotify_id='7ITMCzIU9uII8gwRg8JAhc'"
+    ).fetchone()["c"] == 1
+    assert conn.execute(
+        "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (fragment_album,)
+    ).fetchone()["primary_artist_id"] == real
+
+
+def test_shared_catalog_id_does_not_merge_conflicting_other_ids(repair_db):
+    legacy_db, conn = repair_db
+    _artist(
+        conn, "Name One", spotify_id="7ITMCzIU9uII8gwRg8JAhc",
+        external_ids=json.dumps({"deezer": "111"}),
+    )
+    _artist(
+        conn, "Name Two", spotify_id="7ITMCzIU9uII8gwRg8JAhc",
+        external_ids=json.dumps({"deezer": "222"}),
+    )
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["artists_merged"] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM lib2_artists "
+        "WHERE spotify_id='7ITMCzIU9uII8gwRg8JAhc'"
+    ).fetchone()["c"] == 2
+
+
 # ---------------------------------------------------------------------------
 # §62.6 Stufe 5: heal foreign-shaped ids already sitting in spotify_id columns
 # ---------------------------------------------------------------------------

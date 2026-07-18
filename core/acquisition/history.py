@@ -39,6 +39,7 @@ EVENT_TYPES = frozenset({
     "import_needs_review",
     "import_resolved_manually",
     "import_file_quarantined",
+    "recovered_to_staging",
     "import_completed",
     "import_failed",
 })

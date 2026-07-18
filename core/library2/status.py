@@ -121,13 +121,17 @@ def compute_metadata_gaps(track: Mapping[str, Any], file_row: Optional[Mapping[s
 def file_status(file_row: Optional[Mapping[str, Any]], canonical_track_id: Optional[int]) -> str:
     """Coarse per-track file status for the UI.
 
-    ``'missing'`` (no file), ``'duplicate_single'`` (linked to a canonical album
-    track, i.e. a single that also exists on an album), or ``'present'``.
+    ``'missing'`` (no file or a confirmed miss), ``'missing_suspected'``
+    (the first healthy-root miss is visible but must not trigger a redownload),
+    ``'duplicate_single'`` (linked to a canonical album track, i.e. a single
+    that also exists on an album), or ``'present'``.
     """
     if not file_row or not file_row.get("path"):
         return "missing"
     if file_row.get("file_state") in ("missing_confirmed", "deleted"):
         return "missing"
+    if file_row.get("file_state") == "missing_suspected":
+        return "missing_suspected"
     if canonical_track_id:
         return "duplicate_single"
     return "present"

@@ -12,8 +12,13 @@ export type LibraryV2Sort = (typeof LIBRARY_V2_SORTS)[number];
 export const LIBRARY_V2_MONITOR_FILTERS = ['all', 'monitored', 'unmonitored'] as const;
 export type LibraryV2MonitorFilter = (typeof LIBRARY_V2_MONITOR_FILTERS)[number];
 
+/** §64 I2: library-wide Missing (no owned file) vs. Cutoff Unmet (owned file
+ *  below the resolved quality profile's target) lists. */
+export const LIBRARY_V2_WANTED_KINDS = ['missing', 'cutoff_unmet'] as const;
+export type LibraryV2WantedKind = (typeof LIBRARY_V2_WANTED_KINDS)[number];
+
 export const libraryV2SearchSchema = z.object({
-  section: z.enum(['artists', 'playlists']).default('artists').catch('artists'),
+  section: z.enum(['artists', 'playlists', 'wanted']).default('artists').catch('artists'),
   q: z.string().default('').catch(''),
   sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
   view: z.enum(['table', 'cards']).default('cards').catch('cards'),
@@ -24,6 +29,7 @@ export const libraryV2SearchSchema = z.object({
   playlist: z.coerce.number().int().positive().optional().catch(undefined),
   /** Artist detail: show only owned releases or the full provider discography. */
   releases: z.enum(['library', 'all']).default('library').catch('library'),
+  wantedKind: z.enum(LIBRARY_V2_WANTED_KINDS).default('missing').catch('missing'),
 });
 
 export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
@@ -51,6 +57,26 @@ export interface LibraryV2Pagination {
   total_pages: number;
   has_prev: boolean;
   has_next: boolean;
+}
+
+/** §64 I2: one row of a global Wanted View. `file`/`meets_profile` are only
+ *  present for `kind=cutoff_unmet` rows. */
+export interface LibraryV2WantedRow {
+  track_id: number;
+  title: string;
+  track_number: number | null;
+  disc_number: number | null;
+  monitored: boolean;
+  album: { id: number; title: string; album_type: string };
+  artist: { id: number; name: string };
+  meets_profile?: boolean | null;
+  file?: {
+    format: string | null;
+    bitrate: number | null;
+    sample_rate: number | null;
+    bit_depth: number | null;
+    quality_tier: string | null;
+  };
 }
 
 export interface LibraryV2ArtistSummary {
@@ -363,7 +389,7 @@ export interface LibraryV2Track {
   canonical_track_id: number | null;
   artists: LibraryV2TrackArtist[];
   file: LibraryV2TrackFile | null;
-  file_status: 'present' | 'missing' | 'duplicate_single';
+  file_status: 'present' | 'missing_suspected' | 'missing' | 'duplicate_single';
   metadata_gaps: string[];
   is_missing?: boolean;
   /** Quality vs the album's profile (null when missing or not measurable). */

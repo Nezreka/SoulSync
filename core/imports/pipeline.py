@@ -497,6 +497,51 @@ def _attach_manual_skip_path(context_key, final_path):
         logger.debug("manual-skip final-path attach skipped: %s", exc)
 
 
+def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=None):
+    """Best-effort DB reconciliation after a post-move pipeline exception.
+
+    Once ``safe_move_file`` has consumed the source, retrying the ordinary
+    pipeline is unsafe.  The destination is nevertheless a real imported file
+    and must not remain invisible to both library indexes or leave a correlated
+    Acquisition grab open forever.  Every operation here is idempotent by its
+    own contract: the standalone-library writer keys the track by final path,
+    Library-v2 autolink updates an existing path row, and the Acquisition
+    callbacks tolerate an already-terminal request.
+
+    History/provenance are deliberately not replayed here because those tables
+    are append-only and an exception may have happened after their first write.
+    """
+    final_path = context.get('_final_processed_path') or context.get('_final_path')
+    if not final_path or not os.path.isfile(str(final_path)):
+        return False
+
+    context['_post_move_recovered'] = True
+    try:
+        record_soulsync_library_entry(
+            context,
+            artist_context if isinstance(artist_context, dict) else {},
+            album_info if isinstance(album_info, dict) else {},
+        )
+    except Exception as exc:  # noqa: BLE001 - keep reconciling the other indexes
+        logger.warning("Post-move standalone-library reconciliation failed: %s", exc)
+    try:
+        from core.library2.autolink import link_download_into_library_v2
+        link_download_into_library_v2(context)
+    except Exception as exc:  # noqa: BLE001 - reconciliation must remain fail-open
+        logger.warning("Post-move Library-v2 reconciliation failed: %s", exc)
+    try:
+        from core.acquisition.pipeline_callback import notify_pipeline_import_success
+        notify_pipeline_import_success(context)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-move Acquisition import reconciliation failed: %s", exc)
+    try:
+        from core.acquisition.pipeline_callback import notify_manual_grab_import_success
+        notify_manual_grab_import_success(context)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-move correlated-grab reconciliation failed: %s", exc)
+    return True
+
+
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
     automation_engine = getattr(runtime, "automation_engine", None)
@@ -1622,7 +1667,18 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     matched_downloads_context[context_key] = context
                     logger.warning(f"Re-added {context_key} to context for retry")
         else:
-            logger.warning(f"Source file gone, not retrying: {context_key}")
+            if _recover_moved_file_bookkeeping(
+                context,
+                locals().get('artist_context'),
+                locals().get('album_info'),
+            ):
+                logger.warning(
+                    "Source consumed but destination exists; recovered library "
+                    "bookkeeping for %s",
+                    context_key,
+                )
+            else:
+                logger.warning(f"Source file gone, not retrying: {context_key}")
     finally:
         file_lock.release()
         with post_process_locks_lock:

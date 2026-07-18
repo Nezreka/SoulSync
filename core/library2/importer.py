@@ -36,8 +36,14 @@ logger = get_logger("library2.importer")
 ProgressCb = Optional[Callable[[str, int, int], None]]
 
 # Credit separators: "feat."/"ft."/"featuring"/"with" plus list separators.
-_FEAT_RE = re.compile(r"\b(?:feat|ft|featuring|with)\b\.?", re.IGNORECASE)
-_FEAT_IN_TITLE_RE = re.compile(r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^)\]]+)[\)\]]", re.IGNORECASE)
+_FEAT_RE = re.compile(
+    r"\b(?:feat|ft|featuring|with)\b\.?|\bw/",
+    re.IGNORECASE,
+)
+_FEAT_IN_TITLE_RE = re.compile(
+    r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with|w/)\s+([^)\]]+)[\)\]]",
+    re.IGNORECASE,
+)
 # A bare (un-parenthesized) trailing featured-artist credit, e.g. "Song feat. X".
 # "with" is intentionally excluded here — bare "with" is too ambiguous (e.g.
 # "Dancing With Myself"); only the parenthesized form above strips a "with" credit.
@@ -47,7 +53,7 @@ _LIST_SEP_RE = re.compile(r"\s*(?:,|;|/|&|\bx\b|\band\b|\bvs\.?\b|×|\+)\s*", re
 # list.  Commas, ``&``, ``and``, ``/`` and ``+`` are intentionally absent:
 # they are also ordinary parts of providerless band names.
 _EXPLICIT_CREDIT_RE = re.compile(
-    r"\b(?:feat|ft|featuring|with)\b\.?|\s(?:x|vs\.?)\s|\s×\s",
+    r"\b(?:feat|ft|featuring|with)\b\.?|\bw/|\s(?:x|vs\.?)\s|\s×\s",
     re.IGNORECASE,
 )
 

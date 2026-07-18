@@ -588,3 +588,38 @@ def test_runtime_advances_imports_without_open_grabs(tmp_path):
     assert calls == ["imports"]
     assert result.imports == {"ok": True}
     assert result.skipped_reason == "no_open_grabs"
+
+
+def test_runtime_runs_persistent_reconciliation_without_open_usenet_grabs(tmp_path):
+    seed, factory = _runtime_database(tmp_path)
+    seed.close()
+    calls = []
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: None,
+        persistent_reconciler_runner=(
+            lambda: calls.append("reconcile") or {"observed": 2, "applied": 1}
+        ),
+    )
+
+    result = monitor.run_once()
+
+    assert calls == ["reconcile"]
+    assert result.persistent_reconciliation == {"observed": 2, "applied": 1}
+    assert result.skipped_reason == "no_open_grabs"
+
+
+def test_runtime_reconciles_evidence_before_legacy_import_sweep(tmp_path):
+    seed, factory = _runtime_database(tmp_path)
+    seed.close()
+    calls = []
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: None,
+        persistent_reconciler_runner=lambda: calls.append("reconcile"),
+        import_pipeline_runner=lambda: calls.append("imports"),
+    )
+
+    monitor.run_once()
+
+    assert calls == ["reconcile", "imports"]

@@ -162,6 +162,7 @@ def _run_wishlist_cycle(
     run_id: str,
     auto_initiated: bool,
     first_batch_id: Optional[str] = None,
+    batch_extra_fields: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """THE single wishlist orchestration engine — both the auto timer and the
     manual trigger call this, so a manual scan runs the exact same code path as
@@ -191,13 +192,13 @@ def _run_wishlist_cycle(
         if cycle == 'albums' else None
     )
 
-    extra_fields = None
+    extra_fields = dict(batch_extra_fields or {})
     if auto_initiated:
-        extra_fields = {
+        extra_fields.update({
             'auto_initiated': True,
             'auto_processing_timestamp': runtime.current_time_fn(),
             'current_cycle': cycle,
-        }
+        })
 
     # Reuse the caller-provided placeholder id for the FIRST batch created; every
     # other batch gets a fresh uuid.
@@ -298,6 +299,96 @@ def _run_wishlist_cycle(
         'album_batches': len(album_groups),
         'residual_count': residual_count,
     }
+
+
+def start_direct_track_download_batch(
+    runtime: "WishlistManualDownloadRuntime",
+    tracks: list[Dict[str, Any]],
+) -> tuple[Dict[str, Any], int]:
+    """Dispatch transient track payloads through the shared download pipeline.
+
+    Unlike ``start_manual_wishlist_download_batch`` this entry point never
+    reads from or writes to the Wishlist. It exists for an explicit scoped
+    Automatic Search, where the click is a one-shot acquisition intent rather
+    than a request to monitor the track persistently.
+    """
+    try:
+        if not tracks:
+            return {"success": False, "error": "No tracks supplied"}, 400
+
+        batch_id = str(uuid.uuid4())
+        with runtime.tasks_lock:
+            runtime.download_batches[batch_id] = make_wishlist_batch_row(
+                playlist_id="library_v2_search",
+                playlist_name="Library v2 Automatic Search",
+                track_count=0,
+                max_concurrent=runtime.get_batch_max_concurrent(),
+                profile_id=runtime.profile_id,
+                phase='analysis',
+                extra_fields={
+                    'requeue_failed_to_wishlist': False,
+                    'transient_search': True,
+                },
+            )
+
+        runtime.missing_download_executor.submit(
+            _prepare_and_run_direct_track_batch,
+            runtime,
+            batch_id,
+            list(tracks),
+        )
+        return {"success": True, "batch_id": batch_id}, 200
+    except Exception as exc:
+        runtime.logger.error(f"Error starting direct track download process: {exc}")
+        return {"success": False, "error": str(exc)}, 500
+
+
+def _prepare_and_run_direct_track_batch(
+    runtime: "WishlistManualDownloadRuntime",
+    batch_id: str,
+    tracks: list[Dict[str, Any]],
+) -> None:
+    """Background hand-off for a Wishlist-free scoped Automatic Search."""
+    try:
+        direct_tracks, duplicates = sanitize_and_dedupe_wishlist_tracks(tracks)
+        if duplicates:
+            runtime.logger.info(
+                f"[Library-v2 Search] Removed {duplicates} duplicate transient payload(s)"
+            )
+        for index, track in enumerate(direct_tracks):
+            track['_original_index'] = index
+
+        if not direct_tracks:
+            with runtime.tasks_lock:
+                batch = runtime.download_batches.get(batch_id)
+                if batch is not None:
+                    batch['phase'] = 'complete'
+                    batch['error'] = 'No tracks to search'
+            return
+
+        runtime.add_activity_item(
+            "", "Automatic Search Started", f"{len(direct_tracks)} track(s)", "Now"
+        )
+        _run_wishlist_cycle(
+            runtime,
+            playlist_id='library_v2_search',
+            cycle='singles',
+            tracks=direct_tracks,
+            run_id=str(uuid.uuid4()),
+            auto_initiated=False,
+            first_batch_id=batch_id,
+            batch_extra_fields={
+                'requeue_failed_to_wishlist': False,
+                'transient_search': True,
+            },
+        )
+    except Exception as exc:
+        runtime.logger.error(f"Error preparing direct track batch {batch_id}: {exc}")
+        with runtime.tasks_lock:
+            batch = runtime.download_batches.get(batch_id)
+            if batch is not None:
+                batch['phase'] = 'error'
+                batch['error'] = str(exc)
 
 
 def add_cancelled_tracks_to_failed_tracks(
@@ -1109,6 +1200,7 @@ __all__ = [
     "WishlistAutoProcessingRuntime",
     "WishlistManualDownloadRuntime",
     "process_wishlist_automatically",
+    "start_direct_track_download_batch",
     "start_manual_wishlist_download_batch",
     "cleanup_wishlist_against_library",
     "remove_tracks_already_in_library",

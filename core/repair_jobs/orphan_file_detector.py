@@ -67,6 +67,27 @@ class OrphanFileDetectorJob(RepairJob):
                     suffix = '/'.join(parts[-depth:]).lower()
                     known_suffixes.add(suffix)
 
+            # Library v2 is an independent authoritative file index. Files
+            # successfully autolinked there are not guaranteed to have a
+            # legacy ``tracks`` row yet (notably with external media-server
+            # sync lag), so a legacy-only detector reports valid files as
+            # orphans. Keep this schema-optional for installations that have
+            # never enabled Library v2.
+            has_lib2_files = cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='lib2_track_files'"
+            ).fetchone()
+            if has_lib2_files:
+                cursor.execute(
+                    "SELECT path FROM lib2_track_files "
+                    "WHERE path IS NOT NULL AND path != '' "
+                    "AND COALESCE(file_state,'active') != 'deleted'"
+                )
+                for row in cursor.fetchall():
+                    parts = row[0].replace('\\', '/').split('/')
+                    for depth in range(1, min(5, len(parts) + 1)):
+                        known_suffixes.add('/'.join(parts[-depth:]).lower())
+
             # Build title+artist sets for fallback matching. Include both
             # track artist and album artist so Picard-style albumartist paths
             # don't look orphaned when tracks have featured/guest artists.
@@ -89,6 +110,27 @@ class OrphanFileDetectorJob(RepairJob):
                         clean_a = _strip_extras(artist)
                         if clean_t:
                             known_titles_clean.add((clean_t, clean_a))
+
+            lib2_identity_tables = cursor.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                "AND name IN ('lib2_tracks','lib2_track_artists','lib2_artists')"
+            ).fetchone()[0]
+            if lib2_identity_tables == 3:
+                cursor.execute(
+                    """SELECT t.title, ar.name
+                         FROM lib2_tracks t
+                    LEFT JOIN lib2_track_artists ta ON ta.track_id=t.id
+                    LEFT JOIN lib2_artists ar ON ar.id=ta.artist_id
+                        WHERE t.title IS NOT NULL AND t.title != ''"""
+                )
+                for title_value, artist_value in cursor.fetchall():
+                    title = (title_value or '').lower().strip()
+                    artist = (artist_value or '').lower().strip()
+                    if title:
+                        known_titles.add((title, artist))
+                        clean_t = _strip_extras(title)
+                        if clean_t:
+                            known_titles_clean.add((clean_t, _strip_extras(artist)))
         except Exception as e:
             logger.error("Error reading known file paths from DB: %s", e, exc_info=True)
             result.errors += 1

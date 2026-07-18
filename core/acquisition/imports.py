@@ -9,6 +9,7 @@ the client finished downloading its bundle.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
@@ -31,21 +32,23 @@ IMPORT_STATUSES = frozenset({
     "matching",
     "needs_review",
     "importing",
+    "recovered_to_staging",
     "completed",
     "failed",
 })
 OPEN_IMPORT_STATUSES = (
-    "pending", "matching", "needs_review", "importing",
+    "pending", "matching", "needs_review", "importing", "recovered_to_staging",
 )
 
 # needs_review may re-enter matching after the user fixed mappings or asked
 # for a re-scan; both terminal states are final — a failed import is retried
 # through a fresh acquisition request, never by reviving its row.
 _ALLOWED_TRANSITIONS = {
-    "pending": {"matching", "failed"},
-    "matching": {"needs_review", "importing", "failed"},
-    "needs_review": {"matching", "importing", "failed"},
-    "importing": {"completed", "failed"},
+    "pending": {"matching", "recovered_to_staging", "failed"},
+    "matching": {"needs_review", "importing", "recovered_to_staging", "failed"},
+    "needs_review": {"matching", "importing", "recovered_to_staging", "failed"},
+    "importing": {"recovered_to_staging", "completed", "failed"},
+    "recovered_to_staging": {"importing", "failed"},
     "completed": set(),
     "failed": set(),
 }
@@ -75,7 +78,7 @@ CREATE TABLE IF NOT EXISTS acquisition_imports (
     FOREIGN KEY (download_id) REFERENCES acquisition_grabs(download_id) ON DELETE CASCADE,
     FOREIGN KEY (request_id) REFERENCES acquisition_requests(id) ON DELETE CASCADE,
     FOREIGN KEY (candidate_id) REFERENCES release_candidates(id) ON DELETE SET NULL,
-    CHECK(status IN ('pending','matching','needs_review','importing','completed','failed')),
+    CHECK(status IN ('pending','matching','needs_review','importing','recovered_to_staging','completed','failed')),
     CHECK(expected_entity_id > 0)
 )
 """
@@ -143,6 +146,38 @@ class AcquisitionImport:
 
 
 def ensure_acquisition_imports_schema(conn: Any) -> None:
+    existing_schema = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='acquisition_imports'"
+    ).fetchone()
+    existing_sql = str(existing_schema[0] or "") if existing_schema else ""
+    has_old_status_constraint = bool(re.search(
+        r"CHECK\s*\(\s*status\s+IN\s*\(", existing_sql, re.IGNORECASE,
+    ))
+    if (
+        existing_sql
+        and has_old_status_constraint
+        and "recovered_to_staging" not in existing_sql
+    ):
+        # SQLite cannot widen a CHECK constraint in-place.  This table is a
+        # child of requests/grabs and has no inbound foreign keys, so an
+        # in-transaction copy preserves every row without weakening FK checks.
+        conn.execute(
+            "ALTER TABLE acquisition_imports RENAME TO acquisition_imports_status_legacy"
+        )
+        conn.execute(ACQUISITION_IMPORTS_DDL)
+        legacy_columns = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info(acquisition_imports_status_legacy)"
+            ).fetchall()
+        }
+        shared = [column for column in _COLUMNS if column in legacy_columns]
+        columns = ", ".join(shared)
+        conn.execute(
+            f"INSERT INTO acquisition_imports({columns}) "
+            f"SELECT {columns} FROM acquisition_imports_status_legacy"
+        )
+        conn.execute("DROP TABLE acquisition_imports_status_legacy")
     conn.execute(ACQUISITION_IMPORTS_DDL)
     existing = {
         str(row[1])
@@ -665,6 +700,81 @@ def record_manual_resolution(
     return _reload_import(conn, import_id)
 
 
+def record_recovered_to_staging(
+    conn: Any,
+    import_id: str,
+    *,
+    entry_id: str,
+    previous_path: str,
+    staged_path: str,
+) -> AcquisitionImport:
+    """Park a quarantined import in an explicit manual-recovery state."""
+    record = _open_import(conn, import_id)
+    if record.status == "recovered_to_staging":
+        return record
+    _require_transition(record.status, "recovered_to_staging")
+    result = dict(record.result)
+    result["recovery"] = {
+        "entry_id": str(entry_id),
+        "previous_path": str(previous_path),
+        "staged_path": str(staged_path),
+        "state": "recovered_to_staging",
+    }
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status='recovered_to_staging', result_json=?, error=NULL,
+                  updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (json.dumps(result, ensure_ascii=False, sort_keys=True), record.id),
+    )
+    record_history_event(
+        conn,
+        "recovered_to_staging",
+        request_id=record.request_id,
+        candidate_id=record.candidate_id,
+        download_id=record.download_id,
+        reason_code="manual_quarantine_recovery",
+        payload={
+            "entry_id": str(entry_id),
+            "import_id": record.id,
+            "previous_path": str(previous_path),
+            "staged_path": str(staged_path),
+        },
+    )
+    close_retry_state(conn, status="approved", import_id=record.id)
+    return _reload_import(conn, record.id)
+
+
+def record_recovered_reimport_started(
+    conn: Any,
+    import_id: str,
+    *,
+    staged_path: str,
+) -> AcquisitionImport:
+    """Re-enter the shared pipeline when a recovered staging file is chosen."""
+    record = get_import(conn, import_id)
+    if record is None:
+        raise KeyError(f"acquisition import not found: {import_id}")
+    if record.status == "importing":
+        return record
+    if record.status != "recovered_to_staging":
+        raise ValueError(
+            f"recovered re-import requires recovered_to_staging, not {record.status}"
+        )
+    result = dict(record.result)
+    recovery = dict(result.get("recovery") or {})
+    recovery.update(state="reimporting", staged_path=str(staged_path))
+    result["recovery"] = recovery
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status='importing', result_json=?, error=NULL,
+                  updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (json.dumps(result, ensure_ascii=False, sort_keys=True), record.id),
+    )
+    return _reload_import(conn, record.id)
+
+
 def record_import_deferred(
     conn: Any,
     import_id: str,
@@ -767,6 +877,8 @@ __all__ = [
     "record_inventory_result",
     "record_matching_result",
     "record_manual_resolution",
+    "record_recovered_reimport_started",
+    "record_recovered_to_staging",
     "record_pipeline_file_completed",
     "record_pipeline_file_quarantined",
 ]

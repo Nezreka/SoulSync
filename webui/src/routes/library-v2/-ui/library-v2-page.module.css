@@ -1131,6 +1131,21 @@ button.featureTag:disabled {
   gap: 10px;
 }
 
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: rgba(var(--accent-rgb), 0.9);
+  cursor: pointer;
+  text-align: left;
+}
+
+.linkButton:hover {
+  color: rgb(var(--accent-rgb));
+  text-decoration: underline;
+}
+
 .tableRow {
   cursor: pointer;
 }
@@ -3008,6 +3023,7 @@ button.featureTag:disabled {
 
 .inlinePresent,
 .inlineMissing,
+.inlineMissingSuspected,
 .inlineDuplicate {
   font-size: 10px;
   font-weight: 700;
@@ -3021,6 +3037,10 @@ button.featureTag:disabled {
 
 .inlineMissing {
   color: rgb(248, 113, 113);
+}
+
+.inlineMissingSuspected {
+  color: rgb(251, 191, 36);
 }
 
 .inlineDuplicate {

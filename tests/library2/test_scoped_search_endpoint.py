@@ -1,10 +1,9 @@
 """Flask-level tests for the scoped Automatic Search endpoint (deep-dive C1).
 
-``POST /api/library/v2/<entity>/<id>/search`` must mirror exactly the wanted
-tracks in scope into the wishlist (the "inline upgrade scan") and hand the
-resulting wishlist ids to the injected search dispatcher — never touch a
-track outside its scope, and never dispatch a track that already has a file
-satisfying its quality profile.
+``POST /api/library/v2/<entity>/<id>/search`` mirrors wanted artist/album
+scope into Wishlist, while a direct track search dispatches a transient
+server-owned payload without a Wishlist write. Both must stay scoped and
+must not dispatch a file that already satisfies its quality profile.
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ class FakeDB:
         return True
 
 
-def _build_api(tmp_path, *, dispatcher=None):
+def _build_api(tmp_path, *, dispatcher=None, direct_dispatcher=None):
     db_path = str(tmp_path / "lib2.db")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -97,6 +96,7 @@ def _build_api(tmp_path, *, dispatcher=None):
         config_manager=None,
         profile_id_getter=lambda: db.active_profile,
         scoped_wishlist_search_dispatcher=dispatcher,
+        scoped_track_search_dispatcher=direct_dispatcher,
     )
     ids = {"artist": artist_id, "views": views_id, "ep": ep_id,
            "album_track": album_track, "ep_track": ep_track}
@@ -130,7 +130,7 @@ def test_track_scope_searches_only_that_track(api):
 
     assert status["error"] is None
     assert status["result"] == {
-        "checked": 1, "queued": 1, "searching": 1, "batch_id": None,
+        "checked": 1, "queued": 0, "searching": 1, "batch_id": None,
         "dispatch_error": None,
     }
     assert {a["id"] for a in db.wishlist_adds} == {"sp-t2"}
@@ -152,12 +152,12 @@ def test_direct_track_search_bypasses_monitor_filter_without_changing_it(api):
     assert status["error"] is None
     assert status["result"] == {
         "checked": 1,
-        "queued": 1,
+        "queued": 0,
         "searching": 1,
         "batch_id": None,
         "dispatch_error": None,
     }
-    assert {a["id"] for a in db.wishlist_adds} == {"sp-t2"}
+    assert db.wishlist_adds == []
     with db._get_connection() as conn:
         track = conn.execute(
             "SELECT monitored FROM lib2_tracks WHERE id=?", (ids["ep_track"],)
@@ -200,15 +200,16 @@ def test_artist_scope_only_dispatches_the_missing_track(api):
     assert {a["id"] for a in db.wishlist_adds} == {"sp-t2"}
 
 
-def test_dispatcher_receives_the_scoped_wishlist_ids_and_profile(tmp_path):
+def test_direct_dispatcher_receives_transient_payload_and_profile(tmp_path):
     calls = []
 
-    def _dispatcher(track_ids, profile_id):
-        calls.append((list(track_ids), profile_id))
+    def _dispatcher(tracks, profile_id):
+        calls.append((list(tracks), profile_id))
         return {"success": True, "batch_id": "batch-123"}
 
-    client, _db, ids = _build_api(tmp_path, dispatcher=_dispatcher)
+    client, db, ids = _build_api(tmp_path, direct_dispatcher=_dispatcher)
     client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor", json={"monitored": True})
+    db.wishlist_adds.clear()  # isolate Automatic Search from the monitor mirror
 
     response = client.post(f"/api/library/v2/tracks/{ids['ep_track']}/search")
     job_id = response.get_json()["job_id"]
@@ -216,7 +217,14 @@ def test_dispatcher_receives_the_scoped_wishlist_ids_and_profile(tmp_path):
 
     assert status["error"] is None
     assert status["result"]["batch_id"] == "batch-123"
-    assert calls == [(["sp-t2"], 1)]
+    assert len(calls) == 1
+    tracks, profile_id = calls[0]
+    assert profile_id == 1
+    assert len(tracks) == 1
+    assert tracks[0]["id"] == "sp-t2"
+    assert tracks[0]["source_info"]["lib2_track_id"] == ids["ep_track"]
+    assert tracks[0]["_lib2_direct_search"] is True
+    assert db.wishlist_adds == []
 
 
 def test_dispatcher_failure_is_surfaced_not_silently_swallowed(tmp_path):
@@ -227,7 +235,7 @@ def test_dispatcher_failure_is_surfaced_not_silently_swallowed(tmp_path):
     def _dispatcher(track_ids, profile_id):
         return {"success": False, "error": "executor rejected submission"}
 
-    client, _db, ids = _build_api(tmp_path, dispatcher=_dispatcher)
+    client, _db, ids = _build_api(tmp_path, direct_dispatcher=_dispatcher)
     client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor", json={"monitored": True})
 
     response = client.post(f"/api/library/v2/tracks/{ids['ep_track']}/search")

@@ -35,6 +35,72 @@ class _ImmediateThread:
             self._target()
 
 
+def test_post_move_recovery_reconciles_real_destination_without_append_only_replay(
+    tmp_path, monkeypatch,
+):
+    """A failure after the move must not leave a physical DB orphan."""
+    destination = tmp_path / "Library" / "Artist" / "Track.flac"
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"audio")
+    context = {"_final_processed_path": str(destination)}
+    calls = []
+
+    import core.acquisition.pipeline_callback as acquisition_callback
+    import core.library2.autolink as autolink
+
+    monkeypatch.setattr(
+        import_pipeline,
+        "record_soulsync_library_entry",
+        lambda ctx, artist, album: calls.append(("legacy", artist, album)),
+    )
+    monkeypatch.setattr(
+        autolink,
+        "link_download_into_library_v2",
+        lambda ctx: calls.append(("lib2", ctx["_final_processed_path"])),
+    )
+    monkeypatch.setattr(
+        acquisition_callback,
+        "notify_pipeline_import_success",
+        lambda ctx: calls.append(("acquisition",)),
+    )
+    monkeypatch.setattr(
+        acquisition_callback,
+        "notify_manual_grab_import_success",
+        lambda ctx: calls.append(("correlated_grab",)),
+    )
+
+    recovered = import_pipeline._recover_moved_file_bookkeeping(
+        context,
+        {"name": "Artist"},
+        {"album_name": "Album"},
+    )
+
+    assert recovered is True
+    assert context["_post_move_recovered"] is True
+    assert calls == [
+        ("legacy", {"name": "Artist"}, {"album_name": "Album"}),
+        ("lib2", str(destination)),
+        ("acquisition",),
+        ("correlated_grab",),
+    ]
+
+
+def test_post_move_recovery_requires_a_real_destination(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "record_soulsync_library_entry",
+        lambda *args: calls.append(args),
+    )
+
+    recovered = import_pipeline._recover_moved_file_bookkeeping(
+        {"_final_processed_path": str(tmp_path / "missing.flac")},
+    )
+
+    assert recovered is False
+    assert calls == []
+
+
 def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     transfer_root = tmp_path / "Transfer"
     transfer_root.mkdir()

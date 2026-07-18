@@ -137,3 +137,52 @@ def test_orphan_detector_accepts_picard_albumartist_folder_match(tmp_path: Path)
     assert result.scanned == 1
     assert result.findings_created == 0
     assert findings == []
+
+
+def test_library_v2_only_file_is_not_reported_as_orphan(tmp_path: Path) -> None:
+    """A lib2-autolinked file may precede legacy media-server sync."""
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+    audio_path = tmp_path / "Lib2 Artist" / "Lib2 Album" / "01 - Lib2 Song.mp3"
+    audio_path.parent.mkdir(parents=True)
+    audio_path.write_bytes(b"not a real mp3; exact lib2 path is sufficient")
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, title TEXT NOT NULL);
+            CREATE TABLE lib2_track_artists (track_id INTEGER, artist_id INTEGER);
+            CREATE TABLE lib2_track_files (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                path TEXT,
+                file_state TEXT DEFAULT 'active'
+            );
+            INSERT INTO lib2_artists(id, name) VALUES(1, 'Lib2 Artist');
+            INSERT INTO lib2_tracks(id, title) VALUES(1, 'Lib2 Song');
+            INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(1, 1);
+            """
+        )
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path) VALUES(1, ?)",
+            (str(audio_path),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.scanned == 1
+    assert result.findings_created == 0
+    assert findings == []

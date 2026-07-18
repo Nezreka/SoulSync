@@ -7110,7 +7110,7 @@ In einer schrittweisen Abstimmung mit dem Nutzer wurden am 2026-07-17 verbindlic
 * **H4 — Track-Redownload-Modal:** ⏸️ **Aufgeschoben / Nicht benötigt.** (Falls später, gilt das Prinzip: neu suchen und erst nach verifiziertem Import atomar ersetzen).
 * **H6 — A-Z-Alphabet-Selector, Source-Filter & Stats-Header:** ❌ **Verworfen / Nicht benötigt.** Moderne Textsuche und Paging ersetzen die Buchstabenleiste vollkommen.
 * **H7 — Inline-Edit in der Tabelle:** ❌ **Verworfen / Nicht benötigt.** Editierungen laufen robuster und sicherer ausschließlich über Detail-Modale.
-* **H8 — Bulk-Selektion + Bulk-Bar / Bulk-Edit-Modal:** ✅ **Beibehalten / Umsetzen.** Die Bulk-Bar soll um ein Bulk-Edit-Modal erweitert werden, um Metadaten-Felder (wie Genre, Jahr, etc.) für mehrere ausgewählte Tracks gleichzeitig zu überschreiben (Legacy-Parität zu `showBulkEditModal`).
+* **H8 — Bulk-Selektion + Bulk-Bar / Bulk-Edit-Modal:** ✅ **Bereits erledigt** — geprüft am 2026-07-18: `BulkEditTracksModal` (`webui/src/routes/library-v2/-ui/library-v2-page.tsx`) wurde bereits am 2026-07-16 in §34 (Commit `c03150bf`, vor dieser Entscheidung) gebaut und deckt Style/Mood/BPM/Explicit ab — exakt Legacys tatsächliches `showBulkEditModal`-Feldset (Track Number/BPM/Style/Mood/Explicit) minus des Bulk-Track-Number-Felds, dessen Eins-zu-eins-Übertragung auf mehrere verschiedene Tracks ohnehin keinen Sinn ergibt. Die hier ursprünglich genannten Felder „Genre, Jahr" waren nie Teil von Legacys echtem Bulk-Modal (Faktenirrtum in dieser Zeile); kein weiterer Code nötig.
 * **H9 — Report-Button für Nicht-Admins:** ❌ **Verworfen / Nicht benötigt.** Library v2 ist rein für Administratoren konzipiert (admin-only).
 * **H10 — „Watch All Unwatched“-Bulk-Tool:** ❌ **Verworfen / Nicht benötigt.** Gezielte Auswahl über Bookmarks/Watchlist ist besser, um API-Limits nicht zu überlasten.
 * **H11 — Artist-Record-Inspector:** ❌ **Verworfen / Nicht benötigt.** Eine rohe JSON-Ansicht in der User-UI ist nicht notwendig; Entwickler können die Browser-Konsole oder SQLite nutzen.
@@ -7835,3 +7835,161 @@ clean, Production-Build ok. Backend gesamt `tests/library2` + `tests/imports`
 + `tests/wishlist` + `tests/downloads`: 2290 grün (6 vorbestehende,
 unabhängige Failures in `tests/downloads/test_cross_batch_dedup.py`, siehe
 §71). `ruff check` sauber.
+
+---
+
+## 74. §64 I2 — globale Wanted Views (Missing / Cutoff Unmet) — ✅ umgesetzt (2026-07-18)
+
+Vierter der vier §64-Punkte (nach I8, I6, H8). Ziel: bibliotheksweite
+Lidarr-Style-Übersichten über alle gewünschten Tracks — „Missing" (kein
+File) und „Cutoff Unmet" (File vorhanden, aber unter dem Qualitätsprofil-
+Ziel) — statt nur pro Artist/Album einsehbar.
+
+### 74.1 Rückfrage vor Umsetzung
+
+Nach [[feedback-ask-before-library-parity-work]] wurde vor Beginn erst per
+Rückfrage geklärt, welcher der beiden verbliebenen §64-Punkte (I2/H8)
+zuerst drankommt. Dabei stellte sich heraus, dass H8 bereits durch die
+`BulkEditTracksModal` aus §34 (Commit `c03150bf`, 2026-07-16 — vor der
+§64-Entscheidung) erledigt war: die §64-Beschreibung nannte „Genre, Jahr"
+als Beispielfelder, aber Legacys echtes `showBulkEditModal` deckte nur
+Track Number/BPM/Style/Mood/Explicit ab — exakt das Feldset, das die
+§34-Modal (minus des sinnfreien Bulk-Track-Number-Felds) bereits abdeckt.
+§64 wurde entsprechend korrigiert (kein neuer Code für H8). Für I2 wurde
+eine neue Top-Level-Seite (statt eines Filters innerhalb der bestehenden
+Library-Ansicht) gewählt.
+
+### 74.2 Backend: `core/library2/wanted_views.py`
+
+Liest ausschließlich die bereits materialisierte Wanted-Projektion
+(`lib2_wanted_tracks`, §11.2/ADR-02) statt Monitor-Regeln neu aufzulösen,
+und wertet Dateien exakt wie `get_album()` über `core.library2.quality_eval`
+aus — Badges und diese Übersicht können dadurch nie auseinanderlaufen.
+
+- **`list_missing`:** reines SQL — `wanted=1 AND NOT EXISTS(aktives File)`,
+  mit Pagination direkt in der Query. Schließt konsolidierte Duplikate aus
+  (derselbe `_NOT_CONSOLIDATED_SQL`-Gedanke wie beim Bulk-Remonitor in
+  `api/library_v2.py`, bewusst in den Core-Layer dupliziert statt über die
+  Schichtgrenze importiert — Präzedenzfall: `_config_fingerprint` in
+  `quality_upgrade.py`/`quality_upgrade_scanner.py`) — sonst würde ein
+  bewusst entfernter Duplikat-Single erneut zum Redownload vorgeschlagen.
+- **`list_cutoff_unmet`:** „ist ein File ein Upgrade-Kandidat" lässt sich
+  nicht in SQL ausdrücken (hängt vom aufgelösten Qualitätsprofil samt
+  Ranked Targets ab, bereits als `effective_profile_id` auf
+  `lib2_wanted_tracks` materialisiert). Holt daher alle
+  `wanted=1 AND File vorhanden`-Kandidaten, wertet sie in Python aus
+  (gruppiert nach der kleinen Menge tatsächlich genutzter Profile, nicht
+  pro Track) und paginiert erst danach über das gefilterte Ergebnis. Ein
+  nicht auflösbares Profil/Format liefert laut `quality_eval`s Tri-State-
+  Vertrag nie einen falsch-positiven Fund.
+
+### 74.3 API + Frontend
+
+- `GET /api/library/v2/wanted?kind=missing|cutoff_unmet&search=&page=&limit=`
+  — selbe Pagination-Form wie `/api/library/v2/artists`.
+- Neue Sektion `wanted` im bestehenden `section`-Suchparameter-Muster
+  (`docs`: „ein Route, der aktuelle View kommt aus Search-Params" — wie
+  schon bei `playlists`), dritter Tab in `LibrarySectionTabs`. Zwei
+  Unter-Tabs (Missing/Cutoff Unmet) über einen neuen `wantedKind`-Param.
+  Jede Zeile verlinkt Artist/Album zurück in die normale Detail-Navigation;
+  der Search-Button pro Zeile ist der bereits bestehende gescopte
+  Automatic-Search-Endpunkt (§29/C1, `tracks`-Scope) — kein neuer
+  Suchmechanismus.
+
+### 74.4 Verifikation
+
+`tests/library2/test_wanted_views.py` — 17 neue Tests: Missing/Cutoff-
+Unmet-Query-Logik (Duplikat-Ausschluss, `missing_confirmed`-File-State,
+Pagination, Suche, `until_cutoff`-Policy mit Cutoff-Index, Tri-State-
+Sicherheit bei unauflösbarem Profil) sowie Flask-Endpoint-Tests. Gesamt
+`tests/library2`: **819 grün** (802 + 17). Frontend: neue
+`fetchLibraryV2Wanted`-Tests in `-library-v2.api.test.ts` sowie
+`wanted-quality.test.ts` für die reine Formatierungsfunktion (gleiches
+Muster wie `progress-clamp.test.ts`) — `vitest run src/routes/library-v2/`
+**140 grün** (24 Dateien, war 133). `tsc --noEmit` clean, `npm run check`
+(oxfmt+oxlint) clean, Production-Build ok, `ruff check` sauber. Live-
+Browser-Verifikation war in dieser Session nicht möglich: `dev.py` crash-
+loopte lokal unabhängig von dieser Änderung (letzter sauberer Lauf lag vor
+Sessionbeginn, vermutlich fehlendes `gunicorn` im venv) — Vite HMR hat die
+neue Datei jedoch fehlerfrei übernommen (`"new export"`-Invalidate ohne
+Fehlermeldung), ein zusätzliches, wenn auch schwächeres Signal.
+
+---
+
+## 75. Bug-Tracker LV2-006/009/010/013 geschlossen — persistente Reconciliation und Integritätsreport (2026-07-18)
+
+Der ergänzende Tracker `docs/library-v2-bug-tracker-2026-07-18.md` wurde
+vollständig gegen die konsolidierten Invarianten dieses Dokuments umgesetzt.
+Die zuvor offenen Codepunkte sind geschlossen; operative Live-Daten- und
+externe End-to-End-Läufe bleiben bewusst vom Code-Fix getrennt.
+
+### 75.1 LV2-006 — evidenzbasierte persistente Grab-Reconciliation
+
+`core/acquisition/reconciler.py` verbindet offene request-gebundene Legacy-
+Grabs mit realer Evidenz aus Runtime-Tasks, `matched_downloads_context`,
+externem Client, Quarantäne-Sidecars, nativen Acquisition-Imports und finalen
+Dateipfaden. Eine positive Completion braucht ein reales und in Legacy oder
+Library v2 aktiv indexiertes File; Path-Mapping läuft über den gemeinsamen
+Resolver. Ein Completed Acquisition-Import ist nur dann Abschluss-Evidenz,
+wenn seine `processed.final_path`-Einträge ebenfalls real und indexiert sind.
+
+Eindeutige Success-/Fail-/Cancel-Zustände werden idempotent und pro Grab in
+einem Savepoint übernommen. Reine Abwesenheit wird erst nach konfigurierbarer
+TTL (Default 24 Stunden, Minimum eine Stunde) zum Runtime-Failure und erzeugt
+keinen Blocklist-Eintrag. Der bestehende Acquisition-Monitor führt den Lauf
+beim Start und periodisch aus. Admin-Schnittstellen:
+
+- `GET /api/library/v2/maintenance/reconcile-acquisition`: immer Dry-Run,
+- `POST ... {"apply": true}`: sichere Transitionen anwenden.
+
+Beide Antworten enthalten Counts und Begründungen pro Entscheidung.
+
+### 75.2 LV2-009 — crash-sicheres Recover to Staging
+
+`recovered_to_staging` ist jetzt ein eigener Acquisition-Importstatus und
+Append-only-History-Event. `acquisition_quarantine_recoveries` persistiert
+Move-Plan und Request-/Candidate-/Grab-/Import-Korrelation vor dem
+Dateisystemzugriff. Erst nach Move und Lifecycle-Commit wird das Sidecar
+entfernt; ein Crash an jeder Grenze ist wiederaufnehmbar. Der spätere manuelle
+Staging-Import erhält die persistierten Marker zurück und schließt über die
+Shared Pipeline ab. Solange ein transient fehlgeschlagener Reimport das
+Staging-File nicht entfernt hat, bleibt er erneut versuchbar.
+
+### 75.3 LV2-010 — erster physischer Miss ist sichtbar
+
+`file_status()` gibt `missing_suspected` statt `present` zurück. Die Track-
+Tabelle zeigt `checking missing` in Amber mit Erklärung der zweiten
+Bestätigungsprüfung. Der Zustand bleibt bewusst vom Wanted-/Redownload-Pfad
+ausgeschlossen; erst `missing_confirmed` wird fachlich `missing`.
+
+### 75.4 LV2-013 — zentraler Read-only-Integritätsreport
+
+`core/library2/integrity_reconciler.py` vergleicht alle verfügbaren
+Integritätsindizes: Disk und Path-Mapping, Legacy-/Media-Server-Projektion,
+`lib2_track_files`, `track_downloads`, `library_history`, Runtime-Tasks und
+Matched Contexts, Acquisition-Request/Grab/Import, Recovery-Journal,
+Quarantäne-File/Sidecar-Paare und externe Client-Snapshots. Findings sind
+reason-coded und nach Severity/Komponente/Entität zählbar. Der
+Storage-Health-Gate verhindert falsche Missing-Befunde bei ungemounteten
+Roots; der Report mutiert weder DB noch Files.
+
+Admin-Route:
+
+- `GET /api/library/v2/maintenance/integrity-report?max_findings=1000`
+
+Das Detail-Limit begrenzt nur die Payload, nicht die vollständigen Counts.
+
+### 75.5 Verifikation und Betriebsgrenze
+
+Backend-Breitsuite (`tests/library2`, `tests/wishlist`, `tests/imports`,
+`tests/acquisition`, Orphan Detector): **1970 passed, 3 skipped**. Die 31
+Warnungen sind bestehende Python-3.12-Deprecation-Warnungen. Library-v2-
+Frontend: **141 passed** in 24 Vitest-Dateien; Production-Build erfolgreich;
+Formatter und Type-Lint für die berührten Dateien sauber. `py_compile` für
+die geänderten Python-Grenzen inklusive `web_server.py` war sauber.
+
+Die produktive Provider-ID-Datenreparatur aus LV2-012 wurde weiterhin nicht
+blind gegen `database/music_library.db` ausgeführt: dafür bleiben Dry-Run-
+Paarliste und Backup verbindliche Betriebsbedingungen. Echte Soulseek- und
+Plex/Jellyfin/Navidrome-End-to-End-Läufe sind Deployment-Abnahme, kein noch
+offener Codefix.

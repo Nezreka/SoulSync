@@ -67,6 +67,13 @@ def get_queue_status(
     wanted = {int(t) for t in track_ids}
     tracks: Dict[int, Dict[str, Any]] = {}
     albums: Dict[int, int] = {}
+    # A correlated manual grab can temporarily exist in BOTH runtime maps.
+    # Once its precise batch task reaches a terminal state, that terminal
+    # observation must suppress any leaked/stale matched context. Otherwise
+    # the context fallback below resurrects a completed/failed track as
+    # permanently ``queued`` (the exact state users see after a successful
+    # manual grab or a failed Automatic Search).
+    terminal_track_ids: set[int] = set()
     if not wanted:
         return {"tracks": {}, "albums": {}}
 
@@ -96,6 +103,7 @@ def get_queue_status(
         track_id = int(raw_track_id)
         bucket = _TASK_STATUS_BUCKET.get(task.get("status"))
         if bucket is None:
+            terminal_track_ids.add(track_id)
             continue  # terminal/unknown — omit entirely
 
         progress_pct = 0
@@ -121,7 +129,7 @@ def get_queue_status(
         track_id = int(raw_track_id)
         # A batch-task entry for the same track already won (more precise
         # status machine); don't let a shadow manual-grab context override it.
-        if track_id not in wanted or track_id in tracks:
+        if track_id not in wanted or track_id in tracks or track_id in terminal_track_ids:
             continue
 
         search_result = context.get("search_result") or {}

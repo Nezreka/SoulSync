@@ -162,6 +162,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                run_enrichment: Optional[Callable[..., Dict[str, Any]]] = None,
                                scoped_wishlist_search_dispatcher:
                                    Optional[Callable[[List[str], int], Dict[str, Any]]] = None,
+                               scoped_track_search_dispatcher:
+                                   Optional[Callable[[List[Dict[str, Any]], int], Dict[str, Any]]] = None,
                                configured_match_services_getter:
                                    Optional[Callable[[], Any]] = None,
                                live_artist_stats_getter:
@@ -169,6 +171,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                make_context_key: Optional[Callable[[str, str], str]] = None,
                                get_cached_transfer_data:
                                    Optional[Callable[[], Dict[str, Any]]] = None,
+                               acquisition_reconciliation_runner:
+                                   Optional[Callable[..., Dict[str, Any]]] = None,
+                               integrity_report_runner:
+                                   Optional[Callable[..., Dict[str, Any]]] = None,
                                ) -> None:
     """Attach the Library v2 routes to ``app``.
 
@@ -183,8 +189,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     submits a manual wishlist batch scoped to exactly those ids (same
     executors/pools ``/api/wishlist/download_missing`` uses) — the scoped
     Automatic Search endpoint (C1) hands it the ids currently wanted in an
-    artist/album/track's scope after mirroring them fresh into the wishlist.
+    artist/album scope after mirroring them fresh into the wishlist.
     Injected for the same circular-import reason as ``run_enrichment``.
+    ``scoped_track_search_dispatcher(track_payloads, profile_id)`` submits a
+    transient direct-track batch through the same workers without creating a
+    Wishlist row. It powers a one-shot track Automatic Search, including for
+    an unmonitored track.
     ``configured_match_services_getter() -> set[str]`` — service ids from
     ``core.library2.match_status.SERVICES`` actually configured on this
     instance right now (A8), same "configured" flags the Settings
@@ -1174,6 +1184,50 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": True, **status})
         finally:
             conn.close()
+
+    @app.route("/api/library/v2/wanted")
+    def lib2_list_wanted():
+        """§64 I2: library-wide Missing / Cutoff Unmet lists, Lidarr-style.
+
+        ``kind`` selects the list (``missing`` default, or ``cutoff_unmet``);
+        ``search``/``page``/``limit`` mirror the artists endpoint.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import wanted_views as WV
+        kind = request.args.get("kind", "missing")
+        if kind not in ("missing", "cutoff_unmet"):
+            return jsonify({"success": False, "error": "kind must be missing or cutoff_unmet"}), 400
+        search = request.args.get("search", "")
+        try:
+            page = int(request.args.get("page", 1))
+            limit = int(request.args.get("limit", 75))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+        if page < 1 or not 1 <= limit <= 500:
+            return jsonify({
+                "success": False,
+                "error": "page must be positive and limit must be between 1 and 500",
+            }), 400
+        conn = _conn()
+        try:
+            lister = WV.list_missing if kind == "missing" else WV.list_cutoff_unmet
+            rows, total = lister(conn, search=search, page=page, limit=limit,
+                                 profile_id=ADMIN_PROFILE_ID)
+        finally:
+            conn.close()
+        total_pages = (total + limit - 1) // limit if limit else 0
+        return jsonify({
+            "success": True,
+            "kind": kind,
+            "tracks": rows,
+            "pagination": {
+                "page": page, "limit": limit, "total_count": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1, "has_next": page < total_pages,
+            },
+        })
 
     @app.route("/api/library/v2/artists")
     def lib2_list_artists():
@@ -2625,6 +2679,67 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @app.route(
+        "/api/library/v2/maintenance/reconcile-acquisition",
+        methods=["GET", "POST"],
+    )
+    def lib2_reconcile_acquisition():
+        """Admin audit by default; POST with apply=true commits safe transitions."""
+        guard = _guard()
+        if guard:
+            return guard
+        if _profile() != ADMIN_PROFILE_ID:
+            return jsonify({
+                "success": False,
+                "error": "Acquisition reconciliation requires the admin profile",
+            }), 403
+        if acquisition_reconciliation_runner is None:
+            return jsonify({
+                "success": False,
+                "error": "Acquisition reconciliation is unavailable",
+            }), 503
+        body = request.get_json(silent=True) or {}
+        apply_changes = request.method == "POST" and body.get("apply") is True
+        try:
+            report = acquisition_reconciliation_runner(dry_run=not apply_changes)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Acquisition reconciliation failed: %s", exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": True, "report": report})
+
+    @app.route(
+        "/api/library/v2/maintenance/integrity-report", methods=["GET"],
+    )
+    def lib2_integrity_report():
+        """Admin-only, read-only report over every available integrity index."""
+        guard = _guard()
+        if guard:
+            return guard
+        if _profile() != ADMIN_PROFILE_ID:
+            return jsonify({
+                "success": False,
+                "error": "The integrity report requires the admin profile",
+            }), 403
+        if integrity_report_runner is None:
+            return jsonify({
+                "success": False,
+                "error": "The integrity report is unavailable",
+            }), 503
+        try:
+            max_findings = min(
+                5000, max(0, int(request.args.get("max_findings", 1000))),
+            )
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False, "error": "max_findings must be an integer",
+            }), 400
+        try:
+            report = integrity_report_runner(max_findings=max_findings)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Library-v2 integrity report failed: %s", exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": True, "report": report})
+
     def _bulk_track_ids_for_albums(conn, album_ids: List[int]) -> List[int]:
         if not album_ids:
             return []
@@ -3739,15 +3854,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         quality profile allows it, upgrades — for exactly this artist/album/
         track, never the whole wishlist.
 
-        Reuse-first (no second decision engine, replaces A3/A4): (a) refresh
-        the wanted projection for this scope and mirror it into the wishlist
-        — the same "inline upgrade scan" the global upgrade-scan job and
-        monitor toggles already use (``mirror_projected_tracks_wishlist``);
-        (b) hand the resulting wishlist ids to the existing manual wishlist
-        batch runtime (``start_manual_wishlist_download_batch``, already
-        ``track_ids``-filterable — it backs ``/api/wishlist/download_missing``)
-        so the search/grab itself runs through the one candidate-walk/retry
-        pipeline every other download path uses.
+        Artist/album scope refreshes the wanted projection, mirrors only those
+        monitored/wanted rows into Wishlist, then dispatches those ids. A
+        direct track click instead builds a transient server-owned payload and
+        dispatches it without a Wishlist write. Both paths converge on the one
+        candidate-walk/retry/import pipeline.
         """
         guard = _guard()
         if guard:
@@ -3790,27 +3901,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
                 from core.library2.wishlist_mirror import (
                     mirror_projected_tracks_wishlist,
-                    mirror_tracks_wishlist,
+                    track_direct_download_payload,
                     track_wishlist_payload,
                 )
-                # Only the direct track-level action bypasses the ignore-list
-                # (audit P1-11 precedent, mirrored from lib2_set_monitored):
-                # an album/artist search must not silently un-ignore a track
-                # the user deliberately cancelled elsewhere.
                 direct_track_search = entity in ("track", "tracks")
                 if direct_track_search:
-                    # §52.6: clicking Automatic Search on one concrete track
-                    # is sufficient intent for this attempt, even when the
-                    # persistent monitor rule is off.  Mirror an idempotent
-                    # wishlist add without mutating monitored/wanted state.
-                    queued = mirror_tracks_wishlist(
-                        db,
-                        conn,
-                        track_ids,
-                        True,
-                        profile_id=active_profile,
-                        user_initiated=True,
-                    )
+                    # One-shot intent: never mutate persistent monitoring or
+                    # Wishlist state just to feed the shared worker.
+                    queued = 0
                 else:
                     queued = mirror_projected_tracks_wishlist(
                         db, conn, track_ids, profile_id=active_profile,
@@ -3819,9 +3917,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
                 states = track_wanted_states(conn, track_ids, profile_id=active_profile) \
                     if track_ids else {}
-                search_ids = []
-                for track_id, wanted in states.items():
-                    if not wanted and not direct_track_search:
+                search_ids: List[str] = []
+                direct_payloads: List[Dict[str, Any]] = []
+                for track_id in track_ids:
+                    if direct_track_search:
+                        direct_payload = track_direct_download_payload(conn, track_id)
+                        if direct_payload:
+                            direct_payloads.append(direct_payload)
+                        continue
+                    if not states.get(track_id):
                         continue
                     payload = track_wishlist_payload(conn, track_id)
                     if payload and payload.get("_should_queue"):
@@ -3829,8 +3933,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
                 batch_id = None
                 dispatch_error = None
-                if search_ids and scoped_wishlist_search_dispatcher:
-                    batch_payload = scoped_wishlist_search_dispatcher(search_ids, active_profile) or {}
+                dispatch_count = len(direct_payloads) if direct_track_search else len(search_ids)
+                dispatcher = (
+                    scoped_track_search_dispatcher
+                    if direct_track_search
+                    else scoped_wishlist_search_dispatcher
+                )
+                dispatch_input = direct_payloads if direct_track_search else search_ids
+                if dispatch_input and dispatcher:
+                    batch_payload = dispatcher(dispatch_input, active_profile) or {}
                     if batch_payload.get("success"):
                         batch_id = batch_payload.get("batch_id")
                     else:
@@ -3838,13 +3949,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         logger.error(
                             "Scoped search (%s %s): dispatcher accepted %d wishlist id(s) "
                             "but the download dispatch failed: %s",
-                            entity, eid, len(search_ids), dispatch_error,
+                            entity, eid, dispatch_count, dispatch_error,
                         )
 
                 _job_registry.update(job_id, result={
                     "checked": len(track_ids),
                     "queued": queued,
-                    "searching": len(search_ids),
+                    "searching": dispatch_count,
                     "batch_id": batch_id,
                     "dispatch_error": dispatch_error,
                 })
