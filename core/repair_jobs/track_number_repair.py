@@ -100,12 +100,12 @@ class TrackNumberRepairJob(RepairJob):
         # Native Library-v2 coverage: folders of active V2 files that live
         # outside the transfer walk (deduped against the walked folders).
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
             from core.library2.paths import resolve_lib2_path
 
             transfer_norm = os.path.normcase(os.path.normpath(transfer)) + os.sep
             walked = {os.path.normcase(os.path.normpath(f)) for f in album_folders}
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 raw = str(subject['path'])

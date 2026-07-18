@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -117,7 +118,8 @@ class TracklistTrack:
     track_number: Optional[int]
     disc_number: int
     duration_ms: Optional[int]
-    spotify_id: Optional[str]
+    provider: str
+    provider_id: Optional[str]
 
     @classmethod
     def from_item(cls, item: Mapping[str, Any], *, provider: str) -> Optional["TracklistTrack"]:
@@ -131,13 +133,14 @@ class TracklistTrack:
         if duration is None and provider == "deezer":
             seconds = _optional_nonnegative_int(item.get("duration"))
             duration = seconds * 1000 if seconds is not None else None
+        provider_id = _optional_text(item.get("id"))
         return cls(
             title=title,
             track_number=number,
             disc_number=disc,
             duration_ms=duration,
-            spotify_id=(str(item.get("id"))
-                        if provider == "spotify" and item.get("id") else None),
+            provider=provider,
+            provider_id=provider_id,
         )
 
     def to_payload(self) -> Dict[str, Any]:
@@ -148,8 +151,16 @@ class TracklistTrack:
         }
         if self.duration_ms is not None:
             payload["duration_ms"] = self.duration_ms
-        if self.spotify_id:
-            payload["spotify_id"] = self.spotify_id
+        if self.provider_id:
+            # The provider namespace travels with the value.  Compatibility
+            # consumers may still read ``spotify_id``, while every provider —
+            # including Deezer/iTunes/long-tail adapters — is retained in the
+            # canonical mapping.
+            payload["external_ids"] = {self.provider: self.provider_id}
+            if self.provider == "spotify":
+                payload["spotify_id"] = self.provider_id
+            elif self.provider == "musicbrainz":
+                payload["musicbrainz_id"] = self.provider_id
         return payload
 
 
@@ -182,6 +193,16 @@ class ArtworkProviderResult:
     parser_version: str = ARTWORK_PARSER_VERSION
 
 
+@dataclass(frozen=True)
+class TrackMetadataProviderResult:
+    """Provider-qualified facts used by conservative file maintenance."""
+
+    provider: str
+    provider_entity_id: str
+    duration_ms: Optional[int]
+    image_url: Optional[str]
+
+
 def _normalized_source_ids(
     source_ids: Optional[Mapping[str, str]],
 ) -> Dict[str, str]:
@@ -192,18 +213,61 @@ def _normalized_source_ids(
     }
 
 
+def _configured_source_order() -> Tuple[str, ...]:
+    """Return the user's usable metadata priority, with a safe static fallback."""
+
+    from core.metadata.registry import (
+        METADATA_SOURCE_PRIORITY,
+        get_primary_source,
+        get_source_priority,
+    )
+
+    try:
+        return tuple(get_source_priority(get_primary_source()))
+    except Exception:  # noqa: BLE001 - metadata config is optional in tests/CLI
+        return tuple(METADATA_SOURCE_PRIORITY)
+
+
+def _provider_query_order(
+    source_order: Tuple[str, ...], source_ids: Mapping[str, str],
+) -> list[str]:
+    """Translate resolver aliases to provider namespaces without losing order."""
+    ordered: list[str] = []
+    for raw_source in source_order:
+        source = str(raw_source or "").strip().lower()
+        # Cover Art Archive is addressed by a MusicBrainz release ID.  The UI
+        # calls the artwork source ``caa`` while the stored identity remains
+        # correctly namespaced as ``musicbrainz``.
+        provider = "musicbrainz" if source == "caa" else source
+        if provider and provider not in ordered:
+            ordered.append(provider)
+    ordered.extend(sorted(set(source_ids) - set(ordered)))
+    return ordered
+
+
 def _track_items(payload: Any) -> list[Mapping[str, Any]]:
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, Mapping)]
-    if not isinstance(payload, Mapping):
+        items = payload
+    elif not isinstance(payload, Mapping):
         return []
-    for key in ("items", "tracks", "data"):
-        value = payload.get(key)
-        if isinstance(value, Mapping):
-            value = value.get("items") or value.get("data")
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, Mapping)]
-    return []
+    else:
+        items = []
+        for key in ("items", "tracks", "data"):
+            value = payload.get(key)
+            if isinstance(value, Mapping):
+                value = value.get("items") or value.get("data")
+            if isinstance(value, list):
+                items = value
+                break
+    normalized = []
+    for item in items:
+        if isinstance(item, Mapping):
+            normalized.append(item)
+        elif is_dataclass(item):
+            normalized.append(asdict(item))
+        elif hasattr(item, "__dict__"):
+            normalized.append(vars(item))
+    return normalized
 
 
 def _normalize_tracklist(payload: Any, provider: str) -> Tuple[TracklistTrack, ...]:
@@ -213,6 +277,89 @@ def _normalize_tracklist(payload: Any, provider: str) -> Tuple[TracklistTrack, .
         if track is not None:
             tracks.append(track)
     return tuple(tracks)
+
+
+def _track_art_url(details: Mapping[str, Any]) -> Optional[str]:
+    raw = details.get("raw_data") or details.get("_raw_data") or details
+    if not isinstance(raw, Mapping):
+        return None
+    album = raw.get("album")
+    if isinstance(album, Mapping):
+        images = album.get("images")
+        if isinstance(images, list):
+            for image in images:
+                if isinstance(image, Mapping) and _optional_text(image.get("url")):
+                    return _optional_text(image.get("url"))
+        for key in ("cover_xl", "cover_big", "cover_medium", "image_url"):
+            if _optional_text(album.get(key)):
+                return _optional_text(album.get(key))
+    for key in (
+        "artworkUrl100", "artworkUrl60", "artworkUrl30", "cover_xl",
+        "cover_big", "image_url", "artwork_url",
+    ):
+        art = _optional_text(raw.get(key))
+        if art:
+            for small in ("100x100bb", "60x60bb", "30x30bb"):
+                art = art.replace(small, "600x600bb")
+            return art
+    return None
+
+
+def fetch_track_metadata(
+    source_track_ids: Mapping[str, str],
+    *,
+    source_order: Optional[Tuple[str, ...]] = None,
+    clients: Optional[Mapping[str, Any]] = None,
+) -> Optional[TrackMetadataProviderResult]:
+    """Fetch duration/artwork using every explicitly matched provider in order.
+
+    The returned provider is the one that actually answered. A failed Spotify
+    attempt followed by a Deezer/iTunes answer therefore never records or
+    reports the fallback value as Spotify metadata.
+    """
+
+    from core.metadata.registry import get_client_for_source
+
+    source_ids = _normalized_source_ids(source_track_ids)
+    order = list(source_order or _configured_source_order())
+    order.extend(sorted(set(source_ids) - set(order)))
+    for provider in order:
+        provider_id = source_ids.get(provider)
+        if not provider_id:
+            continue
+        try:
+            # Repair jobs already carry initialized Spotify/iTunes clients in
+            # their context. Prefer those exact provider clients when supplied;
+            # every other provider still comes from the shared registry.
+            client = (clients or {}).get(provider)
+            if client is None:
+                client = get_client_for_source(provider)
+            getter = getattr(client, "get_track_details", None) if client else None
+            if not callable(getter):
+                continue
+            try:
+                details = getter(provider_id, allow_fallback=False)
+            except TypeError:
+                details = getter(provider_id)
+            if not isinstance(details, Mapping):
+                continue
+            duration = _optional_nonnegative_int(
+                details.get("duration_ms") or details.get("trackTimeMillis")
+            )
+            if duration is None and provider == "deezer":
+                seconds = _optional_nonnegative_int(details.get("duration"))
+                duration = seconds * 1000 if seconds is not None else None
+            if duration is None:
+                continue
+            return TrackMetadataProviderResult(
+                provider=provider,
+                provider_entity_id=provider_id,
+                duration_ms=duration,
+                image_url=_track_art_url(details),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("%s track lookup failed (%s): %s", provider, provider_id, exc)
+    return None
 
 
 def _release_year(value: Any) -> Optional[int]:
@@ -291,21 +438,41 @@ def fetch_album_tracklist(
     release_date: Optional[str] = None,
     expected_track_count: Optional[int] = None,
 ) -> Optional[TracklistProviderResult]:
-    """Resolve a canonical tracklist through typed Spotify/Deezer adapters."""
-    from core.metadata.registry import get_deezer_client, get_spotify_client
+    """Resolve a canonical tracklist from every explicitly matched provider.
+
+    Direct IDs are authoritative and tried in metadata priority order.  The
+    returned track IDs keep the provider that actually supplied the list; no
+    numeric/string ID is ever re-labelled as Spotify.  A conservative Deezer
+    name search remains the last fallback for older rows without release IDs.
+    """
+    from core.metadata.registry import (
+        get_client_for_source,
+        get_deezer_client,
+    )
 
     source_ids = _normalized_source_ids(source_album_ids)
-    spotify_id = source_ids.get("spotify")
-    if spotify_id:
+    order = list(_configured_source_order())
+    order.extend(sorted(set(source_ids) - set(order)))
+    for provider in order:
+        provider_id = source_ids.get(provider)
+        if not provider_id or provider in {"upc", "barcode", "isrc"}:
+            continue
         try:
-            client = get_spotify_client()
-            if client:
-                tracks = _normalize_tracklist(
-                    client.get_album_tracks(spotify_id), "spotify")
-                if tracks:
-                    return TracklistProviderResult("spotify", spotify_id, tracks)
+            client = get_client_for_source(provider)
+            getter = getattr(client, "get_album_tracks", None) if client else None
+            if not callable(getter):
+                continue
+            try:
+                payload = getter(provider_id, allow_fallback=False)
+            except TypeError:
+                payload = getter(provider_id)
+            tracks = _normalize_tracklist(payload, provider)
+            if tracks:
+                return TracklistProviderResult(provider, provider_id, tracks)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("spotify tracklist lookup failed (%s): %s", spotify_id, exc)
+            logger.debug(
+                "%s tracklist lookup failed (%s): %s", provider, provider_id, exc,
+            )
 
     if artist_name and album_title:
         try:
@@ -421,7 +588,7 @@ def fetch_artwork_url(
 
     if kind == "artist":
         from core.metadata.artist_image import get_artist_image_url
-        preferred = ["spotify", "musicbrainz"]
+        preferred = list(source_order or _configured_source_order())
         preferred.extend(sorted(set(normalized_ids) - set(preferred)))
         for source in preferred:
             provider_id = normalized_ids.get(source)
@@ -445,6 +612,69 @@ def fetch_artwork_url(
     album_title = str(album_title or "").strip()
     if not artist_name or not album_title:
         return None
+    # Prefer exact release IDs before any title search.  This is both faster
+    # and prevents a Deezer/iTunes/Discogs ID from being silently ignored while
+    # a different provider's fuzzy top result wins.
+    from core.metadata.registry import get_client_for_source
+
+    direct_order = _provider_query_order(
+        tuple(source_order or _configured_source_order()), normalized_ids,
+    )
+    for source in direct_order:
+        provider_id = normalized_ids.get(source)
+        if not provider_id or source in {"upc", "barcode", "isrc"}:
+            continue
+        if source == "musicbrainz":
+            return ArtworkProviderResult(
+                kind="album",
+                source="caa",
+                provider_entity_id=provider_id,
+                url=f"https://coverartarchive.org/release/{provider_id}/front-1200",
+            )
+        try:
+            client = get_client_for_source(source)
+            getter = getattr(client, "get_album", None) if client else None
+            if not callable(getter) and client:
+                # Deezer names its exact album endpoint ``get_album_metadata``;
+                # treating only ``get_album`` as valid would silently discard
+                # a confirmed Deezer release identity and fall back to search.
+                getter = getattr(client, "get_album_metadata", None)
+            if not callable(getter):
+                continue
+            try:
+                payload = getter(provider_id, include_tracks=False)
+            except TypeError:
+                try:
+                    payload = getter(provider_id, allow_fallback=False)
+                except TypeError:
+                    payload = getter(provider_id)
+            if not isinstance(payload, Mapping):
+                continue
+            images = payload.get("images")
+            url = None
+            if isinstance(images, list):
+                for item in images:
+                    if isinstance(item, Mapping) and _optional_text(item.get("url")):
+                        url = _optional_text(item.get("url"))
+                        break
+            if not url:
+                for key in (
+                    "image_url", "cover_xl", "cover_big", "artworkUrl100", "image",
+                ):
+                    url = _optional_text(payload.get(key))
+                    if url:
+                        break
+            if url:
+                for small in ("100x100bb", "60x60bb", "30x30bb"):
+                    url = url.replace(small, "1200x1200bb")
+                return ArtworkProviderResult(
+                    kind="album",
+                    source=source,
+                    provider_entity_id=provider_id,
+                    url=url,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("%s direct artwork lookup failed: %s", source, exc)
     from core.metadata.art_lookup import (
         available_art_sources,
         select_preferred_art,
@@ -482,7 +712,9 @@ __all__ = [
     "DiscographyRelease",
     "TracklistProviderResult",
     "TracklistTrack",
+    "TrackMetadataProviderResult",
     "fetch_album_tracklist",
     "fetch_artwork_url",
     "fetch_artist_discography",
+    "fetch_track_metadata",
 ]

@@ -185,7 +185,7 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
 
 
 def _find_or_create_album(conn, artist_id: int, title: str, *,
-                          album_type: str, spotify_album_id: Optional[str],
+                          album_type: str, spotify_album_id: Optional[str] = None,
                           source: Optional[str] = None) -> int:
     provider_id = str(spotify_album_id).strip() if spotify_album_id else None
     namespace = _provider_namespace(provider_id, source)
@@ -240,16 +240,26 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
 
 def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                           track_number: Optional[int],
-                          spotify_track_id: Optional[str],
-                          disc_number: Optional[int] = None) -> int:
+                          spotify_track_id: Optional[str] = None,
+                          disc_number: Optional[int] = None,
+                          source: Optional[str] = None) -> int:
+    provider_id = str(spotify_track_id).strip() if spotify_track_id else None
+    namespace = _provider_namespace(provider_id, source)
     key = dedup_title_key(title)
     rows = conn.execute(
-        "SELECT id, title, track_number, disc_number, spotify_id "
+        "SELECT id, title, track_number, disc_number, spotify_id, external_ids "
         "FROM lib2_tracks WHERE album_id=?",
         (album_id,),
     ).fetchall()
     for row in rows:
-        if spotify_track_id and row["spotify_id"] == spotify_track_id:
+        if not provider_id:
+            continue
+        if namespace == "spotify" and row["spotify_id"] == provider_id:
+            return row["id"]
+        ids = _row_external_ids(row["external_ids"])
+        if namespace is not None and ids.get(namespace) == provider_id:
+            return row["id"]
+        if namespace is None and provider_id in ids.values():
             return row["id"]
     for row in rows:
         # dedup_title_key (§39) drops feat.-annotations so a finished
@@ -258,6 +268,15 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
         # this (the most common real-world case) and creates a duplicate
         # track row whose wanted-row keeps re-downloading forever (G4).
         if dedup_title_key(row["title"]) == key:
+            if namespace == "spotify" and provider_id and not row["spotify_id"]:
+                conn.execute(
+                    "UPDATE lib2_tracks SET spotify_id=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=?", (provider_id, row["id"]),
+                )
+            elif namespace not in (None, "spotify") and provider_id:
+                _adopt_external_id(
+                    conn, "lib2_tracks", row["id"], namespace, provider_id,
+                )
             return row["id"]
     if track_number is not None:
         wanted_disc = disc_number if disc_number is not None else 1
@@ -273,9 +292,17 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                   or default_quality_profile_id(conn))
     cur = conn.execute(
         """INSERT INTO lib2_tracks(album_id, title, track_number, spotify_id,
-               quality_profile_id)
-           VALUES(?,?,?,?,?)""",
-        (album_id, title, track_number, spotify_track_id, profile_id),
+               external_ids, quality_profile_id)
+           VALUES(?,?,?,?,?,?)""",
+        (
+            album_id,
+            title,
+            track_number,
+            provider_id if namespace == "spotify" else None,
+            json.dumps({namespace: provider_id})
+            if namespace not in (None, "spotify") else "{}",
+            profile_id,
+        ),
     )
     track_id = cur.lastrowid
     conn.execute(
@@ -359,8 +386,10 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         album_name = _get(ti, "album") or title
 
         embedded = context.get("_embedded_id_tags") or {}
-        spotify_track_id = str(embedded.get("SPOTIFY_TRACK_ID") or "") or (
-            str(ti.get("id")) if ti.get("provider") == "spotify" and ti.get("id") else None)
+        embedded_spotify_id = str(embedded.get("SPOTIFY_TRACK_ID") or "") or None
+        spotify_track_id = embedded_spotify_id or (
+            str(ti.get("id")) if ti.get("id") else None
+        )
         album_raw = ti.get("album") if isinstance(ti.get("album"), dict) else {}
         spotify_album_id = str(album_raw.get("id") or "") or None
         total_tracks = album_raw.get("total_tracks")
@@ -383,6 +412,8 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         conn = db._get_connection()
         try:
             track_id = album_id = None
+            ti_provider = str(ti.get("provider") or "").strip().lower() or None
+            track_identity_source = "spotify" if embedded_spotify_id else ti_provider
             if direct_track_id:
                 row = conn.execute(
                     "SELECT id, album_id FROM lib2_tracks WHERE id=?",
@@ -398,12 +429,11 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                     track_id = _find_or_create_track(
                         conn, album_id, row["primary_artist_id"], title,
                         track_number=track_number, spotify_track_id=spotify_track_id,
-                        disc_number=disc_number)
+                        disc_number=disc_number, source=track_identity_source)
             if track_id is None:
                 # Entity gone or absent — heuristic name matching as before.
                 if not title or not artist_name:
                     return None
-                ti_provider = str(ti.get("provider") or "").strip().lower() or None
                 artist_id = _find_or_create_artist(
                     conn, artist_name, spotify_id=_primary_artist_provider_id(ti),
                     source=ti_provider)
@@ -416,7 +446,7 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
                     track_number=track_number, spotify_track_id=spotify_track_id,
-                    disc_number=disc_number)
+                    disc_number=disc_number, source=track_identity_source)
 
             fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
             bitrate = sample_rate = bit_depth = None

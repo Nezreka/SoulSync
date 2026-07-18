@@ -166,33 +166,11 @@ class AudioCorruptionDetectorJob(RepairJob):
         cutoff_mtime = (time.time() - within_days * 86400) if within_days > 0 else None
 
         rows = []
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, al.title AS album_title,
-                       t.file_path
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-            """)
-            rows = [dict(r) for r in cursor.fetchall()]
-        except Exception as e:
-            logger.error("[Corrupt File Detector] error reading tracks: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
-
-        # Native Library-v2 coverage: active files without a legacy backref.
         native_subjects = {}
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 file_path = str(subject["path"])
@@ -293,9 +271,9 @@ class AudioCorruptionDetectorJob(RepairJob):
                         'original_path': row['file_path'],
                     }
                     if subject:
-                        from core.library2.maintenance_sync import v2_subject_details
+                        from core.library2.maintenance_subjects import subject_details
 
-                        finding_details.update(v2_subject_details(subject))
+                        finding_details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='corrupt_audio',
@@ -343,18 +321,13 @@ class AudioCorruptionDetectorJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND lower(file_path) LIKE '%.flac'
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            return sum(
+                1 for subject in active_file_subjects(
+                    context.db, context.config_manager,
+                ) if str(subject.get("path") or "").lower().endswith(".flac")
+            )
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()

@@ -20,12 +20,12 @@ from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
-logger = get_logger("repair.lib2_upgrade_scan")
+logger = get_logger("repair.quality_upgrade_scan")
 
 
 @register_job
 class Lib2UpgradeScanJob(RepairJob):
-    job_id = "lib2_upgrade_scan"
+    job_id = "quality_upgrade_scan"
     display_name = "Quality Upgrade Scan (monitored)"
     description = "Find monitored tracks below their quality profile's cutoff — queue automatically or review first."
     help_text = (

@@ -43,10 +43,13 @@ def materialize_track_intent(
     artist_name: str,
     track_title: str,
     artist_spotify_id: Optional[str] = None,
+    artist_provider_id: Optional[str] = None,
     album_title: Optional[str] = None,
     album_spotify_id: Optional[str] = None,
+    album_provider_id: Optional[str] = None,
     album_type: str = "album",
     track_spotify_id: Optional[str] = None,
+    track_provider_id: Optional[str] = None,
     track_number: Optional[int] = None,
     disc_number: Optional[int] = None,
     explicit_profile_id: Optional[int] = None,
@@ -67,20 +70,23 @@ def materialize_track_intent(
     if not artist_name or not track_title:
         raise ValueError("materialize_track_intent requires artist_name and track_title")
 
-    artist_id = find_or_create_artist(conn, artist_name, spotify_id=artist_spotify_id,
+    artist_identity = artist_provider_id or artist_spotify_id
+    album_identity = album_provider_id or album_spotify_id
+    track_identity = track_provider_id or track_spotify_id
+    artist_id = find_or_create_artist(conn, artist_name, spotify_id=artist_identity,
                                       source=source)
     if artist_id is None:
         raise ValueError(f"could not resolve or create artist {artist_name!r}")
 
     album_id = find_or_create_album(
         conn, artist_id, album_title or track_title,
-        album_type=album_type, spotify_album_id=album_spotify_id,
+        album_type=album_type, spotify_album_id=album_identity,
         source=source)
 
     track_id = find_or_create_track(
         conn, album_id, artist_id, track_title,
-        track_number=track_number, spotify_track_id=track_spotify_id,
-        disc_number=disc_number)
+        track_number=track_number, spotify_track_id=track_identity,
+        disc_number=disc_number, source=source)
 
     if explicit_profile_id is not None:
         assign_quality_profile(conn, "tracks", track_id, int(explicit_profile_id))
@@ -144,19 +150,15 @@ def materialize_from_spotify_track(
     ).strip().lower() or None
     track_id_raw = (str(spotify_track_data["id"])
                     if spotify_track_data.get("id") else None)
-    from core.library2.importer import looks_like_foreign_provider_id
-    if source not in (None, "spotify") or looks_like_foreign_provider_id(track_id_raw):
-        track_id_raw = None   # lib2_tracks.spotify_id must stay Spotify-only
-
     return materialize_track_intent(
         conn,
         artist_name=str(artist_name),
-        artist_spotify_id=(str(artist["id"]) if artist.get("id") else None),
+        artist_provider_id=(str(artist["id"]) if artist.get("id") else None),
         album_title=str(album_title),
-        album_spotify_id=(str(album["id"]) if album.get("id") else None),
+        album_provider_id=(str(album["id"]) if album.get("id") else None),
         album_type=album_type,
         track_title=str(track_title),
-        track_spotify_id=track_id_raw,
+        track_provider_id=track_id_raw,
         track_number=_int_or_none(spotify_track_data.get("track_number")),
         disc_number=_int_or_none(spotify_track_data.get("disc_number")),
         source=source,

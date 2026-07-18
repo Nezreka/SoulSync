@@ -6,10 +6,8 @@ tracks are no longer speculative: Artist, Release and Track must exist before
 search, quality checks or quarantine can fail. This adapter keeps that boundary
 small and reuses :func:`core.library2.materialize.materialize_track_intent`.
 
-Provider ids are deliberately written to the legacy scalar Spotify slots only
-when the payload explicitly identifies Spotify as its metadata source. Other
-providers still materialize by their exact display metadata; their namespaced
-identity is handled by the provider-aware identity work, not guessed here.
+Provider IDs are persisted under the payload's explicit provider namespace for
+artist, release and track. Only Spotify IDs enter the dedicated scalar columns.
 """
 
 from __future__ import annotations
@@ -103,7 +101,6 @@ def _intent_fields(
         or album_context.get("source")
         or artist_context.get("source")
     ).lower()
-    spotify = source == "spotify"
     total_tracks = album.get("total_tracks") or album_context.get("total_tracks")
     album_type = _text(
         album.get("album_type") or album_context.get("album_type")
@@ -114,15 +111,16 @@ def _intent_fields(
         "track_title": track_title,
         "album_title": album_title,
         "album_type": album_type,
-        "artist_spotify_id": _text(artist.get("id") or artist_context.get("id")) or None
-        if spotify
-        else None,
-        "album_spotify_id": _text(album.get("id") or album_context.get("id")) or None
-        if spotify
-        else None,
-        "track_spotify_id": _text(track.get("id")) or None if spotify else None,
+        "artist_provider_id": _text(
+            artist.get("id") or artist_context.get("id")
+        ) or None,
+        "album_provider_id": _text(
+            album.get("id") or album_context.get("id")
+        ) or None,
+        "track_provider_id": _text(track.get("id")) or None,
         "track_number": _int_or_none(track.get("track_number")),
         "disc_number": _int_or_none(track.get("disc_number")),
+        "source": source or None,
     }
 
 

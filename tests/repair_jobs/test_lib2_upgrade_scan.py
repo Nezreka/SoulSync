@@ -107,7 +107,7 @@ def test_periodic_job_queues_only_profiles_that_allow_upgrades(
 def _config(settings=None):
     values = {
         "features.library_v2": True,
-        "repair.jobs.lib2_upgrade_scan.settings": settings or {},
+        "repair.jobs.quality_upgrade_scan.settings": settings or {},
     }
     return SimpleNamespace(get=lambda key, default=None: values.get(key, default))
 

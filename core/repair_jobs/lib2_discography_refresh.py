@@ -26,12 +26,12 @@ from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
-logger = get_logger("repair.lib2_discography_refresh")
+logger = get_logger("repair.monitored_discography_refresh")
 
 
 @register_job
 class Lib2DiscographyRefreshJob(RepairJob):
-    job_id = "lib2_discography_refresh"
+    job_id = "monitored_discography_refresh"
     display_name = "Monitored Discography Refresh"
     description = "Re-fetch monitored artists' provider catalogs so new releases become wanted."
     help_text = (

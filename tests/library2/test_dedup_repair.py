@@ -247,9 +247,8 @@ def test_sanitize_moves_itunes_id_out_of_spotify_column(repair_db):
     assert ids["deezer"] == "196470602"
 
 
-def test_sanitize_resolves_namespace_via_legacy_table(repair_db):
-    """The 1169 shape: a bare Deezer id as spotify_id, nothing else — the
-    legacy albums table knows which column the value really lives in."""
+def test_sanitize_does_not_infer_namespace_via_legacy_table(repair_db):
+    """P3 never assigns a provider namespace from a legacy-table coincidence."""
     legacy_db, conn = repair_db
     conn.execute("ALTER TABLE albums ADD COLUMN deezer_id TEXT")
     conn.execute("UPDATE albums SET deezer_id='42388621' WHERE id=10")
@@ -264,7 +263,9 @@ def test_sanitize_resolves_namespace_via_legacy_table(repair_db):
         "SELECT spotify_id, external_ids FROM lib2_albums WHERE id=?",
         (album,)).fetchone()
     assert row["spotify_id"] is None
-    assert json.loads(row["external_ids"])["deezer"] == "42388621"
+    ids = json.loads(row["external_ids"])
+    assert "deezer" not in ids
+    assert ids["legacy_unknown"] == "42388621"
 
 
 def test_sanitize_uuid_shaped_spotify_id_is_musicbrainz(repair_db):

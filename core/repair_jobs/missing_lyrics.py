@@ -71,32 +71,11 @@ class MissingLyricsJob(RepairJob):
             return result
 
         rows = []
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path, t.duration
-                FROM tracks t
-                LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND t.title IS NOT NULL AND t.title != ''
-            """)
-            rows = cursor.fetchall()
-        except Exception as e:
-            logger.error("[Lyrics Filler] Error reading tracks: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
-
         native_subjects = {}
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 file_path = str(subject["path"])
@@ -194,13 +173,13 @@ class MissingLyricsJob(RepairJob):
                         'track_title': title,
                         'artist': artist_name,
                         'album_title': album_title,
-                        'file_path': resolved_path if subject else file_path,
+                        'file_path': resolved_path,
                         'duration': duration_s,
                     }
                     if subject:
-                        from core.library2.maintenance_sync import v2_subject_details
+                        from core.library2.maintenance_subjects import subject_details
 
-                        details.update(v2_subject_details(subject))
+                        details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lyrics',
@@ -229,23 +208,9 @@ class MissingLyricsJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-                  AND title IS NOT NULL AND title != ''
-            """)
-            row = cursor.fetchone()
-            count = row[0] if row else 0
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
-            return count + len(v2_uncovered_file_subjects(
-                context.db, context.config_manager,
-            ))
+            from core.library2.maintenance_subjects import count_active_files
+
+            return count_active_files(context.db, context.config_manager)
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()

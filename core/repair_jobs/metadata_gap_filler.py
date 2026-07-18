@@ -111,12 +111,12 @@ class MetadataGapFillerJob(RepairJob):
         # to one row per track (the enumerator yields one row per file).
         native_subjects = {}
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
 
             tracks = list(tracks)
             pad = [None] * len(column_index)
             scope_lower = scope_artist.lower() if scope_artist else None
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 entity = f"lib2:{subject['track_id']}"
@@ -230,9 +230,9 @@ class MetadataGapFillerJob(RepairJob):
                         }
                         subject = native_subjects.get(str(track_id))
                         if subject:
-                            from core.library2.maintenance_sync import v2_subject_details
+                            from core.library2.maintenance_subjects import subject_details
 
-                            finding_details.update(v2_subject_details(subject))
+                            finding_details.update(subject_details(subject))
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='metadata_gap',

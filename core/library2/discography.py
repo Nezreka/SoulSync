@@ -569,7 +569,7 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     For each album: materialize its provider tracklist into real track rows,
     flip them monitored, and mirror them into the Wishlist (carrying the
     per-item quality profile). Shared by the discography-refresh endpoint and
-    the periodic ``lib2_discography_refresh`` repair job so the
+    the periodic ``monitored_discography_refresh`` repair job so the
     monitor_new_items enforcement can't drift between the two.
 
     ``wishlist_profile_id`` is the legacy per-user wishlist scope (resolve it

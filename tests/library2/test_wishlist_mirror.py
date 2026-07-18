@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from core.library2.wishlist_mirror import (
     track_wishlist_payload,
     upgrade_candidate_track_ids,
@@ -117,3 +119,62 @@ def test_unknown_quality_queues_existing_file_for_shared_probe_pipeline(imported
     assert payload is not None
     assert payload["_should_queue"] is True
     assert payload["_source_info"]["quality_evaluation"] == "unknown"
+
+
+def test_payload_uses_namespaced_non_spotify_identity_end_to_end(imported_conn):
+    track_id = _seed(
+        imported_conn, policy="acceptable", with_file=False,
+    )
+    row = imported_conn.execute(
+        """SELECT t.album_id, al.primary_artist_id
+             FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id
+            WHERE t.id=?""",
+        (track_id,),
+    ).fetchone()
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET external_ids=? WHERE id=?",
+        (json.dumps({"deezer": "DZ-TRACK", "itunes": "IT-TRACK"}), track_id),
+    )
+    imported_conn.execute(
+        "UPDATE lib2_albums SET external_ids=? WHERE id=?",
+        (json.dumps({"deezer": "DZ-ALBUM"}), row["album_id"]),
+    )
+    imported_conn.execute(
+        "UPDATE lib2_artists SET external_ids=? WHERE id=?",
+        (json.dumps({"deezer": "DZ-ARTIST"}), row["primary_artist_id"]),
+    )
+
+    payload = track_wishlist_payload(imported_conn, track_id)
+
+    assert payload["provider"] == "deezer"
+    assert payload["source"] == "deezer"
+    assert payload["id"] == "DZ-TRACK"
+    assert payload["provider_ids"] == {
+        "deezer": "DZ-TRACK", "itunes": "IT-TRACK",
+    }
+    assert payload["album"]["id"] == "DZ-ALBUM"
+    assert payload["album"]["provider_ids"] == {"deezer": "DZ-ALBUM"}
+    assert payload["artists"][0]["provider_ids"] == {"deezer": "DZ-ARTIST"}
+
+
+def test_artist_mirror_uses_non_spotify_provider_identity(imported_conn):
+    from core.library2 import mirror_outbox
+
+    artist_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, external_ids) VALUES(?, ?)",
+        ("Deezer Native", json.dumps({"deezer": "DZ-ARTIST"})),
+    ).lastrowid
+
+    outbox_ids = mirror_outbox.enqueue_artist_watchlist(
+        imported_conn, artist_id, True,
+    )
+
+    assert len(outbox_ids) == 1
+    data = json.loads(imported_conn.execute(
+        "SELECT payload FROM lib2_mirror_outbox WHERE id=?", (outbox_ids[0],)
+    ).fetchone()["payload"])
+    assert data == {
+        "ext": "DZ-ARTIST",
+        "name": "Deezer Native",
+        "source": "deezer",
+    }

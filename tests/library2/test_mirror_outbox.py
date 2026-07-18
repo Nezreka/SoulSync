@@ -14,8 +14,6 @@ import pytest
 
 from core.library2 import mirror_outbox as MO
 from core.library2.schema import ensure_library_v2_schema
-from core.repair_jobs.base import JobContext
-from core.repair_jobs.lib2_mirror_reconcile import Lib2MirrorReconcileJob
 
 
 class FlakyDB:
@@ -235,63 +233,3 @@ def test_replay_is_idempotent_when_marking_crashes(db):
     result = MO.drain(flaky)
     assert result["done"] == 1
     assert len(flaky.adds) == 2  # replayed — the real DB upserts in place
-
-
-class _JobConfig:
-    def __init__(self, enabled=True, settings=None):
-        self.enabled = enabled
-        self.settings = settings or {}
-
-    def get(self, key, default=None):
-        if key == "features.library_v2":
-            return self.enabled
-        if key == "repair.jobs.lib2_mirror_reconcile.settings":
-            return self.settings
-        return default
-
-
-def _job_context(flaky, *, enabled=True, settings=None):
-    return JobContext(
-        db=flaky,
-        transfer_folder="",
-        config_manager=_JobConfig(enabled=enabled, settings=settings),
-    )
-
-
-def test_periodic_reconciler_drains_rows_left_pending_after_commit(db):
-    flaky, conn = db
-    MO.enqueue_tracks(conn, [flaky.ids["track"]], True)
-    conn.commit()  # Simulates the process stopping before request-level drain.
-    job = Lib2MirrorReconcileJob()
-
-    assert job.estimate_scope(_job_context(flaky)) == 1
-    result = job.scan(_job_context(flaky))
-
-    assert (result.scanned, result.auto_fixed, result.errors) == (1, 1, 0)
-    assert _outbox_rows(conn)[0]["status"] == "done"
-    assert flaky.adds
-
-
-def test_periodic_reconciler_attempts_failed_row_only_once_per_run(db):
-    flaky, conn = db
-    MO.enqueue_tracks(conn, [flaky.ids["track"]], True)
-    conn.commit()
-    flaky.fail_adds = True
-
-    result = Lib2MirrorReconcileJob().scan(_job_context(flaky))
-
-    row = _outbox_rows(conn)[0]
-    assert (result.scanned, result.auto_fixed, result.errors) == (1, 0, 1)
-    assert row["status"] == "pending"
-    assert row["attempts"] == 1
-
-
-def test_periodic_reconciler_is_noop_when_library_v2_is_disabled(db):
-    flaky, conn = db
-    MO.enqueue_tracks(conn, [flaky.ids["track"]], True)
-    conn.commit()
-
-    result = Lib2MirrorReconcileJob().scan(_job_context(flaky, enabled=False))
-
-    assert result.scanned == 0
-    assert _outbox_rows(conn)[0]["status"] == "pending"

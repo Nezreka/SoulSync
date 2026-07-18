@@ -186,7 +186,7 @@ class TestQualityScanner:
         triggered = []
         deps = _build_deps(run_repair_job_now=lambda job_id: triggered.append(job_id) or True)
         result = auto_start_quality_scan({}, deps)
-        assert triggered == ['lib2_upgrade_scan']
+        assert triggered == ['quality_upgrade_scan']
         assert result['status'] == 'completed'
         assert result['triggered'] is True
 

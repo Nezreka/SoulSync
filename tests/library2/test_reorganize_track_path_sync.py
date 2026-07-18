@@ -1,15 +1,8 @@
-"""A reorganize (or any legacy path move) must keep ``lib2_track_files.path``
-in sync with the legacy ``tracks.file_path`` it mirrors.
+"""P3 keeps legacy and native path mutations behind separate authorities.
 
-Root cause this pins down: ``core/reorganize_runner.py::_update_track_path``
-only ever wrote the legacy ``tracks`` row. Every lib2 track keeps a
-``legacy_track_id`` back-reference (populated by the importer) so lib2 can
-serve/scan the file — but nothing updated the lib2 side when the file moved on
-disk, silently desyncing ``lib2_track_files.path`` from reality for any
-already-imported album that gets reorganized (via the legacy UI, the
-``library_reorganize`` repair job, or docs §50's new lib2 endpoints — all three
-funnel through this same runner). A stale path means lib2 stops finding the
-file (scan/serve/artwork-embed all resolve from ``lib2_track_files.path``).
+The retired legacy reorganizer may remain importable during the rollback
+window, but it must not project a bare legacy track id into Library v2. Native
+reorganization updates ``lib2_track_files`` through the Library-v2 path flow.
 """
 
 import sys
@@ -71,10 +64,9 @@ def imported_legacy_db(legacy_db):
     return legacy_db
 
 
-def test_update_track_path_syncs_lib2_track_file(monkeypatch, tmp_path, imported_legacy_db):
-    """After a reorganize move updates the legacy track's file_path, the
-    linked lib2_track_files row (found via legacy_track_id) must reflect the
-    new path too — not just the legacy tracks table."""
+def test_legacy_path_update_does_not_project_into_lib2(
+    monkeypatch, tmp_path, imported_legacy_db
+):
     captured = {}
 
     def fake_reorganize_album(*, update_track_path_fn, **kwargs):
@@ -112,7 +104,7 @@ def test_update_track_path_syncs_lib2_track_file(monkeypatch, tmp_path, imported
             "SELECT path FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
         assert lib2_row is not None, "importer should have linked track 100 via legacy_track_id"
-        assert lib2_row['path'] == '/library/Drake/Views/01 One Dance.flac'
+        assert lib2_row['path'] == '/m/01.flac'
     finally:
         conn.close()
 

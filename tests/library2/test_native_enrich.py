@@ -1,11 +1,4 @@
-"""Resolve + enrich Library-v2 native artists (no legacy back-reference).
-
-Artists born inside lib2 (featured credits, wishlist, discography) have
-``legacy_artist_id`` NULL, so the legacy-row-based enrichment pipeline can
-never reach them: Enrich rejects them and manual match records an id but pulls
-no artwork. ``core.library2.native_enrich`` resolves the provider identity by
-name and writes id + artwork/genres straight onto the lib2 row.
-"""
+"""Resolve and enrich Library-v2 entities through provider-qualified IDs."""
 
 from __future__ import annotations
 
@@ -105,16 +98,21 @@ def test_resolve_no_match_returns_attempted_and_leaves_row_untouched(imported_co
     assert row["image_url"] is None
 
 
-def test_legacy_backed_artist_is_rejected(imported_conn):
+def test_legacy_backed_artist_is_enriched_natively_in_p3(imported_conn):
     drake = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Drake'"
     ).fetchone()["id"]
 
-    with pytest.raises(ValueError):
-        NE.resolve_and_enrich_native_artist(
-            imported_conn, drake,
-            resolver=lambda n: {"source": "spotify", "artist_id": "x"},
-        )
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, drake,
+        resolver=lambda n: {"source": "deezer", "artist_id": "dz-drake"},
+    )
+
+    assert result["success"] is True
+    row = imported_conn.execute(
+        "SELECT external_ids FROM lib2_artists WHERE id=?", (drake,)
+    ).fetchone()
+    assert json.loads(row["external_ids"])["deezer"] == "dz-drake"
 
 
 def test_enrich_native_artwork_writes_image_from_stored_ids(imported_conn):
@@ -149,6 +147,96 @@ def test_enrich_native_artwork_noop_when_no_provider_ids(imported_conn):
 
     assert ok is False
     assert called == []
+
+
+def test_service_enrichment_persists_actual_fallback_provider(imported_conn):
+    """A Spotify request returning Deezer data must not create a Spotify ID."""
+    aid = _insert_native_artist(imported_conn, "Fallback Artist")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET external_ids=? WHERE id=?",
+        (json.dumps({"itunes": "IT-OLD"}), aid),
+    )
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "artist",
+        aid,
+        "spotify",
+        searcher=lambda service, entity, query: [{
+            "id": "DZ-ARTIST",
+            "name": "Fallback Artist",
+            "provider": "deezer",
+            "image": "https://img.example/deezer.jpg",
+        }],
+    )
+
+    assert result["requested_source"] == "spotify"
+    assert result["source"] == "deezer"
+    row = imported_conn.execute(
+        "SELECT spotify_id, external_ids, image_url FROM lib2_artists WHERE id=?",
+        (aid,),
+    ).fetchone()
+    assert row["spotify_id"] is None
+    assert json.loads(row["external_ids"]) == {
+        "deezer": "DZ-ARTIST",
+        "itunes": "IT-OLD",
+    }
+    assert row["image_url"] == "https://img.example/deezer.jpg"
+
+
+def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
+    imported_conn, monkeypatch
+):
+    artist_id = _insert_native_artist(imported_conn, "Track Artist")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Record')",
+        (artist_id,),
+    ).lastrowid)
+    track_id = int(imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Exact Song')",
+        (album_id,),
+    ).lastrowid)
+    captured = {}
+
+    from core.library2 import provider_adapters
+
+    def fake_track_metadata(source_ids, *, source_order=None):
+        captured["ids"] = dict(source_ids)
+        captured["order"] = tuple(source_order or ())
+        return provider_adapters.TrackMetadataProviderResult(
+            provider="itunes",
+            provider_entity_id="IT-TRACK",
+            duration_ms=234000,
+            image_url="https://img.example/album.jpg",
+        )
+
+    monkeypatch.setattr(
+        provider_adapters, "fetch_track_metadata", fake_track_metadata
+    )
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "track",
+        track_id,
+        "spotify",
+        searcher=lambda service, entity, query: [{
+            "id": "IT-TRACK",
+            "name": "Exact Song",
+            "provider": "itunes",
+        }],
+    )
+
+    assert result["source"] == "itunes"
+    assert captured == {"ids": {"itunes": "IT-TRACK"}, "order": ("itunes",)}
+    row = imported_conn.execute(
+        "SELECT spotify_id, external_ids, duration FROM lib2_tracks WHERE id=?",
+        (track_id,),
+    ).fetchone()
+    assert row["spotify_id"] is None
+    assert json.loads(row["external_ids"])["itunes"] == "IT-TRACK"
+    assert row["duration"] == 234000
+    assert imported_conn.execute(
+        "SELECT image_url FROM lib2_albums WHERE id=?", (album_id,)
+    ).fetchone()["image_url"] == "https://img.example/album.jpg"
 
 
 def _artist_id_by_name(conn, name):
@@ -379,5 +467,3 @@ def test_lastfm_only_artist_is_considered_pending(imported_conn):
     pending = NE._pending_unmapped_artists(imported_conn, limit=None)
     pending_ids = [p["id"] for p in pending]
     assert aid not in pending_ids
-
-

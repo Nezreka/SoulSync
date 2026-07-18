@@ -1,6 +1,6 @@
 """Automation handler: ``start_quality_scan`` action.
 
-The quality scanner is now the native Library-v2 ``lib2_upgrade_scan``
+The quality scanner is now the native ``quality_upgrade_scan``
 repair job (evaluates monitored tracks against their quality profile; the
 job's own ``mode`` setting decides automatic queueing vs review findings).
 This action simply triggers a "Run Now" of that job; its progress and any
@@ -18,7 +18,7 @@ from core.automation.deps import AutomationDeps
 def auto_start_quality_scan(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     automation_id = config.get('_automation_id')
 
-    triggered = deps.run_repair_job_now('lib2_upgrade_scan')
+    triggered = deps.run_repair_job_now('quality_upgrade_scan')
     if not triggered:
         deps.update_progress(
             automation_id, status='error', phase='Unavailable',

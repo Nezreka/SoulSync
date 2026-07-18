@@ -236,6 +236,15 @@ class RepairWorker:
         # Load master enabled state
         if config_manager:
             self.enabled = config_manager.get('repair.master_enabled', True)
+            # P3 renamed the remaining implementation-prefixed job ids. Copy
+            # old user settings once when the neutral key has not been saved;
+            # keep the source key untouched for rollback/export compatibility.
+            from core.repair_jobs import JOB_ID_MIGRATIONS
+            for old_id, new_id in JOB_ID_MIGRATIONS.items():
+                old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+                new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
+                if new_cfg is None and isinstance(old_cfg, dict):
+                    config_manager.set(f'repair.jobs.{new_id}', old_cfg)
 
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
@@ -412,7 +421,6 @@ class RepairWorker:
                 'description': job.description,
                 'help_text': job.help_text,
                 'icon': job.icon,
-                'data_basis': job.data_basis,
                 'library_v2_effects': sorted(job.library_v2_effects),
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
@@ -893,10 +901,13 @@ class RepairWorker:
         that declare ``supports_artist_scope``; others ignore it and run
         library-wide as always.
         """
+        from core.repair_jobs import JOB_ID_MIGRATIONS
+
+        job_id = JOB_ID_MIGRATIONS.get(job_id, job_id)
         self._ensure_jobs_loaded()
         if job_id not in self._jobs:
             logger.warning("Unknown job: %s", job_id)
-            return
+            return False
 
         with self._force_run_lock:
             if scope:
@@ -905,6 +916,7 @@ class RepairWorker:
                 self._force_run_queue.append(job_id)
                 logger.info("Job %s queued for immediate run%s", job_id,
                             f" (scope: {scope})" if scope else "")
+        return True
 
     def _update_progress(self, scanned: int, total: int):
         """Callback for jobs to report progress."""
@@ -1258,6 +1270,22 @@ class RepairWorker:
             return {'success': False, 'error': 'No track ID associated with this finding'}
 
         fix_action = details.get('_fix_action', 'redownload')
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            row = self._load_lib2_redownload_row(native_track_id)
+            if not row:
+                return {'success': False, 'error': 'Track not found in Library v2'}
+            title = row.get('title') or details.get('title') or 'Unknown'
+            return {
+                'success': True,
+                'action': 'removed' if fix_action == 'remove' else 'redownload',
+                'message': (
+                    f'Removed missing file reference for "{title}"'
+                    if fix_action == 'remove'
+                    else f'Queued "{title}" for re-download'
+                ),
+                'library_v2_file_deleted': True,
+            }
 
         # Simple removal — just delete the dead track record
         if fix_action == 'remove':
@@ -1415,6 +1443,25 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def _remove_native_repair_file(self, file_path: str, details: dict) -> dict:
+        """Physically remove one reviewed native file; DB lifecycle follows
+        through ``sync_repair_change`` after this handler succeeds."""
+        target = file_path or details.get('original_path') or details.get('file_path')
+        if not target:
+            return {'success': True, 'deleted_file': False}
+        from core.library2.paths import resolve_lib2_path
+
+        resolved = target if os.path.isfile(target) else resolve_lib2_path(
+            target, config_manager=self._config_manager,
+        )
+        if not resolved or not os.path.exists(resolved):
+            return {'success': True, 'deleted_file': False}
+        try:
+            os.remove(resolved)
+            return {'success': True, 'deleted_file': True, 'resolved_path': resolved}
+        except OSError as exc:
+            return {'success': False, 'error': f'Could not delete file: {exc}'}
+
     def _fix_short_preview_track(self, entity_type, entity_id, file_path, details):
         """Approve a preview-clip finding: delete the ~30s preview file, drop its DB row, and
         re-add the track to the wishlist (full payload) so the real version downloads. Mirrors
@@ -1423,6 +1470,24 @@ class RepairWorker:
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
         native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            row = self._load_lib2_redownload_row(native_track_id)
+            if not row:
+                return {'success': False, 'error': 'Track not found in Library v2'}
+            removed = self._remove_native_repair_file(file_path, details)
+            if not removed.get('success'):
+                return removed
+            title = row.get('title') or details.get('title') or 'Unknown'
+            return {
+                'success': True,
+                'action': 'redownload',
+                'message': (
+                    f'Deleted preview clip and queued "{title}" for full download'
+                    if removed.get('deleted_file')
+                    else f'Queued "{title}" for full download (file already gone)'
+                ),
+                'library_v2_file_deleted': True,
+            }
         conn = None
         try:
             conn = self.db._get_connection()
@@ -1549,6 +1614,24 @@ class RepairWorker:
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
         native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            row = self._load_lib2_redownload_row(native_track_id)
+            if not row:
+                return {'success': False, 'error': 'Track not found in Library v2'}
+            removed = self._remove_native_repair_file(file_path, details)
+            if not removed.get('success'):
+                return removed
+            title = row.get('title') or details.get('title') or 'Unknown'
+            return {
+                'success': True,
+                'action': 'redownload',
+                'message': (
+                    f'Deleted corrupt file and queued "{title}" for download'
+                    if removed.get('deleted_file')
+                    else f'Queued "{title}" for download (file already gone)'
+                ),
+                'library_v2_file_deleted': True,
+            }
         conn = None
         try:
             conn = self.db._get_connection()
@@ -1749,7 +1832,19 @@ class RepairWorker:
             return {'success': False, 'error': 'No correct track number in finding details'}
 
         # If we have an entity_id (track DB ID), update DB directly
-        if entity_id:
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            conn = self.db._get_connection()
+            try:
+                conn.execute(
+                    "UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=?",
+                    (int(correct_num), native_track_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        elif entity_id:
             try:
                 self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
             except Exception as e:
@@ -1823,11 +1918,27 @@ class RepairWorker:
                 try:
                     conn = self.db._get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                                   (new_path, file_path))
-                    if cursor.rowcount == 0:
+                    if native_track_id is not None:
+                        file_id = ((details.get('library_v2') or {}).get('file_id')
+                                   or details.get('file_id'))
+                        if file_id:
+                            cursor.execute(
+                                "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE id=?",
+                                (new_path, int(file_id)),
+                            )
+                        else:
+                            cursor.execute(
+                                "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE track_id=? AND path IN (?,?)",
+                                (new_path, native_track_id, file_path, resolved),
+                            )
+                    else:
                         cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                                       (new_path, resolved))
+                                       (new_path, file_path))
+                        if cursor.rowcount == 0:
+                            cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                                           (new_path, resolved))
                     conn.commit()
                 except Exception as e:
                     logger.debug("Failed to update DB file_path after rename: %s", e)
@@ -2483,6 +2594,20 @@ class RepairWorker:
 
         if not track_id:
             return {'success': False, 'error': 'No track ID to remove'}
+        native_track_id = _lib2_id(track_id)
+        if native_track_id is not None:
+            removed = self._remove_native_repair_file(track_path, details)
+            if not removed.get('success'):
+                return removed
+            return {
+                'success': True,
+                'action': 'removed_content',
+                'message': (
+                    f'{type_label} track removed from Library v2'
+                    + (' (file deleted)' if removed.get('deleted_file') else '')
+                ),
+                'library_v2_file_deleted': True,
+            }
 
         # Remove from DB
         conn = None
@@ -2668,6 +2793,132 @@ class RepairWorker:
         """
         fix_action = details.get('_fix_action', 'retag')
         track_id = entity_id
+        native_track_id = _lib2_id(track_id)
+        if native_track_id is not None:
+            if fix_action in {'delete', 'redownload'}:
+                removed = self._remove_native_repair_file(file_path, details)
+                if not removed.get('success'):
+                    return removed
+                expected = details.get('expected_title') or 'track'
+                return {
+                    'success': True,
+                    'action': 'redownload' if fix_action == 'redownload' else 'deleted',
+                    'message': (
+                        f'Queued "{expected}" for re-download and removed wrong file'
+                        if fix_action == 'redownload'
+                        else 'Removed wrong audio file'
+                    ),
+                    'library_v2_file_deleted': True,
+                }
+            if fix_action == 'relocate':
+                from core.library2.paths import resolve_lib2_path
+                from core.imports.file_ops import safe_move_file
+                from core.repair_jobs.relocate import relocate_mismatch_to_staging
+                from core.tag_writer import write_tags_to_file
+
+                resolved = resolve_lib2_path(
+                    file_path, config_manager=self._config_manager,
+                ) if file_path else None
+                if not resolved or not os.path.isfile(resolved):
+                    return {'success': False, 'error': f'File not found: {file_path}'}
+                staging = self._resolve_path(
+                    self._config_manager.get('import.staging_path', './Staging')
+                    if self._config_manager else './Staging'
+                )
+                os.makedirs(staging, exist_ok=True)
+                updates = {'title': details.get('acoustid_title') or ''}
+                if details.get('acoustid_artist'):
+                    updates['artist_name'] = details['acoustid_artist']
+                    updates['artists_list'] = _split_acoustid_credit(
+                        details['acoustid_artist'])
+                try:
+                    destination = relocate_mismatch_to_staging(
+                        resolved, staging, updates,
+                        write_tags=write_tags_to_file,
+                        move_file=safe_move_file,
+                        drop_db_row=lambda: None,
+                        exists=os.path.exists,
+                    )
+                except Exception as exc:
+                    return {'success': False, 'error': f'Relocate failed: {exc}'}
+                return {
+                    'success': True,
+                    'action': 'relocated',
+                    'message': f'Moved to staging for re-import: {os.path.basename(destination)}',
+                    'library_v2_file_deleted': True,
+                }
+
+            # Retag means accepting the fingerprinted recording. Re-home the
+            # file onto a native identity for that recording instead of
+            # overwriting the expected track's canonical provider metadata.
+            actual_title = str(details.get('acoustid_title') or '').strip()
+            actual_artist = str(details.get('acoustid_artist') or '').strip()
+            if not actual_title or not actual_artist:
+                return {'success': False, 'error': 'AcoustID title/artist missing'}
+            conn = self.db._get_connection()
+            try:
+                from core.library2.autolink import (
+                    find_or_create_album,
+                    find_or_create_artist,
+                    find_or_create_track,
+                )
+                artist_id = find_or_create_artist(conn, actual_artist, source='acoustid')
+                album_id = find_or_create_album(
+                    conn,
+                    artist_id,
+                    details.get('actual_album_title') or actual_title,
+                    album_type='single',
+                    source='acoustid',
+                )
+                actual_track_id = find_or_create_track(
+                    conn,
+                    album_id,
+                    artist_id,
+                    actual_title,
+                    track_number=details.get('track_number') or 1,
+                )
+                file_ids = (details.get('library_v2') or {}).get('file_ids') or []
+                if file_ids:
+                    marks = ','.join('?' for _ in file_ids)
+                    conn.execute(
+                        f"UPDATE lib2_track_files SET track_id=?, updated_at=CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({marks})",
+                        (actual_track_id, *[int(value) for value in file_ids]),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE lib2_track_files SET track_id=?, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE track_id=? AND path=?",
+                        (actual_track_id, native_track_id, file_path),
+                    )
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                return {'success': False, 'error': f'Library-v2 re-home failed: {exc}'}
+            finally:
+                conn.close()
+            if file_path:
+                from core.library2.paths import resolve_lib2_path
+                resolved = resolve_lib2_path(file_path, config_manager=self._config_manager)
+                if resolved and os.path.isfile(resolved):
+                    try:
+                        from core.tag_writer import write_tags_to_file
+                        write_tags_to_file(
+                            resolved,
+                            {
+                                'title': actual_title,
+                                'artist_name': actual_artist,
+                                'artists_list': _split_acoustid_credit(actual_artist),
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning('Native AcoustID retag write failed: %s', exc)
+            return {
+                'success': True,
+                'action': 'retagged',
+                'message': f'Re-homed file as "{actual_title}" by {actual_artist}',
+                'library_v2_rehomed_track_id': actual_track_id,
+            }
 
         if fix_action == 'delete':
             # Delete file + DB record

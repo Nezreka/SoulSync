@@ -35,6 +35,12 @@ class OrphanFileDetectorJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
+        if (
+            context.config_manager is None
+            or context.config_manager.get("features.library_v2", False) is not True
+        ):
+            return result
+
         transfer = context.transfer_folder
         if not os.path.isdir(transfer):
             logger.warning("Transfer folder does not exist: %s", transfer)
@@ -49,99 +55,48 @@ class OrphanFileDetectorJob(RepairJob):
         known_suffixes = set()
         known_titles = set()       # (title_lower, artist_lower) for exact match
         known_titles_clean = set()  # (clean_title, clean_artist) for normalized match
-        conn = None
-
         def _strip_extras(s):
             """Strip parentheticals/brackets for normalized comparison."""
             return re.sub(r'\s*[\(\[][^)\]]*[\)\]]', '', s).strip()
 
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ''")
-            for row in cursor.fetchall():
-                parts = row[0].replace('\\', '/').split('/')
-                # Store last 1-4 path components as lowercase suffixes.
-                # Depth 4 covers Genre/Artist/Album/track.flac scenarios.
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            for subject in active_file_subjects(
+                context.db, context.config_manager, include_missing=True,
+            ):
+                parts = str(subject["path"]).replace('\\', '/').split('/')
                 for depth in range(1, min(5, len(parts) + 1)):
-                    suffix = '/'.join(parts[-depth:]).lower()
-                    known_suffixes.add(suffix)
+                    known_suffixes.add('/'.join(parts[-depth:]).lower())
 
-            # Library v2 is an independent authoritative file index. Files
-            # successfully autolinked there are not guaranteed to have a
-            # legacy ``tracks`` row yet (notably with external media-server
-            # sync lag), so a legacy-only detector reports valid files as
-            # orphans. The schema can remain after the feature is disabled,
-            # therefore table presence alone must never activate this path.
-            library_v2_enabled = bool(
-                context.config_manager is not None
-                and context.config_manager.get("features.library_v2", False) is True
-            )
-            has_lib2_files = library_v2_enabled and cursor.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' "
-                "AND name='lib2_track_files'"
-            ).fetchone()
-            if has_lib2_files:
-                cursor.execute(
-                    "SELECT path FROM lib2_track_files "
-                    "WHERE path IS NOT NULL AND path != '' "
-                    "AND COALESCE(file_state,'active') != 'deleted'"
-                )
-                for row in cursor.fetchall():
-                    parts = row[0].replace('\\', '/').split('/')
-                    for depth in range(1, min(5, len(parts) + 1)):
-                        known_suffixes.add('/'.join(parts[-depth:]).lower())
-
-            # Build title+artist sets for fallback matching. Include both
-            # track artist and album artist so Picard-style albumartist paths
-            # don't look orphaned when tracks have featured/guest artists.
-            cursor.execute("""
-                SELECT t.title, track_ar.name, album_ar.name FROM tracks t
-                LEFT JOIN artists track_ar ON track_ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists album_ar ON album_ar.id = al.artist_id
-                WHERE t.title IS NOT NULL AND t.title != ''
-            """)
-            for row in cursor.fetchall():
-                title = (row[0] or '').lower().strip()
-                if title:
-                    for artist_value in (row[1], row[2]):
-                        artist = (artist_value or '').lower().strip()
-                        known_titles.add((title, artist))
-                        # Also store normalized version (stripped of feat.,
-                        # parentheticals, etc.)
-                        clean_t = _strip_extras(title)
-                        clean_a = _strip_extras(artist)
-                        if clean_t:
-                            known_titles_clean.add((clean_t, clean_a))
-
-            lib2_identity_tables = library_v2_enabled and cursor.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-                "AND name IN ('lib2_tracks','lib2_track_artists','lib2_artists')"
-            ).fetchone()[0]
-            if lib2_identity_tables == 3:
-                cursor.execute(
-                    """SELECT t.title, ar.name
+            conn = context.db._get_connection()
+            try:
+                rows = conn.execute(
+                    """SELECT t.title, credit.name, primary_artist.name
                          FROM lib2_tracks t
+                         JOIN lib2_albums al ON al.id=t.album_id
+                    LEFT JOIN lib2_artists primary_artist
+                           ON primary_artist.id=al.primary_artist_id
                     LEFT JOIN lib2_track_artists ta ON ta.track_id=t.id
-                    LEFT JOIN lib2_artists ar ON ar.id=ta.artist_id
-                        WHERE t.title IS NOT NULL AND t.title != ''"""
-                )
-                for title_value, artist_value in cursor.fetchall():
-                    title = (title_value or '').lower().strip()
+                    LEFT JOIN lib2_artists credit ON credit.id=ta.artist_id
+                        WHERE t.title IS NOT NULL AND t.title<>''"""
+                ).fetchall()
+            finally:
+                conn.close()
+            for title_value, credit_name, primary_name in rows:
+                title = (title_value or '').lower().strip()
+                if not title:
+                    continue
+                for artist_value in (credit_name, primary_name):
                     artist = (artist_value or '').lower().strip()
-                    if title:
-                        known_titles.add((title, artist))
-                        clean_t = _strip_extras(title)
-                        if clean_t:
-                            known_titles_clean.add((clean_t, _strip_extras(artist)))
+                    known_titles.add((title, artist))
+                    clean_t = _strip_extras(title)
+                    if clean_t:
+                        known_titles_clean.add((clean_t, _strip_extras(artist)))
         except Exception as e:
             logger.error("Error reading known file paths from DB: %s", e, exc_info=True)
             result.errors += 1
             return result
-        finally:
-            if conn:
-                conn.close()
 
         # Walk transfer folder and find orphans
         audio_files = []

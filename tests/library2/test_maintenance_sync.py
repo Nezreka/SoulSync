@@ -110,12 +110,16 @@ def test_verification_change_updates_v2_file_and_history(legacy_db):
 
     _import(legacy_db)
     conn = legacy_db._get_connection()
-    conn.execute("ALTER TABLE tracks ADD COLUMN verification_status TEXT")
-    conn.execute("UPDATE tracks SET verification_status='verified' WHERE id=100")
+    native = conn.execute(
+        "SELECT t.id AS track_id, f.id AS file_id FROM lib2_tracks t "
+        "JOIN lib2_track_files f ON f.track_id=t.id WHERE t.legacy_track_id=100"
+    ).fetchone()
+    track_id, file_id = native["track_id"], native["file_id"]
+    conn.execute(
+        "UPDATE lib2_track_files SET verification_status='verified' WHERE id=?",
+        (file_id,),
+    )
     conn.commit()
-    track_id = conn.execute(
-        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
-    ).fetchone()[0]
     conn.close()
 
     outcome = sync_repair_change(
@@ -125,8 +129,12 @@ def test_verification_change_updates_v2_file_and_history(legacy_db):
         finding_type="acoustid_verification",
         action="verification_status_updated",
         entity_type="track",
-        entity_id=100,
+        entity_id=f"lib2:{track_id}",
         file_path="/m/01.flac",
+        details={"library_v2": {
+            "track_id": track_id, "track_ids": [track_id],
+            "file_id": file_id, "file_ids": [file_id],
+        }},
     )
 
     assert outcome["reason"] == "synchronized"
@@ -148,15 +156,27 @@ def test_successful_delete_marks_v2_file_deleted_and_recomputes_wanted(legacy_db
     from core.library2.maintenance_sync import sync_repair_change
 
     _import(legacy_db)
+    conn = legacy_db._get_connection()
+    native = conn.execute(
+        "SELECT t.id AS track_id, f.id AS file_id FROM lib2_tracks t "
+        "JOIN lib2_track_files f ON f.track_id=t.id WHERE t.legacy_track_id=100"
+    ).fetchone()
+    track_id, file_id = native["track_id"], native["file_id"]
+    conn.close()
     outcome = sync_repair_change(
         legacy_db,
         _Config(True),
-        job_id="expired_download_cleaner",
-        finding_type="expired_download",
-        action="deleted_expired",
+        job_id="dead_file_cleaner",
+        finding_type="dead_file",
+        action="redownload",
         entity_type="track",
-        entity_id=100,
+        entity_id=f"lib2:{track_id}",
         file_path="/m/01.flac",
+        details={"library_v2": {
+            "track_id": track_id, "track_ids": [track_id],
+            "file_id": file_id, "file_ids": [file_id],
+        }},
+        result={"library_v2_file_deleted": True},
     )
 
     assert outcome["reason"] == "synchronized"
@@ -173,7 +193,7 @@ def test_successful_delete_marks_v2_file_deleted_and_recomputes_wanted(legacy_db
     finally:
         conn.close()
     assert row[0] == "deleted"
-    assert event[0] == "deleted_expired"
+    assert event[0] == "redownload"
     assert "file_state" in event[1]
 
 
@@ -236,7 +256,7 @@ def test_cover_fix_invalidates_both_managed_cache_variants(legacy_db):
         finding_type="missing_cover_art",
         action="applied_cover_art",
         entity_type="album",
-        entity_id=10,
+        entity_id=f"lib2:{album_id}",
     )
 
     assert outcome["artwork_invalidated"] == 2
@@ -244,21 +264,22 @@ def test_cover_fix_invalidates_both_managed_cache_variants(legacy_db):
     assert not thumb.exists()
 
 
-def test_v2_file_subject_enumerator_is_gated_and_excludes_legacy_owned_files(
+def test_v2_file_subject_enumerator_is_gated_and_lists_the_full_native_catalogue(
     legacy_db, tmp_path,
 ):
-    from core.library2.maintenance_sync import v2_uncovered_file_subjects
+    from core.library2.maintenance_subjects import active_file_subjects
 
     _import(legacy_db)
     audio = tmp_path / "v2-only.flac"
     audio.write_bytes(b"audio")
     track_id, file_id = _add_v2_only_file(legacy_db, audio)
 
-    assert v2_uncovered_file_subjects(legacy_db, _Config(False)) == []
-    subjects = v2_uncovered_file_subjects(legacy_db, _Config(True))
-    assert [(row["track_id"], row["file_id"]) for row in subjects] == [
-        (track_id, file_id)
+    assert active_file_subjects(legacy_db, _Config(False)) == []
+    subjects = active_file_subjects(legacy_db, _Config(True))
+    assert (track_id, file_id) in [
+        (row["track_id"], row["file_id"]) for row in subjects
     ]
+    assert any(row.get("legacy_track_id") for row in subjects) is False
 
 
 def test_replaygain_scanner_finds_v2_only_file(legacy_db, tmp_path, monkeypatch):
@@ -317,7 +338,7 @@ def test_lyrics_scanner_finds_v2_only_file(legacy_db, tmp_path, monkeypatch):
 
 
 def test_v2_file_subjects_carry_full_track_album_context(legacy_db, tmp_path):
-    from core.library2.maintenance_sync import v2_uncovered_file_subjects
+    from core.library2.maintenance_subjects import active_file_subjects
 
     _import(legacy_db)
     audio = tmp_path / "context.flac"
@@ -342,7 +363,7 @@ def test_v2_file_subjects_carry_full_track_album_context(legacy_db, tmp_path):
         conn.close()
 
     subject = next(
-        row for row in v2_uncovered_file_subjects(legacy_db, _Config(True))
+        row for row in active_file_subjects(legacy_db, _Config(True))
         if row["file_id"] == file_id
     )
     assert subject["track_number"] == 9
@@ -390,18 +411,18 @@ def _add_v2_only_album(legacy_db, path, *, title="V2-only Album"):
         conn.close()
 
 
-def test_v2_album_subject_enumerator_lists_v2_only_albums(legacy_db, tmp_path):
-    from core.library2.maintenance_sync import v2_uncovered_album_subjects
+def test_v2_album_subject_enumerator_lists_all_native_albums(legacy_db, tmp_path):
+    from core.library2.maintenance_subjects import active_album_subjects
 
     _import(legacy_db)
     audio = tmp_path / "v2-album-01.flac"
     audio.write_bytes(b"audio")
     album_id, artist_id, _track_id, _file_id = _add_v2_only_album(legacy_db, audio)
 
-    assert v2_uncovered_album_subjects(legacy_db, _Config(False)) == []
-    subjects = v2_uncovered_album_subjects(legacy_db, _Config(True))
-    assert [row["album_id"] for row in subjects] == [album_id]
-    subject = subjects[0]
+    assert active_album_subjects(legacy_db, _Config(False)) == []
+    subjects = active_album_subjects(legacy_db, _Config(True))
+    assert album_id in [row["album_id"] for row in subjects]
+    subject = next(row for row in subjects if row["album_id"] == album_id)
     assert subject["artist_id"] == artist_id
     assert subject["title"] == "V2-only Album"
     assert subject["artist_name"] == "V2 Only Artist"
@@ -746,7 +767,7 @@ def test_metadata_gap_fix_writes_natively_to_v2_track(legacy_db, tmp_path):
     assert row[1] == "mb-42"
 
 
-def test_corrupt_fix_deletes_v2_only_file_and_rewishlists(legacy_db, tmp_path):
+def test_corrupt_fix_deletes_v2_only_file_for_native_wanted_sync(legacy_db, tmp_path):
     from core.repair_worker import RepairWorker
 
     _import(legacy_db)
@@ -767,10 +788,10 @@ def test_corrupt_fix_deletes_v2_only_file_and_rewishlists(legacy_db, tmp_path):
     assert result["success"] is True, result
     assert result["library_v2_file_deleted"] is True
     assert not audio.exists()
-    assert wishlisted and wishlisted[0]["name"] == "Corrupt Fix"
+    assert wishlisted == []
 
 
-def test_preview_fix_deletes_v2_only_file_and_rewishlists(legacy_db, tmp_path):
+def test_preview_fix_deletes_v2_only_file_for_native_wanted_sync(legacy_db, tmp_path):
     from core.repair_worker import RepairWorker
 
     _import(legacy_db)
@@ -792,7 +813,7 @@ def test_preview_fix_deletes_v2_only_file_and_rewishlists(legacy_db, tmp_path):
     assert result["success"] is True, result
     assert result["library_v2_file_deleted"] is True
     assert not audio.exists()
-    assert wishlisted and wishlisted[0]["name"] == "Preview Fix"
+    assert wishlisted == []
 
 
 def test_tag_consistency_scanner_covers_v2_only_album(legacy_db, tmp_path, monkeypatch):

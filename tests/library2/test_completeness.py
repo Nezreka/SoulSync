@@ -57,6 +57,29 @@ def test_persist_tracklist_tracks_creates_monitorable_missing_rows(imported_conn
     ]) == 0
 
 
+def test_persist_tracklist_tracks_keeps_non_spotify_provider_ids(imported_conn):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+
+    created = _persist_tracklist_tracks(imported_conn, views_id, [{
+        "track_number": 9,
+        "title": "Deezer Provider Track",
+        "external_ids": {"deezer": "dz-track-9", "itunes": "it-track-9"},
+    }])
+
+    assert created == 1
+    row = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_tracks "
+        "WHERE album_id=? AND track_number=9",
+        (views_id,),
+    ).fetchone()
+    assert row["spotify_id"] is None
+    assert json.loads(row["external_ids"]) == {
+        "deezer": "dz-track-9", "itunes": "it-track-9",
+    }
+
+
 def test_precache_materializes_cached_tracklists_before_provider_lookup(legacy_db):
     from core.library2.importer import import_legacy_library
 
@@ -127,6 +150,9 @@ def test_resolve_tracklist_snapshots_spotify_and_reuses_durable_cache(
     class Spotify:
         calls = []
 
+        def is_spotify_authenticated(self):
+            return True
+
         def get_album_tracks(self, album_id):
             self.calls.append(album_id)
             return {"items": [
@@ -137,8 +163,10 @@ def test_resolve_tracklist_snapshots_spotify_and_reuses_durable_cache(
             ]}
 
     spotify = Spotify()
-    monkeypatch.setattr("core.metadata.registry.get_spotify_client", lambda: spotify)
-    monkeypatch.setattr("core.metadata.registry.get_deezer_client", lambda: None)
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: spotify if source == "spotify" else None,
+    )
 
     first = resolve_tracklist(None, imported_conn, views_id)
     second = resolve_tracklist(None, imported_conn, views_id)
@@ -224,6 +252,9 @@ def test_default_edition_change_invalidates_tracklist_cache(
     class Spotify:
         calls = []
 
+        def is_spotify_authenticated(self):
+            return True
+
         def get_album_tracks(self, album_id):
             self.calls.append(album_id)
             return {"items": [{
@@ -233,8 +264,10 @@ def test_default_edition_change_invalidates_tracklist_cache(
             }]}
 
     spotify = Spotify()
-    monkeypatch.setattr("core.metadata.registry.get_spotify_client", lambda: spotify)
-    monkeypatch.setattr("core.metadata.registry.get_deezer_client", lambda: None)
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: spotify if source == "spotify" else None,
+    )
 
     first = resolve_tracklist(None, imported_conn, views_id)
     imported_conn.execute(

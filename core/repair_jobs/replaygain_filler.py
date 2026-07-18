@@ -96,30 +96,11 @@ class ReplayGainFillerJob(RepairJob):
             return result
 
         rows = []
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name, t.file_path
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-            """)
-            rows = cursor.fetchall()
-        except Exception as e:
-            logger.error("[ReplayGain Filler] Error reading tracks: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
-
         native_subjects = {}
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 file_path = str(subject["path"])
@@ -188,12 +169,12 @@ class ReplayGainFillerJob(RepairJob):
                         'track_id': track_id,
                         'track_title': title,
                         'artist': artist_name,
-                        'file_path': resolved if subject else file_path,
+                        'file_path': resolved,
                     }
                     if subject:
-                        from core.library2.maintenance_sync import v2_subject_details
+                        from core.library2.maintenance_subjects import subject_details
 
-                        details.update(v2_subject_details(subject))
+                        details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_replaygain',
@@ -223,22 +204,9 @@ class ReplayGainFillerJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-            """)
-            row = cursor.fetchone()
-            count = row[0] if row else 0
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
-            return count + len(v2_uncovered_file_subjects(
-                context.db, context.config_manager,
-            ))
+            from core.library2.maintenance_subjects import count_active_files
+
+            return count_active_files(context.db, context.config_manager)
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()

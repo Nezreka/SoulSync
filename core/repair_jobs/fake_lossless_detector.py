@@ -5,7 +5,7 @@ import os
 import subprocess
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, skip_deleted_quarantine
+from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.fake_lossless")
@@ -52,29 +52,16 @@ class FakeLosslessDetectorJob(RepairJob):
         settings = self._get_settings(context)
         cutoff_khz = settings.get('spectral_cutoff_khz', 16.0)
 
-        transfer = context.transfer_folder
-
-        # Collect lossless files
+        # P3 catalogue boundary: scan every active native file exactly once.
+        # Unindexed transfer files belong to staging/orphan detection, not to a
+        # catalogue repair job.
         lossless_files = []
-        if os.path.isdir(transfer):
-            for root, dirs, files in os.walk(transfer):
-                skip_deleted_quarantine(root, dirs, transfer)
-                if context.check_stop():
-                    return result
-                for fname in files:
-                    ext = os.path.splitext(fname)[1].lower()
-                    if ext in LOSSLESS_EXTENSIONS:
-                        lossless_files.append(os.path.join(root, fname))
-
-        # Native Library-v2 coverage: active lossless V2 files outside the
-        # transfer walk (deduped on normalized path).
         native_subjects = {}
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
             from core.library2.paths import resolve_lib2_path
 
-            walked = {os.path.normcase(os.path.normpath(p)) for p in lossless_files}
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 raw = str(subject["path"])
@@ -83,8 +70,6 @@ class FakeLosslessDetectorJob(RepairJob):
                 resolved = raw if os.path.isfile(raw) else resolve_lib2_path(
                     raw, config_manager=context.config_manager)
                 if not resolved or not os.path.isfile(resolved):
-                    continue
-                if os.path.normcase(os.path.normpath(resolved)) in walked:
                     continue
                 native_subjects[resolved] = subject
                 lossless_files.append(resolved)
@@ -148,9 +133,9 @@ class FakeLosslessDetectorJob(RepairJob):
                         }
                         subject = native_subjects.get(fpath)
                         if subject:
-                            from core.library2.maintenance_sync import v2_subject_details
+                            from core.library2.maintenance_subjects import subject_details
 
-                            finding_details.update(v2_subject_details(subject))
+                            finding_details.update(subject_details(subject))
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='fake_lossless',
@@ -194,15 +179,15 @@ class FakeLosslessDetectorJob(RepairJob):
         return merged
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
         count = 0
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in LOSSLESS_EXTENSIONS:
+        try:
+            from core.library2.maintenance_subjects import active_file_subjects
+            for subject in active_file_subjects(context.db, context.config_manager):
+                raw = str(subject.get("path") or "")
+                if os.path.splitext(raw)[1].lower() in LOSSLESS_EXTENSIONS:
                     count += 1
+        except Exception:
+            return 0
         return count
 
 

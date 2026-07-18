@@ -377,8 +377,8 @@ class AcoustIDScannerJob(RepairJob):
             }
             subject = expected.get('lib2_subject')
             if subject:
-                from core.library2.maintenance_sync import v2_subject_details
-                finding_details.update(v2_subject_details(subject))
+                from core.library2.maintenance_subjects import subject_details
+                finding_details.update(subject_details(subject))
             inserted = context.create_finding(
                 job_id=self.job_id,
                 finding_type='acoustid_mismatch',
@@ -580,9 +580,9 @@ class AcoustIDScannerJob(RepairJob):
         # backref never appear in the ``tracks`` query above. Fingerprinting is
         # expensive, so only the primary file of each uncovered track is added.
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in v2_uncovered_file_subjects(context.db, context.config_manager):
+            for subject in active_file_subjects(context.db, context.config_manager):
                 key = f"lib2:{subject['track_id']}"
                 if key in tracks and not subject.get('is_primary'):
                     continue

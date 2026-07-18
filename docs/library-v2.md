@@ -1558,7 +1558,8 @@ implementiert und größtenteils solide.
   scannen Legacy-Tabellen. Solange der Legacy-Import die Quelle ist,
   deckungsgleich — aber autolink-erzeugte lib2-Rows ohne Legacy-Pendant sieht
   keiner dieser Jobs. Mittelfristig brauchen die Jobs eine lib2-Datenquelle
-  oder lib2 einen Rück-Sync. **Explizit gemacht 2026-07-14:** Ein vollständiges
+  oder lib2 einen Rück-Sync. **Historischer P0-Zwischenstand 2026-07-14;
+  durch P3 in §78 ersetzt:** Ein vollständiges
   Registry-Manifest klassifiziert jeden Repair-Job als `legacy`, `lib2`,
   `filesystem` oder `mixed`; Registrierung ohne gültige Zuordnung schlägt
   sofort fehl. Der Worker liefert `data_basis` über die bestehende Repair-API,
@@ -1985,7 +1986,8 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     lib2-Datenbasis kennzeichnen und diese Basis in API/UI sichtbar machen,
     bevor einzelne Jobs migriert werden.
 13. ~~**Legacy- vs. lib2-Datenbasis der Repair-Jobs** explizit machen (A6).~~
-    **Abgeschlossen 2026-07-14:** Das exhaustive Registry-Manifest erzwingt
+    **Historischer Zwischenstand 2026-07-14; aktueller P3-Stand in §78:** Das
+    exhaustive Registry-Manifest erzwingt
     für alle 32 Jobs eine der vier Datenbasen `legacy`, `lib2`, `filesystem`
     oder `mixed`; `RepairWorker.get_all_job_info()` exponiert sie und sowohl
     die globale Stats-/Repair-UI als auch Library-v2-Maintenance zeigen sie
@@ -8053,5 +8055,71 @@ Scan. Die Cutoff-Parität bleibt durch einen eingefrorenen Orakel-Test in
 
 Noch offene P2-Ablösungen (Brücke bleibt sicher): Single/Album Dedup,
 Album Completeness, Canonical/MBID-Reconcile, Library Re-tag, Unknown
-Artist, Live/Commentary, Duplicate Detector. P3 (Legacy-Removal nach
-Löschplan §7 des Audits) folgt in einer späteren Session.
+Artist, Live/Commentary, Duplicate Detector. **Dieser P2-Zwischenstand ist
+durch die P3-Umsetzung in §78 abgelöst.**
+
+---
+
+## 78. P3 — native Tool-Grenze und Provider-Identitäten (2026-07-18)
+
+P3 ist an der Runtime-Grenze umgesetzt; der automatische Bestands-Bootstrap ist
+noch ein offener Cutover-Schritt. Die Repair-Registry enthält 19 Jobs:
+17 lesen den nativen Library-v2-Katalog, zwei sind rein operative
+Filesystem-Jobs. `legacy` und `mixed` sind keine gültigen Registrierungsbasen
+mehr. Retired-Module können während des Rollback-Fensters noch importiert
+werden, der Decorator registriert sie jedoch nicht erneut.
+
+Alle katalogbezogenen Scanner enumerieren `lib2_track_files` bzw.
+`lib2_albums` über `maintenance_subjects.py`. Findings und Fixes verwenden
+`lib2:<id>` plus native File-IDs. `maintenance_sync.py` behält Rescan,
+Artwork-Invalidation, Wanted-Recompute und Entity-History, enthält aber keine
+Legacy-ID-Auflösung, Legacy-Projektion oder Reimports mehr. Die beiden
+periodischen Übergangsjobs Mirror/Wishlist Reconcile sind gelöscht; der
+transaktionale Outbox-Ausgang bleibt nur für die noch vorhandene
+Rollback-Wishlist/Watchlist.
+
+Die verbleibenden nativen Job-IDs sind neutral:
+
+- `quality_upgrade_scan`;
+- `skip_audit_cleanup`;
+- `monitored_discography_refresh`.
+
+Gespeicherte `lib2_*`-Konfigurationen werden lesend migriert. `data_basis`
+bleibt eine interne Registry-Invariante und wird weder über die Repair-API
+noch in React- oder klassischer Repair-UI dargestellt.
+
+Provider-Identitäten sind durchgängig qualifiziert. Dedicated
+Spotify-/MusicBrainz-Spalten und `external_ids` werden zu einer Map
+zusammengeführt; Tracklist, Completeness, Artwork, Match-Chips, manuelles
+Enrichment, bestätigte Materialisierung, Wanted-Mirror und Post-Download-
+Autolink tragen die tatsächliche Quelle für Artist, Album und Track. Ein
+Fallback von Spotify auf Deezer/iTunes speichert und meldet Deezer/iTunes —
+nie Spotify. Mehrere vorhandene Provider-IDs bleiben erhalten; die
+konfigurierte Reihenfolge entscheidet nur die Abfragereihenfolge.
+
+Für bestehende Installationen muss beim ersten Start mit aktiviertem
+`features.library_v2` noch ein idempotenter serverseitiger Initialimport
+(`import_legacy_library`) automatisch gestartet werden. Das darf nicht davon
+abhängen, dass die Library-v2-UI geöffnet wird. Der Import benötigt einen
+persistenten Fortschritts-/Fehlerstatus, Wiederaufnahme und eine Sperre gegen
+Doppelstarts. Ohne diesen Bootstrap werden nur die `lib2_*`-Tabellen angelegt;
+der bestehende Legacy-Bestand bleibt außerhalb der nativen Job-Subjects.
+
+Die Legacy-Wishlist kann bis zum endgültigen Cutover als Acquisition-/Retry-
+Queue bestehen bleiben. Playlist-Sync sowie alte Search-/Download-Pfade bleiben
+bis dahin Hybridpfade; vor einer physischen Entfernung der Legacy-Library müssen
+sie entweder nativ materialisieren oder eine ausdrücklich dokumentierte
+Dual-Write-Grenze besitzen.
+
+Bewusst noch nicht physisch entfernt sind `legacy_artist_id`,
+`legacy_album_id`, `legacy_track_id` und der Legacy-Importer. Das entspricht
+Schritt 5 des Löschplans: Erst ein explizit abgeschlossenes Datenmigrations-/
+Rollback-Fenster autorisiert deren irreversible Entfernung. Sie nehmen an
+keiner P3-Tool-, Match- oder Enrichment-Entscheidung mehr teil.
+
+Verifikation: 1300 Backend-Tests über Library v2, Repair, Repair-Jobs,
+Automation und die P3-Guard-Suiten; 237 Frontend-Tests; vollständiger
+Frontend-Formatter-/Type-/Lint-Check, Produktions-Build sowie statischer
+JavaScript-Syntaxcheck sind grün. Details und die
+Schritt-für-Schritt-Abnahme stehen im
+[`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md).

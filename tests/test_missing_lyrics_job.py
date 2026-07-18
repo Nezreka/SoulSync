@@ -79,6 +79,34 @@ class _DB:
         return conn
 
 
+@pytest.fixture(autouse=True)
+def _native_subject_boundary(monkeypatch):
+    """Adapt the compact rows into the native P3 maintenance contract."""
+
+    def subjects(database, _config_manager, **_kwargs):
+        return [
+            {
+                "file_id": row[0],
+                "track_id": row[0],
+                "album_id": 10,
+                "artist_id": 1,
+                "title": row[1],
+                "artist_name": row[2],
+                "album_title": row[3],
+                "path": row[4],
+                "duration": row[5],
+                "track_source_ids": {},
+                "album_source_ids": {},
+                "artist_source_ids": {},
+            }
+            for row in database._rows
+        ]
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects", subjects
+    )
+
+
 def _ctx(db, findings):
     return SimpleNamespace(
         db=db,
@@ -153,8 +181,10 @@ def test_scan_resolves_db_path_before_lrc_check(tmp_path, monkeypatch):
     db_path = "/data/Sean Kingston/Tomorrow (2009)/08. Tomorrow (Album Version).flac"   # not real here
     rows = [(626, "Tomorrow", "Sean Kingston", "Tomorrow", db_path, 200000)]
     # resolver maps the stored container path -> the real file on disk
-    monkeypatch.setattr("core.repair_jobs.missing_lyrics.resolve_library_file_path",
-                        lambda p, **k: str(real_audio) if p == db_path else None)
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda p, **k: str(real_audio) if p == db_path else None,
+    )
     # LRClib WOULD have lyrics — so without the fix (raw-path check) this gets wrongly flagged.
     fake_client = SimpleNamespace(api=object(), has_remote_lyrics=lambda *a, **k: True)
     monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)

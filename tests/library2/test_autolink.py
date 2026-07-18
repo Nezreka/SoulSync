@@ -625,6 +625,11 @@ def test_numeric_deezer_id_is_not_stored_as_spotify_id(lib2_enabled, imported_co
     ).fetchone()
     assert artist["spotify_id"] in (None, "sp1")   # legacy id may exist; never 12345
     assert artist["spotify_id"] != "12345"
+    track = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_tracks WHERE title='Nonstop'"
+    ).fetchone()
+    assert track["spotify_id"] is None
+    assert json.loads(track["external_ids"])["deezer"] == "999111"
 
 
 def test_deezer_album_id_matches_existing_row_by_external_ids(

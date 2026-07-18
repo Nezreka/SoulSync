@@ -13,10 +13,25 @@ from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
 
 
+class _EnabledConfig:
+    def get(self, key, default=None):
+        return True if key == "features.library_v2" else default
+
+
 def _seed(db: MusicDatabase):
     conn = db._get_connection()
     conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'A-ha')")
     conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Hunting High and Low')")
+    from core.library2.schema import ensure_library_v2_schema
+
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        "INSERT INTO lib2_artists(id, name, sort_name) VALUES(1, 'A-ha', 'A-ha')"
+    )
+    conn.execute(
+        "INSERT INTO lib2_albums(id, primary_artist_id, title) "
+        "VALUES(1, 1, 'Hunting High and Low')"
+    )
     conn.commit()
     conn.close()
 
@@ -30,6 +45,16 @@ def _track(db, tid: int, duration_ms, path, spotify_id=None):
         "VALUES (?, 'ar1', 'al1', ?, ?, ?, ?)",
         (tid, f"Track {tid}", duration_ms, path, spotify_id),
     )
+    conn.execute(
+        "INSERT INTO lib2_tracks(id, album_id, title, duration, spotify_id) "
+        "VALUES(?, 1, ?, ?, ?)",
+        (tid, f"Track {tid}", duration_ms, spotify_id),
+    )
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, is_primary) "
+        "VALUES(?, ?, ?, 1)",
+        (tid, path, Path(path).suffix.lstrip('.').lower()),
+    )
     conn.commit()
     conn.close()
 
@@ -42,7 +67,7 @@ class _FakeSpotify:
 
 def _ctx(db, findings, spotify=None):
     return JobContext(
-        db=db, transfer_folder='/tmp', config_manager=None,
+        db=db, transfer_folder='/tmp', config_manager=_EnabledConfig(),
         spotify_client=spotify,
         create_finding=lambda **kw: findings.append(kw) or True,
         should_stop=lambda: False, is_paused=lambda: False,
@@ -65,7 +90,7 @@ def test_scan_flags_preview_skips_genuine_short_and_unverifiable(tmp_path: Path)
     assert len(findings) == 1
     f = findings[0]
     assert f['finding_type'] == 'short_preview_track'
-    assert f['entity_id'] == '1'          # str(int id), as create_finding stores it
+    assert f['entity_id'] == 'lib2:1'
     assert f['entity_type'] == 'track'
     assert f['details']['expected_duration_s'] == pytest.approx(200.0)
     assert result.findings_created == 1

@@ -42,24 +42,10 @@ _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
-# lib2 table -> (legacy table, namespace -> candidate legacy columns). Used to
-# recover the TRUE provider of a foreign-shaped value parked in spotify_id
-# (§62.4): the legacy enrichment stored the same value under its honest
-# column, so a value-level lookup names the namespace.
-_LEGACY_VALUE_COLUMNS: Dict[str, Any] = {
-    "lib2_albums": ("albums", {
-        "itunes": ("itunes_album_id",),
-        "deezer": ("deezer_album_id", "deezer_id"),
-        "tidal": ("tidal_album_id", "tidal_id"),
-        "qobuz": ("qobuz_album_id", "qobuz_id"),
-    }),
-    "lib2_artists": ("artists", {
-        "itunes": ("itunes_artist_id",),
-        "deezer": ("deezer_artist_id", "deezer_id"),
-        "tidal": ("tidal_artist_id", "tidal_id"),
-        "qobuz": ("qobuz_artist_id", "qobuz_id"),
-    }),
-    "lib2_release_editions": (None, {}),
+_ENTITY_TYPE_BY_TABLE = {
+    "lib2_albums": "album",
+    "lib2_artists": "artist",
+    "lib2_release_editions": "release_edition",
 }
 
 
@@ -70,22 +56,23 @@ def _table_columns(conn: Any, table: str) -> set:
         return set()
 
 
-def _resolve_foreign_namespace(conn: Any, legacy_table: Optional[str],
-                               mapping: Dict[str, Any], value: str,
-                               legacy_columns: set) -> Optional[str]:
-    if not legacy_table:
+def _snapshot_namespace(
+    conn: Any, table: str, entity_id: int, value: str,
+) -> Optional[str]:
+    """Recover an ID namespace only from provider-qualified V2 provenance."""
+
+    entity_type = _ENTITY_TYPE_BY_TABLE.get(table)
+    if not entity_type or not _table_columns(conn, "library_provider_snapshots"):
         return None
-    hits = set()
-    for namespace, columns in mapping.items():
-        for column in columns:
-            if column not in legacy_columns:
-                continue
-            if conn.execute(
-                    f"SELECT 1 FROM {legacy_table} WHERE {column}=? LIMIT 1",
-                    (value,)).fetchone():
-                hits.add(namespace)
-                break
-    return hits.pop() if len(hits) == 1 else None
+    rows = conn.execute(
+        """SELECT DISTINCT provider FROM library_provider_snapshots
+            WHERE entity_type=? AND entity_id=? AND provider_entity_id=?""",
+        (entity_type, int(entity_id), value),
+    ).fetchall()
+    providers = {
+        str(row[0]).strip().lower() for row in rows if str(row[0] or "").strip()
+    }
+    return providers.pop() if len(providers) == 1 else None
 
 
 def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
@@ -93,18 +80,17 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
 
     The value is re-homed: UUIDs are MusicBrainz; a value the row already
     carries under another namespace just loses its bogus spotify copy; a
-    value found in exactly one legacy provider column adopts that namespace;
-    anything else parks under ``legacy_unknown`` so value-based matching
-    (autolink §62.4 compat) keeps working without polluting any provider's
-    namespace. Idempotent. Returns the number of rows fixed."""
+    value bound by one provider snapshot adopts that namespace; anything else
+    parks under ``legacy_unknown`` so value-based matching keeps
+    working without polluting a real provider namespace. Idempotent. Returns
+    the number of rows fixed."""
     fixed = 0
-    for lib2_table, (legacy_table, mapping) in _LEGACY_VALUE_COLUMNS.items():
+    for lib2_table in _ENTITY_TYPE_BY_TABLE:
         if lib2_table not in ("lib2_albums", "lib2_artists",
                               "lib2_release_editions"):
             continue
         if not _table_columns(conn, lib2_table):
             continue
-        legacy_columns = _table_columns(conn, legacy_table) if legacy_table else set()
         has_mb_column = "musicbrainz_id" in _table_columns(conn, lib2_table)
         rows = conn.execute(
             f"SELECT id, spotify_id, external_ids FROM {lib2_table} "
@@ -128,8 +114,7 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
             if namespace is None and _UUID_RE.match(value):
                 namespace = "musicbrainz"
             if namespace is None:
-                namespace = _resolve_foreign_namespace(
-                    conn, legacy_table, mapping, value, legacy_columns)
+                namespace = _snapshot_namespace(conn, lib2_table, row["id"], value)
             if namespace is None:
                 namespace = "legacy_unknown"
             if ids.get("spotify") == value:
@@ -182,8 +167,8 @@ def _group_has_conflict(members: List[Any]) -> bool:
 
 def _survivor_key(member: Any) -> tuple:
     return (
-        1 if member["legacy_artist_id"] is not None else 0,
         len(_stored_ids(member)),
+        1 if member["canonical_artist_id"] is None else 0,
         -int(member["id"]),
     )
 
@@ -199,20 +184,18 @@ def _merge_artist(cursor: Any, survivor: Any, duplicate: Any) -> None:
         "UPDATE lib2_artists SET external_ids=?, "
         "spotify_id=COALESCE(NULLIF(spotify_id,''), ?), "
         "musicbrainz_id=COALESCE(NULLIF(musicbrainz_id,''), ?), "
-        "legacy_artist_id=COALESCE(legacy_artist_id, ?), "
         "image_url=COALESCE(image_url, ?), "
         "updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (json.dumps(merged, sort_keys=True, separators=(",", ":")),
          merged.get("spotify"), merged.get("musicbrainz"),
-         duplicate["legacy_artist_id"], duplicate["image_url"], survivor_id))
+         duplicate["image_url"], survivor_id))
 
     cursor.execute(
         "UPDATE lib2_albums SET primary_artist_id=?, updated_at=CURRENT_TIMESTAMP "
         "WHERE primary_artist_id=?", (survivor_id, duplicate_id))
     # Credit rows: move where the survivor is not already credited, then drop
     # the leftovers (the UNIQUE pair would collide on a plain UPDATE).
-    for table, id_column in (("lib2_album_artists", "album_id"),
-                             ("lib2_track_artists", "track_id")):
+    for table in ("lib2_album_artists", "lib2_track_artists"):
         cursor.execute(
             f"""UPDATE OR IGNORE {table} SET artist_id=?
                  WHERE artist_id=?""", (survivor_id, duplicate_id))
@@ -301,7 +284,7 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
         stats["namespaces_fixed"] = _sanitize_provider_namespaces(conn, cursor)
         rows = conn.execute(
             "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
-            "legacy_artist_id, image_url, canonical_artist_id "
+            "image_url, canonical_artist_id "
             "FROM lib2_artists").fetchall()
         by_name: Dict[str, List[Any]] = {}
         for row in rows:
@@ -347,7 +330,7 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
         # conflict-free groups.
         provider_rows = conn.execute(
             "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
-            "legacy_artist_id, image_url, canonical_artist_id "
+            "image_url, canonical_artist_id "
             "FROM lib2_artists"
         ).fetchall()
         by_provider_id: Dict[tuple[str, str], List[Any]] = {}
@@ -364,7 +347,7 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
             for member in members:
                 current = conn.execute(
                     "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
-                    "legacy_artist_id, image_url, canonical_artist_id "
+                    "image_url, canonical_artist_id "
                     "FROM lib2_artists WHERE id=?",
                     (member["id"],),
                 ).fetchone()

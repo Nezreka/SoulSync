@@ -17,6 +17,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from core.library2.provider_ids import parse_external_ids
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.completeness")
@@ -301,7 +302,14 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
             disc = inferred_disc
             previous_number = number
         duration = entry.get("duration_ms")
-        spotify_id = entry.get("spotify_id")
+        incoming_ids = parse_external_ids(entry.get("external_ids"))
+        if entry.get("spotify_id"):
+            incoming_ids.setdefault("spotify", str(entry["spotify_id"]))
+        if entry.get("musicbrainz_id"):
+            incoming_ids.setdefault("musicbrainz", str(entry["musicbrainz_id"]))
+        if entry.get("isrc"):
+            incoming_ids.setdefault("isrc", str(entry["isrc"]))
+        spotify_id = incoming_ids.get("spotify")
 
         # §16.3 heal: prefer a unique, not-yet-touched local row with the SAME
         # title over the (disc, number) key. When track numbers got corrupted
@@ -353,6 +361,31 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
             track_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             created += 1
             touched_ids.add(track_id)
+
+        if incoming_ids:
+            identity_row = conn.execute(
+                "SELECT spotify_id, musicbrainz_id, isrc, external_ids "
+                "FROM lib2_tracks WHERE id=?",
+                (track_id,),
+            ).fetchone()
+            stored_ids = parse_external_ids(identity_row["external_ids"])
+            for source, value in incoming_ids.items():
+                stored_ids.setdefault(source, value)
+            conn.execute(
+                """UPDATE lib2_tracks
+                      SET spotify_id=COALESCE(NULLIF(spotify_id,''), ?),
+                          musicbrainz_id=COALESCE(NULLIF(musicbrainz_id,''), ?),
+                          isrc=COALESCE(NULLIF(isrc,''), ?),
+                          external_ids=?, updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (
+                    incoming_ids.get("spotify"),
+                    incoming_ids.get("musicbrainz"),
+                    incoming_ids.get("isrc"),
+                    json.dumps(stored_ids, sort_keys=True, separators=(",", ":")),
+                    track_id,
+                ),
+            )
 
         conn.execute(
             """INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)

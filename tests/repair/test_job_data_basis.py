@@ -17,13 +17,15 @@ def test_every_registered_repair_job_has_an_explicit_valid_data_basis():
 
 
 def test_representative_job_data_bases_are_deliberate():
-    assert JOB_DATA_BASIS['metadata_gap_filler'] == 'legacy'
-    assert JOB_DATA_BASIS['lib2_upgrade_scan'] == 'lib2'
+    assert JOB_DATA_BASIS['metadata_gap_filler'] == 'lib2'
+    assert JOB_DATA_BASIS['quality_upgrade_scan'] == 'lib2'
     assert JOB_DATA_BASIS['empty_folder_cleaner'] == 'filesystem'
-    assert JOB_DATA_BASIS['library_retag'] == 'mixed'
+    assert set(JOB_DATA_BASIS.values()) == {'lib2', 'filesystem'}
+    assert 'library_retag' not in JOB_DATA_BASIS
+    assert 'lib2_mirror_reconcile' not in JOB_DATA_BASIS
 
 
-def test_worker_job_info_exposes_data_basis(monkeypatch):
+def test_worker_job_info_does_not_expose_internal_data_basis(monkeypatch):
     worker = RepairWorker.__new__(RepairWorker)
     worker._jobs = {'metadata_gap_filler': get_all_jobs()['metadata_gap_filler']()}
     worker._current_job_id = None
@@ -37,4 +39,4 @@ def test_worker_job_info_exposes_data_basis(monkeypatch):
     )
     monkeypatch.setattr(worker, '_get_last_run', lambda _job_id: None)
 
-    assert worker.get_all_job_info()[0]['data_basis'] == 'legacy'
+    assert 'data_basis' not in worker.get_all_job_info()[0]

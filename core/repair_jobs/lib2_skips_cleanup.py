@@ -20,12 +20,12 @@ from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
-logger = get_logger("repair.lib2_skips_cleanup")
+logger = get_logger("repair.skip_audit_cleanup")
 
 
 @register_job
 class Lib2SkipsCleanupJob(RepairJob):
-    job_id = "lib2_skips_cleanup"
+    job_id = "skip_audit_cleanup"
     display_name = "Skip-Audit Cleanup"
     description = "Expire stale manual check-skip overrides (missing files, past retention)."
     help_text = (

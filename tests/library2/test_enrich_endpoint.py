@@ -1,11 +1,4 @@
-"""Flask-level tests for POST /api/library/v2/<entity>/<id>/enrich (docs §44).
-
-``run_enrichment`` is injected (mirrors ``web_server._run_single_enrichment``)
-so these tests never touch a real provider — they assert the route's own
-logic: legacy-id resolution, service validation, the "no legacy record"
-guard, and that a successful call resyncs the lib2 row from the (now
-enriched) legacy row.
-"""
+"""Flask-level tests for native Library-v2 provider enrichment (P3)."""
 
 from __future__ import annotations
 
@@ -27,313 +20,201 @@ class FakeDB:
 
 
 @pytest.fixture
-def api(tmp_path):
+def api(tmp_path, monkeypatch):
     db_path = str(tmp_path / "lib2.db")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     from core.library2.schema import ensure_library_v2_schema
+
     ensure_library_v2_schema(conn)
-    conn.executescript(
-        """
-        CREATE TABLE artists(
-            id TEXT PRIMARY KEY, name TEXT, thumb_url TEXT, genres TEXT,
-            summary TEXT, style TEXT, mood TEXT, label TEXT, banner_url TEXT
-        );
-        CREATE TABLE albums(
-            id TEXT PRIMARY KEY, title TEXT, thumb_url TEXT, genres TEXT,
-            label TEXT, explicit INTEGER, upc TEXT
-        );
-        CREATE TABLE tracks(
-            id TEXT PRIMARY KEY, title TEXT, bpm REAL, explicit INTEGER,
-            genius_lyrics TEXT, copyright TEXT
-        );
-        """
-    )
     cur = conn.cursor()
+    # Keep one rollback-window back-reference deliberately: P3 must ignore it.
     cur.execute(
         "INSERT INTO lib2_artists(name, legacy_artist_id) VALUES('Drake', 501)"
     )
     artist_id = cur.lastrowid
-    cur.execute("INSERT INTO artists(id, name) VALUES(501, 'Drake')")
-
     cur.execute(
-        "INSERT INTO lib2_albums(primary_artist_id, title, legacy_album_id) "
-        "VALUES(?, 'Views', 601)", (artist_id,)
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Views')",
+        (artist_id,),
     )
     album_id = cur.lastrowid
-    cur.execute("INSERT INTO albums(id, title) VALUES(601, 'Views')")
-
-    base62_legacy_album_id = "01MoTj8w4VkVtgdPOijUUE"
     cur.execute(
-        "INSERT INTO lib2_albums(primary_artist_id, title, legacy_album_id) "
-        "VALUES(?, 'Base62 Album', ?)", (artist_id, base62_legacy_album_id)
+        "INSERT INTO lib2_albums(primary_artist_id, title) "
+        "VALUES(?, 'Discography Only')",
+        (artist_id,),
     )
-    base62_album_id = cur.lastrowid
-    cur.execute(
-        "INSERT INTO albums(id, title) VALUES(?, 'Base62 Album')",
-        (base62_legacy_album_id,),
-    )
-
-    # A discography-only album — never had a legacy counterpart.
-    cur.execute(
-        "INSERT INTO lib2_albums(primary_artist_id, title, legacy_album_id) "
-        "VALUES(?, 'Discography Only', NULL)", (artist_id,)
-    )
-    no_legacy_album_id = cur.lastrowid
-
+    native_album_id = cur.lastrowid
     cur.execute(
         "INSERT INTO lib2_tracks(album_id, title, legacy_track_id) "
-        "VALUES(?, 'One Dance', 701)", (album_id,)
+        "VALUES(?, 'One Dance', 701)",
+        (album_id,),
     )
     track_id = cur.lastrowid
-    cur.execute("INSERT INTO tracks(id, title) VALUES(701, 'One Dance')")
     conn.commit()
     conn.close()
 
     db = FakeDB(db_path)
     calls = []
 
-    def fake_run_enrichment(service, entity_type, legacy_id, name, artist_name):
+    def fake_native_enrich(native_conn, entity_type, entity_id, service):
+        table = {
+            "artist": "lib2_artists",
+            "album": "lib2_albums",
+            "track": "lib2_tracks",
+        }[entity_type]
+        if native_conn.execute(
+            f"SELECT 1 FROM {table} WHERE id=?", (entity_id,)
+        ).fetchone() is None:
+            raise LookupError(f"Library v2 {entity_type} {entity_id} not found")
         calls.append({
-            "service": service, "entity_type": entity_type, "legacy_id": legacy_id,
-            "name": name, "artist_name": artist_name,
+            "service": service,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
         })
-        if service == "genius" and entity_type == "album":
-            return {"success": False, "error": "Genius does not support album enrichment"}
-        # Simulate the worker having just written fresh data into the legacy row.
-        conn2 = db._get_connection()
-        if entity_type == "artist":
-            conn2.execute("UPDATE artists SET genres=? WHERE id=?", ('["rap","hip hop"]', legacy_id))
-        elif entity_type == "album":
-            conn2.execute("UPDATE albums SET label=? WHERE id=?", ("OVO Sound", legacy_id))
-        else:
-            conn2.execute("UPDATE tracks SET bpm=? WHERE id=?", (104.0, legacy_id))
-        conn2.commit()
-        conn2.close()
-        return {"success": True, "message": f"{service} lookup complete for {entity_type}"}
+        return {
+            "success": True,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "requested_source": service,
+            "source": service,
+            "provider_id": f"{service}-{entity_id}",
+        }
+
+    import core.library2.native_enrich as native_enrich
+
+    monkeypatch.setattr(
+        native_enrich,
+        "enrich_native_entity_for_service",
+        fake_native_enrich,
+    )
 
     app = flask.Flask(__name__)
     from api.library_v2 import register_library_v2_routes
+
     register_library_v2_routes(
         app,
         get_database=lambda: db,
-        config_get=lambda key, default=None: {"features.library_v2": True}.get(key, default),
+        config_get=lambda key, default=None: {
+            "features.library_v2": True,
+        }.get(key, default),
         config_manager=None,
         profile_id_getter=lambda: 1,
-        run_enrichment=fake_run_enrichment,
     )
     ids = {
-        "artist": artist_id, "album": album_id,
-        "base62_album": base62_album_id,
-        "no_legacy_album": no_legacy_album_id, "track": track_id,
+        "artist": artist_id,
+        "album": album_id,
+        "native_album": native_album_id,
+        "track": track_id,
     }
     yield app.test_client(), db, ids, calls
 
 
-def test_enrich_artist_delegates_and_resyncs(api):
-    client, db, ids, calls = api
-    resp = client.post(f"/api/library/v2/artists/{ids['artist']}/enrich",
-                       json={"service": "lastfm"})
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["success"] is True
-    assert body["resynced"] is True
-    assert calls == [{
-        "service": "lastfm", "entity_type": "artist", "legacy_id": 501,
-        "name": "Drake", "artist_name": "",
-    }]
-
-    conn = db._get_connection()
-    row = conn.execute("SELECT genres FROM lib2_artists WHERE id=?", (ids["artist"],)).fetchone()
-    conn.close()
-    assert row["genres"] == '["rap", "hip hop"]'
-
-
-def test_enrich_album_passes_artist_name_and_resyncs(api):
-    client, db, ids, calls = api
-    resp = client.post(f"/api/library/v2/albums/{ids['album']}/enrich",
-                       json={"service": "deezer"})
-    assert resp.status_code == 200
-    assert resp.get_json()["success"] is True
-    assert calls[0] == {
-        "service": "deezer", "entity_type": "album", "legacy_id": 601,
-        "name": "Views", "artist_name": "Drake",
-    }
-    conn = db._get_connection()
-    row = conn.execute("SELECT label FROM lib2_albums WHERE id=?", (ids["album"],)).fetchone()
-    conn.close()
-    assert row["label"] == "OVO Sound"
-
-
-def test_enrich_album_preserves_text_legacy_id(api):
-    client, db, ids, calls = api
-    resp = client.post(
-        f"/api/library/v2/albums/{ids['base62_album']}/enrich",
-        json={"service": "deezer"},
+@pytest.mark.parametrize(
+    ("entity", "id_key", "service", "singular"),
+    [
+        ("artists", "artist", "lastfm", "artist"),
+        ("albums", "album", "deezer", "album"),
+        ("tracks", "track", "musicbrainz", "track"),
+    ],
+)
+def test_enrich_delegates_to_native_entity_id(
+    api, entity, id_key, service, singular
+):
+    client, _db, ids, calls = api
+    response = client.post(
+        f"/api/library/v2/{entity}/{ids[id_key]}/enrich",
+        json={"service": service},
     )
 
-    assert resp.status_code == 200
-    assert resp.get_json()["resynced"] is True
-    assert calls[0]["legacy_id"] == "01MoTj8w4VkVtgdPOijUUE"
-    conn = db._get_connection()
-    row = conn.execute(
-        "SELECT label FROM lib2_albums WHERE id=?", (ids["base62_album"],)
-    ).fetchone()
-    conn.close()
-    assert row["label"] == "OVO Sound"
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["source"] == service
+    assert body["resynced"] is True
+    assert calls == [{
+        "service": service,
+        "entity_type": singular,
+        "entity_id": ids[id_key],
+    }]
 
 
-def test_enrich_track_resyncs_bpm(api):
-    client, db, ids, _calls = api
-    resp = client.post(f"/api/library/v2/tracks/{ids['track']}/enrich",
-                       json={"service": "musicbrainz"})
-    assert resp.status_code == 200
-    assert resp.get_json()["resynced"] is True
-    conn = db._get_connection()
-    row = conn.execute("SELECT bpm FROM lib2_tracks WHERE id=?", (ids["track"],)).fetchone()
-    conn.close()
-    assert row["bpm"] == 104.0
+def test_enrich_native_discography_entity_needs_no_legacy_record(api):
+    client, _db, ids, calls = api
+    response = client.post(
+        f"/api/library/v2/albums/{ids['native_album']}/enrich",
+        json={"service": "itunes"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert calls[0]["entity_id"] == ids["native_album"]
 
 
 def test_enrich_rejects_service_unsupported_for_entity_type(api):
     client, _db, ids, calls = api
-    resp = client.post(f"/api/library/v2/albums/{ids['album']}/enrich",
-                       json={"service": "genius"})
-    assert resp.status_code == 400
-    assert "does not support album" in resp.get_json()["error"]
-    assert calls == []  # rejected before ever calling the worker
+    response = client.post(
+        f"/api/library/v2/albums/{ids['album']}/enrich",
+        json={"service": "genius"},
+    )
 
-
-def test_enrich_rejects_unknown_service(api):
-    client, _db, ids, _calls = api
-    resp = client.post(f"/api/library/v2/artists/{ids['artist']}/enrich",
-                       json={"service": "not-a-real-service"})
-    assert resp.status_code == 400
-
-
-def test_enrich_requires_service(api):
-    client, _db, ids, _calls = api
-    resp = client.post(f"/api/library/v2/artists/{ids['artist']}/enrich", json={})
-    assert resp.status_code == 400
-    assert "service is required" in resp.get_json()["error"]
-
-
-def test_enrich_rejects_unsupported_entity(api):
-    client, _db, ids, _calls = api
-    resp = client.post(f"/api/library/v2/playlists/{ids['artist']}/enrich",
-                       json={"service": "lastfm"})
-    assert resp.status_code == 400
-
-
-def test_enrich_404_for_missing_entity(api):
-    client, _db, _ids, _calls = api
-    resp = client.post("/api/library/v2/artists/999999/enrich", json={"service": "lastfm"})
-    assert resp.status_code == 404
-
-
-def test_enrich_409_when_entity_has_no_legacy_record(api):
-    """A discography-only album (never imported from the legacy library) has
-    no legacy row to enrich — must be a clear, honest error, not a crash."""
-    client, _db, ids, calls = api
-    resp = client.post(f"/api/library/v2/albums/{ids['no_legacy_album']}/enrich",
-                       json={"service": "deezer"})
-    assert resp.status_code == 409
-    assert "no legacy library record" in resp.get_json()["error"]
+    assert response.status_code == 400
+    assert "does not support album" in response.get_json()["error"]
     assert calls == []
 
 
-def _insert_native_artist(db, name):
-    conn = db._get_connection()
-    cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)", (name, name)
-    )
-    conn.commit()
-    aid = cur.lastrowid
-    conn.close()
-    return aid
-
-
-def test_enrich_native_artist_resolves_by_name_and_matches(api, monkeypatch):
-    """A native artist (no legacy row) enriches via by-name provider resolution
-    instead of the old 409 dead-end."""
-    client, db, _ids, _calls = api
-    aid = _insert_native_artist(db, "Afrojack")
-
-    import core.library2.native_enrich as NE
-    monkeypatch.setattr(
-        NE, "default_artist_resolver",
-        lambda name: {"source": "spotify", "artist_id": "SP_AFRO",
-                      "name": name, "image_url": "http://img/a", "genres": []},
+def test_enrich_rejects_unknown_service(api):
+    client, _db, ids, calls = api
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/enrich",
+        json={"service": "not-a-real-service"},
     )
 
-    resp = client.post(f"/api/library/v2/artists/{aid}/enrich",
-                       json={"service": "spotify"})
-
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["success"] is True
-    assert body["source"] == "spotify"
-    conn = db._get_connection()
-    row = conn.execute(
-        "SELECT spotify_id, image_url FROM lib2_artists WHERE id=?", (aid,)
-    ).fetchone()
-    conn.close()
-    assert row["spotify_id"] == "SP_AFRO"
-    assert row["image_url"] == "http://img/a"
+    assert response.status_code == 400
+    assert calls == []
 
 
-def test_enrich_native_artist_no_provider_match_is_not_a_dead_end(api, monkeypatch):
-    """A genuine collaboration name resolves to nothing — a clear 'match
-    manually' result, not the legacy 409."""
-    client, db, _ids, _calls = api
-    aid = _insert_native_artist(db, "Big Sean and BabyTron")
+def test_enrich_requires_service(api):
+    client, _db, ids, calls = api
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/enrich", json={}
+    )
 
-    import core.library2.native_enrich as NE
-    monkeypatch.setattr(NE, "default_artist_resolver", lambda name: None)
+    assert response.status_code == 400
+    assert "service is required" in response.get_json()["error"]
+    assert calls == []
 
-    resp = client.post(f"/api/library/v2/artists/{aid}/enrich",
-                       json={"service": "spotify"})
 
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["success"] is False
-    assert body["attempted"] is True
-    assert "match it manually" in body["message"]
+def test_enrich_rejects_unsupported_entity(api):
+    client, _db, ids, calls = api
+    response = client.post(
+        f"/api/library/v2/playlists/{ids['artist']}/enrich",
+        json={"service": "lastfm"},
+    )
+
+    assert response.status_code == 400
+    assert calls == []
+
+
+def test_enrich_returns_404_for_missing_native_entity(api):
+    client, _db, _ids, calls = api
+    response = client.post(
+        "/api/library/v2/artists/999999/enrich",
+        json={"service": "lastfm"},
+    )
+
+    assert response.status_code == 404
+    assert "not found" in response.get_json()["error"]
+    assert calls == []
 
 
 def test_reconcile_unmapped_artists_endpoint_starts_a_job(api):
     client, _db, _ids, _calls = api
-    resp = client.post("/api/library/v2/maintenance/reconcile-unmapped-artists")
-    assert resp.status_code == 200
-    body = resp.get_json()
+    response = client.post(
+        "/api/library/v2/maintenance/reconcile-unmapped-artists"
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
     assert body["success"] is True
     assert body["started"] is True
     assert body["job_id"]
-
-
-def test_enrich_returns_503_when_not_wired(tmp_path):
-    """register_library_v2_routes without run_enrichment (e.g. an older
-    web_server.py wiring) must fail closed with a clear error, not 500."""
-    db_path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    from core.library2.schema import ensure_library_v2_schema
-    ensure_library_v2_schema(conn)
-    conn.execute("INSERT INTO lib2_artists(name, legacy_artist_id) VALUES('Drake', 501)")
-    artist_id = conn.execute("SELECT id FROM lib2_artists").fetchone()["id"]
-    conn.commit()
-    conn.close()
-
-    db = FakeDB(db_path)
-    app = flask.Flask(__name__)
-    from api.library_v2 import register_library_v2_routes
-    register_library_v2_routes(
-        app,
-        get_database=lambda: db,
-        config_get=lambda key, default=None: {"features.library_v2": True}.get(key, default),
-        config_manager=None,
-        profile_id_getter=lambda: 1,
-    )
-    resp = app.test_client().post(f"/api/library/v2/artists/{artist_id}/enrich",
-                                  json={"service": "lastfm"})
-    assert resp.status_code == 503

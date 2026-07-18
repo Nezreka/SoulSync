@@ -91,38 +91,13 @@ class LossyConverterJob(RepairJob):
         out_ext = CODEC_MAP.get(codec, '.mp3')
         quality_label = f'{codec.upper()}-{bitrate}'
 
-        # Get all FLAC tracks from DB
+        # Enumerate the authoritative native file index.
         tracks = []
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path,
-                       al.thumb_url, ar.thumb_url
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND {_lossless_ext_where('t.file_path')}
-            """)
-            tracks = cursor.fetchall()
-        except Exception as e:
-            logger.error("Error fetching tracks: %s", e)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
-
-        # Native Library-v2 coverage: active lossless files without a legacy
-        # backref (same extension pre-filter as the SQL above).
         native_subjects = {}
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
 
-            tracks = list(tracks)
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 file_path = str(subject["path"])
@@ -232,9 +207,9 @@ class LossyConverterJob(RepairJob):
                         'artist_thumb_url': artist_thumb or None,
                     }
                     if subject:
-                        from core.library2.maintenance_sync import v2_subject_details
+                        from core.library2.maintenance_subjects import subject_details
 
-                        finding_details.update(v2_subject_details(subject))
+                        finding_details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lossy_copy',
@@ -280,19 +255,14 @@ class LossyConverterJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-                  AND {_lossless_ext_where('file_path')}
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            return sum(
+                1 for subject in active_file_subjects(
+                    context.db, context.config_manager,
+                ) if os.path.splitext(str(subject.get("path") or ""))[1].lower()
+                in LOSSLESS_CANDIDATE_EXTENSIONS
+            )
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()

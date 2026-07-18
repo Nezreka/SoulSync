@@ -110,6 +110,21 @@ def test_non_spotify_ids_are_not_written_to_legacy_spotify_columns(imported_conn
         (result["lib2_track_id"],),
     ).fetchone()
     assert tuple(row) == (None, None, None)
+    namespaced = imported_conn.execute(
+        """SELECT t.external_ids AS track_ids,
+                  al.external_ids AS album_ids,
+                  a.external_ids AS artist_ids
+             FROM lib2_tracks t
+             JOIN lib2_albums al ON al.id=t.album_id
+             JOIN lib2_artists a ON a.id=al.primary_artist_id
+            WHERE t.id=?""",
+        (result["lib2_track_id"],),
+    ).fetchone()
+    import json
+
+    assert json.loads(namespaced["track_ids"])["deezer"] == "42"
+    assert json.loads(namespaced["album_ids"])["deezer"] == "44"
+    assert json.loads(namespaced["artist_ids"])["deezer"] == "43"
 
 
 @pytest.mark.parametrize(

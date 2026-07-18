@@ -2511,7 +2511,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # monitor_new_items enforcement: releases discovered on a re-expansion
         # of a monitored 'all'/'new' artist come back pre-monitored — give them
         # real track rows and mirror those into the wishlist (shared helper,
-        # also used by the periodic lib2_discography_refresh repair job).
+        # also used by the periodic monitored-discography refresh job).
         auto_ids = stats.pop("auto_monitor_album_ids", []) or []
         # §17.2: already-owned albums whose track numbers collided got
         # re-resolved (title-healed) in the same call, see
@@ -4153,23 +4153,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def lib2_enrich(entity, eid):
         """Re-query ONE metadata provider for one entity (docs §44).
 
-        Enrichment workers only know the LEGACY schema (see
-        ``web_server._run_single_enrichment``) — they write into
-        legacy ``artists``/``albums``/``tracks``, not ``lib2_*``. This
-        endpoint resolves the lib2 entity's legacy back-ref, delegates to the
-        same worker the legacy Enhanced View uses (no new provider
-        integration), then resyncs the refreshed fields onto the lib2 row via
-        ``core.library2.enrich.resync_entity_from_legacy`` so the UI reflects
-        it without a full re-import.
+        P3 resolves and persists directly on the native row. If a requested
+        provider facade falls back to another provider, the actual provider
+        namespace is returned and stored with its own ID.
         """
         guard = _guard()
         if guard:
             return guard
         if entity not in ("artists", "albums", "tracks"):
             return jsonify({"success": False, "error": "Unsupported entity"}), 400
-        if run_enrichment is None:
-            return jsonify({"success": False, "error": "Enrichment is not available"}), 503
-
         data = request.get_json(silent=True) or {}
         service = data.get("service")
         if not service:
@@ -4186,100 +4178,28 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         conn = _conn()
         try:
-            if singular == "artist":
-                row = conn.execute(
-                    "SELECT id, name, legacy_artist_id AS legacy_id FROM lib2_artists WHERE id=?",
-                    (eid,),
-                ).fetchone()
-                artist_name = ""
-            elif singular == "album":
-                row = conn.execute(
-                    """SELECT al.id, al.title AS name, al.legacy_album_id AS legacy_id,
-                              ar.name AS artist_name
-                         FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                        WHERE al.id=?""",
-                    (eid,),
-                ).fetchone()
-                artist_name = row["artist_name"] if row else ""
-            else:
-                row = conn.execute(
-                    """SELECT t.id, t.title AS name, t.legacy_track_id AS legacy_id,
-                              ar.name AS artist_name
-                         FROM lib2_tracks t
-                         JOIN lib2_albums al ON al.id = t.album_id
-                         JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                        WHERE t.id=?""",
-                    (eid,),
-                ).fetchone()
-                artist_name = row["artist_name"] if row else ""
-            if row is None:
-                return jsonify({"success": False,
-                                "error": f"{singular.capitalize()} {eid} not found"}), 404
-            legacy_id = row["legacy_id"]
-            name = row["name"]
+            from core.library2.native_enrich import enrich_native_entity_for_service
+            result = enrich_native_entity_for_service(
+                conn, singular, eid, str(service),
+            )
+            conn.commit()
+        except LookupError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 404
+        except Exception as exc:  # noqa: BLE001
+            conn.rollback()
+            logger.debug("native enrich failed (%s %s): %s", entity, eid, exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
         finally:
             conn.close()
-
-        if legacy_id is None:
-            if singular == "artist":
-                # Native artist (featured credit / wishlist / discography): it
-                # has no legacy row, so the legacy enrichment workers can never
-                # reach it. Resolve its provider identity by name and write the
-                # id + artwork straight onto the lib2 row instead. The specific
-                # ``service`` chip is not honored here — native resolve is
-                # holistic across the source-priority chain.
-                conn = _conn()
-                try:
-                    from core.library2.native_enrich import (
-                        resolve_and_enrich_native_artist,
-                    )
-                    native = resolve_and_enrich_native_artist(conn, eid)
-                    conn.commit()
-                except Exception as exc:  # noqa: BLE001
-                    conn.rollback()
-                    logger.debug("native artist enrich failed (%s): %s", eid, exc)
-                    return jsonify({
-                        "success": False, "error": "Native enrichment failed",
-                    }), 500
-                finally:
-                    conn.close()
-                if native.get("success"):
-                    return jsonify({
-                        "success": True,
-                        "message": f"Resolved via {native.get('source')}",
-                        "resynced": True,
-                        "source": native.get("source"),
-                    })
-                return jsonify({
-                    "success": False,
-                    "attempted": True,
-                    "message": ("No metadata provider has this artist as a single "
-                                "entity — match it manually."),
-                })
-            return jsonify({
-                "success": False,
-                "error": ("This entry has no legacy library record to enrich "
-                          "(it was added via Update Discography)."),
-            }), 409
-
-        result = run_enrichment(service, singular, legacy_id, name, artist_name)
-
-        resynced = False
-        if result.get("success"):
-            conn = _conn()
-            try:
-                from core.library2.enrich import resync_entity_from_legacy
-                resynced = resync_entity_from_legacy(conn, singular, eid, legacy_id)
-                conn.commit()
-            except Exception as e:  # noqa: BLE001
-                logger.debug("enrich resync failed (%s %s): %s", entity, eid, e)
-            finally:
-                conn.close()
-
         return jsonify({
-            "success": bool(result.get("success")),
-            "message": result.get("message") or result.get("error"),
-            "resynced": resynced,
+            **result,
+            "message": (
+                f"Resolved via {result.get('source')}"
+                if result.get("success")
+                else "No matching provider entity found"
+            ),
+            "resynced": bool(result.get("success")),
         })
 
     # -- importer -------------------------------------------------------------

@@ -44,10 +44,9 @@ def _fake_resolver(monkeypatch):
     monkeypatch.setattr(cvr, "resolve_and_store_canonical_for_album", fake)
 
 
-def test_job_is_registered():
+def test_job_is_retired_from_p3_registry():
     jobs = get_all_jobs()  # {job_id: cls}
-    assert "canonical_version_resolve" in jobs
-    assert jobs["canonical_version_resolve"] is CanonicalVersionResolveJob
+    assert "canonical_version_resolve" not in jobs
 
 
 def test_job_is_opt_in_and_dry_run_by_default():

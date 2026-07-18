@@ -14,7 +14,9 @@ class _DB:
         self.path = path
 
     def _get_connection(self):
-        return sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 class _Config:
@@ -29,33 +31,59 @@ class _Config:
 
 def _seed_library(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     try:
+        from core.library2.schema import ensure_library_v2_schema
+
+        ensure_library_v2_schema(conn)
         conn.executescript(
             """
-            CREATE TABLE artists (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL
-            );
-            CREATE TABLE albums (
-                id INTEGER PRIMARY KEY,
-                artist_id INTEGER NOT NULL,
-                title TEXT NOT NULL
-            );
-            CREATE TABLE tracks (
-                id INTEGER PRIMARY KEY,
-                album_id INTEGER NOT NULL,
-                artist_id INTEGER NOT NULL,
-                title TEXT NOT NULL,
-                file_path TEXT
-            );
-            INSERT INTO artists (id, name) VALUES
+            INSERT INTO lib2_artists (id, name) VALUES
                 (1, 'Clouddead89'),
                 (2, 'Featured Artist');
-            INSERT INTO albums (id, artist_id, title) VALUES
+            INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES
                 (10, 1, 'Perfect Match Error');
-            INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES
-                (100, 10, 2, 'Perfect Match', '/old/prefix/elsewhere.mp3');
+            INSERT INTO lib2_album_artists(album_id, artist_id, role)
+                VALUES(10, 1, 'primary');
+            INSERT INTO lib2_tracks (id, album_id, title) VALUES
+                (100, 10, 'Perfect Match');
+            INSERT INTO lib2_track_artists(track_id, artist_id, role, position)
+                VALUES(100, 2, 'primary', 0);
+            INSERT INTO lib2_track_files(id, track_id, path, file_state)
+                VALUES(100, 100, '/old/prefix/elsewhere.mp3', 'active');
             """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_native_file(db_path: Path, audio_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO lib2_artists(id, name) VALUES(3, 'Lib2 Artist')"
+        )
+        conn.execute(
+            "INSERT INTO lib2_albums(id, primary_artist_id, title) "
+            "VALUES(11, 3, 'Lib2 Album')"
+        )
+        conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+            "VALUES(11, 3, 'primary')"
+        )
+        conn.execute(
+            "INSERT INTO lib2_tracks(id, album_id, title) "
+            "VALUES(101, 11, 'Lib2 Song')"
+        )
+        conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+            "VALUES(101, 3, 'primary', 0)"
+        )
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, file_state) "
+            "VALUES(101, ?, 'active')",
+            (str(audio_path),),
         )
         conn.commit()
     finally:
@@ -82,7 +110,7 @@ def test_mass_orphan_path_mismatch_creates_no_findings(tmp_path: Path) -> None:
     context = JobContext(
         db=_DB(db_path),
         transfer_folder=str(tmp_path),
-        config_manager=None,
+        config_manager=_Config(True),
         create_finding=lambda **kwargs: findings.append(kwargs) or True,
     )
 
@@ -109,7 +137,7 @@ def test_small_orphan_set_still_surfaces(tmp_path: Path) -> None:
     context = JobContext(
         db=_DB(db_path),
         transfer_folder=str(tmp_path),
-        config_manager=None,
+        config_manager=_Config(True),
         create_finding=lambda **kwargs: findings.append(kwargs) or True,
     )
 
@@ -138,7 +166,7 @@ def test_orphan_detector_accepts_picard_albumartist_folder_match(tmp_path: Path)
     context = JobContext(
         db=_DB(db_path),
         transfer_folder=str(tmp_path),
-        config_manager=None,
+        config_manager=_Config(True),
         create_finding=lambda **kwargs: findings.append(kwargs) or True,
     )
 
@@ -149,39 +177,14 @@ def test_orphan_detector_accepts_picard_albumartist_folder_match(tmp_path: Path)
     assert findings == []
 
 
-def test_library_v2_schema_is_ignored_when_feature_is_disabled(tmp_path: Path) -> None:
-    """Persisted v2 tables must not silently opt legacy tools into v2."""
+def test_native_job_is_gated_when_library_v2_is_disabled(tmp_path: Path) -> None:
     db_path = tmp_path / "library.sqlite"
     _seed_library(db_path)
     audio_path = tmp_path / "Lib2 Artist" / "Lib2 Album" / "01 - Lib2 Song.mp3"
     audio_path.parent.mkdir(parents=True)
     audio_path.write_bytes(b"not a real mp3")
 
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-            CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, title TEXT NOT NULL);
-            CREATE TABLE lib2_track_artists (track_id INTEGER, artist_id INTEGER);
-            CREATE TABLE lib2_track_files (
-                id INTEGER PRIMARY KEY,
-                track_id INTEGER NOT NULL,
-                path TEXT,
-                file_state TEXT DEFAULT 'active'
-            );
-            INSERT INTO lib2_artists(id, name) VALUES(1, 'Lib2 Artist');
-            INSERT INTO lib2_tracks(id, title) VALUES(1, 'Lib2 Song');
-            INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(1, 1);
-            """
-        )
-        conn.execute(
-            "INSERT INTO lib2_track_files(track_id, path) VALUES(1, ?)",
-            (str(audio_path),),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    _insert_native_file(db_path, audio_path)
 
     findings = []
     context = JobContext(
@@ -193,9 +196,9 @@ def test_library_v2_schema_is_ignored_when_feature_is_disabled(tmp_path: Path) -
 
     result = OrphanFileDetectorJob().scan(context)
 
-    assert result.scanned == 1
-    assert result.findings_created == 1
-    assert findings[0]['finding_type'] == 'orphan_file'
+    assert result.scanned == 0
+    assert result.findings_created == 0
+    assert findings == []
 
 
 def test_library_v2_only_file_is_not_reported_as_orphan(tmp_path: Path) -> None:
@@ -206,31 +209,7 @@ def test_library_v2_only_file_is_not_reported_as_orphan(tmp_path: Path) -> None:
     audio_path.parent.mkdir(parents=True)
     audio_path.write_bytes(b"not a real mp3; exact lib2 path is sufficient")
 
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-            CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, title TEXT NOT NULL);
-            CREATE TABLE lib2_track_artists (track_id INTEGER, artist_id INTEGER);
-            CREATE TABLE lib2_track_files (
-                id INTEGER PRIMARY KEY,
-                track_id INTEGER NOT NULL,
-                path TEXT,
-                file_state TEXT DEFAULT 'active'
-            );
-            INSERT INTO lib2_artists(id, name) VALUES(1, 'Lib2 Artist');
-            INSERT INTO lib2_tracks(id, title) VALUES(1, 'Lib2 Song');
-            INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(1, 1);
-            """
-        )
-        conn.execute(
-            "INSERT INTO lib2_track_files(track_id, path) VALUES(1, ?)",
-            (str(audio_path),),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    _insert_native_file(db_path, audio_path)
 
     findings = []
     context = JobContext(

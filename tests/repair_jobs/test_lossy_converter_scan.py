@@ -23,6 +23,36 @@ from core.repair_jobs.base import JobContext
 from core.repair_jobs.lossy_converter import LossyConverterJob
 
 
+@pytest.fixture(autouse=True)
+def _native_subject_boundary(monkeypatch):
+    """Feed the scanner native subject rows; it must never query old tracks."""
+
+    def subjects(database, _config_manager, **_kwargs):
+        result = []
+        for row in database._rows:
+            track_id, title, artist, album, path, album_image, artist_image = row
+            result.append({
+                "file_id": track_id,
+                "track_id": track_id,
+                "album_id": 1,
+                "artist_id": 1,
+                "title": title,
+                "artist_name": artist,
+                "album_title": album,
+                "path": path,
+                "album_image": album_image,
+                "artist_image": artist_image,
+                "track_source_ids": {},
+                "album_source_ids": {},
+                "artist_source_ids": {},
+            })
+        return result
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects", subjects
+    )
+
+
 class _FakeCursor:
     def __init__(self, rows):
         self._rows = rows
@@ -61,6 +91,7 @@ def _row(track_id, title, path):
 def _context(rows, tmp_path: Path):
     cfg = MagicMock()
     values = {
+        "features.library_v2": True,
         "lossy_copy.enabled": True,
         "lossy_copy.codec": "opus",
         "lossy_copy.bitrate": "256",

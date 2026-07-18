@@ -10,48 +10,35 @@ logger = get_logger("repair_jobs")
 # Registry populated at import time by each job module
 JOB_REGISTRY: dict[str, type[RepairJob]] = {}
 
-# Exhaustive, reviewable declaration of which catalogue/data source each job
-# scans. ``mixed`` means the legacy catalogue plus files on disk; provider
-# lookups do not change a job's catalogue basis. Operational cache/directory
-# jobs are classified as ``filesystem`` because they do not scan either music
-# catalogue. Registration fails when a new job has no deliberate entry here.
-REPAIR_DATA_BASES = frozenset({'legacy', 'lib2', 'filesystem', 'mixed'})
+# P3 invariant: a registered catalogue job reads Library v2.  Pure operational
+# jobs may read the filesystem only; the old ``legacy``/``mixed`` bases are no
+# longer valid registration choices.
+REPAIR_DATA_BASES = frozenset({'lib2', 'filesystem'})
 JOB_DATA_BASIS: dict[str, str] = {
-    'track_number_repair': 'mixed',
+    'track_number_repair': 'lib2',
     'cache_evictor': 'filesystem',
-    'orphan_file_detector': 'mixed',
-    'dead_file_cleaner': 'mixed',
-    'duplicate_detector': 'legacy',
-    'acoustid_scanner': 'mixed',
-    'missing_cover_art': 'mixed',
-    'missing_lyrics': 'mixed',
-    'replaygain_filler': 'mixed',
+    'orphan_file_detector': 'lib2',
+    'dead_file_cleaner': 'lib2',
+    'acoustid_scanner': 'lib2',
+    'missing_cover_art': 'lib2',
+    'missing_lyrics': 'lib2',
+    'replaygain_filler': 'lib2',
     'empty_folder_cleaner': 'filesystem',
-    'expired_download_cleaner': 'mixed',
-    'metadata_gap_filler': 'legacy',
-    'album_completeness': 'legacy',
-    'fake_lossless_detector': 'filesystem',
-    'library_reorganize': 'mixed',
-    'mbid_mismatch_detector': 'mixed',
-    'single_album_dedup': 'legacy',
-    'lossy_converter': 'mixed',
-    'album_tag_consistency': 'mixed',
-    'live_commentary_cleaner': 'legacy',
-    'unknown_artist_fixer': 'mixed',
-    'canonical_version_resolve': 'legacy',
-    'library_retag': 'mixed',
-    'short_preview_track': 'legacy',
-    'lib2_upgrade_scan': 'lib2',
-    'lib2_skips_cleanup': 'lib2',
-    'lib2_discography_refresh': 'lib2',
-    'lib2_mirror_reconcile': 'lib2',
-    'lib2_wishlist_reconcile': 'lib2',
-    'audio_corruption_detector': 'mixed',
+    'metadata_gap_filler': 'lib2',
+    'fake_lossless_detector': 'lib2',
+    'lossy_converter': 'lib2',
+    'album_tag_consistency': 'lib2',
+    'live_commentary_cleaner': 'lib2',
+    'short_preview_track': 'lib2',
+    'quality_upgrade_scan': 'lib2',
+    'skip_audit_cleanup': 'lib2',
+    'monitored_discography_refresh': 'lib2',
+    'audio_corruption_detector': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
 # where a job currently reads; this manifest says what a successful run/fix can
-# change and therefore what the optional Library-v2 bridge must reconcile.  It
+# change and therefore what the native Library-v2 lifecycle must reconcile. It
 # deliberately lives next to the registry so adding a job without considering
 # Library v2 fails at import time instead of silently shipping another stale
 # cache/path/history boundary.
@@ -63,7 +50,7 @@ LIBRARY_V2_EFFECTS = frozenset({
     'artwork',       # embedded/sidecar/provider artwork and lib2 art cache
     'path',          # file rename/move
     'new_file',      # a new derivative/imported file may be created
-    'delete',        # file or legacy row may be removed
+    'delete',        # file or native catalogue row may be removed
     'wanted',        # wishlist/upgrade/monitor projection changes
     'discography',   # provider catalogue expansion/backfill
 })
@@ -73,31 +60,20 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'cache_evictor': frozenset({'none'}),
     'orphan_file_detector': frozenset({'observe', 'path', 'new_file', 'delete'}),
     'dead_file_cleaner': frozenset({'observe', 'delete'}),
-    'duplicate_detector': frozenset({'observe', 'delete'}),
     'acoustid_scanner': frozenset({'observe', 'tags', 'metadata'}),
     'missing_cover_art': frozenset({'observe', 'metadata', 'tags', 'artwork'}),
     'missing_lyrics': frozenset({'observe', 'tags'}),
     'replaygain_filler': frozenset({'observe', 'tags'}),
     'empty_folder_cleaner': frozenset({'none'}),
-    'expired_download_cleaner': frozenset({'observe', 'delete', 'wanted'}),
     'metadata_gap_filler': frozenset({'observe', 'metadata', 'tags'}),
-    'album_completeness': frozenset({'observe', 'metadata', 'tags', 'new_file', 'wanted'}),
     'fake_lossless_detector': frozenset({'observe'}),
-    'library_reorganize': frozenset({'observe', 'metadata', 'tags', 'path'}),
-    'mbid_mismatch_detector': frozenset({'observe', 'metadata', 'tags'}),
-    'single_album_dedup': frozenset({'observe', 'delete', 'wanted'}),
     'lossy_converter': frozenset({'observe', 'new_file', 'tags'}),
     'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
-    'unknown_artist_fixer': frozenset({'observe', 'metadata', 'tags', 'artwork', 'path'}),
-    'canonical_version_resolve': frozenset({'observe', 'metadata'}),
-    'library_retag': frozenset({'observe', 'metadata', 'tags', 'artwork'}),
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
-    'lib2_upgrade_scan': frozenset({'observe', 'wanted'}),
-    'lib2_skips_cleanup': frozenset({'none'}),
-    'lib2_discography_refresh': frozenset({'discography', 'wanted'}),
-    'lib2_mirror_reconcile': frozenset({'wanted'}),
-    'lib2_wishlist_reconcile': frozenset({'wanted'}),
+    'quality_upgrade_scan': frozenset({'observe', 'wanted'}),
+    'skip_audit_cleanup': frozenset({'none'}),
+    'monitored_discography_refresh': frozenset({'discography', 'wanted'}),
     'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
 }
 
@@ -106,16 +82,44 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
 # leftover pending findings deterministically — never inferred from "not in
 # registry", which would also hit jobs that merely failed to import.
 RETIRED_JOB_IDS = frozenset({
-    'quality_upgrade_scanner',  # -> lib2_upgrade_scan mode='review'
-    'quality_upgrade',          # -> lib2_upgrade_scan mode='automatic'
-    'discography_backfill',     # -> lib2_discography_refresh + Wanted views
+    'quality_upgrade_scanner',
+    'quality_upgrade',
+    'discography_backfill',
+    'duplicate_detector',
+    'expired_download_cleaner',
+    'album_completeness',
+    'library_reorganize',
+    'mbid_mismatch_detector',
+    'single_album_dedup',
+    'unknown_artist_fixer',
+    'canonical_version_resolve',
+    'library_retag',
+    'lib2_mirror_reconcile',
+    'lib2_wishlist_reconcile',
+    # Stable P1/P2 identities renamed neutrally at the P3 boundary.
+    'lib2_upgrade_scan',
+    'lib2_skips_cleanup',
+    'lib2_discography_refresh',
 })
+
+# Read-only compatibility for saved settings/automation references.  Runtime
+# registration and API responses expose only the neutral identities.
+JOB_ID_MIGRATIONS = {
+    'lib2_upgrade_scan': 'quality_upgrade_scan',
+    'lib2_skips_cleanup': 'skip_audit_cleanup',
+    'lib2_discography_refresh': 'monitored_discography_refresh',
+}
 
 _imports_done = False
 
 
 def register_job(cls: type[RepairJob]) -> type[RepairJob]:
     """Decorator to register a RepairJob subclass."""
+    # Retired modules remain importable during the rollback window and for
+    # focused algorithm tests, but importing one must never re-introduce its
+    # superseded job identity into the runtime registry.
+    if cls.job_id in RETIRED_JOB_IDS:
+        return cls
     basis = JOB_DATA_BASIS.get(cls.job_id)
     if basis not in REPAIR_DATA_BASES:
         raise ValueError(f"Repair job {cls.job_id!r} has no valid data-basis declaration")
@@ -145,32 +149,23 @@ _JOB_MODULES = [
     'core.repair_jobs.cache_evictor',
     'core.repair_jobs.orphan_file_detector',
     'core.repair_jobs.dead_file_cleaner',
-    'core.repair_jobs.duplicate_detector',
     'core.repair_jobs.acoustid_scanner',
     'core.repair_jobs.missing_cover_art',
     'core.repair_jobs.missing_lyrics',
     'core.repair_jobs.replaygain_filler',
     'core.repair_jobs.empty_folder_cleaner',
-    'core.repair_jobs.expired_download_cleaner',
     'core.repair_jobs.metadata_gap_filler',
-    'core.repair_jobs.album_completeness',
     'core.repair_jobs.fake_lossless_detector',
-    'core.repair_jobs.library_reorganize',
-    'core.repair_jobs.mbid_mismatch_detector',
-    'core.repair_jobs.single_album_dedup',
     'core.repair_jobs.lossy_converter',
     'core.repair_jobs.album_tag_consistency',
     'core.repair_jobs.live_commentary_cleaner',
-    'core.repair_jobs.unknown_artist_fixer',
-    'core.repair_jobs.canonical_version_resolve',
-    'core.repair_jobs.library_retag',
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',
     'core.repair_jobs.lib2_upgrade_scan',
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
-    'core.repair_jobs.lib2_mirror_reconcile',
-    'core.repair_jobs.lib2_wishlist_reconcile',
+    # Overrides mature job identities with P3-native catalogue boundaries.
+    'core.repair_jobs.native_p3',
 ]
 
 

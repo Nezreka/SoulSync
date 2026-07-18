@@ -373,3 +373,8 @@ def test_source_marked_payload_stores_id_in_its_own_namespace(imported_conn):
     ).fetchone()
     assert artist["spotify_id"] is None
     assert _json.loads(artist["external_ids"])["deezer"] == "1315147"
+    track = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_tracks WHERE title='JP Song'"
+    ).fetchone()
+    assert track["spotify_id"] is None
+    assert _json.loads(track["external_ids"])["deezer"] == "999111"

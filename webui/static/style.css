@@ -55264,33 +55264,6 @@ tr.tag-diff-same {
     flex-wrap: wrap;
 }
 
-.repair-job-basis {
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 999px;
-    color: #94a3b8;
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    padding: 1px 6px;
-    text-transform: uppercase;
-    white-space: nowrap;
-}
-
-.repair-job-basis-lib2 {
-    border-color: rgba(var(--accent-rgb), 0.35);
-    color: rgb(var(--accent-light-rgb, 129, 140, 248));
-}
-
-.repair-job-basis-mixed {
-    border-color: rgba(250, 204, 21, 0.24);
-    color: #fbbf24;
-}
-
-.repair-job-basis-filesystem {
-    border-color: rgba(74, 222, 128, 0.24);
-    color: #4ade80;
-}
-
 .repair-job-desc {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.35);

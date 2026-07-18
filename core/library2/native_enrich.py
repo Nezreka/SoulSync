@@ -1,4 +1,4 @@
-"""Resolve + enrich Library-v2 *native* artists (no legacy back-reference).
+"""Resolve + enrich native Library-v2 entities.
 
 Artists born inside lib2 — featured credits (``_featured_names_for_import``),
 wishlist rows, discography discoveries — carry ``legacy_artist_id = NULL``. The
@@ -17,8 +17,8 @@ match-status chips flip to ``matched`` (``match_status`` synthesizes them from
 the row's own ``spotify_id``/``external_ids``) and the artist becomes eligible
 for the normal discography/artwork pipeline.
 
-Legacy-backed artists are intentionally rejected here — they keep using the
-established legacy enrichment path so its columns stay authoritative.
+P3 always writes the Library-v2 row. Legacy back-references may still exist
+during the rollback window, but they are not an enrichment authority.
 """
 
 from __future__ import annotations
@@ -111,17 +111,12 @@ def resolve_and_enrich_native_artist(
         resolver = default_artist_resolver
 
     row = conn.execute(
-        "SELECT id, name, legacy_artist_id, spotify_id, musicbrainz_id, external_ids "
+        "SELECT id, name, spotify_id, musicbrainz_id, external_ids "
         "FROM lib2_artists WHERE id=?",
         (int(artist_id),),
     ).fetchone()
     if row is None:
         raise LookupError(f"Library v2 artist {artist_id} not found")
-    if row["legacy_artist_id"] is not None:
-        raise ValueError(
-            f"Library v2 artist {artist_id} is legacy-backed; use the legacy enrich path"
-        )
-
     name = str(row["name"] or "").strip()
     identity = resolver(name) if name else None
     source = str((identity or {}).get("source") or "").strip().lower()
@@ -206,6 +201,166 @@ def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[s
 
     result = fetch_artwork_url("artist", artist_name=name, source_ids=source_ids)
     return result.url if result is not None else None
+
+
+def enrich_native_entity_for_service(
+    conn: Any,
+    entity_type: str,
+    entity_id: int,
+    service: str,
+    *,
+    searcher: Optional[Callable[[str, str, str], List[Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
+    """Refresh one entity from one requested provider, without a legacy row.
+
+    Search results may explicitly report a different provider when a client
+    fell back. That provider namespace is persisted and returned; a Deezer or
+    iTunes ID can therefore never enter the Spotify slot merely because the
+    Spotify facade initiated the request.
+    """
+
+    from difflib import SequenceMatcher
+    import re
+
+    canonical = {
+        "artist": "artist", "artists": "artist",
+        "album": "album", "albums": "album",
+        "track": "track", "tracks": "track",
+    }.get(str(entity_type))
+    if canonical is None:
+        raise ValueError(f"Unsupported entity type: {entity_type}")
+    service = str(service or "").strip().lower()
+
+    if canonical == "artist":
+        row = conn.execute(
+            "SELECT id, name, spotify_id, musicbrainz_id, external_ids "
+            "FROM lib2_artists WHERE id=?", (int(entity_id),),
+        ).fetchone()
+        artist_name = str(row["name"] or "") if row else ""
+        album_title = None
+    elif canonical == "album":
+        row = conn.execute(
+            """SELECT al.id, al.title AS name, al.spotify_id,
+                      al.musicbrainz_id, al.external_ids, ar.name AS artist_name
+                 FROM lib2_albums al
+                 LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+                WHERE al.id=?""",
+            (int(entity_id),),
+        ).fetchone()
+        artist_name = str(row["artist_name"] or "") if row else ""
+        album_title = str(row["name"] or "") if row else ""
+    else:
+        row = conn.execute(
+            """SELECT t.id, t.title AS name, t.spotify_id,
+                      t.musicbrainz_id, t.external_ids, ar.name AS artist_name,
+                      al.title AS album_title, t.album_id
+                 FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id
+                 LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+                WHERE t.id=?""",
+            (int(entity_id),),
+        ).fetchone()
+        artist_name = str(row["artist_name"] or "") if row else ""
+        album_title = str(row["album_title"] or "") if row else ""
+    if row is None:
+        raise LookupError(f"Library v2 {canonical} {entity_id} not found")
+
+    source_ids = _stored_source_ids(row)
+    provider_id = source_ids.get(service)
+    actual_source = service
+    hit: Dict[str, Any] = {}
+    if not provider_id:
+        if searcher is None:
+            from core.library.service_search import _search_service
+            searcher = _search_service
+        query = str(row["name"] or "")
+        if canonical != "artist" and artist_name:
+            query = f"{artist_name} - {query}"
+        candidates = searcher(service, canonical, query) or []
+
+        def normalized(value: Any) -> str:
+            return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+
+        wanted = normalized(row["name"])
+        ranked = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict) or not candidate.get("id"):
+                continue
+            score = SequenceMatcher(
+                None, wanted, normalized(candidate.get("name")),
+            ).ratio()
+            if score >= 0.72:
+                ranked.append((score, candidate))
+        if not ranked:
+            return {
+                "success": False, "attempted": True,
+                "entity_type": canonical, "entity_id": int(entity_id),
+                "reason": "not_found", "source": service,
+            }
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        hit = ranked[0][1]
+        provider_id = str(hit["id"]).strip()
+        actual_source = str(hit.get("provider") or service).strip().lower()
+
+    from core.library2.match_status import set_library_v2_match
+    set_library_v2_match(
+        conn, canonical, int(entity_id), actual_source, provider_id,
+        actor="native_enrichment",
+    )
+
+    image_url = str(hit.get("image") or "").strip() or None
+    if canonical == "artist":
+        if not image_url:
+            image_url = default_artwork_fetcher(
+                artist_name, {actual_source: provider_id},
+            )
+        if image_url:
+            conn.execute(
+                "UPDATE lib2_artists SET image_url=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?", (image_url, int(entity_id)),
+            )
+    elif canonical == "album":
+        if not image_url:
+            from core.library2.provider_adapters import fetch_artwork_url
+            artwork = fetch_artwork_url(
+                "album",
+                artist_name=artist_name,
+                album_title=album_title,
+                source_ids={actual_source: provider_id},
+                source_order=(actual_source,),
+            )
+            image_url = artwork.url if artwork else None
+        if image_url:
+            conn.execute(
+                "UPDATE lib2_albums SET image_url=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?", (image_url, int(entity_id)),
+            )
+    else:
+        from core.library2.provider_adapters import fetch_track_metadata
+        metadata = fetch_track_metadata(
+            {actual_source: provider_id}, source_order=(actual_source,),
+        )
+        if metadata and metadata.duration_ms is not None:
+            conn.execute(
+                "UPDATE lib2_tracks SET duration=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?", (metadata.duration_ms, int(entity_id)),
+            )
+        image_url = metadata.image_url if metadata else image_url
+        if image_url and row["album_id"]:
+            conn.execute(
+                "UPDATE lib2_albums SET image_url=COALESCE(image_url, ?), "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (image_url, int(row["album_id"])),
+            )
+
+    return {
+        "success": True,
+        "entity_type": canonical,
+        "entity_id": int(entity_id),
+        "requested_source": service,
+        "source": actual_source,
+        "provider_id": provider_id,
+        "image_url": image_url,
+    }
 
 
 def _get_or_create_component_artist(
@@ -469,21 +624,18 @@ def reconcile_unmapped_native_artists(
     stats = {"scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0}
     for index, art in enumerate(artists):
         artist_id = art["id"]
-        legacy_artist_id = art["legacy_artist_id"]
         try:
             stats["scanned"] += 1
-            if legacy_artist_id is None:
-                # Native artist: try single-entity resolve first
-                result = resolve_and_enrich_native_artist(conn, artist_id, resolver=resolver)
-                if result.get("success"):
-                    stats["matched"] += 1
-                    if progress is not None:
-                        progress(index + 1, total)
-                    else:
-                        conn.commit()
-                    continue
-            
-            # Legacy-backed (or native single-entity match failed): try to split
+            result = resolve_and_enrich_native_artist(conn, artist_id, resolver=resolver)
+            if result.get("success"):
+                stats["matched"] += 1
+                if progress is not None:
+                    progress(index + 1, total)
+                else:
+                    conn.commit()
+                continue
+
+            # Single-entity match failed: try a conservative collaboration split.
             if smart_split_combined_artist(conn, artist_id, resolver=resolver):
                 stats["split"] += 1
             else:
@@ -503,8 +655,8 @@ def reconcile_unmapped_native_artists(
             if progress is not None:
                 try:
                     progress(index + 1, total)
-                except Exception:
-                    pass
+                except Exception as progress_exc:
+                    logger.debug("reconcile progress callback failed: %s", progress_exc)
     return stats
 
 
@@ -520,6 +672,7 @@ def default_artist_resolver(name: str) -> Optional[Dict[str, Any]]:
 
 
 __all__ = [
+    "enrich_native_entity_for_service",
     "resolve_and_enrich_native_artist",
     "reconcile_unmapped_native_artists",
     "smart_split_combined_artist",

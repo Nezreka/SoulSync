@@ -323,14 +323,13 @@ class AlbumTagConsistencyJob(RepairJob):
 
     def _scan_native_albums(self, context: JobContext, result: JobResult,
                             check_album: bool, check_artist: bool, check_mbid: bool):
-        """Native Library-v2 coverage: releases without a legacy backref, read
-        via the shared V2 file-subject enumerator (grouped per album)."""
+        """Library-v2 releases grouped by their native file subjects."""
         try:
-            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.maintenance_subjects import active_file_subjects
             from core.library2.paths import resolve_lib2_path
 
             albums = {}
-            for subject in v2_uncovered_file_subjects(
+            for subject in active_file_subjects(
                 context.db, context.config_manager,
             ):
                 albums.setdefault(subject['album_id'], []).append(subject)

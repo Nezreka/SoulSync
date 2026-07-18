@@ -25,17 +25,14 @@ def test_scoped_jobs_declare_support():
     for job_id in (
         "metadata_gap_filler",
         "album_tag_consistency",
-        "library_retag",
-        "library_reorganize",
-        "single_album_dedup",
     ):
         assert registry[job_id].supports_artist_scope is True, job_id
-    # Semantically artist-scoping can't apply here (tracks ARE Unknown Artist).
-    assert registry["unknown_artist_fixer"].supports_artist_scope is False
 
 
-def test_lib2_jobs_registered():
+def test_native_jobs_use_neutral_ids():
     from core.repair_jobs import get_all_jobs
     registry = get_all_jobs()
-    assert "lib2_upgrade_scan" in registry
-    assert "lib2_skips_cleanup" in registry
+    assert "quality_upgrade_scan" in registry
+    assert "skip_audit_cleanup" in registry
+    assert "monitored_discography_refresh" in registry
+    assert not any(job_id.startswith("lib2_") for job_id in registry)

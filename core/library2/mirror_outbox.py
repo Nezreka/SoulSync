@@ -109,14 +109,26 @@ def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
                              profile_id: int = 1) -> List[int]:
     """Queue a watchlist add/remove mirror for a lib2 artist (same-transaction)."""
     row = conn.execute(
-        "SELECT name, spotify_id, musicbrainz_id FROM lib2_artists WHERE id=?",
+        "SELECT name, spotify_id, musicbrainz_id, external_ids "
+        "FROM lib2_artists WHERE id=?",
         (artist_id,)).fetchone()
     if not row:
         return []
-    ext = row["spotify_id"] or row["musicbrainz_id"]
+    from core.library2.provider_ids import (
+        preferred_provider_identity,
+        source_ids_from_values,
+    )
+    from core.metadata.registry import get_primary_source, get_source_priority
+    source, ext = preferred_provider_identity(
+        source_ids_from_values(
+            spotify_id=row["spotify_id"],
+            musicbrainz_id=row["musicbrainz_id"],
+            external_ids=row["external_ids"],
+        ),
+        get_source_priority(get_primary_source()),
+    )
     if not ext:
         return []  # no external id → stays lib2-local only
-    source = "spotify" if row["spotify_id"] else "musicbrainz"
     op = "watchlist_add" if monitored else "watchlist_remove"
     data = {"ext": ext, "name": row["name"], "source": source}
     cur = conn.execute(

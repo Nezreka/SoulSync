@@ -1,14 +1,23 @@
 # Library v2 — Tool-Integration-Audit und Migrationsplan (2026-07-18)
 
+> **Aktueller Stand — P3 Runtime umgesetzt am 2026-07-18.** Die Abschnitte 3–6
+> dokumentieren den historischen Ausgangspunkt und die P0–P2-Entscheidungen.
+> Der verbindliche P3-Endzustand steht in Abschnitt 7: 19 registrierte Jobs,
+> keine registrierte Legacy-/Mixed-Datenbasis, native Library-v2-Subjects und
+> neutrale Job-IDs. Zusätzlich offen ist der automatische Initialimport für
+> Bestandsinstallationen; die physische Entfernung der `legacy_*`-Spalten und
+> des Importers bleibt gemäß geplantem Datenmigrations-/Rollback-Fenster offen.
+
 ## 1. Ziel und Ergebnis
 
-Dieser Deep Dive prüft alle 33 im Repair-Worker registrierten Tools gegen die
-optionale Library v2. Geprüft wurden nicht nur deren Namen und UI-Karten,
+Dieser Deep Dive prüfte ursprünglich alle 33 im Repair-Worker registrierten
+Tools gegen die optionale Library v2. P3 hat die Runtime-Registry auf 19
+native bzw. rein operative Jobs konsolidiert. Geprüft wurden nicht nur Namen und UI-Karten,
 sondern Scanner-Datenbasis, Findings, Fix-Handler, automatische Mutationen,
 Dateioperationen, Quality-/Wanted-Folgen, Artwork-Cache, History und das
 Feature-Gating.
 
-Das wichtigste Ergebnis ist eine klare Trennung:
+Das historische Zwischenergebnis war eine klare Trennung:
 
 1. **Übergangssicherheit:** Ein Legacy-Tool darf bei aktivierter Library v2
    keinen gemappten Artist/Album/Track/File-Zustand stale zurücklassen. Diese
@@ -25,30 +34,28 @@ nichts.
 
 ## 2. Verbindlicher Änderungsvertrag
 
-Jedes Tool besitzt nun im Registry-Code zwei explizite Deklarationen:
+Jedes registrierte Tool besitzt im Registry-Code zwei explizite Deklarationen:
 
-- **Datenbasis:** `legacy`, `lib2`, `filesystem` oder `mixed`;
+- **Datenbasis:** ausschließlich `lib2` oder `filesystem`;
 - **V2-Effekte:** `observe`, `metadata`, `tags`, `artwork`, `path`,
   `new_file`, `delete`, `wanted`, `discography` oder `none`.
 
 Ein neues Tool ohne beide Deklarationen kann nicht registriert werden. Für
-erfolgreiche Legacy-Reparaturen gilt bei eingeschalteter V2:
+native Reparaturen gilt:
 
 ```text
 Finding/Live-Fix
-  → stabile V2-Subjects anhängen
-  → Legacy-Mutation ausführen
-  → betroffene V2-Projektion aktualisieren
+  → stabile V2-Subjects verwenden
+  → native V2-Mutation ausführen
   → nur betroffene Files neu scannen
   → Artwork gegebenenfalls invalidieren
   → Wanted nach Datei-Neu/Entfernung neu berechnen
   → Entity-History-Event schreiben
 ```
 
-Der Übergangscode liegt absichtlich zentral in
-`core/library2/maintenance_sync.py`. Nach Entfernung der alten Library werden
-dort die Legacy-ID-Auflösung und Legacy→V2-Projektion gelöscht; der
-Change-/History-Vertrag bleibt für native Tools verwendbar.
+Der native Change-/History-Vertrag liegt zentral in
+`core/library2/maintenance_sync.py`. Legacy-ID-Auflösung,
+Legacy→V2-Projektion und Reimports sind daraus entfernt.
 
 ## 3. Statusbegriffe
 
@@ -62,7 +69,7 @@ Change-/History-Vertrag bleibt für native Tools verwendbar.
 - **Ablösen:** Funktion soll nach der Übergangsphase durch eine bestehende
   native V2-Funktion ersetzt und nicht ein zweites Mal neu gebaut werden.
 
-## 4. Audit aller 33 Tools
+## 4. Historischer Audit aller 33 Tools vor P3
 
 | # | Tool | Stand nach diesem Paket | Offene native Zielmigration |
 |---:|---|---|---|
@@ -204,34 +211,56 @@ Completeness, Canonical/MBID-Reconcile, Library Re-tag (Karte soll den
 nativen V2-Retag Preview/Write aufrufen), Unknown Artist, Live/Commentary,
 Duplicate Detector.
 
-### P3 — Legacy-Removal
+### P3 — Legacy-Removal — UMGESETZT (2026-07-18)
 
-Siehe den konkreten Löschplan im nächsten Abschnitt. Die zentrale Brücke macht
-diese Phase bewusst mechanisch statt zu einer erneuten 33-Tool-Suche.
+Die Runtime-Grenze ist vollständig nativ. Provider-IDs werden als
+provider-qualifizierte Maps durch Subject-Enumeration, Match/Enrichment,
+Tracklist/Completeness, Materialisierung, Wanted-Mirror und Autolink getragen.
+Ein angefragter Spotify-Pfad, der tatsächlich Deezer oder iTunes liefert,
+persistiert und meldet die tatsächliche Quelle; fremde IDs gelangen nie in
+Spotify-Spalten.
 
-## 7. Löschplan für die alte Library
+## 7. P3-Abschlusscheckliste
 
-Wenn die alte Library freigegeben wird, erfolgt die Entfernung in dieser
-Reihenfolge:
+1. **Erledigt:** Die Registry akzeptiert nur `lib2` und `filesystem`; alle 19
+   registrierten Jobs erfüllen den nativen V2-Effektvertrag. Retired-Module
+   bleiben im Rollback-Fenster importierbar, können sich aber nicht erneut
+   registrieren.
+2. **Erledigt:** Abgelöste Quality-/Discography-/Dedup-/Completeness-/Reorg-/
+   Retag-/Canonical-/Unknown-Artist-Jobs sind aus Registry und Maintenance-UI
+   entfernt. Native Ersatzpfade sind allein sichtbar.
+3. **Erledigt:** `lib2_mirror_reconcile` und `lib2_wishlist_reconcile` sowie
+   ihre Scheduler-Registrierung sind entfernt. Der transaktionale Outbox-
+   Adapter bleibt nur als Rollback-Ausgang zur alten Wishlist/Watchlist.
+4. **Erledigt:** `maintenance_sync.py` enthält nur native ID-Auflösung,
+   File-Rescan, Artwork-Invalidation, Wanted-Recompute und History-Events;
+   keine Legacy-Projektion und keinen Importer-Aufruf.
+5. **Bewusst offen:** `legacy_artist_id`, `legacy_album_id`, `legacy_track_id`
+   und der Legacy-Importer werden erst nach dem expliziten Datenmigrations-/
+   Rollback-Fenster physisch gelöscht. Sie sind keine Runtime-Autorität mehr.
+6. **Erledigt:** `data_basis` wird nicht mehr über API/UI präsentiert. Die
+   nativen Job-IDs heißen `quality_upgrade_scan`, `skip_audit_cleanup` und
+   `monitored_discography_refresh`; gespeicherte alte IDs werden lesend
+   migriert.
+7. **Offen und erforderlich vor dem endgültigen Cutover:** Beim ersten Start
+   mit aktiviertem `features.library_v2` muss ein automatischer, idempotenter
+   Initialimport (`import_legacy_library`) serverseitig ausgelöst werden. Er
+   darf nicht davon abhängen, dass jemand die Library-v2-UI öffnet. Ohne diesen
+   Bootstrap werden zwar Schema und Nebenstrukturen angelegt, der bestehende
+   Legacy-Bestand aber nicht nach `lib2_*` übernommen; native Jobs sehen dann
+   für diesen Altbestand keinen Scope. Der Bootstrap braucht Fortschritt,
+   Wiederaufnahme/Fehlerstatus und eine Sperre gegen Doppelstarts.
 
-1. Sicherstellen, dass kein Tool mehr `data_basis='legacy'` oder `mixed` mit
-   Legacy-Katalogabfrage besitzt.
-2. Abgelöste Jobs aus Registry/UI entfernen: beide Legacy-Quality-Jobs,
-   Discography Backfill, Single/Album Dedup, Canonical Version Resolve und
-   Legacy Retag; weitere nur nach P2-Acceptance.
-3. `lib2_mirror_reconcile` und `lib2_wishlist_reconcile` mit alter
-   Watchlist/Wishlist entfernen.
-4. Aus `maintenance_sync.py` Legacy-ID-Auflösung,
-   `_sync_legacy_projection()` und die seltenen Reimports löschen. Event-
-   Schema und nativen Change-Vertrag behalten.
-5. `legacy_artist_id`, `legacy_album_id`, `legacy_track_id` und den
-   Legacy-Importer erst nach einem Datenmigrations-/Rollback-Fenster entfernen.
-6. Interne `data_basis`-UI-Hinweise entfernen und die verbliebenen stabilen
-   `lib2_*`-Job-IDs neutral migrieren; nutzerseitige Namen sind bereits neutral.
+   Die Legacy-Wishlist darf während dieser Übergangsphase als bestehende
+   Acquisition-/Retry-Queue weiterlaufen. Playlist-Sync, Wishlist und die alten
+   Search-/Download-Routen müssen jedoch vor einer physischen Entfernung der
+   Legacy-Library auf native Materialisierung bzw. eine bewusst dokumentierte
+   Dual-Write-Grenze umgestellt werden.
 
-Die zwei eindeutig **nur übergangsbedingten** V2-Jobs sind damit heute klar:
-Mirror Reconcile und Wishlist Reconcile. Discography Refresh, Upgrade Scan und
-Skip-Audit Cleanup sind native Funktionen und bleiben, nur ohne „V2“ im Namen.
+Zusätzlicher Provider-Vertrag: Alle vorhandenen IDs von Spotify,
+MusicBrainz, Deezer, iTunes und weiteren registrierten Quellen bleiben pro
+Entity erhalten. Auswahlreihenfolgen bestimmen nur, welcher vorhandene
+Provider zuerst gefragt wird, niemals den Namespace eines Ergebnisses.
 
 ## 8. Acceptance-Kriterien
 
@@ -250,21 +279,17 @@ Für jedes mutierende Tool gelten dieselben Tests:
 10. Integration-Fehler: Original-Fix wird nicht zurückgerollt oder als
     ungeschehen dargestellt; Diagnose bleibt im Result/Log sichtbar.
 
-## 9. Verifikation dieses ersten Pakets
+## 9. P3-Verifikation
 
-Neue Regressionstests decken Finding-Annotation, striktes Feature-off,
-AcoustID-Snapshot/History, Delete/Wanted, neue derivative Files,
-Artwork-Invalidation, Registry-Vollständigkeit und Reorganize-
-Pfadsynchronisation sowie V2-only ReplayGain-/Lyrics-Findings ab.
-
-- vollständige `tests/library2`: **852 passed**;
-- breite Repair-/Repair-Job-Auswahl: **309 passed**, vier bestehende
-  Python-3.12-SQLite-Deprecation-Warnungen;
-- Library-v2-Frontend: **141 passed** in 24 Vitest-Dateien;
-- `ruff check`, gezieltes `oxfmt --check` und `oxlint --type-check`: sauber;
-- Vite Production-Build: erfolgreich (nur bestehender Chunk-Size-Hinweis).
-
-Der repositoryweite `npm run check` stoppt weiterhin an einer bereits vor
-diesem Paket unformatierten, hier nicht veränderten Datei
-`track-feature-badges.test.tsx`; alle in diesem Paket berührten Frontend-
-Dateien bestehen Formatter und Type-Lint einzeln.
+- `tests/library2`, `tests/repair`, `tests/repair_jobs`, `tests/automation`
+  plus P3-Guard-Suiten: **1300 passed**; eine bestehende
+  SQLite-Deprecation-Warnung und zwei bestehende Async-Mock-Warnungen;
+- Frontend: **237 passed** in 40 Vitest-Dateien;
+- `npm run check`: Formatter, Type-Lint und Oxlint vollständig sauber;
+- `npm run build`: Produktions-Build erfolgreich;
+- `node --check webui/static/enrichment.js`: sauber;
+- statischer Registry-Audit: **19 Jobs**, davon 17 `lib2` und zwei rein
+  operative `filesystem`-Jobs; keine registrierte Legacy-/Mixed-Basis;
+- Provider-Regressionen belegen Deezer-/iTunes-Tracklists, tatsächliche
+  Fallback-Quelle, MusicBrainz/CAA-Artwork, provider-qualifizierte
+  Enrichment-, Materialisierungs-, Wishlist- und Autolink-IDs.

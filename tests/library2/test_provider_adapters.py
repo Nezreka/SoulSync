@@ -10,6 +10,7 @@ from core.library2.provider_adapters import (
     ArtworkProviderResult,
     fetch_album_tracklist,
     fetch_artwork_url,
+    fetch_track_metadata,
 )
 
 
@@ -135,16 +136,38 @@ def test_artist_artwork_uses_explicit_source_identity(monkeypatch):
     assert result.url == "https://img.test/artist.jpg"
 
 
-def test_album_artwork_reuses_shared_resolver_and_normalizes_result(monkeypatch):
-    captured = {}
+def test_artist_artwork_honors_configured_provider_order(monkeypatch):
+    calls = []
 
-    def fake_select(artist, album, metadata, order, validate=None):
-        captured.update(
-            artist=artist, album=album, metadata=metadata, order=order
-        )
-        return "https://img.test/album.jpg", "caa"
+    def fake_get(artist_id, source_override=None, plugin=None, artist_name=None):
+        calls.append((artist_id, source_override))
+        return "https://img.test/itunes.jpg"
 
-    monkeypatch.setattr("core.metadata.art_lookup.select_preferred_art", fake_select)
+    monkeypatch.setattr(
+        "core.metadata.artist_image.get_artist_image_url", fake_get
+    )
+    result = fetch_artwork_url(
+        "artist",
+        artist_name="Artist",
+        source_ids={"spotify": "sp-artist", "itunes": "it-artist"},
+        source_order=("itunes", "spotify"),
+    )
+
+    assert calls == [("it-artist", "itunes")]
+    assert result is not None
+    assert result.source == "itunes"
+    assert result.provider_entity_id == "it-artist"
+
+
+def test_album_artwork_prefers_exact_musicbrainz_release_identity(monkeypatch):
+    class Spotify:
+        def get_album(self, *_args, **_kwargs):
+            raise AssertionError("CAA priority must win before Spotify lookup")
+
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: Spotify() if source == "spotify" else None,
+    )
     result = fetch_artwork_url(
         "album",
         artist_name="Artist",
@@ -153,16 +176,84 @@ def test_album_artwork_reuses_shared_resolver_and_normalizes_result(monkeypatch)
         source_order=("caa", "spotify"),
     )
 
-    assert captured == {
-        "artist": "Artist",
-        "album": "Album",
-        "metadata": {"musicbrainz_release_id": "mb-release"},
-        "order": ("caa", "spotify"),
-    }
     assert result is not None
     assert result.source == "caa"
-    assert result.provider_entity_id is None
-    assert result.url == "https://img.test/album.jpg"
+    assert result.provider_entity_id == "mb-release"
+    assert result.url == "https://coverartarchive.org/release/mb-release/front-1200"
+
+
+def test_album_artwork_uses_exact_deezer_metadata_endpoint(monkeypatch):
+    calls = []
+
+    class Deezer:
+        def get_album_metadata(self, album_id, include_tracks=True):
+            calls.append((album_id, include_tracks))
+            return {"images": [{"url": "https://img.test/deezer.jpg"}]}
+
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: Deezer() if source == "deezer" else None,
+    )
+    result = fetch_artwork_url(
+        "album",
+        artist_name="Artist",
+        album_title="Album",
+        source_ids={"deezer": "dz-album"},
+        source_order=("deezer",),
+    )
+
+    assert calls == [("dz-album", False)]
+    assert result is not None
+    assert result.source == "deezer"
+    assert result.provider_entity_id == "dz-album"
+    assert result.url == "https://img.test/deezer.jpg"
+
+
+def test_direct_itunes_tracklist_keeps_itunes_track_identity(monkeypatch):
+    class ITunes:
+        def get_album_tracks(self, album_id):
+            assert album_id == "it-album"
+            return {"items": [{
+                "id": "it-track", "name": "Track", "track_number": 1,
+                "disc_number": 1, "duration_ms": 123000,
+            }]}
+
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: ITunes() if source == "itunes" else None,
+    )
+    result = fetch_album_tracklist(
+        "Album", "Artist", source_album_ids={"itunes": "it-album"},
+    )
+
+    assert result is not None and result.provider == "itunes"
+    assert result.track_payloads()[0]["external_ids"] == {"itunes": "it-track"}
+    assert "spotify_id" not in result.track_payloads()[0]
+
+
+def test_track_metadata_records_provider_that_actually_answered(monkeypatch):
+    class EmptySpotify:
+        def get_track_details(self, _track_id, **_kwargs):
+            return None
+
+    class Deezer:
+        def get_track_details(self, track_id):
+            assert track_id == "dz-track"
+            return {"duration": 201, "album": {"cover_big": "https://img/dz.jpg"}}
+
+    clients = {"spotify": EmptySpotify(), "deezer": Deezer()}
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source", clients.get,
+    )
+    result = fetch_track_metadata(
+        {"spotify": "sp-track", "deezer": "dz-track"},
+        source_order=("spotify", "deezer"),
+    )
+
+    assert result is not None
+    assert result.provider == "deezer"
+    assert result.provider_entity_id == "dz-track"
+    assert result.duration_ms == 201000
 
 
 def test_artwork_adapter_rejects_unknown_kind():

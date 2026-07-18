@@ -32,7 +32,7 @@ def test_artist_match_derives_matched_from_existing_provider_id(imported_conn):
     assert by_service["musicbrainz"]["external_id"] is None
 
 
-def test_explicit_match_status_column_wins_when_present(imported_conn):
+def test_legacy_match_status_does_not_override_native_row(imported_conn):
     imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_id TEXT")
     imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_match_status TEXT")
     imported_conn.execute(
@@ -43,11 +43,11 @@ def test_explicit_match_status_column_wins_when_present(imported_conn):
     rows = MS.entity_match_status(imported_conn, "artist", _drake_lib2_id(imported_conn))
     deezer = next(r for r in rows if r["service"] == "deezer")
 
-    assert deezer["status"] == "matched"
-    assert deezer["external_id"] == "dz9"
+    assert deezer["status"] == "pending"
+    assert deezer["external_id"] is None
 
 
-def test_match_status_surfaces_normalized_provenance(imported_conn):
+def test_legacy_match_provenance_does_not_leak_into_native_chips(imported_conn):
     imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_id TEXT")
     imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_match_status TEXT")
     imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_last_attempted TEXT")
@@ -68,8 +68,8 @@ def test_match_status_surfaces_normalized_provenance(imported_conn):
     rows = MS.entity_match_status(imported_conn, "artist", _drake_lib2_id(imported_conn))
     deezer = next(r for r in rows if r["service"] == "deezer")
 
-    assert deezer["match_origin"] == "manual"
-    assert deezer["matched_at"] == "2026-07-17 12:00:00"
+    assert deezer["match_origin"] is None
+    assert deezer["matched_at"] is None
 
 
 def test_entity_without_legacy_backref_returns_synthetic_pending_chips(imported_conn):
@@ -114,7 +114,7 @@ def test_lib2_native_entity_can_be_manually_matched_and_cleared(imported_conn):
     assert deezer["external_id"] is None
 
 
-def test_track_match_reads_legacy_track_row(imported_conn):
+def test_track_match_ignores_legacy_track_row(imported_conn):
     imported_conn.execute("ALTER TABLE tracks ADD COLUMN spotify_track_id TEXT")
     imported_conn.execute("UPDATE tracks SET spotify_track_id='spt' WHERE id=100")
     imported_conn.commit()
@@ -125,9 +125,9 @@ def test_track_match_reads_legacy_track_row(imported_conn):
     rows = MS.entity_match_status(imported_conn, "track", track_id)
     spotify = next(r for r in rows if r["service"] == "spotify")
 
-    assert spotify["status"] == "matched"
-    assert spotify["external_id"] == "spt"
-    assert spotify["legacy_entity_id"] == 100
+    assert spotify["status"] == "pending"
+    assert spotify["external_id"] is None
+    assert spotify["legacy_entity_id"] is None
 
 
 def test_only_services_applicable_to_entity_type_are_returned(imported_conn):
@@ -189,6 +189,10 @@ def test_album_match_bundle_returns_album_and_track_chips(imported_conn):
     one_dance = imported_conn.execute(
         "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
     ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET spotify_id='spt' WHERE id=?", (one_dance,)
+    )
+    imported_conn.commit()
 
     bundle = MS.album_match_bundle(imported_conn, views_id)
 
@@ -218,8 +222,8 @@ def test_album_match_bundle_propagates_available_services_to_album_and_tracks(im
     assert track_deezer["available"] is False
 
 
-def test_match_status_preserves_text_legacy_ids_and_provenance(tmp_path):
-    """§63 metadata identity must not coerce media-server TEXT ids to int."""
+def test_match_status_ignores_text_legacy_ids_and_provenance(tmp_path):
+    """P3 never resolves provider state through opaque legacy identities."""
     album_legacy_id = "01MoTj8w4VkVtgdPOijUUE"
     track_legacy_id = "base62-track-key"
     conn = sqlite3.connect(str(tmp_path / "text-match-ids.db"))
@@ -276,13 +280,15 @@ def test_match_status_preserves_text_legacy_ids_and_provenance(tmp_path):
 
     album_services = MS.entity_match_status(conn, "album", album_id)
     album_spotify = next(row for row in album_services if row["service"] == "spotify")
-    assert album_spotify["legacy_entity_id"] == album_legacy_id
-    assert album_spotify["match_origin"] == "manual"
+    assert album_spotify["legacy_entity_id"] is None
+    assert album_spotify["external_id"] is None
+    assert album_spotify["match_origin"] is None
 
     bundle = MS.album_match_bundle(conn, album_id)
     track_spotify = next(
         row for row in bundle["tracks"][track_id] if row["service"] == "spotify"
     )
-    assert track_spotify["legacy_entity_id"] == track_legacy_id
-    assert track_spotify["match_origin"] == "automatic"
+    assert track_spotify["legacy_entity_id"] is None
+    assert track_spotify["external_id"] is None
+    assert track_spotify["match_origin"] is None
     conn.close()

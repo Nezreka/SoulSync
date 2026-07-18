@@ -140,11 +140,11 @@ class MissingCoverArtJob(RepairJob):
         # SELECT's width so the per-source ID lookups below stay index-safe.
         native_subjects = {}
         try:
-            from core.library2.maintenance_sync import v2_uncovered_album_subjects
+            from core.library2.maintenance_subjects import active_album_subjects
 
             albums = list(albums)
             pad = [None] * len(column_index)
-            for subject in v2_uncovered_album_subjects(
+            for subject in active_album_subjects(
                 context.db, context.config_manager,
             ):
                 entity = f"lib2:{subject['album_id']}"
@@ -564,8 +564,8 @@ class MissingCoverArtJob(RepairJob):
             """)
             row = cursor.fetchone()
             count = row[0] if row else 0
-            from core.library2.maintenance_sync import v2_uncovered_album_subjects
-            return count + len(v2_uncovered_album_subjects(
+            from core.library2.maintenance_subjects import active_album_subjects
+            return count + len(active_album_subjects(
                 context.db, context.config_manager,
             ))
         except Exception:
