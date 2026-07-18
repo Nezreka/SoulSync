@@ -1359,18 +1359,22 @@
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
-            (ep.owned || !window.VideoGrab
-                ? '<div class="vd-ep-badge">' + (ep.owned
-                    ? 'Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') : 'Missing') + '</div>'
+            // Owned episodes keep the badge AND the actions: the acquisition
+            // stack treats owned rows as upgrade candidates (upgrade-until-
+            // cutoff), so re-download / manual search / wishlist must not
+            // vanish once something is on disk.
+            ((ep.owned ? '<div class="vd-ep-badge">Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') + '</div>' : '') +
+             (!window.VideoGrab
+                ? (ep.owned ? '' : '<div class="vd-ep-badge">Missing</div>')
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
                     '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                     '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
-                        '" title="Auto-search &amp; download this episode" aria-label="Get episode">⭳</button>' +
+                        '" title="' + (ep.owned ? 'Search &amp; download again (upgrade)' : 'Auto-search &amp; download this episode') + '" aria-label="Get episode">⭳</button>' +
                     '<button class="vd-ep-getbtn vd-ep-search" type="button" data-vd-ep-search="' + ep.episode_number +
                         '" title="Manual search — pick a release" aria-label="Manual search">⌕</button>' +
                     '<button class="vd-ep-getbtn vd-ep-wish" type="button" data-vd-ep-wish="' + ep.episode_number +
-                        '" title="Add this episode to the wishlist" aria-label="Wishlist episode">＋</button>' +
-                  '</div>') +
+                        '" title="' + (ep.owned ? 'Wishlist for an upgrade' : 'Add this episode to the wishlist') + '" aria-label="Wishlist episode">＋</button>' +
+                  '</div>')) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
     }
