@@ -173,17 +173,21 @@ class TestBlueprint:
         r = http.post("/api/chat/room/message", json={"message": "hi"})
         assert r.status_code == 403
         assert state["client"].sent_room == []
-        # the admin can opt members in
+        # the admin can opt members in — room sends ride the !SS1! envelope
+        # (rich-format wire; see test_chat_codec for the codec contract)
         state["config"]["soulseek.chat_member_send"] = True
         r = http.post("/api/chat/room/message", json={"message": "hi"})
         assert r.status_code == 200
-        assert state["client"].sent_room == [("soulsync", "hi")]
+        from core.chat_codec import decode
+        room, wire = state["client"].sent_room[0]
+        assert room == "soulsync" and decode(wire)["t"] == "hi"
 
     def test_empty_and_oversize_messages(self, chat_app):
         http, state = chat_app
         assert http.post("/api/chat/room/message", json={"message": "  "}).status_code == 400
         http.post("/api/chat/room/message", json={"message": "x" * 5000})
-        assert len(state["client"].sent_room[0][1]) == 1000   # capped, not rejected
+        from core.chat_codec import decode
+        assert len(decode(state["client"].sent_room[0][1])["t"]) == 1000   # capped, not rejected
 
     def test_conversation_read_acks_and_tolerates_both_shapes(self, chat_app):
         http, state = chat_app
