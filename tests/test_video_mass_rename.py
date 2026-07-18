@@ -46,6 +46,24 @@ def _seed_movie_file(db, movies_dir, *, name="heat.1995.x264-GRP.mkv",
     conn.execute("UPDATE movies SET has_file=1 WHERE id=?", (mid,))
     conn.commit()
     conn.close()
+    # Split-brain phantom tripwire (see conftest's _video_db tripwires): this
+    # seed has vanished between write and read in CI with BOTH conftest
+    # tripwires silent — the db global was correct and no lazy-create fired.
+    # Prove the row is visible through the endpoint's own read path RIGHT NOW,
+    # and if not, name which table lost it instead of an anonymous IndexError
+    # in the test body.
+    import api.video as videoapi
+    endpoint_db = videoapi.get_video_db()
+    with db.connect() as c:
+        m_ct = c.execute("SELECT COUNT(*) FROM movies WHERE has_file=1").fetchone()[0]
+        f_ct = c.execute("SELECT COUNT(*) FROM media_files WHERE movie_id IS NOT NULL").fetchone()[0]
+    owned = endpoint_db.repair_owned_movie_files()
+    assert owned, (
+        "[split-brain phantom] seeded movie invisible: movies(has_file=1)=%d "
+        "media_files(movie)=%d via test handle %r (db=%s) but endpoint handle %r (db=%s) "
+        "sees %d owned rows" % (
+            m_ct, f_ct, hex(id(db)), db.database_path,
+            hex(id(endpoint_db)), getattr(endpoint_db, "database_path", "?"), len(owned)))
     return p
 
 
