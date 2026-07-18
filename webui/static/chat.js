@@ -106,7 +106,16 @@
         return _ssChip(path, label);
     }
 
+    // GIFs picked from the in-app search auto-render: these CDNs are the two
+    // the picker can produce, single well-known hosts — unlike arbitrary image
+    // links, which stay click-to-load.
+    var GIF_CDN_RE = /^https?:\/\/((media|c)\.tenor\.com|media\d*\.giphy\.com)\//i;
+
     function _linkWithEmbeds(u) {
+        if (GIF_CDN_RE.test(u)) {
+            return '<img class="chat-embed-img chat-gif" loading="lazy" ' +
+                'referrerpolicy="no-referrer" src="' + u + '" alt="GIF">';
+        }
         var html = _linkHtml(u);
         var yt = _ytId(u);
         if (yt) {
@@ -413,7 +422,7 @@
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
         var bar = q('[data-chat-toolbar]');
         if (bar) bar.hidden = !(state.view === 'room' && state.canSend);
-        if (state.view !== 'room') toggleEmojiPicker(true);
+        if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); }
     }
 
     // ── composer toolbar (room only) ─────────────────────────────────────────
@@ -439,6 +448,57 @@
         input.value = input.value.slice(0, start) + text + input.value.slice(input.selectionEnd || start);
         input.focus();
         input.setSelectionRange(start + text.length, start + text.length);
+    }
+
+    var _gifTimer = null;
+
+    function toggleGifPicker(forceClose) {
+        var pop = q('[data-chat-gif-pop]');
+        if (!pop) return;
+        if (forceClose === true) { pop.hidden = true; return; }
+        pop.hidden = !pop.hidden;
+        if (!pop.hidden) {
+            toggleEmojiPicker(true);
+            var inp = q('[data-chat-gif-search]');
+            if (inp) inp.focus();
+        }
+    }
+
+    function gifSearch(qstr) {
+        var grid = q('[data-chat-gif-grid]');
+        if (!grid) return;
+        if (!qstr) { grid.innerHTML = '<div class="chat-gif-hint">Type to search Tenor</div>'; return; }
+        grid.innerHTML = '<div class="chat-gif-hint">Searching…</div>';
+        getJSON('/api/chat/gifs?q=' + encodeURIComponent(qstr)).then(function (res) {
+            if (!res.ok) {
+                grid.innerHTML = '<div class="chat-gif-hint">' +
+                    esc(res.body && res.body.error || 'GIF search unavailable') + '</div>';
+                return;
+            }
+            var gifs = res.body.gifs || [];
+            if (!gifs.length) { grid.innerHTML = '<div class="chat-gif-hint">No results</div>'; return; }
+            grid.innerHTML = gifs.map(function (g2) {
+                return '<button type="button" class="chat-gif-cell" data-chat-gif-send="' +
+                    attr(g2.url) + '"><img src="' + attr(g2.preview) +
+                    '" loading="lazy" referrerpolicy="no-referrer" alt=""></button>';
+            }).join('');
+        });
+    }
+
+    function sendGif(url) {
+        if (!url || !state.canSend || state.view !== 'room') return;
+        toggleGifPicker(true);
+        postJSON('/api/chat/room/message', { message: url }).then(function (res) {
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'GIF not sent', 'error');
+                }
+                return;
+            }
+            state.stickBottom = true;
+            state.lastStamp = null;
+            refresh();
+        });
     }
 
     function toggleEmojiPicker(forceClose) {
@@ -570,11 +630,19 @@
         page.setAttribute('data-chat-bound', '1');
 
         page.addEventListener('click', function (e) {
-            // any click outside the emoji picker (and its button) closes it
+            // any click outside a picker (and its button) closes it
             if (!e.target.closest('[data-chat-emoji-btn]') &&
                     !e.target.closest('[data-chat-emoji-pop]')) {
                 toggleEmojiPicker(true);
             }
+            if (!e.target.closest('[data-chat-gif-btn]') &&
+                    !e.target.closest('[data-chat-gif-pop]')) {
+                toggleGifPicker(true);
+            }
+            var g = e.target.closest('[data-chat-gif-btn]');
+            if (g) { toggleGifPicker(); return; }
+            g = e.target.closest('[data-chat-gif-send]');
+            if (g) { sendGif(g.getAttribute('data-chat-gif-send')); return; }
             var t = e.target.closest('[data-chat-embed-yt]');
             if (t) {
                 t.outerHTML = '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
@@ -616,6 +684,14 @@
 
         var form = q('[data-chat-composer]');
         if (form) form.addEventListener('submit', function (e) { e.preventDefault(); send(); });
+
+        var gifIn = q('[data-chat-gif-search]');
+        if (gifIn) {
+            gifIn.addEventListener('input', function () {
+                if (_gifTimer) clearTimeout(_gifTimer);
+                _gifTimer = setTimeout(function () { gifSearch(gifIn.value.trim()); }, 400);
+            });
+        }
 
         var scroller = q('[data-chat-messages]');
         if (scroller) {
