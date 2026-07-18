@@ -467,7 +467,7 @@
     function gifSearch(qstr) {
         var grid = q('[data-chat-gif-grid]');
         if (!grid) return;
-        if (!qstr) { grid.innerHTML = '<div class="chat-gif-hint">Type to search Tenor</div>'; return; }
+        if (!qstr) { grid.innerHTML = '<div class="chat-gif-hint">Type to search GIPHY</div>'; return; }
         grid.innerHTML = '<div class="chat-gif-hint">Searching…</div>';
         getJSON('/api/chat/gifs?q=' + encodeURIComponent(qstr)).then(function (res) {
             if (!res.ok) {

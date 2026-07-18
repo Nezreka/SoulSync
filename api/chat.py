@@ -113,33 +113,33 @@ def create_blueprint() -> Blueprint:
 
     @bp.route("/api/chat/gifs", methods=["GET"])
     def chat_gifs():
-        """GIF search (Tenor v2), proxied so the API key never reaches the
-        browser. Key: ``soulseek.chat_tenor_key`` (free at tenor.com/gifapi).
-        Sending a picked GIF is just sending its URL — the renderer
-        auto-embeds trusted GIF CDNs."""
+        """GIF search (GIPHY — Tenor's API was shut down June 2026), proxied so
+        the API key never reaches the browser. Key: ``soulseek.chat_giphy_key``
+        (free at developers.giphy.com). Sending a picked GIF is just sending
+        its URL — the renderer auto-embeds trusted GIF CDNs."""
         try:
-            key = str(_config_get("soulseek.chat_tenor_key", "") or "")
+            key = str(_config_get("soulseek.chat_giphy_key", "") or "")
         except Exception:
             key = ""
         if not key:
-            return jsonify({"error": "No Tenor API key — add soulseek.chat_tenor_key "
-                                     "(free at tenor.com/gifapi) to enable GIF search"}), 503
+            return jsonify({"error": "No GIPHY API key — add soulseek.chat_giphy_key "
+                                     "(free at developers.giphy.com) to enable GIF search"}), 503
         q = str(request.args.get("q") or "").strip()[:100]
         if not q:
             return jsonify({"error": "empty query"}), 400
         try:
-            data = _gif_fetch("https://tenor.googleapis.com/v2/search", {
-                "q": q, "key": key, "limit": 24,
-                "media_filter": "gif,tinygif", "contentfilter": "medium",
+            data = _gif_fetch("https://api.giphy.com/v1/gifs/search", {
+                "q": q, "api_key": key, "limit": 24, "rating": "pg-13",
             })
         except Exception as e:
             logger.exception("chat: gif search failed")
             return jsonify({"error": str(e)}), 502
         gifs = []
-        for res in (data.get("results") or []):
-            fmts = res.get("media_formats") or {}
-            full = (fmts.get("gif") or {}).get("url")
-            tiny = (fmts.get("tinygif") or {}).get("url") or full
+        for res in (data.get("data") or []):
+            imgs = res.get("images") or {}
+            full = (imgs.get("original") or {}).get("url")
+            tiny = ((imgs.get("fixed_width_small") or {}).get("url")
+                    or (imgs.get("preview_gif") or {}).get("url") or full)
             if full:
                 gifs.append({"url": full, "preview": tiny})
         return jsonify({"gifs": gifs})
