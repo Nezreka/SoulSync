@@ -26,7 +26,9 @@ class _Section:
 
     def search(self, libtype=None, filters=None, sort=None, maxresults=None):
         assert libtype == "episode"
-        key = "addedAt" if "addedAt>>" in filters else "updatedAt"
+        key = ("addedAt" if "addedAt>>" in filters
+               else "lastViewedAt" if "lastViewedAt>>" in filters
+               else "updatedAt")
         self.searched.append(key)
         return self._eps.get(key, [])
 
@@ -42,8 +44,21 @@ def test_union_adds_parent_shows_of_new_episodes():
         shows_by_key={200: _Show(200)})
     out = _union_episode_delta_shows(sec, "since", existing)
     assert sorted(str(s.ratingKey) for s in out) == ["100", "200"]          # 100 kept, 200 added
-    assert sec.searched == ["addedAt"]         # addedAt ONLY — updatedAt would drag in the whole library
+    # addedAt + lastViewedAt (the watch delta) — NEVER updatedAt, which Plex's
+    # nightly refresh bumps on ~everything and would drag in the whole library.
+    assert sec.searched == ["addedAt", "lastViewedAt"]
     assert sec.fetched == [200]                # only the NEW show fetched
+
+
+def test_union_adds_parent_shows_of_watched_episodes():
+    # Continue Watching: a play only bumps the EPISODE's lastViewedAt — the watch
+    # delta must pull in its parent show so play_count/viewOffset get rescanned.
+    sec = _Section(
+        eps_by_filter={"lastViewedAt": [_Ep("300")]},
+        shows_by_key={300: _Show(300)})
+    out = _union_episode_delta_shows(sec, "since", [])
+    assert [str(s.ratingKey) for s in out] == ["300"]
+    assert sec.searched == ["addedAt", "lastViewedAt"]
 
 
 def test_union_is_best_effort_when_search_explodes():
