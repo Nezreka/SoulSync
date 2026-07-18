@@ -6359,7 +6359,14 @@ export function TrackReplayGainBadge({ track }: { track: LibraryV2Track }) {
   const hasRg = Boolean(track.file?.has_replaygain);
   const mutation = useMutation({
     mutationFn: () => analyzeLibraryV2TrackReplayGain(track.id as number),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+    onSuccess: (gainDb) => {
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      const gainStr = gainDb != null ? ` (${gainDb > 0 ? '+' : ''}${gainDb.toFixed(1)} dB)` : '';
+      window.showToast?.(`ReplayGain analyzed and written${gainStr}.`, 'success');
+    },
+    onError: (error) => {
+      window.showToast?.(mutationErrorMessage(error, 'ReplayGain analysis failed'), 'error');
+    },
   });
   if (hasRg) {
     return (
@@ -6381,7 +6388,10 @@ export function TrackReplayGainBadge({ track }: { track: LibraryV2Track }) {
           ? mutationErrorMessage(mutation.error, 'ReplayGain analysis failed')
           : 'Analyze + write ReplayGain for this track'
       }
-      onClick={() => mutation.mutate()}
+      onClick={(e) => {
+        e.stopPropagation();
+        mutation.mutate();
+      }}
     >
       {mutation.isPending ? '…' : 'RG'}
     </button>
@@ -6401,7 +6411,13 @@ export function TrackLyricsBadge({
   const hasLyrics = Boolean(track.file?.has_lyrics);
   const mutation = useMutation({
     mutationFn: () => fetchLibraryV2TrackLyrics(track.id as number),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      window.showToast?.('Lyrics fetched and embedded.', 'success');
+    },
+    onError: (error) => {
+      window.showToast?.(mutationErrorMessage(error, 'Lyrics fetch failed'), 'error');
+    },
   });
   if (hasLyrics) {
     return (
@@ -6409,7 +6425,10 @@ export function TrackLyricsBadge({
         type="button"
         className={`${styles.featureTag} ${styles.featureLr}`}
         title="Lyrics are embedded in this track — click to view"
-        onClick={onOpenLyrics}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenLyrics();
+        }}
       >
         LR
       </button>
@@ -6425,7 +6444,10 @@ export function TrackLyricsBadge({
           ? mutationErrorMessage(mutation.error, 'Lyrics fetch failed')
           : 'Fetch lyrics from LRClib for this track'
       }
-      onClick={() => mutation.mutate()}
+      onClick={(e) => {
+        e.stopPropagation();
+        mutation.mutate();
+      }}
     >
       {mutation.isPending ? '…' : 'LR'}
     </button>

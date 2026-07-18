@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
@@ -55,6 +55,14 @@ function renderWithClient(node: React.ReactElement) {
 }
 
 describe('library v2 RG badge (deep-dive B3)', () => {
+  beforeEach(() => {
+    window.showToast = vi.fn();
+  });
+
+  afterEach(() => {
+    delete (window as any).showToast;
+  });
+
   it('shows a green badge when present, with no action', () => {
     renderWithClient(
       <TrackReplayGainBadge track={track({ file: { ...track().file!, has_replaygain: true } })} />,
@@ -76,6 +84,12 @@ describe('library v2 RG badge (deep-dive B3)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'RG' }));
 
     await waitFor(() => expect(called).toBe(true));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        'ReplayGain analyzed and written (-3.1 dB).',
+        'success',
+      ),
+    );
   });
 
   it('surfaces a failed analysis as the badge title', async () => {
@@ -91,10 +105,21 @@ describe('library v2 RG badge (deep-dive B3)', () => {
     await waitFor(() =>
       expect(screen.getByRole('button')).toHaveAttribute('title', 'ffmpeg not found on PATH'),
     );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('ffmpeg not found on PATH', 'error'),
+    );
   });
 });
 
 describe('library v2 LR badge (deep-dive B3)', () => {
+  beforeEach(() => {
+    window.showToast = vi.fn();
+  });
+
+  afterEach(() => {
+    delete (window as any).showToast;
+  });
+
   it('clicking the green badge opens the lyrics tab instead of fetching', () => {
     const onOpenLyrics = vi.fn();
     renderWithClient(
@@ -124,6 +149,9 @@ describe('library v2 LR badge (deep-dive B3)', () => {
 
     await waitFor(() => expect(called).toBe(true));
     expect(onOpenLyrics).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Lyrics fetched and embedded.', 'success'),
+    );
   });
 
   it('surfaces an unavailable-lyrics error as the badge title', async () => {
@@ -143,6 +171,12 @@ describe('library v2 LR badge (deep-dive B3)', () => {
       expect(screen.getByRole('button')).toHaveAttribute(
         'title',
         'No lyrics available for this track',
+      ),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        'No lyrics available for this track',
+        'error',
       ),
     );
   });
