@@ -21,6 +21,7 @@
         stickBottom: true,       // autoscroll unless the user scrolled up
         started: false,
         ssOnly: false,           // room filter: show only SoulSync-app messages
+        isAdmin: false,          // shows the settings cog (from /status)
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
 
@@ -403,7 +404,9 @@
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
                             : 'Showing everything — click to hide other Soulseek clients') + '">' +
-              (state.ssOnly ? 'SoulSync only' : 'All messages') + '</button>'
+              (state.ssOnly ? 'SoulSync only' : 'All messages') + '</button>' +
+              (state.isAdmin ? '<button class="chat-cog-btn" type="button" data-chat-settings-btn ' +
+                  'title="Chat settings">⚙</button>' : '')
             : '<span class="chat-head-title">' + esc(state.pmUser || '') + '</span>' +
               '<span class="chat-head-sub">private message</span>';
     }
@@ -451,6 +454,56 @@
     }
 
     var _gifTimer = null;
+
+    function openSettings() {
+        var overlay = q('[data-chat-settings-modal]');
+        if (!overlay) return;
+        getJSON('/api/chat/settings').then(function (res) {
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not load chat settings', 'error');
+                }
+                return;
+            }
+            var b = res.body;
+            var el = q('[data-chat-set-room]');
+            if (el) el.value = b.room || '';
+            el = q('[data-chat-set-giphy]');
+            if (el) { el.value = ''; el.placeholder = b.giphy_key_set ? '••••••••  (configured)' : 'not set'; }
+            el = q('[data-chat-set-autojoin]'); if (el) el.checked = !!b.auto_join;
+            el = q('[data-chat-set-membersend]'); if (el) el.checked = !!b.member_send;
+            el = q('[data-chat-set-autoprove]'); if (el) el.checked = !!b.auto_prove;
+            overlay.hidden = false;
+        });
+    }
+
+    function saveSettings() {
+        var overlay = q('[data-chat-settings-modal]');
+        var payload = {
+            room: (q('[data-chat-set-room]') || {}).value || '',
+            auto_join: !!(q('[data-chat-set-autojoin]') || {}).checked,
+            member_send: !!(q('[data-chat-set-membersend]') || {}).checked,
+            auto_prove: !!(q('[data-chat-set-autoprove]') || {}).checked,
+        };
+        // the key field is only SENT when the admin typed one — an untouched
+        // blank must never clear a configured key
+        var kEl = q('[data-chat-set-giphy]');
+        if (kEl && kEl.value.trim()) payload.giphy_key = kEl.value.trim();
+        postJSON('/api/chat/settings', payload).then(function (res) {
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Settings not saved', 'error');
+                }
+                return;
+            }
+            if (overlay) overlay.hidden = true;
+            state.room = res.body.room || state.room;
+            state.lastStamp = null;
+            renderHead();
+            refresh();
+            if (typeof showToast === 'function') showToast('Chat settings saved', 'success');
+        });
+    }
 
     function toggleGifPicker(forceClose) {
         var pop = q('[data-chat-gif-pop]');
@@ -666,6 +719,14 @@
             if (t) { toggleEmojiPicker(); return; }
             t = e.target.closest('[data-chat-emoji-pick]');
             if (t) { insertAtCursor(t.getAttribute('data-chat-emoji-pick')); toggleEmojiPicker(true); return; }
+            t = e.target.closest('[data-chat-settings-btn]');
+            if (t) { openSettings(); return; }
+            t = e.target.closest('[data-chat-settings-save]');
+            if (t) { saveSettings(); return; }
+            t = e.target.closest('[data-chat-settings-cancel]');
+            if (t) { var ov = q('[data-chat-settings-modal]'); if (ov) ov.hidden = true; return; }
+            var ovl = e.target.closest('[data-chat-settings-modal]');
+            if (ovl && e.target === ovl) { ovl.hidden = true; return; }   // click outside the card
             t = e.target.closest('[data-chat-filter]');
             if (t) {
                 state.ssOnly = !state.ssOnly;
@@ -713,6 +774,7 @@
                 state.configured = !!(res.ok && res.body.configured);
                 state.room = (res.body && res.body.room) || 'SoulSync';
                 state.canSend = !!(res.body && res.body.can_send);
+                state.isAdmin = !!(res.body && res.body.is_admin);
                 renderSide([]); renderHead(); renderComposer();
                 if (!state.configured) {
                     renderProblem('Soulseek (slskd) isn\'t configured — set it up in Settings ' +

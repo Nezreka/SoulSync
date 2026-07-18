@@ -32,13 +32,15 @@ _MAX_MESSAGE_LEN = 1000
 _client_getter = None      # () -> SoulseekClient | None (configured or None)
 _run_async = None          # coroutine -> result (the shared slskd event loop)
 _config_get = None         # (key, default) -> value
+_config_set = None         # (key, value) -> None
 
 
-def configure(*, client_getter, run_async, config_get) -> None:
-    global _client_getter, _run_async, _config_get
+def configure(*, client_getter, run_async, config_get, config_set=None) -> None:
+    global _client_getter, _run_async, _config_get, _config_set
     _client_getter = client_getter
     _run_async = run_async
     _config_get = config_get
+    _config_set = config_set
 
 
 def _client():
@@ -111,6 +113,57 @@ def _gif_fetch(url: str, params: dict) -> dict:
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
+    @bp.route("/api/chat/settings", methods=["GET"])
+    def chat_settings_get():
+        """The chat settings for the cog modal (admin-only — these are
+        server-wide). The GIPHY key is never echoed back, only whether one
+        is configured."""
+        if not bool(getattr(g, "is_admin", True)):
+            return jsonify({"error": "Admin access required"}), 403
+        def _cfg(key, default):
+            try:
+                return _config_get(key, default)
+            except Exception:
+                return default
+        return jsonify({
+            "room": str(_cfg("soulseek.chat_room", "SoulSync") or "SoulSync"),
+            "member_send": bool(_cfg("soulseek.chat_member_send", False)),
+            "auto_join": bool(_cfg("soulseek.chat_auto_join", True)),
+            "auto_prove": bool(_cfg("soulseek.chat_auto_prove", True)),
+            "giphy_key_set": bool(_cfg("soulseek.chat_giphy_key", "")),
+        })
+
+    @bp.route("/api/chat/settings", methods=["POST"])
+    def chat_settings_set():
+        if not bool(getattr(g, "is_admin", True)):
+            return jsonify({"error": "Admin access required"}), 403
+        if _config_set is None:
+            return jsonify({"error": "settings backend not wired"}), 500
+        body = request.get_json(silent=True) or {}
+        old_room = _room_name()
+        if "room" in body:
+            room = str(body.get("room") or "").strip()[:64]
+            _config_set("soulseek.chat_room", room or "SoulSync")
+        for key, cfg in (("member_send", "soulseek.chat_member_send"),
+                         ("auto_join", "soulseek.chat_auto_join"),
+                         ("auto_prove", "soulseek.chat_auto_prove")):
+            if key in body:
+                _config_set(cfg, bool(body.get(key)))
+        if "giphy_key" in body:
+            # present = intentional: a value sets it, empty string clears it
+            _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
+        # Renaming the room: walk slskd out of the old one, best-effort —
+        # otherwise the account sits in both forever.
+        new_room = _room_name()
+        if new_room != old_room:
+            client = _client()
+            if client is not None:
+                try:
+                    _run_async(client.leave_room(old_room))
+                except Exception:
+                    logger.debug("chat: could not leave old room %r", old_room, exc_info=True)
+        return chat_settings_get()
+
     @bp.route("/api/chat/gifs", methods=["GET"])
     def chat_gifs():
         """GIF search (GIPHY — Tenor's API was shut down June 2026), proxied so
@@ -152,6 +205,7 @@ def create_blueprint() -> Blueprint:
             "configured": client is not None,
             "room": _room_name(),
             "can_send": _can_send(),
+            "is_admin": bool(getattr(g, "is_admin", True)),   # shows the settings cog
         })
 
     @bp.route("/api/chat/room", methods=["GET"])

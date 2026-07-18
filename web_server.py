@@ -40377,6 +40377,7 @@ _configure_chat_api(
     client_getter=lambda: download_orchestrator.client("soulseek"),
     run_async=run_async,
     config_get=lambda key, default=None: config_manager.get(key, default),
+    config_set=lambda key, value: config_manager.set(key, value),
 )
 app.register_blueprint(_create_chat_blueprint())
 
