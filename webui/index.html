@@ -9915,6 +9915,32 @@
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
+                            <!-- admin settings modal (cog in the room head) -->
+                            <div class="chat-settings-overlay" data-chat-settings-modal hidden>
+                                <div class="chat-settings-modal">
+                                    <h3 class="chat-settings-title">Chat Settings</h3>
+                                    <label class="chat-settings-label">Community room
+                                        <input class="chat-input" data-chat-set-room type="text" maxlength="64"
+                                               placeholder="SoulSync" autocomplete="off">
+                                        <span class="chat-settings-hint">Soulseek room names are case-sensitive</span>
+                                    </label>
+                                    <label class="chat-settings-label">GIPHY API key
+                                        <input class="chat-input" data-chat-set-giphy type="password"
+                                               placeholder="" autocomplete="off">
+                                        <span class="chat-settings-hint">free at developers.giphy.com — enables GIF search; leave blank to keep the current key</span>
+                                    </label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-autojoin>
+                                        Auto-join the community room</label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
+                                        Let non-admin profiles send messages</label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
+                                        Auto-answer "prove you're human" download challenges</label>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="chat-fmt-btn" data-chat-settings-cancel>Cancel</button>
+                                        <button type="button" class="chat-send-btn" data-chat-settings-save>Save</button>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="chat-scroll" data-chat-messages></div>
                             <div class="chat-toolbar" data-chat-toolbar hidden>
                                 <button type="button" class="chat-fmt-btn" data-chat-fmt="bold" title="Bold (**text**)"><b>B</b></button>

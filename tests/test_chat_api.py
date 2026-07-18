@@ -148,7 +148,8 @@ class TestBlueprint:
     def test_status(self, chat_app):
         http, state = chat_app
         res = http.get("/api/chat/status").get_json()
-        assert res == {"configured": True, "room": "SoulSync", "can_send": True}
+        assert res == {"configured": True, "room": "SoulSync", "can_send": True,
+                       "is_admin": True}
 
     def test_room_hydrate_auto_joins_once(self, chat_app):
         http, state = chat_app
@@ -248,3 +249,58 @@ class TestGifProxy:
             raise RuntimeError("tenor down")
         monkeypatch.setattr(chat_api, "_gif_fetch", boom)
         assert http.get("/api/chat/gifs?q=x").status_code == 502
+
+
+class TestChatSettings:
+    """The cog modal backend — admin-only, key never echoed."""
+
+    def _wire_set(self, state):
+        chat_api.configure(
+            client_getter=lambda: state["client"],
+            run_async=lambda v: v,
+            config_get=lambda key, default=None: state["config"].get(key, default),
+            config_set=lambda key, value: state["config"].__setitem__(key, value),
+        )
+
+    def test_get_never_echoes_the_key(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_giphy_key"] = "SECRET"
+        res = http.get("/api/chat/settings").get_json()
+        assert res["giphy_key_set"] is True
+        assert "SECRET" not in str(res)
+        assert res["room"] == "SoulSync" and res["auto_join"] is True
+
+    def test_non_admin_locked_out(self, chat_app):
+        http, state = chat_app
+        state["admin"] = False
+        assert http.get("/api/chat/settings").status_code == 403
+        assert http.post("/api/chat/settings", json={"room": "x"}).status_code == 403
+
+    def test_save_updates_and_blank_key_keeps_current(self, chat_app):
+        http, state = chat_app
+        self._wire_set(state)
+        state["config"]["soulseek.chat_giphy_key"] = "KEEP"
+        res = http.post("/api/chat/settings", json={
+            "room": "MyRoom", "member_send": True, "auto_join": False,
+            "auto_prove": False}).get_json()
+        assert res["room"] == "MyRoom" and res["member_send"] is True
+        assert res["auto_join"] is False and res["auto_prove"] is False
+        # key untouched (field absent from the payload = admin didn't type one)
+        assert state["config"]["soulseek.chat_giphy_key"] == "KEEP"
+        # explicit empty clears it
+        http.post("/api/chat/settings", json={"giphy_key": ""})
+        assert state["config"]["soulseek.chat_giphy_key"] == ""
+
+    def test_room_rename_leaves_the_old_room(self, chat_app):
+        http, state = chat_app
+        self._wire_set(state)
+        left = []
+        state["client"].leave_room = lambda room: left.append(room) or True
+        http.post("/api/chat/settings", json={"room": "NewRoom"})
+        assert left == ["SoulSync"]     # walked out of the old room, not stuck in both
+
+    def test_status_exposes_is_admin_for_the_cog(self, chat_app):
+        http, state = chat_app
+        assert http.get("/api/chat/status").get_json()["is_admin"] is True
+        state["admin"] = False
+        assert http.get("/api/chat/status").get_json()["is_admin"] is False
