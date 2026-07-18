@@ -841,6 +841,15 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-play-ep { font-weight: 800; padding: 2px 8px; border-radius: 6px;
     background: rgba(255,255,255,0.16); font-size: 0.85em; }
 
+/* Detail BIC P3 — enriched facts finally surfaced */
+.vd-awards { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px;
+    font-size: 13px; font-weight: 600; color: #fbbf24; }
+.vd-awards-ic { font-size: 14px; }
+.vd-stinger { color: #fbbf24 !important; font-weight: 700; white-space: nowrap; }
+.vd-ep-new-chip { flex: none; align-self: center; font-size: 10.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 9px; border-radius: 999px;
+    color: #fff; background: rgba(220, 38, 38, 0.9); white-space: nowrap; }
+
 @media (max-width: 820px) {
     .vd-bb-content { padding-left: 24px; padding-right: 24px; }
     .vd-body { padding: 24px 22px 60px; }
