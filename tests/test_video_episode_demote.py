@@ -92,6 +92,37 @@ def test_tvdb_id_also_counts_as_identity(db):
     assert 3 in _rows(db, show_id)
 
 
+def test_backfill_restores_a_deleted_episode_row_silo_shape(db):
+    # the EXACT live shape from the report: E1/E2 server-owned, E3's row
+    # deleted (pre-demote-fix prune), E4+ enrichment rows — a TMDB season
+    # backfill must re-INSERT the hole, not just gap-fill existing rows
+    show_id = db.upsert_show_tree("plex", _tree([
+        _ep("p1", 1, air_date="2026-07-02"),
+        _ep("p2", 2, air_date="2026-07-09"),
+    ]))
+    db.backfill_episodes(show_id, 1, [
+        {"episode_number": n, "title": "E%d" % n, "air_date": "2026-07-%02d" % (2 + 7 * (n - 1))}
+        for n in range(1, 11)
+    ])
+    conn = db._get_connection()
+    conn.execute("DELETE FROM episodes WHERE show_id=? AND season_number=1 AND episode_number=3",
+                 (show_id,))
+    conn.commit()
+    conn.close()
+    assert 3 not in _rows(db, show_id)          # the hole, as on the live box
+
+    touched = db.backfill_episodes(show_id, 1, [
+        {"episode_number": n, "title": "E%d" % n, "air_date": "2026-07-%02d" % (2 + 7 * (n - 1))}
+        for n in range(1, 11)
+    ])
+    rows = _rows(db, show_id)
+    assert 3 in rows, "backfill must restore the deleted episode row"
+    assert rows[3]["has_file"] == 0
+    assert touched >= 1
+    # owned rows untouched
+    assert rows[1]["has_file"] == 1 and rows[2]["has_file"] == 1
+
+
 def test_demoted_episode_can_be_repromoted(db):
     # re-download: the file comes back on the server → owned again, same row
     show_id = db.upsert_show_tree("plex", _tree([

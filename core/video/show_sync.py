@@ -118,23 +118,35 @@ def sync_show(db, show_id: int) -> dict:
         finally:
             conn.close()
 
-    # Episode-list refresh from TMDB (best-effort): the server only knows about
-    # FILES — the aired-episode schedule comes from enrichment, and a hole in it
-    # (an episode row lost before the demote fix existed) would otherwise stay a
-    # hole. recent_seasons_only keeps it to 1-2 API calls; a TMDB hiccup must
-    # never fail the sync itself. Runs BEFORE the counts so restored episodes
-    # show up in the toast.
+    # Episode-list refresh from TMDB: the server only knows about FILES — the
+    # aired-episode schedule comes from enrichment, and a hole in it (an
+    # episode row lost before the demote fix existed) would otherwise stay a
+    # hole. recent_seasons_only keeps it to 1-2 API calls; a TMDB failure must
+    # never fail the sync itself — but it must be VISIBLE (result surfaced in
+    # the response + logged at info), not a silent fire-and-forget: an
+    # unobservable heal is indistinguishable from no heal. Runs BEFORE the
+    # counts so restored episodes show up in the toast.
+    schedule_refresh = "skipped"
     try:
         from core.video.enrichment.engine import get_video_enrichment_engine
-        get_video_enrichment_engine().refresh_show_art(
+        res = get_video_enrichment_engine().refresh_show_art(
             target_id, with_ratings=False, recent_seasons_only=True)
-    except Exception:   # noqa: BLE001 - schedule refresh is a bonus, not the sync
-        logger.debug("show sync: episode-list refresh failed", exc_info=True)
+        if res and res.get("ok"):
+            schedule_refresh = "ok"
+            logger.info("show sync: episode schedule refreshed for '%s'", row["title"])
+        else:
+            schedule_refresh = "failed:%s" % ((res or {}).get("reason") or "unknown")
+            logger.warning("show sync: episode schedule refresh for '%s' did not run: %s",
+                           row["title"], schedule_refresh)
+    except Exception as e:   # noqa: BLE001 - schedule refresh is a bonus, not the sync
+        schedule_refresh = "error:%s" % e
+        logger.warning("show sync: episode-list refresh failed for '%s': %s", row["title"], e)
 
     eps_after, files_after = _counts(db, target_id)
     return {
         "status": "ok", "title": row["title"], "show_removed": False,
         "show_id": target_id, "rekeyed": target_id != int(show_id),
+        "schedule_refresh": schedule_refresh,
         "episodes_added": max(0, eps_after - eps_before),
         "episodes_removed": max(0, eps_before - eps_after),
         "files_added": max(0, files_after - files_before),

@@ -1829,7 +1829,15 @@
                 if (d.files_added) bits.push('+' + d.files_added + ' file' + (d.files_added !== 1 ? 's' : ''));
                 if (d.files_removed) bits.push('−' + d.files_removed + ' file' + (d.files_removed !== 1 ? 's' : ''));
                 if (typeof showToast === 'function') {
-                    showToast('Synchronized' + (bits.length ? ': ' + bits.join(', ') : ' — no changes'), 'success');
+                    // a failed schedule refresh must be SAID, not silently absorbed —
+                    // otherwise "no changes" reads as "everything's fine"
+                    var refreshBad = d.schedule_refresh && d.schedule_refresh !== 'ok';
+                    if (refreshBad) {
+                        showToast('Synchronized' + (bits.length ? ': ' + bits.join(', ') : '') +
+                            ' — episode schedule refresh failed (' + d.schedule_refresh + ')', 'warning');
+                    } else {
+                        showToast('Synchronized' + (bits.length ? ': ' + bits.join(', ') : ' — no changes'), 'success');
+                    }
                 }
                 // a Plex re-key heals onto a NEW row id — reload THAT row
                 var rid = parseInt(d.show_id != null ? d.show_id : id, 10);
