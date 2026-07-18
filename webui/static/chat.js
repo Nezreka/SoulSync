@@ -22,6 +22,8 @@
         started: false,
         ssOnly: false,           // room filter: show only SoulSync-app messages
         isAdmin: false,          // shows the settings cog (from /status)
+        newMarker: null,         // frozen last-seen ts for the NEW divider (per room open)
+        renderedCount: 0,        // for the new-messages pill delta
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
 
@@ -330,6 +332,22 @@
         return html;
     }
 
+    var _pillCount = 0;
+
+    function hideJumpPill() {
+        _pillCount = 0;
+        var pill = q('[data-chat-jump]');
+        if (pill) pill.hidden = true;
+    }
+
+    function showJumpPill(added) {
+        _pillCount += added;
+        var pill = q('[data-chat-jump]');
+        if (!pill) return;
+        pill.textContent = (_pillCount > 1 ? _pillCount + ' new messages' : 'New messages') + ' ↓';
+        pill.hidden = false;
+    }
+
     function renderMessages(list) {
         var host = q('[data-chat-messages]');
         if (!host) return;
@@ -349,10 +367,38 @@
             shown = msgs.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
             hidden = msgs.length - shown.length;
         }
-        host.innerHTML = renderGroups(shown) +
+        // NEW divider: split at the frozen last-seen marker (set on room open).
+        // Groups deliberately break at the divider, like Discord's red line.
+        var body;
+        if (state.view === 'room' && state.newMarker) {
+            var seen = [], unseen = [];
+            shown.forEach(function (m) {
+                (String(m.timestamp || '') > state.newMarker ? unseen : seen).push(m);
+            });
+            body = renderGroups(seen) +
+                (unseen.length && seen.length
+                    ? '<div class="chat-new-sep"><span>NEW</span></div>' : '') +
+                renderGroups(unseen);
+        } else {
+            body = renderGroups(shown);
+        }
+        host.innerHTML = body +
             (hidden ? '<div class="chat-hidden-note">' + hidden +
                 ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden</div>' : '');
-        if (state.stickBottom) host.scrollTop = host.scrollHeight;
+        if (state.stickBottom) {
+            host.scrollTop = host.scrollHeight;
+        } else if (shown.length > state.renderedCount && state.renderedCount > 0) {
+            showJumpPill(shown.length - state.renderedCount);   // arrivals while scrolled up
+        }
+        state.renderedCount = shown.length;
+        // seen upkeep: reading at the bottom advances the stored marker (the
+        // frozen divider position doesn't move until the next room open)
+        if (state.view === 'room' && pageVisible() && state.stickBottom && msgs.length) {
+            try {
+                localStorage.setItem('chat_seen_' + (state.room || ''),
+                    String(msgs[msgs.length - 1].timestamp || ''));
+            } catch (e) { /* ignore */ }
+        }
     }
 
     function renderUsers(users) {
@@ -623,6 +669,10 @@
     // ── actions ──────────────────────────────────────────────────────────────
     function openRoom() {
         state.view = 'room'; state.pmUser = null; state.lastStamp = null; state.stickBottom = true;
+        state.renderedCount = 0; hideJumpPill();
+        try {
+            state.newMarker = localStorage.getItem('chat_seen_' + (state.room || '')) || null;
+        } catch (e) { state.newMarker = null; }
         renderHead(); renderComposer();
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
@@ -632,6 +682,7 @@
     function openPm(username) {
         if (!username) return;
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
+        state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         renderHead(); renderComposer();
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
@@ -644,6 +695,7 @@
         var text = (input.value || '').trim();
         if (!text || !state.canSend) return;
         input.value = '';
+        input.style.height = 'auto';
         var url = state.view === 'room'
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
@@ -732,6 +784,7 @@
                 state.ssOnly = !state.ssOnly;
                 try { localStorage.setItem('chat_ss_only', state.ssOnly ? '1' : '0'); } catch (err) { /* ignore */ }
                 state.lastStamp = null;
+                state.renderedCount = 0; hideJumpPill();   // a filter flip isn't 'new messages'
                 renderHead(); refresh();
                 return;
             }
@@ -746,6 +799,19 @@
         var form = q('[data-chat-composer]');
         if (form) form.addEventListener('submit', function (e) { e.preventDefault(); send(); });
 
+        var inputEl = q('[data-chat-input]');
+        if (inputEl) {
+            // Discord composer: Enter sends, Shift+Enter newlines (the block
+            // syntax — code fences, quotes, lists — NEEDS real newlines)
+            inputEl.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+            });
+            inputEl.addEventListener('input', function () {
+                inputEl.style.height = 'auto';
+                inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px';
+            });
+        }
+
         var gifIn = q('[data-chat-gif-search]');
         if (gifIn) {
             gifIn.addEventListener('input', function () {
@@ -759,6 +825,17 @@
             scroller.addEventListener('scroll', function () {
                 state.stickBottom =
                     scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 40;
+                if (state.stickBottom) hideJumpPill();
+            });
+        }
+
+        var jump = q('[data-chat-jump]');
+        if (jump) {
+            jump.addEventListener('click', function () {
+                var sc = q('[data-chat-messages]');
+                if (sc) sc.scrollTop = sc.scrollHeight;
+                state.stickBottom = true;
+                hideJumpPill();
             });
         }
 
