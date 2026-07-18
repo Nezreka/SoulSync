@@ -12,7 +12,6 @@ from core.repair_jobs.base import (
     get_scope_file_paths,
     JobContext,
 )
-from core.repair_jobs.single_album_dedup import SingleAlbumDedupJob
 
 
 class _DB:
@@ -71,32 +70,50 @@ def test_file_scope_is_exact_and_empty_never_means_library_wide():
     assert file_path_in_scope("/any/file.flac", None)
 
 
+def _scan_actionable_singles_against_global_album_candidates(context, rows):
+    """Minimal stand-in for a scoped dedup-style job's scan(): the same
+    contract ``SingleAlbumDedupJob`` (retired, see docs §7 P3 checklist)
+    used to exercise — only a "single" whose file is IN scope is actionable,
+    while "album" candidates it matches against stay library-wide/global and
+    are never filtered by scope. Exists purely to keep this file's coverage
+    of ``get_scope_file_paths``/``file_path_in_scope`` working together
+    end-to-end, independent of any one concrete job's business logic."""
+    scope_paths = get_scope_file_paths(context)
+    singles = [r for r in rows if r["kind"] == "single" and file_path_in_scope(r["file_path"], scope_paths)]
+    album_tracks = [r for r in rows if r["kind"] == "album"]
+    created = 0
+    for single in singles:
+        for album_track in album_tracks:
+            if album_track["norm_title"] == single["norm_title"]:
+                context.create_finding(
+                    entity_id=str(single["id"]),
+                    details={"album_track": {"id": album_track["id"]}},
+                )
+                created += 1
+                break
+    return created
+
+
 def test_dedup_scopes_actionable_single_path_but_keeps_album_candidates_global():
     rows = [
-        (1, "Song", "Artist", "Song", "single", 1,
-         "/music/Artist/Song/single.flac", 1000, 180, None, None, 1),
-        (2, "Song", "Artist", "Other Single", "single", 1,
-         "/music/Other/Song/single.flac", 1000, 180, None, None, 1),
-        (3, "Song", "Artist", "Full Album", "album", 10,
-         "/music/Other/Album/song.flac", 1000, 180, None, None, 4),
+        {"id": 1, "kind": "single", "norm_title": "song",
+         "file_path": "/music/Artist/Song/single.flac"},
+        {"id": 2, "kind": "single", "norm_title": "song",
+         "file_path": "/music/Other/Song/single.flac"},
+        {"id": 3, "kind": "album", "norm_title": "song",
+         "file_path": "/music/Other/Album/song.flac"},
     ]
-    cursor = MagicMock()
-    cursor.fetchall.return_value = rows
-    conn = MagicMock()
-    conn.cursor.return_value = cursor
-    db = MagicMock()
-    db._get_connection.return_value = conn
     findings = []
     context = JobContext(
-        db=db,
+        db=MagicMock(),
         transfer_folder="/music",
         config_manager=None,
         scope={"file_paths": ["/music/Artist/Song/single.flac"]},
         create_finding=lambda **finding: findings.append(finding) or True,
     )
 
-    result = SingleAlbumDedupJob().scan(context)
+    created = _scan_actionable_singles_against_global_album_candidates(context, rows)
 
-    assert result.findings_created == 1
+    assert created == 1
     assert findings[0]["entity_id"] == "1"
     assert findings[0]["details"]["album_track"]["id"] == 3

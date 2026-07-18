@@ -41,7 +41,11 @@
 > Scanner oder einem anderen Eingangspfad stammt.
 > Die Bulk-Monitoring-UI invalidiert nach abgeschlossenen Jobs ebenfalls
 > den Library-Query-Cache; explizite Track-Entscheidungen werden dadurch
-> unmittelbar und ohne stale Anzeige sichtbar.
+> unmittelbar und ohne stale Anzeige sichtbar. Am 2026-07-19 wurde Abschnitt
+> 80 ergänzt (automatischer Initialimport-Bootstrap) und Abschnitt 81
+> (physische Entfernung von neun bereits seit dem P3-Commit retirierten
+> Repair-Jobs plus Korrektur der dadurch stale gewordenen Audit-Doku-
+> Abschnitte 4/5.3/6).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -8336,3 +8340,109 @@ Damit ist Schritt 7 aus dem P3-Abschlusscheckliste
 `legacy_album_id`, `legacy_track_id` und der Legacy-Importer selbst): ihre
 physische Entfernung hängt weiterhin am eigenen, noch nicht eröffneten
 Datenmigrations-/Rollback-Fenster und ist von diesem Bootstrap unberührt.
+
+---
+
+## 81. §7-Checkliste-Nachtrag — 9 bereits retirierte Repair-Jobs physisch entfernt, Audit-Doku korrigiert (2026-07-19)
+
+Beim Weiterarbeiten an der offenen P3-Restarbeit fiel auf, dass
+[`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md)
+Abschnitt 4 (Tabelle) und Abschnitt 6 (P2-„Offen"-Liste, §5.3) **Duplicate
+Detector, Album Completeness, Canonical Version Resolve, MBID Mismatch
+Detector, Single/Album Dedup, Fix Unknown Artists und Library Re-tag**
+weiterhin als offene, noch zu migrierende Brücken-Tools beschrieben — obwohl
+Abschnitt 7 Punkt 2 desselben Dokuments bereits seit dem P3-Commit vom
+2026-07-18 (`f3abaf16`) korrekt festhält, dass genau diese (plus Library
+Reorganize) „aus Registry und Maintenance-UI entfernt" sind. `RETIRED_JOB_IDS`
+in `core/repair_jobs/__init__.py` bestätigte das: alle acht (plus Expired
+Download Cleaner, insgesamt neun) standen schon dort und waren über
+`register_job()` und `_prune_retired_job_findings()` bereits vollständig
+unerreichbar — nur Abschnitt 4/6 wurden nach P3 nie nachgezogen.
+
+### 81.1 Was tatsächlich noch fehlte
+
+Die neun Jobs liefen zwar nicht mehr, ihre Modul-Dateien in
+`core/repair_jobs/`, die zugehörigen Dispatch-Einträge und `_fix_*`-Handler
+in `core/repair_worker.py` sowie ihre (den Job direkt statt über die
+Registry importierenden) Tests waren aber noch nicht physisch entfernt —
+anders als bei `quality_upgrade_scanner`/`quality_upgrade`/
+`discography_backfill`, die beim P2-Commit bereits vollständig gelöscht
+wurden (§77). Nachgeholt für: `library_retag`, `duplicate_detector`,
+`album_completeness`, `canonical_version_resolve`, `mbid_mismatch_detector`,
+`single_album_dedup`, `unknown_artist_fixer`, `library_reorganize`,
+`expired_download_cleaner`.
+
+### 81.2 Umsetzung
+
+- Neun Job-Module in `core/repair_jobs/` gelöscht, dazu zwei dadurch
+  verwaiste reine Algorithmus-Module (`core/library/retag_planner.py`,
+  `core/library/expired_cleanup.py` — analog zu `core/discovery/
+  quality_scanner.py` bei §77, jeweils nur noch vom eigenen gelöschten Job
+  benutzt).
+- `core/repair_worker.py`: neun Dispatch-Einträge in `_execute_fix` plus die
+  zugehörigen `_fix_*`-Handler entfernt (insgesamt >1100 Zeilen); die
+  `bulk_fix_findings`-`fixable_types`-Liste um dieselben sechs bulk-fähigen
+  Finding-Typen bereinigt.
+- **Bewusst NICHT angefasst:** `library_reorganize`s Dispatch-Eintrag
+  (`path_mismatch` → `_fix_path_mismatch`) und Handler bleiben, weil
+  `core/reorganize_runner.py` über die weiterhin aktive native Reorganize-
+  Engine (`core/library_reorganize.py`, `core/reorganize_queue.py` — eigene,
+  unverwandte Module trotz Namensgleichheit mit dem gelöschten Job)
+  `path_mismatch`-Findings erzeugt. `core/metadata/canonical_resolver.py`
+  bleibt ebenfalls vollständig erhalten (andere Exporte werden aktiv von
+  `core/library_reorganize.py` benutzt); nur die jetzt verwaiste
+  `resolve_and_store_canonical_for_album`-Funktion wurde nicht separat
+  entfernt, da sie Teil einer aktiv genutzten Datei ist. `history_feed.py`s
+  kosmetische Label für `library_retag`/`fixed_unknown_artist` bleiben,
+  weil sie bereits geschriebene, dauerhafte Entity-History-Einträge
+  beschriften. Die toten `webui/static/enrichment.js`-Kartenfälle (inkl.
+  einem bereits vorher verwaisten `discography_backfill`-Fall aus §77, der
+  damals ebenfalls nicht mitentfernt wurde) bleiben unangetastet — dieselbe
+  Vorsicht wie beim ursprünglichen P2-Commit, der die alte vanilla-JS-
+  Oberfläche nie anfasste; alle diese Fälle sind unerreichbar, aber
+  kosmetischer Aufräum-Rest.
+- Neun direkt-importierende Tote-Code-Tests gelöscht
+  (`test_library_retag_job.py`, `test_retag_planner.py`,
+  `test_duplicate_detector_{slskd_dedup,mount_paths,cjk_and_cross_album}.py`,
+  `test_album_completeness_{job,fragmented_rows}.py`,
+  `test_canonical_version_job.py`, `test_repair_worker_canonical_version.py`,
+  `test_album_mbid_consistency.py`, `test_unknown_artist_fixer.py`,
+  `test_expired_download_cleaner.py`, `tests/library/test_expired_cleanup.py`).
+- Drei Tests chirurgisch statt komplett entfernt, weil sie zusätzlich noch
+  aktiven Code abdeckten:
+  - `tests/test_missing_lyrics_job.py`: nur den `library_retag.
+    apply_track_plans`-Lyrics-Block (3 Tests) entfernt, der Rest der Datei
+    (Lyrics-Filler-Job selbst) bleibt unverändert.
+  - `tests/repair/test_file_scope.py`: der dritte Test nutzte
+    `SingleAlbumDedupJob` nur als Vehikel, um `get_scope_file_paths`/
+    `file_path_in_scope` end-to-end zu prüfen („Single im Scope aktionabel,
+    Album-Kandidaten bleiben global sichtbar"). Gegen einen minimalen,
+    lokal definierten Scan-Ersatz neu geschrieben, der denselben Vertrag
+    prüft, ohne von der gelöschten Job-Klasse abzuhängen.
+  - `tests/test_library_reorganize.py`: die fünf `_prune_empty_source_dirs`-
+    Tests (#985) testeten die weiterhin aktive `core/library_reorganize.py`
+    (nicht den gelöschten Job) — nach `tests/test_reorganize_prune_empty_dirs.py`
+    verschoben, der Rest der Datei (reine Job-Wrapper-Tests) gelöscht.
+
+### 81.3 Korrigierte Doku
+
+`library-v2-tool-integration-audit-2026-07-18.md`: die neun Tabellenzeilen
+in Abschnitt 4 auf „ENTFERNT" mit ihrem jeweiligen nativen Ersatzpfad
+umgestellt (Dedup/Canonical/MBID → `core/library2/dedup_repair.py` +
+`editions.py`; Album Completeness → `completeness.py` + globale
+Wanted-Views §74; Unknown Artist → `native_enrich.py` §68; Library Re-tag →
+`retag.py` + `retag-modal.tsx`; Library Reorganize → bestehende
+Reorganize-Bridge/-Engine; Expired Download Cleaner → kein 1:1-Nachfolger
+identifiziert), §5.3 und die P2-„Offen"-Liste in Abschnitt 6 korrigiert, und
+ein Nachtrag im Kopf-Blockzitat ergänzt.
+
+### 81.4 Verifikation
+
+- `python -c "from core.repair_jobs import get_all_jobs; ..."`: weiterhin
+  exakt 19 registrierte Jobs (unverändert ggü. vor diesem Cleanup) — die
+  Löschung war reiner Tote-Code-Abbau, keine Verhaltensänderung.
+- `pytest --collect-only`: **10469 Tests** sammeln weiterhin fehlerfrei
+  (0 Collection-Fehler durch die gelöschten Imports).
+- `pytest tests/repair tests/repair_jobs tests/test_missing_lyrics_job.py
+  tests/test_reorganize_prune_empty_dirs.py tests/test_canonical_orchestration.py`:
+  **73 passed**.

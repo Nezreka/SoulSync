@@ -10,6 +10,18 @@
 > erledigt; die physische Entfernung der `legacy_*`-Spalten und des Importers
 > (Punkt 5) bleibt weiterhin gemäß geplantem Datenmigrations-/Rollback-Fenster
 > offen.
+>
+> **Nachtrag 2026-07-19 (siehe [`library-v2.md`](library-v2.md) §81):**
+> Abschnitt 4 (Tabelle) und Abschnitt 6 (P2-„Offen"-Liste/§5.3) beschrieben
+> Duplicate Detector, Album Completeness, Canonical Version Resolve, MBID
+> Mismatch Detector, Single/Album Dedup, Fix Unknown Artists und Library
+> Re-tag fälschlich weiterhin als offene Brücken-Tools, obwohl sie laut
+> Abschnitt 7 Punkt 2 bereits seit dem P3-Commit vom 2026-07-18 retiriert
+> waren — nur ihre toten Modul-Dateien/Dispatch-Einträge/Tests waren noch
+> nicht physisch entfernt. Beides ist jetzt korrigiert bzw. nachgeholt;
+> Library Reorganize ebenso (nur der Scan-Job-Wrapper, nicht die aktive
+> Reorganize-Engine). Expired Download Cleaner ist ebenfalls retiriert,
+> aber ohne klar identifizierten 1:1-nativen Nachfolger.
 
 ## 1. Ziel und Ergebnis
 
@@ -80,27 +92,27 @@ Legacy→V2-Projektion und Reimports sind daraus entfernt.
 | 2 | Cache Maintenance | **Neutral.** Entfernt nur abgelaufene/junk/orphaned Metadaten-Caches; keine Library-Entität. | Keine V2-Migration. |
 | 3 | Orphan File Detector | **Dual Read.** V2-Dateipfade und -Identitäten werden nur bei exakt aktiviertem Flag berücksichtigt. Mass-Orphan-Guard bleibt bestehen. | P1: gemeinsame normalisierte File-Index-Abfrage statt Suffix-Heuristik; echter Orphan bleibt bis zum normalen Staging-Import absichtlich ohne V2-Subject. |
 | 4 | Dead File Cleaner | **Brücke.** Entfernen/Re-download markiert das gemappte V2-File deleted und berechnet Wanted neu. | P1: V2-File-Lifecycle (`missing_suspected`/`missing_confirmed`) als Scannerquelle; nicht parallel zur Integrity-Reconciliation neu erfinden. |
-| 5 | Duplicate Detector | **Brücke.** Nutzerbestätigte Deletes werden in V2 und Wanted gespiegelt. | P2: durch V2-Canonical-/Managed-Tracks-Beziehungen ersetzen; V2-only und mehrere Files pro Track nativ bewerten. |
+| 5 | Duplicate Detector | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Ersetzt durch die native Dedup-Reparatur (`core/library2/dedup_repair.py`, §62/§63) — läuft automatisch am Ende jedes Imports und on-demand über den Maintenance-Endpoint; Artist-/Album-Duplikate werden gemerged statt nur nachträglich als Finding gemeldet. | Erledigt. |
 | 6 | AcoustID Scanner | **Dual Read, P1 nativ (2026-07-18).** Aktive V2-Primary-Files ohne Legacy-Backref werden direkt gescannt; Verification-Status wird nativ auf `lib2_track_files` persistiert, Finding-Fixes melden sich zusätzlich an V2. | Erledigt (P1). |
 | 7 | Cover Art Filler | **Dual Read, P1 nativ (2026-07-18).** V2-Alben werden über den Album-Enumerator direkt erfasst; der Fix schreibt nativ auf `lib2_albums`/`lib2_artists` über die bestehende V2-Artwork-Resolverkette. | Erledigt (P1). |
 | 8 | Lyrics Filler | **Dual Read, P1 nativ (2026-07-18).** Legacy-Files plus aktive V2-Files ohne Legacy-File-Backref über den gemeinsamen V2-Subject-Enumerator; `.lrc`/embedded Lyrics führen zu gezieltem V2-Rescan und sichtbarem History-Event. | Erledigt (P1). |
 | 9 | ReplayGain Filler | **Dual Read, P1 nativ (2026-07-18).** Legacy-Files plus aktive V2-Files ohne Legacy-File-Backref über denselben Enumerator; geschriebene Tags aktualisieren `has_replaygain` über gezielten Rescan und erscheinen in Track/Album/Artist-History. | Erledigt (P1). |
 | 10 | Empty Folder Cleaner | **Neutral.** Löscht nur leere/junk-only Verzeichnisse; Quarantäne-Schutz bleibt. | Keine Katalogmigration; Root-Health-Gate weiter verbindlich. |
-| 11 | Expired Download Cleaner | **Brücke.** automatische Deletes melden Datei/Wanted/History. | P2: Retention langfristig aus Acquisition-Origin/History ableiten; nicht als allgemeiner V2-File-Cleaner verwenden. |
+| 11 | Expired Download Cleaner | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Kein dedizierter nativer Nachfolger identifiziert — Retention läuft nicht mehr als eigener periodischer Scan; File-Löschung/Wanted-Neuberechnung bleibt generisch über die zentrale V2-Lifecycle-Brücke abgedeckt, falls ein anderer Pfad eine abgelaufene Datei entfernt. | Erledigt (retired ohne 1:1-Ersatz). |
 | 12 | Metadata Gap Filler | **Dual Read, P1 nativ (2026-07-18).** IDs/Metadaten/Tags werden auf gemappte V2-Subjects projiziert und neu gescannt; der Fix schreibt zusätzlich nativ auf `lib2_tracks`. | Erledigt (P1). |
-| 13 | Album Completeness | **Brücke plus Import.** Copy/Move neuer Legacy-Tracks löst den idempotenten Legacy→V2-Import, Rescan und Wanted-Recompute aus. | P2/Ablösen: native V2-Completeness + Wanted/Acquisition als Quelle; keine zweite Missing-Track-Engine. |
+| 13 | Album Completeness | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Ersetzt durch native V2-Completeness (`core/library2/completeness.py` — kanonische Tracklist-Auflösung materialisiert fehlende Tracks als monitorbare Platzhalter) plus die globalen Wanted-Views (Missing/Cutoff, §74) mit manuellem Grab statt einem separaten periodischen Scan-Job. | Erledigt. |
 | 14 | Fake Lossless Detector | **Dual Read (observe-only), P1 nativ (2026-07-18).** Alle aktiven V2-Files werden statt nur Filesystem-/Transfer-Scope geprüft; Path-Findings erhalten V2-Subjects. Das Tool verändert absichtlich nichts automatisch — ein späterer Fix muss über Review/Replacement laufen. | Erledigt (P1). |
 | 15 | Quality Check — flag only | **ENTFERNT (P2, 2026-07-18).** Ersetzt durch `lib2_upgrade_scan` mode=`review` (`quality_below_cutoff`-Findings). | Erledigt. |
-| 16 | Library Reorganize | **Brücke.** Dry-run-Findings sind V2-verknüpft; Queue-Moves laufen nun über die strikt gegatete zentrale Pfad-/Rescan-/History-Grenze. | P1: Planner muss V2-IDs/Files ohne Legacy-Backref akzeptieren; bestehende V2-Reorganize-API weiterverwenden. |
-| 17 | MBID Mismatch Detector | **Brücke.** Retag/ID-Clear/Album-Korrektur aktualisiert gemappte V2-Files und Metadaten. | P2: mit V2 Release-/Recording-Reconcile zusammenführen, sobald dessen manuelle Review-Semantik gleichwertig ist. |
-| 18 | Single/Album Dedup | **Brücke.** bestätigte Single-Entfernung markiert V2-Files deleted und Wanted neu. | P2/Ablösen: Managed Tracks + Canonical Relationships sind das native Zielmodell. |
+| 16 | Library Reorganize | **ENTFERNT als eigener Repair-Job (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Die dry-run-Scan-Job-Wrapper-Schicht ist weg; die zugrundeliegende Planner-/Queue-Engine (`core/library_reorganize.py`, `core/reorganize_queue.py`, `core/reorganize_runner.py`) bleibt unverändert aktiv und wird bereits nativ über `core/library2/reorganize_bridge.py` (Album-/Artist-Reorganize-Aktionen in der V2-UI) angesprochen. Das `path_mismatch`-Finding + sein Fix-Handler bleiben in `repair_worker.py`, weil der native Reorganize-Runner sie weiterhin über `sync_repair_change` erzeugt. | Erledigt. |
+| 17 | MBID Mismatch Detector | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Ersetzt durch die Namespace-Sanitize-Stufe der nativen Dedup-Reparatur (`core/library2/dedup_repair.py::_sanitize_provider_namespaces`, §62/§63) plus die Release-Edition-Verwaltung (`core/library2/editions.py`). | Erledigt. |
+| 18 | Single/Album Dedup | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Ersetzt durch die album-interne Fold-Stufe der nativen Dedup-Reparatur (`core/library2/dedup_repair.py`, §62.6 Stufe 3). | Erledigt. |
 | 19 | Lossy Converter | **Dual Read, P1 nativ (2026-07-18).** V2-Files werden direkt enumeriert; der neue Output-Pfad wird als zusätzliches V2-File desselben Tracks registriert und gescannt, Replace-original markiert das alte File deleted. | Erledigt (P1). |
 | 20 | Album Tag Consistency | **Dual Read, P1 nativ (2026-07-18).** V2 Album→Track→File wird direkt gelesen; korrigierte Tags/Metadaten führen zu gezieltem V2-Rescan und History. | Erledigt (P1). |
 | 21 | Live/Commentary Cleaner | **Brücke.** Nutzerbestätigtes Entfernen aktualisiert V2-File und Wanted. | P2: V2-Policy-Query; niedrige Priorität, da bewusst heuristisch und reviewpflichtig. |
-| 22 | Fix Unknown Artists | **Brücke plus Import.** Live/Finding-Fix meldet Änderungen; wegen geänderter Artist-/Album-Junctions wird idempotent neu importiert, danach rescant und History aktualisiert. | P2: V2-native Enrichment/Manual Match übernimmt V2-only Fälle; Legacy-Job später ablösen. |
+| 22 | Fix Unknown Artists | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Ersetzt durch die native Artist-Enrichment/Smart-Split-Maschine (`core/library2/native_enrich.py`, §68) plus Manual-Match — deckt sowohl legacy-gebackte als auch V2-only Artists ab. | Erledigt. |
 | 23 | Discography Backfill | **ENTFERNT (P2, 2026-07-18).** Ersetzt durch V2 Discography Refresh + Monitoring/Wanted + Wanted-Views (Missing/Cutoff, manueller Grab). | Erledigt. |
-| 24 | Resolve Canonical Album Versions | **Brücke.** Finding-Fix und Live-Pin melden Albumänderung in Entity History. | P2/Ablösen: V2 Release-Edition-/MusicBrainz-Reconcile wird alleinige Canonical-Quelle. |
-| 25 | Library Re-tag | **Brücke.** Jeder Live-Retag meldet Metadata/Tags/Artwork; Cache wird invalidiert und Files werden rescant. | P1/Ablösen: Repair-Karte soll den bereits nativen V2 Retag Preview/Write aufrufen; alten Scanner danach entfernen. |
+| 24 | Resolve Canonical Album Versions | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Ersetzt durch die Release-Edition-/MusicBrainz-Reconcile-Stufe der nativen Dedup-Reparatur (`core/library2/dedup_repair.py`, `core/library2/editions.py`, §62/§63). | Erledigt. |
+| 25 | Library Re-tag | **ENTFERNT (P3, 2026-07-18; Modul physisch entfernt 2026-07-19).** Ersetzt durch das bereits native V2 Retag Preview/Write (`core/library2/retag.py`, UI: `retag-modal.tsx` auf der Album-/Artist-Seite) — schreibt lib2-DB-Metadaten direkt in die Datei-Tags; kein zweiter Fresh-Pull-Scan-Job mehr nötig. | Erledigt. |
 | 26 | Quality Upgrade Finder — active | **ENTFERNT (P2, 2026-07-18).** Ersetzt durch `lib2_upgrade_scan` mode=`automatic` (native Upgrade-Queue). | Erledigt. |
 | 27 | Preview Clip Cleanup | **Dual Read, P1 nativ (2026-07-18).** Aktive V2-Files werden direkt nach Dauer/Identity geprüft; Delete+Rewishlist markiert V2-File deleted und Wanted neu. | Erledigt (P1). |
 | 28 | Corrupt File Detector | **Dual Read, P1 nativ (2026-07-18).** Aktive V2-Files werden direkt decode-getestet (Root-Health/Path-Resolver); Delete+Rewishlist markiert V2-File deleted und Wanted neu. | Erledigt (P1). |
@@ -140,12 +152,24 @@ Auch diese sind noch nicht dasselbe:
 Materialisierung laufen über die native Discography-/Wanted-UI (globale
 Missing-/Cutoff-Views mit manuellem Grab, `core/library2/materialize.py`).
 
-### 5.3 Weitere spätere Ablösungen
+### 5.3 Weitere spätere Ablösungen — erledigt (P3, 2026-07-18/19)
 
-- Single/Album Dedup → V2 Managed Tracks/Canonical Relationships.
-- Canonical Version Resolve + MBID Mismatch → V2 Edition/Recording Reconcile.
-- Legacy Library Re-tag → V2 Retag Preview/Write.
-- Album Completeness → V2 Completeness + Wanted/Acquisition.
+Alle vier hier ursprünglich vorgemerkten Ablösungen sind inzwischen
+umgesetzt und die Legacy-Module physisch entfernt (siehe die korrigierte
+Tabelle in Abschnitt 4 sowie §81 in
+[`library-v2.md`](library-v2.md)):
+
+- Single/Album Dedup → native Dedup-Reparatur (`core/library2/dedup_repair.py`).
+- Canonical Version Resolve + MBID Mismatch → dieselbe native Dedup-
+  Reparatur plus `core/library2/editions.py`.
+- Legacy Library Re-tag → V2 Retag Preview/Write (`core/library2/retag.py`).
+- Album Completeness → V2 Completeness (`core/library2/completeness.py`)
+  + Wanted/Acquisition (globale Wanted-Views, §74).
+
+Dieser Abschnitt (5.3) wurde ursprünglich VOR der tatsächlichen P3-Umsetzung
+geschrieben und danach nicht mehr aktualisiert — Abschnitt 7 Punkt 2 belegt
+den fertigen Zustand bereits seit 2026-07-18; die Tabelle in Abschnitt 4 und
+dieser Abschnitt hatten das nur nie nachgezogen.
 
 ## 6. Findings und Priorität
 
@@ -205,14 +229,30 @@ Umgesetzt:
   deren pendente Findings beim Start deterministisch ab, Resolved-History
   bleibt erhalten.
 - Mit entfernt: `core/discovery/quality_scanner.py` (nur noch vom entfernten
-  Job benutzt). Tote Karten-Sonderfälle in `webui/static/enrichment.js`
-  verschwinden mit der Legacy-UI in P3.
+  Job benutzt).
 
-Offen (Brücke bleibt sicher; Ablösung erst nach nachgewiesener
-Gleichwertigkeit der Review-/Safety-Aktionen): Single/Album Dedup, Album
-Completeness, Canonical/MBID-Reconcile, Library Re-tag (Karte soll den
-nativen V2-Retag Preview/Write aufrufen), Unknown Artist, Live/Commentary,
-Duplicate Detector.
+**Korrektur (2026-07-19, siehe §81 in [`library-v2.md`](library-v2.md)):**
+Dieser Abschnitt behauptete bis hierher fälschlich, Single/Album Dedup,
+Album Completeness, Canonical/MBID-Reconcile, Library Re-tag und Unknown
+Artist seien noch offene Brücken-Tools. Tatsächlich stehen alle fünf
+bereits seit dem P3-Commit vom 2026-07-18 in `RETIRED_JOB_IDS`
+(`core/repair_jobs/__init__.py`) — Abschnitt 7 Punkt 2 unten hat das korrekt
+festgehalten, nur diese Stelle wurde nie nachgezogen. Am 2026-07-19 wurden
+zusätzlich ihre Modul-Dateien, die zugehörigen `repair_worker.py`-Dispatch-
+Einträge/Fix-Handler und toten Tests physisch entfernt (siehe die
+korrigierte Tabelle in Abschnitt 4). Live/Commentary Cleaner ist davon NICHT
+betroffen — das Tool ist weiterhin aktiv registriert (`live_commentary_cleaner`
+in `JOB_DATA_BASIS`), niedrige Priorität bleibt zutreffend.
+
+Die tote `discography_backfill`-Sonderbehandlung in
+`webui/static/enrichment.js` (Zeile ~3583) wurde entgegen der obigen Notiz
+NICHT mit P3 entfernt und bleibt zusammen mit den analogen toten
+Renderer-Fällen der neu retirierten Tools (Duplicate Detector, Album
+Completeness, Canonical Version, Library Re-tag) bewusst unangetastet —
+dieselbe Vorsicht wie beim ursprünglichen P2-Commit, der die alte
+vanilla-JS-Oberfläche ebenfalls nicht anfasste. Alle diese Fälle sind
+unerreichbar (kein Job registriert ⇒ keine Findings dieses Typs können mehr
+entstehen), aber noch nicht aufgeräumt.
 
 ### P3 — Legacy-Removal — UMGESETZT (2026-07-18)
 
