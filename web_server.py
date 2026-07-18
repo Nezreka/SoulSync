@@ -39947,9 +39947,14 @@ def _emit_chat_push_loop():
                         if dec:
                             out['rich'] = True
                         return out
+                    decoded = [_unwrap(m) for m in fresh]
+                    try:
+                        get_database().add_chat_messages(room, decoded)
+                    except Exception:
+                        logger.debug("chat: loop archive write failed", exc_info=True)
                     socketio.emit('chat:room_message', {
                         'room': room,
-                        'messages': [_unwrap(m) for m in fresh[-20:]],
+                        'messages': decoded[-20:],
                     })
             convos = run_async(_slsk.get_conversations()) or []
             unread_users = [str(c.get('username') or '') for c in convos
@@ -40383,6 +40388,7 @@ _configure_chat_api(
     run_async=run_async,
     config_get=lambda key, default=None: config_manager.get(key, default),
     config_set=lambda key, value: config_manager.set(key, value),
+    db_getter=get_database,
 )
 app.register_blueprint(_create_chat_blueprint())
 

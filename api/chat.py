@@ -26,6 +26,7 @@ from utils.logging_config import get_logger
 logger = get_logger("chat.api")
 
 _MAX_MESSAGE_LEN = 1000
+_INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
 
 # Host-injected callables (configure() below) — avoids circular imports with
 # web_server, same pattern as core/enrichment/api.py.
@@ -33,14 +34,24 @@ _client_getter = None      # () -> SoulseekClient | None (configured or None)
 _run_async = None          # coroutine -> result (the shared slskd event loop)
 _config_get = None         # (key, default) -> value
 _config_set = None         # (key, value) -> None
+_db_getter = None          # () -> MusicDatabase (the chat archive lives there)
 
 
-def configure(*, client_getter, run_async, config_get, config_set=None) -> None:
-    global _client_getter, _run_async, _config_get, _config_set
+def configure(*, client_getter, run_async, config_get, config_set=None,
+              db_getter=None) -> None:
+    global _client_getter, _run_async, _config_get, _config_set, _db_getter
     _client_getter = client_getter
     _run_async = run_async
     _config_get = config_get
     _config_set = config_set
+    _db_getter = db_getter
+
+
+def _db():
+    try:
+        return _db_getter() if _db_getter else None
+    except Exception:
+        return None
 
 
 def _client():
@@ -236,8 +247,44 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.exception("chat: room hydrate failed")
             return jsonify({"error": str(e)}), 502
-        return jsonify({"room": room, "messages": _unwrap_room_messages(messages),
+        live = _unwrap_room_messages(messages)
+        # Archive-first (chatbic P2): slskd forgets the room on restart, the
+        # archive doesn't. Top it up from the live buffer (idempotent), then
+        # serve the archive tail; live is only the fallback when the archive
+        # is unavailable. The top-up is THROTTLED — the page polls this every
+        # 4s and re-ingesting the whole slskd buffer each tick is the request
+        # flood all over again; the push loop archives the deltas in between.
+        db = _db()
+        out = live
+        if db is not None:
+            try:
+                import time as _time
+                now = _time.time()
+                if now - _INGEST_AT.get(room, 0) > 60:
+                    _INGEST_AT[room] = now
+                    db.add_chat_messages(room, live)
+                arch = db.get_chat_messages(room, limit=100)
+                if arch:
+                    out = arch
+            except Exception:
+                logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
+        return jsonify({"room": room, "messages": out,
                         "users": users or [], "can_send": _can_send()})
+
+    @bp.route("/api/chat/room/history", methods=["GET"])
+    def chat_room_history():
+        """Scrollback: a page of archived messages strictly OLDER than
+        ``before`` (a timestamp), oldest-first within the page."""
+        db = _db()
+        if db is None:
+            return jsonify({"messages": [], "done": True})
+        before = str(request.args.get("before") or "").strip()
+        try:
+            limit = max(1, min(int(request.args.get("limit", 100)), 200))
+        except (TypeError, ValueError):
+            limit = 100
+        msgs = db.get_chat_messages(_room_name(), before=before or None, limit=limit)
+        return jsonify({"messages": msgs, "done": len(msgs) < limit})
 
     @bp.route("/api/chat/room/message", methods=["POST"])
     def chat_room_send():

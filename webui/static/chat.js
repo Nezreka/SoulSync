@@ -24,6 +24,9 @@
         isAdmin: false,          // shows the settings cog (from /status)
         newMarker: null,         // frozen last-seen ts for the NEW divider (per room open)
         renderedCount: 0,        // for the new-messages pill delta
+        msgs: [],                // room message store: archive pages + live tail (merged)
+        loadingOlder: false,     // scrollback fetch in flight
+        historyDone: false,      // no more archive pages
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
 
@@ -387,6 +390,13 @@
                 ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden</div>' : '');
         if (state.stickBottom) {
             host.scrollTop = host.scrollHeight;
+            // deep-scrollback cleanup: once the reader is back at the bottom,
+            // trim the store so steady-state renders stay light (they can
+            // always page history again)
+            if (state.view === 'room' && state.msgs.length > 300) {
+                state.msgs = state.msgs.slice(-300);
+                state.historyDone = false;
+            }
         } else if (shown.length > state.renderedCount && state.renderedCount > 0) {
             showJumpPill(shown.length - state.renderedCount);   // arrivals while scrolled up
         }
@@ -621,6 +631,49 @@
         renderUsers(null);
     }
 
+    // ── room message store (archive pages + live tail) ───────────────────────
+    function _msgKey(m) {
+        return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
+    }
+
+    function mergeMessages(incoming) {
+        var known = {};
+        state.msgs.forEach(function (m) { known[_msgKey(m)] = 1; });
+        var added = 0;
+        (incoming || []).forEach(function (m) {
+            if (!known[_msgKey(m)]) { known[_msgKey(m)] = 1; state.msgs.push(m); added++; }
+        });
+        if (added) {
+            state.msgs.sort(function (a, b) {
+                return String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
+            });
+        }
+        return added;
+    }
+
+    function loadOlder() {
+        if (state.view !== 'room' || state.loadingOlder || state.historyDone || !state.msgs.length) return;
+        state.loadingOlder = true;
+        var oldest = String(state.msgs[0].timestamp || '');
+        getJSON('/api/chat/room/history?before=' + encodeURIComponent(oldest) + '&limit=100')
+            .then(function (res) {
+                state.loadingOlder = false;
+                if (!res.ok) return;
+                if (res.body.done) state.historyDone = true;
+                var older = res.body.messages || [];
+                if (!older.length) return;
+                mergeMessages(older);
+                // re-render, keeping the reader anchored where they were
+                var host = q('[data-chat-messages]');
+                var prevH = host ? host.scrollHeight : 0;
+                var prevTop = host ? host.scrollTop : 0;
+                state.lastStamp = null;
+                renderMessages(state.msgs);
+                if (host) host.scrollTop = host.scrollHeight - prevH + prevTop;
+            })
+            .catch(function () { state.loadingOlder = false; });
+    }
+
     // ── refresh loop ─────────────────────────────────────────────────────────
     function refresh() {
         if (!pageVisible()) return Promise.resolve();
@@ -636,7 +689,8 @@
                 state.room = res.body.room || state.room;
                 state.canSend = !!res.body.can_send;
                 renderHead(); renderComposer();
-                renderMessages(res.body.messages);
+                mergeMessages(res.body.messages);
+                renderMessages(state.msgs);
                 renderUsers(res.body.users);
             });
         } else {
@@ -670,6 +724,7 @@
     function openRoom() {
         state.view = 'room'; state.pmUser = null; state.lastStamp = null; state.stickBottom = true;
         state.renderedCount = 0; hideJumpPill();
+        state.msgs = []; state.loadingOlder = false; state.historyDone = false;
         try {
             state.newMarker = localStorage.getItem('chat_seen_' + (state.room || '')) || null;
         } catch (e) { state.newMarker = null; }
@@ -826,6 +881,7 @@
                 state.stickBottom =
                     scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 40;
                 if (state.stickBottom) hideJumpPill();
+                if (scroller.scrollTop < 60) loadOlder();   // reach the top → page older
             });
         }
 
