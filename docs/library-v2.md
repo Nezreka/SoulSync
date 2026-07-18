@@ -7736,3 +7736,79 @@ Production-Build ok. `ruff check` sauber.
 
 **Noch offen aus §64:** I2 (Wanted-Views), I6 (Queue-Sichtbarkeit), H8
 (Bulk-Edit-Modal).
+
+---
+
+## 73. §64 I6 — Queue-Sichtbarkeit an der Entity — Design entschieden, Umsetzung folgt (2026-07-18)
+
+Entscheidung nach Rückfragen mit dem Nutzer, zweiter der vier §64-Punkte.
+Ziel: Status/Fortschritt laufender Downloads direkt an Track- und
+Album-Zeilen in Library v2 sichtbar machen, nicht nur auf der separaten
+Downloads-Seite.
+
+### 73.1 Bestandsaufnahme
+
+Zwei parallele, bereits vorhandene In-Flight-Tracking-Systeme
+(`core/runtime_state.py`): `download_tasks`/`download_batches` (Batch-/
+Wishlist-Pfad, Status-Werte `pending/queued/searching/downloading/
+post_processing/completed/failed/cancelled/not_found`, Fortschritt via
+`core/downloads/status.py`) und `matched_downloads_context` (manueller
+Grab/Interactive Search, byte-genauer Fortschritt aus dem slskd/Streaming-
+Transfer). Beide tragen die lib2-Track-Identität bereits mit sich —
+`matched_downloads_context[...]['lib2_entity']['track_id']` (gesetzt via
+§71/`resolve_lib2_grab_context`) bzw.
+`download_tasks[...]['track_info']['source_info']['lib2_track_id']`
+(gesetzt via `core/library2/wishlist_mirror.py`) — aber keine der
+bestehenden Status-APIs (`/api/downloads/status`, `/api/downloads/all`)
+surfaced das heute.
+
+### 73.2 Entschiedenes Design
+
+- **Scope:** Track-Zeilen in der Album-Detailansicht bekommen ein Status-
+  Badge; die Album-Liste in der Artist-Detailansicht bekommt ein kleines
+  Roll-up ("2 downloading") neben der bestehenden Presence-Progress-Bar.
+  Beide Download-Pfade (Batch/Queue UND manueller Grab) zählen.
+- **Lebensdauer:** rein aktiv — nur sichtbar während
+  `pending/queued/searching/downloading/post_processing`. Kein neuer
+  persistenter Fehlzustand; `failed`/`not_found` verschwindet mit dem
+  bestehenden Task-Purge (5 min) wieder, die vorhandenen Quality-/
+  Verification-Badges decken das Ergebnis bereits ab.
+- **Backend:** neuer read-only Helper `core/library2/queue_status.py::
+  get_queue_status(track_ids)` scannt beide In-Memory-Strukturen gefiltert
+  auf die übergebenen lib2-Track-IDs und mappt auf
+  `{track_id: {status, progress_pct}}` — terminale/leere Einträge werden
+  weggelassen statt kodiert. Zwei neue, schlank gescopte Routen nach dem
+  Muster der §29/C1 Scoped-Search-Endpunkte: `GET /api/library/v2/artist/
+  <id>/queue-status` und `.../album/<id>/queue-status` (Artist-Variante
+  löst zunächst alle Track-IDs des Artists auf, dann derselbe Scan).
+- **Frontend:** kein neuer Toggle-Spalten-Eintrag (wie bei I8) — das Badge
+  ist die meiste Zeit leer, daher inline neben dem Tracktitel in `TrackRow`
+  bzw. als Pill neben der Progress-Bar in `AlbumBlock`, jeweils nur
+  gerendert wenn ein Eintrag existiert. Polling: einfacher
+  `refetchInterval: 3000` in der jeweils gemounteten Detailansicht (Artist-
+  /Album-Detail), kein bedingtes An/Aus nötig, da der Endpoint durch das
+  Scoping bereits günstig ist; ein Fetch-Fehler wird still geschluckt (das
+  Badge ist ein Overlay, darf die Seite nie blockieren). Beide Download-
+  Pfade normalisieren serverseitig auf dieselben fünf Status-Strings, das
+  Frontend braucht nur eine gemeinsame Icon/Label-Zuordnung (Vokabular
+  angelehnt an die bestehende Downloads-Seite, `pages-extra.js
+  _adlStatusLabel`: "Queued", "Searching", "⏬ Downloading N%",
+  "Processing").
+- **Bewusst abgelehnt:** `/api/downloads/all` wiederverwenden und
+  clientseitig filtern (verworfen — Payload wächst mit der Gesamtzahl aller
+  Batches, nicht mit der sichtbaren Entity) und WebSocket/SSE-Push
+  (verworfen — kein bestehendes Push-Infra in dieser Codebase, unnötige
+  Komplexität für ein Nice-to-have-Overlay).
+
+### 73.3 Verifikationsplan (vor Umsetzung)
+
+`tests/library2/test_queue_status.py` (Helper gegen geseedete
+`download_tasks`/`matched_downloads_context`-Fixtures, ein Fall pro
+Status-Wert + ein Track ohne In-Flight-Eintrag → weggelassen; Endpoint-
+Tests für Artist- und Album-Scope, leerer Fall, gemischte Status, unbekannte
+ID → 404). Frontend: `album-track-table.test.tsx` + Artist-Detail-Test
+erweitert um einen gemockten Queue-Status, der das Badge/Pill mit
+korrektem Label rendert und bei fehlendem Eintrag verschwindet. Gleiche
+Verifikationsleiste wie die vorherigen Slices: `tests/library2` grün,
+`tsc --noEmit` clean, betroffene `vitest`-Dateien grün, `ruff check`
+sauber.
