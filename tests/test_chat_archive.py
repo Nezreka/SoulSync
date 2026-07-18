@@ -60,6 +60,20 @@ class TestArchiveDb:
             "not a dict", None]) == 0
 
 
+class TestArchiveReply:
+    def test_reply_survives_the_archive(self, mdb):
+        mdb.add_chat_messages("SoulSync", [
+            {"username": "a", "message": "yes", "rich": True,
+             "timestamp": "2026-07-19 10:00:00",
+             "reply": {"u": "bob", "x": "should we?"}},
+            {"username": "b", "message": "plain", "rich": False,
+             "timestamp": "2026-07-19 10:01:00"},
+        ])
+        rows = mdb.get_chat_messages("SoulSync")
+        assert rows[0]["reply"] == {"u": "bob", "x": "should we?"}
+        assert "reply" not in rows[1]
+
+
 class TestArchiveApi:
     def _app(self, mdb):
         import api.chat as chat_api

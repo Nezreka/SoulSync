@@ -39946,6 +39946,9 @@ def _emit_chat_push_loop():
                                'timestamp': m.get('timestamp')}
                         if dec:
                             out['rich'] = True
+                            rep = chat_codec.reply_of(dec)
+                            if rep:
+                                out['reply'] = rep
                         return out
                     decoded = [_unwrap(m) for m in fresh]
                     try:

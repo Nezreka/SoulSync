@@ -27,6 +27,22 @@ logger = get_logger("chat.api")
 
 _MAX_MESSAGE_LEN = 1000
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
+_SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
+
+
+def _self_username(client) -> str:
+    import time as _time
+    now = _time.time()
+    if _SELF["name"] and now - _SELF["at"] < 300:
+        return _SELF["name"]
+    try:
+        info = _run_async(client.get_session_info()) or {}
+        name = str(info.get("username") or "")
+        if name:
+            _SELF.update(name=name, at=now)
+        return name
+    except Exception:
+        return _SELF["name"]
 
 # Host-injected callables (configure() below) — avoids circular imports with
 # web_server, same pattern as core/enrichment/api.py.
@@ -109,6 +125,9 @@ def _unwrap_room_messages(messages) -> list:
         if dec is not None:
             m["message"] = dec["t"]
             m["rich"] = True
+            r = chat_codec.reply_of(dec)
+            if r:
+                m["reply"] = r
         out.append(m)
     return out
 
@@ -229,6 +248,8 @@ def create_blueprint() -> Blueprint:
             "room": _room_name(),
             "can_send": _can_send(),
             "is_admin": bool(getattr(g, "is_admin", True)),   # shows the settings cog
+            # our slskd account name — the page needs it for @mention highlights
+            "username": _self_username(client) if client is not None else "",
         })
 
     @bp.route("/api/chat/room", methods=["GET"])
@@ -300,7 +321,12 @@ def create_blueprint() -> Blueprint:
         # see line noise). PMs are NEVER encoded — they must stay readable to
         # non-SoulSync users (and the ProveIt bots need literal plaintext).
         from core import chat_codec
-        wrapped = chat_codec.encode(msg)
+        body = request.get_json(silent=True) or {}
+        extra = None
+        rep = chat_codec.reply_of({"r": body.get("reply")})
+        if rep:
+            extra = {"r": rep}
+        wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400
         room = _room_name()

@@ -27,6 +27,9 @@
         msgs: [],                // room message store: archive pages + live tail (merged)
         loadingOlder: false,     // scrollback fetch in flight
         historyDone: false,      // no more archive pages
+        selfName: '',            // our slskd username (@mention highlighting)
+        users: [],               // room user names (mention autocomplete)
+        replyTo: null,           // {u, x} while composing a reply
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
 
@@ -148,6 +151,24 @@
         return s.replace(/\u0000(\d+)\u0000/g, function (_, i) { return out[Number(i)]; });
     }
 
+    var MENTION_RE = /@([A-Za-z0-9_.-]{2,32})\b/g;
+
+    function _mentionify(s) {
+        var selfLower = String(state.selfName || '').toLowerCase();
+        return s.replace(MENTION_RE, function (m, name) {
+            var me = selfLower && name.toLowerCase() === selfLower;
+            return '<span class="chat-mention' + (me ? ' chat-mention--self' : '') +
+                '" data-chat-user="' + name + '">@' + name + '</span>';
+        });
+    }
+
+    function mentionsMe(text) {
+        if (!state.selfName) return false;
+        var re = new RegExp('@' + String(state.selfName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+            '(?![A-Za-z0-9_.-])', 'i');
+        return re.test(String(text || ''));
+    }
+
     function _preclean(text) {
         // strip literal NULs so crafted input can never touch the sentinel space
         return String(text == null ? '' : text).replace(/\u0000/g, '');
@@ -160,6 +181,7 @@
             var u = _trimUrl(m);
             return _linkWithEmbeds(u) + m.slice(u.length);
         });
+        s = _mentionify(s);
         return _restore(s, hold).replace(/\n/g, '<br>');
     }
 
@@ -210,8 +232,9 @@
         s = s.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
         s = s.replace(/\|\|([^|\n]+)\|\|/g,
             '<span class="chat-spoiler" data-chat-spoiler title="Spoiler — click to reveal">$1</span>');
-        // 3) emoji shortcodes
+        // 3) emoji shortcodes + @mentions
         s = s.replace(/:([a-z0-9_+-]+):/g, function (m, name) { return EMOJI[name] || m; });
+        s = _mentionify(s);
         // 4) line-level blocks: headings, quotes, bullets ('>' is &gt; here)
         s = s.split('\n').map(function (line) {
             if (line.indexOf('### ') === 0) return '<span class="chat-h3">' + line.slice(4) + '</span>';
@@ -288,9 +311,21 @@
     }
 
     function _lineHtml(m) {
-        return '<div class="chat-line" title="' + attr(_fullTs(m.timestamp)) + '">' +
+        var self = m.self === true || m.direction === 'Out';
+        var me = !self && state.view === 'room' && mentionsMe(m.message);
+        var replyRef = (m.reply && m.reply.u)
+            ? '<div class="chat-reply-ref">↩ <b>' + esc(m.reply.u) + '</b> ' +
+              '<span>' + esc(m.reply.x || '') + '</span></div>'
+            : '';
+        var replyBtn = (state.view === 'room' && state.canSend && !self)
+            ? '<button type="button" class="chat-line-reply" title="Reply" ' +
+              'data-chat-reply-user="' + attr(m.username || '') + '" ' +
+              'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>'
+            : '';
+        return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
+            attr(_fullTs(m.timestamp)) + '">' + replyRef +
             (m.rich ? renderRich(m.message) : renderPlain(m.message)) +
-            '</div>';
+            replyBtn + '</div>';
     }
 
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
@@ -418,6 +453,7 @@
             host.innerHTML = ''; host.hidden = true; return;
         }
         host.hidden = false;
+        state.users = users.map(function (u) { return String(u.username || u || ''); }).filter(Boolean);
         var names = users.map(function (u) { return u.username || u; })
             .filter(Boolean).sort(function (a, b) {
                 return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
@@ -507,6 +543,66 @@
         input.value = input.value.slice(0, start) + text + input.value.slice(input.selectionEnd || start);
         input.focus();
         input.setSelectionRange(start + text.length, start + text.length);
+    }
+
+    // ── reply composing (chatbic P3) ─────────────────────────────────────────
+    function startReply(u, x) {
+        if (state.view !== 'room' || !state.canSend || !u) return;
+        state.replyTo = { u: u, x: x || '' };
+        var bar = q('[data-chat-reply-bar]');
+        var who = q('[data-chat-reply-who]');
+        var ex = q('[data-chat-reply-excerpt]');
+        if (who) who.textContent = u;
+        if (ex) ex.textContent = x || '';
+        if (bar) bar.hidden = false;
+        var input = q('[data-chat-input]');
+        if (input) input.focus();
+    }
+
+    function cancelReply() {
+        state.replyTo = null;
+        var bar = q('[data-chat-reply-bar]');
+        if (bar) bar.hidden = true;
+    }
+
+    // ── @mention autocomplete ────────────────────────────────────────────────
+    function _mentionQuery(input) {
+        var upto = input.value.slice(0, input.selectionStart || input.value.length);
+        var m = upto.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
+        return m ? m[2] : null;
+    }
+
+    function updateMentionPop(input) {
+        var pop = q('[data-chat-mention-pop]');
+        if (!pop) return;
+        var qstr = state.view === 'room' ? _mentionQuery(input) : null;
+        if (qstr === null || !state.users.length) { pop.hidden = true; return; }
+        var ql = qstr.toLowerCase();
+        var hits = state.users.filter(function (u) {
+            return u.toLowerCase().indexOf(ql) === 0 && u !== state.selfName;
+        }).slice(0, 8);
+        if (!hits.length) { pop.hidden = true; return; }
+        pop.innerHTML = hits.map(function (u) {
+            return '<button type="button" class="chat-mention-opt" data-chat-mention-pick="' +
+                attr(u) + '">' + _avatar(u) + '<span>' + esc(u) + '</span></button>';
+        }).join('');
+        pop.hidden = false;
+    }
+
+    function pickMention(name) {
+        var input = q('[data-chat-input]');
+        var pop = q('[data-chat-mention-pop]');
+        if (pop) pop.hidden = true;
+        if (!input || !name) return;
+        var caret = input.selectionStart || input.value.length;
+        var upto = input.value.slice(0, caret);
+        var rest = input.value.slice(caret);
+        // usernames with spaces can't ride the @grammar — mention the safe prefix
+        var safe = name.split(/\s/)[0];
+        var replaced = upto.replace(/(^|\s)@[A-Za-z0-9_.-]*$/, '$1@' + safe + ' ');
+        input.value = replaced + rest;
+        input.focus();
+        input.setSelectionRange(replaced.length, replaced.length);
     }
 
     var _gifTimer = null;
@@ -738,6 +834,7 @@
         if (!username) return;
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
+        cancelReply();
         renderHead(); renderComposer();
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
@@ -754,7 +851,13 @@
         var url = state.view === 'room'
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
-        postJSON(url, { message: text }).then(function (res) {
+        var payload = { message: text };
+        var sentReply = null;
+        if (state.view === 'room' && state.replyTo) {
+            payload.reply = state.replyTo;
+            sentReply = state.replyTo;
+        }
+        postJSON(url, payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'Message not sent', 'error');
@@ -772,6 +875,7 @@
                 host.insertAdjacentHTML('beforeend', renderGroups([{
                     username: 'you', message: text,
                     timestamp: new Date().toISOString(), self: true,
+                    reply: sentReply || undefined,
                     // room sends ride the envelope → render the echo rich too
                     rich: state.view === 'room',
                 }]));
@@ -779,6 +883,7 @@
                 state.lastStamp = null;
             }
             state.stickBottom = true;
+            cancelReply();
             refresh();
         });
     }
@@ -826,6 +931,16 @@
             if (t) { toggleEmojiPicker(); return; }
             t = e.target.closest('[data-chat-emoji-pick]');
             if (t) { insertAtCursor(t.getAttribute('data-chat-emoji-pick')); toggleEmojiPicker(true); return; }
+            t = e.target.closest('[data-chat-reply-user]');
+            if (t) {
+                startReply(t.getAttribute('data-chat-reply-user'),
+                           t.getAttribute('data-chat-reply-x'));
+                return;
+            }
+            t = e.target.closest('[data-chat-reply-cancel]');
+            if (t) { cancelReply(); return; }
+            t = e.target.closest('[data-chat-mention-pick]');
+            if (t) { pickMention(t.getAttribute('data-chat-mention-pick')); return; }
             t = e.target.closest('[data-chat-settings-btn]');
             if (t) { openSettings(); return; }
             t = e.target.closest('[data-chat-settings-save]');
@@ -860,10 +975,16 @@
             // syntax — code fences, quotes, lists — NEEDS real newlines)
             inputEl.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                if (e.key === 'Escape') {
+                    cancelReply();
+                    var mp = q('[data-chat-mention-pop]');
+                    if (mp) mp.hidden = true;
+                }
             });
             inputEl.addEventListener('input', function () {
                 inputEl.style.height = 'auto';
                 inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px';
+                updateMentionPop(inputEl);
             });
         }
 
@@ -908,6 +1029,7 @@
                 state.room = (res.body && res.body.room) || 'SoulSync';
                 state.canSend = !!(res.body && res.body.can_send);
                 state.isAdmin = !!(res.body && res.body.is_admin);
+                state.selfName = String((res.body && res.body.username) || '');
                 renderSide([]); renderHead(); renderComposer();
                 if (!state.configured) {
                     renderProblem('Soulseek (slskd) isn\'t configured — set it up in Settings ' +
@@ -957,7 +1079,29 @@
         });
     }
 
+    var _selfFetched = false;
+
+    function _ensureSelf() {
+        // mention pings must work even if the chat page was never opened this
+        // session — one lazy status fetch on the first pushed room message
+        if (_selfFetched || state.selfName) return;
+        _selfFetched = true;
+        getJSON('/api/chat/status').then(function (res) {
+            if (res.ok) state.selfName = String(res.body.username || '');
+        });
+    }
+
     function onRoomMessages(d) {
+        _ensureSelf();
+        // a mention pings you wherever you are in the app (Discord behavior)
+        var mentioned = (d && d.messages || []).filter(function (m) {
+            return mentionsMe(m.message);
+        });
+        if (mentioned.length && !(pageVisible() && state.view === 'room') &&
+                typeof showToast === 'function') {
+            showToast('💬 ' + (mentioned[0].username || 'someone') +
+                ' mentioned you in # ' + (state.room || 'chat'), 'info');
+        }
         if (pageVisible() && state.view === 'room') {
             refresh();               // live update, nothing to badge
             return;
@@ -1016,5 +1160,6 @@
                         onRoomMessages: onRoomMessages, onUnread: onUnread,
                         // exported for the node render harness (XSS contract tests)
                         renderRich: renderRich, renderPlain: renderPlain,
-                        renderGroups: renderGroups };
+                        renderGroups: renderGroups,
+                        _testSetSelf: function (n) { state.selfName = n; } };
 })();
