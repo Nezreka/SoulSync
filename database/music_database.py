@@ -8189,7 +8189,7 @@ class MusicDatabase:
             logger.error(f"Error fetching candidate tracks for {len(album_ids)} album IDs: {e}")
             return []
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -8201,7 +8201,7 @@ class MusicDatabase:
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -8215,7 +8215,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -8238,7 +8238,7 @@ class MusicDatabase:
                 # per-variation SQL widening that the legacy path does.
                 logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
                 for album in candidate_albums:
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
@@ -8271,7 +8271,7 @@ class MusicDatabase:
 
                     # Score each potential match with Smart Edition Matching
                     for album in albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                         logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
 
                         if confidence > best_confidence:
@@ -8307,7 +8307,7 @@ class MusicDatabase:
                             logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
 
                         for album in artist_albums:
-                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                             if confidence > best_confidence:
                                 best_confidence = confidence
                                 best_match = album
@@ -8326,7 +8326,7 @@ class MusicDatabase:
                 try:
                     title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
                     for album in title_only_albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                         # Slightly penalize cross-artist matches to prefer same-artist when possible
                         if confidence > best_confidence:
                             best_confidence = confidence
@@ -8443,7 +8443,27 @@ class MusicDatabase:
         
         return unique_variations
     
-    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False) -> float:
+    @staticmethod
+    def _release_years_conflict(expected_year, album_year, tolerance: int = 1) -> bool:
+        """True when BOTH years are known and disagree beyond tolerance.
+
+        The re-release guard (#re-releases-as-owned): two same-named releases in
+        a discography only exist as separate cards when their years differ (the
+        variant dedup collapses same-year editions), so a year mismatch means
+        the card is a genuinely different release than the local album. Either
+        year missing/unparseable → False, so behavior falls back to the
+        original name-based matching.
+        """
+        try:
+            ey = int(str(expected_year)[:4])
+            ay = int(str(album_year)[:4])
+        except (TypeError, ValueError):
+            return False
+        if ey <= 0 or ay <= 0:
+            return False
+        return abs(ey - ay) > tolerance
+
+    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False, expected_year=None) -> float:
         """Calculate confidence score for album match with Smart Edition Matching"""
         try:
             # Simple confidence based on string similarity
@@ -8473,6 +8493,19 @@ class MusicDatabase:
                 db_album.track_count,
             ):
                 logger.debug("  Strict discography match rejected: '%s' -> '%s'", search_title, db_album.title)
+                return 0.0
+
+            # Re-release year gate (discography surfaces only): a same-named card
+            # from a different year is a different release — owning the original
+            # must not light up its re-releases. Fires only when BOTH years are
+            # known (±1yr tolerance for edition-date drift); otherwise the match
+            # behaves exactly as before.
+            if (strict_discography_match
+                    and self._release_years_conflict(expected_year,
+                                                     getattr(db_album, 'year', None))):
+                logger.debug(
+                    "  Year gate rejected: '%s' (%s) -> '%s' (%s)",
+                    search_title, expected_year, db_album.title, db_album.year)
                 return 0.0
 
             # Log when normalized matching helps (only if it's the best score and better than others)

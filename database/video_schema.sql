@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS movies (
     updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     play_count       INTEGER,                         -- server watch state (viewCount)
     last_viewed_at   TEXT,                             -- server last-watched stamp (Plex lastViewedAt / JF LastPlayedDate)
+    view_offset_ms   INTEGER,                         -- resume position (Continue Watching)
     locked_fields    TEXT                             -- JSON list of user-edited (scan/enrichment-immune) fields
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
@@ -186,6 +187,9 @@ CREATE TABLE IF NOT EXISTS episodes (
     tvdb_id         INTEGER,
     monitored       INTEGER NOT NULL DEFAULT 1,
     has_file        INTEGER NOT NULL DEFAULT 0,
+    play_count      INTEGER,          -- server watch state (Plex viewCount / JF UserData.PlayCount)
+    last_viewed_at  TEXT,             -- server last-watched stamp
+    view_offset_ms  INTEGER,          -- resume position (Plex viewOffset / JF PlaybackPositionTicks→ms)
     UNIQUE (show_id, season_number, episode_number)
 );
 CREATE INDEX IF NOT EXISTS idx_episodes_show     ON episodes(show_id);
@@ -407,6 +411,9 @@ CREATE TABLE IF NOT EXISTS media_files (
     release_source TEXT,             -- bluray | web-dl | webrip | hdtv | youtube
     quality        TEXT,             -- resolved quality name
     runtime_seconds INTEGER,
+    audio_channels INTEGER,          -- 2 | 6 (5.1) | 8 (7.1)
+    dynamic_range  TEXT,             -- HDR10 | HDR10+ | DV | HLG (NULL = SDR)
+    atmos          INTEGER,          -- Dolby Atmos audio present
     added_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((movie_id IS NOT NULL) + (episode_id IS NOT NULL) + (video_id IS NOT NULL) = 1)
 );
@@ -513,7 +520,9 @@ CREATE TABLE IF NOT EXISTS video_wishlist (
     source         TEXT NOT NULL DEFAULT 'tmdb',
     source_id      TEXT,
     parent_source_id TEXT,                   -- owning channel's youtube id (video rows)
-    date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_attempts INTEGER DEFAULT 0,       -- consecutive fruitless drain searches (reset on grab)
+    last_search_at  TEXT                     -- when the drain last searched this row
 );
 -- one row per movie, one per (show, season, episode), one per youtube video —
 -- partial uniques so the shapes don't collide and re-adding is an idempotent upsert.

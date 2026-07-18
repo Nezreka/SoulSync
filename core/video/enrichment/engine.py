@@ -353,12 +353,30 @@ class VideoEnrichmentEngine:
                         out[rail] = self._stamp_owned(list(out[rail]))
         srv = self._server_watch_link(kind, item_id)
         if srv:
+            if kind == "show":
+                # Continue Watching: point the CTA at the NEXT episode, not the
+                # show root — Plex/Jellyfin resume an in-progress item themselves.
+                try:
+                    nu = self.db.show_next_up(item_id)
+                except Exception:
+                    nu = None
+                if nu and nu.get("server_id"):
+                    ep_link = self._server_watch_link(kind, item_id,
+                                                      episode_sid=nu["server_id"])
+                    if ep_link:
+                        srv = dict(srv)
+                        srv["episode_url"] = ep_link["url"]
+                        srv["next_up"] = {"season": nu["season_number"],
+                                          "episode": nu["episode_number"],
+                                          "resume": bool(nu.get("resume"))}
             out["server"] = srv
         return out
 
-    def _server_watch_link(self, kind, item_id) -> dict | None:
+    def _server_watch_link(self, kind, item_id, episode_sid=None) -> dict | None:
         """A 'play on your media server' deep link for an owned item, or None.
-        Plex → the Plex web app at the item; Jellyfin → its web detail page."""
+        Plex → the Plex web app at the item; Jellyfin → its web detail page.
+        ``episode_sid`` swaps in an EPISODE's server id (same server as its
+        show) for a Continue-Watching deep link straight to the episode."""
         table = "movies" if kind == "movie" else "shows"
         try:
             with self.db.connect() as c:
@@ -371,6 +389,8 @@ class VideoEnrichmentEngine:
         source, sid = row["server_source"], row["server_id"]
         if not source or not sid:
             return None                      # not on a server (e.g. a wishlist row)
+        if episode_sid:
+            sid = episode_sid                # deep-link the episode, same server
         try:
             # Use the VIDEO side's effective connection (its own creds, or inherited
             # from music) — the item lives on the server the video side scanned.

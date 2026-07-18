@@ -493,6 +493,9 @@ class NavidromeClient(MediaServerClient):
 
     def get_all_artists(self) -> List[NavidromeArtist]:
         """Get all artists from the music library"""
+        # last_fetch_failed lets callers tell "library is genuinely empty"
+        # from "the fetch failed" — both come back as [] (#stale-artists).
+        self.last_fetch_failed = True
         if not self.ensure_connection():
             logger.error("Not connected to Navidrome server")
             return []
@@ -506,6 +509,8 @@ class NavidromeClient(MediaServerClient):
                 params['musicFolderId'] = self.music_folder_id
             response = self._make_request('getArtists', params if params else None)
             if not response:
+                # a failed request is a FAILURE, not an empty library — an
+                # empty library still answers with an artists envelope
                 return []
 
             if self._progress_callback:
@@ -530,6 +535,7 @@ class NavidromeClient(MediaServerClient):
                 self._progress_callback(f"Retrieved {len(artists)} artists from Navidrome")
 
             logger.info(f"Retrieved {len(artists)} artists from Navidrome")
+            self.last_fetch_failed = False
             return artists
 
         except Exception as e:

@@ -64636,6 +64636,28 @@ body.max-performance #page-particles-canvas {
 
 .wl-tile-track:hover { background: rgba(255,255,255,0.05); }
 
+/* Repeatedly-failing wishlist items (#liveleak-failing-hub) */
+.wl-failing-badge {
+    flex: 0 0 auto; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.02em; cursor: default;
+    color: #fca5a5; background: rgba(239, 68, 68, 0.14);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.wl-track-failing .wl-tile-track-name { color: rgba(252, 165, 165, 0.9); }
+.wl-orb-meta-failing { color: #fca5a5; font-weight: 700; cursor: default; }
+.wl-moon-failing img { outline: 2px solid rgba(239, 68, 68, 0.55); outline-offset: -1px; }
+.wl-moon-failing-badge {
+    position: absolute; top: -4px; right: -4px; z-index: 3;
+    font-size: 10px; color: #fff; background: rgba(220, 38, 38, 0.9);
+    width: 16px; height: 16px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+}
+.wl-failing-filter { flex: 0 0 auto; }
+.wl-failing-filter.active {
+    color: #fca5a5; background: rgba(239, 68, 68, 0.16);
+    border-color: rgba(239, 68, 68, 0.45);
+}
+
 .wl-tile-track-name {
     font-size: 10px;
     color: rgba(255,255,255,0.6);
@@ -64661,6 +64683,24 @@ body.max-performance #page-particles-canvas {
 }
 
 .wl-tile-track:hover .wl-tile-track-remove { opacity: 1; }
+
+/* Manual-search jump (LiveLeak hub phase 2) — mirrors the remove button */
+.wl-tile-track-search {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.35);
+    font-size: 9px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-left: 4px;
+    opacity: 0;
+    transition: all 0.15s;
+}
+.wl-tile-track:hover .wl-tile-track-search { opacity: 1; }
+.wl-tile-track-search:hover { color: #fff; background: rgba(var(--accent-rgb), 0.35); }
 .wl-tile-track-remove:hover { background: rgba(239,68,68,0.2); color: #f87171; }
 
 /* ── Singles orbit (small moons) ── */
@@ -64735,6 +64775,21 @@ body.max-performance #page-particles-canvas {
 }
 
 .wl-single-moon:hover .wl-moon-remove-btn { opacity: 1; }
+.wl-moon-search-btn {
+    position: absolute;
+    top: -2px; left: 2px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
+    font-size: 8px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.wl-single-moon:hover .wl-moon-search-btn { opacity: 1; }
 .wl-moon-remove-btn:hover { transform: scale(1.15); }
 
 @media (max-width: 768px) {

@@ -371,6 +371,31 @@ def list_video_libraries():
 
 
 # ── Plex ──────────────────────────────────────────────────────────────────────
+def _format_from_name(path: str) -> dict:
+    """Release-name format tokens (Radarr-style): HDR flavor + Atmos from the
+    FILENAME. This is the only cheap signal Plex gives us — stream-level HDR
+    data needs a per-item reload (an N+1 the scan must never do). Jellyfin
+    overrides with real stream facts where it has them."""
+    s = (path or "").lower().replace(".", " ").replace("_", " ")
+    out = {}
+    dv = bool(re.search(r"\b(dv|dovi|dolby.?vision)\b", s))
+    hdr10p = bool(re.search(r"\bhdr10(\+|plus)\b", s))
+    hdr = hdr10p or bool(re.search(r"\bhdr(10)?\b", s))
+    hlg = bool(re.search(r"\bhlg\b", s))
+    parts = []
+    if dv:
+        parts.append("DV")
+    if hdr:
+        parts.append("HDR10+" if hdr10p else "HDR10")
+    elif hlg:
+        parts.append("HLG")
+    if parts:
+        out["dynamic_range"] = " ".join(parts)
+    if re.search(r"\batmos\b", s):
+        out["atmos"] = True
+    return out
+
+
 def _union_episode_delta_shows(section, since, shows):
     """Union into ``shows`` the parent shows of any EPISODE ADDED since ``since``.
 
@@ -389,6 +414,15 @@ def _union_episode_delta_shows(section, since, shows):
         except Exception:   # noqa: BLE001 - the episode delta is an assist over the show delta
             logger.debug("Plex: episode addedAt delta search failed", exc_info=True)
             eps = []
+        try:
+            # WATCH delta: watching (even partially) bumps an episode's lastViewedAt but not
+            # the show's addedAt, so without this an incremental never refreshes per-episode
+            # play_count/viewOffset (Continue Watching would go stale until a deep scan).
+            eps = list(eps) + list(section.search(libtype="episode",
+                                                  filters={"lastViewedAt>>": since},
+                                                  sort="lastViewedAt:desc", maxresults=500))
+        except Exception:   # noqa: BLE001 - the watch delta is an assist too
+            logger.debug("Plex: episode lastViewedAt delta search failed", exc_info=True)
         for ep in eps:
             gk = str(getattr(ep, "grandparentRatingKey", "") or "")
             if gk and gk not in seen:
@@ -473,6 +507,40 @@ class PlexVideoSource:
                     yield self._movie(m)
                 except Exception:
                     logger.exception("Plex: skipping movie %s", getattr(m, "title", "?"))
+
+    def show_tree(self, server_id, title=None, tmdb_id=None):
+        """The full tree for ONE show (same shape iter_shows yields) — the
+        per-show Synchronize. Returns None ONLY when Plex positively says the
+        item is gone AND a title/tmdb search of the TV sections can't find it
+        either — Plex re-keys items on metadata refresh/optimize, so a stale
+        ratingKey alone must never read as 'show removed' (the tree returned
+        from the search carries the NEW server_id; the caller heals the row).
+        Any other failure raises, so a server hiccup can't delete anything."""
+        from plexapi.exceptions import NotFound
+        try:
+            item = self._server.fetchItem(int(server_id))
+        except NotFound:
+            item = None
+        if item is not None and getattr(item, "type", "") == "show":
+            return self._show(item)
+        # Stale/re-keyed id — look the show up the durable way before giving up.
+        want_tmdb = str(tmdb_id) if tmdb_id else None
+        for section in self._scan_sections("show", self._tv_lib):
+            try:
+                hits = section.search(title=title) if title else []
+            except Exception:
+                logger.exception("Plex: rekey-check search failed for %r", title)
+                raise
+            for h in hits:
+                if getattr(h, "type", "") != "show":
+                    continue
+                if want_tmdb and _parse_plex_guids(h).get("tmdb_id"):
+                    if str(_parse_plex_guids(h).get("tmdb_id")) == want_tmdb:
+                        return self._show(h)
+                    continue
+                if title and (getattr(h, "title", "") or "").strip().lower() == title.strip().lower():
+                    return self._show(h)
+        return None
 
     def iter_shows(self, incremental=False, since=None):
         for section in self._scan_sections("show", self._tv_lib):
@@ -881,15 +949,20 @@ class PlexVideoSource:
                 parts = media.parts or []
                 if not parts:
                     continue
-                out.append({
+                entry = {
                     "relative_path": parts[0].file,
                     "size_bytes": sum(int(getattr(p, "size", 0) or 0) for p in parts) or None,
                     "resolution": getattr(media, "videoResolution", None),
                     "aspect": getattr(media, "aspectRatio", None),
                     "video_codec": getattr(media, "videoCodec", None),
                     "audio_codec": getattr(media, "audioCodec", None),
+                    # format badges: channel count is real container data; HDR/
+                    # Atmos come from the release name (stream data would be N+1)
+                    "audio_channels": int(getattr(media, "audioChannels", 0) or 0) or None,
                     "runtime_seconds": runtime,
-                })
+                }
+                entry.update(_format_from_name(parts[0].file))
+                out.append(entry)
             except Exception:   # noqa: BLE001 - one unreadable version never hides the rest
                 continue
         return out
@@ -931,6 +1004,7 @@ class PlexVideoSource:
             "rating_critic": getattr(m, "rating", None),
             "play_count": int(getattr(m, "viewCount", 0) or 0),
             "last_viewed_at": _iso_dt(getattr(m, "lastViewedAt", None)),
+            "view_offset_ms": int(getattr(m, "viewOffset", 0) or 0),   # resume position
             "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
             "files": self._part_files(m),
@@ -954,6 +1028,10 @@ class PlexVideoSource:
             "rating": getattr(ep, "audienceRating", None),
             "tvdb_id": _parse_plex_guids(ep).get("tvdb_id"),
             "added_at": _iso_dt(getattr(ep, "addedAt", None)),   # ranks the show in Recently Added
+            # Continue Watching: per-episode watch state + resume position
+            "play_count": int(getattr(ep, "viewCount", 0) or 0),
+            "last_viewed_at": _iso_dt(getattr(ep, "lastViewedAt", None)),
+            "view_offset_ms": int(getattr(ep, "viewOffset", 0) or 0),
             "files": self._part_files(ep),
             "file": self._part_file(ep),
         }
@@ -1019,7 +1097,7 @@ class PlexVideoSource:
 _JF_MOVIE_FIELDS = ("Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,"
                     "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,UserData")
 _JF_EP_FIELDS = ("Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,"
-                 "ProviderIds,CommunityRating,DateCreated")
+                 "ProviderIds,CommunityRating,DateCreated,UserData")
 _JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Taglines,CommunityRating,"
                    "PremiereDate,EndDate,UserData,RecursiveItemCount")
 
@@ -1037,8 +1115,21 @@ def _union_jf_episode_delta_series(req, uid, view_id, since, series_items, show_
         ep_resp = req(f"/Users/{uid}/Items", {
             "ParentId": view_id, "IncludeItemTypes": "Episode", "Recursive": "true",
             "MinDateLastSaved": since.isoformat(), "Fields": "SeriesId", "Limit": "1000"}) or {}
+        ep_items = list(ep_resp.get("Items", []))
+        try:
+            # WATCH delta: playback updates an episode's USER DATA, not its DateLastSaved,
+            # so the metadata delta alone never refreshes play state (Continue Watching
+            # would go stale until a deep scan). MinDateLastSavedForUser is the user-data
+            # twin of MinDateLastSaved.
+            watch_resp = req(f"/Users/{uid}/Items", {
+                "ParentId": view_id, "IncludeItemTypes": "Episode", "Recursive": "true",
+                "MinDateLastSavedForUser": since.isoformat(),
+                "Fields": "SeriesId", "Limit": "500"}) or {}
+            ep_items += watch_resp.get("Items", [])
+        except Exception:   # noqa: BLE001 - the watch delta is an assist too
+            logger.debug("Jellyfin: episode user-data delta failed", exc_info=True)
         new_ids = []
-        for ep in ep_resp.get("Items", []):
+        for ep in ep_items:
             sid = str(ep.get("SeriesId") or "")
             if sid and sid not in seen:
                 seen.add(sid)
@@ -1443,16 +1534,29 @@ class JellyfinVideoSource:
             streams = src.get("MediaStreams") or []
             vid = next((s for s in streams if s.get("Type") == "Video"), {})
             aud = next((s for s in streams if s.get("Type") == "Audio"), {})
-            out.append({
-                "relative_path": src.get("Path") or item.get("Path") or "",
+            fpath = src.get("Path") or item.get("Path") or ""
+            entry = {
+                "relative_path": fpath,
                 "size_bytes": src.get("Size"),
                 "resolution": (str(vid.get("Height")) + "p") if vid.get("Height") else None,
                 "aspect": vid.get("AspectRatio") or (
                     (vid.get("Width") / vid.get("Height")) if vid.get("Width") and vid.get("Height") else None),
                 "video_codec": vid.get("Codec"),
                 "audio_codec": aud.get("Codec"),
+                "audio_channels": aud.get("Channels"),
                 "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),
-            })
+            }
+            # release-name tokens first, then REAL stream facts override them
+            entry.update(_format_from_name(fpath))
+            vrange = (vid.get("VideoRangeType") or "").upper()   # HDR10 | HDR10Plus | DOVI | HLG
+            if vrange and vrange != "SDR":
+                entry["dynamic_range"] = {"DOVI": "DV", "HDR10PLUS": "HDR10+",
+                                          "DOVIWITHHDR10": "DV HDR10"}.get(vrange, vrange)
+            elif (vid.get("VideoRange") or "").upper() == "HDR" and not entry.get("dynamic_range"):
+                entry["dynamic_range"] = "HDR"
+            if "atmos" in ((aud.get("DisplayTitle") or "") + " " + (aud.get("Profile") or "")).lower():
+                entry["atmos"] = True
+            out.append(entry)
         return out
 
     @classmethod
@@ -1471,6 +1575,19 @@ class JellyfinVideoSource:
                 # just new adds (the Jellyfin twin of Plex's updatedAt delta).
                 params.update({"MinDateLastSaved": since.isoformat()})
                 items = (self._req(path, params) or {}).get("Items", [])
+                try:
+                    # WATCH delta: playback updates USER DATA, not DateLastSaved — union in
+                    # movies whose play state changed so Continue Watching stays fresh
+                    # between deep scans (the Jellyfin twin of Plex's lastViewedAt delta).
+                    wparams = dict(params)
+                    wparams.pop("MinDateLastSaved", None)
+                    wparams.update({"MinDateLastSavedForUser": since.isoformat(), "Limit": "500"})
+                    seen_ids = {str(x.get("Id")) for x in items}
+                    items = list(items) + [
+                        w for w in (self._req(path, wparams) or {}).get("Items", [])
+                        if str(w.get("Id")) not in seen_ids]
+                except Exception:   # noqa: BLE001 - the watch delta is an assist
+                    logger.debug("Jellyfin: movie user-data delta failed", exc_info=True)
             elif incremental:
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "100"})
                 items = (self._req(path, params) or {}).get("Items", [])
@@ -1504,6 +1621,8 @@ class JellyfinVideoSource:
             "play_count": int((it.get("UserData") or {}).get("PlayCount")
                               or (1 if (it.get("UserData") or {}).get("Played") else 0)),
             "last_viewed_at": _iso_dt((it.get("UserData") or {}).get("LastPlayedDate")),
+            # JF ticks are 100ns units → ms
+            "view_offset_ms": int(((it.get("UserData") or {}).get("PlaybackPositionTicks") or 0) // 10_000),
             "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "files": self._files(it),
@@ -1511,6 +1630,24 @@ class JellyfinVideoSource:
         }
         d.update(_parse_jf_providers(it))
         return d
+
+    def show_tree(self, server_id, title=None, tmdb_id=None):
+        """The full tree for ONE show — the per-show Synchronize. Jellyfin's
+        item ids are durable GUIDs (no Plex-style re-keying), so the extra
+        title/tmdb args are accepted for interface parity but unused. Its
+        request helper collapses every failure into None, so 'gone' is only
+        believed when the item is missing while the server still answers a
+        health probe; an unreachable server raises instead (a hiccup must
+        never read as 'show removed')."""
+        it = self._req(f"/Users/{self.uid}/Items/{server_id}",
+                       {"Fields": _JF_SHOW_FIELDS})
+        if it and it.get("Id"):
+            if (it.get("Type") or "") != "Series":
+                return None   # re-keyed to something else entirely — treat as gone
+            return self._show(it)
+        if self._req(f"/Users/{self.uid}/Views") is None:
+            raise RuntimeError("Jellyfin unreachable — cannot verify the show's state")
+        return None
 
     def iter_shows(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
@@ -1566,6 +1703,11 @@ class JellyfinVideoSource:
                     "rating": ep.get("CommunityRating"),
                     "tvdb_id": _parse_jf_providers(ep).get("tvdb_id"),
                     "added_at": ((ep.get("DateCreated") or "").replace("T", " ")[:19] or None),
+                    # Continue Watching: UserData rides the user-scoped episodes call
+                    "play_count": int((ep.get("UserData") or {}).get("PlayCount")
+                                      or (1 if (ep.get("UserData") or {}).get("Played") else 0)),
+                    "last_viewed_at": _iso_dt((ep.get("UserData") or {}).get("LastPlayedDate")),
+                    "view_offset_ms": int(((ep.get("UserData") or {}).get("PlaybackPositionTicks") or 0) // 10_000),
                     "files": self._files(ep),
                     "file": self._file(ep),
                 })

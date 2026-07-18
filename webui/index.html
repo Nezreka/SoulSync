@@ -1677,6 +1677,7 @@
                                 <!-- External-source links reuse the artist-hero-badge style. -->
                                 <div class="artist-hero-badges vd-links" data-vd-links></div>
                                 <div class="vd-ratings" data-vd-ratings hidden></div>
+                                <div class="vd-awards" data-vd-awards hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
                                 <!-- Action buttons reuse the exact artist-detail button styles. -->
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
@@ -1781,6 +1782,7 @@
                                 <div class="vd-crew-line" data-vd-crew-line hidden></div>
                                 <div class="artist-hero-badges vd-links" data-vd-links></div>
                                 <div class="vd-ratings" data-vd-ratings hidden></div>
+                                <div class="vd-awards" data-vd-awards hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
                                 <div class="vd-genres" data-vd-genres></div>
@@ -10512,6 +10514,7 @@
                         <!-- Action bar -->
                         <div class="wl-nebula-bar">
                             <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Filter wishlist…" oninput="_filterNebula()">
+                            <button type="button" class="wl-chip wl-failing-filter" id="wl-failing-filter" onclick="_toggleFailingFilter()" title="Show only artists with tracks that keep failing to download">&#9888; Failing</button>
                             <button class="btn btn--primary" onclick="_nebulaDownload()">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 Download Wishlist
@@ -11608,6 +11611,9 @@
         </div>
     </div>
 
+    <!-- fetch-dedupe must load BEFORE the React bundle and every split module,
+         so all frameworks share one wire request per identical GET burst. -->
+    <script src="{{ url_for('static', filename='fetch-dedupe.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     {{ vite_assets('body')|safe }}
     <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>

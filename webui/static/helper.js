@@ -3482,19 +3482,19 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.0': [
-        { date: 'July 2026 · 3.1.0' },
-        { title: 'Video acquisition: full Sonarr/Radarr parity', desc: 'the video side now has RSS instant grabs (a wanted release lands minutes after it hits your indexers), per-title quality profiles, custom formats, an in-app requests system, torrent seeding lifecycle, import lists (Trakt/TMDB/IMDb/Plex watchlist), mass rename, daily/anime series types, per-title history, video backups, and event notifications.', page: 'video-downloads' },
-        { title: 'Every video page got a best-in-class pass', desc: 'calendar gets a movie release lane + agenda view + iCal subscribe (and moved up to Find). wishlist gets Search Now + honest status + far snappier art. downloads show live speed/ETA. library gets size-on-disk + filters + a Largest sort. search gets recent chips. discover gets a filter collapse toggle.', page: 'video-library' },
-        { title: 'Version glow', desc: 'the version number glows when an update is out: green for routine, yellow for major, red for critical. it checks real GitHub releases and tells you the version instead of a commit hash. thanks Kazimir.' },
-        { title: 'Notification history', desc: 'every notification is saved server-side now, so a reflexive Clear All loses nothing. filter the bell panel by type, and a searchable History page. thanks Kazimir.' },
-        { title: 'Config migration', desc: 'export every setting for both sides as one JSON file to move to a new install, or import one. secrets are redacted by default; the credentials export is gated behind login mode. thanks Kazimir.' },
-        { title: 'Downloads folder no longer bleeds storage', desc: 'failed youtube matches were being cancelled while still landing, piling up recordless files (a 10GB leak for one user). fixed at the source, plus a reaper for what\'s already orphaned. thanks Kazimir.' },
-        { title: 'Torrents move to your client folder', desc: 'qBittorrent reports its own container path (/downloads); soulsync now verifies the release is actually there and falls back to your configured folder. thanks TheHomeGuy.' },
-        { title: 'YouTube stops grabbing the wrong song', desc: '"We\'re Shameless" was matching "We Were Shameless" by a different artist. youtube results now need real artist evidence or a title made only of the wanted words. thanks Kazimir.' },
-        { title: 'HiFi 30-second clips can\'t replace real files', desc: 'preview clips were overwriting full tracks on quality-upgrade. the import gate decodes them now, an upgrade can never replace a good file with a shorter one, and Preview Clip Cleanup finds and re-fetches ones already in a library. thanks sella.' },
-        { title: 'Guided tours rebuilt', desc: 'the tours pointed at UI that had moved; re-anchored against the current app, the spotlight actually reveals what it highlights now, and the never-clearing red dot is fixed. thanks Kazimir.' },
-        { title: 'Earlier versions', desc: '3.0.5 added exact-ID album import + lyrics-travel + a stack of music fixes. 3.0.4 rebuilt video Discover and added per-profile side access. 3.0.1 shipped the entire video side.' },
+    '3.1.1': [
+        { date: 'July 2026 · 3.1.1' },
+        { title: 'Continue Watching on video detail pages', desc: 'per-episode watch state scanned from plex/jellyfin: checkmarks, progress bars, a Next Up highlight, and the hero button becomes "Resume S2 E4" deep-linking the episode. shows open on the season you\'re actually in. plus a real Mark watched/unwatched toggle that syncs to your server.', page: 'video-library' },
+        { title: 'Detail pages show what we already knew', desc: 'the awards line, an after-credits-scene tag, NEW badges on fresh episodes, digital release dates, your file\'s ranked quality name, and 4K · HDR · Atmos · 7.1 format badges on owned movies.', page: 'video-library' },
+        { title: 'Re-releases no longer show as owned', desc: 'owning the original of an album made every remaster and anniversary edition light up as owned too. album matching now respects the release year, so owning "Album" doesn\'t claim "Album (2011 Remaster)".' },
+        { title: 'Playlist sync stops leaving tracks behind', desc: 'three stacked bugs (#1047): decent matches thrown away, stale plex ratingKeys failing silently, and big playlist writes partially landing unchecked. writes are now chunked and verified against what the server stored.' },
+        { title: 'Force download really replaces the file', desc: '"download again" used to import next to the old file or skip entirely (#1045). a forced re-download now actually replaces what\'s on disk.' },
+        { title: 'Deep scan removes artists that left your library', desc: 'switching to a smaller/empty library kept the old artists forever. deep scan reads the server fresh and cleans them out — and refuses to mass-delete when the server call failed, so a plex hiccup can\'t wipe your list.' },
+        { title: 'Failing wishlist downloads are visible', desc: 'items that keep failing get an attempt counter, a failing badge, a filter, and a jump straight into manual search. both music and video wishlists. thanks LiveLeak.' },
+        { title: 'Synchronize one show', desc: 'a per-show deep scan on the show page reconciles episodes against your server right now and refreshes the airing schedule. vanished episodes demote to missing — never deleted.', page: 'video-library' },
+        { title: 'Way fewer requests at idle', desc: 'duplicate api bursts dedupe client-side, enrichment status hydrates in one bundled call instead of ~28, and pollers slow down and skip when the tab is hidden.' },
+        { title: 'Smaller fixes', desc: 'digit-named artists like 311 open again, the whole-library m3u reports itself in the scan summary (#1041), genres/keywords/where-to-watch on video detail are real links (#1042), mass rename previews big libraries in the background, and youtube episode numbering uses the real upload date.' },
+        { title: 'Earlier versions', desc: '3.1.0 gave the video side full Sonarr/Radarr-class acquisition + a best-in-class pass over every page. 3.0.5 added exact-ID album import + lyrics-travel. 3.0.4 rebuilt video Discover + per-profile side access. 3.0.1 shipped the entire video side.' },
     ],
 };
 
@@ -3525,7 +3525,22 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.0: the video side grows up",
+        title: "3.1.1: continue watching + the reported-bugs sweep",
+        description: "the video detail pages learn everything your server knows about what you've watched, and a stack of reported music bugs — re-releases showing owned, playlist sync leaving tracks behind, force download not forcing — all die.",
+        features: [
+            "continue watching: per-episode watch state scanned from plex/jellyfin — checkmarks, progress bars, a Next Up highlight, the hero button becomes 'Resume S2 E4 on Plex' deep-linking the episode, shows open on the season you're actually in, and a Mark watched/unwatched toggle pushes played state back to your server",
+            "detail pages surface what soulsync already knew: the 🏆 awards line, an after-credits-scene tag, NEW badges on freshly-landed episodes, digital release dates, your file's ranked quality name, and 4K · HDR · DV · Atmos · 7.1 format badges on owned movies (real stream data on jellyfin, release-name parsing on plex)",
+            "re-releases no longer show as owned: owning the original doesn't claim the remaster/anniversary edition anymore — album matching respects the release year on both sides",
+            "playlist sync stops leaving tracks behind (#1047): matches in the 0.70–0.79 band were found then thrown away, stale plex ratingKeys failed silently, and big playlist writes partially landed unchecked — all three fixed, writes now chunked and verified against what the server stored",
+            "deep scan finally removes artists that left your library, reads the server fresh instead of a stale cache, and refuses to mass-delete on a failed server call — a plex hiccup can't wipe your artist list",
+            "repeatedly-failing wishlist downloads get an attempt counter, a failing badge, a see-only-failing filter, and a jump straight into manual search (music + video, thanks LiveLeak); force download actually replaces the file on disk (#1045)",
+            "per-show Synchronize: a deep scan scoped to one show that reconciles episodes right now, survives plex re-keys, and refreshes the airing schedule — and vanished episodes demote to 'missing' instead of being erased",
+            "the request flood is gone: duplicate api GET bursts dedupe to one wire request, enrichment status hydrates in one bundled call instead of ~28, and steady-state pollers slow down + skip hidden tabs",
+            "smaller fixes: digit-named artists (311) open again, the whole-library m3u reports itself in the scan summary (#1041), video genres/keywords/where-to-watch are real links (#1042), mass rename previews big libraries in the background with live progress, youtube episode numbering trusts the real upload date",
+        ],
+    },
+    {
+        title: "Earlier in 3.1.0 — the video side grows up",
         description: "the video side gets a full Sonarr/Radarr-class acquisition stack, a best-in-class pass over every page, and a wave of reported bugs (storage bleeding, torrents not moving, the wrong song downloading) all die.",
         features: [
             "video acquisition, Sonarr/Radarr parity in eleven pieces: RSS instant grabs (a wanted release lands minutes after it hits your indexers, not at the next hourly sweep), per-title quality profiles + monitor policies, custom formats (scored release-name matchers), an in-app requests system, torrent seeding lifecycle, import lists (Trakt/TMDB/IMDb/Plex watchlist), mass rename with preview, daily/anime series types + multi-episode files, per-title history, video backups + staged restore, and Discord/Telegram/webhook notifications",

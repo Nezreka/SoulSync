@@ -208,16 +208,20 @@ def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, con
 
 
 def authoritative_download_fields(dl: Dict[str, Any], res: Dict[str, Any]) -> Dict[str, Any]:
-    """Fold yt-dlp's extracted title/date back into a row whose enqueue-time
-    context LOST them (an upstream title-parser change can blank every scanned
-    title — files then land as '$channel - $date -'). The extractor is the last
-    word: when the context already carries a real video title the row returns
-    unchanged; otherwise the returned copy carries the real title (+ date when
-    missing) in both the row and its search_ctx, so the organised path, the
-    sidecars, AND the history snapshot all get it. Pure."""
-    title = (res or {}).get("title")
-    if not title:
-        return dl
+    """Fold yt-dlp's extracted title/date back into the row — the extractor is
+    the last word, and a changed row makes the caller RE-PLAN the organised
+    path (rename), so the file, sidecars, AND history snapshot all agree.
+
+    Title: filled only when the enqueue-time context lost it (an upstream
+    title-parser change can blank every scanned title — files then land as
+    '$channel - $date -').
+
+    Date: the extractor's upload_date ALWAYS overrides a differing context
+    date. The channel scan estimates dates from YouTube's relative labels
+    ('1 month ago' → today − 30.44d), month-level precision at best — and
+    that estimate used to mint the canonical episode number (season=year,
+    episode=MMDD): five backlog videos all labelled '1 month ago' landed as
+    five colliding e0617 files (the GMM incident). Pure."""
     ctx = dl.get("search_ctx")
     if isinstance(ctx, str):
         try:
@@ -225,12 +229,26 @@ def authoritative_download_fields(dl: Dict[str, Any], res: Dict[str, Any]) -> Di
         except (ValueError, TypeError):
             ctx = {}
     ctx = dict(ctx) if isinstance(ctx, dict) else {}
-    if str(ctx.get("video_title") or "").strip():
+
+    changed = False
+    out_title = None
+    title = (res or {}).get("title")
+    if title and not str(ctx.get("video_title") or "").strip():
+        ctx["video_title"] = title
+        out_title = title
+        changed = True
+
+    real_date = str((res or {}).get("published_at") or "")[:10]
+    if real_date and str(ctx.get("published_at") or "")[:10] != real_date:
+        ctx["published_at"] = real_date
+        changed = True
+
+    if not changed:
         return dl
-    ctx["video_title"] = title
-    if not ctx.get("published_at") and (res or {}).get("published_at"):
-        ctx["published_at"] = res["published_at"]
-    return dict(dl, title=title, search_ctx=json.dumps(ctx))
+    updated = dict(dl, search_ctx=json.dumps(ctx))
+    if out_title:
+        updated["title"] = out_title
+    return updated
 
 
 _MOVE_CHUNK = 8 * 1024 * 1024   # 8 MiB — smooth progress without syscall spam
@@ -610,7 +628,9 @@ def process_youtube_download(
         return {"status": "failed", "error": err}
 
     # The extractor's metadata is authoritative: a titleless row re-plans its
-    # destination with the REAL title so files never land as '$channel - $date -'.
+    # destination with the REAL title, and a scan-ESTIMATED date ('1 month
+    # ago' → ±weeks) is replaced by the real upload date — the episode number
+    # is MMDD, so a wrong date is a wrong (and colliding) episode number.
     fixed = authoritative_download_fields(dl, res)
     replanned = fixed is not dl
     if replanned:

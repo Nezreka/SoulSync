@@ -83,6 +83,15 @@
             return (s.season_number > best.season_number) ? s : best;
         }, pool[0]).season_number;
     }
+    // Continue Watching: land on the season you're actually IN (Netflix behavior)
+    // when the show has a next-up episode; otherwise the usual latest season.
+    function initialSeasonNum(d) {
+        var nu = d && d.next_up;
+        if (nu && (d.seasons || []).some(function (s) { return s.season_number === nu.season_number; })) {
+            return nu.season_number;
+        }
+        return defaultSeasonNum(d && d.seasons);
+    }
     function seasonArt(s) {
         // tmdb + youtube carry direct (already-proxied for yt) art urls on the payload.
         if (data && (data.source === 'tmdb' || data.source === 'youtube')) return s.poster_url || data.poster_url || '';
@@ -230,7 +239,7 @@
             var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
             var gg = q('[data-vd-genres]');
             if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(genreChip).join('');
-            renderRatings(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
+            renderRatings(d); renderAwards(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
             return;
         }
         if (d.source === 'tmdb') {
@@ -238,9 +247,18 @@
         } else if (d.kind === 'show') {
             var ownedPct = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
             meta.push('<span class="vd-match">' + ownedPct + '% in library</span>');
+            // Continue Watching: how far through the show you are (server truth).
+            if (d.watched) meta.push('<span class="vd-watched-tag" title="Every episode watched">✓ Watched</span>');
+            else if (d.watched_episodes > 0) {
+                meta.push('<span class="vd-watched-tag" title="Episodes watched on your server">✓ ' +
+                    d.watched_episodes + ' of ' + d.episode_total + ' watched</span>');
+            }
         } else {
             meta.push(d.owned ? '<span class="vd-match">In library</span>'
                 : '<span class="vd-status">Wanted</span>');
+            if (d.watched) meta.push('<span class="vd-watched-tag" title="Watched on your server">✓ Watched</span>');
+            // your best copy's format facts (4K · HDR · Atmos · 5.1), like the streamers show
+            if (d.owned && d.file) meta.push.apply(meta, formatBadges(d.file));
         }
         if (d.rating) meta.push('<span class="vd-score">★ ' + (Math.round(d.rating * 10) / 10) + '</span>');
         if (d.year) meta.push('<span>' + esc(d.year) + '</span>');
@@ -254,6 +272,11 @@
         if (d.kind === 'show' && d.status) meta.push('<span class="vd-status">' + esc(statusLabel(d.status)) + '</span>');
         if (d.network) meta.push('<span>' + esc(d.network) + '</span>');
         if (d.kind === 'movie' && d.studio) meta.push('<span>' + esc(d.studio) + '</span>');
+        // Mediastinger (already enriched for overlays): don't leave before the credits end.
+        if (d.mediastinger) {
+            meta.push('<span class="vd-stinger" title="This title has an after-credits scene">' +
+                '🎬 After-credits scene</span>');
+        }
         var m = q('[data-vd-meta]'); if (m) m.innerHTML = meta.join('');
 
         renderActions(d);
@@ -283,9 +306,21 @@
         }
         renderSubtitles(d);
         renderRatings(d);
+        renderAwards(d);
         renderCrewLine(d);
         renderNextEpisode(d);
         renderCast(d);
+    }
+
+    // OMDb Awards line ("Won 2 Oscars. 154 wins & 87 nominations total.") — the
+    // overlay system already fetches it; the detail page finally shows it.
+    function renderAwards(d) {
+        var host = q('[data-vd-awards]');
+        if (!host) return;
+        var s = (d && d.awards || '').trim();
+        if (!s || /^n\/?a$/i.test(s)) { host.hidden = true; host.innerHTML = ''; return; }
+        host.hidden = false;
+        host.innerHTML = '<span class="vd-awards-ic">🏆</span>' + esc(s);
     }
 
     // Subtitle availability (OpenSubtitles backfill, #video-enrichment): a chip row
@@ -478,12 +513,27 @@
         if (d.server && d.server.url) {
             var sv = esc(d.server.server || 'Server');
             var slogo = SERVER_LOGOS[d.server.server];
+            // Continue Watching: shows deep-link the NEXT episode ("Resume S2 E4"),
+            // an in-progress movie says Resume (the server resumes it itself).
+            var snu = d.server.next_up;
+            var href = (snu && d.server.episode_url) ? d.server.episode_url : d.server.url;
+            var verb = 'Play', epTag = '', tip = 'Play on ' + sv;
+            if (snu) {
+                verb = snu.resume ? 'Resume' : 'Play';
+                epTag = '<span class="vd-play-ep">S' + snu.season + ' E' + snu.episode + '</span>';
+                tip = (snu.resume ? 'Resume' : 'Next up') + ' S' + snu.season + ' E' + snu.episode + ' on ' + sv;
+            } else if (d.kind === 'movie' && !d.watched && (d.view_offset_ms || 0) > 0) {
+                verb = 'Resume';
+                var left = d.runtime_minutes
+                    ? Math.max(1, Math.round(d.runtime_minutes - d.view_offset_ms / 60000)) : 0;
+                tip = 'Resume on ' + sv + (left ? ' · ' + left + ' min left' : '');
+            }
             var inner = slogo
-                ? '<span class="vd-play-ic">▶</span><span>Play on</span>' +
-                  '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="' + sv + '">'
-                : '<span class="vd-play-ic">▶</span><span>Play on ' + sv + '</span>';
-            html += '<a class="vd-play-btn" href="' + esc(d.server.url) +
-                '" target="_blank" rel="noopener" title="Play on ' + sv + '">' + inner + '</a>';
+                ? '<span class="vd-play-ic">▶</span><span>' + verb + ' on</span>' +
+                  '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="' + sv + '">' + epTag
+                : '<span class="vd-play-ic">▶</span><span>' + verb + ' on ' + sv + '</span>' + epTag;
+            html += '<a class="vd-play-btn" href="' + esc(href) +
+                '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
         if (d.trailer && d.trailer.key) {
             html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
@@ -576,7 +626,71 @@
             html += '<button class="vd-manage-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
                 '<span class="vd-manage-ic">✎</span> Manage</button>';
         }
+        // Synchronize — a deep scan scoped to THIS show: re-reads it from the
+        // server and reconciles episodes (adds + removals) without waiting for
+        // a full library scan. Library shows only (needs a local row).
+        var libShowId = (d.kind === 'show' && ownLibItem)
+            ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
+        if (libShowId != null) {
+            html += '<button class="vd-manage-btn" type="button" data-vd-act="sync-show" data-vd-sync-id="' + esc(libShowId) +
+                '" title="Re-read this show from your server — picks up new or removed episodes">' +
+                '<span class="vd-manage-ic">⟳</span> Synchronize</button>';
+        }
+        // Watched toggle (the /watched API finally gets a UI): local state +
+        // markPlayed/markUnplayed pushed to the server. Library rows only.
+        if (ownLibItem && (d.kind === 'movie' || d.kind === 'show') &&
+                (d.source !== 'tmdb' || d.library_id != null) && (d.owned || d.episode_owned || d.watched)) {
+            html += '<button class="vd-manage-btn" type="button" data-vd-act="watched-toggle" title="' +
+                (d.watched ? 'Mark unwatched (clears played state on your server too)'
+                           : 'Mark watched (marks played on your server too)') + '">' +
+                '<span class="vd-manage-ic">' + (d.watched ? '↺' : '✓') + '</span> ' +
+                (d.watched ? 'Mark unwatched' : 'Mark watched') + '</button>';
+        }
         a.innerHTML = html;
+    }
+
+    // Continue Watching: played/unplayed toggle → POST /detail/<kind>/<id>/watched
+    // (local rows + server markPlayed), then mirror the result in-page.
+    function toggleWatchedState(btn) {
+        if (!data || btn.disabled) return;
+        var kind = data.kind === 'movie' ? 'movie' : 'show';
+        var libId = (data.source !== 'tmdb') ? data.id : data.library_id;
+        if (libId == null) return;
+        var target = !data.watched;
+        btn.disabled = true;
+        fetch(DETAIL_URL + kind + '/' + libId + '/watched', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ watched: target }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                btn.disabled = false;
+                if (!res || !res.ok) throw new Error();
+                // Mirror what the backend did so the page reacts instantly.
+                data.watched = target;
+                if (kind === 'movie') {
+                    data.play_count = target ? 1 : 0;
+                    data.view_offset_ms = 0;
+                } else {
+                    data.watched_episodes = target ? data.episode_total : 0;
+                    (data.seasons || []).forEach(function (s) {
+                        (s.episodes || []).forEach(function (ep) {
+                            ep.watched = target; ep.view_offset_ms = 0;
+                        });
+                    });
+                    data.next_up = null;
+                    if (data.server) { delete data.server.next_up; delete data.server.episode_url; }
+                }
+                renderBillboard(data);
+                if (kind === 'show') renderEpisodes();
+                if (typeof showToast === 'function') {
+                    showToast((target ? 'Marked watched' : 'Marked unwatched') +
+                        (res.pushed ? ' — synced to your server' : ''), 'success');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                if (typeof showToast === 'function') showToast('Could not update watched state', 'error');
+            });
     }
 
     // Open the shared Get modal for the current item (movies use this in place of
@@ -656,6 +770,25 @@
         if (r.indexOf('480') > -1 || r.indexOf('576') > -1) return 'SD';
         return r.toUpperCase();
     }
+    function channelsLabel(n) {
+        n = Number(n) || 0;
+        if (n >= 8) return '7.1';
+        if (n === 7) return '6.1';
+        if (n === 6) return '5.1';
+        if (n === 2) return 'Stereo';
+        if (n === 1) return 'Mono';
+        return n ? n + 'ch' : '';
+    }
+    // Netflix/Disney-style format badges for the hero meta: 4K · HDR10 · Atmos · 5.1
+    function formatBadges(f) {
+        if (!f) return [];
+        var b = [];
+        var res = mediaRes(f.resolution); if (res) b.push(res);
+        if (f.dynamic_range) b.push(f.dynamic_range);
+        if (f.atmos) b.push('Atmos');
+        else { var ch = channelsLabel(f.audio_channels); if (ch && ch !== 'Stereo' && ch !== 'Mono') b.push(ch); }
+        return b.map(function (t) { return '<span class="vd-fmt">' + esc(t) + '</span>'; });
+    }
     function prettyCodec(c) {
         if (!c) return '';
         var l = String(c).toLowerCase();
@@ -676,8 +809,9 @@
         return gb >= 1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round(n / 1048576) + ' MB';
     }
     function fileSummary(v) {
-        return [mediaRes(v.resolution), prettyCodec(v.video_codec),
-            v.audio_codec ? String(v.audio_codec).toUpperCase() : '', fmtBytes(v.size_bytes),
+        return [mediaRes(v.resolution), v.dynamic_range || '', prettyCodec(v.video_codec),
+            v.audio_codec ? String(v.audio_codec).toUpperCase() : '',
+            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), fmtBytes(v.size_bytes),
             v.release_source ? prettySource(v.release_source) : ''].filter(Boolean).join(' · ');
     }
 
@@ -686,6 +820,9 @@
         if (!host) return;
         var rows = [];
         if (d.release_date) rows.push(['Released', d.release_date]);
+        if (d.digital_release_date && d.digital_release_date !== d.release_date) {
+            rows.push(['Digital release', d.digital_release_date]);
+        }
         if (d.runtime_minutes) rows.push(['Runtime', runtimeLabel(d.runtime_minutes)]);
         if (d.studio) rows.push(['Studio', d.studio]);
         if (d.status) rows.push(['Status', statusLabel(d.status)]);
@@ -693,9 +830,16 @@
         // Your media — the technical specs we scanned (Plex-grade).
         var f = d.file;
         if (f) {
-            if (f.resolution) rows.push(['Quality', mediaRes(f.resolution)]);
+            // the ranked quality name when the grab recorded one (Radarr-style
+            // "WEBDL-1080p"), else the plain scanned resolution
+            if (f.quality || f.resolution) rows.push(['Quality', f.quality || mediaRes(f.resolution)]);
             if (f.video_codec) rows.push(['Video', prettyCodec(f.video_codec)]);
-            if (f.audio_codec) rows.push(['Audio', String(f.audio_codec).toUpperCase()]);
+            if (f.dynamic_range) rows.push(['Dynamic range', f.dynamic_range]);
+            if (f.audio_codec || f.audio_channels || f.atmos) {
+                rows.push(['Audio', [String(f.audio_codec || '').toUpperCase(),
+                    channelsLabel(f.audio_channels), f.atmos ? 'Atmos' : '']
+                    .filter(Boolean).join(' · ')]);
+            }
             if (f.release_source) rows.push(['Source', prettySource(f.release_source)]);
             if (f.size_bytes) rows.push(['Size', fmtBytes(f.size_bytes)]);
         }
@@ -1339,6 +1483,17 @@
     function episodeRow(ep) {
         if (data && data.source === 'youtube') return ytEpisodeRow(ep);
         var owned = ep.owned ? 'vd-ep--owned' : 'vd-ep--missing';
+        // Continue Watching: watched check / in-progress bar / next-up highlight
+        // (all server truth from the scan; a TMDB preview has none of it).
+        var inProgress = !ep.watched && (ep.view_offset_ms || 0) > 0 && ep.runtime_minutes;
+        var progPct = inProgress
+            ? Math.max(2, Math.min(98, Math.round(ep.view_offset_ms / (ep.runtime_minutes * 60000) * 100)))
+            : 0;
+        var nu = data && data.next_up;
+        var isNext = !!(nu && nu.season_number === selectedSeason &&
+                        nu.episode_number === ep.episode_number);
+        if (ep.watched) owned += ' vd-ep--watched';
+        if (isNext) owned += ' vd-ep--next';
         var meta = [];
         var rt = runtimeLabel(ep.runtime_minutes); if (rt) meta.push(rt);
         if (ep.air_date) meta.push(ep.air_date);
@@ -1352,25 +1507,43 @@
         if (ep.rating) meta.push('★ ' + (Math.round(ep.rating * 10) / 10));
         var key = selectedSeason + '_' + ep.episode_number;
         // Row + a sibling expand panel (guest stars etc. load lazily on open).
+        var prog = inProgress
+            ? '<span class="vd-ep-prog"><span class="vd-ep-prog-fill" style="width:' + progPct + '%"></span></span>'
+            : '';
+        var check = ep.watched ? '<span class="vd-ep-check" title="Watched">✓</span>' : '';
+        var nextChip = isNext
+            ? '<span class="vd-ep-next-chip">' + (inProgress ? 'Resume' : 'Next up') + '</span>'
+            : '';
+        // NEW = landed on the server in the last 7 days and not watched yet.
+        var addedTs = ep.owned && !ep.watched && ep.added_at
+            ? Date.parse(String(ep.added_at).replace(' ', 'T'))   // Safari chokes on the space form
+            : NaN;
+        var newChip = (addedTs && !isNaN(addedTs) && (Date.now() - addedTs) < 7 * 86400000)
+            ? '<span class="vd-ep-new-chip" title="Recently added">New</span>'
+            : '';
         return '<div class="vd-ep ' + owned + '" data-vd-ep-key="' + key + '">' +
             '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + '</div>' +
-            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span></div>' +
-            '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
+            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span>' + prog + '</div>' +
+            '<div class="vd-ep-info"><div class="vd-ep-top">' + check + nextChip + newChip + '<span class="vd-ep-title">' +
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
-            (ep.owned || !window.VideoGrab
-                ? '<div class="vd-ep-badge">' + (ep.owned
-                    ? 'Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') : 'Missing') + '</div>'
+            // Owned episodes keep the badge AND the actions: the acquisition
+            // stack treats owned rows as upgrade candidates (upgrade-until-
+            // cutoff), so re-download / manual search / wishlist must not
+            // vanish once something is on disk.
+            ((ep.owned ? '<div class="vd-ep-badge">Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') + '</div>' : '') +
+             (!window.VideoGrab
+                ? (ep.owned ? '' : '<div class="vd-ep-badge">Missing</div>')
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
                     '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                     '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
-                        '" title="Auto-search &amp; download this episode" aria-label="Get episode">⭳</button>' +
+                        '" title="' + (ep.owned ? 'Search &amp; download again (upgrade)' : 'Auto-search &amp; download this episode') + '" aria-label="Get episode">⭳</button>' +
                     '<button class="vd-ep-getbtn vd-ep-search" type="button" data-vd-ep-search="' + ep.episode_number +
                         '" title="Manual search — pick a release" aria-label="Manual search">⌕</button>' +
                     '<button class="vd-ep-getbtn vd-ep-wish" type="button" data-vd-ep-wish="' + ep.episode_number +
-                        '" title="Add this episode to the wishlist" aria-label="Wishlist episode">＋</button>' +
-                  '</div>') +
+                        '" title="' + (ep.owned ? 'Wishlist for an upgrade' : 'Add this episode to the wishlist') + '" aria-label="Wishlist episode">＋</button>' +
+                  '</div>')) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
     }
@@ -1733,7 +1906,7 @@
                 if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
                 if (currentId !== id || currentKind !== 'show') return;
                 data = d; menuOpen = false; missingOnly = false;
-                selectedSeason = defaultSeasonNum(d.seasons);
+                selectedSeason = initialSeasonNum(d);
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = !(d.seasons && d.seasons.length); mt.classList.remove('vd-missing-toggle--on'); }
                 renderBillboard(d);
@@ -1787,6 +1960,58 @@
         el.hidden = !on;
     }
 
+    // Per-show Synchronize (server re-read). Synchronous on the backend (one
+    // show reads in seconds); the response says exactly what changed.
+    function syncShowNow(btn) {
+        var id = btn.getAttribute('data-vd-sync-id');
+        if (!id || btn.disabled) return;
+        btn.disabled = true;
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<span class="vd-manage-ic">⟳</span> Syncing…';
+        fetch('/api/video/detail/show/' + encodeURIComponent(id) + '/sync', { method: 'POST' })
+            .then(function (r) { return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; }); })
+            .then(function (d) {
+                btn.disabled = false;
+                btn.innerHTML = orig;
+                if (!d || !d.success) {
+                    if (typeof showToast === 'function') showToast(d && d.error ? d.error : 'Sync failed', 'error');
+                    return;
+                }
+                if (d.show_removed) {
+                    if (typeof showToast === 'function') showToast('"' + (d.title || 'Show') + '" is no longer on your server — removed from the library', 'warning');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-library' }));
+                    return;
+                }
+                var bits = [];
+                if (d.episodes_added) bits.push('+' + d.episodes_added + ' episode' + (d.episodes_added !== 1 ? 's' : ''));
+                if (d.episodes_removed) bits.push('−' + d.episodes_removed + ' episode' + (d.episodes_removed !== 1 ? 's' : ''));
+                if (d.files_added) bits.push('+' + d.files_added + ' file' + (d.files_added !== 1 ? 's' : ''));
+                if (d.files_removed) bits.push('−' + d.files_removed + ' file' + (d.files_removed !== 1 ? 's' : ''));
+                if (typeof showToast === 'function') {
+                    // a failed schedule refresh must be SAID, not silently absorbed —
+                    // otherwise "no changes" reads as "everything's fine"
+                    var refreshBad = d.schedule_refresh && d.schedule_refresh !== 'ok';
+                    if (refreshBad) {
+                        showToast('Synchronized' + (bits.length ? ': ' + bits.join(', ') : '') +
+                            ' — episode schedule refresh failed (' + d.schedule_refresh + ')', 'warning');
+                    } else {
+                        showToast('Synchronized' + (bits.length ? ': ' + bits.join(', ') : ' — no changes'), 'success');
+                    }
+                }
+                // a Plex re-key heals onto a NEW row id — reload THAT row
+                var rid = parseInt(d.show_id != null ? d.show_id : id, 10);
+                if (!isNaN(rid)) {
+                    if (d.rekeyed) { currentId = rid; }
+                    if (currentId === rid) reloadDetail(rid);
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.innerHTML = orig;
+                if (typeof showToast === 'function') showToast('Sync failed — could not reach the server', 'error');
+            });
+    }
+
     function reloadDetail(id) {
         fetch(DETAIL_URL + 'show/' + id, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -1802,7 +2027,7 @@
                 d.next_episode = prev.next_episode || null;
                 data = d;
                 if (!seasonByNum(selectedSeason)) {
-                    selectedSeason = defaultSeasonNum(d.seasons);
+                    selectedSeason = initialSeasonNum(d);
                 }
                 renderBillboard(d); renderSeasonNav(); renderEpisodes();
             })
@@ -2390,6 +2615,8 @@
             else if (which === 'wishlist-missing') wishlistAllMissing(act);
             else if (which === 'poster') openPosterModal();
             else if (which === 'manage') openManagePanel();
+            else if (which === 'sync-show') syncShowNow(act);
+            else if (which === 'watched-toggle') toggleWatchedState(act);
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
@@ -2679,13 +2906,24 @@
     var _dlTimer = null, _dlActive = {}, _dlDone = {}, _dlPrev = {};
     function _dlReset() { _dlActive = {}; _dlDone = {}; _dlPrev = {}; }
     function _dlTrackable() { return !!(data && (data.kind === 'show' || data.kind === 'channel')); }
+    // Adaptive cadence: 2.5s only while a download for THIS show is actually
+    // in flight; 10s otherwise (still catches a fresh grab quickly) — and
+    // nothing at all while the tab is hidden. A flat 2.5s forever was a
+    // request every 2.5s for as long as any show page stayed open.
+    var _DL_FAST_MS = 2500, _DL_IDLE_MS = 10000, _dlHasActive = false;
     function startDlTracking() {
         stopDlTracking();
         if (!_dlTrackable()) return;
         pollDl();
-        _dlTimer = setInterval(pollDl, 2500);
+        _scheduleDl();
     }
-    function stopDlTracking() { if (_dlTimer) { clearInterval(_dlTimer); _dlTimer = null; } }
+    function _scheduleDl() {
+        _dlTimer = setTimeout(function () {
+            if (!document.hidden) pollDl();
+            if (_dlTimer) _scheduleDl();
+        }, _dlHasActive ? _DL_FAST_MS : _DL_IDLE_MS);
+    }
+    function stopDlTracking() { if (_dlTimer) { clearTimeout(_dlTimer); _dlTimer = null; } }
     function pollDl() {
         if (!_dlTrackable() || !root()) { stopDlTracking(); return; }
         var showTitle = data.title;
@@ -2726,6 +2964,7 @@
                 if (!cur[key] && _dlActive[key]) { _dlDone[key] = 1; delete _dlActive[key]; }
             });
             _dlPrev = cur;
+            _dlHasActive = Object.keys(cur).length > 0;   // drives the adaptive cadence
             applyDlStates();
             // Everything settled → stop the interval until the next grab.
             if (!Object.keys(_dlActive).length) stopDlTracking();

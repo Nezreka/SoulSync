@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 43   # v43: shows.series_type (daily/anime, P8); v42: video_requests (in-app Overseerr, arr-parity P4); v41: one-time details_synced heal
+SCHEMA_VERSION = 46   # v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -157,6 +157,21 @@ _BACKFILL_COLS = {
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
 _COLUMN_MIGRATIONS = [
+    # Continue Watching (v45): per-episode watch state + resume offsets, scanned
+    # from the server (Plex viewCount/viewOffset, Jellyfin UserData) — powers
+    # episode checkmarks, progress bars, and the Resume/Next-Up CTA.
+    # v46: scanned format facts for the detail-page badges (4K · HDR · Atmos · 5.1)
+    ("media_files", "audio_channels", "INTEGER"),
+    ("media_files", "dynamic_range", "TEXT"),
+    ("media_files", "atmos", "INTEGER"),
+    ("episodes", "play_count", "INTEGER"),
+    ("episodes", "last_viewed_at", "TEXT"),
+    ("episodes", "view_offset_ms", "INTEGER"),
+    ("movies", "view_offset_ms", "INTEGER"),
+    # video_wishlist — consecutive fruitless drain searches per row, so the UI can
+    # mark repeatedly-failing items (#liveleak-failing-hub). Reset on a grab.
+    ("video_wishlist", "search_attempts", "INTEGER DEFAULT 0"),
+    ("video_wishlist", "last_search_at", "TEXT"),
     # video_downloads — media identity for the Downloads page cards (poster + open).
     ("video_downloads", "media_id", "TEXT"),
     ("video_downloads", "media_source", "TEXT"),
@@ -2584,13 +2599,16 @@ class VideoDatabase:
                 continue
             conn.execute(
                 f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
-                "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect, "
+                "audio_channels, dynamic_range, atmos) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (owner_id,
                  file.get("relative_path") or file.get("path") or "",
                  file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
                  file.get("audio_codec"), file.get("release_source"), file.get("quality"),
-                 file.get("runtime_seconds"), canonical_aspect(file.get("aspect"))),
+                 file.get("runtime_seconds"), canonical_aspect(file.get("aspect")),
+                 file.get("audio_channels"), file.get("dynamic_range"),
+                 1 if file.get("atmos") else 0),
             )
 
     @staticmethod
@@ -2779,6 +2797,7 @@ class VideoDatabase:
                 "rating": item.get("rating"), "rating_critic": item.get("rating_critic"),
                 "play_count": item.get("play_count"),
                 "last_viewed_at": item.get("last_viewed_at"),
+                "view_offset_ms": item.get("view_offset_ms"),
                 "poster_url": item.get("poster_url"),
                 "has_file": 1 if (item.get("files") or item.get("file")) else 0,
             }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
@@ -2859,8 +2878,9 @@ class VideoDatabase:
                     conn.execute(
                         "INSERT INTO episodes (show_id, season_id, server_source, server_id, "
                         "season_number, episode_number, title, overview, air_date, "
-                        "runtime_minutes, still_url, rating, tvdb_id, has_file, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "runtime_minutes, still_url, rating, tvdb_id, has_file, added_at, "
+                        "play_count, last_viewed_at, view_offset_ms) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
                         "season_id=excluded.season_id, server_source=excluded.server_source, "
                         "server_id=excluded.server_id, title=excluded.title, "
@@ -2869,12 +2889,16 @@ class VideoDatabase:
                         "rating=excluded.rating, tvdb_id=excluded.tvdb_id, has_file=excluded.has_file, "
                         # keep the earliest known add-date: don't clobber it with a NULL from a
                         # source that didn't report one.
-                        "added_at=COALESCE(episodes.added_at, excluded.added_at)",
+                        "added_at=COALESCE(episodes.added_at, excluded.added_at), "
+                        # watch state is server truth — always take the fresh values
+                        "play_count=excluded.play_count, last_viewed_at=excluded.last_viewed_at, "
+                        "view_offset_ms=excluded.view_offset_ms",
                         (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
                          ep.get("title"), ep.get("overview"), ep.get("air_date"),
                          ep.get("runtime_minutes"), ep.get("still_url"), ep.get("rating"),
                          ep.get("tvdb_id"), 1 if (ep.get("files") or ep.get("file")) else 0,
-                         ep.get("added_at")),
+                         ep.get("added_at"),
+                         ep.get("play_count"), ep.get("last_viewed_at"), ep.get("view_offset_ms")),
                     )
                     ep_id = conn.execute(
                         "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
@@ -2886,15 +2910,32 @@ class VideoDatabase:
             # Prune only SERVER-originated rows that vanished (server_id set) — the
             # full episode/season list now includes enrichment-added MISSING items
             # (server_id NULL), which the scan must never remove.
+            #
+            # Episodes are FACTS, only their files are server-owned. A missing
+            # (enrichment) row that later got downloaded acquires a server_id via
+            # the upsert above — if its file then disappears from the server, a
+            # hard DELETE erases the episode's very existence from the page (the
+            # Silo-E03 hole: aired episodes vanish, and nothing re-creates them
+            # because the full episode sync is one-time). So a vanished episode
+            # that carries enrichment identity (an air date or a tvdb id) is
+            # DEMOTED back to a missing row — files cleared, server_id NULL —
+            # and only identity-less server junk is actually deleted.
             for row in conn.execute(
-                "SELECT season_number, episode_number FROM episodes "
+                "SELECT id, season_number, episode_number, air_date, tvdb_id FROM episodes "
                 "WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
                 if (row["season_number"], row["episode_number"]) not in seen_eps:
-                    conn.execute(
-                        "DELETE FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
-                        (show_id, row["season_number"], row["episode_number"]),
-                    )
+                    if row["air_date"] or row["tvdb_id"]:
+                        conn.execute("DELETE FROM media_files WHERE episode_id=?", (row["id"],))
+                        conn.execute(
+                            "UPDATE episodes SET server_id=NULL, has_file=0 WHERE id=?",
+                            (row["id"],),
+                        )
+                    else:
+                        conn.execute(
+                            "DELETE FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
+                            (show_id, row["season_number"], row["episode_number"]),
+                        )
             for row in conn.execute(
                 "SELECT season_number FROM seasons WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
@@ -4251,7 +4292,8 @@ class VideoDatabase:
                 "FROM seasons WHERE show_id=? ORDER BY season_number", (show_id,)).fetchall()
             eps = conn.execute(
                 "SELECT id, season_number, episode_number, title, overview, air_date, "
-                "runtime_minutes, rating, monitored, has_file, "
+                "runtime_minutes, rating, monitored, has_file, added_at, "
+                "play_count, last_viewed_at, view_offset_ms, "
                 "(still_url IS NOT NULL AND still_url<>'') AS has_still, "
                 # A server may hold several COPIES of one episode — surface them.
                 "(SELECT COUNT(*) FROM media_files f WHERE f.episode_id=episodes.id) AS versions, "
@@ -4271,6 +4313,11 @@ class VideoDatabase:
                 "has_still": bool(e["has_still"]),
                 "monitored": bool(e["monitored"]), "owned": bool(e["has_file"]),
                 "versions": e["versions"], "resolution": e["resolution"],
+                # Continue Watching: server watch state (scanned per episode)
+                "watched": (e["play_count"] or 0) > 0,
+                "last_viewed_at": e["last_viewed_at"],
+                "view_offset_ms": e["view_offset_ms"] or 0,
+                "added_at": e["added_at"],   # NEW badge (freshly landed on the server)
             })
 
         # Seasons declared in the seasons table, plus any season numbers that only
@@ -4306,6 +4353,10 @@ class VideoDatabase:
             "series_type": show["series_type"] or "standard",
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
             "watched": (show["watched_episodes"] or 0) >= total > 0,
+            "watched_episodes": show["watched_episodes"] or 0,   # raw count for "N of M watched"
+            # Enriched-but-never-surfaced facts (detail BIC P3)
+            "awards": show["awards"],
+            "mediastinger": bool(show["mediastinger"] or 0),
             "overview": show["overview"], "status": show["status"], "network": show["network"],
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
             "tagline": show["tagline"], "rating": show["rating"],
@@ -4326,7 +4377,45 @@ class VideoDatabase:
             "season_count": len(out_seasons),
             "episode_total": total, "episode_owned": owned_total,
             "seasons": out_seasons,
+            # Continue Watching: the episode to play next (None until something
+            # has actually been watched — a fresh show has no 'continue' story)
+            "next_up": self.show_next_up(show_id),
         }
+
+    def show_next_up(self, show_id: int) -> dict | None:
+        """The episode to watch NEXT (the Netflix 'Next Up' slot): the most
+        recently started-but-unfinished OWNED episode wins (resume), else the
+        first unwatched owned episode in airing order (specials sort last).
+        Returns None when nothing is owned, nothing has been watched yet, or
+        everything owned is already watched — the hero CTA then stays a plain
+        'Play on <server>'."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT season_number, episode_number, title, server_id, "
+                "view_offset_ms, runtime_minutes, play_count, last_viewed_at "
+                "FROM episodes WHERE show_id=? AND has_file=1 "
+                "ORDER BY (season_number=0), season_number, episode_number",
+                (show_id,)).fetchall()
+        finally:
+            conn.close()
+        if not rows or not any((r["play_count"] or 0) or (r["view_offset_ms"] or 0) for r in rows):
+            return None    # nothing watched yet — no continue story
+        started = [r for r in rows
+                   if (r["view_offset_ms"] or 0) > 0 and not (r["play_count"] or 0)]
+        if started:
+            r = max(started, key=lambda x: x["last_viewed_at"] or "")
+            resume = True
+        else:
+            unwatched = [r for r in rows if not (r["play_count"] or 0)]
+            if not unwatched:
+                return None    # all owned episodes watched
+            r = unwatched[0]
+            resume = False
+        return {"season_number": r["season_number"], "episode_number": r["episode_number"],
+                "title": r["title"], "server_id": r["server_id"],
+                "view_offset_ms": r["view_offset_ms"] or 0,
+                "runtime_minutes": r["runtime_minutes"], "resume": resume}
 
     def set_monitored(self, kind: str, item_id: int, monitored: bool) -> bool:
         """Toggle the 'follow/watchlist' flag on a movie or show. Returns True if a
@@ -4353,12 +4442,19 @@ class VideoDatabase:
             if kind == "movie":
                 cur = conn.execute(
                     "UPDATE movies SET play_count=CASE WHEN ? THEN MAX(COALESCE(play_count,0),1) "
-                    "ELSE 0 END WHERE id=?", (1 if watched else 0, item_id))
+                    "ELSE 0 END, view_offset_ms=0 WHERE id=?", (1 if watched else 0, item_id))
             elif kind == "show":
                 cur = conn.execute(
                     "UPDATE shows SET watched_episodes=CASE WHEN ? THEN "
                     "(SELECT COUNT(*) FROM episodes WHERE show_id=shows.id) ELSE 0 END "
                     "WHERE id=?", (1 if watched else 0, item_id))
+                # markPlayed/markUnplayed on a SHOW hits every episode on the
+                # server — mirror that here so the per-episode watch state
+                # (checkmarks, next-up) agrees without waiting for the next scan.
+                conn.execute(
+                    "UPDATE episodes SET play_count=CASE WHEN ? THEN "
+                    "MAX(COALESCE(play_count,0),1) ELSE 0 END, view_offset_ms=0 "
+                    "WHERE show_id=?", (1 if watched else 0, item_id))
             else:
                 return False
             conn.commit()
@@ -5710,6 +5806,35 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def record_wishlist_search_outcome(self, kind: str, tmdb_id, grabbed: bool,
+                                       season_number=None, episode_number=None) -> None:
+        """Track consecutive fruitless drain searches per wishlist row
+        (#liveleak-failing-hub): a grab resets the counter, a genuinely
+        fruitless search (no results / all rejected) increments it. Searches
+        that never RAN (slskd down, rate-limited) must not be recorded — the
+        caller owns that distinction. Best-effort; never raises."""
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None and episode_number is not None:
+                where += " AND season_number=? AND episode_number=?"
+                args += [int(season_number), int(episode_number)]
+            if grabbed:
+                conn.execute(
+                    "UPDATE video_wishlist SET search_attempts=0, "
+                    "last_search_at=datetime('now') WHERE " + where, args)
+            else:
+                conn.execute(
+                    "UPDATE video_wishlist SET "
+                    "search_attempts=COALESCE(search_attempts,0)+1, "
+                    "last_search_at=datetime('now') WHERE " + where, args)
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("record_wishlist_search_outcome failed")
+        finally:
+            conn.close()
+
     def query_wishlist(self, kind: str, *, search=None, sort="added", page=1, limit=60) -> dict:
         """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
         → shows grouped show→season→episode with wanted/done roll-ups. ``sort`` ∈
@@ -5732,12 +5857,15 @@ class VideoDatabase:
                          "added": "date_added DESC, id DESC"}.get(sort, "date_added DESC, id DESC")
                 total = conn.execute("SELECT COUNT(*) c FROM video_wishlist" + wsql, args).fetchone()["c"]
                 rows = conn.execute(
-                    "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added "
+                    "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added, "
+                    "search_attempts, last_search_at "
                     "FROM video_wishlist" + wsql + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                     args + [limit, (page - 1) * limit]).fetchall()
                 items = [{"kind": "movie", "tmdb_id": r["tmdb_id"], "title": r["title"],
                           "poster_url": r["poster_url"], "year": r["year"], "status": r["status"],
-                          "library_id": r["library_id"]} for r in rows]
+                          "library_id": r["library_id"],
+                          "search_attempts": r["search_attempts"] or 0,
+                          "last_search_at": r["last_search_at"]} for r in rows]
             else:   # shows (grouped from episode rows)
                 where, args = ["kind='episode'"], []
                 if s:
@@ -5759,7 +5887,8 @@ class VideoDatabase:
                 for sr in show_rows:
                     eps = conn.execute(
                         "SELECT season_number, episode_number, episode_title, still_url, "
-                        "episode_overview, season_poster_url, air_date, status "
+                        "episode_overview, season_poster_url, air_date, status, "
+                        "search_attempts, last_search_at "
                         "FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
                         "ORDER BY season_number, episode_number", (sr["tmdb_id"],)).fetchall()
                     by_season: dict = {}
@@ -5768,7 +5897,9 @@ class VideoDatabase:
                         by_season.setdefault(e["season_number"], []).append({
                             "episode_number": e["episode_number"], "title": e["episode_title"],
                             "still_url": e["still_url"], "overview": e["episode_overview"],
-                            "air_date": e["air_date"], "status": e["status"]})
+                            "air_date": e["air_date"], "status": e["status"],
+                            "search_attempts": e["search_attempts"] or 0,
+                            "last_search_at": e["last_search_at"]})
                         if e["season_poster_url"] and e["season_number"] not in season_poster:
                             season_poster[e["season_number"]] = e["season_poster_url"]
                     seasons = [{"season_number": sn, "poster_url": season_poster.get(sn),
@@ -7013,7 +7144,8 @@ class VideoDatabase:
             genres = self._genres_for(conn, "movie_genres", "movie_id", movie_id)
             credits = self._credits_for(conn, "movie_id", movie_id)
             files = conn.execute(
-                "SELECT resolution, quality, video_codec, audio_codec, release_source, size_bytes "
+                "SELECT resolution, quality, video_codec, audio_codec, release_source, size_bytes, "
+                "audio_channels, dynamic_range, atmos "
                 "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC",
                 (movie_id,)).fetchall()
         finally:
@@ -7024,6 +7156,14 @@ class VideoDatabase:
             "quality_profile_id": m["quality_profile_id"] or 0,
             "locked_fields": sorted(self._parse_locked(m["locked_fields"])),
             "watched": (m["play_count"] or 0) > 0,
+            # Continue Watching raw state (v45): last watched + resume position
+            "play_count": m["play_count"] or 0,
+            "last_viewed_at": m["last_viewed_at"],
+            "view_offset_ms": m["view_offset_ms"] or 0,
+            # Enriched-but-never-surfaced facts (detail BIC P3)
+            "awards": m["awards"],
+            "mediastinger": bool(m["mediastinger"] or 0),
+            "digital_release_date": m["digital_release_date"],
             "overview": m["overview"], "status": m["status"], "studio": m["studio"],
             "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
             "content_rating": m["content_rating"], "tagline": m["tagline"],

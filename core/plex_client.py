@@ -477,6 +477,33 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error fetching playlist '{name}': {e}")
             return None
     
+    # A single createPlaylist/addItems call with ~1000 ratingKeys builds an
+    # oversized request that Plex (or a reverse proxy) can reject outright or
+    # silently truncate — the sync then reports success while the playlist is
+    # short (#1047). All playlist writes go through bounded chunks instead.
+    _PLAYLIST_ADD_CHUNK = 200
+
+    def _add_items_chunked(self, playlist, tracks) -> None:
+        """addItems in bounded chunks; raises on a failed chunk so callers
+        can't mistake a partial write for success."""
+        for i in range(0, len(tracks), self._PLAYLIST_ADD_CHUNK):
+            playlist.addItems(tracks[i:i + self._PLAYLIST_ADD_CHUNK])
+
+    def _verify_playlist_count(self, name: str, expected: int) -> None:
+        """Read the playlist back and say honestly when Plex stored fewer
+        tracks than were sent (a silent partial add). Log-only — the write
+        already happened; this makes the discrepancy visible instead of
+        letting 'synced N' over-report."""
+        try:
+            pl = self.server.playlist(name)
+            actual = len([i for i in pl.items() if hasattr(i, 'ratingKey')])
+            if actual < expected:
+                logger.warning(f"Plex playlist '{name}': sent {expected} tracks but the server holds {actual} — partial add")
+            else:
+                logger.info(f"Plex playlist '{name}': verified {actual} tracks on server")
+        except Exception as e:
+            logger.debug(f"Playlist verify failed for '{name}': {e}")
+
     def create_playlist(self, name: str, tracks) -> bool:
         if not self.ensure_connection():
             logger.error("Not connected to Plex server")
@@ -517,40 +544,47 @@ class PlexClient(MediaServerClient):
                     logger.debug("About to create playlist with tracks:")
                     for i, track in enumerate(valid_tracks):
                         logger.debug(f"  Track {i+1}: {track.title} (type: {type(track)}, ratingKey: {track.ratingKey})")
-                    
+
+                    # Create with the FIRST chunk only, then append the rest in
+                    # bounded chunks (#1047) — the compatibility cascade below
+                    # stays, it just never sends an oversized single request.
+                    first = valid_tracks[:self._PLAYLIST_ADD_CHUNK]
+                    rest = valid_tracks[self._PLAYLIST_ADD_CHUNK:]
+                    playlist = None
                     try:
-                        playlist = self.server.createPlaylist(name, valid_tracks)
-                        logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks")
-                        return True
+                        playlist = self.server.createPlaylist(name, first)
                     except Exception as create_error:
                         logger.error(f"CreatePlaylist failed: {create_error}")
                         # Try alternative approach - pass items as list
                         try:
-                            playlist = self.server.createPlaylist(name, items=valid_tracks)
-                            logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks (using items parameter)")
-                            return True
+                            playlist = self.server.createPlaylist(name, items=first)
+                            logger.debug("createPlaylist succeeded using items parameter")
                         except Exception as alt_error:
                             logger.error(f"Alternative createPlaylist also failed: {alt_error}")
                             # Try creating empty playlist first, then adding tracks
                             try:
                                 logger.debug("Trying to create empty playlist first, then add tracks...")
                                 playlist = self.server.createPlaylist(name, [])
-                                playlist.addItems(valid_tracks)
-                                logger.info(f"Created empty playlist and added {len(valid_tracks)} tracks")
-                                return True
+                                self._add_items_chunked(playlist, first)
                             except Exception as empty_error:
                                 logger.error(f"Empty playlist approach also failed: {empty_error}")
                                 # Final attempt: Create with first item, then add the rest
                                 try:
                                     logger.debug("Trying to create playlist with first track, then add remaining...")
-                                    playlist = self.server.createPlaylist(name, valid_tracks[0])
-                                    if len(valid_tracks) > 1:
-                                        playlist.addItems(valid_tracks[1:])
-                                    logger.info(f"Created playlist with first track and added {len(valid_tracks)-1} more tracks")
-                                    return True
+                                    playlist = self.server.createPlaylist(name, first[0])
+                                    if len(first) > 1:
+                                        self._add_items_chunked(playlist, first[1:])
                                 except Exception as final_error:
                                     logger.error(f"Final playlist creation attempt failed: {final_error}")
                                     raise create_error from final_error
+                    if playlist is not None:
+                        if rest:
+                            self._add_items_chunked(playlist, rest)
+                        logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks "
+                                    f"({(len(rest) // self._PLAYLIST_ADD_CHUNK) + 1 if rest else 1} chunk(s))")
+                        self._verify_playlist_count(name, len(valid_tracks))
+                        return True
+                    return False
                 else:
                     logger.error(f"No valid tracks with ratingKeys for playlist '{name}'")
                     return False
@@ -657,11 +691,12 @@ class PlexClient(MediaServerClient):
                 )
                 return True
 
-            existing_playlist.addItems(new_tracks)
+            self._add_items_chunked(existing_playlist, new_tracks)
             logger.info(
                 f"Plex append: added {len(new_tracks)} new tracks to '{playlist_name}' "
                 f"(skipped {len(tracks) - len(new_tracks)} already present)"
             )
+            self._verify_playlist_count(playlist_name, len(existing_keys) + len(new_tracks))
             return True
         except Exception as e:
             logger.error(f"Error appending to Plex playlist '{playlist_name}': {e}")
@@ -694,7 +729,7 @@ class PlexClient(MediaServerClient):
             to_remove = [i for i in current_items if str(i.ratingKey) in remove_set]
 
             if to_add:
-                existing.addItems(to_add)
+                self._add_items_chunked(existing, to_add)
             if to_remove:
                 try:
                     existing.removeItems(to_remove)
@@ -709,6 +744,7 @@ class PlexClient(MediaServerClient):
                 f"Plex reconcile '{playlist_name}': +{len(to_add)} / -{len(to_remove)} "
                 f"(playlist preserved)"
             )
+            self._verify_playlist_count(playlist_name, len(desired_ids))
             return True
         except Exception as e:
             logger.error(f"Error reconciling Plex playlist '{playlist_name}': {e}")
@@ -1123,6 +1159,9 @@ class PlexClient(MediaServerClient):
         doesn't show "Drake" twice when Drake is in two sections.
         Single-library mode is unaffected — dedup helper is a no-op.
         """
+        # last_fetch_failed lets callers tell "library is genuinely empty"
+        # from "the fetch failed" — both come back as [] (#stale-artists).
+        self.last_fetch_failed = True
         if not self.ensure_connection() or not self._can_query():
             logger.error("Not connected to Plex server or no music library")
             return []
@@ -1137,6 +1176,7 @@ class PlexClient(MediaServerClient):
                 )
             else:
                 logger.info(f"Found {len(artists)} artists in Plex library")
+            self.last_fetch_failed = False
             return artists
         except Exception as e:
             logger.error(f"Error getting all artists: {e}")

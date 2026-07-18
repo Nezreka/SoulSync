@@ -22,10 +22,16 @@ class MatchResult:
     plex_track: Optional[TrackInfo]
     confidence: float
     match_type: str
-    
+    # The bar a resolved track must clear to count as matched. Callers whose
+    # finder already accepted a lower confidence (playlist sync's db lookup
+    # runs at 0.7 — the app-wide "you own this" bar) pass their own threshold,
+    # otherwise a 0.70-0.79 match resolves to a live server track yet still
+    # counts unmatched: wishlisted AND never added to the playlist (#1047).
+    match_threshold: float = 0.8
+
     @property
     def is_match(self) -> bool:
-        return self.plex_track is not None and self.confidence >= 0.8
+        return self.plex_track is not None and self.confidence >= self.match_threshold
 
 class MusicMatchingEngine:
     def __init__(self):

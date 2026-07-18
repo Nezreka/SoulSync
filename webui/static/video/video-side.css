@@ -820,6 +820,40 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep--missing .vd-ep-badge { color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); }
 .vd-ep--missing .vd-ep-index, .vd-ep--missing .vd-ep-title { opacity: 0.7; }
 
+/* Continue Watching — per-episode watch state (server truth from the scan) */
+.vd-ep-prog { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 4px;
+    background: rgba(255,255,255,0.25); }
+.vd-ep-prog-fill { display: block; height: 100%; background: rgb(var(--vd-accent-rgb, 255 59 59));
+    border-radius: 0 2px 2px 0; }
+.vd-ep-check { flex: none; font-size: 13px; font-weight: 900; color: #4ade80; line-height: 1;
+    align-self: center; }
+.vd-ep--watched .vd-ep-title { color: rgba(255,255,255,0.62); }
+.vd-ep--watched .vd-ep-still { filter: grayscale(0.35) brightness(0.82); }
+.vd-ep--watched:hover .vd-ep-still { filter: grayscale(0.1) brightness(0.72); }
+.vd-ep-next-chip { flex: none; align-self: center; font-size: 10.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 9px; border-radius: 999px;
+    color: #fff; background: rgba(var(--vd-accent-rgb, 255 59 59), 0.85); white-space: nowrap; }
+.vd-ep--next { box-shadow: inset 3px 0 0 rgb(var(--vd-accent-rgb, 255 59 59));
+    background: rgba(var(--vd-accent-rgb, 255 59 59), 0.05); }
+.vd-ep--next:hover { background: rgba(var(--vd-accent-rgb, 255 59 59), 0.09); }
+/* hero: watched tag in the meta line + the S/E tag inside the play button */
+.vd-watched-tag { color: #4ade80 !important; font-weight: 700; }
+.vd-play-ep { font-weight: 800; padding: 2px 8px; border-radius: 6px;
+    background: rgba(255,255,255,0.16); font-size: 0.85em; }
+
+/* Detail BIC P3 — enriched facts finally surfaced */
+.vd-awards { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px;
+    font-size: 13px; font-weight: 600; color: #fbbf24; }
+.vd-awards-ic { font-size: 14px; }
+.vd-stinger { color: #fbbf24 !important; font-weight: 700; white-space: nowrap; }
+.vd-ep-new-chip { flex: none; align-self: center; font-size: 10.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 9px; border-radius: 999px;
+    color: #fff; background: rgba(220, 38, 38, 0.9); white-space: nowrap; }
+/* format badges (4K · HDR10 · Atmos · 5.1) — boxed caps like the streamers */
+.vd-fmt { font-size: 10.5px; font-weight: 800; letter-spacing: 0.5px; line-height: 1;
+    padding: 3px 7px; border-radius: 4px; color: rgba(255,255,255,0.85);
+    border: 1px solid rgba(255,255,255,0.35); white-space: nowrap; }
+
 @media (max-width: 820px) {
     .vd-bb-content { padding-left: 24px; padding-right: 24px; }
     .vd-body { padding: 24px 22px 60px; }
@@ -3671,6 +3705,15 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-st--monitored { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.65); }
 .vwsh-st--upgrade { background: hsla(282, 80%, 62%, 0.18); color: hsl(282, 90%, 78%); }
 .vwsh-movie-art .vwsh-st { position: absolute; top: 8px; left: 8px; z-index: 2; backdrop-filter: blur(6px); }
+/* Repeatedly-failing marker (#liveleak-failing-hub) — sits under the status pill */
+.vwsh-failing {
+    position: absolute; top: 34px; left: 8px; z-index: 2;
+    font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px;
+    color: #fca5a5; background: rgba(220, 38, 38, 0.22);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    backdrop-filter: blur(6px); cursor: default;
+}
+.vwsh-failing-inline { color: #fca5a5; font-weight: 700; cursor: default; }
 
 /* 'Search now' — per-item manual search (movie art / episode row / season side) */
 .vwsh-hunt { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.12);
