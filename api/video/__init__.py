@@ -94,7 +94,9 @@ def create_video_blueprint() -> Blueprint:
                 or path.endswith(("/metadata", "/lock", "/refresh-art",
                                   # per-title acquisition settings (P2/P8) — management,
                                   # same as the metadata edits above
-                                  "/quality-profile", "/series-type"))
+                                  "/quality-profile", "/series-type",
+                                  # per-show Synchronize — mutates library rows
+                                  "/sync"))
         if admin and not is_admin:
             return jsonify({"error": "Admin only."}), 403
 

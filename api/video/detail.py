@@ -118,6 +118,24 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         return jsonify(data)
 
+    @bp.route("/detail/show/<int:show_id>/sync", methods=["POST"])
+    def video_show_sync(show_id):
+        """Per-show Synchronize: re-read THIS show from the server and
+        reconcile local rows (adds, updates, prunes vanished episodes; removes
+        the show if the server verifiably no longer has it). Admin-gated via
+        the blueprint's /sync write rule. Synchronous — a single show reads in
+        seconds, and the response carries what changed."""
+        from . import get_video_db
+        try:
+            from core.video.show_sync import ShowSyncError, sync_show
+            res = sync_show(get_video_db(), show_id)
+            return jsonify({"success": True, **res})
+        except ShowSyncError as e:
+            return jsonify({"success": False, "error": str(e)}), 409
+        except Exception:
+            logger.exception("show sync failed for %s", show_id)
+            return jsonify({"success": False, "error": "Sync failed — see app.log"}), 500
+
     @bp.route("/detail/show/<int:show_id>/refresh-art", methods=["POST"])
     def video_show_refresh_art(show_id):
         """Lazy on-view backfill: pull missing season posters / episode art from
