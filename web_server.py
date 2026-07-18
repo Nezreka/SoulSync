@@ -6676,6 +6676,10 @@ def search_music():
         results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
+    except ValueError as ve:
+        # user-facing config problem (e.g. SoundCloud link with the source
+        # disabled) — a clear 400, not a silent empty result
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500

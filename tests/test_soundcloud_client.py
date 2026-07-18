@@ -906,3 +906,20 @@ class TestPasteAnywhere:
         res = by_id.resolve_identifier("not a link at all", deps=None,
                                        client_resolver=lambda s: None)
         assert 'bare ID is ambiguous' in res['message']
+
+    def test_disabled_soundcloud_gets_a_clear_error_not_silence(self):
+        """Audit catch: with SoundCloud disabled, the force-route used to fall
+        back to searching the raw URL as text — guaranteed-empty, silent."""
+        import pytest as _pytest
+        from core.search.basic import run_basic_search
+
+        class _Orch:
+            def client(self, name):
+                return None                      # soundcloud not enabled
+
+            async def search(self, query):
+                raise AssertionError("must not fall back to text search")
+
+        with _pytest.raises(ValueError, match="enable it in Settings"):
+            run_basic_search("https://soundcloud.com/a/t/s-Xy12", _Orch(),
+                             lambda c: c, source=None)
