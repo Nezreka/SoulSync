@@ -54,3 +54,10 @@ class TestWiring:
 
     def test_own_room_echo_renders_rich(self):
         assert "rich: state.view === 'room'" in _CHAT_JS
+
+    def test_embeds_are_click_to_load_and_private(self):
+        # nothing fetches until the reader clicks (IP privacy), youtube goes
+        # through the nocookie host, and nothing sends a referrer out
+        assert "data-chat-embed-img" in _CHAT_JS
+        assert "youtube-nocookie.com/embed/" in _CHAT_JS
+        assert _CHAT_JS.count('referrerpolicy="no-referrer"') == 2   # img + iframe
