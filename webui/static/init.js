@@ -2933,7 +2933,7 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
-    'hydrabase', 'tools'
+    'hydrabase', 'tools', 'chat'
 ]);
 
 function _getPageFromPath() {
@@ -3309,6 +3309,9 @@ async function loadPageData(pageId) {
                 break;
             case 'automations':
                 await loadAutomations();
+                break;
+            case 'chat':
+                if (window.ChatPage) window.ChatPage.open();
                 break;
             case 'help':
                 initializeDocsPage();
