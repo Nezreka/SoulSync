@@ -13408,6 +13408,7 @@ try:
         get_transfer_path=lambda: docker_resolve_path(
             config_manager.get('soulseek.transfer_path', './Transfer')
         ),
+        get_config_manager=lambda: config_manager,
         # Rename-only mode (#875) computes destinations via the same path builder the
         # preview uses, so apply matches exactly what the user saw.
         build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),

@@ -204,6 +204,18 @@ class CanonicalVersionResolveJob(RepairJob):
                         result.findings_skipped_dedup += 1
                 elif not dry_run:
                     result.auto_fixed += 1
+                    report_change = getattr(context, 'report_change', None)
+                    if report_change:
+                        report_change(
+                            job_id=self.job_id,
+                            finding_type='canonical_version',
+                            action='canonical_version_pinned',
+                            entity_type='album',
+                            entity_id=str(album_id),
+                            file_path=None,
+                            details={'album_id': str(album_id), **resolved},
+                            result={'success': True, 'action': 'canonical_version_pinned'},
+                        )
 
             if context.report_progress and (i + 1) % 25 == 0:
                 context.report_progress(scanned=i + 1, total=total,

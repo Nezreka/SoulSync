@@ -19,8 +19,8 @@ logger = get_logger("repair.lib2_mirror_reconcile")
 @register_job
 class Lib2MirrorReconcileJob(RepairJob):
     job_id = "lib2_mirror_reconcile"
-    display_name = "Library v2 Mirror Reconcile"
-    description = "Retry pending Library-v2 Wishlist/Watchlist mirror operations."
+    display_name = "Watchlist/Wishlist Mirror Reconcile"
+    description = "Retry pending Wishlist/Watchlist mirror operations."
     help_text = (
         "Replays pending transactional outbox rows that survived a restart or "
         "temporary database failure. Completed history is bounded; terminal "
@@ -40,8 +40,8 @@ class Lib2MirrorReconcileJob(RepairJob):
                 f"repair.jobs.{self.job_id}.settings", {})
             if isinstance(configured, dict):
                 settings.update(configured)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("mirror reconcile settings lookup failed: %s", exc)
         try:
             batch_size = int(settings["batch_size"])
         except (TypeError, ValueError):

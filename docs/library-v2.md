@@ -7993,3 +7993,37 @@ blind gegen `database/music_library.db` ausgeführt: dafür bleiben Dry-Run-
 Paarliste und Backup verbindliche Betriebsbedingungen. Echte Soulseek- und
 Plex/Jellyfin/Navidrome-End-to-End-Läufe sind Deployment-Abnahme, kein noch
 offener Codefix.
+
+---
+
+## 76. Repair-/Maintenance-Tools — vollständiger V2-Audit und erste Umsetzung (2026-07-18)
+
+Alle 33 im Repair-Worker registrierten Tools wurden gegen Datenbasis,
+Findings, Fix-Handler, automatische Mutationen, Datei-/Wanted-/Artwork-Folgen,
+History und Feature-Gating geprüft. Die vollständige Matrix,
+Konsolidierungsentscheidungen und der spätere Legacy-Löschplan stehen in
+[`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md).
+
+Das erste Prioritätspaket ist implementiert: ein exhaustives Datenbasis- und
+V2-Effekt-Manifest, stabile V2-Subjects an Repair-Findings, eine strikt durch
+`features.library_v2 is True` gegatete zentrale Mutation-Synchronisation,
+gezielte File-Rescans, Artwork-Invalidation, Delete/New-File/Wanted-Folgen und
+Entity-History. Live-Mutationen sowie die Reorganize-Queue melden Änderungen
+über dieselbe Grenze. Vorhandene V2-Tabellen allein aktivieren keinen Pfad.
+Die Repair-UI verwendet bereits neutrale Namen und Basis-Badges (`Library`,
+`Library + files`, `Files`); nur stabile interne Übergangs-IDs tragen noch den
+`lib2_`-Prefix.
+
+Wichtig: „sicher synchronisiert“ ist nicht dasselbe wie „Scanner bereits
+nativ vollständig“. Mehrere ältere Scanner lesen weiterhin den Legacy-
+Katalog und erfassen darum V2-only Subjects ohne Legacy-Backref noch nicht.
+Diese P1-Migration ist im Audit pro Tool sichtbar. Der gemeinsame, strikt
+gegatete V2-File-Subject-Enumerator ist bereits gebaut; ReplayGain und Lyrics
+erfassen damit auch V2-only/derivative Files. Als Nächstes folgen Cover Art
+und AcoustID mit ihren zusätzlichen Album-/Verification-Schreibgrenzen.
+
+Verifikation dieses Pakets: **852** Library-v2-Backendtests, **309** breite
+Repair-/Repair-Job-Tests und **141** Library-v2-Frontendtests grün; Ruff,
+Formatter/Type-Lint der berührten Frontend-Dateien und Vite Production-Build
+sauber. Der globale Frontend-Check trifft weiterhin eine vorbestehende
+Formatabweichung in der unberührten Datei `track-feature-badges.test.tsx`.

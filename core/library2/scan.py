@@ -28,10 +28,28 @@ ProgressCb = Optional[Callable[[str, int, int], None]]
 MISSING_CONFIRMATION_SCANS = 2
 
 
-def _file_rows_in_scope(conn, *, album_ids: Optional[List[int]] = None) -> List[Any]:
+def _file_rows_in_scope(
+    conn,
+    *,
+    album_ids: Optional[List[int]] = None,
+    file_ids: Optional[List[int]] = None,
+) -> List[Any]:
     # Scope contract: None = whole library, [] = nothing. An empty scope must
     # never widen to a full-library scan (an artist without albums would
     # otherwise probe every file in the database).
+    if album_ids is not None and file_ids is not None:
+        raise ValueError("album_ids and file_ids are mutually exclusive")
+    if file_ids is not None:
+        if not file_ids:
+            return []
+        marks = ",".join("?" for _ in file_ids)
+        return conn.execute(
+            f"""SELECT id, path, file_state, missing_scan_count
+                  FROM lib2_track_files
+                 WHERE id IN ({marks}) AND path IS NOT NULL AND path <> ''
+                   AND COALESCE(file_state,'active')<>'deleted'""",
+            [int(file_id) for file_id in file_ids],
+        ).fetchall()
     if album_ids is not None:
         if not album_ids:
             return []
@@ -143,11 +161,19 @@ def _persist_present_observation(
         conn.close()
 
 
-def rescan_files(database, *, album_ids: Optional[List[int]] = None,
-                 progress: ProgressCb = None) -> Dict[str, int]:
+def rescan_files(
+    database,
+    *,
+    album_ids: Optional[List[int]] = None,
+    file_ids: Optional[List[int]] = None,
+    progress: ProgressCb = None,
+) -> Dict[str, int]:
     """Probe the files in scope and persist their measured audio properties.
 
-    ``album_ids=None`` scans the whole library; an empty list scans nothing.
+    ``album_ids=None`` and ``file_ids=None`` scan the whole library; an empty
+    supplied list scans nothing.  The two scopes are mutually exclusive.  The
+    file-id scope is used by repair/change bridges so one ReplayGain or lyrics
+    approval never turns into a full-library probe.
 
     Returns ``{"scanned": n, "updated": n, "missing": n}``. Never raises for
     individual files — a broken file just stays on its imported values.
@@ -170,7 +196,12 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
     try:
         # sqlite3.Row values remain tied to the result shape, so materialize
         # plain dicts before closing the read snapshot connection.
-        rows = [dict(row) for row in _file_rows_in_scope(conn, album_ids=album_ids)]
+        rows = [
+            dict(row)
+            for row in _file_rows_in_scope(
+                conn, album_ids=album_ids, file_ids=file_ids,
+            )
+        ]
     finally:
         conn.close()
 

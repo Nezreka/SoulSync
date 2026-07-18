@@ -52,6 +52,61 @@ JOB_DATA_BASIS: dict[str, str] = {
     'audio_corruption_detector': 'mixed',
 }
 
+# Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
+# where a job currently reads; this manifest says what a successful run/fix can
+# change and therefore what the optional Library-v2 bridge must reconcile.  It
+# deliberately lives next to the registry so adding a job without considering
+# Library v2 fails at import time instead of silently shipping another stale
+# cache/path/history boundary.
+LIBRARY_V2_EFFECTS = frozenset({
+    'none',          # operational/cache-only; no music-library state changes
+    'observe',       # findings only; subjects still need lib2 identity links
+    'metadata',      # artist/album/track catalogue fields or provider ids
+    'tags',          # embedded tags / lyrics / ReplayGain / verification tag
+    'artwork',       # embedded/sidecar/provider artwork and lib2 art cache
+    'path',          # file rename/move
+    'new_file',      # a new derivative/imported file may be created
+    'delete',        # file or legacy row may be removed
+    'wanted',        # wishlist/upgrade/monitor projection changes
+    'discography',   # provider catalogue expansion/backfill
+})
+
+JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
+    'track_number_repair': frozenset({'metadata', 'tags', 'path'}),
+    'cache_evictor': frozenset({'none'}),
+    'orphan_file_detector': frozenset({'observe', 'path', 'new_file', 'delete'}),
+    'dead_file_cleaner': frozenset({'observe', 'delete'}),
+    'duplicate_detector': frozenset({'observe', 'delete'}),
+    'acoustid_scanner': frozenset({'observe', 'tags', 'metadata'}),
+    'missing_cover_art': frozenset({'observe', 'metadata', 'tags', 'artwork'}),
+    'missing_lyrics': frozenset({'observe', 'tags'}),
+    'replaygain_filler': frozenset({'observe', 'tags'}),
+    'empty_folder_cleaner': frozenset({'none'}),
+    'expired_download_cleaner': frozenset({'observe', 'delete', 'wanted'}),
+    'metadata_gap_filler': frozenset({'observe', 'metadata', 'tags'}),
+    'album_completeness': frozenset({'observe', 'metadata', 'tags', 'new_file', 'wanted'}),
+    'fake_lossless_detector': frozenset({'observe'}),
+    'quality_upgrade_scanner': frozenset({'observe', 'wanted', 'delete'}),
+    'library_reorganize': frozenset({'observe', 'metadata', 'tags', 'path'}),
+    'mbid_mismatch_detector': frozenset({'observe', 'metadata', 'tags'}),
+    'single_album_dedup': frozenset({'observe', 'delete', 'wanted'}),
+    'lossy_converter': frozenset({'observe', 'new_file', 'tags'}),
+    'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
+    'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
+    'unknown_artist_fixer': frozenset({'observe', 'metadata', 'tags', 'artwork', 'path'}),
+    'discography_backfill': frozenset({'observe', 'discography', 'wanted'}),
+    'canonical_version_resolve': frozenset({'observe', 'metadata'}),
+    'library_retag': frozenset({'observe', 'metadata', 'tags', 'artwork'}),
+    'quality_upgrade': frozenset({'observe', 'wanted', 'delete'}),
+    'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
+    'lib2_upgrade_scan': frozenset({'wanted'}),
+    'lib2_skips_cleanup': frozenset({'none'}),
+    'lib2_discography_refresh': frozenset({'discography', 'wanted'}),
+    'lib2_mirror_reconcile': frozenset({'wanted'}),
+    'lib2_wishlist_reconcile': frozenset({'wanted'}),
+    'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
+}
+
 _imports_done = False
 
 
@@ -60,7 +115,17 @@ def register_job(cls: type[RepairJob]) -> type[RepairJob]:
     basis = JOB_DATA_BASIS.get(cls.job_id)
     if basis not in REPAIR_DATA_BASES:
         raise ValueError(f"Repair job {cls.job_id!r} has no valid data-basis declaration")
+    effects = JOB_LIBRARY_V2_EFFECTS.get(cls.job_id)
+    if not effects or not effects.issubset(LIBRARY_V2_EFFECTS):
+        raise ValueError(
+            f"Repair job {cls.job_id!r} has no valid Library-v2 effects declaration"
+        )
+    if 'none' in effects and len(effects) != 1:
+        raise ValueError(
+            f"Repair job {cls.job_id!r} mixes the 'none' Library-v2 effect with mutations"
+        )
     cls.data_basis = basis
+    cls.library_v2_effects = effects
     JOB_REGISTRY[cls.job_id] = cls
     return cls
 

@@ -26,11 +26,11 @@ logger = get_logger("repair.lib2_skips_cleanup")
 @register_job
 class Lib2SkipsCleanupJob(RepairJob):
     job_id = "lib2_skips_cleanup"
-    display_name = "Library v2 Skip-Audit Cleanup"
+    display_name = "Skip-Audit Cleanup"
     description = "Expire stale manual check-skip overrides (missing files, past retention)."
     help_text = (
         "Manual downloads made with 'skip AcoustID/quality check' are recorded "
-        "in a Library v2 audit table so later repair jobs honor the override. "
+        "in the library audit so later repair jobs honor the override. "
         "This job removes entries whose file no longer exists and entries older "
         "than the retention window, so an old one-time decision doesn't shield "
         "files from checks forever. Only audit rows are deleted — never files."

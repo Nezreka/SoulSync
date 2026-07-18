@@ -406,6 +406,7 @@ class AcoustIDScannerJob(RepairJob):
                 write_verification_status(fpath, status)
             except Exception as e:
                 logger.debug("verification tag write failed for %s: %s", fpath, e)
+        conn = None
         try:
             conn = context.db._get_connection()
             cur = conn.cursor()
@@ -461,8 +462,20 @@ class AcoustIDScannerJob(RepairJob):
                      exp.get('album_thumb_url') or None,
                      status))
             getattr(conn, 'commit', lambda: None)()
+            if context.report_change:
+                context.report_change(
+                    finding_type='acoustid_verification',
+                    action='verification_status_updated',
+                    entity_type='track',
+                    entity_id=track_id,
+                    file_path=db_path or fpath,
+                    details={'verification_status': status},
+                )
         except Exception as e:
             logger.debug("verification_status persist failed for %s: %s", track_id, e)
+        finally:
+            if conn:
+                conn.close()
 
     def _load_db_tracks(self, context: JobContext) -> dict:
         """Load all tracks from DB keyed by track ID."""

@@ -1889,6 +1889,7 @@ const HISTORY_CATEGORY_LABELS: Record<LibraryV2HistoryCategory, string> = {
   moved: 'Moved',
   deleted: 'Deleted',
   override: 'Override',
+  maintenance: 'Maintenance',
   info: 'Info',
 };
 
@@ -2600,9 +2601,9 @@ function EditArtistModal({
 type MaintenanceDataBasis = 'legacy' | 'lib2' | 'mixed';
 
 const MAINTENANCE_BASIS_LABEL: Record<MaintenanceDataBasis, string> = {
-  legacy: 'legacy catalog',
-  lib2: 'Library v2',
-  mixed: 'legacy + files',
+  legacy: 'Library',
+  lib2: 'Library',
+  mixed: 'Library + files',
 };
 
 const MAINTENANCE_JOBS: Array<{
@@ -2655,7 +2656,7 @@ const MAINTENANCE_JOBS: Array<{
   },
   {
     id: 'lib2_upgrade_scan',
-    label: 'Library v2 Upgrade Scan',
+    label: 'Automatic Upgrade Scan (monitored)',
     desc: 'Queue monitored tracks below their quality profile cutoff (also schedulable under Stats → Repair).',
     basis: 'lib2',
   },

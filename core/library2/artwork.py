@@ -82,6 +82,30 @@ def thumb_file(database, kind: str, entity_id: int) -> Path:
     return artwork_dir(database) / f"{kind}_{int(entity_id)}_t.jpg"
 
 
+def invalidate_artwork(database, kind: str, entity_id: int) -> int:
+    """Remove both managed cache variants for one entity.
+
+    Repair jobs may rewrite embedded art outside the Library-v2 API.  Keeping
+    this invalidation in the artwork module gives those bridges the same
+    full+thumbnail cache-bust boundary as native refreshes.  The next request
+    rebuilds from embedded art/provider fallback.  Missing files are a no-op.
+    """
+    removed = 0
+    with _build_lock(database, kind, int(entity_id)):
+        for path in (
+            artwork_file(database, kind, int(entity_id)),
+            thumb_file(database, kind, int(entity_id)),
+        ):
+            try:
+                path.unlink()
+                removed += 1
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logger.debug("artwork invalidation failed for %s: %s", path, exc)
+    return removed
+
+
 def is_cached_jpeg(path: Path) -> bool:
     """Cheap fast-path guard for old caches that stored PNG/WEBP as .jpg."""
     try:
@@ -573,6 +597,7 @@ __all__ = [
     "artwork_file",
     "thumb_file",
     "artwork_dir",
+    "invalidate_artwork",
     "is_cached_jpeg",
     "precache_all_artwork",
 ]

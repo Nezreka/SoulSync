@@ -92,6 +92,24 @@ class MissingLyricsJob(RepairJob):
             if conn:
                 conn.close()
 
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                file_path = str(subject["path"])
+                native_subjects[file_path] = subject
+                rows.append((
+                    f"lib2:{subject['track_id']}", subject["title"],
+                    subject["artist_name"], subject["album_title"],
+                    file_path, subject["duration"],
+                ))
+        except Exception as e:
+            logger.warning("[Lyrics Filler] V2 subject enumeration failed: %s", e)
+            result.errors += 1
+
         # The stored file_path may not exist as-is in this process's filesystem view (docker mounts,
         # a Plex/SoulSync path mismatch). The .lrc check below MUST run against the resolved on-disk
         # path — exactly like the apply (_fix_missing_lyrics) and the Cover Art sibling already do.
@@ -118,12 +136,20 @@ class MissingLyricsJob(RepairJob):
             # Resolve the stored path to the real file before checking for the sidecar (see note
             # above). Fall back to the raw path when the resolver returns nothing — the common docker
             # case where the container path already equals the stored path.
-            resolved_path = resolve_library_file_path(
-                file_path,
-                transfer_folder=getattr(context, 'transfer_folder', None),
-                download_folder=download_folder,
-                config_manager=context.config_manager,
-            ) or file_path
+            subject = native_subjects.get(str(file_path))
+            if subject:
+                from core.library2.paths import resolve_lib2_path
+
+                resolved_path = resolve_lib2_path(
+                    file_path, config_manager=context.config_manager,
+                ) or file_path
+            else:
+                resolved_path = resolve_library_file_path(
+                    file_path,
+                    transfer_folder=getattr(context, 'transfer_folder', None),
+                    download_folder=download_folder,
+                    config_manager=context.config_manager,
+                ) or file_path
 
             # Already has a sidecar on disk → nothing to do.
             if _has_lrc_sidecar(resolved_path):
@@ -163,6 +189,18 @@ class MissingLyricsJob(RepairJob):
 
             if context.create_finding:
                 try:
+                    details = {
+                        'track_id': track_id,
+                        'track_title': title,
+                        'artist': artist_name,
+                        'album_title': album_title,
+                        'file_path': resolved_path if subject else file_path,
+                        'duration': duration_s,
+                    }
+                    if subject:
+                        from core.library2.maintenance_sync import v2_subject_details
+
+                        details.update(v2_subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lyrics',
@@ -172,14 +210,7 @@ class MissingLyricsJob(RepairJob):
                         file_path=file_path,
                         title=f'Missing lyrics: {title or "Unknown"}',
                         description=f'"{title}" by {artist_name or "Unknown"} has no .lrc — lyrics found on LRClib.',
-                        details={
-                            'track_id': track_id,
-                            'track_title': title,
-                            'artist': artist_name,
-                            'album_title': album_title,
-                            'file_path': file_path,
-                            'duration': duration_s,
-                        })
+                        details=details)
                     if inserted:
                         result.findings_created += 1
                     else:
@@ -208,7 +239,11 @@ class MissingLyricsJob(RepairJob):
                   AND title IS NOT NULL AND title != ''
             """)
             row = cursor.fetchone()
-            return row[0] if row else 0
+            count = row[0] if row else 0
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            return count + len(v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ))
         except Exception:
             return 0
         finally:

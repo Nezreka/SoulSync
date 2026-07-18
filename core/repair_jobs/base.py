@@ -141,6 +141,11 @@ class JobContext:
     is_paused: Optional[Callable[[], bool]] = None
     update_progress: Optional[Callable[[int, int], None]] = None
     report_progress: Optional[Callable] = None  # Rich progress: (phase, log_line, log_type, scanned, total)
+    # Successful in-scan mutations report their concrete subject here.  The
+    # worker coalesces these reports and runs the optional Library-v2 bridge
+    # after the job releases its own DB/file handles.  Finding-based fixes use
+    # the same bridge centrally from RepairWorker.fix_finding().
+    report_change: Optional[Callable[..., None]] = None
 
     def check_stop(self) -> bool:
         """Return True if the worker should stop."""
@@ -206,6 +211,7 @@ class RepairJob(ABC):
     # Authoritative data source used by the scan. Assigned by the registry's
     # exhaustive manifest so a newly registered job cannot silently omit it.
     data_basis: str = ''
+    library_v2_effects: frozenset[str] = frozenset()
     default_enabled: bool = False
     default_interval_hours: int = 24
     default_settings: Dict[str, Any] = {}

@@ -71,9 +71,13 @@ class OrphanFileDetectorJob(RepairJob):
             # successfully autolinked there are not guaranteed to have a
             # legacy ``tracks`` row yet (notably with external media-server
             # sync lag), so a legacy-only detector reports valid files as
-            # orphans. Keep this schema-optional for installations that have
-            # never enabled Library v2.
-            has_lib2_files = cursor.execute(
+            # orphans. The schema can remain after the feature is disabled,
+            # therefore table presence alone must never activate this path.
+            library_v2_enabled = bool(
+                context.config_manager is not None
+                and context.config_manager.get("features.library_v2", False) is True
+            )
+            has_lib2_files = library_v2_enabled and cursor.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "
                 "AND name='lib2_track_files'"
             ).fetchone()
@@ -111,7 +115,7 @@ class OrphanFileDetectorJob(RepairJob):
                         if clean_t:
                             known_titles_clean.add((clean_t, clean_a))
 
-            lib2_identity_tables = cursor.execute(
+            lib2_identity_tables = library_v2_enabled and cursor.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
                 "AND name IN ('lib2_tracks','lib2_track_artists','lib2_artists')"
             ).fetchone()[0]

@@ -115,6 +115,23 @@ class ReplayGainFillerJob(RepairJob):
             if conn:
                 conn.close()
 
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                file_path = str(subject["path"])
+                native_subjects[file_path] = subject
+                rows.append((
+                    f"lib2:{subject['track_id']}", subject["title"],
+                    subject["artist_name"], file_path,
+                ))
+        except Exception as e:
+            logger.warning("[ReplayGain Filler] V2 subject enumeration failed: %s", e)
+            result.errors += 1
+
         total = len(rows)
         if context.update_progress:
             context.update_progress(0, total)
@@ -130,7 +147,17 @@ class ReplayGainFillerJob(RepairJob):
             track_id, title, artist_name, file_path = row[:4]
             result.scanned += 1
 
-            resolved = _resolve(file_path, context)
+            subject = native_subjects.get(str(file_path))
+            if subject:
+                from core.library2.paths import resolve_lib2_path
+
+                resolved = resolve_lib2_path(
+                    file_path, config_manager=context.config_manager,
+                )
+                if not resolved and os.path.isfile(file_path):
+                    resolved = file_path
+            else:
+                resolved = _resolve(file_path, context)
             if not resolved:
                 # Can't read the file from here → can't analyze it on apply either.
                 result.skipped += 1
@@ -157,6 +184,16 @@ class ReplayGainFillerJob(RepairJob):
 
             if context.create_finding:
                 try:
+                    details = {
+                        'track_id': track_id,
+                        'track_title': title,
+                        'artist': artist_name,
+                        'file_path': resolved if subject else file_path,
+                    }
+                    if subject:
+                        from core.library2.maintenance_sync import v2_subject_details
+
+                        details.update(v2_subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_replaygain',
@@ -167,12 +204,7 @@ class ReplayGainFillerJob(RepairJob):
                         title=f'No ReplayGain: {title or "Unknown"}',
                         description=(f'"{title}" by {artist_name or "Unknown"} has no '
                                      'ReplayGain tag — loudness can be analyzed + written.'),
-                        details={
-                            'track_id': track_id,
-                            'track_title': title,
-                            'artist': artist_name,
-                            'file_path': file_path,
-                        })
+                        details=details)
                     if inserted:
                         result.findings_created += 1
                     else:
@@ -200,7 +232,11 @@ class ReplayGainFillerJob(RepairJob):
                 WHERE file_path IS NOT NULL AND file_path != ''
             """)
             row = cursor.fetchone()
-            return row[0] if row else 0
+            count = row[0] if row else 0
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            return count + len(v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ))
         except Exception:
             return 0
         finally:

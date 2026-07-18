@@ -819,6 +819,7 @@ export type LibraryV2HistoryCategory =
   | 'moved'
   | 'deleted'
   | 'override'
+  | 'maintenance'
   | 'info';
 
 export interface LibraryV2HistoryEntry {

@@ -23,14 +23,14 @@ logger = get_logger("repair.lib2_wishlist_reconcile")
 @register_job
 class Lib2WishlistReconcileJob(RepairJob):
     job_id = "lib2_wishlist_reconcile"
-    display_name = "Library v2 Wishlist Reconcile"
-    description = "Re-add monitored+missing Library-v2 tracks that dropped out of the Wishlist."
+    display_name = "Monitored Wishlist Reconcile"
+    description = "Re-add monitored+missing library tracks that dropped out of the Wishlist."
     help_text = (
-        "Re-derives the authoritative Library v2 wanted projection and mirrors it "
+        "Re-derives the authoritative library wanted projection and mirrors it "
         "into the Wishlist: monitored tracks that are still missing but whose "
         "Wishlist entry was downloaded, cleared, or aged away get re-added, and "
         "entries whose track is no longer wanted get pruned. Deliberate user "
-        "cancels (ignore-list) are respected. Does nothing when the Library v2 "
+        "cancels (ignore-list) are respected. Does nothing when the new library "
         "feature flag is off."
     )
     icon = "list-checks"

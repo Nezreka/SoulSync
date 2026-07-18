@@ -2031,6 +2031,7 @@ button.featureTag:disabled {
 
 .sourceBadge[data-tone='blocklist'],
 .sourceBadge[data-tone='override'],
+.sourceBadge[data-tone='maintenance'],
 .sourceBadge[data-tone='info'] {
   color: rgba(255, 255, 255, 0.6);
   background: rgba(255, 255, 255, 0.08);

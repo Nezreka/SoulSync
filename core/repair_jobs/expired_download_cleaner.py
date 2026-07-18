@@ -160,6 +160,15 @@ class ExpiredDownloadCleanerJob(RepairJob):
                     res = delete_origin_download(context.db, entry, context.config_manager)
                     if res.get('removed') or res.get('file_deleted'):
                         result.auto_fixed += 1
+                        if context.report_change:
+                            context.report_change(
+                                finding_type='expired_download',
+                                action='deleted_expired',
+                                entity_type='track',
+                                entity_id=entry.get('id'),
+                                file_path=entry.get('file_path'),
+                                details={'history_id': entry.get('id')},
+                            )
                 except Exception as e:
                     logger.error("expired auto-delete failed for %s: %s", entry.get('title'), e)
                     result.errors += 1

@@ -861,6 +861,14 @@ def ensure_library_v2_schema(connection: Any) -> None:
         ensure_file_delete_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("file-delete journal migration failed (will retry next start): %s", e)
+    # Transitional repair-worker bridge: append-only, entity-addressable
+    # events for tag/path/artwork/verification mutations performed by the
+    # shared maintenance tools outside Library-v2-native endpoints.
+    try:
+        from core.library2.maintenance_sync import ensure_maintenance_event_schema
+        ensure_maintenance_event_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("maintenance-event schema failed (will retry next start): %s", e)
     # B5: persisted table/column/match-provider display preferences.
     try:
         from core.library2.ui_preferences import ensure_ui_preferences_schema

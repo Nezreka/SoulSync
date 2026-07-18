@@ -1207,10 +1207,22 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     if not plan['tag_ok']:
         _fix_track_number_tag(file_path, plan['correct_num'], plan['disc_total'])
 
+    final_path = file_path
     if plan['new_basename']:
         new_path = _rename_to_basename(file_path, filename, plan['new_basename'])
         if new_path and context.db:
             _update_db_file_path(context.db, file_path, new_path)
+            final_path = new_path
+
+    if context.report_change:
+        context.report_change(
+            finding_type='track_number_mismatch',
+            action='fixed_track_number',
+            entity_type='file',
+            entity_id=None,
+            file_path=final_path,
+            details={'original_path': file_path},
+        )
 
     return True
 

@@ -497,6 +497,16 @@ class LibraryRetagJob(RepairJob):
                                     lyrics_action=lyrics_action)
             if res['written'] or res['cover_written'] or res.get('lyrics_written'):
                 result.auto_fixed += 1
+                if context.report_change:
+                    for track_plan in track_plans:
+                        context.report_change(
+                            finding_type='library_retag',
+                            action='library_retag',
+                            entity_type='track',
+                            entity_id=track_plan.get('track_id'),
+                            file_path=track_plan.get('file_path'),
+                            details={'album_id': album_id},
+                        )
             else:
                 result.errors += 1
             return

@@ -2014,10 +2014,10 @@ async function loadRepairJobs() {
             const dotClass = job.is_running ? 'running' : (job.enabled ? 'enabled' : 'disabled');
             const cardClass = job.is_running ? 'running' : (!job.enabled ? 'disabled' : '');
             const basisMeta = {
-                legacy: ['Legacy catalog', 'Scans the legacy artists/albums/tracks catalogue'],
-                lib2: ['Library v2', 'Scans the Library v2 catalogue'],
-                filesystem: ['Filesystem / ops', 'Scans files, directories, or operational caches rather than a music catalogue'],
-                mixed: ['Legacy + files', 'Scans the legacy catalogue and files on disk'],
+                legacy: ['Library', 'Scans the library catalogue; successful maintenance changes are reconciled into the active library index when enabled'],
+                lib2: ['Library', 'Scans the active library catalogue directly'],
+                filesystem: ['Files', 'Scans files, directories, or operational caches rather than a music catalogue'],
+                mixed: ['Library + files', 'Scans the library catalogue and files on disk; successful changes are reconciled into the active library index when enabled'],
             }[job.data_basis] || ['Unknown basis', 'The job did not declare its data basis'];
 
             // Build flow badges

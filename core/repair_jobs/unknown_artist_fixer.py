@@ -238,6 +238,15 @@ class UnknownArtistFixerJob(RepairJob):
                                             expected_rel, transfer, fix_tags, reorganize_files)
                     if fixed:
                         result.auto_fixed += 1
+                        if context.report_change:
+                            context.report_change(
+                                finding_type='unknown_artist',
+                                action='fixed_unknown_artist',
+                                entity_type='track',
+                                entity_id=track_id,
+                                file_path=file_path,
+                                details={'original_path': file_path},
+                            )
                     else:
                         result.errors += 1
                 except Exception as e:

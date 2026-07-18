@@ -71,6 +71,28 @@ ENTITY_EVENT_LABEL = {
 SCOPES = ("artist", "album", "track")
 PIPELINE_CHECK_EVENTS = frozenset({"quality_checked", "acoustic_id_checked"})
 
+MAINTENANCE_EVENT_LABEL = {
+    "applied_replaygain": "ReplayGain added",
+    "applied_lyrics": "Lyrics added",
+    "applied_cover_art": "Cover art updated",
+    "applied_artist_art": "Artist image updated",
+    "fixed_track_number": "Track number repaired",
+    "verification_status_updated": "Acoustic ID status updated",
+    "library_retag": "File tags rewritten",
+    "retagged": "File tags updated",
+    "moved_file": "File reorganized",
+    "fixed_unknown_artist": "Artist identity repaired",
+    "canonical_version_pinned": "Canonical album version selected",
+    "pinned_canonical": "Canonical album version selected",
+    "added_to_wishlist": "Replacement requested",
+    "auto_fill_album": "Missing album tracks processed",
+    "relocated": "Moved to staging for re-import",
+    "converted": "Lossy copy created",
+    "converted_and_deleted": "Lossy copy replaced original",
+    "deleted_expired": "Expired download removed",
+    "deleted_file": "File removed by maintenance",
+}
+
 
 def _rows(conn, sql: str, params: Sequence[Any]) -> List[Any]:
     return conn.execute(sql, params).fetchall()
@@ -350,6 +372,60 @@ def _manual_skip_events(conn, track_ids: Sequence[int], limit: int) -> List[Dict
     return events
 
 
+def _maintenance_events(
+    conn,
+    *,
+    artist_ids: Sequence[int] = (),
+    album_ids: Sequence[int] = (),
+    track_ids: Sequence[int] = (),
+    limit: int,
+) -> List[Dict[str, Any]]:
+    clauses: List[str] = []
+    params: List[Any] = []
+    if artist_ids:
+        clauses.append(f"lib2_artist_id IN ({_in_clause(artist_ids)})")
+        params.extend(artist_ids)
+    if album_ids:
+        clauses.append(f"lib2_album_id IN ({_in_clause(album_ids)})")
+        params.extend(album_ids)
+    if track_ids:
+        clauses.append(f"lib2_track_id IN ({_in_clause(track_ids)})")
+        params.extend(track_ids)
+    if not clauses:
+        return []
+    try:
+        rows = _rows(
+            conn,
+            """SELECT job_id, finding_type, action, changed_fields_json, occurred_at
+                 FROM lib2_maintenance_events
+                WHERE """ + " OR ".join(clauses) + " ORDER BY id DESC LIMIT ?",
+            (*params, limit),
+        )
+    except Exception:  # noqa: BLE001 — table is additive on older databases
+        return []
+    events = []
+    for row in rows:
+        try:
+            fields = json.loads(row["changed_fields_json"] or "[]")
+        except (TypeError, ValueError):
+            fields = []
+        events.append({
+            "date": row["occurred_at"],
+            "event_type": row["action"],
+            "category": "maintenance",
+            "title": MAINTENANCE_EVENT_LABEL.get(
+                row["action"], str(row["action"] or "Maintenance updated")
+                    .replace("_", " ").capitalize(),
+            ),
+            "detail": (
+                f"{row['job_id']} · {', '.join(str(field) for field in fields)}"
+                if fields else str(row["job_id"])
+            ),
+            "source": "maintenance",
+        })
+    return events
+
+
 def _track_downloads_to_events(rows: Sequence[Any]) -> List[Dict[str, Any]]:
     return [{
         "date": r["created_at"],
@@ -494,6 +570,10 @@ def scoped_history(
         events += _entity_history_events(conn, track_ids, limit)
         events += _file_delete_events(conn, artist_id=entity_id, album_ids=album_ids, limit=limit)
         events += _manual_skip_events(conn, track_ids, limit)
+        events += _maintenance_events(
+            conn, artist_ids=[entity_id], album_ids=album_ids,
+            track_ids=track_ids, limit=limit,
+        )
         events += download_events
         events += _artist_name_fallback_events(conn, artist_name or "", matched_ids, limit)
     elif scope == "album":
@@ -508,6 +588,9 @@ def scoped_history(
         events += _entity_history_events(conn, track_ids, limit)
         events += _file_delete_events(conn, album_ids=[entity_id], limit=limit)
         events += _manual_skip_events(conn, track_ids, limit)
+        events += _maintenance_events(
+            conn, album_ids=[entity_id], track_ids=track_ids, limit=limit,
+        )
         events += download_events
     else:  # track
         recording_ids = _recording_ids_for_track(conn, entity_id)
@@ -516,6 +599,7 @@ def scoped_history(
         events += _acquisition_events(conn, request_ids, limit)
         events += _entity_history_events(conn, [entity_id], limit)
         events += _manual_skip_events(conn, [entity_id], limit)
+        events += _maintenance_events(conn, track_ids=[entity_id], limit=limit)
         events += download_events
 
     events.sort(key=lambda e: e["date"] or "", reverse=True)

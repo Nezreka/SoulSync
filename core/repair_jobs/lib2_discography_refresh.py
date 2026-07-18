@@ -32,10 +32,10 @@ logger = get_logger("repair.lib2_discography_refresh")
 @register_job
 class Lib2DiscographyRefreshJob(RepairJob):
     job_id = "lib2_discography_refresh"
-    display_name = "Library v2 Discography Refresh"
+    display_name = "Monitored Discography Refresh"
     description = "Re-fetch monitored artists' provider catalogs so new releases become wanted."
     help_text = (
-        "Re-expands the provider discography of every monitored Library v2 "
+        "Re-expands the provider discography of every monitored library "
         "artist whose catalog was already fetched once. Releases discovered "
         "since the last expansion are auto-monitored when the artist's "
         "'monitor new items' setting is 'all'; 'new' only accepts a dated "
@@ -43,7 +43,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
         "materialized and mirrored into the Wishlist, so the normal download "
         "pipeline picks them up. Artists never expanded stay untouched (the "
         "first expansion remains an explicit user action). Does nothing when "
-        "the Library v2 feature flag is off."
+        "the new library feature is off."
     )
     icon = "refresh-cw"
     default_enabled = False

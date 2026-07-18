@@ -37,6 +37,11 @@ if "config.settings" not in sys.modules:
 from core.reorganize_runner import build_runner  # noqa: E402
 
 
+class _EnabledConfig:
+    def get(self, key, default=None):
+        return True if key == "features.library_v2" else default
+
+
 def _make_item(*, queue_id='qid-1', album_id='10', source=None):
     item = MagicMock()
     item.queue_id = queue_id
@@ -91,6 +96,7 @@ def test_update_track_path_syncs_lib2_track_file(monkeypatch, tmp_path, imported
         is_shutting_down_fn=lambda: False,
         get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        get_config_manager=lambda: _EnabledConfig(),
     )
     summary = runner(_make_item())
     assert summary['status'] == 'completed'

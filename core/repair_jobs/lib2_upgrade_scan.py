@@ -26,15 +26,15 @@ logger = get_logger("repair.lib2_upgrade_scan")
 @register_job
 class Lib2UpgradeScanJob(RepairJob):
     job_id = "lib2_upgrade_scan"
-    display_name = "Library v2 Upgrade Scan"
-    description = "Queue monitored Library-v2 tracks below their quality profile's cutoff for upgrade."
+    display_name = "Automatic Upgrade Scan (monitored)"
+    description = "Queue monitored tracks below their quality profile's cutoff for upgrade."
     help_text = (
-        "Scans the opt-in Library v2 for monitored tracks whose file sits below "
+        "Scans the active library for monitored tracks whose file sits below "
         "the assigned quality profile's upgrade cutoff (profiles with policy "
         "'upgrade until cutoff/top'). Genuine candidates are added to the "
         "Wishlist carrying their quality profile, so the normal download "
         "pipeline searches for and imports the better version. Does nothing "
-        "when the Library v2 feature flag is off."
+        "when the new library feature is off."
     )
     icon = "arrow-up-circle"
     default_enabled = False

@@ -399,6 +399,7 @@ class RepairWorker:
                 'help_text': job.help_text,
                 'icon': job.icon,
                 'data_basis': job.data_basis,
+                'library_v2_effects': sorted(job.library_v2_effects),
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
                 'interval_hours': config['interval_hours'],
@@ -726,6 +727,18 @@ class RepairWorker:
             run_scope = self._force_run_scopes.pop(job_id, None) if forced else None
 
         # Build context
+        reported_changes: List[dict] = []
+
+        def _report_change(**change):
+            """Collect successful in-scan mutations for the post-job bridge.
+
+            Jobs report only after their own file/DB write succeeded. Keeping
+            this list in the worker avoids Library-v2 writes inside a job's
+            transaction and gives finding fixes + live scans one contract.
+            """
+            if isinstance(change, dict):
+                reported_changes.append(dict(change))
+
         context = JobContext(
             db=self.db,
             transfer_folder=self.transfer_folder,
@@ -742,6 +755,7 @@ class RepairWorker:
             is_paused=(lambda: False) if forced else (lambda: not self.enabled),
             update_progress=self._update_progress,
             report_progress=_report_progress,
+            report_change=_report_change,
         )
 
         start_time = time.time()
@@ -752,6 +766,42 @@ class RepairWorker:
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             result.errors += 1
+
+        # Optional Library-v2 interoperability pass. The callee repeats the
+        # strict feature gate; failures are counted because the underlying
+        # mutation succeeded but its Library-v2 view did not converge.
+        if reported_changes:
+            try:
+                from core.library2.maintenance_sync import sync_repair_change
+
+                seen_changes = set()
+                for change in reported_changes:
+                    dedup_key = (
+                        change.get('finding_type'), change.get('action'),
+                        change.get('entity_type'), str(change.get('entity_id')),
+                        str(change.get('file_path')),
+                    )
+                    if dedup_key in seen_changes:
+                        continue
+                    seen_changes.add(dedup_key)
+                    sync_repair_change(
+                        self.db,
+                        self._config_manager,
+                        job_id=job_id,
+                        finding_type=change.get('finding_type'),
+                        action=change.get('action') or 'auto_fixed',
+                        entity_type=change.get('entity_type'),
+                        entity_id=change.get('entity_id'),
+                        file_path=change.get('file_path'),
+                        details=change.get('details'),
+                        result=change.get('result'),
+                    )
+            except Exception as e:
+                logger.error(
+                    "Library-v2 post-job sync failed for %s: %s", job_id, e,
+                    exc_info=True,
+                )
+                result.errors += 1
 
         duration = time.time() - start_time
 
@@ -859,6 +909,23 @@ class RepairWorker:
             if cursor.fetchone():
                 return False  # Already exists or was already fixed
 
+            enriched_details = details or {}
+            try:
+                from core.library2.maintenance_sync import annotate_finding_details
+
+                enriched_details = annotate_finding_details(
+                    self.db,
+                    self._config_manager,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    file_path=file_path,
+                    details=enriched_details,
+                )
+            except Exception as e:
+                # Finding creation remains fail-open: a bridge problem must not
+                # hide the repair issue itself.
+                logger.debug("Library-v2 finding annotation skipped: %s", e)
+
             cursor.execute("""
                 INSERT INTO repair_findings
                     (job_id, finding_type, severity, status, entity_type, entity_id,
@@ -867,7 +934,7 @@ class RepairWorker:
             """, (
                 job_id, finding_type, severity, entity_type, entity_id,
                 file_path, title, description,
-                json.dumps(details) if details else '{}'
+                json.dumps(enriched_details) if enriched_details else '{}'
             ))
             conn.commit()
             return True
@@ -1005,6 +1072,31 @@ class RepairWorker:
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
 
             if result.get('success'):
+                try:
+                    from core.library2.maintenance_sync import sync_repair_change
+
+                    result['library_v2_sync'] = sync_repair_change(
+                        self.db,
+                        self._config_manager,
+                        job_id=job_id,
+                        finding_type=finding_type,
+                        action=result.get('action', 'auto_fix'),
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        file_path=file_path,
+                        details=details,
+                        result=result,
+                    )
+                except Exception as sync_error:
+                    logger.error(
+                        "Finding %s applied but Library-v2 sync failed: %s",
+                        finding_id, sync_error, exc_info=True,
+                    )
+                    result['library_v2_sync'] = {
+                        'enabled': True,
+                        'reason': 'error',
+                        'error': str(sync_error),
+                    }
                 self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
 
             return result
@@ -1372,7 +1464,8 @@ class RepairWorker:
             conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
-                    'message': f'Added "{track_name}" to wishlist for re-download'}
+                    'message': f'Added "{track_name}" to wishlist for re-download',
+                    'library_v2_file_deleted': True}
         except Exception as e:
             logger.error("Dead file re-download failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
@@ -1484,7 +1577,8 @@ class RepairWorker:
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted preview clip and re-wishlisted "{track_name}" for full download'
                                 if deleted_file else
-                                f'Re-wishlisted "{track_name}" (preview file already gone)')}
+                                f'Re-wishlisted "{track_name}" (preview file already gone)'),
+                    'library_v2_file_deleted': True}
         except Exception as e:
             logger.error("Preview-clip fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
@@ -1595,7 +1689,8 @@ class RepairWorker:
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted corrupt file and re-wishlisted "{track_name}" for download'
                                 if deleted_file else
-                                f'Re-wishlisted "{track_name}" (corrupt file already gone)')}
+                                f'Re-wishlisted "{track_name}" (corrupt file already gone)'),
+                    'library_v2_file_deleted': True}
         except Exception as e:
             logger.error("Corrupt-file fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
@@ -3783,7 +3878,8 @@ class RepairWorker:
                              f'choose a different lossy codec'}
         if os.path.exists(out_path):
             return {'success': True, 'action': 'already_exists',
-                    'message': f'{quality_label} copy already exists'}
+                    'message': f'{quality_label} copy already exists',
+                    'output_path': out_path}
 
         import subprocess
         try:
@@ -3889,12 +3985,14 @@ class RepairWorker:
                         except Exception as e:
                             logger.debug("Failed to update DB path after lossy conversion: %s", e)
                         return {'success': True, 'action': 'converted_and_deleted',
-                                'message': f'Converted to {quality_label} and deleted original'}
+                                'message': f'Converted to {quality_label} and deleted original',
+                                'output_path': out_path}
                 except Exception as e:
                     logger.debug("Blasphemy mode error: %s", e)
 
             return {'success': True, 'action': 'converted',
-                    'message': f'Created {quality_label} copy'}
+                    'message': f'Created {quality_label} copy',
+                    'output_path': out_path}
 
         except subprocess.TimeoutExpired:
             if os.path.exists(out_path):
