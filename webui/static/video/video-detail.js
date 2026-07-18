@@ -2738,13 +2738,24 @@
     var _dlTimer = null, _dlActive = {}, _dlDone = {}, _dlPrev = {};
     function _dlReset() { _dlActive = {}; _dlDone = {}; _dlPrev = {}; }
     function _dlTrackable() { return !!(data && (data.kind === 'show' || data.kind === 'channel')); }
+    // Adaptive cadence: 2.5s only while a download for THIS show is actually
+    // in flight; 10s otherwise (still catches a fresh grab quickly) — and
+    // nothing at all while the tab is hidden. A flat 2.5s forever was a
+    // request every 2.5s for as long as any show page stayed open.
+    var _DL_FAST_MS = 2500, _DL_IDLE_MS = 10000, _dlHasActive = false;
     function startDlTracking() {
         stopDlTracking();
         if (!_dlTrackable()) return;
         pollDl();
-        _dlTimer = setInterval(pollDl, 2500);
+        _scheduleDl();
     }
-    function stopDlTracking() { if (_dlTimer) { clearInterval(_dlTimer); _dlTimer = null; } }
+    function _scheduleDl() {
+        _dlTimer = setTimeout(function () {
+            if (!document.hidden) pollDl();
+            if (_dlTimer) _scheduleDl();
+        }, _dlHasActive ? _DL_FAST_MS : _DL_IDLE_MS);
+    }
+    function stopDlTracking() { if (_dlTimer) { clearTimeout(_dlTimer); _dlTimer = null; } }
     function pollDl() {
         if (!_dlTrackable() || !root()) { stopDlTracking(); return; }
         var showTitle = data.title;
@@ -2785,6 +2796,7 @@
                 if (!cur[key] && _dlActive[key]) { _dlDone[key] = 1; delete _dlActive[key]; }
             });
             _dlPrev = cur;
+            _dlHasActive = Object.keys(cur).length > 0;   // drives the adaptive cadence
             applyDlStates();
             // Everything settled → stop the interval until the next grab.
             if (!Object.keys(_dlActive).length) stopDlTracking();

@@ -78,12 +78,22 @@
     function startPolling() {
         if (pollTimer) return;
         if (onVideoSide()) fetchStatus();
-        pollTimer = setInterval(function () { if (onVideoSide()) fetchStatus(); }, 5000);
-        // Refresh the instant the shell flips to the video side (don't wait up to 5s).
+        // Service config (server/metadata/download keys) changes only when the
+        // user edits settings — a 5s poll was pure noise (a request every 5s
+        // forever). 60s keeps the dots honest; the side-flip observer and the
+        // tab-refocus listener below repaint INSTANTLY on the moments that
+        // actually matter.
+        pollTimer = setInterval(function () {
+            if (onVideoSide() && !document.hidden) fetchStatus();
+        }, 60000);
+        // Refresh the instant the shell flips to the video side (don't wait a minute).
         try {
             new MutationObserver(function () { if (onVideoSide()) fetchStatus(); })
                 .observe(document.body, { attributes: true, attributeFilter: ['data-side'] });
         } catch (e) { /* MutationObserver is always available in target browsers */ }
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden && onVideoSide()) fetchStatus();
+        });
     }
 
     // ── the switch modal (reuses the .ss-* styling from service-switch.css) ──────
