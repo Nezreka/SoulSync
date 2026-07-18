@@ -472,6 +472,11 @@
         page.setAttribute('data-chat-bound', '1');
 
         page.addEventListener('click', function (e) {
+            // any click outside the emoji picker (and its button) closes it
+            if (!e.target.closest('[data-chat-emoji-btn]') &&
+                    !e.target.closest('[data-chat-emoji-pop]')) {
+                toggleEmojiPicker(true);
+            }
             var t = e.target.closest('[data-chat-embed-yt]');
             if (t) {
                 t.outerHTML = '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
