@@ -389,6 +389,15 @@ def _union_episode_delta_shows(section, since, shows):
         except Exception:   # noqa: BLE001 - the episode delta is an assist over the show delta
             logger.debug("Plex: episode addedAt delta search failed", exc_info=True)
             eps = []
+        try:
+            # WATCH delta: watching (even partially) bumps an episode's lastViewedAt but not
+            # the show's addedAt, so without this an incremental never refreshes per-episode
+            # play_count/viewOffset (Continue Watching would go stale until a deep scan).
+            eps = list(eps) + list(section.search(libtype="episode",
+                                                  filters={"lastViewedAt>>": since},
+                                                  sort="lastViewedAt:desc", maxresults=500))
+        except Exception:   # noqa: BLE001 - the watch delta is an assist too
+            logger.debug("Plex: episode lastViewedAt delta search failed", exc_info=True)
         for ep in eps:
             gk = str(getattr(ep, "grandparentRatingKey", "") or "")
             if gk and gk not in seen:
@@ -965,6 +974,7 @@ class PlexVideoSource:
             "rating_critic": getattr(m, "rating", None),
             "play_count": int(getattr(m, "viewCount", 0) or 0),
             "last_viewed_at": _iso_dt(getattr(m, "lastViewedAt", None)),
+            "view_offset_ms": int(getattr(m, "viewOffset", 0) or 0),   # resume position
             "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
             "files": self._part_files(m),
@@ -988,6 +998,10 @@ class PlexVideoSource:
             "rating": getattr(ep, "audienceRating", None),
             "tvdb_id": _parse_plex_guids(ep).get("tvdb_id"),
             "added_at": _iso_dt(getattr(ep, "addedAt", None)),   # ranks the show in Recently Added
+            # Continue Watching: per-episode watch state + resume position
+            "play_count": int(getattr(ep, "viewCount", 0) or 0),
+            "last_viewed_at": _iso_dt(getattr(ep, "lastViewedAt", None)),
+            "view_offset_ms": int(getattr(ep, "viewOffset", 0) or 0),
             "files": self._part_files(ep),
             "file": self._part_file(ep),
         }
@@ -1053,7 +1067,7 @@ class PlexVideoSource:
 _JF_MOVIE_FIELDS = ("Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,"
                     "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,UserData")
 _JF_EP_FIELDS = ("Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,"
-                 "ProviderIds,CommunityRating,DateCreated")
+                 "ProviderIds,CommunityRating,DateCreated,UserData")
 _JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Taglines,CommunityRating,"
                    "PremiereDate,EndDate,UserData,RecursiveItemCount")
 
@@ -1071,8 +1085,21 @@ def _union_jf_episode_delta_series(req, uid, view_id, since, series_items, show_
         ep_resp = req(f"/Users/{uid}/Items", {
             "ParentId": view_id, "IncludeItemTypes": "Episode", "Recursive": "true",
             "MinDateLastSaved": since.isoformat(), "Fields": "SeriesId", "Limit": "1000"}) or {}
+        ep_items = list(ep_resp.get("Items", []))
+        try:
+            # WATCH delta: playback updates an episode's USER DATA, not its DateLastSaved,
+            # so the metadata delta alone never refreshes play state (Continue Watching
+            # would go stale until a deep scan). MinDateLastSavedForUser is the user-data
+            # twin of MinDateLastSaved.
+            watch_resp = req(f"/Users/{uid}/Items", {
+                "ParentId": view_id, "IncludeItemTypes": "Episode", "Recursive": "true",
+                "MinDateLastSavedForUser": since.isoformat(),
+                "Fields": "SeriesId", "Limit": "500"}) or {}
+            ep_items += watch_resp.get("Items", [])
+        except Exception:   # noqa: BLE001 - the watch delta is an assist too
+            logger.debug("Jellyfin: episode user-data delta failed", exc_info=True)
         new_ids = []
-        for ep in ep_resp.get("Items", []):
+        for ep in ep_items:
             sid = str(ep.get("SeriesId") or "")
             if sid and sid not in seen:
                 seen.add(sid)
@@ -1505,6 +1532,19 @@ class JellyfinVideoSource:
                 # just new adds (the Jellyfin twin of Plex's updatedAt delta).
                 params.update({"MinDateLastSaved": since.isoformat()})
                 items = (self._req(path, params) or {}).get("Items", [])
+                try:
+                    # WATCH delta: playback updates USER DATA, not DateLastSaved — union in
+                    # movies whose play state changed so Continue Watching stays fresh
+                    # between deep scans (the Jellyfin twin of Plex's lastViewedAt delta).
+                    wparams = dict(params)
+                    wparams.pop("MinDateLastSaved", None)
+                    wparams.update({"MinDateLastSavedForUser": since.isoformat(), "Limit": "500"})
+                    seen_ids = {str(x.get("Id")) for x in items}
+                    items = list(items) + [
+                        w for w in (self._req(path, wparams) or {}).get("Items", [])
+                        if str(w.get("Id")) not in seen_ids]
+                except Exception:   # noqa: BLE001 - the watch delta is an assist
+                    logger.debug("Jellyfin: movie user-data delta failed", exc_info=True)
             elif incremental:
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "100"})
                 items = (self._req(path, params) or {}).get("Items", [])
@@ -1538,6 +1578,8 @@ class JellyfinVideoSource:
             "play_count": int((it.get("UserData") or {}).get("PlayCount")
                               or (1 if (it.get("UserData") or {}).get("Played") else 0)),
             "last_viewed_at": _iso_dt((it.get("UserData") or {}).get("LastPlayedDate")),
+            # JF ticks are 100ns units → ms
+            "view_offset_ms": int(((it.get("UserData") or {}).get("PlaybackPositionTicks") or 0) // 10_000),
             "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "files": self._files(it),
@@ -1618,6 +1660,11 @@ class JellyfinVideoSource:
                     "rating": ep.get("CommunityRating"),
                     "tvdb_id": _parse_jf_providers(ep).get("tvdb_id"),
                     "added_at": ((ep.get("DateCreated") or "").replace("T", " ")[:19] or None),
+                    # Continue Watching: UserData rides the user-scoped episodes call
+                    "play_count": int((ep.get("UserData") or {}).get("PlayCount")
+                                      or (1 if (ep.get("UserData") or {}).get("Played") else 0)),
+                    "last_viewed_at": _iso_dt((ep.get("UserData") or {}).get("LastPlayedDate")),
+                    "view_offset_ms": int(((ep.get("UserData") or {}).get("PlaybackPositionTicks") or 0) // 10_000),
                     "files": self._files(ep),
                     "file": self._file(ep),
                 })

@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 44   # v44: video_wishlist.search_attempts/last_search_at (failing visibility); v43: shows.series_type (daily/anime, P8); v42: video_requests (in-app Overseerr, arr-parity P4)
+SCHEMA_VERSION = 45   # v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at; v43: shows.series_type (daily/anime, P8)
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -157,6 +157,13 @@ _BACKFILL_COLS = {
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
 _COLUMN_MIGRATIONS = [
+    # Continue Watching (v45): per-episode watch state + resume offsets, scanned
+    # from the server (Plex viewCount/viewOffset, Jellyfin UserData) — powers
+    # episode checkmarks, progress bars, and the Resume/Next-Up CTA.
+    ("episodes", "play_count", "INTEGER"),
+    ("episodes", "last_viewed_at", "TEXT"),
+    ("episodes", "view_offset_ms", "INTEGER"),
+    ("movies", "view_offset_ms", "INTEGER"),
     # video_wishlist — consecutive fruitless drain searches per row, so the UI can
     # mark repeatedly-failing items (#liveleak-failing-hub). Reset on a grab.
     ("video_wishlist", "search_attempts", "INTEGER DEFAULT 0"),
@@ -2783,6 +2790,7 @@ class VideoDatabase:
                 "rating": item.get("rating"), "rating_critic": item.get("rating_critic"),
                 "play_count": item.get("play_count"),
                 "last_viewed_at": item.get("last_viewed_at"),
+                "view_offset_ms": item.get("view_offset_ms"),
                 "poster_url": item.get("poster_url"),
                 "has_file": 1 if (item.get("files") or item.get("file")) else 0,
             }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
@@ -2863,8 +2871,9 @@ class VideoDatabase:
                     conn.execute(
                         "INSERT INTO episodes (show_id, season_id, server_source, server_id, "
                         "season_number, episode_number, title, overview, air_date, "
-                        "runtime_minutes, still_url, rating, tvdb_id, has_file, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "runtime_minutes, still_url, rating, tvdb_id, has_file, added_at, "
+                        "play_count, last_viewed_at, view_offset_ms) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
                         "season_id=excluded.season_id, server_source=excluded.server_source, "
                         "server_id=excluded.server_id, title=excluded.title, "
@@ -2873,12 +2882,16 @@ class VideoDatabase:
                         "rating=excluded.rating, tvdb_id=excluded.tvdb_id, has_file=excluded.has_file, "
                         # keep the earliest known add-date: don't clobber it with a NULL from a
                         # source that didn't report one.
-                        "added_at=COALESCE(episodes.added_at, excluded.added_at)",
+                        "added_at=COALESCE(episodes.added_at, excluded.added_at), "
+                        # watch state is server truth — always take the fresh values
+                        "play_count=excluded.play_count, last_viewed_at=excluded.last_viewed_at, "
+                        "view_offset_ms=excluded.view_offset_ms",
                         (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
                          ep.get("title"), ep.get("overview"), ep.get("air_date"),
                          ep.get("runtime_minutes"), ep.get("still_url"), ep.get("rating"),
                          ep.get("tvdb_id"), 1 if (ep.get("files") or ep.get("file")) else 0,
-                         ep.get("added_at")),
+                         ep.get("added_at"),
+                         ep.get("play_count"), ep.get("last_viewed_at"), ep.get("view_offset_ms")),
                     )
                     ep_id = conn.execute(
                         "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
@@ -4273,6 +4286,7 @@ class VideoDatabase:
             eps = conn.execute(
                 "SELECT id, season_number, episode_number, title, overview, air_date, "
                 "runtime_minutes, rating, monitored, has_file, "
+                "play_count, last_viewed_at, view_offset_ms, "
                 "(still_url IS NOT NULL AND still_url<>'') AS has_still, "
                 # A server may hold several COPIES of one episode — surface them.
                 "(SELECT COUNT(*) FROM media_files f WHERE f.episode_id=episodes.id) AS versions, "
@@ -4292,6 +4306,10 @@ class VideoDatabase:
                 "has_still": bool(e["has_still"]),
                 "monitored": bool(e["monitored"]), "owned": bool(e["has_file"]),
                 "versions": e["versions"], "resolution": e["resolution"],
+                # Continue Watching: server watch state (scanned per episode)
+                "watched": (e["play_count"] or 0) > 0,
+                "last_viewed_at": e["last_viewed_at"],
+                "view_offset_ms": e["view_offset_ms"] or 0,
             })
 
         # Seasons declared in the seasons table, plus any season numbers that only
@@ -4327,6 +4345,7 @@ class VideoDatabase:
             "series_type": show["series_type"] or "standard",
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
             "watched": (show["watched_episodes"] or 0) >= total > 0,
+            "watched_episodes": show["watched_episodes"] or 0,   # raw count for "N of M watched"
             "overview": show["overview"], "status": show["status"], "network": show["network"],
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
             "tagline": show["tagline"], "rating": show["rating"],
@@ -4347,7 +4366,45 @@ class VideoDatabase:
             "season_count": len(out_seasons),
             "episode_total": total, "episode_owned": owned_total,
             "seasons": out_seasons,
+            # Continue Watching: the episode to play next (None until something
+            # has actually been watched — a fresh show has no 'continue' story)
+            "next_up": self.show_next_up(show_id),
         }
+
+    def show_next_up(self, show_id: int) -> dict | None:
+        """The episode to watch NEXT (the Netflix 'Next Up' slot): the most
+        recently started-but-unfinished OWNED episode wins (resume), else the
+        first unwatched owned episode in airing order (specials sort last).
+        Returns None when nothing is owned, nothing has been watched yet, or
+        everything owned is already watched — the hero CTA then stays a plain
+        'Play on <server>'."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT season_number, episode_number, title, server_id, "
+                "view_offset_ms, runtime_minutes, play_count, last_viewed_at "
+                "FROM episodes WHERE show_id=? AND has_file=1 "
+                "ORDER BY (season_number=0), season_number, episode_number",
+                (show_id,)).fetchall()
+        finally:
+            conn.close()
+        if not rows or not any((r["play_count"] or 0) or (r["view_offset_ms"] or 0) for r in rows):
+            return None    # nothing watched yet — no continue story
+        started = [r for r in rows
+                   if (r["view_offset_ms"] or 0) > 0 and not (r["play_count"] or 0)]
+        if started:
+            r = max(started, key=lambda x: x["last_viewed_at"] or "")
+            resume = True
+        else:
+            unwatched = [r for r in rows if not (r["play_count"] or 0)]
+            if not unwatched:
+                return None    # all owned episodes watched
+            r = unwatched[0]
+            resume = False
+        return {"season_number": r["season_number"], "episode_number": r["episode_number"],
+                "title": r["title"], "server_id": r["server_id"],
+                "view_offset_ms": r["view_offset_ms"] or 0,
+                "runtime_minutes": r["runtime_minutes"], "resume": resume}
 
     def set_monitored(self, kind: str, item_id: int, monitored: bool) -> bool:
         """Toggle the 'follow/watchlist' flag on a movie or show. Returns True if a
@@ -7080,6 +7137,10 @@ class VideoDatabase:
             "quality_profile_id": m["quality_profile_id"] or 0,
             "locked_fields": sorted(self._parse_locked(m["locked_fields"])),
             "watched": (m["play_count"] or 0) > 0,
+            # Continue Watching raw state (v45): last watched + resume position
+            "play_count": m["play_count"] or 0,
+            "last_viewed_at": m["last_viewed_at"],
+            "view_offset_ms": m["view_offset_ms"] or 0,
             "overview": m["overview"], "status": m["status"], "studio": m["studio"],
             "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
             "content_rating": m["content_rating"], "tagline": m["tagline"],

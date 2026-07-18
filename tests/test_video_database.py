@@ -281,13 +281,18 @@ def test_upsert_show_tree_builds_seasons_episodes_and_prunes(db):
                          (sid,)).fetchone()["has_file"] == 1
         assert c.execute("SELECT has_file FROM episodes WHERE show_id=? AND episode_number=2",
                          (sid,)).fetchone()["has_file"] == 0
-    # Re-scan with E2 removed from the server -> it gets pruned.
+    # Re-scan with E2 removed from the server -> DEMOTED, not deleted: E2 has
+    # identity (air_date), and episodes are facts — only FILES are server-owned.
+    # (The Silo E03 lesson; the full demote seams live in test_video_episode_demote.)
     item["seasons"][0]["episodes"] = item["seasons"][0]["episodes"][:1]
     assert db.upsert_show_tree("plex", item) == sid
     with db.connect() as c:
-        eps = [r["episode_number"] for r in c.execute(
-            "SELECT episode_number FROM episodes WHERE show_id=?", (sid,)).fetchall()]
-    assert eps == [1]
+        rows = {r["episode_number"]: r for r in c.execute(
+            "SELECT episode_number, server_id, has_file FROM episodes WHERE show_id=?",
+            (sid,)).fetchall()}
+    assert sorted(rows) == [1, 2]
+    assert rows[2]["server_id"] is None and rows[2]["has_file"] == 0   # demoted to MISSING
+    assert rows[1]["has_file"] == 1                                    # untouched
 
 
 def test_upsert_stores_provider_ids(db):

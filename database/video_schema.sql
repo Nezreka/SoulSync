@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS movies (
     updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     play_count       INTEGER,                         -- server watch state (viewCount)
     last_viewed_at   TEXT,                             -- server last-watched stamp (Plex lastViewedAt / JF LastPlayedDate)
+    view_offset_ms   INTEGER,                         -- resume position (Continue Watching)
     locked_fields    TEXT                             -- JSON list of user-edited (scan/enrichment-immune) fields
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
@@ -186,6 +187,9 @@ CREATE TABLE IF NOT EXISTS episodes (
     tvdb_id         INTEGER,
     monitored       INTEGER NOT NULL DEFAULT 1,
     has_file        INTEGER NOT NULL DEFAULT 0,
+    play_count      INTEGER,          -- server watch state (Plex viewCount / JF UserData.PlayCount)
+    last_viewed_at  TEXT,             -- server last-watched stamp
+    view_offset_ms  INTEGER,          -- resume position (Plex viewOffset / JF PlaybackPositionTicks→ms)
     UNIQUE (show_id, season_number, episode_number)
 );
 CREATE INDEX IF NOT EXISTS idx_episodes_show     ON episodes(show_id);
