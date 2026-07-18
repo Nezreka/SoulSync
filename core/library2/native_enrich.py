@@ -209,7 +209,7 @@ def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[s
 
 
 def _get_or_create_component_artist(
-    conn, name: str, identity: Dict[str, Any]
+    conn, name: str, identity: Dict[str, Any], *, monitored: int = 1
 ) -> int:
     """Resolve a split component to a lib2 artist id, creating + enriching it.
 
@@ -244,7 +244,8 @@ def _get_or_create_component_artist(
         return cid
 
     cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)", (name, name)
+        "INSERT INTO lib2_artists(name, sort_name, monitored) VALUES(?, ?, ?)",
+        (name, name, monitored),
     )
     cid = int(cur.lastrowid)
     _persist_identity(
@@ -364,7 +365,7 @@ def smart_split_combined_artist(
         resolver = default_artist_resolver
 
     row = conn.execute(
-        "SELECT id, name, legacy_artist_id FROM lib2_artists WHERE id=?",
+        "SELECT id, name, legacy_artist_id, monitored FROM lib2_artists WHERE id=?",
         (int(artist_id),),
     ).fetchone()
     if row is None:
@@ -383,9 +384,13 @@ def smart_split_combined_artist(
             return None  # not confident — leave the combined row intact
         identities.append((component, identity))
 
+    ghost_monitored = int(row["monitored"] if row["monitored"] is not None else 1)
+
     component_ids: List[int] = []
     for component, identity in identities:
-        cid = _get_or_create_component_artist(conn, component, identity)
+        cid = _get_or_create_component_artist(
+            conn, component, identity, monitored=ghost_monitored
+        )
         if cid not in component_ids:
             component_ids.append(cid)
     if len(component_ids) < 2 or int(artist_id) in component_ids:

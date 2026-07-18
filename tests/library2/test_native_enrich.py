@@ -191,6 +191,7 @@ def _component_resolver(name):
 
 def test_smart_split_rehomes_primary_album_and_deletes_ghost(imported_conn):
     combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=0 WHERE id=?", (combined,))
     album_id, track_id = _make_collab_release(imported_conn, combined)
 
     result = NE.smart_split_combined_artist(
@@ -203,6 +204,13 @@ def test_smart_split_rehomes_primary_album_and_deletes_ghost(imported_conn):
     ian = _artist_id_by_name(imported_conn, "Ian Asher")
     gal = _artist_id_by_name(imported_conn, "Galantis")
     assert ian is not None and gal is not None
+    
+    # Assert that components inherited the unmonitored status of the ghost artist
+    for cid in (ian, gal):
+        row = imported_conn.execute(
+            "SELECT monitored FROM lib2_artists WHERE id=?", (cid,)
+        ).fetchone()
+        assert row["monitored"] == 0
     assert imported_conn.execute(
         "SELECT spotify_id FROM lib2_artists WHERE id=?", (ian,)
     ).fetchone()["spotify_id"] == "SP_Ian_Asher"
