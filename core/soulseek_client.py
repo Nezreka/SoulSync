@@ -2010,6 +2010,66 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.error(f"Error getting session info: {e}")
             return None
     
+    # ── Soulseek chat (rooms + private messages) ──────────────────────────────
+    # Thin pass-throughs to slskd's chat API. slskd IS a full Soulseek client;
+    # these ride the same base_url + X-API-Key the search/transfer calls use.
+    # Room names and usernames can contain spaces/anything → always URL-quote.
+    # slskd expects a JSON-encoded STRING body for join/send (json= handles it).
+
+    @staticmethod
+    def _quote(part: str) -> str:
+        from urllib.parse import quote
+        return quote(str(part), safe="")
+
+    async def get_joined_rooms(self) -> List[str]:
+        """Names of the rooms slskd is currently in ([] when none/unreachable)."""
+        res = await self._make_request('GET', 'rooms/joined')
+        return list(res) if isinstance(res, list) else []
+
+    async def join_room(self, room: str) -> bool:
+        res = await self._make_request('POST', 'rooms/joined', json=str(room))
+        return res is not None
+
+    async def leave_room(self, room: str) -> bool:
+        res = await self._make_request('DELETE', f'rooms/joined/{self._quote(room)}')
+        return res is not None
+
+    async def get_room_messages(self, room: str) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', f'rooms/joined/{self._quote(room)}/messages')
+        return list(res) if isinstance(res, list) else []
+
+    async def get_room_users(self, room: str) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', f'rooms/joined/{self._quote(room)}/users')
+        return list(res) if isinstance(res, list) else []
+
+    async def send_room_message(self, room: str, message: str) -> bool:
+        res = await self._make_request('POST', f'rooms/joined/{self._quote(room)}/messages',
+                                       json=str(message))
+        return res is not None
+
+    async def get_available_rooms(self) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', 'rooms/available')
+        return list(res) if isinstance(res, list) else []
+
+    async def get_conversations(self) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', 'conversations')
+        return list(res) if isinstance(res, list) else []
+
+    async def get_conversation(self, username: str) -> Any:
+        """One conversation with its messages. Shape varies by slskd version
+        (object with .messages vs a bare list) — callers must tolerate both."""
+        return await self._make_request('GET', f'conversations/{self._quote(username)}')
+
+    async def send_private_message(self, username: str, message: str) -> bool:
+        res = await self._make_request('POST', f'conversations/{self._quote(username)}',
+                                       json=str(message))
+        return res is not None
+
+    async def acknowledge_conversation(self, username: str) -> bool:
+        """Mark a conversation read (clears slskd's unacknowledged flag)."""
+        res = await self._make_request('PUT', f'conversations/{self._quote(username)}')
+        return res is not None
+
     async def explore_api_endpoints(self) -> Dict[str, Any]:
         """Explore available API endpoints to find the correct download endpoint"""
         if not self.base_url:
