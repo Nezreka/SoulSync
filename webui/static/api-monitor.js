@@ -1507,6 +1507,26 @@ async function initializeWishlistPage() {
    WISHLIST NEBULA — Artist orbs with album/single satellites
    ═══════════════════════════════════════════════════════════════════ */
 
+// A track is "failing" once it has burned this many wishlist cycles without
+// landing (#liveleak-failing-hub). The count/last-try/reason all come from the
+// wishlist API (retry_count / last_attempted / failure_reason) — the data was
+// always there, the page just never showed it.
+const WL_FAILING_ATTEMPTS = 3;
+
+function _wlFailTitle(p) {
+    let t = `${p.retry} failed attempt${p.retry !== 1 ? 's' : ''}`;
+    if (p.lastTried) t += ` · last tried ${p.lastTried}`;
+    if (p.failReason) t += `\n${p.failReason}`;
+    return t;
+}
+
+// Attribute-safe escape: escapeHtml (innerHTML-based) leaves double quotes
+// intact, so a failure reason containing one would break out of a title="…"
+// attribute. Always use this for attribute values built from wishlist data.
+function _wlAttr(s) {
+    return escapeHtml(String(s ?? '')).replace(/"/g, '&quot;');
+}
+
 function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, currentCycle) {
     const field = document.getElementById('wl-nebula-field');
     if (!field) return;
@@ -1523,7 +1543,13 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
         let artist = 'Unknown Artist';
         if (sd.artists?.[0]?.name) artist = sd.artists[0].name;
         else if (typeof sd.artists?.[0] === 'string') artist = sd.artists[0];
-        return { track: sd.name || 'Unknown', artist, album: albumName, image: albumImage, type, id: track.spotify_track_id || track.id || '' };
+        const retry = Number(track.retry_count) || 0;
+        return { track: sd.name || 'Unknown', artist, album: albumName, image: albumImage, type,
+                 id: track.spotify_track_id || track.id || '',
+                 retry,
+                 failing: retry >= WL_FAILING_ATTEMPTS,
+                 lastTried: track.last_attempted || '',
+                 failReason: track.failure_reason || '' };
     }
 
     for (const t of albumTracks) { const p = _parse(t, 'album'); if (p) { if (!artistMap.has(p.artist)) artistMap.set(p.artist, { albums: new Map(), singles: [] }); const a = artistMap.get(p.artist); if (!a.albums.has(p.album)) a.albums.set(p.album, { image: p.image, tracks: [] }); a.albums.get(p.album).tracks.push(p); } }
@@ -1545,6 +1571,11 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
         const hasAlbums = data.albums.size > 0;
         const hue = _hue(name);
         const sz = total >= 10 ? 'orb-lg' : total >= 4 ? 'orb-md' : 'orb-sm';
+        // Failing rollup for this artist (#liveleak-failing-hub): drives the orb
+        // warning dot and the Failing-only filter (data-failing attribute).
+        const failingCount = [...data.albums.values()].reduce(
+            (s, a) => s + a.tracks.filter(t => t.failing).length, 0)
+            + data.singles.filter(s2 => s2.failing).length;
 
         // Enhancement 1: prefer watchlist artist photo over album cover
         let img = artistImageMap.get(name.toLowerCase()) || '';
@@ -1557,7 +1588,7 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
         // Enhancement 7: staggered entry animation
         const delay = Math.min(idx * 60, 800);
 
-        html += `<div class="wl-orb-group" data-artist="${escapeHtml(name)}" style="animation-delay:${delay}ms">`;
+        html += `<div class="wl-orb-group" data-artist="${escapeHtml(name)}" data-failing="${failingCount}" style="animation-delay:${delay}ms">`;
 
         // Enhancement 2: hover tooltip
         html += `<div class="wl-orb-tooltip">${escapeHtml(name)}<br><span>${total} track${total !== 1 ? 's' : ''}</span></div>`;
@@ -1584,7 +1615,7 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
 
         // Enhancement 8: clickable artist name → navigate to artist detail
         html += `<div class="wl-orb-label" onclick="event.stopPropagation(); _navigateToArtistFromWishlist('${escapeHtml(name)}')" title="View artist">${escapeHtml(name)}</div>`;
-        html += `<div class="wl-orb-meta">${total} track${total !== 1 ? 's' : ''}</div>`;
+        html += `<div class="wl-orb-meta">${total} track${total !== 1 ? 's' : ''}${failingCount > 0 ? ` · <span class="wl-orb-meta-failing" title="${failingCount} track${failingCount !== 1 ? 's' : ''} repeatedly failing to download">&#9888; ${failingCount} failing</span>` : ''}</div>`;
 
         // Expanded content
         html += `<div class="wl-orb-expanded">`;
@@ -1600,8 +1631,11 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
                 // Track list (hidden until tile clicked)
                 html += `<div class="wl-tile-tracks">`;
                 for (const tr of ad.tracks) {
-                    html += `<div class="wl-tile-track">`;
+                    html += `<div class="wl-tile-track${tr.failing ? ' wl-track-failing' : ''}">`;
                     html += `<span class="wl-tile-track-name">${escapeHtml(tr.track)}</span>`;
+                    if (tr.failing) {
+                        html += `<span class="wl-failing-badge" title="${_wlAttr(_wlFailTitle(tr))}">&#9888; ${tr.retry}</span>`;
+                    }
                     html += `<button class="wl-tile-track-remove" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(tr.id)}')" title="Remove track">&#10005;</button>`;
                     html += `</div>`;
                 }
@@ -1613,8 +1647,9 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
         if (data.singles.length > 0) {
             html += `<div class="wl-singles-orbit">`;
             for (const s of data.singles) {
-                html += `<div class="wl-single-moon" data-track-id="${escapeHtml(s.id)}">`;
+                html += `<div class="wl-single-moon${s.failing ? ' wl-moon-failing' : ''}" data-track-id="${escapeHtml(s.id)}"${s.failing ? ` title="${_wlAttr(_wlFailTitle(s))}"` : ''}>`;
                 html += s.image ? `<img src="${s.image}" alt="">` : `<span class="wl-moon-fallback">&#11088;</span>`;
+                if (s.failing) html += `<span class="wl-moon-failing-badge">&#9888;</span>`;
                 html += `<div class="wl-moon-label">${escapeHtml(s.track)}</div>`;
                 html += `<button class="wl-moon-remove-btn" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(s.id)}')" title="Remove">&#10005;</button>`;
                 html += `</div>`;
@@ -1679,12 +1714,22 @@ async function _removeWishlistTrack(trackId) {
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
+let _wlFailingOnly = false;
+
+function _toggleFailingFilter() {
+    _wlFailingOnly = !_wlFailingOnly;
+    document.getElementById('wl-failing-filter')?.classList.toggle('active', _wlFailingOnly);
+    _filterNebula();
+}
+
 function _filterNebula() {
     const q = (document.getElementById('wl-nebula-search')?.value || '').toLowerCase().trim();
     document.querySelectorAll('.wl-orb-group').forEach(g => {
         const a = (g.dataset.artist || '').toLowerCase();
         const albums = [...g.querySelectorAll('.wl-satellite')].map(s => (s.dataset.album || '').toLowerCase());
-        const match = !q || a.includes(q) || albums.some(al => al.includes(q));
+        let match = !q || a.includes(q) || albums.some(al => al.includes(q));
+        // Failing-only chip: hide artists with nothing stuck (#liveleak-failing-hub)
+        if (match && _wlFailingOnly && !(Number(g.dataset.failing) > 0)) match = false;
         g.style.display = match ? '' : 'none';
         if (!match) g.classList.remove('expanded');
     });
