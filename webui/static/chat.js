@@ -81,6 +81,29 @@
         return m ? m[1] : null;
     }
 
+    // ── SoulSync deep links (richchat P4) ────────────────────────────────────
+    // Paste your address bar and every SoulSync renders it as a LOCAL link:
+    // the sharer's host is theirs, only the path travels. Whitelisted shapes
+    // only — and NEVER 'library'-source video paths (those ids are local db
+    // rows; on another install they'd open a random title). tmdb ids and
+    // artist source-ids are universal.
+    var SS_PATH_RE = /\/(artist-detail\/[a-z0-9_-]{1,32}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,63}|video-detail\/tmdb\/(?:movie|show)\/\d{1,10})(?:$|[?#])/;
+
+    function _ssChip(path, label) {
+        // path is regex-whitelisted above — attribute-safe by shape
+        return ' <a class="chat-embed-chip chat-ss-chip" href="' + path +
+            '" title="Open in SoulSync">↪ ' + label + '</a>';
+    }
+
+    function _ssPathChip(u) {
+        var m = u.replace(/&amp;/g, '&').match(SS_PATH_RE);
+        if (!m) return '';
+        var path = '/' + m[1];
+        var label = path.indexOf('/artist-detail/') === 0 ? '🎵 open artist'
+            : (path.indexOf('/movie/') > -1 ? '🎬 open movie' : '📺 open show');
+        return _ssChip(path, label);
+    }
+
     function _linkWithEmbeds(u) {
         var html = _linkHtml(u);
         var yt = _ytId(u);
@@ -93,7 +116,7 @@
             return html + ' <button type="button" class="chat-embed-chip" data-chat-embed-img="' +
                 u + '" title="Load this image (reveals your IP to its host)">🖼 show</button>';
         }
-        return html;
+        return html + _ssPathChip(u);
     }
 
     function _extract(s, regex, out, transform) {
@@ -134,6 +157,17 @@
             var u = _trimUrl(m);
             return _linkWithEmbeds(u) + m.slice(u.length);
         });
+        // 1b) bare ss:// short links (envelope-only grammar):
+        //     ss://artist/<source>/<id> · ss://movie/<tmdb> · ss://show/<tmdb>
+        s = _extract(s, /ss:\/\/(artist\/[a-z0-9_-]{1,32}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,63}|(?:movie|show)\/\d{1,10})\b/g,
+            hold, function (_, g1) {
+                if (g1.indexOf('artist/') === 0) {
+                    return _ssChip('/artist-detail/' + g1.slice(7), '🎵 open artist');
+                }
+                var kind = g1.split('/')[0];
+                return _ssChip('/video-detail/tmdb/' + g1,
+                    kind === 'movie' ? '🎬 open movie' : '📺 open show');
+            });
         // 2) markdown subset (on escaped text — tags below are OURS, not input's)
         s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
         s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
