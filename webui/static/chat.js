@@ -26,15 +26,98 @@
         var page = document.getElementById('chat-page');
         return page ? page.querySelector(sel) : null;
     }
+    // Pure string escaping (no DOM): safe in BOTH text and attribute context,
+    // and testable under node (tests/js/chat_render_harness.mjs).
     function esc(s) {
-        var d = document.createElement('div');
-        d.textContent = (s == null ? '' : String(s));
-        return d.innerHTML;
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
-    // esc() (innerHTML-based) does NOT escape double quotes — a Soulseek
-    // username is REMOTE input and must never break out of an attribute.
-    function attr(s) {
-        return esc(s).replace(/"/g, '&quot;');
+    var attr = esc;   // esc now covers attribute context too
+
+    // ── rich rendering (the !SS1! envelope payload, markdown subset) ─────────
+    // EVERYTHING here is remote input wearing a costume: escape FIRST, then
+    // apply formatting to the escaped text. Code spans and URLs are pulled out
+    // into \u0000-sentinel placeholders before markdown so their contents stay literal.
+    var EMOJI = {
+        smile: '😄', grin: '😁', joy: '😂', wink: '😉', cry: '😢', sob: '😭',
+        heart: '❤️', broken_heart: '💔', fire: '🔥', tada: '🎉', rocket: '🚀',
+        thumbsup: '👍', thumbsdown: '👎', clap: '👏', wave: '👋', pray: '🙏',
+        eyes: '👀', thinking: '🤔', shrug: '🤷', facepalm: '🤦', skull: '💀',
+        notes: '🎵', musical_note: '🎶', headphones: '🎧', guitar: '🎸', cd: '💿',
+        vinyl: '📀', mic: '🎤', speaker: '🔊', movie: '🎬', tv: '📺',
+        popcorn: '🍿', star: '⭐', sparkles: '✨', zap: '⚡', boom: '💥',
+        check: '✅', x: '❌', warning: '⚠️', question: '❓', exclamation: '❗',
+        wave_hand: '👋', beers: '🍻', coffee: '☕', pizza: '🍕', cake: '🎂',
+        sunglasses: '😎', robot: '🤖', ghost: '👻', alien: '👽', crown: '👑',
+        gem: '💎', money: '🤑', hundred: '💯', point_up: '☝️', muscle: '💪',
+        rofl: '🤣', melting: '🫠', salute: '🫡', handshake: '🤝', brain: '🧠',
+    };
+    var URL_RE = /(https?:\/\/[^\s]+)/g;
+
+    function _trimUrl(u) {
+        // trailing sentence punctuation is chat, not URL
+        var m = u.match(/[.,;:!?)\]]+$/);
+        return m ? u.slice(0, -m[0].length) : u;
+    }
+
+    function _linkHtml(u) {
+        // u is already-escaped text (esc ran first) — safe in attr + label.
+        return '<a class="chat-link" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>';
+    }
+
+    function _extract(s, regex, out, transform) {
+        return s.replace(regex, function (m, g1) {
+            var kept = transform ? transform(m, g1) : m;
+            out.push(kept);
+            return '\u0000' + (out.length - 1) + '\u0000';
+        });
+    }
+
+    function _restore(s, out) {
+        return s.replace(/\u0000(\d+)\u0000/g, function (_, i) { return out[Number(i)]; });
+    }
+
+    function _preclean(text) {
+        // strip literal NULs so crafted input can never touch the sentinel space
+        return String(text == null ? '' : text).replace(/\u0000/g, '');
+    }
+
+    function renderPlain(text) {
+        // non-envelope messages (other clients): escaped + clickable links only
+        var hold = [];
+        var s = _extract(esc(_preclean(text)), URL_RE, hold, function (m) {
+            var u = _trimUrl(m);
+            return _linkHtml(u) + m.slice(u.length);
+        });
+        return _restore(s, hold).replace(/\n/g, '<br>');
+    }
+
+    function renderRich(text) {
+        var hold = [];
+        var s = esc(_preclean(text));
+        // 1) protect code spans + URLs from markdown mangling
+        s = _extract(s, /`([^`\n]+)`/g, hold, function (_, c) {
+            return '<code class="chat-code">' + c + '</code>';
+        });
+        s = _extract(s, URL_RE, hold, function (m) {
+            var u = _trimUrl(m);
+            return _linkHtml(u) + m.slice(u.length);
+        });
+        // 2) markdown subset (on escaped text — tags below are OURS, not input's)
+        s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+        s = s.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+        s = s.replace(/\|\|([^|\n]+)\|\|/g,
+            '<span class="chat-spoiler" data-chat-spoiler title="Spoiler — click to reveal">$1</span>');
+        // 3) emoji shortcodes
+        s = s.replace(/:([a-z0-9_+-]+):/g, function (m, name) { return EMOJI[name] || m; });
+        // 4) quotes ('> ' lines; '>' escaped to &gt; above)
+        s = s.split('\n').map(function (line) {
+            return line.indexOf('&gt; ') === 0
+                ? '<span class="chat-quote">' + line.slice(5) + '</span>' : line;
+        }).join('\n');
+        return _restore(s.replace(/\n/g, '<br>'), hold);
     }
 
     function pageVisible() {
@@ -82,7 +165,9 @@
             '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) + '" ' +
                 'title="Message ' + attr(user) + '">' + esc(user) + '</button>' +
             '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
-            '<div class="chat-msg-text">' + esc(m.message) + '</div></div>';
+            '<div class="chat-msg-text">' +
+            (m.rich ? renderRich(m.message) : renderPlain(m.message)) +
+            '</div></div>';
     }
 
     function renderMessages(list) {
@@ -162,6 +247,51 @@
             ? (state.view === 'room' ? 'Message # ' + (state.room || '') + '…'
                                      : 'Message ' + (state.pmUser || '') + '…')
             : 'Read-only — chat sending is admin-only on this server';
+        // Formatting only exists inside the envelope — the toolbar is a ROOM
+        // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
+        var bar = q('[data-chat-toolbar]');
+        if (bar) bar.hidden = !(state.view === 'room' && state.canSend);
+        if (state.view !== 'room') toggleEmojiPicker(true);
+    }
+
+    // ── composer toolbar (room only) ─────────────────────────────────────────
+    var _FMT = { bold: ['**', '**'], italic: ['*', '*'], strike: ['~~', '~~'],
+                 code: ['`', '`'], spoiler: ['||', '||'], quote: ['> ', ''] };
+
+    function applyFormat(kind) {
+        var input = q('[data-chat-input]');
+        var pair = _FMT[kind];
+        if (!input || !pair || input.disabled) return;
+        var start = input.selectionStart || 0, end = input.selectionEnd || 0;
+        var v = input.value;
+        input.value = v.slice(0, start) + pair[0] + v.slice(start, end) + pair[1] + v.slice(end);
+        var pos = (start === end) ? start + pair[0].length : end + pair[0].length + pair[1].length;
+        input.focus();
+        input.setSelectionRange(pos, pos);
+    }
+
+    function insertAtCursor(text) {
+        var input = q('[data-chat-input]');
+        if (!input || !text || input.disabled) return;
+        var start = input.selectionStart || input.value.length;
+        input.value = input.value.slice(0, start) + text + input.value.slice(input.selectionEnd || start);
+        input.focus();
+        input.setSelectionRange(start + text.length, start + text.length);
+    }
+
+    function toggleEmojiPicker(forceClose) {
+        var pop = q('[data-chat-emoji-pop]');
+        if (!pop) return;
+        if (forceClose === true) { pop.hidden = true; return; }
+        if (pop.hidden && !pop.getAttribute('data-built')) {
+            pop.setAttribute('data-built', '1');
+            var names = Object.keys(EMOJI);
+            pop.innerHTML = names.map(function (n) {
+                return '<button type="button" class="chat-emoji" data-chat-emoji-pick="' +
+                    EMOJI[n] + '" title=":' + n + ':">' + EMOJI[n] + '</button>';
+            }).join('');
+        }
+        pop.hidden = !pop.hidden;
     }
 
     function renderProblem(msg) {
@@ -260,6 +390,8 @@
                 host.insertAdjacentHTML('beforeend', messageRow({
                     username: 'you', message: text,
                     timestamp: new Date().toISOString(), self: true,
+                    // room sends ride the envelope → render the echo rich too
+                    rich: state.view === 'room',
                 }));
                 host.scrollTop = host.scrollHeight;
                 state.lastStamp = null;
@@ -276,7 +408,15 @@
         page.setAttribute('data-chat-bound', '1');
 
         page.addEventListener('click', function (e) {
-            var t = e.target.closest('[data-chat-open-room]');
+            var t = e.target.closest('[data-chat-spoiler]');
+            if (t) { t.classList.add('chat-spoiler--shown'); return; }
+            t = e.target.closest('[data-chat-fmt]');
+            if (t) { applyFormat(t.getAttribute('data-chat-fmt')); return; }
+            t = e.target.closest('[data-chat-emoji-btn]');
+            if (t) { toggleEmojiPicker(); return; }
+            t = e.target.closest('[data-chat-emoji-pick]');
+            if (t) { insertAtCursor(t.getAttribute('data-chat-emoji-pick')); toggleEmojiPicker(true); return; }
+            t = e.target.closest('[data-chat-open-room]');
             if (t) { openRoom(); return; }
             t = e.target.closest('[data-chat-open-pm]');
             if (t) { openPm(t.getAttribute('data-chat-open-pm')); return; }
@@ -412,5 +552,7 @@
     }, true);
 
     window.ChatPage = { open: open, openPm: openPm, messageUser: messageUser,
-                        onRoomMessages: onRoomMessages, onUnread: onUnread };
+                        onRoomMessages: onRoomMessages, onUnread: onUnread,
+                        // exported for the node render harness (XSS contract tests)
+                        renderRich: renderRich, renderPlain: renderPlain };
 })();

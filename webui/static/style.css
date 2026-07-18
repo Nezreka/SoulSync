@@ -71682,3 +71682,45 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     text-underline-offset: 2px;
 }
 .chat-user-link:hover { color: #1db954; text-decoration-color: #1db954; }
+
+/* rich chat (richchat P2): formatting, spoilers, toolbar, emoji picker */
+.chat-msg-text code.chat-code {
+    font-family: 'SF Mono', Consolas, monospace; font-size: 12.5px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 5px; padding: 1px 6px;
+}
+.chat-msg-text .chat-link { color: #58a6ff; word-break: break-all; }
+.chat-msg-text .chat-link:hover { text-decoration: underline; }
+.chat-quote {
+    display: inline-block; border-left: 3px solid rgba(29,185,84,0.6);
+    padding-left: 10px; color: rgba(255,255,255,0.6); font-style: italic;
+}
+.chat-spoiler {
+    background: rgba(255,255,255,0.14); color: transparent; border-radius: 4px;
+    padding: 0 4px; cursor: pointer; user-select: none;
+    text-shadow: none; transition: color 0.15s ease, background 0.15s ease;
+}
+.chat-spoiler--shown { color: inherit; background: rgba(255,255,255,0.06); cursor: text; user-select: text; }
+.chat-toolbar {
+    position: relative; display: flex; gap: 4px; align-items: center;
+    padding: 8px 14px 0;
+}
+.chat-fmt-btn {
+    min-width: 30px; height: 28px; padding: 0 8px; border-radius: 7px; border: none;
+    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7);
+    font-size: 12.5px; cursor: pointer;
+}
+.chat-fmt-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.chat-emoji-pop {
+    position: absolute; bottom: 36px; left: 14px; z-index: 30;
+    display: grid; grid-template-columns: repeat(10, 32px); gap: 2px;
+    padding: 10px; border-radius: 12px;
+    background: rgba(18,18,22,0.98); border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+    max-height: 220px; overflow-y: auto;
+}
+.chat-emoji {
+    width: 32px; height: 32px; border: none; border-radius: 7px; background: transparent;
+    font-size: 19px; line-height: 1; cursor: pointer;
+}
+.chat-emoji:hover { background: rgba(255,255,255,0.12); }

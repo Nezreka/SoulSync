@@ -64,14 +64,13 @@ class TestChatModule:
         assert "document.hidden" in _CHAT_JS
 
     def test_remote_usernames_are_attribute_escaped(self):
-        # Soulseek usernames are remote input; esc() leaves double quotes intact,
-        # so every attribute interpolation must go through attr().
-        assert "function attr(s)" in _CHAT_JS
-        assert '&quot;' in _CHAT_JS
+        # Soulseek usernames are remote input. esc() is now a pure string
+        # escaper covering BOTH contexts (quotes included) and attr aliases it
+        # — attribute interpolations stay safe whichever name they use.
+        assert "var attr = esc" in _CHAT_JS
+        assert ".replace(/\"/g, '&quot;')" in _CHAT_JS
         assert "data-chat-user=\"' + attr(" in _CHAT_JS
         assert "data-chat-open-pm=\"' + attr(" in _CHAT_JS
-        assert "data-chat-user=\"' + esc(" not in _CHAT_JS
-        assert "data-chat-open-pm=\"' + esc(" not in _CHAT_JS
 
     def test_video_page_event_starts_and_stops_polling(self):
         assert "soulsync:video-page-shown" in _CHAT_JS
