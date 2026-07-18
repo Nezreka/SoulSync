@@ -3194,18 +3194,11 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 ---
 
-### 42. Preview Retag zeigt falsche „File not found" Fehler
+### 42. Preview Retag zeigt falsche „File not found" Fehler — ✅ abgeschlossen (siehe ui-requirements.md §5.2)
 
-**Beobachtung:** „Preview Retag" zeigt für heruntergeladene Tracks „No File" oder „File not found on disk", obwohl die Datei vorhanden ist.
+**Beobachtung (historisch):** „Preview Retag" zeigte für heruntergeladene Tracks „No File" oder „File not found on disk", obwohl die Datei vorhanden war.
 
-**Vermutete Root Causes:**
-- `core/library2/paths.resolve_lib2_path` wird nicht konsistent aufgerufen; älterer `os.path.exists` wird noch irgendwo verwendet.
-- Gespeicherter Pfad in `lib2_track_files.file_path` ist Media-Server-Sicht (z.B. mit Mapping), wird aber gegen den lokalen Filesystem-Pfad geprüft.
-- Relative Pfade werden nicht korekt aufgelöst.
-
-**Scope:** Audit aller Pfad-Zugriffe in `core/library2/retag.py` + Preview-Route.
-
-**Nächster Schritt:** Manuell einen Track downloaden, in DB seinen `file_path` inspizieren, Preview Retag öffnen und Fehler-Root-Cause identifizieren.
+**Status:** Laut `docs/library-v2-ui-requirements.md` §5.2 abgeschlossen: Tracks ohne Datei werden im Preview-Retag-Modal ausgeblendet statt als Fehler angezeigt, die verbleibenden Tracks werden dezent nach Alben gruppiert, und die begleitenden Falsch-Alarme bei Datums-/Genre-Diffs wurden in `tag_writer.py` behoben. `core/library2/retag.py` ruft `resolve_lib2_path()` bereits konsistent in `tag_preview()` und `write_tags()` auf (kein `os.path.exists` mehr im Preview-/Write-Pfad); der ursprünglich vermutete Suffix-Walk-Bug im gemeinsamen Resolver (Index 0 wurde bei relativen Pfaden übersprungen) ist über `core/library/path_resolver.py` bereits separat gefixt (siehe [[quality-scanner-path-resolve-rootcause]]).
 
 ---
 

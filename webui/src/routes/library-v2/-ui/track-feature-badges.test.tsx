@@ -174,10 +174,7 @@ describe('library v2 LR badge (deep-dive B3)', () => {
       ),
     );
     await waitFor(() =>
-      expect(window.showToast).toHaveBeenCalledWith(
-        'No lyrics available for this track',
-        'error',
-      ),
+      expect(window.showToast).toHaveBeenCalledWith('No lyrics available for this track', 'error'),
     );
   });
 });

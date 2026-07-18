@@ -132,11 +132,12 @@
 - **Scope:** UI Label + Icon.
 
 ### 6.4 Artist-spezifische automatische Suche (Lidarr-Style)
-- **Status:** **Offen / Ausstehend** (Ausführliches Konzept erfasst)
-- **Ziel:** Der "Automatic Search"-Button in der Artist-Detailansicht (und entsprechend bei Alben) darf **nicht** die gesamte globale Wishlist verarbeiten. Er soll sich wie in Lidarr verhalten:
+- **Status:** **Abgeschlossen** (umgesetzt als C1, siehe `docs/library-v2.md` §29)
+- **Ziel (historisch):** Der "Automatic Search"-Button in der Artist-Detailansicht (und entsprechend bei Alben) darf **nicht** die gesamte globale Wishlist verarbeiten. Er soll sich wie in Lidarr verhalten:
   - Sucht **ausschließlich** nach gemonitorten Titeln des **spezifischen Künstlers/Albums**.
   - Führt automatische Upgrades durch, sofern das Quality Profile dies erlaubt.
   - Eine globale Suche ("Automatic Search (Global)") soll weiterhin existieren, jedoch nur im globalen Dashboard bzw. der Wishlist-Ansicht, nicht auf Artist-/Album-Ebene.
+- **Details:** Der gescopte Automatic-Search-Endpunkt (§29/C1) deckt Artist-, Album- und Track-Scope ab; `library-v2-page.tsx` (`SCOPED_SEARCH_RE`, `resolveActionScope`) verdrahtet Toolbar- und Zeilen-Buttons bereits gegen diesen Endpunkt statt gegen die globale Wishlist.
 - **Scope:** Backend-Erweiterung (Einschränkung des Such-Job-Scopes auf den spezifischen Artist/Album) + UI-Verdrahtung.
 
 ---
@@ -202,7 +203,7 @@
 5. **Quality-Darstellung** (2.4): **Abgeschlossen** (Entscheidung: Ursprüngliches Layout beibehalten).
 6. **Quality Profile Spalte** (4.1): **Abgeschlossen** (Entscheidung: In Quality-Spalte belassen).
 7. **Backend-Findings** (8.3, 8.4 etc.): Roadmap-Punkte für zukünftige Sitzungen.
-8. **Artist-spezifische automatische Suche** (6.4): **Offen / Ausstehend** (Aufteilung in artist-spezifisch vs. global benötigt Backend-Erweiterung).
+8. **Artist-spezifische automatische Suche** (6.4): **Abgeschlossen** (umgesetzt als C1/§29 — gescopter Automatic-Search-Endpunkt für Artist/Album/Track).
 9. **Verification Flow, Match-Quelle und ReplayGain** (7.1, 8.1, 8.2): **Abgeschlossen** (Badges, Chips und ReplayGain-Aktionen sind voll funktionsfähig).
 10. **Legacy-Import von Dateieigenschaften** (8.5): **Abgeschlossen** (`precache_tag_cache()` liest Tags direkt nach dem Import, siehe §25.2).
 11. **Preview Retag** (5.2): **Abgeschlossen** (Tracks ohne Datei ausgeblendet, dezent nach Alben gruppiert, falsche Änderungsalarme behoben).
