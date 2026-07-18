@@ -372,3 +372,52 @@ class TestRepliesAndMentions:
         mod._SELF.update(name="", at=0.0)
         state["client"].get_session_info = lambda: {"username": "BoulderBadgeDad"}
         assert http.get("/api/chat/status").get_json()["username"] == "BoulderBadgeDad"
+
+
+class TestReactions:
+    """chatbic P4 — envelope reactions + the user card endpoint."""
+
+    def test_react_sends_an_empty_text_envelope(self, chat_app):
+        http, state = chat_app
+        from core.chat_codec import decode, react_key
+        r = http.post("/api/chat/room/react",
+                      json={"target_user": "alice", "target_text": "great song", "e": "🔥"})
+        assert r.status_code == 200
+        payload = decode(state["client"].sent_room[0][1])
+        assert payload["t"] == "" and payload["re"]["e"] == "🔥"
+        assert payload["re"]["k"] == react_key("alice", "great song")
+
+    def test_hostile_reactions_rejected(self, chat_app):
+        http, state = chat_app
+        for e in ("<script>", "x" * 50, "", "a&b"):
+            assert http.post("/api/chat/room/react",
+                             json={"target_user": "a", "target_text": "t", "e": e}).status_code == 400
+        assert http.post("/api/chat/room/react",
+                         json={"target_text": "t", "e": "🔥"}).status_code == 400   # no target user
+        assert state["client"].sent_room == []
+
+    def test_room_read_aggregates_and_hides_carriers(self, chat_app):
+        http, state = chat_app
+        from core.chat_codec import encode, react_key
+        target = {"username": "alice", "timestamp": "2026-07-19 10:00:00",
+                  "message": encode("great song")}
+        k = react_key("alice", "great song")
+        state["client"].get_room_messages = lambda room: [
+            target,
+            {"username": "bob", "timestamp": "2026-07-19 10:01:00",
+             "message": encode("", {"re": {"k": k, "e": "🔥"}})},
+            {"username": "carol", "timestamp": "2026-07-19 10:02:00",
+             "message": encode("", {"re": {"k": k, "e": "🔥"}})},
+        ]
+        msgs = http.get("/api/chat/room").get_json()["messages"]
+        assert len(msgs) == 1                                # carriers never render
+        assert msgs[0]["reactions"] == [{"e": "🔥", "n": 2, "users": ["bob", "carol"]}]
+
+    def test_user_card_endpoint_is_best_effort(self, chat_app):
+        http, state = chat_app
+        state["client"].get_user_status = lambda u: {"isOnline": True}
+        state["client"].get_user_info = lambda u: {"uploadSlots": 3, "picture": b"blob",
+                                                   "nested": {"x": 1}, "description": "hi"}
+        res = http.get("/api/chat/user/some pal").get_json()
+        assert res["status"] == {"isOnline": True}
+        assert res["info"] == {"uploadSlots": 3, "description": "hi"}   # primitives only

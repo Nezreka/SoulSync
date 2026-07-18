@@ -76,6 +76,28 @@ def decode(text) -> dict | None:
     return payload
 
 
+def react_key(username: str, text: str) -> str:
+    """The reaction target key: a message has no protocol id, so reactions
+    bind to (sender, text-hash). Known limitation: identical texts by the
+    same sender share reactions."""
+    import hashlib
+    h = hashlib.sha1(str(text or "").encode("utf-8")).hexdigest()[:8]
+    return f"{str(username or '')[:64]}|{h}"
+
+
+def reaction_of(payload) -> dict | None:
+    """The validated reaction from a decoded envelope ({'k','e'}), or None.
+    Remote input — strict shape, tiny caps (an emoji, not an essay)."""
+    r = (payload or {}).get("re")
+    if not isinstance(r, dict):
+        return None
+    k = str(r.get("k") or "").strip()[:80]
+    e = str(r.get("e") or "").strip()
+    if not k or "|" not in k or not e or len(e) > 8 or any(c in e for c in "<>&\"'"):
+        return None
+    return {"k": k, "e": e}
+
+
 def reply_of(payload) -> dict | None:
     """The validated reply reference from a decoded envelope, or None.
     Everything here is REMOTE input — strict shape, hard caps."""

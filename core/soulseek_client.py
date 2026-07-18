@@ -2070,6 +2070,14 @@ class SoulseekClient(DownloadSourcePlugin):
         res = await self._make_request('PUT', f'conversations/{self._quote(username)}')
         return res is not None
 
+    async def get_user_status(self, username: str) -> Optional[Dict[str, Any]]:
+        """A peer's presence (online/away) — shape varies by slskd version."""
+        return await self._make_request('GET', f'users/{self._quote(username)}/status')
+
+    async def get_user_info(self, username: str) -> Optional[Dict[str, Any]]:
+        """A peer's info card (description, slots, queue) — best-effort."""
+        return await self._make_request('GET', f'users/{self._quote(username)}/info')
+
     async def explore_api_endpoints(self) -> Dict[str, Any]:
         """Explore available API endpoints to find the correct download endpoint"""
         if not self.base_url:

@@ -9915,6 +9915,16 @@
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
+                            <!-- user popover card (click any username) -->
+                            <div class="chat-settings-overlay" data-chat-user-card hidden>
+                                <div class="chat-settings-modal chat-user-card">
+                                    <div data-chat-user-card-body></div>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="chat-fmt-btn" data-chat-card-close>Close</button>
+                                        <button type="button" class="chat-send-btn" data-chat-card-message>Message</button>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- admin settings modal (cog in the room head) -->
                             <div class="chat-settings-overlay" data-chat-settings-modal hidden>
                                 <div class="chat-settings-modal">

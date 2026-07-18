@@ -112,24 +112,49 @@ def _ensure_joined(client, room: str) -> bool:
     return bool(ok)
 
 
-def _unwrap_room_messages(messages) -> list:
+def _unwrap_room_messages(messages):
     """Decode SoulSync envelopes in a room message list. Envelope messages get
-    their text swapped for the payload + rich=True (the page renders those with
-    the markdown subset); everything else passes through untouched and renders
-    as escaped plaintext like always."""
+    their text swapped for the payload + rich=True; reply refs are validated
+    and attached. REACTION carriers (empty-text envelopes with 're') are
+    pulled OUT of the visible list into a {target_key: {emoji: [users]}} map.
+    Returns (messages, reactions_map)."""
     from core import chat_codec
     out = []
+    reactions: dict = {}
     for m in (messages or []):
         m = dict(m)
         dec = chat_codec.decode(m.get("message"))
         if dec is not None:
+            react = chat_codec.reaction_of(dec)
+            if react:
+                by_emoji = reactions.setdefault(react["k"], {})
+                users = by_emoji.setdefault(react["e"], [])
+                u = str(m.get("username") or "")
+                if u and u not in users:
+                    users.append(u)
+                continue                     # carriers never render as messages
             m["message"] = dec["t"]
             m["rich"] = True
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
         out.append(m)
-    return out
+    return out, reactions
+
+
+def _attach_reactions(messages, reactions) -> list:
+    """Stamp aggregated reactions onto their target messages (keyed by
+    sender + text-hash — reactions live as long as slskd's room buffer)."""
+    if not reactions:
+        return messages
+    from core import chat_codec
+    for m in messages:
+        key = chat_codec.react_key(m.get("username"), m.get("message"))
+        agg = reactions.get(key)
+        if agg:
+            m["reactions"] = [{"e": e, "n": len(users), "users": users[:5]}
+                              for e, users in agg.items()]
+    return messages
 
 
 def _gif_fetch(url: str, params: dict) -> dict:
@@ -206,6 +231,63 @@ def create_blueprint() -> Blueprint:
                         logger.debug("chat: could not leave room %r", r, exc_info=True)
         return chat_settings_get()
 
+    @bp.route("/api/chat/room/react", methods=["POST"])
+    def chat_room_react():
+        """Send a reaction: an empty-text envelope carrying {re:{k,e}} that
+        SoulSync clients aggregate into chips (other clients see line noise).
+        No protocol ids → the target key is sender + text-hash; reactions
+        can't be un-sent and live as long as slskd's room buffer."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        if not _can_send():
+            return jsonify({"error": "Chat sending is admin-only on this server"}), 403
+        from core import chat_codec
+        body = request.get_json(silent=True) or {}
+        target_user = str(body.get("target_user") or "").strip()
+        target_text = str(body.get("target_text") or "")
+        react = chat_codec.reaction_of({"re": {
+            "k": chat_codec.react_key(target_user, target_text) if target_user else "",
+            "e": body.get("e")}})
+        if not react:
+            return jsonify({"error": "bad reaction"}), 400
+        wrapped = chat_codec.encode("", {"re": react})
+        room = _room_name()
+        try:
+            if not _ensure_joined(client, room):
+                return jsonify({"error": "Could not join room '%s'" % room}), 502
+            ok = _run_async(client.send_room_message(room, wrapped))
+        except Exception as e:
+            logger.exception("chat: react send failed")
+            return jsonify({"error": str(e)}), 502
+        if not ok:
+            return jsonify({"error": "slskd rejected the reaction"}), 502
+        return jsonify({"ok": True})
+
+    @bp.route("/api/chat/user/<path:username>", methods=["GET"])
+    def chat_user_card(username):
+        """The user popover: presence + info card from slskd, best-effort
+        per field (peers can be offline / refuse info)."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        out = {"username": username}
+        try:
+            st = _run_async(client.get_user_status(username))
+            if isinstance(st, dict):
+                out["status"] = st
+        except Exception:
+            logger.debug("chat: user status failed", exc_info=True)
+        try:
+            info = _run_async(client.get_user_info(username))
+            if isinstance(info, dict):
+                # primitives only — no nested blobs to the page
+                out["info"] = {k: v for k, v in info.items()
+                               if isinstance(v, (str, int, float, bool)) and k != "picture"}
+        except Exception:
+            logger.debug("chat: user info failed", exc_info=True)
+        return jsonify(out)
+
     @bp.route("/api/chat/gifs", methods=["GET"])
     def chat_gifs():
         """GIF search (GIPHY — Tenor's API was shut down June 2026), proxied so
@@ -268,7 +350,7 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.exception("chat: room hydrate failed")
             return jsonify({"error": str(e)}), 502
-        live = _unwrap_room_messages(messages)
+        live, reactions = _unwrap_room_messages(messages)
         # Archive-first (chatbic P2): slskd forgets the room on restart, the
         # archive doesn't. Top it up from the live buffer (idempotent), then
         # serve the archive tail; live is only the fallback when the archive
@@ -289,7 +371,7 @@ def create_blueprint() -> Blueprint:
                     out = arch
             except Exception:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
-        return jsonify({"room": room, "messages": out,
+        return jsonify({"room": room, "messages": _attach_reactions(out, reactions),
                         "users": users or [], "can_send": _can_send()})
 
     @bp.route("/api/chat/room/history", methods=["GET"])
