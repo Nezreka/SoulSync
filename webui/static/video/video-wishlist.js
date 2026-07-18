@@ -91,10 +91,19 @@
         var st = liveStatus(it);
         var tip = st === 'upgrade' ? ('Own it in ' + it.upgrade_from + ' — watching for a better copy')
             : st === 'monitored' ? 'Not released yet — grabs automatically once it\'s out' : null;
+        // Repeatedly-failing marker (#liveleak-failing-hub): only meaningful while
+        // the drain is still hunting (wanted/upgrade) — a monitored or already
+        // downloading item isn't "failing".
+        var fails = Number(it.search_attempts) || 0;
+        var failChip = (fails >= 3 && (st === 'wanted' || st === 'upgrade'))
+            ? '<span class="vwsh-failing" title="' + esc(fails + ' searches without a grab' +
+                (it.last_search_at ? ' · last tried ' + it.last_search_at : '') +
+                ' — try Search now, or a different quality profile') + '">&#9888; ' + fails + '</span>'
+            : '';
         return '<div class="vwsh-movie" data-vwsh-open-movie="' + esc(it.tmdb_id) +
             '" data-vwsh-src="' + (owned ? 'library' : 'tmdb') + '" data-vwsh-id="' + esc(owned ? it.library_id : it.tmdb_id) + '">' +
             '<div class="vwsh-movie-art">' + art + '<div class="vwsh-movie-scrim"></div>' +
-            statusPill(st, tip) +
+            statusPill(st, tip) + failChip +
             (st === 'downloading' ? '' : huntBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"')) +
             rmBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') + '</div>' +
             '<div class="vwsh-movie-info"><span class="vwsh-movie-title" title="' + esc(it.title) + '">' +
@@ -311,8 +320,14 @@
         var st = liveStatus(e);
         var date = fmtDate(e.air_date);
         // TMDB shows the SxEx label; a YouTube video shows just its upload date.
+        // Repeatedly-failing marker (#liveleak-failing-hub) — same rule as movies.
+        var fails = Number(e.search_attempts) || 0;
+        var failTxt = (fails >= 3 && (st === 'wanted' || st === 'upgrade'))
+            ? ' · <span class="vwsh-failing-inline" title="' + esc(fails + ' searches without a grab' +
+                (e.last_search_at ? ' · last tried ' + e.last_search_at : '')) + '">&#9888; ' + fails + '</span>'
+            : '';
         var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
-            (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : ''));
+            (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : '') + failTxt);
         var thumb = e.still_url
             ? '<span class="vwsh-epc-thumb"><img src="' + esc(sized(pimg(e.still_url), 342)) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'

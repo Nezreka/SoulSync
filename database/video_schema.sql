@@ -513,7 +513,9 @@ CREATE TABLE IF NOT EXISTS video_wishlist (
     source         TEXT NOT NULL DEFAULT 'tmdb',
     source_id      TEXT,
     parent_source_id TEXT,                   -- owning channel's youtube id (video rows)
-    date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_attempts INTEGER DEFAULT 0,       -- consecutive fruitless drain searches (reset on grab)
+    last_search_at  TEXT                     -- when the drain last searched this row
 );
 -- one row per movie, one per (show, season, episode), one per youtube video —
 -- partial uniques so the shapes don't collide and re-adding is an idempotent upsert.
