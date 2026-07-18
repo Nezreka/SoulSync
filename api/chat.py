@@ -10,7 +10,8 @@ slskd API key — everything proxies through here). SENDING speaks as the one
 shared Soulseek account, so it's admin-only unless the admin opts members in
 via ``soulseek.chat_member_send``.
 
-The community room (``soulseek.chat_room``, default 'soulsync') is auto-joined
+The community room (``soulseek.chat_room``, default 'SoulSync' — Soulseek room
+names are CASE-SENSITIVE and that's the real community room) is auto-joined
 on demand: slskd room joins don't survive its restarts, so the room hydrate
 re-joins whenever slskd reports us absent — idempotent, one extra call only
 when actually needed.
@@ -50,9 +51,9 @@ def _client():
 
 def _room_name() -> str:
     try:
-        return str(_config_get("soulseek.chat_room", "soulsync") or "soulsync")
+        return str(_config_get("soulseek.chat_room", "SoulSync") or "SoulSync")
     except Exception:
-        return "soulsync"
+        return "SoulSync"
 
 
 def _can_send() -> bool:

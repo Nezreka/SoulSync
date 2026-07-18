@@ -39906,7 +39906,7 @@ def _emit_chat_push_loop():
             _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
             if not _slsk or not _slsk.base_url:
                 continue
-            room = str(config_manager.get('soulseek.chat_room', 'soulsync') or 'soulsync')
+            room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
             joined = run_async(_slsk.get_joined_rooms()) or []
             if room not in joined:
                 # auto-join at startup / after an slskd restart (joins don't persist)
