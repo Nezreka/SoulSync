@@ -1,12 +1,15 @@
 # Library v2 — Tool-Integration-Audit und Migrationsplan (2026-07-18)
 
-> **Aktueller Stand — P3 Runtime umgesetzt am 2026-07-18.** Die Abschnitte 3–6
-> dokumentieren den historischen Ausgangspunkt und die P0–P2-Entscheidungen.
-> Der verbindliche P3-Endzustand steht in Abschnitt 7: 19 registrierte Jobs,
-> keine registrierte Legacy-/Mixed-Datenbasis, native Library-v2-Subjects und
-> neutrale Job-IDs. Zusätzlich offen ist der automatische Initialimport für
-> Bestandsinstallationen; die physische Entfernung der `legacy_*`-Spalten und
-> des Importers bleibt gemäß geplantem Datenmigrations-/Rollback-Fenster offen.
+> **Aktueller Stand — P3 Runtime umgesetzt am 2026-07-18, automatischer
+> Initialimport-Bootstrap umgesetzt am 2026-07-19** (siehe
+> [`library-v2.md`](library-v2.md) §80). Die Abschnitte 3–6 dokumentieren den
+> historischen Ausgangspunkt und die P0–P2-Entscheidungen. Der verbindliche
+> P3-Endzustand steht in Abschnitt 7: 19 registrierte Jobs, keine registrierte
+> Legacy-/Mixed-Datenbasis, native Library-v2-Subjects und neutrale Job-IDs.
+> Punkt 7 der P3-Abschlusscheckliste (automatischer Initialimport) ist damit
+> erledigt; die physische Entfernung der `legacy_*`-Spalten und des Importers
+> (Punkt 5) bleibt weiterhin gemäß geplantem Datenmigrations-/Rollback-Fenster
+> offen.
 
 ## 1. Ziel und Ergebnis
 
@@ -242,14 +245,17 @@ Spotify-Spalten.
    nativen Job-IDs heißen `quality_upgrade_scan`, `skip_audit_cleanup` und
    `monitored_discography_refresh`; gespeicherte alte IDs werden lesend
    migriert.
-7. **Offen und erforderlich vor dem endgültigen Cutover:** Beim ersten Start
-   mit aktiviertem `features.library_v2` muss ein automatischer, idempotenter
-   Initialimport (`import_legacy_library`) serverseitig ausgelöst werden. Er
-   darf nicht davon abhängen, dass jemand die Library-v2-UI öffnet. Ohne diesen
-   Bootstrap werden zwar Schema und Nebenstrukturen angelegt, der bestehende
-   Legacy-Bestand aber nicht nach `lib2_*` übernommen; native Jobs sehen dann
-   für diesen Altbestand keinen Scope. Der Bootstrap braucht Fortschritt,
-   Wiederaufnahme/Fehlerstatus und eine Sperre gegen Doppelstarts.
+7. **Erledigt (2026-07-19), siehe [`library-v2.md`](library-v2.md) §80.** Beim
+   ersten Start mit aktiviertem `features.library_v2` löst
+   `core/library2/bootstrap.py` serverseitig einen automatischen, idempotenten
+   Initialimport (`import_legacy_library`) aus — ohne dass jemand die
+   Library-v2-UI öffnen muss. Ein persistierter Single-Row-Status
+   (`lib2_bootstrap_state`) übersteht einen Neustart, ein optimistisches
+   Compare-and-Swap auf `(status, heartbeat_at)` sperrt gegen Doppelstarts, ein
+   gealterter `running`-Claim (Heartbeat >600s) ist zurückeroberbar
+   (Wiederaufnahme), und ein Fehlschlag bleibt mit Fehlertext claimbar für den
+   nächsten Retry. Der bestehende manuelle Import-Endpoint teilt sich denselben
+   Claim, damit er nie parallel zum Hintergrund-Bootstrap läuft.
 
    Die Legacy-Wishlist darf während dieser Übergangsphase als bestehende
    Acquisition-/Retry-Queue weiterlaufen. Playlist-Sync, Wishlist und die alten

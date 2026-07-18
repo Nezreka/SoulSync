@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import jsonify, request, send_file
 
 from core.library2 import ADMIN_PROFILE_ID
+from core.library2 import bootstrap as lib2_bootstrap
 from core.library2.job_registry import JobAlreadyRunning, JobRegistry
 from utils.logging_config import get_logger
 
@@ -4218,6 +4219,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "success": False,
                     "error": "Artwork caching is still running; retry when it finishes",
                 }), 409
+            # Shares the persisted claim with the automatic first-run bootstrap
+            # (core/library2/bootstrap.py) so a manual click can never run
+            # import_legacy_library() concurrently with the background autostart.
+            if not lib2_bootstrap.try_claim(get_database()):
+                return jsonify({
+                    "success": False,
+                    "error": "Library import already running in the background",
+                }), 409
             _reset_artwork_cache_state()
             _import_state.update(running=True, stage="starting", current=0, total=0,
                                  stats=None, error=None, finished_at=None)
@@ -4258,10 +4267,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # committed already.  Mark the import complete and let artwork
                 # continue independently so the UI can browse immediately.
                 _import_state.update(stage="done", current=0, total=0)
+                lib2_bootstrap.mark_done(get_database())
                 _start_artwork_cache(get_database, config_manager)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")
+                try:
+                    lib2_bootstrap.mark_failed(get_database(), str(e))
+                except Exception as mark_err:  # noqa: BLE001
+                    logger.debug("lib2 bootstrap mark_failed skipped: %s", mark_err)
             finally:
                 _import_state.update(running=False, finished_at=_t.time())
 
@@ -4273,10 +4287,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
+        # "bootstrap" is the persisted state (core/library2/bootstrap.py) — unlike
+        # _import_state (this process, this click) it also reflects an automatic
+        # background import that this request didn't itself trigger.
         return jsonify({
             "success": True,
             **_import_state,
             "artwork_cache": _artwork_cache_snapshot(),
+            "bootstrap": lib2_bootstrap.get_state(get_database()),
         })
 
     logger.info("Library v2 routes registered (/api/library/v2/*)")

@@ -8243,3 +8243,96 @@ Frontend-Formatter-/Type-/Lint-Check, Produktions-Build sowie statischer
 JavaScript-Syntaxcheck sind grün. Details und die
 Schritt-für-Schritt-Abnahme stehen im
 [`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md).
+
+---
+
+## 80. §78 — Automatischer Initialimport-Bootstrap für Bestandsinstallationen — ✅ umgesetzt (2026-07-19)
+
+Letzter offener Punkt aus §78 und aus
+[`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md)
+§7 Punkt 7: Auf einer Bestandsinstallation entstanden `lib2_*`-Zeilen bisher
+nur, wenn jemand die Library-v2-UI öffnete und manuell auf Import klickte.
+Die 19 nativen P3-Jobs setzen bereits eine befüllte Library v2 voraus — ohne
+diesen Klick sahen sie für den gesamten Altbestand keinen Scope, obwohl
+`features.library_v2` bereits aktiv war.
+
+### 80.1 Umsetzung (`core/library2/bootstrap.py`)
+
+- Neue Single-Row-Tabelle `lib2_bootstrap_state` (Teil von
+  `ensure_library_v2_schema()`, läuft also bei jedem Start mit) hält
+  `status` (`pending`/`running`/`done`/`failed`), `attempts`, Fortschritt
+  (`stage`/`current_count`/`total_count`), `last_error` sowie
+  `started_at`/`finished_at`/`heartbeat_at` — persistiert, übersteht also
+  einen Neustart, anders als der bisherige rein prozesslokale
+  `_import_state` des manuellen Endpoints.
+- `try_claim()` ist ein optimistisches Compare-and-Swap exakt auf das zuvor
+  gelesene `(status, heartbeat_at)`-Paar: ein `running`-Zustand mit frischem
+  Heartbeat blockt jeden weiteren Claim; `pending`, `failed`, `done` und ein
+  `running` mit abgelaufenem Heartbeat (Default 600s) sind claimbar. Ein
+  `done`-Zustand bleibt bewusst claimbar — „done" heißt nur „der automatische
+  Bootstrap muss nicht mehr anlaufen", nie „für immer gesperrt", sonst hätte
+  ein späterer manueller „Reset & Reimport"-Klick nach dem allerersten
+  erfolgreichen Lauf nie wieder funktioniert.
+- „Wiederaufnahme nach Crash" bedeutet hier bewusst kein Row-genaues
+  Checkpointing: `import_legacy_library()` läuft in einer einzigen
+  Transaktion, ein Absturz mittendrin persistiert nichts. Der stale
+  `running`-Claim wird stattdessen beim nächsten Start einfach neu
+  vollständig (aber sicher, weil upsert-by-`legacy_*_id`) durchlaufen — laut
+  Importer-Docstring bereits so vorgesehen.
+- `run_bootstrap_if_needed(database, config_get)` ist die High-Level-Policy:
+  Feature-Flag aus → `{"skipped": "disabled"}`; bereits `done` → `{"skipped":
+  "already_done"}` (kein Claim-Versuch, keine Zustandsänderung); Claim
+  fehlgeschlagen → `{"skipped": "already_running"}`; sonst Import mit
+  gedrosseltem (alle 5s) `heartbeat()`-Fortschritt, danach `mark_done()` bzw.
+  bei einer Exception `mark_failed(error)` — der Fehler bleibt gelesen
+  abrufbar und der Zustand bleibt claimbar, der nächste Versuch retried also
+  automatisch.
+- `web_server.py::_autostart_library_v2_bootstrap_import()` läuft als Daemon-
+  Thread aus `start_runtime_services()` (neben dem bestehenden
+  `usenet_acquisition_monitor.start()`): 30s initiale Verzögerung, danach
+  `run_bootstrap_if_needed()` mit exponentiellem Backoff (verdoppelnd, Cap
+  1800s). Die Schleife endet erst bei `already_done` oder `success=True`;
+  ein deaktiviertes Flag, ein laufender Claim oder ein Fehlschlag führen nur
+  zu einem weiteren Backoff-Tick — dadurch greift auch ein erst zur Laufzeit
+  (ohne Neustart) aktiviertes Feature-Flag von selbst.
+- Der bestehende manuelle `POST /api/library/v2/import`-Endpoint teilt sich
+  jetzt denselben persistierten Claim: er ruft `try_claim()` synchron VOR dem
+  Start seines Threads (liefert bei Ablehnung `409` mit derselben Semantik
+  wie der bestehende `_import_lock`-Konflikt) und meldet Erfolg/Fehlschlag
+  über `mark_done()`/`mark_failed()` an denselben State. Ohne diese
+  Verzahnung hätten ein manueller Klick und der Hintergrund-Bootstrap
+  gleichzeitig `import_legacy_library()` gegen dieselbe DB laufen lassen
+  können — beide für sich idempotent, aber nicht sicher gegeneinander
+  nebenläufig (ein `resolver.seed_existing()`-Snapshot des einen Laufs hätte
+  die noch uncommitteten Inserts des anderen nicht gesehen).
+- `GET /api/library/v2/import/status` liefert den persistierten Zustand
+  zusätzlich unter `bootstrap` mit aus (separater Schlüssel, keine
+  Feldkollision mit dem bestehenden prozesslokalen `_import_state`) — so ist
+  ein automatisch im Hintergrund laufender Erstimport auch sichtbar, wenn
+  ihn niemand über die UI gestartet hat.
+
+### 80.2 Verifikation
+
+- Neue Tests `tests/library2/test_bootstrap_import.py` (11): Flag-Gating,
+  Erstlauf importiert und markiert `done`, ein zweiter Lauf überspringt ohne
+  den Importer erneut aufzurufen (Spy-Assertion), Fehlschlag persistiert
+  `last_error` und bleibt retrybar (zweiter Versuch danach erfolgreich,
+  `attempts` zählt korrekt hoch), frischer `running`-Claim blockt, ein
+  gealterter `running`-Claim wird zurückerobert, ein `done`-Zustand bleibt
+  claimbar (Reimport-Fall), Heartbeat persistiert Fortschritt, sowie ein
+  echter Nebenläufigkeits-Test mit 8 Threads auf einer `threading.Barrier`
+  gegen dieselbe SQLite-Datei — exakt ein Gewinner.
+- Golden-Table-Liste `tests/library2/test_schema.py` um `lib2_bootstrap_state`
+  ergänzt (die neue Tabelle ist Teil von `ensure_library_v2_schema()` und lief
+  sonst gegen die vollständige Tabellen-Assertion).
+- `pytest tests/library2 tests/acquisition -q`: **1157 passed, 3 skipped**
+  (breiter Regressionslauf, inkl. der 11 neuen Bootstrap-Tests und der
+  korrigierten Golden-Table-Liste). `ruff check` der geänderten Dateien
+  sauber, `py_compile` inklusive `web_server.py` sauber.
+
+Damit ist Schritt 7 aus dem P3-Abschlusscheckliste
+([`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md)
+§7) erledigt. Bewusst unverändert bleibt Schritt 5 (`legacy_artist_id`,
+`legacy_album_id`, `legacy_track_id` und der Legacy-Importer selbst): ihre
+physische Entfernung hängt weiterhin am eigenen, noch nicht eröffneten
+Datenmigrations-/Rollback-Fenster und ist von diesem Bootstrap unberührt.

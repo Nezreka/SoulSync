@@ -888,6 +888,14 @@ def ensure_library_v2_schema(connection: Any) -> None:
                 "ON track_downloads(file_path)")
     except Exception as e:  # noqa: BLE001
         logger.debug("track_downloads index skipped: %s", e)
+    # Automatic initial-import bootstrap (§78 / tool-integration-audit §7.7):
+    # persisted status so an existing installation's first import can run on
+    # its own at server start, survive a restart, and be retried on failure.
+    try:
+        from core.library2.bootstrap import ensure_bootstrap_schema
+        ensure_bootstrap_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("bootstrap-state migration failed (will retry next start): %s", e)
     logger.debug("Library v2 schema ensured")
 
 

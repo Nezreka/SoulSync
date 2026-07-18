@@ -31938,6 +31938,33 @@ def _autostart_popularity_backfill():
         _t.sleep(3600)  # re-check hourly; new artists fill within the hour
 
 
+def _autostart_library_v2_bootstrap_import():
+    """Existing installations only get `lib2_*` rows once someone opens the Library
+    v2 UI and clicks Import — native repair/quality/wanted jobs then have nothing to
+    work with until that happens (docs/library-v2.md §78). This makes the first
+    import happen on its own: no button, survives a restart, retries on failure, and
+    won't race a concurrent manual import — see core/library2/bootstrap.py for the
+    persisted claim/heartbeat/retry mechanics this loop just drives repeatedly.
+
+    Exits for good once the import has actually completed; otherwise keeps
+    retrying with backoff so a transient failure or a `features.library_v2` flag
+    flipped on later at runtime both still get picked up without a restart."""
+    import time as _t
+    from core.library2 import bootstrap as lib2_bootstrap
+    delay = 30
+    max_delay = 1800
+    while True:
+        _t.sleep(delay)
+        delay = min(delay * 2, max_delay)
+        try:
+            database = get_database()
+            result = lib2_bootstrap.run_bootstrap_if_needed(database, config_manager.get)
+            if result.get("skipped") == "already_done" or result.get("success") is True:
+                return
+        except Exception as e:
+            logger.debug(f"lib2 bootstrap import tick skipped: {e}")
+
+
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
@@ -42120,6 +42147,14 @@ def start_runtime_services():
 
         if usenet_acquisition_monitor is not None:
             usenet_acquisition_monitor.start()
+
+        # Existing-installation bootstrap: import legacy -> lib2_* on its own the
+        # first time features.library_v2 is on, no UI click required (§78).
+        try:
+            threading.Thread(target=_autostart_library_v2_bootstrap_import, daemon=True,
+                             name='Lib2BootstrapImportAutostart').start()
+        except Exception as _lib2_bootstrap_err:
+            logger.debug(f"could not start lib2 bootstrap import autostart: {_lib2_bootstrap_err}")
 
         # Wishlist/watchlist timers are now managed by AutomationEngine system automations
 
