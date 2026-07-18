@@ -10296,6 +10296,16 @@ _ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several
 _ART_OPTIONS_EMPTY_TTL_S = 60                  # empties retry fast: one hiccup must not stick
 
 
+def _looks_like_image(data: bytes) -> bool:
+    """Magic-byte sniff — pasted custom URLs must not poison the thumb/poster/
+    artist.jpg with an HTML page. JPEG/PNG/GIF/WEBP/BMP cover real art."""
+    if not data or len(data) < 12:
+        return False
+    return (data[:2] == b"\xff\xd8" or data[:8] == b"\x89PNG\r\n\x1a\n"
+            or data[:4] == b"GIF8" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+            or data[:2] == b"BM")
+
+
 @app.route('/api/album/<album_id>/art-options', methods=['GET'])
 def get_album_art_options(album_id):
     """Candidate cover-art images for an album, for the art picker (read-only).
@@ -10470,10 +10480,10 @@ def set_artist_art(artist_id):
             return jsonify({"error": "Artist not found"}), 404
         artist_name = getattr(artist_row, 'name', '') or ''
 
-        if not db.set_artist_thumb_url(int(artist_id), url):
-            return jsonify({"error": "Could not update artist"}), 500
-
-        # Download once; server upload + disk write share the bytes.
+        # Download FIRST (server upload + disk write share the bytes) and
+        # validate: a custom URL that resolves to an HTML page must abort
+        # before anything is pinned. A failed download stays best-effort —
+        # hotlink-protected art can still render in the browser.
         image_bytes = None
         try:
             import urllib.request
@@ -10483,6 +10493,11 @@ def set_artist_art(artist_id):
                 image_bytes = resp.read() or None
         except Exception as exc:
             logger.warning("[set-artist-art] image download failed: %s", exc)
+        if image_bytes is not None and not _looks_like_image(image_bytes):
+            return jsonify({"error": "That URL doesn't point to an image"}), 400
+
+        if not db.set_artist_thumb_url(int(artist_id), url):
+            return jsonify({"error": "Could not update artist"}), 500
 
         # 2. Active media server poster (Plex/Jellyfin have APIs; Navidrome's
         #    update_artist_poster is a documented no-op — disk write covers it).
