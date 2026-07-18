@@ -247,20 +247,77 @@
         return sameDay ? hm : (d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + hm);
     }
 
-    function messageRow(m) {
-        var user = m.username || m.user || '?';
-        var self = m.self === true || m.direction === 'Out';
-        // the envelope IS the app signature: a plaintext room message means the
-        // sender is on another Soulseek client, not SoulSync
-        var ext = state.view === 'room' && !m.rich && !self;
-        return '<div class="chat-msg' + (self ? ' chat-msg--self' : '') + (ext ? ' chat-msg--ext' : '') + '">' +
-            '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) + '" ' +
-                'title="Message ' + attr(user) + '">' + esc(user) + '</button>' +
-            (ext ? '<span class="chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '') +
-            '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
-            '<div class="chat-msg-text">' +
+    // ── Discord-style rendering: avatars, grouping, date separators ──────────
+    function _hue(name) {
+        var h = 0;
+        name = String(name || '');
+        for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+        return h % 360;
+    }
+
+    function _avatar(user) {
+        return '<span class="chat-avatar" style="background:hsl(' + _hue(user) +
+            ',52%,40%)" aria-hidden="true">' +
+            esc(String(user || '?').charAt(0).toUpperCase()) + '</span>';
+    }
+
+    function _fullTs(ts) {
+        var d = new Date(String(ts || '').replace(' ', 'T'));
+        return isNaN(d.getTime()) ? '' : d.toLocaleString();
+    }
+
+    function _dayLabel(ts) {
+        var d = new Date(String(ts || '').replace(' ', 'T'));
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
+    }
+
+    function _lineHtml(m) {
+        return '<div class="chat-line" title="' + attr(_fullTs(m.timestamp)) + '">' +
             (m.rich ? renderRich(m.message) : renderPlain(m.message)) +
-            '</div></div>';
+            '</div>';
+    }
+
+    // Consecutive messages from the same sender (same app-ness, <5 min apart)
+    // fold under one avatar + name header, with day separators between dates.
+    function renderGroups(msgs) {
+        var html = '', group = null, lastDay = null, GAP = 5 * 60 * 1000;
+        function flush() { if (group) { html += group.html + '</div></div>'; group = null; } }
+        for (var i = 0; i < msgs.length; i++) {
+            var m = msgs[i];
+            var user = m.username || m.user || '?';
+            var self = m.self === true || m.direction === 'Out';
+            // the envelope IS the app signature: a plaintext room message means
+            // the sender is on another Soulseek client, not SoulSync
+            var ext = state.view === 'room' && !m.rich && !self;
+            var day = _dayLabel(m.timestamp);
+            if (day && day !== lastDay) {
+                flush();
+                html += '<div class="chat-day-sep"><span>' + esc(day) + '</span></div>';
+                lastDay = day;
+            }
+            var t = Date.parse(String(m.timestamp || '').replace(' ', 'T')) || 0;
+            if (group && group.user === user && group.ext === ext && group.self === self &&
+                    (t - group.t) < GAP) {
+                group.html += _lineHtml(m);
+                group.t = t;
+                continue;
+            }
+            flush();
+            group = { user: user, ext: ext, self: self, t: t, html:
+                '<div class="chat-group' + (self ? ' chat-group--self' : '') +
+                    (ext ? ' chat-group--ext' : '') + '">' +
+                _avatar(user) +
+                '<div class="chat-group-body"><div class="chat-group-head">' +
+                '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) +
+                    '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
+                    attr(user) + '">' + esc(user) + '</button>' +
+                (ext ? '<span class="chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '') +
+                '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
+                '</div>' + _lineHtml(m) };
+        }
+        flush();
+        return html;
     }
 
     function renderMessages(list) {
@@ -282,7 +339,7 @@
             shown = msgs.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
             hidden = msgs.length - shown.length;
         }
-        host.innerHTML = shown.map(messageRow).join('') +
+        host.innerHTML = renderGroups(shown) +
             (hidden ? '<div class="chat-hidden-note">' + hidden +
                 ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden</div>' : '');
         if (state.stickBottom) host.scrollTop = host.scrollHeight;
@@ -492,12 +549,12 @@
             if (host) {
                 var empty = host.querySelector('.chat-empty');
                 if (empty) empty.remove();
-                host.insertAdjacentHTML('beforeend', messageRow({
+                host.insertAdjacentHTML('beforeend', renderGroups([{
                     username: 'you', message: text,
                     timestamp: new Date().toISOString(), self: true,
                     // room sends ride the envelope → render the echo rich too
                     rich: state.view === 'room',
-                }));
+                }]));
                 host.scrollTop = host.scrollHeight;
                 state.lastStamp = null;
             }
@@ -687,5 +744,6 @@
     window.ChatPage = { open: open, openPm: openPm, messageUser: messageUser,
                         onRoomMessages: onRoomMessages, onUnread: onUnread,
                         // exported for the node render harness (XSS contract tests)
-                        renderRich: renderRich, renderPlain: renderPlain };
+                        renderRich: renderRich, renderPlain: renderPlain,
+                        renderGroups: renderGroups };
 })();
