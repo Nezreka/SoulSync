@@ -862,3 +862,47 @@ def test_init_survives_uncreatable_download_path(tmp_path):
     client = SoundcloudClient(download_path=bad_path)   # must not raise
     assert client is not None
     assert str(client.download_path) == bad_path
+
+
+class TestPasteAnywhere:
+    """#865 follow-up (Lenochxd): the fix landed on manual search, but users
+    paste links into the other two boxes. Both now route/answer correctly."""
+
+    def test_basic_search_forces_the_soundcloud_source_for_links(self):
+        from core.search.basic import run_basic_search
+
+        class _SC:
+            def __init__(self):
+                self.searched = []
+
+            async def search(self, query, timeout=None, progress_callback=None):
+                self.searched.append(query)
+                return ([], [])
+
+        sc = _SC()
+
+        class _Orch:
+            def client(self, name):
+                assert name == 'soundcloud', f"routed to {name!r}, not soundcloud"
+                return sc
+
+        def run_async(coro):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro)
+
+        url = "https://soundcloud.com/artist/track/s-AbCdEf123"
+        # source explicitly OTHER than soundcloud — the URL must override it
+        run_basic_search(url, _Orch(), run_async, source='soulseek')
+        assert sc.searched == [url]
+
+    def test_link_id_box_gives_the_soundcloud_hint(self):
+        from core.search import by_id
+        res = by_id.resolve_identifier(
+            "https://soundcloud.com/artist/track", deps=None,
+            client_resolver=lambda s: None)
+        assert res['available'] is False
+        assert 'search bar' in res['message']
+        # ordinary junk keeps the generic message
+        res = by_id.resolve_identifier("not a link at all", deps=None,
+                                       client_resolver=lambda s: None)
+        assert 'bare ID is ambiguous' in res['message']

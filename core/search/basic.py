@@ -37,6 +37,17 @@ def run_basic_search(
         is unchanged from before: orchestrator.search() picks the active
         source (single mode) or the first in chain (hybrid).
     """
+    # A pasted SoundCloud link only resolves on the SoundCloud source (its
+    # share URL carries the access token; no other source can find an
+    # unlisted track) — force the route no matter which source is selected,
+    # the same way manual search does (#865). The user just pastes the link.
+    try:
+        from core.soundcloud_client import is_soundcloud_url
+        if is_soundcloud_url(query):
+            source = 'soundcloud'
+    except Exception as exc:   # noqa: BLE001 - routing sugar must never kill a search
+        logger.debug("soundcloud URL routing skipped: %s", exc)
+
     if source and download_orchestrator:
         # Target a specific source: resolve the client and call search()
         # directly instead of going through the orchestrator chain.
