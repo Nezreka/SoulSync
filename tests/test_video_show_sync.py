@@ -166,6 +166,35 @@ def test_plex_rekey_heals_the_row_instead_of_deleting(seeded, monkeypatch, _quie
         conn.close()
 
 
+def test_sync_triggers_a_scoped_episode_list_refresh(seeded, monkeypatch, _quiet_scanner):
+    # the server only knows about FILES; the aired-episode schedule comes from
+    # enrichment — sync asks TMDB for the recent seasons so schedule holes
+    # (like a pre-demote-fix deleted episode) heal on the spot
+    db, show_id = seeded
+    calls = {}
+
+    class _Engine:
+        def refresh_show_art(self, sid, **kw):
+            calls.update(sid=sid, **kw)
+            return {"ok": True}
+    import core.video.enrichment.engine as engine_mod
+    monkeypatch.setattr(engine_mod, "get_video_enrichment_engine", lambda: _Engine())
+    _use_source(monkeypatch, _Source(tree=_tree()))
+    sync_show(db, show_id)
+    assert calls["sid"] == show_id
+    assert calls["recent_seasons_only"] is True and calls["with_ratings"] is False
+
+
+def test_episode_refresh_failure_never_fails_the_sync(seeded, monkeypatch, _quiet_scanner):
+    db, show_id = seeded
+    import core.video.enrichment.engine as engine_mod
+    monkeypatch.setattr(engine_mod, "get_video_enrichment_engine",
+                        lambda: (_ for _ in ()).throw(RuntimeError("tmdb down")))
+    _use_source(monkeypatch, _Source(tree=_tree()))
+    res = sync_show(db, show_id)
+    assert res["status"] == "ok"
+
+
 def test_source_show_tree_receives_title_and_tmdb(seeded, monkeypatch, _quiet_scanner):
     # the identity hints are what let plex disambiguate a stale key from a
     # genuinely-removed show — sync must pass them

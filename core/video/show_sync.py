@@ -118,6 +118,19 @@ def sync_show(db, show_id: int) -> dict:
         finally:
             conn.close()
 
+    # Episode-list refresh from TMDB (best-effort): the server only knows about
+    # FILES — the aired-episode schedule comes from enrichment, and a hole in it
+    # (an episode row lost before the demote fix existed) would otherwise stay a
+    # hole. recent_seasons_only keeps it to 1-2 API calls; a TMDB hiccup must
+    # never fail the sync itself. Runs BEFORE the counts so restored episodes
+    # show up in the toast.
+    try:
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        get_video_enrichment_engine().refresh_show_art(
+            target_id, with_ratings=False, recent_seasons_only=True)
+    except Exception:   # noqa: BLE001 - schedule refresh is a bonus, not the sync
+        logger.debug("show sync: episode-list refresh failed", exc_info=True)
+
     eps_after, files_after = _counts(db, target_id)
     return {
         "status": "ok", "title": row["title"], "show_removed": False,
