@@ -3901,6 +3901,19 @@ function openArtistArtPicker() {
             countEl.textContent = cands.length + ' source' + (cands.length === 1 ? '' : 's');
             const grid = document.createElement('div');
             grid.className = 'art-picker-grid';
+            // the CURRENT photo leads the grid as a reference tile — read from
+            // the page (the DB often stores a local cache path, which must
+            // never be re-applied as if it were a source URL). Display-only.
+            const curImg = document.getElementById('artist-detail-image');
+            if (curImg && curImg.src && curImg.style.display !== 'none') {
+                const cur = document.createElement('div');
+                cur.className = 'art-picker-tile art-picker-tile--current';
+                cur.innerHTML =
+                    '<img loading="lazy" src="' + _esc(curImg.src) + '" alt="">' +
+                    '<span class="art-picker-badge art-picker-badge--current">current</span>';
+                cur.querySelector('img').onerror = () => cur.remove();
+                grid.appendChild(cur);
+            }
             cands.forEach(c => {
                 const tile = document.createElement('button');
                 tile.className = 'art-picker-tile';

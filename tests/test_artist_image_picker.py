@@ -279,3 +279,18 @@ def test_custom_row_check_icon_is_module_scope():
     assert "const _ART_CHECK_SVG" in js
     row = js.split("function _artPickerCustomRow")[1].split("\nfunction ")[0]
     assert "_ART_CHECK_SVG" in row and "_checkSvg" not in row
+
+
+def test_current_photo_leads_the_grid_as_reference():
+    """The current artist photo shows first, badged 'current', display-only —
+    it's read from the PAGE (the DB may hold a local cache path that must
+    never round-trip through the apply endpoint as a source URL)."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
+        encoding="utf-8", errors="replace")
+    seg = js.split("art-picker-tile--current")[0]
+    assert "getElementById('artist-detail-image')" in js
+    # a DIV, not a button — it can't be selected/applied
+    assert "createElement('div');\n                cur.className = 'art-picker-tile art-picker-tile--current'" \
+        .replace("\n                ", "") in js.replace("\n                ", "")
+    assert "art-picker-badge--current" in js
