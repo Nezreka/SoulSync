@@ -849,6 +849,10 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep-new-chip { flex: none; align-self: center; font-size: 10.5px; font-weight: 800;
     text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 9px; border-radius: 999px;
     color: #fff; background: rgba(220, 38, 38, 0.9); white-space: nowrap; }
+/* format badges (4K · HDR10 · Atmos · 5.1) — boxed caps like the streamers */
+.vd-fmt { font-size: 10.5px; font-weight: 800; letter-spacing: 0.5px; line-height: 1;
+    padding: 3px 7px; border-radius: 4px; color: rgba(255,255,255,0.85);
+    border: 1px solid rgba(255,255,255,0.35); white-space: nowrap; }
 
 @media (max-width: 820px) {
     .vd-bb-content { padding-left: 24px; padding-right: 24px; }

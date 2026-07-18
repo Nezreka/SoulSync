@@ -257,6 +257,8 @@
             meta.push(d.owned ? '<span class="vd-match">In library</span>'
                 : '<span class="vd-status">Wanted</span>');
             if (d.watched) meta.push('<span class="vd-watched-tag" title="Watched on your server">✓ Watched</span>');
+            // your best copy's format facts (4K · HDR · Atmos · 5.1), like the streamers show
+            if (d.owned && d.file) meta.push.apply(meta, formatBadges(d.file));
         }
         if (d.rating) meta.push('<span class="vd-score">★ ' + (Math.round(d.rating * 10) / 10) + '</span>');
         if (d.year) meta.push('<span>' + esc(d.year) + '</span>');
@@ -768,6 +770,25 @@
         if (r.indexOf('480') > -1 || r.indexOf('576') > -1) return 'SD';
         return r.toUpperCase();
     }
+    function channelsLabel(n) {
+        n = Number(n) || 0;
+        if (n >= 8) return '7.1';
+        if (n === 7) return '6.1';
+        if (n === 6) return '5.1';
+        if (n === 2) return 'Stereo';
+        if (n === 1) return 'Mono';
+        return n ? n + 'ch' : '';
+    }
+    // Netflix/Disney-style format badges for the hero meta: 4K · HDR10 · Atmos · 5.1
+    function formatBadges(f) {
+        if (!f) return [];
+        var b = [];
+        var res = mediaRes(f.resolution); if (res) b.push(res);
+        if (f.dynamic_range) b.push(f.dynamic_range);
+        if (f.atmos) b.push('Atmos');
+        else { var ch = channelsLabel(f.audio_channels); if (ch && ch !== 'Stereo' && ch !== 'Mono') b.push(ch); }
+        return b.map(function (t) { return '<span class="vd-fmt">' + esc(t) + '</span>'; });
+    }
     function prettyCodec(c) {
         if (!c) return '';
         var l = String(c).toLowerCase();
@@ -788,8 +809,9 @@
         return gb >= 1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round(n / 1048576) + ' MB';
     }
     function fileSummary(v) {
-        return [mediaRes(v.resolution), prettyCodec(v.video_codec),
-            v.audio_codec ? String(v.audio_codec).toUpperCase() : '', fmtBytes(v.size_bytes),
+        return [mediaRes(v.resolution), v.dynamic_range || '', prettyCodec(v.video_codec),
+            v.audio_codec ? String(v.audio_codec).toUpperCase() : '',
+            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), fmtBytes(v.size_bytes),
             v.release_source ? prettySource(v.release_source) : ''].filter(Boolean).join(' · ');
     }
 
@@ -812,7 +834,12 @@
             // "WEBDL-1080p"), else the plain scanned resolution
             if (f.quality || f.resolution) rows.push(['Quality', f.quality || mediaRes(f.resolution)]);
             if (f.video_codec) rows.push(['Video', prettyCodec(f.video_codec)]);
-            if (f.audio_codec) rows.push(['Audio', String(f.audio_codec).toUpperCase()]);
+            if (f.dynamic_range) rows.push(['Dynamic range', f.dynamic_range]);
+            if (f.audio_codec || f.audio_channels || f.atmos) {
+                rows.push(['Audio', [String(f.audio_codec || '').toUpperCase(),
+                    channelsLabel(f.audio_channels), f.atmos ? 'Atmos' : '']
+                    .filter(Boolean).join(' · ')]);
+            }
             if (f.release_source) rows.push(['Source', prettySource(f.release_source)]);
             if (f.size_bytes) rows.push(['Size', fmtBytes(f.size_bytes)]);
         }

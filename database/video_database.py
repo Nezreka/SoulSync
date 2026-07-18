@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 45   # v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at; v43: shows.series_type (daily/anime, P8)
+SCHEMA_VERSION = 46   # v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -160,6 +160,10 @@ _COLUMN_MIGRATIONS = [
     # Continue Watching (v45): per-episode watch state + resume offsets, scanned
     # from the server (Plex viewCount/viewOffset, Jellyfin UserData) — powers
     # episode checkmarks, progress bars, and the Resume/Next-Up CTA.
+    # v46: scanned format facts for the detail-page badges (4K · HDR · Atmos · 5.1)
+    ("media_files", "audio_channels", "INTEGER"),
+    ("media_files", "dynamic_range", "TEXT"),
+    ("media_files", "atmos", "INTEGER"),
     ("episodes", "play_count", "INTEGER"),
     ("episodes", "last_viewed_at", "TEXT"),
     ("episodes", "view_offset_ms", "INTEGER"),
@@ -2595,13 +2599,16 @@ class VideoDatabase:
                 continue
             conn.execute(
                 f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
-                "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect, "
+                "audio_channels, dynamic_range, atmos) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (owner_id,
                  file.get("relative_path") or file.get("path") or "",
                  file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
                  file.get("audio_codec"), file.get("release_source"), file.get("quality"),
-                 file.get("runtime_seconds"), canonical_aspect(file.get("aspect"))),
+                 file.get("runtime_seconds"), canonical_aspect(file.get("aspect")),
+                 file.get("audio_channels"), file.get("dynamic_range"),
+                 1 if file.get("atmos") else 0),
             )
 
     @staticmethod
@@ -7137,7 +7144,8 @@ class VideoDatabase:
             genres = self._genres_for(conn, "movie_genres", "movie_id", movie_id)
             credits = self._credits_for(conn, "movie_id", movie_id)
             files = conn.execute(
-                "SELECT resolution, quality, video_codec, audio_codec, release_source, size_bytes "
+                "SELECT resolution, quality, video_codec, audio_codec, release_source, size_bytes, "
+                "audio_channels, dynamic_range, atmos "
                 "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC",
                 (movie_id,)).fetchall()
         finally:

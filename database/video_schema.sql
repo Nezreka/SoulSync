@@ -411,6 +411,9 @@ CREATE TABLE IF NOT EXISTS media_files (
     release_source TEXT,             -- bluray | web-dl | webrip | hdtv | youtube
     quality        TEXT,             -- resolved quality name
     runtime_seconds INTEGER,
+    audio_channels INTEGER,          -- 2 | 6 (5.1) | 8 (7.1)
+    dynamic_range  TEXT,             -- HDR10 | HDR10+ | DV | HLG (NULL = SDR)
+    atmos          INTEGER,          -- Dolby Atmos audio present
     added_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((movie_id IS NOT NULL) + (episode_id IS NOT NULL) + (video_id IS NOT NULL) = 1)
 );
