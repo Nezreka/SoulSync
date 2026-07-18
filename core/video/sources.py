@@ -371,6 +371,31 @@ def list_video_libraries():
 
 
 # ── Plex ──────────────────────────────────────────────────────────────────────
+def _format_from_name(path: str) -> dict:
+    """Release-name format tokens (Radarr-style): HDR flavor + Atmos from the
+    FILENAME. This is the only cheap signal Plex gives us — stream-level HDR
+    data needs a per-item reload (an N+1 the scan must never do). Jellyfin
+    overrides with real stream facts where it has them."""
+    s = (path or "").lower().replace(".", " ").replace("_", " ")
+    out = {}
+    dv = bool(re.search(r"\b(dv|dovi|dolby.?vision)\b", s))
+    hdr10p = bool(re.search(r"\bhdr10(\+|plus)\b", s))
+    hdr = hdr10p or bool(re.search(r"\bhdr(10)?\b", s))
+    hlg = bool(re.search(r"\bhlg\b", s))
+    parts = []
+    if dv:
+        parts.append("DV")
+    if hdr:
+        parts.append("HDR10+" if hdr10p else "HDR10")
+    elif hlg:
+        parts.append("HLG")
+    if parts:
+        out["dynamic_range"] = " ".join(parts)
+    if re.search(r"\batmos\b", s):
+        out["atmos"] = True
+    return out
+
+
 def _union_episode_delta_shows(section, since, shows):
     """Union into ``shows`` the parent shows of any EPISODE ADDED since ``since``.
 
@@ -924,15 +949,20 @@ class PlexVideoSource:
                 parts = media.parts or []
                 if not parts:
                     continue
-                out.append({
+                entry = {
                     "relative_path": parts[0].file,
                     "size_bytes": sum(int(getattr(p, "size", 0) or 0) for p in parts) or None,
                     "resolution": getattr(media, "videoResolution", None),
                     "aspect": getattr(media, "aspectRatio", None),
                     "video_codec": getattr(media, "videoCodec", None),
                     "audio_codec": getattr(media, "audioCodec", None),
+                    # format badges: channel count is real container data; HDR/
+                    # Atmos come from the release name (stream data would be N+1)
+                    "audio_channels": int(getattr(media, "audioChannels", 0) or 0) or None,
                     "runtime_seconds": runtime,
-                })
+                }
+                entry.update(_format_from_name(parts[0].file))
+                out.append(entry)
             except Exception:   # noqa: BLE001 - one unreadable version never hides the rest
                 continue
         return out
@@ -1504,16 +1534,29 @@ class JellyfinVideoSource:
             streams = src.get("MediaStreams") or []
             vid = next((s for s in streams if s.get("Type") == "Video"), {})
             aud = next((s for s in streams if s.get("Type") == "Audio"), {})
-            out.append({
-                "relative_path": src.get("Path") or item.get("Path") or "",
+            fpath = src.get("Path") or item.get("Path") or ""
+            entry = {
+                "relative_path": fpath,
                 "size_bytes": src.get("Size"),
                 "resolution": (str(vid.get("Height")) + "p") if vid.get("Height") else None,
                 "aspect": vid.get("AspectRatio") or (
                     (vid.get("Width") / vid.get("Height")) if vid.get("Width") and vid.get("Height") else None),
                 "video_codec": vid.get("Codec"),
                 "audio_codec": aud.get("Codec"),
+                "audio_channels": aud.get("Channels"),
                 "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),
-            })
+            }
+            # release-name tokens first, then REAL stream facts override them
+            entry.update(_format_from_name(fpath))
+            vrange = (vid.get("VideoRangeType") or "").upper()   # HDR10 | HDR10Plus | DOVI | HLG
+            if vrange and vrange != "SDR":
+                entry["dynamic_range"] = {"DOVI": "DV", "HDR10PLUS": "HDR10+",
+                                          "DOVIWITHHDR10": "DV HDR10"}.get(vrange, vrange)
+            elif (vid.get("VideoRange") or "").upper() == "HDR" and not entry.get("dynamic_range"):
+                entry["dynamic_range"] = "HDR"
+            if "atmos" in ((aud.get("DisplayTitle") or "") + " " + (aud.get("Profile") or "")).lower():
+                entry["atmos"] = True
+            out.append(entry)
         return out
 
     @classmethod
