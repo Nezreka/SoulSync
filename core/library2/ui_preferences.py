@@ -87,11 +87,14 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "quality_profile": False,
             "genres": False,
             "added": False,
+            # I8: disk-space roll-up, opt-in like the rest of this table.
+            "size": False,
         },
         "column_order": [
             "quality_profile",
             "genres",
             "added",
+            "size",
         ],
     },
 }

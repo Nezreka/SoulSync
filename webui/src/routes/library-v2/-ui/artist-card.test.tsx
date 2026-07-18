@@ -23,6 +23,7 @@ const artist: LibraryV2ArtistSummary = {
   track_count: 10,
   tracks_present: 8,
   tracks_missing: 2,
+  total_size_bytes: 0,
   user_overrides: {},
 };
 

@@ -70,6 +70,8 @@ export interface LibraryV2ArtistSummary {
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
+  /** I8: sum of each present track's primary file size, in bytes. */
+  total_size_bytes: number;
   user_overrides: Record<string, unknown>;
 }
 
@@ -95,6 +97,8 @@ export interface LibraryV2AlbumSummary {
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
+  /** I8: sum of each present track's primary file size, in bytes. */
+  total_size_bytes: number;
   user_overrides: Record<string, unknown>;
 }
 
@@ -121,6 +125,8 @@ export interface LibraryV2ArtistDetail {
   single_count: number;
   /** Provider-only releases currently persisted for this artist. */
   discography_count: number;
+  /** I8: sum of every album/EP/single's total_size_bytes, in bytes. */
+  total_size_bytes: number;
   user_overrides: Record<string, unknown>;
 }
 
@@ -375,6 +381,8 @@ export interface LibraryV2AlbumDetail {
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
+  /** I8: sum of each present track's primary file size, in bytes. */
+  total_size_bytes: number;
   upgrades_available?: number;
   user_overrides: Record<string, unknown>;
 }
@@ -508,6 +516,8 @@ export interface LibraryV2ArtistTableColumns {
   quality_profile: boolean;
   genres: boolean;
   added: boolean;
+  /** I8: disk-space roll-up column. */
+  size: boolean;
 }
 
 export interface LibraryV2UiPreferences {

@@ -52,6 +52,7 @@ def test_artist_table_columns_default_off_and_merge_independently():
         "quality_profile": False,
         "genres": False,
         "added": False,
+        "size": False,
     }
     update_ui_preferences(conn, {"artist_table": {"columns": {"genres": True}}})
     prefs = get_ui_preferences(conn)

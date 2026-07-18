@@ -7691,3 +7691,48 @@ dieser Session vorhanden). `ruff check` sauber.
 
 ---
 
+## 72. §64 I8 — Diskspace pro Artist/Album — ✅ umgesetzt (2026-07-18)
+
+Erster der vier am 2026-07-17 angenommenen, aber unimplementierten I/H-Punkte
+(§64: I2 Wanted-Views, I6 Queue-Sichtbarkeit, I8 Diskspace, H8
+Bulk-Edit-Modal). Entscheidung: „Speicherplatzbelegung (Größe) pro Artist
+und Album anzeigen, absoluter Pfad nicht nötig."
+
+**Backend (`core/library2/queries.py`):** `total_size_bytes` in
+`list_artists`, `get_artist` (pro Release + Artist-Summe) und `get_album`.
+Zählt je Track exakt eine primäre Datei (ADR-03 `primary_order`, dieselbe
+Auswahlregel wie `core/library2/track_files.py::primary_file_row`) —
+bewusst NICHT einfach `SUM(lib2_track_files.size)` über den bestehenden,
+bereits für die Presence-Zählung gefanten (`LEFT JOIN lib2_track_files`)
+Join, da das historische/gelöschte Datei-Zeilen mitzählen und Werte
+vervielfachen würde. `get_album` summiert stattdessen direkt aus den
+bereits serialisierten Tracks (`track["file"]["size"]`), `list_artists`/
+`get_artist` nutzen eine eigene, per `ROW_NUMBER() OVER (PARTITION BY
+track_id ...)` auf Rang 1 begrenzte CTE, separat von der bestehenden
+Track-Zähl-CTE gejoint.
+
+**Frontend:** `total_size_bytes` in allen vier TS-Typen
+(`LibraryV2ArtistSummary/Detail`, `LibraryV2AlbumSummary/Detail`);
+Artist- und Album-Detail-Header zeigen die Größe als neues Detail-Label
+(`formatFileSize`, bereits vorhandener Helper) neben Quality-Profile/
+Monitored/Tracks. Neue optionale Spalte „Size" in der Artist-Tabelle,
+default aus (wie alle B5/D6-Spalten dieser Tabelle) — `lib2_ui_preferences`
+Default + `LibraryV2ArtistTableColumns`-Typ + Renderer + Options-Menü-Label
+ergänzt.
+
+**Bewusst nicht in diesem Slice:** kein Root-Folder/Pfad (laut Entscheidung
+nicht gewünscht); keine Album-Tabellen-Spalte (nur Artist-Tabelle + beide
+Detail-Header, wie im Feature-Wunsch beschrieben — „pro Artist und Album"
+ist über die Detail-Header beider Entitäten abgedeckt).
+
+**Verifikation:** `tests/library2/test_queries.py` (2 neue Tests: Basis-Summe
+gegen die Seed-Daten + eine gezielte Regression, dass eine zusätzliche
+gelöschte historische Datei-Zeile die Summe NICHT verändert, inkl.
+Konsistenz zwischen `get_album`/`list_artists`/`get_artist`),
+`tests/library2/test_ui_preferences.py` (1 Test angepasst). Gesamt
+`tests/library2`: **777 grün**. Frontend `tsc --noEmit` clean, `vitest run
+src/routes/library-v2/` 131 grün (23 Dateien), `npm run check` clean,
+Production-Build ok. `ruff check` sauber.
+
+**Noch offen aus §64:** I2 (Wanted-Views), I6 (Queue-Sichtbarkeit), H8
+(Bulk-Edit-Modal).

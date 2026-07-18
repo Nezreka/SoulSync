@@ -58,6 +58,50 @@ def test_list_artists_stats(imported_conn):
     # Wizkid shows the one track it's credited on (multi-artist via junction).
     assert by_name["Wizkid"]["track_count"] == 1
     assert by_name["Wizkid"]["album_count"] == 1
+    # I8: disk-space roll-up — both of Drake's present files (5000 bytes each
+    # per the legacy seed), Hotline Bling has no file so contributes nothing.
+    assert drake["total_size_bytes"] == 10000
+
+
+def test_size_rollup_counts_each_track_once_despite_historical_file_rows(imported_conn):
+    """I8: a track can accumulate multiple lib2_track_files rows over its
+    history (replaced/lossy-copy/deleted). The disk-space roll-up must count
+    each track's current primary file exactly once — never fan out with the
+    unrelated files_present/track_count joins, never count deleted rows."""
+    conn = imported_conn
+    track_id = conn.execute(
+        "SELECT id FROM lib2_tracks WHERE title='One Dance' AND album_id="
+        "(SELECT id FROM lib2_albums WHERE title='Views')"
+    ).fetchone()["id"]
+    album_id = conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()["album_id"]
+    artist_id = conn.execute(
+        "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (album_id,)
+    ).fetchone()["primary_artist_id"]
+
+    before_album = Q.get_album(conn, album_id)["total_size_bytes"]
+    before_artists = {a["id"]: a["total_size_bytes"] for a in Q.list_artists(conn)[0]}
+
+    # A stale, deleted historical file row for the SAME track — must be
+    # excluded entirely, not summed alongside the live one.
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, size, file_state) "
+        "VALUES(?, '/old/one-dance.flac', 999999, 'deleted')", (track_id,))
+    conn.commit()
+
+    after_album = Q.get_album(conn, album_id)["total_size_bytes"]
+    after_artists = {a["id"]: a["total_size_bytes"] for a in Q.list_artists(conn)[0]}
+
+    assert after_album == before_album
+    assert after_artists[artist_id] == before_artists[artist_id]
+
+    # get_artist's per-album totals must add up to the same artist-wide total,
+    # and match get_album/list_artists exactly (one source of truth).
+    artist_detail = Q.get_artist(conn, artist_id)
+    assert artist_detail["total_size_bytes"] == after_artists[artist_id]
+    matching_album = next(a for a in artist_detail["albums"] if a["id"] == album_id)
+    assert matching_album["total_size_bytes"] == after_album
 
 
 def test_list_artist_track_files_scopes_paginates_and_excludes_deleted(imported_conn):

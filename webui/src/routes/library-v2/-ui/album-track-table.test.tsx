@@ -30,6 +30,7 @@ function album(): LibraryV2AlbumDetail {
     track_count: 0,
     tracks_present: 0,
     tracks_missing: 0,
+    total_size_bytes: 0,
     user_overrides: {},
   };
 }

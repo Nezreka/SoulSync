@@ -40,6 +40,7 @@ const artist: LibraryV2ArtistDetail = {
   album_count: 0,
   single_count: 0,
   discography_count: 0,
+  total_size_bytes: 0,
   user_overrides: {},
 };
 

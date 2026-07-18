@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
 from .status import compute_metadata_gaps, file_status, quality_tier
+from .track_files import primary_order
 
 _SORTS = {
     "name": "a.sort_name COLLATE NOCASE, a.name COLLATE NOCASE",
@@ -144,6 +145,24 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                      ON w.track_id=t.id AND w.profile_id=1
               LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
              GROUP BY ta.artist_id
+        ),
+        track_primary_files AS (
+            SELECT tf.track_id, tf.size,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
+                   ) AS rank
+              FROM lib2_track_files tf
+             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'
+        ),
+        -- I8: disk-space roll-up, kept separate from track_stats above —
+        -- that CTE's plain (unranked) tf join fans out per historical file
+        -- row, which would inflate a SUM(size) sharing the same join. This
+        -- one joins each track's single ADR-03 primary file exactly once.
+        artist_size AS (
+            SELECT ta.artist_id, COALESCE(SUM(pf.size), 0) AS total_size_bytes
+              FROM lib2_track_artists ta
+              JOIN track_primary_files pf ON pf.track_id=ta.track_id AND pf.rank=1
+             GROUP BY ta.artist_id
         )
         SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
                a.monitored, a.monitor_new_items, a.quality_profile_id,
@@ -151,10 +170,12 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                COALESCE(als.album_count, 0) AS album_count,
                COALESCE(als.single_count, 0) AS single_count,
                COALESCE(ts.track_count, 0) AS track_count,
-               COALESCE(ts.track_files_present, 0) AS track_files_present
+               COALESCE(ts.track_files_present, 0) AS track_files_present,
+               COALESCE(asz.total_size_bytes, 0) AS total_size_bytes
         FROM lib2_artists a
         LEFT JOIN album_stats als ON als.artist_id=a.id
         LEFT JOIN track_stats ts ON ts.artist_id=a.id
+        LEFT JOIN artist_size asz ON asz.artist_id=a.id
         {where}
         ORDER BY {order}
         LIMIT :limit OFFSET :offset
@@ -193,6 +214,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             "track_count": track_count,
             "tracks_present": present,
             "tracks_missing": max(0, track_count - present),
+            "total_size_bytes": r["total_size_bytes"] or 0,
             "user_overrides": overrides,
         })
     return artists, total
@@ -304,6 +326,23 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
               FROM lib2_track_artists ta
               JOIN lib2_tracks t ON t.id=ta.track_id
              WHERE ta.artist_id IN ({group_marks})
+        ),
+        track_primary_files AS (
+            SELECT tf.track_id, tf.size,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
+                   ) AS rank
+              FROM lib2_track_files tf
+             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'
+        ),
+        -- I8: disk-space roll-up per album, computed separately from the
+        -- files_present fan-out below (that join isn't restricted to one row
+        -- per track, so a SUM(size) sharing it would double-count).
+        album_size AS (
+            SELECT t.album_id, COALESCE(SUM(pf.size), 0) AS total_size_bytes
+              FROM lib2_tracks t
+              JOIN track_primary_files pf ON pf.track_id=t.id AND pf.rank=1
+             GROUP BY t.album_id
         )
         SELECT al.id, al.title, al.album_type, al.release_date, al.year,
                al.image_url, al.monitored, al.quality_profile_id,
@@ -318,12 +357,14 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                    WHEN tf.id IS NOT NULL
                     AND COALESCE(tf.file_state, 'active')
                         NOT IN ('missing_confirmed','deleted')
-                   THEN t.id END) AS files_present
+                   THEN t.id END) AS files_present,
+               COALESCE(asz.total_size_bytes, 0) AS total_size_bytes
         FROM artist_albums aa
         JOIN lib2_albums al ON al.id = aa.album_id
         JOIN lib2_artists pa ON pa.id=al.primary_artist_id
         LEFT JOIN lib2_tracks t ON t.album_id=al.id
         LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
+        LEFT JOIN album_size asz ON asz.album_id=al.id
         GROUP BY al.id
         ORDER BY al.year DESC, al.title COLLATE NOCASE
         """,
@@ -375,6 +416,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "track_count": total,
             "tracks_present": present,
             "tracks_missing": max(0, total - present),
+            "total_size_bytes": r["total_size_bytes"] or 0,
             "user_overrides": overrides,
         }
         if effective["album_type"] == "single":
@@ -408,6 +450,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
         "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
+        # I8: sum of each release's own total_size_bytes above — one source
+        # of truth, no separate artist-wide aggregate query needed.
+        "total_size_bytes": sum(e["total_size_bytes"] for e in albums + eps + singles),
         "user_overrides": artist_overrides,
     }
 
@@ -1089,6 +1134,10 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "track_count": total,
         "tracks_present": present_count,
         "tracks_missing": max(0, total - present_count),
+        # I8: disk-space roll-up — sum of each present track's primary file.
+        "total_size_bytes": sum(
+            t["file"]["size"] or 0 for t in tracks if t.get("file") and t["file"].get("size")
+        ),
         "upgrades_available": upgrades_available,
         "tracklist_sync": {
             "status": al["tracklist_status"],

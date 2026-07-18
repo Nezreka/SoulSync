@@ -3518,6 +3518,7 @@ function ArtistIndexView() {
     quality_profile: false,
     genres: false,
     added: false,
+    size: false,
   };
 
   return (
@@ -4064,11 +4065,12 @@ function ArtistTable({
     'quality_profile',
     'genres',
     'added',
+    'size',
   ];
   const orderedKeys = Array.from(
     new Set([
       ...columnOrder.filter(
-        (key) => key === 'quality_profile' || key === 'genres' || key === 'added',
+        (key) => key === 'quality_profile' || key === 'genres' || key === 'added' || key === 'size',
       ),
       ...defaultOrder,
     ]),
@@ -4083,6 +4085,12 @@ function ArtistTable({
         return <th key="genres">Genre</th>;
       case 'added':
         return <th key="added">Added</th>;
+      case 'size':
+        return (
+          <th key="size" className={styles.colNum}>
+            Size
+          </th>
+        );
       default:
         return null;
     }
@@ -4109,6 +4117,12 @@ function ArtistTable({
         return <td key="genres">{artist.genres.join(', ') || '—'}</td>;
       case 'added':
         return <td key="added">{formatReleaseDate(artist.added_at) ?? '—'}</td>;
+      case 'size':
+        return (
+          <td key="size" className={styles.colNum}>
+            {artist.total_size_bytes > 0 ? formatFileSize(artist.total_size_bytes) : '—'}
+          </td>
+        );
       default:
         return null;
     }
@@ -4276,6 +4290,12 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                   <SvgIcon name={album.monitored ? 'monitor' : 'close'} />
                   {album.monitored ? 'Monitored' : 'Unmonitored'}
                 </span>
+                {album.total_size_bytes > 0 ? (
+                  <span className={styles.detailLabel}>
+                    <SvgIcon name="folder" />
+                    {formatFileSize(album.total_size_bytes)}
+                  </span>
+                ) : null}
               </div>
               {album.genres.length > 0 ? (
                 <p className={styles.genres}>{album.genres.join(', ')}</p>
@@ -4693,6 +4713,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length}{' '}
                   releases
                 </span>
+                {artist.total_size_bytes > 0 ? (
+                  <span className={styles.detailLabel}>
+                    <SvgIcon name="folder" />
+                    {formatFileSize(artist.total_size_bytes)}
+                  </span>
+                ) : null}
               </div>
               {artist.genres.length > 0 ? (
                 <p className={styles.genres}>{artist.genres.join(', ')}</p>
@@ -5447,6 +5473,7 @@ const ARTIST_TABLE_COLUMN_LABELS: Record<keyof LibraryV2ArtistTableColumns, stri
   quality_profile: 'Quality Profile',
   genres: 'Genre',
   added: 'Added',
+  size: 'Size',
 };
 
 function ArtistTableOptionsMenu({
