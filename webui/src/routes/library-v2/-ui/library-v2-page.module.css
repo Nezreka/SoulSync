@@ -779,6 +779,27 @@ button.featureTag:disabled {
   height: 11px;
 }
 
+/* §73/I6: album-list roll-up pill, next to the presence progress bar. */
+.queueStatusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  background: rgba(245, 158, 11, 0.16);
+  color: rgb(252, 211, 77);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.queueStatusPill svg {
+  width: 11px;
+  height: 11px;
+}
+
 .albumProgress {
   display: flex;
   align-items: center;
@@ -3004,6 +3025,24 @@ button.featureTag:disabled {
 
 .inlineDuplicate {
   color: rgb(96, 165, 250);
+}
+
+/* §73/I6: live queue-status badge, next to the track title — amber matches
+ * the "downloading" progress-fill accent used elsewhere on this page. */
+.queueStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: rgb(252, 211, 77);
+}
+
+.queueStatusBadge svg {
+  width: 10px;
+  height: 10px;
 }
 
 /* --- auto-grab status banner --- */

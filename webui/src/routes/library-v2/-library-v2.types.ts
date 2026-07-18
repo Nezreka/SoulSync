@@ -200,6 +200,22 @@ export interface LibraryV2PipelineResult {
   quality_fallback?: string[];
 }
 
+/** §73/I6: live download-queue status for a track row — active-only, absent
+ *  once terminal (completed/failed/etc. are covered by the existing
+ *  quality/verification badges, not this overlay). */
+export type LibraryV2QueueStatusKind = 'queued' | 'searching' | 'downloading' | 'processing';
+
+export interface LibraryV2QueueStatusEntry {
+  status: LibraryV2QueueStatusKind;
+  progress_pct: number;
+}
+
+export interface LibraryV2QueueStatusResponse {
+  tracks: Record<number, LibraryV2QueueStatusEntry>;
+  /** album_id -> count of that album's tracks currently active. */
+  albums: Record<number, number>;
+}
+
 /** One provider's match state for an entity (legacy Enhanced-View match chips). */
 export interface LibraryV2MatchService {
   service: string;

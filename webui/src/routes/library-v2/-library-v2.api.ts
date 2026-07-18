@@ -20,6 +20,7 @@ import type {
   LibraryV2ManualSkip,
   LibraryV2MatchService,
   LibraryV2QualityProfile,
+  LibraryV2QueueStatusResponse,
   LibraryV2ReorganizePreview,
   LibraryV2ReorganizeQueueItem,
   LibraryV2ReorganizeQueueSnapshot,
@@ -1010,6 +1011,35 @@ export async function startLibraryV2ScopedSearch(
   if (!payload.success) throw new Error(payload.error || 'Search failed');
   if (!payload.job_id) throw new Error('Search did not return a job id');
   return payload.job_id;
+}
+
+/** §73/I6: live download-queue status for this scope's tracks — a plain GET,
+ *  never throws on its own absence of data (see queryOptions below, which
+ *  swallows fetch errors so the badge is a pure overlay, never blocking). */
+export async function fetchLibraryV2QueueStatus(
+  entity: 'artists' | 'albums' | 'tracks',
+  id: number,
+): Promise<LibraryV2QueueStatusResponse> {
+  return readJson<LibraryV2QueueStatusResponse>(
+    apiClient.get(`library/v2/${entity}/${id}/queue-status`),
+  );
+}
+
+export function libraryV2QueueStatusQueryOptions(
+  entity: 'artists' | 'albums' | 'tracks',
+  id: number,
+) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'queue-status', entity, id],
+    queryFn: () => fetchLibraryV2QueueStatus(entity, id),
+    enabled: id > 0,
+    refetchInterval: 3000,
+    // A nice-to-have overlay must never surface as a page error or a
+    // console-visible failure — callers read `.data?.tracks ?? {}` and treat
+    // "no data yet" the same as "nothing in flight."
+    retry: false,
+    throwOnError: false,
+  });
 }
 
 /** Analyze an album's files and write track+album ReplayGain tags. Returns a

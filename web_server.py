@@ -41186,6 +41186,8 @@ _register_library_v2_routes(
     scoped_wishlist_search_dispatcher=_library_v2_scoped_wishlist_search,
     configured_match_services_getter=_library_v2_configured_match_services,
     live_artist_stats_getter=_library_v2_live_artist_stats,
+    make_context_key=_make_context_key,
+    get_cached_transfer_data=get_cached_transfer_data,
 )
 
 

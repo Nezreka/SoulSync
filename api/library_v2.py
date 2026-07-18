@@ -166,6 +166,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                    Optional[Callable[[], Any]] = None,
                                live_artist_stats_getter:
                                    Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
+                               make_context_key: Optional[Callable[[str, str], str]] = None,
+                               get_cached_transfer_data:
+                                   Optional[Callable[[], Dict[str, Any]]] = None,
                                ) -> None:
     """Attach the Library v2 routes to ``app``.
 
@@ -192,6 +195,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     ``/api/watchlist/artist/<id>/config`` endpoint already does (§52.5/§56.2);
     injected for the same circular-import reason as ``run_enrichment``.
     ``None``/omitted means the settings response carries no ``artist_stats``.
+    ``make_context_key(username, filename) -> str`` and
+    ``get_cached_transfer_data() -> dict`` are the same helpers
+    ``/api/downloads/status`` uses to read live slskd/streaming transfer
+    progress — injected (rather than imported) for the same circular-import
+    reason, powering the read-only queue-status endpoint (docs §73/I6).
+    Either omitted means that endpoint reports no in-flight status.
     """
 
     def _enabled() -> bool:
@@ -3848,6 +3857,48 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         threading.Thread(target=_run, name="lib2-scoped-search", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
+
+    # -- §73/I6: live queue status for track/album rows -------------------------
+
+    @app.route("/api/library/v2/<entity>/<int:eid>/queue-status")
+    def lib2_queue_status(entity, eid):
+        """Read-only live download-queue status for this scope's tracks.
+
+        ``{"tracks": {track_id: {"status", "progress_pct"}}, "albums":
+        {album_id: active_track_count}}`` sourced from the in-flight
+        ``download_tasks``/``matched_downloads_context`` state (docs §73) —
+        terminal/idle tracks are simply absent, there is no persisted "last
+        outcome" here.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        table = _MONITOR_TABLES.get(entity)
+        if not table:
+            return jsonify({"success": False, "error": "Unknown entity"}), 400
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
+                return jsonify({"success": False, "error": "Not found"}), 404
+            from core.library2.wanted import entity_track_ids
+            track_ids = entity_track_ids(conn, entity, eid)
+        finally:
+            conn.close()
+
+        if make_context_key is None or get_cached_transfer_data is None or not track_ids:
+            return jsonify({"tracks": {}, "albums": {}})
+
+        from core.library2.queue_status import get_queue_status
+        status = get_queue_status(
+            track_ids,
+            make_context_key=make_context_key,
+            get_cached_transfer_data=get_cached_transfer_data,
+        )
+        return jsonify({
+            "tracks": {str(k): v for k, v in status["tracks"].items()},
+            "albums": {str(k): v for k, v in status["albums"].items()},
+        })
 
     # -- Phase C: tag preview / re-tag -----------------------------------------
 

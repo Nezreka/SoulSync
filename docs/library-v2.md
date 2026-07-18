@@ -7734,12 +7734,12 @@ Konsistenz zwischen `get_album`/`list_artists`/`get_artist`),
 src/routes/library-v2/` 131 grün (23 Dateien), `npm run check` clean,
 Production-Build ok. `ruff check` sauber.
 
-**Noch offen aus §64:** I2 (Wanted-Views), I6 (Queue-Sichtbarkeit), H8
-(Bulk-Edit-Modal).
+**Noch offen aus §64:** I2 (Wanted-Views), I6 (Queue-Sichtbarkeit, siehe
+§73), H8 (Bulk-Edit-Modal).
 
 ---
 
-## 73. §64 I6 — Queue-Sichtbarkeit an der Entity — Design entschieden, Umsetzung folgt (2026-07-18)
+## 73. §64 I6 — Queue-Sichtbarkeit an der Entity — ✅ umgesetzt (2026-07-18)
 
 Entscheidung nach Rückfragen mit dem Nutzer, zweiter der vier §64-Punkte.
 Ziel: Status/Fortschritt laufender Downloads direkt an Track- und
@@ -7777,10 +7777,11 @@ surfaced das heute.
   get_queue_status(track_ids)` scannt beide In-Memory-Strukturen gefiltert
   auf die übergebenen lib2-Track-IDs und mappt auf
   `{track_id: {status, progress_pct}}` — terminale/leere Einträge werden
-  weggelassen statt kodiert. Zwei neue, schlank gescopte Routen nach dem
-  Muster der §29/C1 Scoped-Search-Endpunkte: `GET /api/library/v2/artist/
-  <id>/queue-status` und `.../album/<id>/queue-status` (Artist-Variante
-  löst zunächst alle Track-IDs des Artists auf, dann derselbe Scan).
+  weggelassen statt kodiert. Eine gescopte Route, generisch über den Entity-
+  Typ, exakt nach dem Muster des bestehenden §29/C1 Scoped-Search-Endpunkts:
+  `GET /api/library/v2/<entity>/<id>/queue-status` (`entity` ∈
+  `artists/albums/tracks`, Track-IDs im Scope via die bereits vorhandene
+  `core.library2.wanted.entity_track_ids`).
 - **Frontend:** kein neuer Toggle-Spalten-Eintrag (wie bei I8) — das Badge
   ist die meiste Zeit leer, daher inline neben dem Tracktitel in `TrackRow`
   bzw. als Pill neben der Progress-Bar in `AlbumBlock`, jeweils nur
@@ -7800,15 +7801,37 @@ surfaced das heute.
   (verworfen — kein bestehendes Push-Infra in dieser Codebase, unnötige
   Komplexität für ein Nice-to-have-Overlay).
 
-### 73.3 Verifikationsplan (vor Umsetzung)
+### 73.3 Umsetzungsdetail: Album-Roll-up ohne N+1-Polling
 
-`tests/library2/test_queue_status.py` (Helper gegen geseedete
-`download_tasks`/`matched_downloads_context`-Fixtures, ein Fall pro
-Status-Wert + ein Track ohne In-Flight-Eintrag → weggelassen; Endpoint-
-Tests für Artist- und Album-Scope, leerer Fall, gemischte Status, unbekannte
-ID → 404). Frontend: `album-track-table.test.tsx` + Artist-Detail-Test
-erweitert um einen gemockten Queue-Status, der das Badge/Pill mit
-korrektem Label rendert und bei fehlendem Eintrag verschwindet. Gleiche
-Verifikationsleiste wie die vorherigen Slices: `tests/library2` grün,
-`tsc --noEmit` clean, betroffene `vitest`-Dateien grün, `ruff check`
-sauber.
+Beim Bau fiel auf, dass ein separates Artist-weites Roll-up (ein Query pro
+Artist-Seite) für `AlbumBlock` nicht ausreicht, weil `AlbumBlock` nur die
+Album-Summary kennt (keine Track-ID-Liste) — eine Filterung "welche Tracks
+gehören zu diesem Album" wäre ohne Zusatzdaten nicht möglich gewesen. Beide
+In-Memory-Quellen tragen aber ihre `lib2_album_id` bereits neben der
+Track-ID mit (`source_info`/`lib2_entity`), also liefert `get_queue_status`
+beide Ebenen aus demselben einen Scan zurück: `{"tracks": {track_id: {...}},
+"albums": {album_id: aktive_Track_Anzahl}}`. `AlbumTrackTable` liest nur
+`tracks` (Album-Detail-Scope deckt exakt seine eigenen Tracks ab);
+`AlbumBlock` pollt seinerseits denselben Endpoint scoped auf sein eigenes
+`album.id` (kein Artist-weiter Extra-Request) und liest nur `albums[album.id]`
+darüber — bleibt pro sichtbarem Album ein einzelner leichter Request, kein
+Artist-weiter Fan-out.
+
+### 73.4 Verifikation
+
+`tests/library2/test_queue_status.py` — 25 neue Tests: Status-Bucket-Mapping
+für alle vier aktiven Zustände, alle sechs terminalen Zustände korrekt
+weggelassen, Live-Fortschritt aus dem gecachten Transfer-Lookup, Album-Roll-up
+über mehrere aktive Tracks, ein Batch-Task gewinnt gegenüber einem
+korrelierten Shadow-Manual-Grab-Kontext für denselben Track (kein
+Doppelzählen im Roll-up), sowie Flask-Endpoint-Tests (unbekannte Entity →
+400, unbekannte ID → 404, Artist- und Album-Scope, fehlende injizierte Deps
+degradiert auf leere Maps statt Fehler). Gesamt `tests/library2`: **802
+grün** (777 + 25). Frontend: `album-track-table.test.tsx` um zwei Tests
+erweitert (Badge erscheint mit korrektem Label/Prozent, verschwindet ohne
+In-Flight-Eintrag) — `vitest run src/routes/library-v2/` **133 grün** (23
+Dateien, war 131). `tsc --noEmit` clean, `npm run check` (oxfmt+oxlint)
+clean, Production-Build ok. Backend gesamt `tests/library2` + `tests/imports`
++ `tests/wishlist` + `tests/downloads`: 2290 grün (6 vorbestehende,
+unabhängige Failures in `tests/downloads/test_cross_batch_dedup.py`, siehe
+§71). `ruff check` sauber.

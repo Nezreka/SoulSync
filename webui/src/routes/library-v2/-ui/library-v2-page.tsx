@@ -21,6 +21,7 @@ import type {
   LibraryV2PlaylistSummary,
   LibraryV2PlaylistTrack,
   LibraryV2QualityProfileSource,
+  LibraryV2QueueStatusEntry,
   LibraryV2Track,
   LibraryV2TrackFile,
   LibraryV2TrackTableColumns,
@@ -63,6 +64,7 @@ import {
   libraryV2PlaylistQueryOptions,
   libraryV2PlaylistsQueryOptions,
   libraryV2QualityProfilesQueryOptions,
+  libraryV2QueueStatusQueryOptions,
   libraryV2TrackFileTagsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
   libraryV2UiPreferencesQueryOptions,
@@ -5041,6 +5043,8 @@ function AlbumBlock({
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
+  const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('albums', album.id));
+  const activeDownloads = Object.keys(queueStatusQuery.data?.tracks ?? {}).length;
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
   const releaseDate =
@@ -5100,6 +5104,15 @@ function AlbumBlock({
             {trackProgress(album.tracks_present, album.track_count)}
           </span>
         </div>
+        {activeDownloads > 0 ? (
+          <span
+            className={styles.queueStatusPill}
+            title={`${activeDownloads} track(s) currently in the download pipeline`}
+          >
+            <SvgIcon name="download" />
+            {activeDownloads} downloading
+          </span>
+        ) : null}
         {unowned ? (
           <span className={styles.statusNotOwned}>not in library</span>
         ) : (
@@ -5807,6 +5820,7 @@ export function AlbumTrackTable({
   const matchQuery = useQuery(libraryV2AlbumMatchStatusQueryOptions(albumId));
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
+  const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('albums', albumId));
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -5998,6 +6012,7 @@ export function AlbumTrackTable({
                 track.id != null ? () => toggleSelected(track.id as number) : undefined
               }
               onAction={onAction}
+              queueStatus={track.id != null ? queueStatusQuery.data?.tracks[track.id] : undefined}
             />
           ))}
         </tbody>
@@ -6054,6 +6069,7 @@ function TrackRow({
   selected,
   onToggleSelect,
   onAction,
+  queueStatus,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
@@ -6066,6 +6082,8 @@ function TrackRow({
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
   onAction: ActionHandler;
+  /** §73/I6: this track's live queue-status entry, if any is in flight. */
+  queueStatus?: LibraryV2QueueStatusEntry;
 }) {
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const missing = track.file_status === 'missing';
@@ -6259,6 +6277,7 @@ function TrackRow({
         <span className={styles.trackTitleCell}>
           <span className={missing ? styles.muted : undefined}>{label}</span>
           <InlineFileStatus status={track.file_status} />
+          <QueueStatusBadge status={queueStatus} />
         </span>
       </td>
       {columnOrder.map(renderBodyCell)}
@@ -6418,6 +6437,29 @@ function InlineFileStatus({ status }: { status: LibraryV2Track['file_status'] })
   if (status === 'duplicate_single')
     return <span className={styles.inlineDuplicate}>also on album</span>;
   return null;
+}
+
+/** §73/I6: live download-queue badge for one track row. Active-only —
+ *  renders nothing once the track has no in-flight entry, matching the
+ *  existing quality/verification badges that already cover completed and
+ *  failed outcomes. */
+const QUEUE_STATUS_LABELS: Record<LibraryV2QueueStatusEntry['status'], string> = {
+  queued: 'Queued',
+  searching: 'Searching',
+  downloading: 'Downloading',
+  processing: 'Processing',
+};
+
+function QueueStatusBadge({ status }: { status: LibraryV2QueueStatusEntry | undefined }) {
+  if (!status) return null;
+  const label = QUEUE_STATUS_LABELS[status.status];
+  const text = status.status === 'downloading' ? `${label} ${status.progress_pct}%` : label;
+  return (
+    <span className={styles.queueStatusBadge} title={text}>
+      <SvgIcon name="download" />
+      {text}
+    </span>
+  );
 }
 
 /** Per-track details, consolidated behind one button: Quality profile (the

@@ -9,7 +9,7 @@ import type { LibraryV2AlbumDetail } from '../-library-v2.types';
 
 import { AlbumTrackTable } from './library-v2-page';
 
-function album(): LibraryV2AlbumDetail {
+function album(tracks: LibraryV2AlbumDetail['tracks'] = []): LibraryV2AlbumDetail {
   return {
     id: 42,
     title: 'Uncached Album',
@@ -26,12 +26,35 @@ function album(): LibraryV2AlbumDetail {
     origin: 'library',
     quality_profile: null,
     primary_artist: null,
-    tracks: [],
-    track_count: 0,
-    tracks_present: 0,
+    tracks,
+    track_count: tracks.length,
+    tracks_present: tracks.length,
     tracks_missing: 0,
     total_size_bytes: 0,
     user_overrides: {},
+  };
+}
+
+function track(overrides: Partial<LibraryV2AlbumDetail['tracks'][number]> = {}) {
+  return {
+    id: 7,
+    title: 'Track Seven',
+    track_number: 1,
+    disc_number: null,
+    duration: null,
+    bpm: null,
+    explicit: null,
+    style: null,
+    mood: null,
+    isrc: null,
+    monitored: false,
+    quality_profile_id: 1,
+    canonical_track_id: null,
+    artists: [],
+    file: null,
+    file_status: 'missing' as const,
+    metadata_gaps: [],
+    ...overrides,
   };
 }
 
@@ -56,6 +79,9 @@ describe('library v2 album track table', () => {
       http.get('/api/library/v2/ui-preferences', () =>
         HttpResponse.json({ success: true, preferences: { track_table: {} } }),
       ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
     );
 
     render(
@@ -68,5 +94,65 @@ describe('library v2 album track table', () => {
     finishRequest?.();
 
     expect(await screen.findByRole('table')).toBeInTheDocument();
+  });
+
+  it('shows a live queue-status badge next to a track currently downloading', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({ success: true, album: album([track()]) }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({
+          tracks: { 7: { status: 'downloading', progress_pct: 55 } },
+          albums: { 42: 1 },
+        }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Downloading 55%')).toBeInTheDocument();
+  });
+
+  it('shows no queue-status badge once the track has no in-flight entry', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({ success: true, album: album([track()]) }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(screen.queryByText(/Downloading|Queued|Searching|Processing/)).not.toBeInTheDocument();
   });
 });
