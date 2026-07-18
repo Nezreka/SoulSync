@@ -80,7 +80,7 @@ Change-/History-Vertrag bleibt für native Tools verwendbar.
 | 12 | Metadata Gap Filler | **Brücke.** IDs/Metadaten/Tags werden auf gemappte V2-Subjects projiziert und neu gescannt. | P1: V2 Provider-ID-Spalten direkt lesen/schreiben, Multi-Artist-Beziehungen beachten. |
 | 13 | Album Completeness | **Brücke plus Import.** Copy/Move neuer Legacy-Tracks löst den idempotenten Legacy→V2-Import, Rescan und Wanted-Recompute aus. | P2/Ablösen: native V2-Completeness + Wanted/Acquisition als Quelle; keine zweite Missing-Track-Engine. |
 | 14 | Fake Lossless Detector | **Brücke (observe-only).** Path-Findings erhalten V2-Subjects; das Tool verändert absichtlich nichts automatisch. | P1: alle aktiven V2-Files statt nur Filesystem-/Transfer-Scope prüfen. Ein späterer Fix muss über Review/Replacement laufen. |
-| 15 | Quality Check — flag only | **Brücke.** Bleibt ein reiner Befund mit explizitem Redownload/Delete/Ignore durch den Nutzer. | P2/Ablösen: als Review-Ansicht/Policy über denselben nativen Cutoff-Evaluator wie „Cutoff Unmet“ führen. |
+| 15 | Quality Check — flag only | **ENTFERNT (P2, 2026-07-18).** Ersetzt durch `lib2_upgrade_scan` mode=`review` (`quality_below_cutoff`-Findings). | Erledigt. |
 | 16 | Library Reorganize | **Brücke.** Dry-run-Findings sind V2-verknüpft; Queue-Moves laufen nun über die strikt gegatete zentrale Pfad-/Rescan-/History-Grenze. | P1: Planner muss V2-IDs/Files ohne Legacy-Backref akzeptieren; bestehende V2-Reorganize-API weiterverwenden. |
 | 17 | MBID Mismatch Detector | **Brücke.** Retag/ID-Clear/Album-Korrektur aktualisiert gemappte V2-Files und Metadaten. | P2: mit V2 Release-/Recording-Reconcile zusammenführen, sobald dessen manuelle Review-Semantik gleichwertig ist. |
 | 18 | Single/Album Dedup | **Brücke.** bestätigte Single-Entfernung markiert V2-Files deleted und Wanted neu. | P2/Ablösen: Managed Tracks + Canonical Relationships sind das native Zielmodell. |
@@ -88,13 +88,13 @@ Change-/History-Vertrag bleibt für native Tools verwendbar.
 | 20 | Album Tag Consistency | **Brücke.** korrigierte Tags/Metadaten führen zu gezieltem V2-Rescan und History. | P1: V2 Album→Track→File direkt lesen; effektive Multi-Artist-/Edition-Metadaten respektieren. |
 | 21 | Live/Commentary Cleaner | **Brücke.** Nutzerbestätigtes Entfernen aktualisiert V2-File und Wanted. | P2: V2-Policy-Query; niedrige Priorität, da bewusst heuristisch und reviewpflichtig. |
 | 22 | Fix Unknown Artists | **Brücke plus Import.** Live/Finding-Fix meldet Änderungen; wegen geänderter Artist-/Album-Junctions wird idempotent neu importiert, danach rescant und History aktualisiert. | P2: V2-native Enrichment/Manual Match übernimmt V2-only Fälle; Legacy-Job später ablösen. |
-| 23 | Discography Backfill | **Brücke.** Missing-Findings/Wishlist-Intent werden V2-verknüpft. | P2/Ablösen durch V2 Discography Refresh + Monitoring/Wanted, sobald Review/Materialisierung vollständig gleichwertig ist. |
+| 23 | Discography Backfill | **ENTFERNT (P2, 2026-07-18).** Ersetzt durch V2 Discography Refresh + Monitoring/Wanted + Wanted-Views (Missing/Cutoff, manueller Grab). | Erledigt. |
 | 24 | Resolve Canonical Album Versions | **Brücke.** Finding-Fix und Live-Pin melden Albumänderung in Entity History. | P2/Ablösen: V2 Release-Edition-/MusicBrainz-Reconcile wird alleinige Canonical-Quelle. |
 | 25 | Library Re-tag | **Brücke.** Jeder Live-Retag meldet Metadata/Tags/Artwork; Cache wird invalidiert und Files werden rescant. | P1/Ablösen: Repair-Karte soll den bereits nativen V2 Retag Preview/Write aufrufen; alten Scanner danach entfernen. |
-| 26 | Quality Upgrade Finder — active | **Brücke.** Sucht vorab Ersatz, legt nach Nutzerfreigabe Wishlist/Replacement an; Delete wird ebenfalls V2-synchronisiert. | P2/Ablösen: native Upgrade-Evaluation + wählbarer Review-Modus statt eigener Legacy-Suchlogik. |
+| 26 | Quality Upgrade Finder — active | **ENTFERNT (P2, 2026-07-18).** Ersetzt durch `lib2_upgrade_scan` mode=`automatic` (native Upgrade-Queue). | Erledigt. |
 | 27 | Preview Clip Cleanup | **Brücke.** Delete+Rewishlist markiert V2-File deleted und Wanted neu. | P1: aktive V2-Files direkt nach Dauer/Identity prüfen. |
 | 28 | Corrupt File Detector | **Brücke.** Delete+Rewishlist markiert V2-File deleted und Wanted neu. | P1: aktive V2-Files direkt decode-testen; Root-Health/Path-Resolver verwenden. |
-| 29 | Automatic Upgrade Scan (monitored), intern `lib2_upgrade_scan` | **Nativ und gegated.** Monitored/Wanted gegen effektives Profil/Cutoff, automatische Upgrade-Queue. | Behalten; internen Prefix nach Legacy-Removal entfernen. |
+| 29 | Quality Upgrade Scan (monitored), intern `lib2_upgrade_scan` | **Nativ und gegated.** Monitored/Wanted gegen effektives Profil/Cutoff; Modus `automatic` (Upgrade-Queue) oder `review` (Findings). Einziger Quality-Evaluator seit P2. | Behalten; internen Prefix nach Legacy-Removal entfernen. |
 | 30 | Skip-Audit Cleanup, intern `lib2_skips_cleanup` | **Nativ und gegated.** räumt nur abgelaufene manuelle Skip-Audit-Zeilen auf. | Behalten. Nicht mit Quality Scan zusammenführen. |
 | 31 | Monitored Discography Refresh, intern `lib2_discography_refresh` | **Nativ und gegated.** erweitert monitored Artists und projiziert `monitor_new_items`/Wanted. | Behalten; Zielersatz für Legacy Discography Backfill. |
 | 32 | Watchlist/Wishlist Mirror Reconcile, intern `lib2_mirror_reconcile` | **Nativ, gegated, transitional.** retryt persistente Watchlist/Wishlist-Mirror-Outbox. | Nach Entfernung der alten Watchlist/Wishlist-Ausgänge löschen oder durch native Consumer-Outbox ersetzen. |
@@ -113,10 +113,9 @@ Produktsemantik:
 | Quality Upgrade Finder | Legacy/File | sucht vorab Replacement | Nutzer bestätigt Proposal |
 | Automatic Upgrade Scan (monitored) | native Wanted/Cutoff | queued native Upgrade-Intent | automatisch gemäß Monitoring/Profil |
 
-Darum jetzt **keine blinde Zusammenlegung**. Kurzfristig werden sie in der UI
-als eine Quality-Familie erklärt. Zielzustand ist ein einziger nativer
-Evaluator mit zwei Ausführungsmodi: `review` und `automatic`. Dann können die
-beiden Legacy-Jobs entfallen.
+**Erledigt (2026-07-18):** Der Zielzustand ist umgesetzt — `lib2_upgrade_scan`
+ist der einzige native Evaluator mit den Ausführungsmodi `review` und
+`automatic`; die beiden Legacy-Jobs sind entfernt.
 
 ### 5.2 Discography Backfill vs. V2 Discography Refresh
 
@@ -127,9 +126,9 @@ Auch diese sind noch nicht dasselbe:
 - V2 Refresh aktualisiert den Providerkatalog monitored Artists und wendet
   `monitor_new_items` sowie die Wanted-Projektion an.
 
-Ziel ist der V2 Refresh. Vor dem Löschen des Backfills müssen jedoch dessen
-Review- und explizite Track-Materialisierungsfälle über die native
-Discography/Wanted-UI erreichbar sein.
+**Erledigt (2026-07-18):** Der Backfill ist entfernt. Review und explizite
+Materialisierung laufen über die native Discography-/Wanted-UI (globale
+Missing-/Cutoff-Views mit manuellem Grab, `core/library2/materialize.py`).
 
 ### 5.3 Weitere spätere Ablösungen
 
@@ -160,21 +159,50 @@ Discography/Wanted-UI erreichbar sein.
   haben bereits neutrale Produktnamen, ihre stabilen internen Job-IDs bleiben
   für die Übergangsphase `lib2_*`.
 
-### P1 — native File-Tool-Coverage
+### P1 — native File-Tool-Coverage — UMGESETZT (2026-07-18)
 
-Der gemeinsame V2-File-Subject-Enumerator ist implementiert und strikt
-gegatet; ReplayGain und Lyrics sind die ersten Verbraucher. Als Nächstes
-werden Cover Art und AcoustID darauf bzw. auf den benötigten Album-/
-Verification-Writer umgestellt, danach Track Number, Metadata Gap, Tag
-Consistency, Fake Lossless, Corruption, Preview und Lossy Converter. Dadurch
-wird V2-only Coverage erreicht, ohne pro Tool Path-, Scope- und Multi-File-
-Logik erneut zu implementieren.
+Der gemeinsame V2-Subject-Enumerator (`v2_uncovered_file_subjects`, ergänzt um
+vollen Track-/Album-/Provider-Kontext) und sein Album-Pendant
+(`v2_uncovered_album_subjects`) liefern aktive V2-Subjects ohne
+Legacy-Backref. Darauf umgestellt sind jetzt: ReplayGain, Lyrics, AcoustID
+(inkl. nativer Verification-Persistenz auf `lib2_track_files`), Cover Art
+(Album-Enumerator, nativer Fix auf `lib2_albums`/`lib2_artists`), Corruption,
+Preview Clip, Lossy Converter, Fake Lossless, Metadata Gap (inkl. nativem
+Fix auf `lib2_tracks`), Album Tag Consistency und Track Number Repair
+(V2-Ordner außerhalb des Transfer-Walks). Die Delete+Rewishlist-Fixes laden
+ihren Redownload-Payload für `lib2:`-Subjects nativ aus dem V2-Katalog
+(`_load_lib2_redownload_row`); File-State/Wanted übernimmt die zentrale
+Brücke. Ein fehlschlagender Legacy-Query bricht die native Coverage in
+keinem migrierten Scanner mehr ab.
 
-### P2 — semantische Konsolidierung
+### P2 — semantische Konsolidierung — TEILWEISE UMGESETZT (2026-07-18)
 
-Quality-Familie, Discography, Dedup, Completeness, Canonical/MBID, Retag und
-Unknown Artist auf die jeweiligen nativen V2-Engines umleiten. Erst nach
-gleichwertigen Review-/Safety-Aktionen die Legacy-Jobs aus Registry/UI nehmen.
+Umgesetzt:
+
+- **Quality-Familie:** `lib2_upgrade_scan` („Quality Upgrade Scan
+  (monitored)") ist der einzige Evaluator und hat die beiden Modi
+  `automatic` (queued direkt) und `review` (erzeugt
+  `quality_below_cutoff`-Findings; der Fix queued den Upgrade-Search pro
+  Track). Beide Legacy-Jobs (`quality_upgrade_scanner`, `quality_upgrade`)
+  sind aus Registry und Code entfernt; die Cutoff-Semantik-Parität bleibt
+  durch den eingefrorenen Orakel-Test in `test_legacy_parity_contract.py`
+  belegt. Die Automation-Aktion `start_quality_scan` triggert jetzt den
+  nativen Scan.
+- **Discography:** `discography_backfill` ist entfernt; native Abdeckung
+  sind `lib2_discography_refresh` + Monitoring/Wanted + die globalen
+  Wanted-Views (Missing/Cutoff) mit manuellem Grab.
+- Entfernte Jobs stehen in `RETIRED_JOB_IDS` (Registry); der Worker räumt
+  deren pendente Findings beim Start deterministisch ab, Resolved-History
+  bleibt erhalten.
+- Mit entfernt: `core/discovery/quality_scanner.py` (nur noch vom entfernten
+  Job benutzt). Tote Karten-Sonderfälle in `webui/static/enrichment.js`
+  verschwinden mit der Legacy-UI in P3.
+
+Offen (Brücke bleibt sicher; Ablösung erst nach nachgewiesener
+Gleichwertigkeit der Review-/Safety-Aktionen): Single/Album Dedup, Album
+Completeness, Canonical/MBID-Reconcile, Library Re-tag (Karte soll den
+nativen V2-Retag Preview/Write aufrufen), Unknown Artist, Live/Commentary,
+Duplicate Detector.
 
 ### P3 — Legacy-Removal
 

@@ -8027,3 +8027,38 @@ Repair-/Repair-Job-Tests und **141** Library-v2-Frontendtests grün; Ruff,
 Formatter/Type-Lint der berührten Frontend-Dateien und Vite Production-Build
 sauber. Der globale Frontend-Check trifft weiterhin eine vorbestehende
 Formatabweichung in der unberührten Datei `track-feature-badges.test.tsx`.
+
+---
+
+## 77. P1 komplett + P2-Konsolidierung der Quality-/Discography-Familie (2026-07-18)
+
+Die im Audit ([`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md))
+definierte P1-Migration ist vollständig: Der gemeinsame V2-Subject-Enumerator
+liefert jetzt vollen Track-/Album-/Provider-Kontext, dazu ein Album-Pendant
+für Release-orientierte Tools. Nativ V2-fähig (V2-only Subjects ohne
+Legacy-Backref werden erfasst und gefixt) sind damit: ReplayGain, Lyrics,
+AcoustID (Verification nativ auf `lib2_track_files`), Cover Art (nativer Fix
+auf `lib2_albums`/`lib2_artists`), Corruption, Preview Clip, Lossy Converter,
+Fake Lossless, Metadata Gap (nativer Fix auf `lib2_tracks`), Album Tag
+Consistency und Track Number Repair (V2-Ordner außerhalb des
+Transfer-Walks). Delete+Rewishlist-Fixes laden ihren Redownload-Payload für
+`lib2:`-Subjects nativ; File-State/Wanted übernimmt weiterhin die zentrale
+Brücke aus §76.
+
+P2 (Beschluss endgültig, keine Rücksicht auf die alte Library): Die
+Quality-Familie ist konsolidiert — `lib2_upgrade_scan` („Quality Upgrade
+Scan (monitored)") ist der einzige Evaluator mit den Modi `automatic`
+(direkte Upgrade-Queue) und `review` (`quality_below_cutoff`-Findings mit
+Queue-Fix pro Track). Entfernt wurden `quality_upgrade_scanner`,
+`quality_upgrade`, `discography_backfill` (nativ ersetzt durch Discography
+Refresh + Wanted-Views) und das nur noch von ihnen genutzte
+`core/discovery/quality_scanner.py`. Entfernte Job-IDs stehen in
+`RETIRED_JOB_IDS`; der Repair-Worker räumt deren pendente Findings beim
+Start ab. Die Automation-Aktion `start_quality_scan` triggert den nativen
+Scan. Die Cutoff-Parität bleibt durch einen eingefrorenen Orakel-Test in
+`tests/acquisition/test_legacy_parity_contract.py` belegt.
+
+Noch offene P2-Ablösungen (Brücke bleibt sicher): Single/Album Dedup,
+Album Completeness, Canonical/MBID-Reconcile, Library Re-tag, Unknown
+Artist, Live/Commentary, Duplicate Detector. P3 (Legacy-Removal nach
+Löschplan §7 des Audits) folgt in einer späteren Session.

@@ -182,11 +182,11 @@ class TestDuplicateCleaner:
 
 
 class TestQualityScanner:
-    def test_triggers_quality_upgrade_repair_job(self):
+    def test_triggers_native_upgrade_scan_job(self):
         triggered = []
         deps = _build_deps(run_repair_job_now=lambda job_id: triggered.append(job_id) or True)
         result = auto_start_quality_scan({}, deps)
-        assert triggered == ['quality_upgrade']
+        assert triggered == ['lib2_upgrade_scan']
         assert result['status'] == 'completed'
         assert result['triggered'] is True
 

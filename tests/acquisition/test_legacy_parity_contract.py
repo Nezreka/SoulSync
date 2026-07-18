@@ -36,7 +36,6 @@ from core.downloads.candidates import order_candidates
 from core.downloads.source_policy import resolve_source_policy
 from core.library2.quality_eval import evaluate_file, profile_targets
 from core.quality.model import AudioQuality, QualityTarget, rank_candidate
-from core.repair_jobs.quality_upgrade import _upgrade_cutoff_index
 from core.runtime_state import download_tasks
 from tests.acquisition.test_pipeline_callback import _importing_record
 from tests.acquisition.test_retry_resume import _seed_walk
@@ -287,6 +286,23 @@ def test_quality_rejection_matches_shared_import_gate(
     assert ("quality_not_allowed" in rejection_codes) is rejected
 
 
+def _legacy_upgrade_cutoff_index(profile, targets, settings):
+    """Frozen copy of the retired quality_upgrade job's cutoff resolution —
+    kept here as the parity oracle for the native evaluator's semantics."""
+    policy = profile.get("upgrade_policy")
+    if policy == "until_top":
+        policy = "until_cutoff"
+    if policy in (None, "acceptable") and settings.get("require_top_target"):
+        policy = "until_cutoff"
+    if policy != "until_cutoff" or not targets:
+        return None
+    try:
+        idx = int(profile.get("upgrade_cutoff_index") or 0)
+    except (TypeError, ValueError):
+        idx = 0
+    return max(0, min(idx, len(targets) - 1))
+
+
 @pytest.mark.parametrize(
     ("policy", "cutoff", "file_row"),
     [
@@ -325,7 +341,7 @@ def test_upgrade_policy_matches_legacy_quality_job(policy, cutoff, file_row):
         resolved_policy,
         resolved_cutoff,
     )
-    legacy_cutoff = _upgrade_cutoff_index(profile, targets, {})
+    legacy_cutoff = _legacy_upgrade_cutoff_index(profile, targets, {})
     quality = AudioQuality(
         format=file_row["format"],
         bit_depth=file_row.get("bit_depth"),

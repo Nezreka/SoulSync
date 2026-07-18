@@ -104,6 +104,70 @@ def test_periodic_job_queues_only_profiles_that_allow_upgrades(
     assert progress == [(2, 2)]
 
 
+def _config(settings=None):
+    values = {
+        "features.library_v2": True,
+        "repair.jobs.lib2_upgrade_scan.settings": settings or {},
+    }
+    return SimpleNamespace(get=lambda key, default=None: values.get(key, default))
+
+
+def test_review_mode_creates_findings_instead_of_queueing(
+    monkeypatch, library_database
+):
+    database, conn = library_database
+    cutoff = _seed_track(conn, policy="until_cutoff")
+    calls = []
+
+    def mirror(_db, _conn, track_ids, *, profile_id, **_kwargs):
+        calls.append(tuple(track_ids))
+        return len(track_ids)
+
+    monkeypatch.setattr(
+        "core.library2.wishlist_mirror.mirror_projected_tracks_wishlist", mirror)
+    findings = []
+    context = JobContext(
+        db=database,
+        transfer_folder="",
+        config_manager=_config({"mode": "review"}),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = Lib2UpgradeScanJob().scan(context)
+
+    assert calls == []
+    assert result.auto_fixed == 0
+    assert result.findings_created == 1
+    finding = findings[0]
+    assert finding["finding_type"] == "quality_below_cutoff"
+    assert finding["entity_id"] == f"lib2:{cutoff}"
+    assert finding["details"]["library_v2"]["track_id"] == cutoff
+    assert finding["details"]["upgrade_candidate"] is True
+
+
+def test_fix_quality_below_cutoff_queues_the_upgrade(monkeypatch, library_database):
+    from core.repair_worker import RepairWorker
+
+    database, conn = library_database
+    cutoff = _seed_track(conn, policy="until_cutoff")
+    calls = []
+
+    def mirror(_db, _conn, track_ids, *, profile_id, **_kwargs):
+        calls.append((tuple(track_ids), profile_id))
+        return len(track_ids)
+
+    monkeypatch.setattr(
+        "core.library2.wishlist_mirror.mirror_projected_tracks_wishlist", mirror)
+    worker = RepairWorker(database=database)
+    worker._config_manager = _config()
+
+    result = worker._fix_quality_below_cutoff(
+        "track", f"lib2:{cutoff}", None, {})
+
+    assert result["success"] is True, result
+    assert calls == [((cutoff,), ADMIN_PROFILE_ID)]
+
+
 def test_periodic_job_is_noop_when_library_v2_is_disabled(library_database):
     database, _conn = library_database
     context = JobContext(

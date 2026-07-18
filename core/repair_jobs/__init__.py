@@ -31,7 +31,6 @@ JOB_DATA_BASIS: dict[str, str] = {
     'metadata_gap_filler': 'legacy',
     'album_completeness': 'legacy',
     'fake_lossless_detector': 'filesystem',
-    'quality_upgrade_scanner': 'mixed',
     'library_reorganize': 'mixed',
     'mbid_mismatch_detector': 'mixed',
     'single_album_dedup': 'legacy',
@@ -39,10 +38,8 @@ JOB_DATA_BASIS: dict[str, str] = {
     'album_tag_consistency': 'mixed',
     'live_commentary_cleaner': 'legacy',
     'unknown_artist_fixer': 'mixed',
-    'discography_backfill': 'legacy',
     'canonical_version_resolve': 'legacy',
     'library_retag': 'mixed',
-    'quality_upgrade': 'mixed',
     'short_preview_track': 'legacy',
     'lib2_upgrade_scan': 'lib2',
     'lib2_skips_cleanup': 'lib2',
@@ -86,7 +83,6 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'metadata_gap_filler': frozenset({'observe', 'metadata', 'tags'}),
     'album_completeness': frozenset({'observe', 'metadata', 'tags', 'new_file', 'wanted'}),
     'fake_lossless_detector': frozenset({'observe'}),
-    'quality_upgrade_scanner': frozenset({'observe', 'wanted', 'delete'}),
     'library_reorganize': frozenset({'observe', 'metadata', 'tags', 'path'}),
     'mbid_mismatch_detector': frozenset({'observe', 'metadata', 'tags'}),
     'single_album_dedup': frozenset({'observe', 'delete', 'wanted'}),
@@ -94,18 +90,26 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
     'unknown_artist_fixer': frozenset({'observe', 'metadata', 'tags', 'artwork', 'path'}),
-    'discography_backfill': frozenset({'observe', 'discography', 'wanted'}),
     'canonical_version_resolve': frozenset({'observe', 'metadata'}),
     'library_retag': frozenset({'observe', 'metadata', 'tags', 'artwork'}),
-    'quality_upgrade': frozenset({'observe', 'wanted', 'delete'}),
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
-    'lib2_upgrade_scan': frozenset({'wanted'}),
+    'lib2_upgrade_scan': frozenset({'observe', 'wanted'}),
     'lib2_skips_cleanup': frozenset({'none'}),
     'lib2_discography_refresh': frozenset({'discography', 'wanted'}),
     'lib2_mirror_reconcile': frozenset({'wanted'}),
     'lib2_wishlist_reconcile': frozenset({'wanted'}),
     'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
 }
+
+# Jobs deliberately retired after their function moved to a native Library-v2
+# engine (P2 consolidation). Listed explicitly so the worker can prune their
+# leftover pending findings deterministically — never inferred from "not in
+# registry", which would also hit jobs that merely failed to import.
+RETIRED_JOB_IDS = frozenset({
+    'quality_upgrade_scanner',  # -> lib2_upgrade_scan mode='review'
+    'quality_upgrade',          # -> lib2_upgrade_scan mode='automatic'
+    'discography_backfill',     # -> lib2_discography_refresh + Wanted views
+})
 
 _imports_done = False
 
@@ -151,7 +155,6 @@ _JOB_MODULES = [
     'core.repair_jobs.metadata_gap_filler',
     'core.repair_jobs.album_completeness',
     'core.repair_jobs.fake_lossless_detector',
-    'core.repair_jobs.quality_upgrade_scanner',
     'core.repair_jobs.library_reorganize',
     'core.repair_jobs.mbid_mismatch_detector',
     'core.repair_jobs.single_album_dedup',
@@ -159,10 +162,8 @@ _JOB_MODULES = [
     'core.repair_jobs.album_tag_consistency',
     'core.repair_jobs.live_commentary_cleaner',
     'core.repair_jobs.unknown_artist_fixer',
-    'core.repair_jobs.discography_backfill',
     'core.repair_jobs.canonical_version_resolve',
     'core.repair_jobs.library_retag',
-    'core.repair_jobs.quality_upgrade',
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',
     'core.repair_jobs.lib2_upgrade_scan',
