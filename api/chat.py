@@ -141,6 +141,10 @@ def create_blueprint() -> Blueprint:
             return jsonify({"error": "settings backend not wired"}), 500
         body = request.get_json(silent=True) or {}
         old_room = _room_name()
+        try:
+            old_auto_join = bool(_config_get("soulseek.chat_auto_join", True))
+        except Exception:
+            old_auto_join = True
         if "room" in body:
             room = str(body.get("room") or "").strip()[:64]
             _config_set("soulseek.chat_room", room or "SoulSync")
@@ -153,15 +157,23 @@ def create_blueprint() -> Blueprint:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
         # Renaming the room: walk slskd out of the old one, best-effort —
-        # otherwise the account sits in both forever.
+        # otherwise the account sits in both forever. Same for turning
+        # auto-join OFF: an opt-out that leaves you sitting in the room until
+        # slskd restarts isn't an opt-out (the page can still join on open).
         new_room = _room_name()
+        leave = []
         if new_room != old_room:
+            leave.append(old_room)
+        if old_auto_join and "auto_join" in body and not bool(body.get("auto_join")):
+            leave.append(new_room)
+        if leave:
             client = _client()
             if client is not None:
-                try:
-                    _run_async(client.leave_room(old_room))
-                except Exception:
-                    logger.debug("chat: could not leave old room %r", old_room, exc_info=True)
+                for r in leave:
+                    try:
+                        _run_async(client.leave_room(r))
+                    except Exception:
+                        logger.debug("chat: could not leave room %r", r, exc_info=True)
         return chat_settings_get()
 
     @bp.route("/api/chat/gifs", methods=["GET"])

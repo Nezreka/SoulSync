@@ -39895,7 +39895,7 @@ def _emit_watchlist_count_loop():
 # without the chat page being open. First pass after boot only BASELINES the
 # room (no replaying history as "new"). Wholly idle-gated: zero slskd calls
 # while no browser is connected.
-_chat_push_state = {'room_key': None, 'pm_unread': -1}
+_chat_push_state = {'room_key': None, 'pm_unread': -1, 'room': None}
 
 def _emit_chat_push_loop():
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -39907,6 +39907,11 @@ def _emit_chat_push_loop():
             if not _slsk or not _slsk.base_url:
                 continue
             room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
+            if room != _chat_push_state['room']:
+                # room renamed (settings cog): re-baseline so the new room's
+                # history never replays as 'new' badge/notification spam
+                _chat_push_state['room'] = room
+                _chat_push_state['room_key'] = None
             joined = run_async(_slsk.get_joined_rooms()) or []
             if room not in joined:
                 # auto-join at startup / after an slskd restart (joins don't
