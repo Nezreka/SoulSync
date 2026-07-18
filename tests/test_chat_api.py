@@ -148,18 +148,18 @@ class TestBlueprint:
     def test_status(self, chat_app):
         http, state = chat_app
         res = http.get("/api/chat/status").get_json()
-        assert res == {"configured": True, "room": "soulsync", "can_send": True}
+        assert res == {"configured": True, "room": "SoulSync", "can_send": True}
 
     def test_room_hydrate_auto_joins_once(self, chat_app):
         http, state = chat_app
         res = http.get("/api/chat/room").get_json()
-        assert state["client"].joined == ["soulsync"]      # was absent → joined
-        assert res["room"] == "soulsync"
+        assert state["client"].joined == ["SoulSync"]      # was absent → joined
+        assert res["room"] == "SoulSync"
         assert res["messages"][0]["message"] == "hello"
         assert res["users"] == [{"username": "u"}]
         # second hydrate: already joined → no second join call
         http.get("/api/chat/room")
-        assert state["client"].joined == ["soulsync"]
+        assert state["client"].joined == ["SoulSync"]
 
     def test_room_respects_configured_name(self, chat_app):
         http, state = chat_app
@@ -180,7 +180,7 @@ class TestBlueprint:
         assert r.status_code == 200
         from core.chat_codec import decode
         room, wire = state["client"].sent_room[0]
-        assert room == "soulsync" and decode(wire)["t"] == "hi"
+        assert room == "SoulSync" and decode(wire)["t"] == "hi"
 
     def test_empty_and_oversize_messages(self, chat_app):
         http, state = chat_app

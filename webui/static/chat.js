@@ -275,7 +275,7 @@
         if (rooms) {
             rooms.innerHTML = '<button class="chat-side-item' +
                 (state.view === 'room' ? ' chat-side-item--on' : '') +
-                '" type="button" data-chat-open-room># ' + esc(state.room || 'soulsync') + '</button>';
+                '" type="button" data-chat-open-room># ' + esc(state.room || 'SoulSync') + '</button>';
         }
         var host = q('[data-chat-convos]');
         if (!host) return;
@@ -529,7 +529,7 @@
         if (state.configured !== true) {
             getJSON('/api/chat/status').then(function (res) {
                 state.configured = !!(res.ok && res.body.configured);
-                state.room = (res.body && res.body.room) || 'soulsync';
+                state.room = (res.body && res.body.room) || 'SoulSync';
                 state.canSend = !!(res.body && res.body.can_send);
                 renderSide([]); renderHead(); renderComposer();
                 if (!state.configured) {
