@@ -57,7 +57,7 @@ class _Source:
         self.tree = tree
         self.raises = raises
 
-    def show_tree(self, server_id):
+    def show_tree(self, server_id, title=None, tmdb_id=None):
         if self.raises:
             raise self.raises
         return self.tree
@@ -141,6 +141,45 @@ def test_running_scan_is_refused(seeded, monkeypatch):
 def test_unknown_show_is_refused(db, monkeypatch, _quiet_scanner):
     with pytest.raises(ShowSyncError, match="not found"):
         sync_show(db, 999)
+
+
+def test_plex_rekey_heals_the_row_instead_of_deleting(seeded, monkeypatch, _quiet_scanner):
+    # plex re-keys items on metadata refresh — the old id 404s while the show
+    # still exists under a new key. sync must migrate to the new row, never
+    # delete the show.
+    db, show_id = seeded
+    new_tree = _tree(server_id="sh1-NEW", eps=((1, 1), (1, 2), (1, 3)))
+    _use_source(monkeypatch, _Source(tree=new_tree))
+    res = sync_show(db, show_id)
+    assert res["show_removed"] is False
+    assert res["rekeyed"] is True
+    assert res["show_id"] != show_id
+    conn = db._get_connection()
+    try:
+        # exactly one row remains, under the NEW key, with all episodes
+        rows = conn.execute("SELECT id, server_id FROM shows").fetchall()
+        assert len(rows) == 1 and rows[0]["server_id"] == "sh1-NEW"
+        eps = conn.execute("SELECT COUNT(*) c FROM episodes WHERE show_id=?",
+                           (res["show_id"],)).fetchone()["c"]
+        assert eps == 3
+    finally:
+        conn.close()
+
+
+def test_source_show_tree_receives_title_and_tmdb(seeded, monkeypatch, _quiet_scanner):
+    # the identity hints are what let plex disambiguate a stale key from a
+    # genuinely-removed show — sync must pass them
+    db, show_id = seeded
+    seen = {}
+
+    class _Spy(_Source):
+        def show_tree(self, server_id, title=None, tmdb_id=None):
+            seen.update(server_id=server_id, title=title, tmdb_id=tmdb_id)
+            return _tree()
+    _use_source(monkeypatch, _Spy())
+    sync_show(db, show_id)
+    assert seen["title"] == "The Show"
+    assert seen["server_id"] == "sh1"
 
 
 # ── wiring pins ───────────────────────────────────────────────────────────────

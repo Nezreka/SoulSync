@@ -1831,8 +1831,12 @@
                 if (typeof showToast === 'function') {
                     showToast('Synchronized' + (bits.length ? ': ' + bits.join(', ') : ' — no changes'), 'success');
                 }
-                var rid = parseInt(id, 10);
-                if (!isNaN(rid) && currentId === rid) reloadDetail(rid);
+                // a Plex re-key heals onto a NEW row id — reload THAT row
+                var rid = parseInt(d.show_id != null ? d.show_id : id, 10);
+                if (!isNaN(rid)) {
+                    if (d.rekeyed) { currentId = rid; }
+                    if (currentId === rid) reloadDetail(rid);
+                }
             })
             .catch(function () {
                 btn.disabled = false;

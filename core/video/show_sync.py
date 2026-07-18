@@ -47,7 +47,7 @@ def sync_show(db, show_id: int) -> dict:
     conn = db._get_connection()
     try:
         row = conn.execute(
-            "SELECT id, title, server_id, server_source FROM shows WHERE id=?",
+            "SELECT id, title, server_id, server_source, tmdb_id FROM shows WHERE id=?",
             (int(show_id),)).fetchone()
     finally:
         conn.close()
@@ -67,7 +67,10 @@ def sync_show(db, show_id: int) -> dict:
             "This show belongs to %s but the active server is %s"
             % (row["server_source"], source.server_name))
 
-    tree = source.show_tree(row["server_id"])   # raises on server errors
+    # title + tmdb_id let Plex verify a NotFound isn't just a re-keyed item
+    # (metadata refresh/optimize changes ratingKeys) before we believe "gone".
+    tree = source.show_tree(row["server_id"], title=row["title"],
+                            tmdb_id=row["tmdb_id"])   # raises on server errors
 
     if tree is None:
         # Verified gone from the server — remove it here too (cascades).
@@ -94,9 +97,31 @@ def sync_show(db, show_id: int) -> dict:
             "is really empty now.")
 
     db.upsert_show_tree(row["server_source"], tree, preserve_enrichment=True)
-    eps_after, files_after = _counts(db, int(show_id))
+
+    # Healed key: the source found the show under a NEW server id (Plex re-key).
+    # The upsert landed on a fresh row — retire the stale one and count against
+    # the row the data actually lives on now.
+    target_id = int(show_id)
+    if str(tree.get("server_id")) != str(row["server_id"]):
+        conn = db._get_connection()
+        try:
+            new_row = conn.execute(
+                "SELECT id FROM shows WHERE server_source=? AND server_id=?",
+                (row["server_source"], str(tree.get("server_id")))).fetchone()
+            if new_row and int(new_row["id"]) != int(show_id):
+                target_id = int(new_row["id"])
+                conn.execute("DELETE FROM shows WHERE id=?", (int(show_id),))
+                conn.commit()
+                logger.info("show sync: '%s' re-keyed on %s (%s → %s) — row healed",
+                            row["title"], row["server_source"],
+                            row["server_id"], tree.get("server_id"))
+        finally:
+            conn.close()
+
+    eps_after, files_after = _counts(db, target_id)
     return {
         "status": "ok", "title": row["title"], "show_removed": False,
+        "show_id": target_id, "rekeyed": target_id != int(show_id),
         "episodes_added": max(0, eps_after - eps_before),
         "episodes_removed": max(0, eps_before - eps_after),
         "files_added": max(0, files_after - files_before),
