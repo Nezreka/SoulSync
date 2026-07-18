@@ -227,6 +227,23 @@ def _audiodb():
     return _AUDIODB_CLIENT
 
 
+def _spotify_artist_image(client, artist_id: str):
+    """Artist image via the Spotify WRAPPER, with a free-metadata fall-through:
+    Spotify 403s dev apps whose owner lacks an active Premium subscription —
+    auth still LOOKS healthy (token refresh succeeds), so the wrapper's own
+    free routing never engages. The no-creds backend answers regardless."""
+    try:
+        url = _extract_artist_image_url(client.get_artist(artist_id))
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        return _extract_artist_image_url(client._free_meta.get_artist(artist_id))
+    except Exception:
+        return None
+
+
 def _audiodb_candidate(name: str, sid: str):
     client = _audiodb()
     if not client:
@@ -274,10 +291,7 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
             url = None
             if sid:
                 if source == 'spotify':
-                    try:
-                        url = _extract_artist_image_url(client.get_artist(sid))
-                    except Exception:
-                        url = None
+                    url = _spotify_artist_image(client, sid)
                 else:
                     url = _get_artist_image_from_source(source, sid)
             if not url and name and hasattr(client, 'search_artists'):
@@ -294,10 +308,7 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
                             top.get('id') if isinstance(top, dict) else '') or '').strip()
                         if top_id:
                             if source == 'spotify':
-                                try:
-                                    url = _extract_artist_image_url(client.get_artist(top_id))
-                                except Exception:
-                                    url = None
+                                url = _spotify_artist_image(client, top_id)
                             else:
                                 url = _get_artist_image_from_source(source, top_id)
             return (source, url) if url else None
