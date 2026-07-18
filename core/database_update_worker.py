@@ -321,6 +321,14 @@ class DatabaseUpdateWorker:
                 # A failed fetch must never look like an empty library — abort
                 # exactly as before.
                 if not getattr(self, '_artists_fetch_verified', False):
+                    # the abort reason must reach app.log — 5BILLION's failing
+                    # runs were invisible (only the UI toast carried the error)
+                    logger.error(
+                        "Deep scan aborted: artists fetch UNVERIFIED for %s "
+                        "(connection/API failure, last API error: %r) — stale "
+                        "removal skipped as a safety measure",
+                        self.server_type,
+                        getattr(self.media_client, 'last_api_error', None))
                     self._emit_signal('error', f"Deep scan: No artists found in {self.server_type} library")
                     return
                 # The server ANSWERED with zero artists — e.g. the user switched
@@ -331,6 +339,10 @@ class DatabaseUpdateWorker:
                 self._emit_signal('phase_changed', "Deep scan: Library returned no artists — verifying...")
                 artists = self._get_all_artists()
                 if not artists and not getattr(self, '_artists_fetch_verified', False):
+                    logger.error(
+                        "Deep scan aborted on re-verify: artists fetch UNVERIFIED for %s "
+                        "(last API error: %r)", self.server_type,
+                        getattr(self.media_client, 'last_api_error', None))
                     self._emit_signal('error', f"Deep scan: No artists found in {self.server_type} library")
                     return
                 if not artists:
