@@ -474,19 +474,39 @@ class PlexVideoSource:
                 except Exception:
                     logger.exception("Plex: skipping movie %s", getattr(m, "title", "?"))
 
-    def show_tree(self, server_id):
+    def show_tree(self, server_id, title=None, tmdb_id=None):
         """The full tree for ONE show (same shape iter_shows yields) — the
         per-show Synchronize. Returns None ONLY when Plex positively says the
-        item is gone (NotFound); any other failure raises, so a server hiccup
-        can never read as 'show removed'."""
+        item is gone AND a title/tmdb search of the TV sections can't find it
+        either — Plex re-keys items on metadata refresh/optimize, so a stale
+        ratingKey alone must never read as 'show removed' (the tree returned
+        from the search carries the NEW server_id; the caller heals the row).
+        Any other failure raises, so a server hiccup can't delete anything."""
         from plexapi.exceptions import NotFound
         try:
             item = self._server.fetchItem(int(server_id))
         except NotFound:
-            return None
-        if getattr(item, "type", "") != "show":
-            return None   # re-keyed to something else entirely — treat as gone
-        return self._show(item)
+            item = None
+        if item is not None and getattr(item, "type", "") == "show":
+            return self._show(item)
+        # Stale/re-keyed id — look the show up the durable way before giving up.
+        want_tmdb = str(tmdb_id) if tmdb_id else None
+        for section in self._scan_sections("show", self._tv_lib):
+            try:
+                hits = section.search(title=title) if title else []
+            except Exception:
+                logger.exception("Plex: rekey-check search failed for %r", title)
+                raise
+            for h in hits:
+                if getattr(h, "type", "") != "show":
+                    continue
+                if want_tmdb and _parse_plex_guids(h).get("tmdb_id"):
+                    if str(_parse_plex_guids(h).get("tmdb_id")) == want_tmdb:
+                        return self._show(h)
+                    continue
+                if title and (getattr(h, "title", "") or "").strip().lower() == title.strip().lower():
+                    return self._show(h)
+        return None
 
     def iter_shows(self, incremental=False, since=None):
         for section in self._scan_sections("show", self._tv_lib):
@@ -1526,8 +1546,10 @@ class JellyfinVideoSource:
         d.update(_parse_jf_providers(it))
         return d
 
-    def show_tree(self, server_id):
+    def show_tree(self, server_id, title=None, tmdb_id=None):
         """The full tree for ONE show — the per-show Synchronize. Jellyfin's
+        item ids are durable GUIDs (no Plex-style re-keying), so the extra
+        title/tmdb args are accepted for interface parity but unused. Its
         request helper collapses every failure into None, so 'gone' is only
         believed when the item is missing while the server still answers a
         health probe; an unreachable server raises instead (a hiccup must
