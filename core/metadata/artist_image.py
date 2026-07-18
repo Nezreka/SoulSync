@@ -210,6 +210,35 @@ _SOURCE_ID_COLUMNS = {
 # Sources that can't produce an artist photo (or aren't image services at all).
 _CANDIDATE_SKIP_SOURCES = {'musicbrainz', 'soulseek', 'youtube_videos', 'hydrabase'}
 
+# TheAudioDB isn't in the metadata priority chain (it's an enrichment worker,
+# not a browse source) but it has excellent keyless artist photos — the picker
+# queries it explicitly. Lazy singleton: one requests session, reused.
+_AUDIODB_CLIENT = None
+
+
+def _audiodb():
+    global _AUDIODB_CLIENT
+    if _AUDIODB_CLIENT is None:
+        try:
+            from core.audiodb_client import AudioDBClient
+            _AUDIODB_CLIENT = AudioDBClient()
+        except Exception:
+            return None
+    return _AUDIODB_CLIENT
+
+
+def _audiodb_candidate(name: str, sid: str):
+    client = _audiodb()
+    if not client:
+        return None
+    data = None
+    if sid:
+        data = client.lookup_artist_by_id(sid)
+    if not data and name:
+        data = client.search_artist(name)
+    url = (data or {}).get('strArtistThumb') or (data or {}).get('strArtistFanart')
+    return ('audiodb', url) if url else None
+
 
 def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] = None) -> list:
     """One candidate photo per CONNECTED metadata source, for the artist
@@ -225,13 +254,17 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
     ids = source_ids or {}
     sources = [s for s in metadata_registry.get_source_priority(metadata_registry.get_primary_source())
                if s not in _CANDIDATE_SKIP_SOURCES]
+    if 'audiodb' not in sources:
+        sources.append('audiodb')       # the docstring always promised it
 
     def _one(source: str):
         try:
+            sid = str(ids.get(_SOURCE_ID_COLUMNS.get(source, '')) or '').strip()
+            if source == 'audiodb':
+                return _audiodb_candidate(name, sid)
             client = metadata_registry.get_client_for_source(source)
             if not client:
                 return None
-            sid = str(ids.get(_SOURCE_ID_COLUMNS.get(source, '')) or '').strip()
             url = _get_artist_image_from_source(source, sid) if sid else None
             if not url and name and hasattr(client, 'search_artists'):
                 results = client.search_artists(name, limit=1) or []
@@ -239,6 +272,14 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
                     top = results[0]
                     url = getattr(top, 'image_url', None) or (
                         top.get('image_url') if isinstance(top, dict) else None)
+                    if not url:
+                        # some sources (iTunes by design) return imageless
+                        # search hits — a second exact fetch by the hit's id
+                        # gets the artwork the search withheld
+                        top_id = str(getattr(top, 'id', '') or (
+                            top.get('id') if isinstance(top, dict) else '') or '').strip()
+                        if top_id:
+                            url = _get_artist_image_from_source(source, top_id)
             return (source, url) if url else None
         except Exception as exc:
             logger.debug("artist image candidate failed for %s: %s", source, exc)
