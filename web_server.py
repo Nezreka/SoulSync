@@ -39909,10 +39909,19 @@ def _emit_chat_push_loop():
             room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
             joined = run_async(_slsk.get_joined_rooms()) or []
             if room not in joined:
-                # auto-join at startup / after an slskd restart (joins don't persist)
-                if not run_async(_slsk.join_room(room)):
-                    continue
-            msgs = run_async(_slsk.get_room_messages(room)) or []
+                # auto-join at startup / after an slskd restart (joins don't
+                # persist). chat_auto_join=false is the opt-out for users who
+                # don't want their account sitting in a public room — without
+                # it the loop would re-join them every 6s (un-leaveable). The
+                # chat PAGE still joins on open (an explicit user action).
+                if not config_manager.get('soulseek.chat_auto_join', True):
+                    room = None
+                elif not run_async(_slsk.join_room(room)):
+                    room = None
+            if not room:
+                msgs = []
+            else:
+                msgs = run_async(_slsk.get_room_messages(room)) or []
             msgs.sort(key=lambda m: str(m.get('timestamp') or ''))
             key = (str(msgs[-1].get('timestamp') or '') + ':' + str(len(msgs))) if msgs else ''
             prev_key = _chat_push_state['room_key']

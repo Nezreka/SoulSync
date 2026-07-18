@@ -71744,3 +71744,22 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     margin: 6px 0; border-radius: 10px; overflow: hidden; background: #000;
 }
 .chat-embed-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* chat: external-client distinction + SoulSync-only filter (chatux P1) */
+.chat-ext-tag {
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+    color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.chat-msg--ext .chat-msg-user { color: rgba(255,255,255,0.55); }
+.chat-filter-btn {
+    margin-left: auto; border: 1px solid rgba(255,255,255,0.16); border-radius: 999px;
+    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.65);
+    font-size: 11.5px; font-weight: 700; padding: 4px 12px; cursor: pointer; white-space: nowrap;
+}
+.chat-filter-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.chat-filter-btn--on { color: #1db954; border-color: rgba(29,185,84,0.45); background: rgba(29,185,84,0.12); }
+.chat-hidden-note {
+    text-align: center; font-size: 11.5px; color: rgba(255,255,255,0.35); padding: 8px 0;
+}
