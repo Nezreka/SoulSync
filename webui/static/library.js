@@ -3791,6 +3791,10 @@ function openAlbumArtPicker(album) {
 // Custom-URL row for the artist photo picker: paste a link → instant preview
 // tile → click it → Apply. The preview <img> is the validation (a bad link
 // shows its own error); the backend re-validates bytes before applying.
+// NB: module scope — the pickers' _checkSvg consts are function-LOCAL, so
+// this needs its own (referencing theirs was a silent ReferenceError).
+const _ART_CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
 function _artPickerCustomRow(body, grid, onSelect) {
     const row = document.createElement('div');
     row.className = 'art-picker-custom';
@@ -3811,7 +3815,7 @@ function _artPickerCustomRow(body, grid, onSelect) {
             tile.innerHTML =
                 '<img loading="lazy" src="' + _esc(url) + '" alt="">' +
                 '<span class="art-picker-badge">custom</span>' +
-                '<span class="art-picker-check">' + _checkSvg + '</span>';
+                '<span class="art-picker-check">' + _ART_CHECK_SVG + '</span>';
             tile.querySelector('img').onerror = () => {
                 slot.innerHTML = '<div class="art-picker-custom-err">Couldn\'t load that image.</div>';
             };

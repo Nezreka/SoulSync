@@ -237,3 +237,45 @@ def test_picker_has_the_custom_url_row():
     # the row mounts AFTER the innerHTML reset that would wipe it
     seg = js.split("body.appendChild(grid);")[1][:400]
     assert "_artPickerCustomRow" in seg
+
+
+def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
+    """Live finding (Boulder's box): Spotify 403s dev apps whose owner lacks
+    active Premium — token refresh still works, so auth LOOKS healthy and the
+    wrapper's own free routing never engages. The picker falls through to the
+    no-creds backend itself."""
+    class _FreeMeta:
+        def get_artist(self, sid):
+            return {"images": [{"url": "https://i.scdn.co/free.jpg"}]}
+
+    class _PremiumWalled:
+        def get_artist(self, sid, **kw):
+            raise RuntimeError("403 premium required")
+        _free_meta = _FreeMeta()
+
+    monkeypatch.setattr(ai.metadata_registry, "get_spotify_client",
+                        lambda **kw: _PremiumWalled())
+    _wire_registry(monkeypatch, {}, ["spotify"])
+
+    cands = ai.gather_artist_image_candidates("Adele", {"spotify_artist_id": "sp1"})
+    assert cands == [{"source": "spotify", "url": "https://i.scdn.co/free.jpg"}]
+
+    # official returning None (not raising) falls through the same way
+    class _NoneOfficial(_PremiumWalled):
+        def get_artist(self, sid, **kw):
+            return None
+    monkeypatch.setattr(ai.metadata_registry, "get_spotify_client",
+                        lambda **kw: _NoneOfficial())
+    cands = ai.gather_artist_image_candidates("Adele", {"spotify_artist_id": "sp1"})
+    assert cands[0]["url"] == "https://i.scdn.co/free.jpg"
+
+
+def test_custom_row_check_icon_is_module_scope():
+    """The pickers' _checkSvg consts are function-LOCAL — the custom row
+    referencing one was a silent ReferenceError ('paste and nothing happens')."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
+        encoding="utf-8", errors="replace")
+    assert "const _ART_CHECK_SVG" in js
+    row = js.split("function _artPickerCustomRow")[1].split("\nfunction ")[0]
+    assert "_ART_CHECK_SVG" in row and "_checkSvg" not in row
