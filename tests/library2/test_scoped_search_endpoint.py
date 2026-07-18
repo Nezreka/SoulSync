@@ -131,6 +131,7 @@ def test_track_scope_searches_only_that_track(api):
     assert status["error"] is None
     assert status["result"] == {
         "checked": 1, "queued": 1, "searching": 1, "batch_id": None,
+        "dispatch_error": None,
     }
     assert {a["id"] for a in db.wishlist_adds} == {"sp-t2"}
 
@@ -154,6 +155,7 @@ def test_direct_track_search_bypasses_monitor_filter_without_changing_it(api):
         "queued": 1,
         "searching": 1,
         "batch_id": None,
+        "dispatch_error": None,
     }
     assert {a["id"] for a in db.wishlist_adds} == {"sp-t2"}
     with db._get_connection() as conn:
@@ -215,6 +217,26 @@ def test_dispatcher_receives_the_scoped_wishlist_ids_and_profile(tmp_path):
     assert status["error"] is None
     assert status["result"]["batch_id"] == "batch-123"
     assert calls == [(["sp-t2"], 1)]
+
+
+def test_dispatcher_failure_is_surfaced_not_silently_swallowed(tmp_path):
+    """docs §69.3: a failed dispatch (e.g. the download executor rejected the
+    submission) must not look like a successful "search started" — the UI
+    would otherwise show an OK banner while nothing was actually queued."""
+
+    def _dispatcher(track_ids, profile_id):
+        return {"success": False, "error": "executor rejected submission"}
+
+    client, _db, ids = _build_api(tmp_path, dispatcher=_dispatcher)
+    client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor", json={"monitored": True})
+
+    response = client.post(f"/api/library/v2/tracks/{ids['ep_track']}/search")
+    job_id = response.get_json()["job_id"]
+    status = _await_job(client, job_id)
+
+    assert status["error"] is None
+    assert status["result"]["batch_id"] is None
+    assert status["result"]["dispatch_error"] == "executor rejected submission"
 
 
 def test_unknown_entity_rejected(api):

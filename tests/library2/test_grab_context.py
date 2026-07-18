@@ -12,6 +12,7 @@ import sqlite3
 import pytest
 
 from core.library2.grab_context import (
+    build_lib2_import_pipeline_fields,
     build_lib2_track_info,
     names_lib2_entity,
     resolve_lib2_grab_context,
@@ -93,18 +94,71 @@ def test_pipeline_metadata_is_absent_without_lib2_context():
     assert build_lib2_track_info({"title": "Normal download"}, None) is None
 
 
+def test_import_pipeline_fields_ground_metadata_in_the_resolved_entity():
+    """docs §69.2/§71.2: a grab naming a resolved track routes through the
+    full import pipeline, trusting the entity's own DB row over whatever
+    (possibly stale) title/artist the browser's search-result card sent."""
+    request_data = {"title": "Stale Title", "artist": "Stale Artist"}
+    lib2_context = {
+        "track_id": 3, "album_id": 2, "quality_profile_id": 9,
+        "artist_name": "Real Artist", "album_name": "Real Album",
+        "track_title": "Real Title", "track_number": 4, "disc_number": 1,
+    }
+
+    fields = build_lib2_import_pipeline_fields(request_data, lib2_context)
+
+    assert fields["is_simple_download"] is False
+    assert fields["artist"] == {"name": "Real Artist"}
+    assert fields["album"] == {"name": "Real Album"}
+    assert fields["track_info"]["name"] == "Real Title"
+    assert fields["track_info"]["track_number"] == 4
+    assert fields["track_info"]["disc_number"] == 1
+    assert fields["track_info"]["album"] == {"name": "Real Album"}
+
+
+def test_import_pipeline_fields_fall_back_to_request_title_for_album_scope():
+    """An album-scoped grab's lib2_context has no per-track title (only one
+    context is resolved for the whole album) — each track's own request
+    data still supplies it."""
+    request_data = {"title": "Track From Listing", "artist": "ignored"}
+    lib2_context = {
+        "album_id": 2, "quality_profile_id": 7,
+        "artist_name": "Real Artist", "album_name": "Real Album",
+    }
+
+    fields = build_lib2_import_pipeline_fields(request_data, lib2_context)
+
+    assert fields["is_simple_download"] is False
+    assert fields["artist"] == {"name": "Real Artist"}
+    assert fields["track_info"]["name"] == "Track From Listing"
+
+
+def test_import_pipeline_fields_empty_without_lib2_context():
+    """No resolved entity (plain search-page download) => stay on the
+    metadata-free simple-download shortcut, unchanged."""
+    assert build_lib2_import_pipeline_fields({"title": "x"}, None) == {}
+    assert build_lib2_import_pipeline_fields({"title": "x"}, {}) == {}
+
+
 def test_track_resolves_with_own_profile(db):
     state, ctx = resolve_lib2_grab_context(db, {"lib2_track_id": db.ids["track"]})
     assert state == "ok"
-    assert ctx == {"track_id": db.ids["track"], "album_id": db.ids["album"],
-                   "quality_profile_id": 9}
+    assert ctx == {
+        "track_id": db.ids["track"], "album_id": db.ids["album"],
+        "quality_profile_id": 9,
+        "artist_name": "A", "album_name": "Alb", "track_title": "T",
+        "track_number": 1, "disc_number": 1,
+    }
 
 
 def test_album_resolves_with_album_profile_not_artist(db):
     """P1-17: an album grab carries the ALBUM's own profile."""
     state, ctx = resolve_lib2_grab_context(db, {"lib2_album_id": db.ids["album"]})
     assert state == "ok"
-    assert ctx == {"album_id": db.ids["album"], "quality_profile_id": 7}
+    assert ctx == {
+        "album_id": db.ids["album"], "quality_profile_id": 7,
+        "artist_name": "A", "album_name": "Alb",
+    }
 
 
 def test_unknown_ids_are_invalid(db):

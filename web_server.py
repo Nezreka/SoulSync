@@ -1212,6 +1212,14 @@ missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix
 # other album downloads, never the user-facing path.
 album_bundle_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlbumBundleWorker")
 
+# Dedicated pool for Library-v2 scoped Automatic Search (§29/C1) — a user
+# clicking "Automatic Search" on one artist/album/track expects that item to
+# be searched right away, not queued behind whatever the periodic auto-
+# wishlist cycle currently has saturating missing_download_executor (docs
+# §69.3: same starvation class as #740, just never split out for the
+# per-track/scoped-search flow the way album bundles were).
+scoped_search_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ScopedSearchWorker")
+
 # Parallelizes the per-file metadata-lookup + post-processing in
 # /api/import/singles/process. Single-file work is dominated by
 # Spotify/iTunes/Deezer search round-trips so 3 workers give a near-
@@ -2075,6 +2083,7 @@ def _shutdown_runtime_components():
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
         (album_bundle_executor, "album bundle executor"),
+        (scoped_search_executor, "scoped search executor"),
         (import_singles_executor, "import singles executor"),
         (tidal_discovery_executor, "tidal discovery executor"),
         (deezer_discovery_executor, "deezer discovery executor"),
@@ -7162,6 +7171,7 @@ def start_download():
         # entity fails the grab instead of degrading to a context-free one.
         from core.library2 import ADMIN_PROFILE_ID
         from core.library2.grab_context import (
+            build_lib2_import_pipeline_fields,
             build_lib2_track_info,
             names_lib2_entity,
             resolve_lib2_grab_context,
@@ -7258,7 +7268,15 @@ def start_download():
                     if download_id:
                         from core.acquisition.manual_grab import bind_correlated_grab_transfer
                         bind_correlated_grab_transfer(_acq_markers, download_id)
-                        # Register download for post-processing (simple transfer to /Transfer)
+                        # A grab naming a resolved Library-v2 entity runs
+                        # through the full import pipeline (real file
+                        # placement + tags + quarantine gate, docs §69.2) —
+                        # everything else falls back to the metadata-free
+                        # simple-download shortcut (transfer to /Transfer),
+                        # unchanged for grabs with no library target.
+                        _pipeline_fields = build_lib2_import_pipeline_fields(
+                            track_data, _lib2_ctx, album_name=data.get('album_name'),
+                        )
                         context_key = _make_context_key(username, filename)
                         with matched_context_lock:
                             matched_downloads_context[context_key] = {
@@ -7269,11 +7287,13 @@ def start_download():
                                     'title': track_data.get('title', 'Unknown'),
                                     'artist': track_data.get('artist', 'Unknown'),
                                     'quality': track_data.get('quality', 'Unknown'),
-                                    'is_simple_download': True  # Flag for simple processing
+                                    'is_simple_download': _pipeline_fields.get('is_simple_download', True),
                                 },
-                                'spotify_artist': None,  # No Spotify metadata
+                                'artist': _pipeline_fields.get('artist'),
+                                'album': _pipeline_fields.get('album'),
+                                'spotify_artist': None,  # legacy alias; 'artist' above wins when set
                                 'spotify_album': None,
-                                'track_info': build_lib2_track_info(
+                                'track_info': _pipeline_fields.get('track_info') or build_lib2_track_info(
                                     track_data,
                                     _lib2_ctx,
                                     album_name=data.get('album_name'),
@@ -7384,6 +7404,14 @@ def start_download():
                     _skip_checks.append('acoustid')
                 if data.get('quality_check') is False:
                     _skip_checks.extend(['bit_depth', 'quality'])
+                # A grab naming a resolved Library-v2 entity runs through the
+                # full import pipeline (real file placement + tags +
+                # quarantine gate, docs §69.2) — everything else falls back
+                # to the metadata-free simple-download shortcut (transfer to
+                # /Transfer), unchanged for grabs with no library target.
+                _pipeline_fields = build_lib2_import_pipeline_fields(
+                    data, _lib2_ctx, album_name=data.get('album_name'),
+                )
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -7393,11 +7421,13 @@ def start_download():
                             'title': data.get('title', 'Unknown'),
                             'artist': data.get('artist', 'Unknown'),
                             'quality': data.get('quality', 'Unknown'),
-                            'is_simple_download': True  # Flag for simple processing
+                            'is_simple_download': _pipeline_fields.get('is_simple_download', True),
                         },
-                        'spotify_artist': None,  # No Spotify metadata
+                        'artist': _pipeline_fields.get('artist'),
+                        'album': _pipeline_fields.get('album'),
+                        'spotify_artist': None,  # legacy alias; 'artist' above wins when set
                         'spotify_album': None,
-                        'track_info': build_lib2_track_info(
+                        'track_info': _pipeline_fields.get('track_info') or build_lib2_track_info(
                             data,
                             _lib2_ctx,
                             album_name=data.get('album_name'),
@@ -7408,7 +7438,7 @@ def start_download():
                             _acq_markers or {}).get('download_id'),
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
-                    logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
+                    logger.info(f"[{source_label}] Registered download for post-processing: {context_key}")
 
                 # Audit a user-initiated override: record which profile-enforced
                 # checks were skipped so cleanup/repair jobs (and the user) know it
@@ -41066,7 +41096,11 @@ def _library_v2_scoped_wishlist_search(track_ids, profile_id):
         get_music_database=lambda: db,
         download_batches=download_batches,
         tasks_lock=tasks_lock,
-        missing_download_executor=missing_download_executor,
+        # Its own small pool (not the shared missing_download_executor) so a
+        # scoped/manual single-item search is never starved by a busy
+        # periodic wishlist auto-cycle (docs §69.3) — same precedent as
+        # album_bundle_executor below.
+        missing_download_executor=scoped_search_executor,
         album_bundle_executor=album_bundle_executor,
         run_full_missing_tracks_process=_run_full_missing_tracks_process,
         get_batch_max_concurrent=_get_batch_max_concurrent,

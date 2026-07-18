@@ -7576,3 +7576,118 @@ Toggles*. Daraus zwei Lücken:
 §69.2 (Manual Grab erreicht die Download-Pipeline nicht) und §69.3 (Automatic
 Search eines Einzel-Tracks führt die Wishlist nicht sofort aus) bleiben offen —
 separate Analyse.
+
+---
+
+## 71. §69.3 behoben (Such-Pool-Contention) und §69.2 behoben (Manual Grab durchläuft jetzt die volle Pipeline) (2026-07-18)
+
+### 71.1 §69.3 — ✅ behoben
+
+Root Cause verifiziert: der scoped-Search-Endpoint (`POST
+/api/library/v2/<entity>/<id>/search`, §29/C1) dispatcht bereits korrekt und
+synchron über `start_manual_wishlist_download_batch` — dieselbe Engine wie
+„Download Wishlist" — kein zweiter Pfad, keine Verzögerung durch einen
+periodischen Zyklus. Die tatsächliche Ursache für „läuft nicht sofort": der
+Dispatch teilt sich `missing_download_executor` (3 Worker) mit dem
+periodischen Wishlist-Auto-Zyklus (`core/wishlist/processing.py`, dieselbe
+Klasse Bug wie #740, dort aber nur für Album-Bundles gefixt — Einzeltrack-
+Dispatch teilte weiterhin den Pool). Bei einem aktiven Auto-Zyklus blockierten
+alle 3 Worker-Slots, sodass ein Scoped-Search-Klick real hinter der Batch-
+Verarbeitung „verhungerte" — von außen ununterscheidbar vom gemeldeten
+Symptom. Zusätzlich verschluckte der Endpoint einen fehlgeschlagenen
+Dispatch (`batch_payload.get("success") == False`) stillschweigend — die UI
+zeigte „Search started", obwohl nichts lief.
+
+**Fix:**
+- Neuer dedizierter `scoped_search_executor` (2 Worker,
+  `web_server.py`), analog zum bestehenden `album_bundle_executor`-Präzedenzfall
+  (#740): `_library_v2_scoped_wishlist_search` übergibt ihn statt des
+  geteilten Pools an `_WishlistManualDownloadRuntime.missing_download_executor`
+  — sowohl die Vorbereitung als auch der eigentliche Track-Download laufen
+  darüber, ohne den globalen Wishlist-Flow zu verändern.
+  In den Shutdown-Pfad aufgenommen.
+- `api/library_v2.py::lib2_scoped_search`: ein fehlgeschlagener Dispatch wird
+  jetzt geloggt und als `dispatch_error` im Job-Result zurückgegeben.
+  Frontend (`runScopedSearch`, `library-v2-page.tsx`) zeigt bei gesetztem
+  `dispatch_error` jetzt eine Fehler- statt einer OK-Banner.
+- `LibraryV2JobState.result` Typ erweitert (`Record<string, number | string |
+  null>`), da `batch_id`/`dispatch_error` Strings sind.
+
+**Verifikation:** `tests/library2/test_scoped_search_endpoint.py` (neuer Test
+`test_dispatcher_failure_is_surfaced_not_silently_swallowed` + 2 bestehende
+Tests um das neue `dispatch_error`-Feld ergänzt) — 9/9 grün.
+`tests/library2` + `tests/wishlist` gesamt: 939 grün. `ruff check` sauber.
+Frontend `tsc --noEmit` clean, `vitest run src/routes/library-v2/` 131 grün
+(23 Dateien), `npm run check` (oxfmt+oxlint) clean.
+
+### 71.2 §69.2 — ✅ behoben
+
+Die ursprüngliche Hypothese (kein serverseitiges Completion-Detection für
+manuelle Grabs) ist **widerlegt**: `_simple_monitor_task` (`web_server.py`,
+seit App-Start unbedingt aktiv, 1s-Poll) ruft dieselbe Logik wie
+`GET /api/downloads/status` unabhängig von jedem Frontend-Polling auf, sobald
+`matched_downloads_context` nicht leer ist.
+
+**Der tatsächliche Fund:** `web_server.py::start_download` setzte für JEDEN
+manuellen Grab unbedingt `search_result.is_simple_download = True`
+(Album- und Single-Track-Zweig) — unabhängig davon, ob `_lib2_ctx` eine
+echte Library-v2-Entität aufgelöst hat. Das routete die Datei in
+`core/imports/pipeline.py`s „Simple Download"-Kurzschluss: Datei landet
+unverändert (keine Tag-Anreicherung, keine Ordnerorganisation nach
+Artist/Album) im rohen `/Transfer`-Ordner statt im echten, organisierten
+Library-Pfad. Die `lib2_track_files`-Zeile zeigte danach zwar auf eine
+reale Datei, aber die lag außerhalb der echten Musik-Bibliothek — für jeden
+externen Medienserver (Plex/Jellyfin/Navidrome), der nur den echten
+Library-Pfad scannt, existierte der Track schlicht nicht.
+
+**Der Nutzer-Einwand war der richtige Hebel:** Automatic Search/Wishlist-
+Downloads laufen bereits erfolgreich durch die volle Pipeline — der einzige
+Unterschied bei Manual Grab ist, dass der Nutzer den Kandidaten selbst
+auswählt statt der automatischen Suche. Ein erster geprüfter Fix
+(„`is_simple_download` false setzen, wenn `lib2_entity` vorliegt") crashte
+zunächst mit „Missing artist context" — aber nicht, weil die volle Pipeline
+echte Provider-/Spotify-Metadaten braucht (`get_import_context_artist`
+prüft nur `context["artist"]`, ein reiner Name genügt, siehe
+`core/imports/context.py`), sondern weil der manuelle Grab bislang nur
+`spotify_artist: None` setzte und nie das neutrale `artist`-Feld befüllte.
+
+**Fix (`core/library2/grab_context.py`):**
+- `resolve_lib2_grab_context` liefert jetzt zusätzlich `artist_name`,
+  `album_name`, `track_title`, `track_number`, `disc_number` — per JOIN
+  gegen `lib2_tracks`/`lib2_albums`/`lib2_artists` direkt aus der bereits
+  aufgelösten Entität (Ground Truth, zuverlässiger als das ggf. veraltete
+  Suchergebnis-Kärtchen im Browser).
+- Neue Funktion `build_lib2_import_pipeline_fields(data, lib2_context,
+  album_name=None)`: baut `{is_simple_download: False, artist: {name},
+  album: {name}, track_info}` aus der Entität — leer (`{}`) ohne aufgelöste
+  Entität (dann bleibt alles beim alten Simple-Download-Shortcut, unverändert
+  für den „Search-Seite ohne Library-Ziel"-Fall).
+- `web_server.py::start_download` (Album- und Single-Track-Zweig) nutzt das
+  jetzt zum Aufbau von `matched_downloads_context[...]` statt hartkodiertem
+  `is_simple_download: True` + `spotify_artist/album: None`.
+
+Ergebnis: ein Manual Grab mit bekanntem `lib2_track_id` durchläuft jetzt
+dieselbe volle Pipeline (echte Ordner-Platzierung, Tag-Schreibung,
+Quarantäne-Gate, Autolink) wie jeder Automatic-Search-Download — nur der
+Kandidat kommt vom Nutzer statt von der Suche. Ein Grab ohne Library-Ziel
+bleibt exakt beim alten `/Transfer`-Verhalten.
+
+**Bewusst nicht in diesem Slice:** Album-Grabs setzen `is_album_download`
+nicht explizit (wie zuvor) — jeder Track im Album-Grab durchläuft die
+normale Single-Track-Album-Erkennung (`detect_album_info_web`) statt
+forcierter Album-Gruppierung; funktioniert, ist aber nicht so robust wie ein
+echter Album-Bundle-Download. Kann bei Bedarf in einem eigenen Slice
+nachgezogen werden.
+
+**Verifikation:** `tests/library2/test_manual_grab_pipeline.py` (2 Tests:
+voller Pipeline-Pfad mit Autolink in einen echten organisierten Pfad +
+unveränderter Simple-Download-Shortcut ohne Entität) und
+`tests/library2/test_grab_context.py` (4 neue/angepasste Tests für die
+erweiterte Rückgabe + `build_lib2_import_pipeline_fields`). Gesamt
+`tests/library2` + `tests/imports` + `tests/wishlist`: **1624 grün** (6
+vorbestehende, unabhängige Failures in `tests/downloads/
+test_cross_batch_dedup.py` per `git stash`-Vergleich bestätigt bereits vor
+dieser Session vorhanden). `ruff check` sauber.
+
+---
+

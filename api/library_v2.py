@@ -3819,16 +3819,25 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         search_ids.append(payload["id"])
 
                 batch_id = None
+                dispatch_error = None
                 if search_ids and scoped_wishlist_search_dispatcher:
                     batch_payload = scoped_wishlist_search_dispatcher(search_ids, active_profile) or {}
                     if batch_payload.get("success"):
                         batch_id = batch_payload.get("batch_id")
+                    else:
+                        dispatch_error = batch_payload.get("error") or "Search dispatch failed"
+                        logger.error(
+                            "Scoped search (%s %s): dispatcher accepted %d wishlist id(s) "
+                            "but the download dispatch failed: %s",
+                            entity, eid, len(search_ids), dispatch_error,
+                        )
 
                 _job_registry.update(job_id, result={
                     "checked": len(track_ids),
                     "queued": queued,
                     "searching": len(search_ids),
                     "batch_id": batch_id,
+                    "dispatch_error": dispatch_error,
                 })
             except Exception as e:  # noqa: BLE001
                 logger.error("Scoped search failed (%s %s): %s", entity, eid, e, exc_info=True)

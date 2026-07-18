@@ -14,6 +14,7 @@ import type {
   LibraryV2ArtistTableColumns,
   LibraryV2FileTags,
   LibraryV2ImportState,
+  LibraryV2JobState,
   LibraryV2ManualSkip,
   LibraryV2MatchService,
   LibraryV2PlaylistPipelineState,
@@ -4833,19 +4834,38 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 }
 
 /** Poll the background bulk-job status until it settles, then refresh. */
-async function awaitBulkJob(
+async function awaitBulkJobState(
   queryClient: ReturnType<typeof useQueryClient>,
   jobId: string,
-): Promise<string | null> {
+): Promise<LibraryV2JobState> {
   for (let i = 0; i < 300; i += 1) {
     const state = await fetchLibraryV2JobStatus(jobId);
     if (!state.running) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      return state.error;
+      return state;
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
-  return 'Timed out waiting for the bulk job';
+  return {
+    job_id: jobId,
+    running: false,
+    kind: null,
+    current: 0,
+    total: 0,
+    result: null,
+    error: 'Timed out waiting for the bulk job',
+    started_at: null,
+    finished_at: null,
+  };
+}
+
+/** Poll the background bulk-job status until it settles, then refresh. */
+async function awaitBulkJob(
+  queryClient: ReturnType<typeof useQueryClient>,
+  jobId: string,
+): Promise<string | null> {
+  const state = await awaitBulkJobState(queryClient, jobId);
+  return state.error;
 }
 
 /** Deep-dive C1: run the scoped Automatic Search endpoint for exactly one
@@ -4859,8 +4879,10 @@ async function runScopedSearch(
 ): Promise<{ tone: 'ok' | 'err'; text: string }> {
   try {
     const jobId = await startLibraryV2ScopedSearch(entity, id);
-    const error = await awaitBulkJob(queryClient, jobId);
-    if (error) return { tone: 'err', text: `Search failed: ${error}` };
+    const state = await awaitBulkJobState(queryClient, jobId);
+    if (state.error) return { tone: 'err', text: `Search failed: ${state.error}` };
+    const dispatchError = state.result?.dispatch_error;
+    if (dispatchError) return { tone: 'err', text: `Search failed: ${dispatchError}` };
     return {
       tone: 'ok',
       text: 'Search started for the monitored missing/upgradable tracks in scope — progress on the Downloads page.',

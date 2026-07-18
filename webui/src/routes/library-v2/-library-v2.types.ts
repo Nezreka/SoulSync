@@ -427,7 +427,7 @@ export interface LibraryV2JobState {
   kind: string | null;
   current: number;
   total: number;
-  result: Record<string, number> | null;
+  result: Record<string, number | string | null> | null;
   error: string | null;
   started_at: number | null;
   finished_at: number | null;
