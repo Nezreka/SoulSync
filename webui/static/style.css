@@ -71674,3 +71674,11 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     .chat-side-item { width: auto; white-space: nowrap; }
     .chat-users { display: none; }
 }
+
+/* message-this-user links (chat P4) — any surface can render one */
+.chat-user-link {
+    border: none; background: transparent; padding: 0; cursor: pointer;
+    color: inherit; font: inherit; text-decoration: underline dotted rgba(255,255,255,0.35);
+    text-underline-offset: 2px;
+}
+.chat-user-link:hover { color: #1db954; text-decoration-color: #1db954; }

@@ -372,6 +372,31 @@
         _openRoomBase();
     };
 
-    window.ChatPage = { open: open, openPm: openPm,
+    // ── message-this-user from anywhere (P4) ─────────────────────────────────
+    // Any surface can render `<button data-chat-msg-user="name">` (download
+    // rows, search results…) — this one delegated handler navigates to the
+    // Chat page via the REAL nav link (both sides' routers do the rest) and
+    // opens the conversation. No inline onclick = no inline-JS escaping traps.
+    function messageUser(username) {
+        if (!username) return;
+        var onVideo = document.body.getAttribute('data-side') === 'video';
+        var link = document.querySelector(onVideo
+            ? '.nav-button[data-video-page="video-chat"]'
+            : '.nav-button[data-page="chat"]');
+        if (link) link.click();
+        // let the page activate, then open the conversation
+        setTimeout(function () { openPm(username); }, 120);
+    }
+
+    // CAPTURE phase: the username sits inside cards with their own click
+    // handlers (album expand etc.) — messaging must win, not toggle the card.
+    document.addEventListener('click', function (e) {
+        var t = e.target.closest('[data-chat-msg-user]');
+        if (!t) return;
+        e.preventDefault(); e.stopPropagation();
+        messageUser(t.getAttribute('data-chat-msg-user'));
+    }, true);
+
+    window.ChatPage = { open: open, openPm: openPm, messageUser: messageUser,
                         onRoomMessages: onRoomMessages, onUnread: onUnread };
 })();
