@@ -161,6 +161,43 @@ def test_authoritative_fields_fill_a_titleless_row_only():
     assert ytd.authoritative_download_fields(bare, {}) is bare                  # no title → no-op
 
 
+def test_extractor_date_overrides_a_scan_estimate():
+    # the GMM incident: the channel scan estimates dates from relative labels
+    # ('1 month ago' → today − 30.44d), and episode numbers are MMDD — five
+    # backlog videos all estimated 2026-06-17 landed as five colliding e0617
+    # files. yt-dlp's real upload_date must win over a differing context date.
+    est = {"id": 3, "title": "Guess The Instant Ramen Flavor",
+           "search_ctx": json.dumps({"channel": "GMM",
+                                     "video_title": "Guess The Instant Ramen Flavor",
+                                     "published_at": "2026-06-17"})}
+    fixed = ytd.authoritative_download_fields(est, {"title": "Guess The Instant Ramen Flavor",
+                                                    "published_at": "2026-05-22"})
+    assert fixed is not est
+    ctx = json.loads(fixed["search_ctx"])
+    assert ctx["published_at"] == "2026-05-22"          # real date wins
+    assert ctx["video_title"] == "Guess The Instant Ramen Flavor"   # title untouched
+    assert fixed["title"] == est["title"]               # row title untouched
+
+
+def test_matching_date_is_identity_no_replan():
+    # dates agree → no change → the caller must NOT re-plan/rename
+    good = {"id": 4, "title": "T",
+            "search_ctx": json.dumps({"video_title": "T", "published_at": "2026-07-17"})}
+    assert ytd.authoritative_download_fields(
+        good, {"title": "T", "published_at": "2026-07-17"}) is good
+
+
+def test_two_backlog_videos_stop_colliding():
+    # both estimated '1 month ago' → same date; real dates differ → distinct
+    mk = lambda i: {"id": i, "title": "GMM", "search_ctx": json.dumps(
+        {"channel": "GMM", "video_title": "V%d" % i, "published_at": "2026-06-17"})}
+    a = ytd.authoritative_download_fields(mk(1), {"title": "V1", "published_at": "2026-05-22"})
+    b = ytd.authoritative_download_fields(mk(2), {"title": "V2", "published_at": "2026-04-30"})
+    da = json.loads(a["search_ctx"])["published_at"]
+    db_ = json.loads(b["search_ctx"])["published_at"]
+    assert da != db_ and {da, db_} == {"2026-05-22", "2026-04-30"}
+
+
 def test_download_one_failure_is_captured_not_raised():
     res = ytd.download_one("vid1", "/yt", "stem", default_profile(), "mp4", ydl_factory=_BoomYDL)
     assert res["ok"] is False and "403 blocked" in res["error"]
