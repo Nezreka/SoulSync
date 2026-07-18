@@ -71975,3 +71975,11 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .art-picker-url:focus { outline: none; border-color: rgba(29,185,84,0.6); }
 .art-picker-custom-slot .art-picker-tile { max-width: 180px; }
 .art-picker-custom-err { font-size: 12.5px; color: #f0a05a; }
+
+/* artist photo picker: the current photo as a display-only reference tile */
+.art-picker-tile--current { cursor: default; opacity: 0.95; }
+.art-picker-tile--current:hover { transform: none; }
+.art-picker-badge--current {
+    background: rgba(29,185,84,0.85) !important; color: #06130a !important;
+    font-weight: 800;
+}
