@@ -12,7 +12,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import core.metadata.artist_image as ai
+
+
+@pytest.fixture(autouse=True)
+def _no_real_audiodb(monkeypatch):
+    # the gather now ALWAYS asks TheAudioDB — without this stub the legacy
+    # tests would hit the real network (and did, with a real Adele thumb)
+    monkeypatch.setattr(ai, "_audiodb", lambda: None)
 
 
 class _Client:
@@ -104,3 +113,71 @@ def test_set_artist_thumb_url_pins_and_workers_respect_it(tmp_path):
     assert db.get_artist(1).thumb_url == "https://picked/photo.jpg"
 
     assert db.set_artist_thumb_url(999, "x") is False   # unknown artist -> False
+
+
+class _AudioDbFake:
+    def __init__(self, thumb=None):
+        self.thumb = thumb
+        self.searched = []
+        self.looked_up = []
+
+    def search_artist(self, name):
+        self.searched.append(name)
+        return {"strArtistThumb": self.thumb} if self.thumb else None
+
+    def lookup_artist_by_id(self, sid):
+        self.looked_up.append(sid)
+        return {"strArtistThumb": self.thumb} if self.thumb else None
+
+
+def test_audiodb_is_actually_queried(monkeypatch):
+    """The endpoint docstring always promised AudioDB — but it wasn't in the
+    priority chain, so the picker never asked it. Now it always does."""
+    fake = _AudioDbFake(thumb="https://audiodb/adele.jpg")
+    monkeypatch.setattr(ai, "_audiodb", lambda: fake)
+    _wire_registry(monkeypatch, {"deezer": None}, ["deezer"])   # audiodb appended anyway
+
+    cands = ai.gather_artist_image_candidates("Adele", {})
+    assert cands == [{"source": "audiodb", "url": "https://audiodb/adele.jpg"}]
+    assert fake.searched == ["Adele"]
+
+    # a stored audiodb_id beats the name search
+    fake2 = _AudioDbFake(thumb="https://audiodb/exact.jpg")
+    monkeypatch.setattr(ai, "_audiodb", lambda: fake2)
+    cands = ai.gather_artist_image_candidates("Adele", {"audiodb_id": "111239"})
+    assert fake2.looked_up == ["111239"] and fake2.searched == []
+    assert cands[0]["url"] == "https://audiodb/exact.jpg"
+
+
+def test_imageless_search_hits_get_a_second_exact_fetch(monkeypatch):
+    """iTunes returns NO image on search hits by design — the picker now does
+    search → get_artist(top id) so iTunes finally contributes."""
+    class _ITunes(_Client):
+        def __init__(self):
+            super().__init__(image_url="https://itunes/art.jpg",
+                             search_hit=SimpleNamespace(id="it42", image_url=None))
+    monkeypatch.setattr(ai, "_audiodb", lambda: None)
+    _wire_registry(monkeypatch, {"itunes": _ITunes()}, ["itunes"])
+
+    cands = ai.gather_artist_image_candidates("Adele", {})
+    assert cands == [{"source": "itunes", "url": "https://itunes/art.jpg"}]
+
+
+def test_endpoint_cache_is_id_keyed_and_forgives_empties():
+    """Source pins: two same-name artists must not share a cache slot, and an
+    empty result (one transient source hiccup) must not stick for 15 minutes."""
+    from pathlib import Path
+    ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(
+        encoding="utf-8", errors="replace")
+    handler = ws.split("def get_artist_art_options")[1].split("\n@app.route")[0]
+    assert "cache_key = ('artist', int(artist_id))" in handler
+    assert "_ART_OPTIONS_EMPTY_TTL_S" in handler
+    assert "_ART_OPTIONS_EMPTY_TTL_S = 60" in ws
+
+
+def test_picker_grid_never_goes_silently_blank():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
+        encoding="utf-8", errors="replace")
+    # dead image URLs remove tiles — an emptied grid must SAY so
+    assert "none of the images would load" in js

@@ -3731,7 +3731,17 @@ function openAlbumArtPicker(album) {
                     '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
                     '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
                     '<span class="art-picker-check">' + _checkSvg + '</span>';
-                tile.querySelector('img').onerror = () => tile.remove();
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
                 tile.onclick = () => {
                     grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
                     tile.classList.add('selected');
@@ -3845,7 +3855,17 @@ function openArtistArtPicker() {
                     '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
                     '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
                     '<span class="art-picker-check">' + _checkSvg + '</span>';
-                tile.querySelector('img').onerror = () => tile.remove();
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
                 tile.onclick = () => {
                     grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
                     tile.classList.add('selected');

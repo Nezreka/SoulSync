@@ -10293,6 +10293,7 @@ def get_artist_discography(artist_id):
 _ART_OPTIONS_CACHE = {}                       # (artist_lower, album_lower) -> (ts, candidates)
 _ART_OPTIONS_CACHE_LOCK = threading.Lock()
 _ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several slow external calls
+_ART_OPTIONS_EMPTY_TTL_S = 60                  # empties retry fast: one hiccup must not stick
 
 
 @app.route('/api/album/<album_id>/art-options', methods=['GET'])
@@ -10418,11 +10419,14 @@ def get_artist_art_options(artist_id):
             return jsonify({"error": "Artist not found"}), 404
         name = getattr(artist_row, 'name', '') or ''
 
-        cache_key = ('artist', name.lower())
+        # Key by ROW id, not name: two artists sharing a name must not share
+        # a cache slot. Empty results only stick for a minute — a transient
+        # source failure used to poison the picker with 'no photos' for 15.
+        cache_key = ('artist', int(artist_id))
         now = time.time()
         with _ART_OPTIONS_CACHE_LOCK:
             hit = _ART_OPTIONS_CACHE.get(cache_key)
-            if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+            if hit and now - hit[0] < (_ART_OPTIONS_TTL_S if hit[1] else _ART_OPTIONS_EMPTY_TTL_S):
                 return jsonify({"artist_id": artist_id, "count": len(hit[1]),
                                 "candidates": hit[1], "cached": True})
 
