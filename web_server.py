@@ -11302,12 +11302,20 @@ def library_completion_stream():
             _loop_start = time.perf_counter()
             for _i, (category, item) in enumerate(all_items):
                 try:
-                    # Map Library field names to helper field names
+                    # Map Library field names to helper field names.
+                    # CRUCIAL: carry the card's YEAR through — the re-release
+                    # year gate (0e53851fd) needs it, and dropping it here
+                    # silently disabled the gate on the library page so owning
+                    # the original still lit up every re-release (5BILLION,
+                    # round 2). The artist-detail path already passes the card
+                    # dict straight through; this one rebuilt it and forgot.
                     mapped = {
                         'id': item['id'],
                         'name': item['title'],
                         'total_tracks': item.get('track_count', 0),
-                        'album_type': item.get('album_type', 'album')
+                        'album_type': item.get('album_type', 'album'),
+                        'year': item.get('year'),
+                        'release_date': item.get('release_date') or item.get('releaseDate'),
                     }
 
                     if category == 'singles':
