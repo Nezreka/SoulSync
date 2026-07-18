@@ -148,12 +148,30 @@
         return _restore(s, hold).replace(/\n/g, '<br>');
     }
 
+    function _hostOf(u) {
+        var m = u.match(/^https?:\/\/([^\/?#\s]+)/i);
+        return m ? m[1] : '';
+    }
+
     function renderRich(text) {
         var hold = [];
         var s = esc(_preclean(text));
-        // 1) protect code spans + URLs from markdown mangling
+        // 1) protect literal regions from markdown mangling: code BLOCKS first
+        //    (their newlines survive inside <pre> because placeholders skip the
+        //    later \n→<br> pass), then inline code, then masked links + URLs
+        s = _extract(s, /```\n?([\s\S]+?)\n?```/g, hold, function (_, c) {
+            return '<pre class="chat-codeblock">' + c + '</pre>';
+        });
         s = _extract(s, /`([^`\n]+)`/g, hold, function (_, c) {
             return '<code class="chat-code">' + c + '</code>';
+        });
+        // [label](url) masked links — with the real domain disclosed right
+        // after the label, so a masked link can't impersonate another site
+        s = _extract(s, /\[([^\]\n]{1,80})\]\((https?:\/\/[^\s)]+)\)/g, hold, function (m) {
+            var mm = m.match(/^\[([^\]]+)\]\((.+)\)$/);
+            var label = mm[1], url = mm[2];
+            return '<a class="chat-link" href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+                label + '</a><span class="chat-link-domain">(' + _hostOf(url) + ')</span>';
         });
         s = _extract(s, URL_RE, hold, function (m) {
             var u = _trimUrl(m);
@@ -172,16 +190,21 @@
             });
         // 2) markdown subset (on escaped text — tags below are OURS, not input's)
         s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/__([^_\n]+)__/g, '<u>$1</u>');
         s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
         s = s.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
         s = s.replace(/\|\|([^|\n]+)\|\|/g,
             '<span class="chat-spoiler" data-chat-spoiler title="Spoiler — click to reveal">$1</span>');
         // 3) emoji shortcodes
         s = s.replace(/:([a-z0-9_+-]+):/g, function (m, name) { return EMOJI[name] || m; });
-        // 4) quotes ('> ' lines; '>' escaped to &gt; above)
+        // 4) line-level blocks: headings, quotes, bullets ('>' is &gt; here)
         s = s.split('\n').map(function (line) {
-            return line.indexOf('&gt; ') === 0
-                ? '<span class="chat-quote">' + line.slice(5) + '</span>' : line;
+            if (line.indexOf('### ') === 0) return '<span class="chat-h3">' + line.slice(4) + '</span>';
+            if (line.indexOf('## ') === 0) return '<span class="chat-h2">' + line.slice(3) + '</span>';
+            if (line.indexOf('# ') === 0) return '<span class="chat-h1">' + line.slice(2) + '</span>';
+            if (line.indexOf('&gt; ') === 0) return '<span class="chat-quote">' + line.slice(5) + '</span>';
+            if (line.indexOf('- ') === 0) return '<span class="chat-li">•&nbsp;' + line.slice(2) + '</span>';
+            return line;
         }).join('\n');
         return _restore(s.replace(/\n/g, '<br>'), hold);
     }

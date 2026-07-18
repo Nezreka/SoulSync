@@ -71763,3 +71763,18 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .chat-hidden-note {
     text-align: center; font-size: 11.5px; color: rgba(255,255,255,0.35); padding: 8px 0;
 }
+
+/* chat: extended formatting (chatux P2) */
+.chat-msg-text .chat-codeblock {
+    display: block; margin: 6px 0; padding: 10px 12px; border-radius: 9px;
+    font-family: 'SF Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.5;
+    background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.09);
+    white-space: pre-wrap; word-break: break-word; max-width: 640px;
+}
+.chat-h1, .chat-h2, .chat-h3 { display: block; font-weight: 800; color: #fff; margin: 4px 0 2px; }
+.chat-h1 { font-size: 19px; }
+.chat-h2 { font-size: 16.5px; }
+.chat-h3 { font-size: 14.5px; }
+.chat-li { display: block; padding-left: 10px; }
+.chat-link-domain { font-size: 11px; color: rgba(255,255,255,0.35); margin-left: 4px; }
+.chat-msg-text u { text-underline-offset: 2px; }
