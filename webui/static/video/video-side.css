@@ -3671,6 +3671,15 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-st--monitored { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.65); }
 .vwsh-st--upgrade { background: hsla(282, 80%, 62%, 0.18); color: hsl(282, 90%, 78%); }
 .vwsh-movie-art .vwsh-st { position: absolute; top: 8px; left: 8px; z-index: 2; backdrop-filter: blur(6px); }
+/* Repeatedly-failing marker (#liveleak-failing-hub) — sits under the status pill */
+.vwsh-failing {
+    position: absolute; top: 34px; left: 8px; z-index: 2;
+    font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px;
+    color: #fca5a5; background: rgba(220, 38, 38, 0.22);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    backdrop-filter: blur(6px); cursor: default;
+}
+.vwsh-failing-inline { color: #fca5a5; font-weight: 700; cursor: default; }
 
 /* 'Search now' — per-item manual search (movie art / episode row / season side) */
 .vwsh-hunt { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.12);

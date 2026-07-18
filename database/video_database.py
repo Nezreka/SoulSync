@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 43   # v43: shows.series_type (daily/anime, P8); v42: video_requests (in-app Overseerr, arr-parity P4); v41: one-time details_synced heal
+SCHEMA_VERSION = 44   # v44: video_wishlist.search_attempts/last_search_at (failing visibility); v43: shows.series_type (daily/anime, P8); v42: video_requests (in-app Overseerr, arr-parity P4)
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -157,6 +157,10 @@ _BACKFILL_COLS = {
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
 _COLUMN_MIGRATIONS = [
+    # video_wishlist — consecutive fruitless drain searches per row, so the UI can
+    # mark repeatedly-failing items (#liveleak-failing-hub). Reset on a grab.
+    ("video_wishlist", "search_attempts", "INTEGER DEFAULT 0"),
+    ("video_wishlist", "last_search_at", "TEXT"),
     # video_downloads — media identity for the Downloads page cards (poster + open).
     ("video_downloads", "media_id", "TEXT"),
     ("video_downloads", "media_source", "TEXT"),
@@ -5710,6 +5714,35 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def record_wishlist_search_outcome(self, kind: str, tmdb_id, grabbed: bool,
+                                       season_number=None, episode_number=None) -> None:
+        """Track consecutive fruitless drain searches per wishlist row
+        (#liveleak-failing-hub): a grab resets the counter, a genuinely
+        fruitless search (no results / all rejected) increments it. Searches
+        that never RAN (slskd down, rate-limited) must not be recorded — the
+        caller owns that distinction. Best-effort; never raises."""
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None and episode_number is not None:
+                where += " AND season_number=? AND episode_number=?"
+                args += [int(season_number), int(episode_number)]
+            if grabbed:
+                conn.execute(
+                    "UPDATE video_wishlist SET search_attempts=0, "
+                    "last_search_at=datetime('now') WHERE " + where, args)
+            else:
+                conn.execute(
+                    "UPDATE video_wishlist SET "
+                    "search_attempts=COALESCE(search_attempts,0)+1, "
+                    "last_search_at=datetime('now') WHERE " + where, args)
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("record_wishlist_search_outcome failed")
+        finally:
+            conn.close()
+
     def query_wishlist(self, kind: str, *, search=None, sort="added", page=1, limit=60) -> dict:
         """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
         → shows grouped show→season→episode with wanted/done roll-ups. ``sort`` ∈
@@ -5732,12 +5765,15 @@ class VideoDatabase:
                          "added": "date_added DESC, id DESC"}.get(sort, "date_added DESC, id DESC")
                 total = conn.execute("SELECT COUNT(*) c FROM video_wishlist" + wsql, args).fetchone()["c"]
                 rows = conn.execute(
-                    "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added "
+                    "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added, "
+                    "search_attempts, last_search_at "
                     "FROM video_wishlist" + wsql + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                     args + [limit, (page - 1) * limit]).fetchall()
                 items = [{"kind": "movie", "tmdb_id": r["tmdb_id"], "title": r["title"],
                           "poster_url": r["poster_url"], "year": r["year"], "status": r["status"],
-                          "library_id": r["library_id"]} for r in rows]
+                          "library_id": r["library_id"],
+                          "search_attempts": r["search_attempts"] or 0,
+                          "last_search_at": r["last_search_at"]} for r in rows]
             else:   # shows (grouped from episode rows)
                 where, args = ["kind='episode'"], []
                 if s:
@@ -5759,7 +5795,8 @@ class VideoDatabase:
                 for sr in show_rows:
                     eps = conn.execute(
                         "SELECT season_number, episode_number, episode_title, still_url, "
-                        "episode_overview, season_poster_url, air_date, status "
+                        "episode_overview, season_poster_url, air_date, status, "
+                        "search_attempts, last_search_at "
                         "FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
                         "ORDER BY season_number, episode_number", (sr["tmdb_id"],)).fetchall()
                     by_season: dict = {}
@@ -5768,7 +5805,9 @@ class VideoDatabase:
                         by_season.setdefault(e["season_number"], []).append({
                             "episode_number": e["episode_number"], "title": e["episode_title"],
                             "still_url": e["still_url"], "overview": e["episode_overview"],
-                            "air_date": e["air_date"], "status": e["status"]})
+                            "air_date": e["air_date"], "status": e["status"],
+                            "search_attempts": e["search_attempts"] or 0,
+                            "last_search_at": e["last_search_at"]})
                         if e["season_poster_url"] and e["season_number"] not in season_poster:
                             season_poster[e["season_number"]] = e["season_poster_url"]
                     seasons = [{"season_number": sn, "poster_url": season_poster.get(sn),

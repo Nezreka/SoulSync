@@ -391,6 +391,27 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
 _running: Dict[str, bool] = {"movie": False, "episode": False}
 
 
+def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool) -> None:
+    """Persist the drain search outcome on the wishlist row (#liveleak-failing-hub):
+    a grab resets search_attempts, a fruitless search increments it. Callers skip
+    this entirely when the search never ran (slskd down) — that's not evidence
+    the release doesn't exist. Best-effort: a db hiccup never breaks the drain."""
+    try:
+        from api.video import get_video_db
+        # episode drain items alias the show id as show_tmdb_id (movie items
+        # carry plain tmdb_id) — read both or episodes silently never record
+        tmdb = item.get('tmdb_id') or item.get('show_tmdb_id')
+        if not tmdb:
+            return
+        get_video_db().record_wishlist_search_outcome(
+            'movie' if media_type == 'movie' else 'episode',
+            tmdb, grabbed,
+            season_number=item.get('season_number'),
+            episode_number=item.get('episode_number'))
+    except Exception:   # noqa: BLE001 - visibility must never break acquisition
+        logger.debug("record_wishlist_search_outcome failed", exc_info=True)
+
+
 def is_running(media_type: str) -> bool:
     return bool(_running.get(media_type))
 
@@ -405,6 +426,7 @@ def auto_video_process_wishlist(
     target_dir: Optional[Callable[[str], str]] = None,
     search: Optional[Callable[[Dict[str, Any], str], List[Dict[str, Any]]]] = None,
     enqueue: Optional[Callable[..., bool]] = None,
+    record_outcome: Optional[Callable[[Dict[str, Any], str, bool], None]] = None,
 ) -> Dict[str, Any]:
     """Auto-grab the wished movies (or episodes): search Soulseek, pick the best release,
     enqueue. Processes the whole eligible wishlist, a few searches at a time.
@@ -415,6 +437,7 @@ def auto_video_process_wishlist(
     target_dir = target_dir or _default_target_dir
     search = search or _default_search
     enqueue = enqueue or _default_enqueue
+    record_outcome = record_outcome or _default_record_outcome
     automation_id = config.get('_automation_id')
     concurrency = max(1, int(config.get('max_concurrent', 3) or 3))
     label = 'movie' if media_type == 'movie' else 'episode'
@@ -500,6 +523,12 @@ def auto_video_process_wishlist(
                 msg, lt = "%d result(s) for '%s', none accepted — %s" % (len(cands), name, why), 'info'
                 if err:
                     msg, lt = msg + " · " + str(err), 'warning'
+            # Failing visibility (#liveleak-failing-hub): record the outcome on
+            # the wishlist row — but only when the search actually RAN. A search
+            # that never ran (slskd down / rate-limited) says nothing about
+            # whether the release exists and must not push a row toward failing.
+            if not didnt_run:
+                record_outcome(it, media_type, ok)
             with lock:
                 searched[0] += 1
                 if ok:
