@@ -130,6 +130,7 @@ class ShortPreviewTrackJob(RepairJob):
         # owned files and DECODE them with ffmpeg to get the real length.
         verify_zero = self._setting_bool(context, "verify_zero_length", True)
 
+        rows = []
         conn = context.db._get_connection()
         try:
             cursor = conn.cursor()
@@ -151,8 +152,43 @@ class ShortPreviewTrackJob(RepairJob):
                 (max_dur_ms,),
             )
             rows = [dict(r) for r in cursor.fetchall()]
+        except Exception as exc:
+            # A failed legacy query must not abort native Library-v2 coverage.
+            logger.error("short-preview legacy query failed: %s", exc)
+            result.errors += 1
         finally:
             conn.close()
+
+        # Native Library-v2 coverage: short active files without a legacy
+        # backref, with their provider ids so the source length check works.
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                duration = subject.get("duration") or 0
+                if not duration or duration > max_dur_ms:
+                    continue
+                file_path = str(subject["path"])
+                native_subjects[file_path] = subject
+                rows.append({
+                    "id": f"lib2:{subject['track_id']}",
+                    "title": subject["title"],
+                    "duration": duration,
+                    "file_path": file_path,
+                    "spotify_track_id": subject.get("spotify_track_id"),
+                    "itunes_track_id": subject.get("itunes_track_id"),
+                    "musicbrainz_recording_id": subject.get("musicbrainz_recording_id"),
+                    "artist_name": subject.get("artist_name"),
+                    "artist_thumb": subject.get("artist_image"),
+                    "album_title": subject.get("album_title"),
+                    "album_thumb": subject.get("album_image"),
+                })
+        except Exception as exc:
+            logger.warning("V2 subject enumeration failed: %s", exc)
+            result.errors += 1
 
         total = len(rows)
         if context.report_progress:
@@ -219,6 +255,22 @@ class ShortPreviewTrackJob(RepairJob):
                 title = row["title"] or "Unknown"
                 artist = row["artist_name"] or "Unknown"
                 try:
+                    finding_details = {
+                        "track_id": row["id"],
+                        "title": row["title"],
+                        "artist": row["artist_name"],
+                        "album": row["album_title"],
+                        "album_thumb_url": album_image,
+                        "artist_thumb_url": row["artist_thumb"],
+                        "file_duration_s": round(file_dur_s, 1),
+                        "expected_duration_s": round(expected_dur_s, 1),
+                        "original_path": row["file_path"],
+                    }
+                    subject = native_subjects.get(str(row["file_path"]))
+                    if subject:
+                        from core.library2.maintenance_sync import v2_subject_details
+
+                        finding_details.update(v2_subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type="short_preview_track",
@@ -232,17 +284,7 @@ class ShortPreviewTrackJob(RepairJob):
                             f"{expected_dur_s:.0f}s at the source — looks like a preview clip. "
                             "Approve to delete it and re-download the full version."
                         ),
-                        details={
-                            "track_id": row["id"],
-                            "title": row["title"],
-                            "artist": row["artist_name"],
-                            "album": row["album_title"],
-                            "album_thumb_url": album_image,
-                            "artist_thumb_url": row["artist_thumb"],
-                            "file_duration_s": round(file_dur_s, 1),
-                            "expected_duration_s": round(expected_dur_s, 1),
-                            "original_path": row["file_path"],
-                        },
+                        details=finding_details,
                     )
                     if inserted:
                         result.findings_created += 1

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.repair_jobs.base import JobContext
+from core.repair_jobs.base import JobContext, JobResult
 
 
 class _Config:
@@ -557,6 +557,320 @@ def test_cover_art_fix_applies_natively_to_v2_album(legacy_db, tmp_path):
     finally:
         conn.close()
     assert row[0] == "http://new-art"
+
+
+class _ToolConfig(_Config):
+    """_Config plus arbitrary extra keys for tool-specific settings."""
+
+    def __init__(self, enabled: bool = True, extra: dict | None = None):
+        super().__init__(enabled)
+        self.extra = extra or {}
+
+    def get(self, key, default=None):
+        if key in self.extra:
+            return self.extra[key]
+        return super().get(key, default)
+
+
+def test_corruption_scanner_covers_v2_only_file(legacy_db, tmp_path, monkeypatch):
+    from core.repair_jobs import audio_corruption_detector as mod
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-corrupt.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Damaged")
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "check_flac_integrity", lambda path: (False, "bad frame"))
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    mod.AudioCorruptionDetectorJob().scan(context)
+
+    native = [f for f in findings if f["entity_id"] == f"lib2:{track_id}"]
+    assert len(native) == 1
+    assert native[0]["details"]["library_v2"]["file_id"] == file_id
+
+
+def test_preview_scanner_covers_v2_only_file(legacy_db, tmp_path, monkeypatch):
+    from core.repair_jobs.short_preview_track import ShortPreviewTrackJob
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-preview.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Clip")
+    conn = legacy_db._get_connection()
+    conn.execute("UPDATE lib2_tracks SET duration=25000 WHERE id=?", (track_id,))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(
+        ShortPreviewTrackJob, "_lookup_source",
+        lambda self, context, row: {"duration_s": 200.0, "album_image": None},
+    )
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    ShortPreviewTrackJob().scan(context)
+
+    native = [f for f in findings if f["entity_id"] == f"lib2:{track_id}"]
+    assert len(native) == 1
+    assert native[0]["details"]["library_v2"]["file_id"] == file_id
+
+
+def test_lossy_converter_covers_v2_only_file(legacy_db, tmp_path):
+    from core.repair_jobs.lossy_converter import LossyConverterJob
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-lossless.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Lossless Only")
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_ToolConfig(True, {
+            "lossy_copy.enabled": True,
+            "lossy_copy.codec": "mp3",
+            "lossy_copy.bitrate": "320",
+        }),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    LossyConverterJob().scan(context)
+
+    native = [f for f in findings if f["entity_id"] == f"lib2:{track_id}"]
+    assert len(native) == 1
+    assert native[0]["details"]["library_v2"]["file_id"] == file_id
+
+
+def test_fake_lossless_scanner_covers_v2_only_file(legacy_db, tmp_path, monkeypatch):
+    from core.repair_jobs import fake_lossless_detector as mod
+
+    _import(legacy_db)
+    transfer = tmp_path / "transfer"
+    transfer.mkdir()
+    audio = tmp_path / "v2-fake.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Fake Lossless")
+    monkeypatch.setattr(mod, "_is_ffprobe_available", lambda: True)
+    monkeypatch.setattr(
+        mod, "_analyze_file",
+        lambda path: {"sample_rate": 44100, "detected_cutoff_khz": 10.0,
+                      "bit_depth": 16, "bitrate": 900000},
+    )
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(transfer),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    mod.FakeLosslessDetectorJob().scan(context)
+
+    native = [f for f in findings if f["file_path"] == str(audio)]
+    assert len(native) == 1
+    assert native[0]["details"]["library_v2"]["file_id"] == file_id
+
+
+def test_metadata_gap_scanner_covers_v2_only_track(legacy_db, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from core.repair_jobs.metadata_gap_filler import MetadataGapFillerJob
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-gap.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Gapped Song")
+    monkeypatch.setattr(
+        "core.repair_jobs.metadata_gap_filler.get_primary_source", lambda: "spotify"
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.metadata_gap_filler.get_source_priority",
+        lambda primary: ["spotify"],
+    )
+    fake_mb = SimpleNamespace(
+        search_recording=lambda title, artist_name=None, limit=1: [{"id": "mb-999"}]
+    )
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        mb_client=fake_mb,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    MetadataGapFillerJob().scan(context)
+
+    native = [f for f in findings if f["entity_id"] == f"lib2:{track_id}"]
+    assert len(native) == 1
+    assert native[0]["details"]["found_fields"]["musicbrainz_recording_id"] == "mb-999"
+    assert native[0]["details"]["library_v2"]["track_id"] == track_id
+
+
+def test_metadata_gap_fix_writes_natively_to_v2_track(legacy_db, tmp_path):
+    from core.repair_worker import RepairWorker
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-gap-fix.flac"
+    audio.write_bytes(b"audio")
+    track_id, _file_id = _add_v2_only_file(legacy_db, audio, title="Gap Fix")
+    worker = RepairWorker(database=legacy_db, transfer_folder=str(tmp_path))
+    worker._config_manager = _Config(True)
+
+    result = worker._fix_metadata_gap(
+        "track", f"lib2:{track_id}", None,
+        {"found_fields": {"isrc": "DE1234567890",
+                          "musicbrainz_recording_id": "mb-42"}},
+    )
+
+    assert result["success"] is True, result
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT isrc, musicbrainz_id FROM lib2_tracks WHERE id=?", (track_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "DE1234567890"
+    assert row[1] == "mb-42"
+
+
+def test_corrupt_fix_deletes_v2_only_file_and_rewishlists(legacy_db, tmp_path):
+    from core.repair_worker import RepairWorker
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-corrupt-fix.flac"
+    audio.write_bytes(b"audio")
+    track_id, _file_id = _add_v2_only_file(legacy_db, audio, title="Corrupt Fix")
+    wishlisted = []
+    legacy_db.add_to_wishlist = (
+        lambda payload, **kwargs: wishlisted.append(payload) or True
+    )
+    worker = RepairWorker(database=legacy_db, transfer_folder=str(tmp_path))
+    worker._config_manager = _Config(True)
+
+    result = worker._fix_corrupt_audio(
+        "track", f"lib2:{track_id}", str(audio), {"reason": "bad frame"},
+    )
+
+    assert result["success"] is True, result
+    assert result["library_v2_file_deleted"] is True
+    assert not audio.exists()
+    assert wishlisted and wishlisted[0]["name"] == "Corrupt Fix"
+
+
+def test_preview_fix_deletes_v2_only_file_and_rewishlists(legacy_db, tmp_path):
+    from core.repair_worker import RepairWorker
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-preview-fix.flac"
+    audio.write_bytes(b"audio")
+    track_id, _file_id = _add_v2_only_file(legacy_db, audio, title="Preview Fix")
+    wishlisted = []
+    legacy_db.add_to_wishlist = (
+        lambda payload, **kwargs: wishlisted.append(payload) or True
+    )
+    worker = RepairWorker(database=legacy_db, transfer_folder=str(tmp_path))
+    worker._config_manager = _Config(True)
+
+    result = worker._fix_short_preview_track(
+        "track", f"lib2:{track_id}", str(audio),
+        {"expected_duration_s": 200.0},
+    )
+
+    assert result["success"] is True, result
+    assert result["library_v2_file_deleted"] is True
+    assert not audio.exists()
+    assert wishlisted and wishlisted[0]["name"] == "Preview Fix"
+
+
+def test_tag_consistency_scanner_covers_v2_only_album(legacy_db, tmp_path, monkeypatch):
+    from core.repair_jobs import album_tag_consistency as mod
+
+    _import(legacy_db)
+    audio_a = tmp_path / "v2-tags-01.flac"
+    audio_a.write_bytes(b"audio")
+    album_id, artist_id, track_a, _file_a = _add_v2_only_album(
+        legacy_db, audio_a, title="Split Album"
+    )
+    audio_b = tmp_path / "v2-tags-02.flac"
+    audio_b.write_bytes(b"audio")
+    conn = legacy_db._get_connection()
+    track_b = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?,'T2',2)",
+        (album_id,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, file_state, is_primary) "
+        "VALUES(?,?, 'active', 1)",
+        (track_b, str(audio_b)),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(mod, "MutagenFile", lambda path, easy=False: path)
+
+    def fake_read(audio, tag_name):
+        if tag_name == "album":
+            return "Version A" if str(audio).endswith("01.flac") else "Version B"
+        return None
+
+    monkeypatch.setattr(mod, "_read_tag", fake_read)
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    mod.AlbumTagConsistencyJob().scan(context)
+
+    native = [f for f in findings if f["entity_id"] == f"lib2:{album_id}"]
+    assert len(native) == 1
+    assert native[0]["details"]["library_v2"]["album_id"] == album_id
+    fields = {inc["field"] for inc in native[0]["details"]["inconsistencies"]}
+    assert "album" in fields
+
+
+def test_track_number_repair_visits_v2_only_folders(legacy_db, tmp_path, monkeypatch):
+    from core.repair_jobs.track_number_repair import TrackNumberRepairJob
+
+    _import(legacy_db)
+    music = tmp_path / "music"
+    music.mkdir()
+    audio = music / "01 - Song.flac"
+    audio.write_bytes(b"audio")
+    _add_v2_only_file(legacy_db, audio, title="Song")
+    transfer = tmp_path / "transfer"
+    transfer.mkdir()
+    visited = []
+    monkeypatch.setattr(
+        TrackNumberRepairJob, "_repair_album",
+        lambda self, folder, filenames, *args, **kwargs: (
+            visited.append((folder, tuple(sorted(filenames)))) or JobResult()
+        ),
+    )
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(transfer),
+        config_manager=_Config(True),
+    )
+
+    TrackNumberRepairJob().scan(context)
+
+    assert (str(music), ("01 - Song.flac",)) in visited
 
 
 def test_every_registered_job_declares_v2_effects():

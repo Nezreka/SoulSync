@@ -115,6 +115,30 @@ class LossyConverterJob(RepairJob):
             if conn:
                 conn.close()
 
+        # Native Library-v2 coverage: active lossless files without a legacy
+        # backref (same extension pre-filter as the SQL above).
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+            tracks = list(tracks)
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                file_path = str(subject["path"])
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext not in LOSSLESS_CANDIDATE_EXTENSIONS:
+                    continue
+                native_subjects[file_path] = subject
+                tracks.append((
+                    f"lib2:{subject['track_id']}", subject["title"],
+                    subject["artist_name"], subject["album_title"], file_path,
+                    subject.get("album_image"), subject.get("artist_image"),
+                ))
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
+
         total = len(tracks)
         if context.update_progress:
             context.update_progress(0, total)
@@ -152,8 +176,18 @@ class LossyConverterJob(RepairJob):
                 )
 
             # Resolve path
-            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
-                                           config_manager=context.config_manager)
+            subject = native_subjects.get(str(file_path))
+            if subject:
+                if os.path.isfile(file_path):
+                    resolved = file_path
+                else:
+                    from core.library2.paths import resolve_lib2_path
+
+                    resolved = resolve_lib2_path(
+                        file_path, config_manager=context.config_manager)
+            else:
+                resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
+                                              config_manager=context.config_manager)
             if not resolved or not os.path.exists(resolved):
                 skipped_missing += 1
                 continue
@@ -183,6 +217,24 @@ class LossyConverterJob(RepairJob):
             if context.create_finding:
                 try:
                     file_size = os.path.getsize(resolved)
+                    finding_details = {
+                        'track_id': track_id,
+                        'title': title,
+                        'artist': artist_name,
+                        'album': album_title,
+                        'file_path': file_path,
+                        'resolved_path': resolved,
+                        'codec': codec,
+                        'bitrate': bitrate,
+                        'quality_label': quality_label,
+                        'file_size': file_size,
+                        'album_thumb_url': album_thumb or None,
+                        'artist_thumb_url': artist_thumb or None,
+                    }
+                    if subject:
+                        from core.library2.maintenance_sync import v2_subject_details
+
+                        finding_details.update(v2_subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lossy_copy',
@@ -195,20 +247,7 @@ class LossyConverterJob(RepairJob):
                             f'Lossless file "{title}" by {artist_name or "Unknown"} does not have '
                             f'a {quality_label} copy alongside it'
                         ),
-                        details={
-                            'track_id': track_id,
-                            'title': title,
-                            'artist': artist_name,
-                            'album': album_title,
-                            'file_path': file_path,
-                            'resolved_path': resolved,
-                            'codec': codec,
-                            'bitrate': bitrate,
-                            'quality_label': quality_label,
-                            'file_size': file_size,
-                            'album_thumb_url': album_thumb or None,
-                            'artist_thumb_url': artist_thumb or None,
-                        }
+                        details=finding_details
                     )
                     if inserted:
                         result.findings_created += 1

@@ -101,10 +101,44 @@ class MetadataGapFillerJob(RepairJob):
         except Exception as e:
             logger.error("Error fetching tracks with metadata gaps: %s", e, exc_info=True)
             result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
+            tracks = []
+            column_index = {}
+
+        if conn:
+            conn.close()
+
+        # Native Library-v2 coverage: tracks without a legacy backref, deduped
+        # to one row per track (the enumerator yields one row per file).
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+            tracks = list(tracks)
+            pad = [None] * len(column_index)
+            scope_lower = scope_artist.lower() if scope_artist else None
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                entity = f"lib2:{subject['track_id']}"
+                if entity in native_subjects:
+                    continue
+                isrc_missing = fill_isrc and not (subject.get('isrc') or '').strip()
+                mbid_missing = fill_mb_id and not (
+                    subject.get('musicbrainz_recording_id') or '').strip()
+                if not (isrc_missing or mbid_missing):
+                    continue
+                if scope_lower and (subject.get('artist_name') or '').lower() != scope_lower:
+                    continue
+                native_subjects[entity] = subject
+                tracks.append((
+                    entity, subject['title'], subject['artist_name'],
+                    subject['album_title'], subject.get('isrc'),
+                    subject.get('musicbrainz_recording_id'),
+                    subject.get('album_image'), subject.get('artist_image'), *pad,
+                ))
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
 
         total = len(tracks)
         if context.update_progress:
@@ -182,6 +216,23 @@ class MetadataGapFillerJob(RepairJob):
                 if context.create_finding:
                     try:
                         field_names = ', '.join(found_fields.keys())
+                        finding_details = {
+                            'track_id': track_id,
+                            'title': title,
+                            'artist': artist_name,
+                            'album': album_title,
+                            'track_ids': source_track_ids,
+                            'resolved_source': resolved_source,
+                            'resolved_track_id': resolved_track_id,
+                            'found_fields': found_fields,
+                            'album_thumb_url': album_thumb or None,
+                            'artist_thumb_url': artist_thumb or None,
+                        }
+                        subject = native_subjects.get(str(track_id))
+                        if subject:
+                            from core.library2.maintenance_sync import v2_subject_details
+
+                            finding_details.update(v2_subject_details(subject))
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='metadata_gap',
@@ -194,18 +245,7 @@ class MetadataGapFillerJob(RepairJob):
                                 f'Track "{title}" by {artist_name or "Unknown"} is missing: {field_names}. '
                                 f'Found values from API lookup.'
                             ),
-                            details={
-                                'track_id': track_id,
-                                'title': title,
-                                'artist': artist_name,
-                                'album': album_title,
-                                'track_ids': source_track_ids,
-                                'resolved_source': resolved_source,
-                                'resolved_track_id': resolved_track_id,
-                                'found_fields': found_fields,
-                                'album_thumb_url': album_thumb or None,
-                                'artist_thumb_url': artist_thumb or None,
-                            }
+                            details=finding_details
                         )
                         if inserted:
                             result.findings_created += 1

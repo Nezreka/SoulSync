@@ -84,18 +84,48 @@ class TrackNumberRepairJob(RepairJob):
         transfer = context.transfer_folder
         if not os.path.isdir(transfer):
             logger.warning("Transfer folder does not exist: %s", transfer)
-            return result
 
         # Collect album folders (directories containing audio files)
         album_folders: Dict[str, List[str]] = {}
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    album_folders.setdefault(root, []).append(fname)
+        if os.path.isdir(transfer):
+            for root, dirs, files in os.walk(transfer):
+                skip_deleted_quarantine(root, dirs, transfer)
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        album_folders.setdefault(root, []).append(fname)
+
+        # Native Library-v2 coverage: folders of active V2 files that live
+        # outside the transfer walk (deduped against the walked folders).
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.paths import resolve_lib2_path
+
+            transfer_norm = os.path.normcase(os.path.normpath(transfer)) + os.sep
+            walked = {os.path.normcase(os.path.normpath(f)) for f in album_folders}
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                raw = str(subject['path'])
+                resolved = raw if os.path.isfile(raw) else resolve_lib2_path(
+                    raw, config_manager=context.config_manager)
+                if not resolved or not os.path.isfile(resolved):
+                    continue
+                if os.path.splitext(resolved)[1].lower() not in AUDIO_EXTENSIONS:
+                    continue
+                folder = os.path.dirname(resolved)
+                folder_norm = os.path.normcase(os.path.normpath(folder))
+                if folder_norm in walked or folder_norm.startswith(transfer_norm):
+                    continue
+                fname = os.path.basename(resolved)
+                bucket = album_folders.setdefault(folder, [])
+                if fname not in bucket:
+                    bucket.append(fname)
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
 
         total = sum(len(fnames) for fnames in album_folders.values())
         if context.update_progress:

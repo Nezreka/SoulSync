@@ -1487,6 +1487,47 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def _load_lib2_redownload_row(self, native_track_id: int) -> Optional[Dict[str, Any]]:
+        """Load the redownload payload fields for a native Library-v2 track in
+        the same shape the legacy ``tracks`` SELECT produces, so the preview/
+        corrupt delete+rewishlist handlers work identically for both."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute("""
+                SELECT t.id, t.title, t.track_number, t.duration, t.isrc,
+                       t.spotify_id AS spotify_track_id,
+                       t.external_ids AS external_ids,
+                       ar.name AS artist_name,
+                       ar.spotify_id AS spotify_artist_id,
+                       al.title AS album_title,
+                       al.spotify_id AS spotify_album_id,
+                       al.album_type AS record_type,
+                       al.track_count, al.year,
+                       al.image_url AS album_thumb
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE t.id = ?
+            """, (native_track_id,)).fetchone()
+            if row is None:
+                return None
+            payload = dict(row)
+            external = {}
+            try:
+                parsed = json.loads(payload.pop('external_ids', None) or '{}')
+                if isinstance(parsed, dict):
+                    external = parsed
+            except (TypeError, ValueError):
+                pass
+            payload['itunes_track_id'] = external.get('itunes')
+            payload['deezer_id'] = external.get('deezer')
+            payload.setdefault('bitrate', None)
+            return payload
+        finally:
+            if conn:
+                conn.close()
+
     def _fix_short_preview_track(self, entity_type, entity_id, file_path, details):
         """Approve a preview-clip finding: delete the ~30s preview file, drop its DB row, and
         re-add the track to the wishlist (full payload) so the real version downloads. Mirrors
@@ -1494,22 +1535,26 @@ class RepairWorker:
         """
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
+        native_track_id = _lib2_id(entity_id)
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration, t.bitrate,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
-                       ar.name AS artist_name, ar.spotify_artist_id,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
+            if native_track_id is not None:
+                row = self._load_lib2_redownload_row(native_track_id)
+            else:
+                cursor.execute("""
+                    SELECT t.id, t.title, t.track_number, t.duration, t.bitrate,
+                           t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
+                           ar.name AS artist_name, ar.spotify_artist_id,
+                           al.title AS album_title, al.spotify_album_id,
+                           al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
+                    FROM tracks t
+                    LEFT JOIN artists ar ON ar.id = t.artist_id
+                    LEFT JOIN albums al ON al.id = t.album_id
+                    WHERE t.id = ?
+                """, (entity_id,))
+                row = cursor.fetchone()
             if not row:
                 return {'success': False, 'error': 'Track not found in database'}
 
@@ -1573,10 +1618,15 @@ class RepairWorker:
             deleted_file = False
             target_path = file_path or details.get('original_path')
             if target_path:
-                download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                resolved = _resolve_file_path(target_path, self.transfer_folder,
-                                              download_folder=download_folder,
-                                              config_manager=self._config_manager)
+                if native_track_id is not None:
+                    from core.library2.paths import resolve_lib2_path
+                    resolved = target_path if os.path.isfile(target_path) else (
+                        resolve_lib2_path(target_path, config_manager=self._config_manager))
+                else:
+                    download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+                    resolved = _resolve_file_path(target_path, self.transfer_folder,
+                                                  download_folder=download_folder,
+                                                  config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
@@ -1584,9 +1634,12 @@ class RepairWorker:
                     except Exception as e:
                         logger.warning("Could not delete preview file %s: %s", resolved, e)
 
-            # Drop the DB row so the track shows as missing.
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-            conn.commit()
+            # Drop the legacy DB row so the track shows as missing. Native V2
+            # subjects have no legacy row; the maintenance bridge marks the V2
+            # file deleted and recomputes Wanted from the fix result instead.
+            if native_track_id is None:
+                cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted preview clip and re-wishlisted "{track_name}" for full download'
@@ -1608,22 +1661,26 @@ class RepairWorker:
         """
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
+        native_track_id = _lib2_id(entity_id)
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
-                       ar.name AS artist_name, ar.spotify_artist_id,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
+            if native_track_id is not None:
+                row = self._load_lib2_redownload_row(native_track_id)
+            else:
+                cursor.execute("""
+                    SELECT t.id, t.title, t.track_number, t.duration,
+                           t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
+                           ar.name AS artist_name, ar.spotify_artist_id,
+                           al.title AS album_title, al.spotify_album_id,
+                           al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
+                    FROM tracks t
+                    LEFT JOIN artists ar ON ar.id = t.artist_id
+                    LEFT JOIN albums al ON al.id = t.album_id
+                    WHERE t.id = ?
+                """, (entity_id,))
+                row = cursor.fetchone()
             if not row:
                 return {'success': False, 'error': 'Track not found in database'}
 
@@ -1685,10 +1742,15 @@ class RepairWorker:
             deleted_file = False
             target_path = file_path or details.get('original_path')
             if target_path:
-                download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                resolved = _resolve_file_path(target_path, self.transfer_folder,
-                                              download_folder=download_folder,
-                                              config_manager=self._config_manager)
+                if native_track_id is not None:
+                    from core.library2.paths import resolve_lib2_path
+                    resolved = target_path if os.path.isfile(target_path) else (
+                        resolve_lib2_path(target_path, config_manager=self._config_manager))
+                else:
+                    download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+                    resolved = _resolve_file_path(target_path, self.transfer_folder,
+                                                  download_folder=download_folder,
+                                                  config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
@@ -1696,9 +1758,12 @@ class RepairWorker:
                     except Exception as e:
                         logger.warning("Could not delete corrupt file %s: %s", resolved, e)
 
-            # Drop the DB row so the track shows as missing.
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-            conn.commit()
+            # Drop the legacy DB row so the track shows as missing. Native V2
+            # subjects have no legacy row; the maintenance bridge marks the V2
+            # file deleted and recomputes Wanted from the fix result instead.
+            if native_track_id is None:
+                cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted corrupt file and re-wishlisted "{track_name}" for download'
@@ -2240,6 +2305,39 @@ class RepairWorker:
             return {'success': False, 'error': 'No metadata fields found in finding details'}
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
+
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            native_columns = {
+                'isrc': 'isrc',
+                'musicbrainz_recording_id': 'musicbrainz_id',
+                'spotify_track_id': 'spotify_id',
+                'bpm': 'bpm', 'tempo': 'bpm',
+                'explicit': 'explicit',
+                'style': 'style', 'mood': 'mood',
+            }
+            native_updates = {}
+            for key, value in found_fields.items():
+                column = native_columns.get(key.lower())
+                if column:
+                    native_updates[column] = value
+            if not native_updates:
+                return {'success': False, 'error': 'No applicable metadata fields to update'}
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                set_parts = [f"{column} = ?" for column in native_updates]
+                conn.execute(
+                    f"UPDATE lib2_tracks SET {', '.join(set_parts)}, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (*native_updates.values(), native_track_id),
+                )
+                conn.commit()
+            finally:
+                if conn:
+                    conn.close()
+            return {'success': True, 'action': 'applied_metadata',
+                    'message': f'Applied metadata: {", ".join(native_updates)}'}
 
         # Map found_fields to DB-updatable fields
         field_map = {
@@ -2962,6 +3060,11 @@ class RepairWorker:
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder, config_manager=self._config_manager)
+            if not resolved and details.get('library_v2_native'):
+                from core.library2.paths import resolve_lib2_path
+                resolved = resolve_lib2_path(track_file, config_manager=self._config_manager)
+            if not resolved and os.path.isfile(track_file):
+                resolved = track_file
             if not resolved or not os.path.exists(resolved):
                 continue
 

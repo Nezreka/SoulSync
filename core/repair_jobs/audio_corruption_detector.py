@@ -187,6 +187,27 @@ class AudioCorruptionDetectorJob(RepairJob):
             if conn:
                 conn.close()
 
+        # Native Library-v2 coverage: active files without a legacy backref.
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                file_path = str(subject["path"])
+                native_subjects[file_path] = subject
+                rows.append({
+                    'id': f"lib2:{subject['track_id']}",
+                    'title': subject['title'],
+                    'artist_name': subject['artist_name'],
+                    'album_title': subject['album_title'],
+                    'file_path': file_path,
+                })
+        except Exception as e:
+            logger.warning("[Corrupt File Detector] V2 subject enumeration failed: %s", e)
+            result.errors += 1
+
         # Narrow to FLAC up front so progress reflects the real work-list.
         rows = [r for r in rows
                 if os.path.splitext(r['file_path'])[1].lower() in _CORRUPT_CHECK_EXTS]
@@ -209,7 +230,15 @@ class AudioCorruptionDetectorJob(RepairJob):
             result.scanned += 1
             title = row['title'] or 'Unknown'
             artist = row['artist_name'] or 'Unknown'
-            resolved = _resolve(row['file_path'], context)
+            subject = native_subjects.get(str(row['file_path']))
+            if subject:
+                from core.library2.paths import resolve_lib2_path
+
+                resolved = row['file_path'] if os.path.isfile(row['file_path']) else (
+                    resolve_lib2_path(row['file_path'],
+                                      config_manager=context.config_manager))
+            else:
+                resolved = _resolve(row['file_path'], context)
 
             if not resolved:
                 unresolved += 1
@@ -255,6 +284,18 @@ class AudioCorruptionDetectorJob(RepairJob):
 
             if context.create_finding:
                 try:
+                    finding_details = {
+                        'track_id': row['id'],
+                        'title': row['title'],
+                        'artist': row['artist_name'],
+                        'album': row['album_title'],
+                        'reason': reason,
+                        'original_path': row['file_path'],
+                    }
+                    if subject:
+                        from core.library2.maintenance_sync import v2_subject_details
+
+                        finding_details.update(v2_subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='corrupt_audio',
@@ -267,14 +308,7 @@ class AudioCorruptionDetectorJob(RepairJob):
                             f'"{title}" by {artist} failed a decode test '
                             f'({reason}). The audio is damaged and can\'t be repaired by '
                             're-tagging — approve to delete it and re-download the real version.'),
-                        details={
-                            'track_id': row['id'],
-                            'title': row['title'],
-                            'artist': row['artist_name'],
-                            'album': row['album_title'],
-                            'reason': reason,
-                            'original_path': row['file_path'],
-                        })
+                        details=finding_details)
                     if inserted:
                         result.findings_created += 1
                     else:

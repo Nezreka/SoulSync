@@ -53,19 +53,44 @@ class FakeLosslessDetectorJob(RepairJob):
         cutoff_khz = settings.get('spectral_cutoff_khz', 16.0)
 
         transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return result
 
         # Collect lossless files
         lossless_files = []
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in LOSSLESS_EXTENSIONS:
-                    lossless_files.append(os.path.join(root, fname))
+        if os.path.isdir(transfer):
+            for root, dirs, files in os.walk(transfer):
+                skip_deleted_quarantine(root, dirs, transfer)
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in LOSSLESS_EXTENSIONS:
+                        lossless_files.append(os.path.join(root, fname))
+
+        # Native Library-v2 coverage: active lossless V2 files outside the
+        # transfer walk (deduped on normalized path).
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+            from core.library2.paths import resolve_lib2_path
+
+            walked = {os.path.normcase(os.path.normpath(p)) for p in lossless_files}
+            for subject in v2_uncovered_file_subjects(
+                context.db, context.config_manager,
+            ):
+                raw = str(subject["path"])
+                if os.path.splitext(raw)[1].lower() not in LOSSLESS_EXTENSIONS:
+                    continue
+                resolved = raw if os.path.isfile(raw) else resolve_lib2_path(
+                    raw, config_manager=context.config_manager)
+                if not resolved or not os.path.isfile(resolved):
+                    continue
+                if os.path.normcase(os.path.normpath(resolved)) in walked:
+                    continue
+                native_subjects[resolved] = subject
+                lossless_files.append(resolved)
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
 
         total = len(lossless_files)
         if context.update_progress:
@@ -111,12 +136,27 @@ class FakeLosslessDetectorJob(RepairJob):
                             log_type='error'
                         )
                     if context.create_finding:
+                        finding_details = {
+                            'detected_cutoff_khz': round(detected_cutoff, 1),
+                            'expected_min_khz': cutoff_khz,
+                            'sample_rate': sample_rate,
+                            'nyquist_khz': round(max_freq_khz, 1),
+                            'format': os.path.splitext(fpath)[1].lower().lstrip('.'),
+                            'bit_depth': analysis.get('bit_depth'),
+                            'bitrate': analysis.get('bitrate'),
+                            'file_size': os.path.getsize(fpath),
+                        }
+                        subject = native_subjects.get(fpath)
+                        if subject:
+                            from core.library2.maintenance_sync import v2_subject_details
+
+                            finding_details.update(v2_subject_details(subject))
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='fake_lossless',
                             severity='warning',
                             entity_type='file',
-                            entity_id=None,
+                            entity_id=f"lib2:{subject['track_id']}" if subject else None,
                             file_path=fpath,
                             title=f'Possible fake lossless: {os.path.basename(fpath)}',
                             description=(
@@ -124,16 +164,7 @@ class FakeLosslessDetectorJob(RepairJob):
                                 f'(expected >{cutoff_khz:.1f} kHz for true lossless). '
                                 f'File may be transcoded from a lossy source.'
                             ),
-                            details={
-                                'detected_cutoff_khz': round(detected_cutoff, 1),
-                                'expected_min_khz': cutoff_khz,
-                                'sample_rate': sample_rate,
-                                'nyquist_khz': round(max_freq_khz, 1),
-                                'format': os.path.splitext(fpath)[1].lower().lstrip('.'),
-                                'bit_depth': analysis.get('bit_depth'),
-                                'bitrate': analysis.get('bitrate'),
-                                'file_size': os.path.getsize(fpath),
-                            }
+                            details=finding_details
                         )
                         if inserted:
                             result.findings_created += 1
