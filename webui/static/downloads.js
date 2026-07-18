@@ -3199,7 +3199,12 @@ function _renderCandidateRow(c, index, rowClass, showSourceBadge) {
         <td class="candidates-col-quality">${qBadge}${c.bitrate ? ` ${c.bitrate}kbps` : ''}</td>
         <td class="candidates-col-size">${_candidatesFmtSize(c.size)}</td>
         <td class="candidates-col-duration">${_candidatesFmtDur(c.duration)}</td>
-        <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${escapeHtml(c.username || '-')}</td>
+        <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${
+            // only SOULSEEK peers are messageable (torrent/youtube "usernames" aren't Soulseek users)
+            (c.username && (!c.source || /soulseek/i.test(String(c.source))))
+                ? `<button type="button" class="chat-user-link" data-chat-msg-user="${escapeHtml(c.username).replace(/"/g, '&quot;')}" title="Message this user on Soulseek">${escapeHtml(c.username)}</button>`
+                : escapeHtml(c.username || '-')
+        }</td>
         <td class="candidates-col-action"><button class="candidates-download-btn" data-index="${index}" title="Download this file">⬇</button></td>
     </tr>`;
 }
@@ -5258,7 +5263,7 @@ function displayDownloadsResults(results) {
                             <div class="album-details">
                                 ${trackCount} tracks • ${totalSize} • ${escapeHtml(result.quality || 'Mixed')}
                             </div>
-                            <div class="album-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
+                            <div class="album-uploader">Shared by <button type="button" class="chat-user-link" data-chat-msg-user="${escapeHtml(result.username || '').replace(/"/g, '&quot;')}" title="Message this user on Soulseek">${escapeHtml(result.username || 'Unknown')}</button></div>
                         </div>
                         <div class="album-actions" onclick="event.stopPropagation()">
                             <button onclick="downloadAlbum(${index})" class="album-download-btn">⬇ Download Album</button>
@@ -5282,7 +5287,7 @@ function displayDownloadsResults(results) {
                         <div class="track-details">
                             ${sizeText} • ${escapeHtml(result.quality || 'Unknown')} ${bitrateText}
                         </div>
-                        <div class="track-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
+                        <div class="track-uploader">Shared by <button type="button" class="chat-user-link" data-chat-msg-user="${escapeHtml(result.username || '').replace(/"/g, '&quot;')}" title="Message this user on Soulseek">${escapeHtml(result.username || 'Unknown')}</button></div>
                     </div>
                     <div class="track-actions">
                         <button onclick="streamTrack(${index})" class="track-stream-btn" title="Stream Track">Stream ▶</button>

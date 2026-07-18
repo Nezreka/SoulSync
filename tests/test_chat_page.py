@@ -106,3 +106,21 @@ class TestPush:
         assert "unread.room = 0; updateBadges();" in _CHAT_JS
         # a rising PM count toasts (journals into the bell); reads stay silent
         assert "d.grew && typeof showToast === 'function'" in _CHAT_JS
+
+
+class TestMessageUserHooks:
+    """P4 — message-this-user from download/search surfaces."""
+
+    def test_delegated_capture_handler(self):
+        assert "data-chat-msg-user" in _CHAT_JS
+        assert "}, true);" in _CHAT_JS          # capture phase beats card handlers
+        assert "messageUser" in _CHAT_JS
+
+    def test_download_surfaces_render_the_hook(self):
+        dl = (_ROOT / "webui" / "static" / "downloads.js").read_text(
+            encoding="utf-8", errors="replace")
+        assert dl.count("data-chat-msg-user=") == 3      # album + track + candidates
+        # escapeHtml leaves double quotes — every attr site must strip them
+        assert dl.count("escapeHtml(result.username || '').replace(/\"/g, '&quot;')") == 2
+        # candidates: only SOULSEEK peers are messageable (torrent rows aren't users)
+        assert "/soulseek/i.test(String(c.source))" in dl
