@@ -83,6 +83,15 @@
             return (s.season_number > best.season_number) ? s : best;
         }, pool[0]).season_number;
     }
+    // Continue Watching: land on the season you're actually IN (Netflix behavior)
+    // when the show has a next-up episode; otherwise the usual latest season.
+    function initialSeasonNum(d) {
+        var nu = d && d.next_up;
+        if (nu && (d.seasons || []).some(function (s) { return s.season_number === nu.season_number; })) {
+            return nu.season_number;
+        }
+        return defaultSeasonNum(d && d.seasons);
+    }
     function seasonArt(s) {
         // tmdb + youtube carry direct (already-proxied for yt) art urls on the payload.
         if (data && (data.source === 'tmdb' || data.source === 'youtube')) return s.poster_url || data.poster_url || '';
@@ -238,9 +247,16 @@
         } else if (d.kind === 'show') {
             var ownedPct = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
             meta.push('<span class="vd-match">' + ownedPct + '% in library</span>');
+            // Continue Watching: how far through the show you are (server truth).
+            if (d.watched) meta.push('<span class="vd-watched-tag" title="Every episode watched">✓ Watched</span>');
+            else if (d.watched_episodes > 0) {
+                meta.push('<span class="vd-watched-tag" title="Episodes watched on your server">✓ ' +
+                    d.watched_episodes + ' of ' + d.episode_total + ' watched</span>');
+            }
         } else {
             meta.push(d.owned ? '<span class="vd-match">In library</span>'
                 : '<span class="vd-status">Wanted</span>');
+            if (d.watched) meta.push('<span class="vd-watched-tag" title="Watched on your server">✓ Watched</span>');
         }
         if (d.rating) meta.push('<span class="vd-score">★ ' + (Math.round(d.rating * 10) / 10) + '</span>');
         if (d.year) meta.push('<span>' + esc(d.year) + '</span>');
@@ -478,12 +494,27 @@
         if (d.server && d.server.url) {
             var sv = esc(d.server.server || 'Server');
             var slogo = SERVER_LOGOS[d.server.server];
+            // Continue Watching: shows deep-link the NEXT episode ("Resume S2 E4"),
+            // an in-progress movie says Resume (the server resumes it itself).
+            var snu = d.server.next_up;
+            var href = (snu && d.server.episode_url) ? d.server.episode_url : d.server.url;
+            var verb = 'Play', epTag = '', tip = 'Play on ' + sv;
+            if (snu) {
+                verb = snu.resume ? 'Resume' : 'Play';
+                epTag = '<span class="vd-play-ep">S' + snu.season + ' E' + snu.episode + '</span>';
+                tip = (snu.resume ? 'Resume' : 'Next up') + ' S' + snu.season + ' E' + snu.episode + ' on ' + sv;
+            } else if (d.kind === 'movie' && !d.watched && (d.view_offset_ms || 0) > 0) {
+                verb = 'Resume';
+                var left = d.runtime_minutes
+                    ? Math.max(1, Math.round(d.runtime_minutes - d.view_offset_ms / 60000)) : 0;
+                tip = 'Resume on ' + sv + (left ? ' · ' + left + ' min left' : '');
+            }
             var inner = slogo
-                ? '<span class="vd-play-ic">▶</span><span>Play on</span>' +
-                  '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="' + sv + '">'
-                : '<span class="vd-play-ic">▶</span><span>Play on ' + sv + '</span>';
-            html += '<a class="vd-play-btn" href="' + esc(d.server.url) +
-                '" target="_blank" rel="noopener" title="Play on ' + sv + '">' + inner + '</a>';
+                ? '<span class="vd-play-ic">▶</span><span>' + verb + ' on</span>' +
+                  '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="' + sv + '">' + epTag
+                : '<span class="vd-play-ic">▶</span><span>' + verb + ' on ' + sv + '</span>' + epTag;
+            html += '<a class="vd-play-btn" href="' + esc(href) +
+                '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
         if (d.trailer && d.trailer.key) {
             html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
@@ -1349,6 +1380,17 @@
     function episodeRow(ep) {
         if (data && data.source === 'youtube') return ytEpisodeRow(ep);
         var owned = ep.owned ? 'vd-ep--owned' : 'vd-ep--missing';
+        // Continue Watching: watched check / in-progress bar / next-up highlight
+        // (all server truth from the scan; a TMDB preview has none of it).
+        var inProgress = !ep.watched && (ep.view_offset_ms || 0) > 0 && ep.runtime_minutes;
+        var progPct = inProgress
+            ? Math.max(2, Math.min(98, Math.round(ep.view_offset_ms / (ep.runtime_minutes * 60000) * 100)))
+            : 0;
+        var nu = data && data.next_up;
+        var isNext = !!(nu && nu.season_number === selectedSeason &&
+                        nu.episode_number === ep.episode_number);
+        if (ep.watched) owned += ' vd-ep--watched';
+        if (isNext) owned += ' vd-ep--next';
         var meta = [];
         var rt = runtimeLabel(ep.runtime_minutes); if (rt) meta.push(rt);
         if (ep.air_date) meta.push(ep.air_date);
@@ -1362,10 +1404,17 @@
         if (ep.rating) meta.push('★ ' + (Math.round(ep.rating * 10) / 10));
         var key = selectedSeason + '_' + ep.episode_number;
         // Row + a sibling expand panel (guest stars etc. load lazily on open).
+        var prog = inProgress
+            ? '<span class="vd-ep-prog"><span class="vd-ep-prog-fill" style="width:' + progPct + '%"></span></span>'
+            : '';
+        var check = ep.watched ? '<span class="vd-ep-check" title="Watched">✓</span>' : '';
+        var nextChip = isNext
+            ? '<span class="vd-ep-next-chip">' + (inProgress ? 'Resume' : 'Next up') + '</span>'
+            : '';
         return '<div class="vd-ep ' + owned + '" data-vd-ep-key="' + key + '">' +
             '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + '</div>' +
-            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span></div>' +
-            '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
+            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span>' + prog + '</div>' +
+            '<div class="vd-ep-info"><div class="vd-ep-top">' + check + nextChip + '<span class="vd-ep-title">' +
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
@@ -1747,7 +1796,7 @@
                 if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
                 if (currentId !== id || currentKind !== 'show') return;
                 data = d; menuOpen = false; missingOnly = false;
-                selectedSeason = defaultSeasonNum(d.seasons);
+                selectedSeason = initialSeasonNum(d);
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = !(d.seasons && d.seasons.length); mt.classList.remove('vd-missing-toggle--on'); }
                 renderBillboard(d);
@@ -1868,7 +1917,7 @@
                 d.next_episode = prev.next_episode || null;
                 data = d;
                 if (!seasonByNum(selectedSeason)) {
-                    selectedSeason = defaultSeasonNum(d.seasons);
+                    selectedSeason = initialSeasonNum(d);
                 }
                 renderBillboard(d); renderSeasonNav(); renderEpisodes();
             })
