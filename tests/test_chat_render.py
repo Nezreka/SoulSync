@@ -64,6 +64,21 @@ class TestWiring:
     def test_own_room_echo_renders_rich(self):
         assert "rich: state.view === 'room'" in _CHAT_JS
 
+    def test_external_clients_are_tagged_and_filterable(self):
+        # a plaintext ROOM message = a non-SoulSync client; tagged + dimmed,
+        # and the head toggle can hide them entirely (persisted)
+        assert "state.view === 'room' && !m.rich && !self" in _CHAT_JS
+        assert "chat-ext-tag" in _CHAT_JS and "via Soulseek" in _CHAT_JS
+        assert "data-chat-filter" in _CHAT_JS
+        assert "localStorage.setItem('chat_ss_only'" in _CHAT_JS
+        assert "from other Soulseek clients hidden" in _CHAT_JS
+
+    def test_auto_join_has_an_opt_out(self):
+        ws = (_ROOT / "web_server.py").read_text(encoding="utf-8", errors="replace")
+        loop = ws.split("def _emit_chat_push_loop")[1].split("\ndef ")[0]
+        # without this the loop re-joins an opted-out user every 6s (un-leaveable)
+        assert "soulseek.chat_auto_join" in loop
+
     def test_deep_links_are_path_whitelisted(self):
         # only universal shapes chip: artist source-ids + tmdb video ids;
         # 'library'-source video ids are local rows and must never travel

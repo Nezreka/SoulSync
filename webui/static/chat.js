@@ -20,7 +20,9 @@
         lastStamp: null,         // newest message timestamp we've rendered
         stickBottom: true,       // autoscroll unless the user scrolled up
         started: false,
+        ssOnly: false,           // room filter: show only SoulSync-app messages
     };
+    try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
 
     function q(sel) {
         var page = document.getElementById('chat-page');
@@ -225,9 +227,13 @@
     function messageRow(m) {
         var user = m.username || m.user || '?';
         var self = m.self === true || m.direction === 'Out';
-        return '<div class="chat-msg' + (self ? ' chat-msg--self' : '') + '">' +
+        // the envelope IS the app signature: a plaintext room message means the
+        // sender is on another Soulseek client, not SoulSync
+        var ext = state.view === 'room' && !m.rich && !self;
+        return '<div class="chat-msg' + (self ? ' chat-msg--self' : '') + (ext ? ' chat-msg--ext' : '') + '">' +
             '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) + '" ' +
                 'title="Message ' + attr(user) + '">' + esc(user) + '</button>' +
+            (ext ? '<span class="chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '') +
             '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
             '<div class="chat-msg-text">' +
             (m.rich ? renderRich(m.message) : renderPlain(m.message)) +
@@ -248,7 +254,14 @@
         var newest = String(msgs[msgs.length - 1].timestamp || '') + ':' + msgs.length;
         if (newest === state.lastStamp && host.childElementCount) return;   // nothing new
         state.lastStamp = newest;
-        host.innerHTML = msgs.map(messageRow).join('');
+        var shown = msgs, hidden = 0;
+        if (state.view === 'room' && state.ssOnly) {
+            shown = msgs.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
+            hidden = msgs.length - shown.length;
+        }
+        host.innerHTML = shown.map(messageRow).join('') +
+            (hidden ? '<div class="chat-hidden-note">' + hidden +
+                ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden</div>' : '');
         if (state.stickBottom) host.scrollTop = host.scrollHeight;
     }
 
@@ -296,7 +309,12 @@
         if (!head) return;
         head.innerHTML = state.view === 'room'
             ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
-              '<span class="chat-head-sub">the SoulSync community room on Soulseek</span>'
+              '<span class="chat-head-sub">the SoulSync community room on Soulseek</span>' +
+              '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
+              '" type="button" data-chat-filter title="' +
+              (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
+                            : 'Showing everything — click to hide other Soulseek clients') + '">' +
+              (state.ssOnly ? 'SoulSync only' : 'All messages') + '</button>'
             : '<span class="chat-head-title">' + esc(state.pmUser || '') + '</span>' +
               '<span class="chat-head-sub">private message</span>';
     }
@@ -500,6 +518,14 @@
             if (t) { toggleEmojiPicker(); return; }
             t = e.target.closest('[data-chat-emoji-pick]');
             if (t) { insertAtCursor(t.getAttribute('data-chat-emoji-pick')); toggleEmojiPicker(true); return; }
+            t = e.target.closest('[data-chat-filter]');
+            if (t) {
+                state.ssOnly = !state.ssOnly;
+                try { localStorage.setItem('chat_ss_only', state.ssOnly ? '1' : '0'); } catch (err) { /* ignore */ }
+                state.lastStamp = null;
+                renderHead(); refresh();
+                return;
+            }
             t = e.target.closest('[data-chat-open-room]');
             if (t) { openRoom(); return; }
             t = e.target.closest('[data-chat-open-pm]');
