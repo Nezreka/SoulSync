@@ -576,6 +576,16 @@
             html += '<button class="vd-manage-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
                 '<span class="vd-manage-ic">✎</span> Manage</button>';
         }
+        // Synchronize — a deep scan scoped to THIS show: re-reads it from the
+        // server and reconciles episodes (adds + removals) without waiting for
+        // a full library scan. Library shows only (needs a local row).
+        var libShowId = (d.kind === 'show' && ownLibItem)
+            ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
+        if (libShowId != null) {
+            html += '<button class="vd-manage-btn" type="button" data-vd-act="sync-show" data-vd-sync-id="' + esc(libShowId) +
+                '" title="Re-read this show from your server — picks up new or removed episodes">' +
+                '<span class="vd-manage-ic">⟳</span> Synchronize</button>';
+        }
         a.innerHTML = html;
     }
 
@@ -1791,6 +1801,46 @@
         el.hidden = !on;
     }
 
+    // Per-show Synchronize (server re-read). Synchronous on the backend (one
+    // show reads in seconds); the response says exactly what changed.
+    function syncShowNow(btn) {
+        var id = btn.getAttribute('data-vd-sync-id');
+        if (!id || btn.disabled) return;
+        btn.disabled = true;
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<span class="vd-manage-ic">⟳</span> Syncing…';
+        fetch('/api/video/detail/show/' + encodeURIComponent(id) + '/sync', { method: 'POST' })
+            .then(function (r) { return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; }); })
+            .then(function (d) {
+                btn.disabled = false;
+                btn.innerHTML = orig;
+                if (!d || !d.success) {
+                    if (typeof showToast === 'function') showToast(d && d.error ? d.error : 'Sync failed', 'error');
+                    return;
+                }
+                if (d.show_removed) {
+                    if (typeof showToast === 'function') showToast('"' + (d.title || 'Show') + '" is no longer on your server — removed from the library', 'warning');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-library' }));
+                    return;
+                }
+                var bits = [];
+                if (d.episodes_added) bits.push('+' + d.episodes_added + ' episode' + (d.episodes_added !== 1 ? 's' : ''));
+                if (d.episodes_removed) bits.push('−' + d.episodes_removed + ' episode' + (d.episodes_removed !== 1 ? 's' : ''));
+                if (d.files_added) bits.push('+' + d.files_added + ' file' + (d.files_added !== 1 ? 's' : ''));
+                if (d.files_removed) bits.push('−' + d.files_removed + ' file' + (d.files_removed !== 1 ? 's' : ''));
+                if (typeof showToast === 'function') {
+                    showToast('Synchronized' + (bits.length ? ': ' + bits.join(', ') : ' — no changes'), 'success');
+                }
+                var rid = parseInt(id, 10);
+                if (!isNaN(rid) && currentId === rid) reloadDetail(rid);
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.innerHTML = orig;
+                if (typeof showToast === 'function') showToast('Sync failed — could not reach the server', 'error');
+            });
+    }
+
     function reloadDetail(id) {
         fetch(DETAIL_URL + 'show/' + id, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -2394,6 +2444,7 @@
             else if (which === 'wishlist-missing') wishlistAllMissing(act);
             else if (which === 'poster') openPosterModal();
             else if (which === 'manage') openManagePanel();
+            else if (which === 'sync-show') syncShowNow(act);
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);

@@ -474,6 +474,20 @@ class PlexVideoSource:
                 except Exception:
                     logger.exception("Plex: skipping movie %s", getattr(m, "title", "?"))
 
+    def show_tree(self, server_id):
+        """The full tree for ONE show (same shape iter_shows yields) — the
+        per-show Synchronize. Returns None ONLY when Plex positively says the
+        item is gone (NotFound); any other failure raises, so a server hiccup
+        can never read as 'show removed'."""
+        from plexapi.exceptions import NotFound
+        try:
+            item = self._server.fetchItem(int(server_id))
+        except NotFound:
+            return None
+        if getattr(item, "type", "") != "show":
+            return None   # re-keyed to something else entirely — treat as gone
+        return self._show(item)
+
     def iter_shows(self, incremental=False, since=None):
         for section in self._scan_sections("show", self._tv_lib):
             # Delta = shows ADDED since our last scan (addedAt, not updatedAt — Plex's nightly
@@ -1511,6 +1525,22 @@ class JellyfinVideoSource:
         }
         d.update(_parse_jf_providers(it))
         return d
+
+    def show_tree(self, server_id):
+        """The full tree for ONE show — the per-show Synchronize. Jellyfin's
+        request helper collapses every failure into None, so 'gone' is only
+        believed when the item is missing while the server still answers a
+        health probe; an unreachable server raises instead (a hiccup must
+        never read as 'show removed')."""
+        it = self._req(f"/Users/{self.uid}/Items/{server_id}",
+                       {"Fields": _JF_SHOW_FIELDS})
+        if it and it.get("Id"):
+            if (it.get("Type") or "") != "Series":
+                return None   # re-keyed to something else entirely — treat as gone
+            return self._show(it)
+        if self._req(f"/Users/{self.uid}/Views") is None:
+            raise RuntimeError("Jellyfin unreachable — cannot verify the show's state")
+        return None
 
     def iter_shows(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
