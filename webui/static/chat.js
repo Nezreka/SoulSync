@@ -66,6 +66,36 @@
         return '<a class="chat-link" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>';
     }
 
+    // ── embeds (richchat P3): click-to-load, never auto-load ─────────────────
+    // Loading a remote image reveals your IP to whoever hosts it — so nothing
+    // fetches until the reader clicks the chip. Works for BOTH rich and plain
+    // messages (rendering is our choice, not the sender's).
+    var IMG_RE = /\.(png|jpe?g|gif|webp|avif)(\?[^\s]*)?$/i;
+
+    function _ytId(u) {
+        // u is escaped text: undo &amp; on a PARSING COPY only
+        var raw = u.replace(/&amp;/g, '&');
+        var m = raw.match(/youtube\.com\/watch\?(?:[^\s&]*&)*v=([A-Za-z0-9_-]{6,20})/) ||
+                raw.match(/youtu\.be\/([A-Za-z0-9_-]{6,20})/) ||
+                raw.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{6,20})/);
+        return m ? m[1] : null;
+    }
+
+    function _linkWithEmbeds(u) {
+        var html = _linkHtml(u);
+        var yt = _ytId(u);
+        if (yt) {
+            // id is regex-constrained to [A-Za-z0-9_-] — attribute-safe by shape
+            return html + ' <button type="button" class="chat-embed-chip" data-chat-embed-yt="' +
+                yt + '" title="Play here (YouTube)">▶ play</button>';
+        }
+        if (IMG_RE.test(u)) {
+            return html + ' <button type="button" class="chat-embed-chip" data-chat-embed-img="' +
+                u + '" title="Load this image (reveals your IP to its host)">🖼 show</button>';
+        }
+        return html;
+    }
+
     function _extract(s, regex, out, transform) {
         return s.replace(regex, function (m, g1) {
             var kept = transform ? transform(m, g1) : m;
@@ -88,7 +118,7 @@
         var hold = [];
         var s = _extract(esc(_preclean(text)), URL_RE, hold, function (m) {
             var u = _trimUrl(m);
-            return _linkHtml(u) + m.slice(u.length);
+            return _linkWithEmbeds(u) + m.slice(u.length);
         });
         return _restore(s, hold).replace(/\n/g, '<br>');
     }
@@ -102,7 +132,7 @@
         });
         s = _extract(s, URL_RE, hold, function (m) {
             var u = _trimUrl(m);
-            return _linkHtml(u) + m.slice(u.length);
+            return _linkWithEmbeds(u) + m.slice(u.length);
         });
         // 2) markdown subset (on escaped text — tags below are OURS, not input's)
         s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
@@ -408,7 +438,22 @@
         page.setAttribute('data-chat-bound', '1');
 
         page.addEventListener('click', function (e) {
-            var t = e.target.closest('[data-chat-spoiler]');
+            var t = e.target.closest('[data-chat-embed-yt]');
+            if (t) {
+                t.outerHTML = '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
+                    t.getAttribute('data-chat-embed-yt') +
+                    '" allow="encrypted-media; picture-in-picture" allowfullscreen ' +
+                    'referrerpolicy="no-referrer" loading="lazy"></iframe></span>';
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-img]');
+            if (t) {
+                t.outerHTML = '<img class="chat-embed-img" loading="lazy" referrerpolicy="no-referrer" src="' +
+                    t.getAttribute('data-chat-embed-img').replace(/"/g, '&quot;') + '" ' +
+                    'onerror="this.replaceWith(document.createTextNode(\'(image failed to load)\'))">';
+                return;
+            }
+            t = e.target.closest('[data-chat-spoiler]');
             if (t) { t.classList.add('chat-spoiler--shown'); return; }
             t = e.target.closest('[data-chat-fmt]');
             if (t) { applyFormat(t.getAttribute('data-chat-fmt')); return; }
