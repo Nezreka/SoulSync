@@ -2890,15 +2890,32 @@ class VideoDatabase:
             # Prune only SERVER-originated rows that vanished (server_id set) — the
             # full episode/season list now includes enrichment-added MISSING items
             # (server_id NULL), which the scan must never remove.
+            #
+            # Episodes are FACTS, only their files are server-owned. A missing
+            # (enrichment) row that later got downloaded acquires a server_id via
+            # the upsert above — if its file then disappears from the server, a
+            # hard DELETE erases the episode's very existence from the page (the
+            # Silo-E03 hole: aired episodes vanish, and nothing re-creates them
+            # because the full episode sync is one-time). So a vanished episode
+            # that carries enrichment identity (an air date or a tvdb id) is
+            # DEMOTED back to a missing row — files cleared, server_id NULL —
+            # and only identity-less server junk is actually deleted.
             for row in conn.execute(
-                "SELECT season_number, episode_number FROM episodes "
+                "SELECT id, season_number, episode_number, air_date, tvdb_id FROM episodes "
                 "WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
                 if (row["season_number"], row["episode_number"]) not in seen_eps:
-                    conn.execute(
-                        "DELETE FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
-                        (show_id, row["season_number"], row["episode_number"]),
-                    )
+                    if row["air_date"] or row["tvdb_id"]:
+                        conn.execute("DELETE FROM media_files WHERE episode_id=?", (row["id"],))
+                        conn.execute(
+                            "UPDATE episodes SET server_id=NULL, has_file=0 WHERE id=?",
+                            (row["id"],),
+                        )
+                    else:
+                        conn.execute(
+                            "DELETE FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
+                            (show_id, row["season_number"], row["episode_number"]),
+                        )
             for row in conn.execute(
                 "SELECT season_number FROM seasons WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
