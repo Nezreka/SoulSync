@@ -2161,15 +2161,54 @@ class RepairWorker:
             msg += ' + applied artist image'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
 
+    def _resolve_finding_path(self, entity_id, raw_path):
+        """Resolve a finding's stored path the same way its scan did.
+
+        Native (``lib2:<id>``) findings must resolve through ``resolve_lib2_path``
+        — the same resolver the Lyrics Filler/ReplayGain Filler scans use to
+        confirm a file exists — not the generic/legacy ``_resolve_file_path``.
+        The two can disagree (mount/container mapping), which is exactly what
+        produced a false "File not found on disk" for a file Library v2 could
+        still play (docs §79, LV2-LYRICS-01). Returns ``(resolved_path, native_track_id)``.
+        """
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            from core.library2.paths import resolve_lib2_path
+            resolved = resolve_lib2_path(raw_path, config_manager=self._config_manager) or raw_path
+        else:
+            download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+            resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                          config_manager=self._config_manager) or raw_path
+        return resolved, native_track_id
+
+    def _refresh_lib2_tag_cache(self, details, resolved_path):
+        """Re-read a native file's tags right after an apply that changed them,
+        so the tags/lyrics/ReplayGain badges reflect the write immediately
+        instead of waiting for the next Refresh & Scan (docs §79, LV2-LYRICS-01
+        acceptance criterion 3). ``details['library_v2']['file_id']`` is set by
+        ``subject_details()`` for native findings and by the legacy-finding
+        convergence sync — a finding without it is a no-op, not an error."""
+        file_id = (details.get('library_v2') or {}).get('file_id')
+        if not file_id:
+            return
+        try:
+            from core.library2.tag_cache import read_and_persist_tag_cache
+            conn = self.db._get_connection()
+            try:
+                read_and_persist_tag_cache(conn, int(file_id), resolved_path)
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to refresh lib2 tag cache for file %s: %s", file_id, e)
+
     def _fix_missing_lyrics(self, entity_type, entity_id, file_path, details):
         """Apply a missing-lyrics finding: fetch + write the .lrc sidecar and
         embed the lyrics, via the same LyricsClient the import pipeline uses."""
         raw_path = details.get('file_path') or file_path
         if not raw_path:
             return {'success': False, 'error': 'No file path in finding'}
-        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
-                                      config_manager=self._config_manager) or raw_path
+        resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
@@ -2188,6 +2227,8 @@ class RepairWorker:
         if not ok:
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
+        if native_track_id is not None:
+            self._refresh_lib2_tag_cache(details, resolved)
         return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
 
     def _fix_missing_replaygain(self, entity_type, entity_id, file_path, details):
@@ -2196,9 +2237,7 @@ class RepairWorker:
         raw_path = details.get('file_path') or file_path
         if not raw_path:
             return {'success': False, 'error': 'No file path in finding'}
-        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
-                                      config_manager=self._config_manager) or raw_path
+        resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
@@ -2214,6 +2253,8 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
         if not ok:
             return {'success': False, 'error': 'Could not write ReplayGain tags'}
+        if native_track_id is not None:
+            self._refresh_lib2_tag_cache(details, resolved)
         return {'success': True, 'action': 'applied_replaygain',
                 'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
 

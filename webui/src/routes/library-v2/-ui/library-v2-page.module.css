@@ -1210,6 +1210,19 @@ button.featureTag:disabled {
   color: rgb(16, 185, 129);
 }
 
+button.statusOk,
+button.statusWarn {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button.statusOk:disabled,
+button.statusWarn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .statusDup {
   background: rgba(59, 130, 246, 0.18);
   color: rgb(96, 165, 250);

@@ -241,6 +241,109 @@ def test_fix_missing_lyrics_missing_file(tmp_path, monkeypatch):
     assert res["success"] is False
 
 
+def test_fix_missing_lyrics_native_finding_uses_lib2_resolver(tmp_path, monkeypatch):
+    """LV2-LYRICS-01: a native (``lib2:<id>``) finding must resolve its stored
+    path through resolve_lib2_path — the same resolver the scan used to
+    confirm the file exists — never the generic/legacy _resolve_file_path.
+    The divergence between the two was exactly what caused a false
+    'File not found on disk' for a file Library v2 could still play."""
+    from core.repair_worker import RepairWorker
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
+
+    w = RepairWorker.__new__(RepairWorker)
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = SimpleNamespace(get=lambda k, d=None: d)
+
+    monkeypatch.setattr(
+        "core.lyrics_client.lyrics_client",
+        SimpleNamespace(create_lrc_file=lambda *a, **k: True),
+    )
+
+    def _boom(*a, **k):
+        raise AssertionError("legacy resolver must not be used for a native lib2 finding")
+    monkeypatch.setattr("core.repair_worker._resolve_file_path", _boom)
+
+    resolve_calls = []
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda raw, config_manager=None: resolve_calls.append(raw) or str(audio),
+    )
+
+    res = w._fix_missing_lyrics("track", "lib2:1", None, {
+        "file_path": "stored/relative/song.flac", "track_title": "Song",
+        "artist": "Artist", "album_title": "Album", "duration": 200,
+    })
+
+    assert res["success"] is True
+    assert resolve_calls == ["stored/relative/song.flac"]
+
+
+def test_fix_missing_lyrics_refreshes_lib2_tag_cache_on_success(tmp_path, monkeypatch):
+    """Acceptance criterion 3: after a successful write, tags_json/
+    missing_tags_json must be re-read immediately, not left stale until the
+    next Refresh & Scan."""
+    from core.repair_worker import RepairWorker
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
+
+    w = RepairWorker.__new__(RepairWorker)
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = SimpleNamespace(get=lambda k, d=None: d)
+    w.db = SimpleNamespace(_get_connection=lambda: MagicMock())
+
+    monkeypatch.setattr(
+        "core.lyrics_client.lyrics_client",
+        SimpleNamespace(create_lrc_file=lambda *a, **k: True),
+    )
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda raw, config_manager=None: str(audio),
+    )
+    refreshed = {}
+    monkeypatch.setattr(
+        "core.library2.tag_cache.read_and_persist_tag_cache",
+        lambda conn, file_id, path: refreshed.update(file_id=file_id, path=path) or True,
+    )
+
+    res = w._fix_missing_lyrics("track", "lib2:1", None, {
+        "file_path": "song.flac", "track_title": "Song", "artist": "Artist",
+        "library_v2": {"file_id": 42},
+    })
+
+    assert res["success"] is True
+    assert refreshed == {"file_id": 42, "path": str(audio)}
+
+
+def test_fix_missing_lyrics_native_finding_without_file_id_does_not_crash(tmp_path, monkeypatch):
+    """A native finding missing library_v2.file_id (e.g. an older cached
+    finding) must not fail the whole apply — the tag-cache refresh is a
+    best-effort follow-up, not a precondition for success."""
+    from core.repair_worker import RepairWorker
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
+
+    w = RepairWorker.__new__(RepairWorker)
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = SimpleNamespace(get=lambda k, d=None: d)
+    w.db = SimpleNamespace(_get_connection=lambda: MagicMock())
+
+    monkeypatch.setattr(
+        "core.lyrics_client.lyrics_client",
+        SimpleNamespace(create_lrc_file=lambda *a, **k: True),
+    )
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda raw, config_manager=None: str(audio),
+    )
+
+    res = w._fix_missing_lyrics("track", "lib2:1", None, {
+        "file_path": "song.flac", "track_title": "Song", "artist": "Artist",
+    })
+
+    assert res["success"] is True
+
+
 # ── retag apply_track_plans lyrics_action ────────────────────────────────────
 
 def test_apply_track_plans_lyrics_action(tmp_path, monkeypatch):

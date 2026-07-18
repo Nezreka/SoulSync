@@ -13,7 +13,7 @@ import json
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
-from .status import compute_metadata_gaps, file_status, quality_tier
+from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier
 from .track_files import primary_order
 
 _SORTS = {
@@ -808,18 +808,8 @@ def _serialize_track(
             (t["id"],),
         ).fetchone()
         wanted = bool(wanted_row["wanted"]) if wanted_row else bool(t["monitored"])
-    track_meta = {
-        "title": effective["title"],
-        "track_number": effective["track_number"],
-        "disc_number": effective["disc_number"],
-        "isrc": t["isrc"],
-        "album_title": album["title"] if album else None,
-        "album_artist_name": album["primary_artist_name"] if album and "primary_artist_name" in album.keys() else None,
-        "album_year": album["year"] if album else None,
-        "album_image_url": album["image_url"] if album else None,
-        "album_genres": album["genres"] if album else None,
-    }
-    gaps = compute_metadata_gaps(track_meta, file_row, artist_count=len(artists))
+    gaps = compute_metadata_gaps(file_row)
+    scan_status = metadata_scan_status(file_row)
     fstat = file_status(file_row, t["canonical_track_id"])
     file_info = None
     if file_row:
@@ -908,6 +898,7 @@ def _serialize_track(
         "file": file_info,
         "file_status": fstat,
         "metadata_gaps": gaps,
+        "metadata_scan_status": scan_status,
         "user_overrides": overrides,
     }
 

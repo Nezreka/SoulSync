@@ -75,47 +75,55 @@ def _coerce_list(raw: Any) -> Optional[List[str]]:
     return None
 
 
-def compute_metadata_gaps(track: Mapping[str, Any], file_row: Optional[Mapping[str, Any]] = None,
-                          artist_count: int = 0) -> List[str]:
-    """Return the list of EXPECTED_TAGS that are missing for a track.
+def metadata_scan_status(file_row: Optional[Mapping[str, Any]]) -> str:
+    """Whether ``file_row``'s tag snapshot reflects a real read of the file.
 
-    Combines DB-level metadata (``track`` row fields + linked ``artist_count``) with
-    the file's cached ``tags_json`` snapshot when available. A tag counts as present
-    if either the DB knows it or the cached tag snapshot has a non-empty value.
+    ``persist_tag_cache`` is the only writer of ``tags_json``/``missing_tags_json``
+    (docs §79, LV2-TAG-STATUS-01). On a successful read it always stores the full
+    ``EXPECTED_TAGS``-keyed snapshot (never the literal ``'{}'``); on a failed read
+    it resets ``tags_json`` back to ``'{}'`` and writes the explicit JSON ``null``
+    sentinel into ``missing_tags_json``. The schema default for a file the tag
+    reader has never touched is ``tags_json='{}'`` + ``missing_tags_json='[]'`` —
+    numerically indistinguishable from a real "scanned, zero gaps" result, which
+    is exactly the false "tags ✓" this function exists to prevent.
+
+    Returns ``'scanned'``, ``'unreadable'`` (last read attempt failed), or
+    ``'pending'`` (no file, or never read since import).
     """
-    # A scanned missing-tag snapshot is authoritative whenever present (even before
-    # we have a resolved file path).
-    explicit_missing = _coerce_list(file_row.get("missing_tags_json")) if file_row else None
-    if explicit_missing is not None:
-        return [tag for tag in EXPECTED_TAGS if tag in set(explicit_missing)]
-
     if not file_row or not file_row.get("path"):
+        return "pending"
+    raw_tags = file_row.get("tags_json")
+    if isinstance(raw_tags, Mapping):
+        if raw_tags:
+            return "scanned"
+    elif isinstance(raw_tags, str) and raw_tags.strip() not in ("", "{}"):
+        return "scanned"
+    raw_missing = file_row.get("missing_tags_json")
+    if isinstance(raw_missing, str) and raw_missing.strip() == "null":
+        return "unreadable"
+    return "pending"
+
+
+def compute_metadata_gaps(file_row: Optional[Mapping[str, Any]]) -> List[str]:
+    """Return the EXPECTED_TAGS confirmed missing from the file's own tags.
+
+    Only meaningful once the file has actually been read — call
+    ``metadata_scan_status`` first. A track whose file was never scanned or
+    whose last read failed also returns ``[]`` here, but that must not be
+    read as "no gaps": this function reports the file's *physical* tag
+    state and deliberately never falls back to DB/provider metadata (docs
+    §79, LV2-TAG-STATUS-01) — DB knowledge (e.g. a provider ``image_url``)
+    is not evidence that a tag is actually embedded in this file.
+    """
+    if not file_row:
         return []
-
-    tags = _coerce_tags(file_row.get("tags_json")) if file_row else {}
-
-    def present(tag_key: str, db_value: Any) -> bool:
-        if db_value not in (None, "", 0):
-            return True
-        val = tags.get(tag_key)
-        return val not in (None, "", [], {})
-
-    gaps: List[str] = []
-    checks = {
-        "title": track.get("title"),
-        "artist": artist_count if artist_count else None,
-        "album": track.get("album_title"),
-        "albumartist": track.get("album_artist_name"),
-        "track_number": track.get("track_number"),
-        "disc_number": track.get("disc_number"),
-        "year": track.get("year") or track.get("album_year"),
-        "genre": track.get("genre") or track.get("album_genres"),
-        "cover": track.get("image_url") or track.get("album_image_url"),
-    }
-    for tag in EXPECTED_TAGS:
-        if not present(tag, checks.get(tag)):
-            gaps.append(tag)
-    return gaps
+    # A non-empty missing-tag snapshot is unambiguous evidence of a real scan
+    # (the untouched schema default is always an empty list) — authoritative
+    # even before a path is resolved.
+    explicit_missing = _coerce_list(file_row.get("missing_tags_json"))
+    if explicit_missing:
+        return [tag for tag in EXPECTED_TAGS if tag in set(explicit_missing)]
+    return []
 
 
 def file_status(file_row: Optional[Mapping[str, Any]], canonical_track_id: Optional[int]) -> str:
@@ -141,5 +149,6 @@ __all__ = [
     "EXPECTED_TAGS",
     "quality_tier",
     "compute_metadata_gaps",
+    "metadata_scan_status",
     "file_status",
 ]

@@ -391,6 +391,10 @@ export interface LibraryV2Track {
   file: LibraryV2TrackFile | null;
   file_status: 'present' | 'missing_suspected' | 'missing' | 'duplicate_single';
   metadata_gaps: string[];
+  /** LV2-TAG-STATUS-01: whether metadata_gaps reflects a real read of this
+   *  file's tags. Absent (older cached responses / test fixtures) is treated
+   *  as 'scanned' for backward compatibility. */
+  metadata_scan_status?: 'scanned' | 'pending' | 'unreadable';
   is_missing?: boolean;
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;

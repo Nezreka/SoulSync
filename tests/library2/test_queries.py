@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from core.library2 import queries as Q
 from core.library2.metadata_overrides import clear_field_override, set_field_override
-from core.library2.status import compute_metadata_gaps, file_status, quality_tier
+from core.library2.status import (
+    compute_metadata_gaps,
+    file_status,
+    metadata_scan_status,
+    quality_tier,
+)
 
 
 # --- pure status helpers -----------------------------------------------------
@@ -31,14 +36,51 @@ def test_file_status():
 
 
 def test_metadata_gaps_uses_db_and_tags():
-    track = {"title": "T", "track_number": 1, "disc_number": 1}
     # No file: the track is missing, not badly tagged. Retag gaps only make
     # sense for a physical file we can actually repair.
-    gaps = compute_metadata_gaps(track, None, artist_count=1)
+    gaps = compute_metadata_gaps(None)
     assert gaps == []
     # A scanned missing-tag snapshot is authoritative when present.
-    gaps2 = compute_metadata_gaps(track, {"missing_tags_json": '["cover"]'}, artist_count=1)
+    gaps2 = compute_metadata_gaps({"missing_tags_json": '["cover"]'})
     assert gaps2 == ["cover"]
+
+
+def test_metadata_gaps_never_scanned_file_is_not_reported_gap_free():
+    """LV2-TAG-STATUS-01: a file whose tags_json/missing_tags_json are still
+    the untouched schema defaults ('{}' / '[]') has never actually been read
+    by the canonical tag reader — it must not be reported as having zero
+    gaps (a false "tags ✓"), even though the raw missing_tags_json decodes
+    to an empty list indistinguishable-by-value from a real scan result."""
+    never_scanned = {"path": "/m/01.flac", "tags_json": "{}", "missing_tags_json": "[]"}
+    assert compute_metadata_gaps(never_scanned) == []
+    assert metadata_scan_status(never_scanned) == "pending"
+
+
+def test_metadata_gaps_unreadable_file_does_not_fall_back_to_db_cover():
+    """A failed read persists tags_json='{}' + missing_tags_json='null' (the
+    explicit unknown sentinel). This must surface as 'unreadable', not fall
+    back to DB fields like a provider image_url standing in for an embedded
+    cover that was never confirmed to actually be in the file."""
+    unreadable = {"path": "/m/01.flac", "tags_json": "{}", "missing_tags_json": "null"}
+    assert compute_metadata_gaps(unreadable) == []
+    assert metadata_scan_status(unreadable) == "unreadable"
+
+
+def test_metadata_gaps_real_scan_with_zero_gaps_is_scanned():
+    scanned = {
+        "path": "/m/01.flac",
+        "tags_json": '{"title": "T", "artist": "A", "album": "Al", '
+        '"albumartist": "A", "track_number": 1, "disc_number": 1, '
+        '"year": 2020, "genre": "Pop", "cover": true}',
+        "missing_tags_json": "[]",
+    }
+    assert compute_metadata_gaps(scanned) == []
+    assert metadata_scan_status(scanned) == "scanned"
+
+
+def test_metadata_scan_status_no_file_is_pending():
+    assert metadata_scan_status(None) == "pending"
+    assert metadata_scan_status({"path": None}) == "pending"
 
 
 # --- query layer -------------------------------------------------------------

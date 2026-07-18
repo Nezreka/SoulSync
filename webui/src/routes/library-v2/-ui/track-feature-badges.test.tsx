@@ -7,7 +7,7 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2Track } from '../-library-v2.types';
 
-import { TrackLyricsBadge, TrackReplayGainBadge } from './library-v2-page';
+import { TrackLyricsBadge, TrackMetadataGapsCell, TrackReplayGainBadge } from './library-v2-page';
 
 function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
   return {
@@ -176,5 +176,105 @@ describe('library v2 LR badge (deep-dive B3)', () => {
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith('No lyrics available for this track', 'error'),
     );
+  });
+});
+
+describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () => {
+  beforeEach(() => {
+    window.showToast = vi.fn();
+  });
+
+  afterEach(() => {
+    delete (window as any).showToast;
+  });
+
+  it('shows a scan-pending state instead of a false "tags ✓" for a never-scanned file', () => {
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({ metadata_scan_status: 'pending', metadata_gaps: [] })}
+        onOpenTags={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('scan pending').tagName).toBe('SPAN');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('shows an unreadable state when the last tag read failed', () => {
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({ metadata_scan_status: 'unreadable', metadata_gaps: [] })}
+        onOpenTags={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('unreadable').tagName).toBe('SPAN');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('clicking "tags ✓" opens the tags tab instead of writing anything', () => {
+    const onOpenTags = vi.fn();
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({ metadata_scan_status: 'scanned', metadata_gaps: [] })}
+        onOpenTags={onOpenTags}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'tags ✓' }));
+
+    expect(onOpenTags).toHaveBeenCalledOnce();
+  });
+
+  it('clicking "N tag gaps" writes this track\'s tags and never claims success optimistically', async () => {
+    let submittedIds: unknown = null;
+    server.use(
+      http.post('/api/library/v2/tags/write', async ({ request }) => {
+        submittedIds = ((await request.json()) as { track_ids: unknown }).track_ids;
+        return HttpResponse.json({ success: true, job_id: 'retag-job-1' });
+      }),
+      http.get('/api/library/v2/jobs/status', () =>
+        HttpResponse.json({ running: false, result: { written: 1, skipped: 0, failed: 0 } }),
+      ),
+    );
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({ metadata_scan_status: 'scanned', metadata_gaps: ['cover'] })}
+        onOpenTags={vi.fn()}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: '1 tag gaps' });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(submittedIds).toEqual([7]));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Tags written to file.', 'success'),
+    );
+  });
+
+  it('surfaces a failed tag write as the button title without claiming "tags ✓"', async () => {
+    server.use(
+      http.post('/api/library/v2/tags/write', () =>
+        HttpResponse.json({ success: true, job_id: 'retag-job-2' }),
+      ),
+      http.get('/api/library/v2/jobs/status', () =>
+        HttpResponse.json({ running: false, error: 'File not found on disk' }),
+      ),
+    );
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({ metadata_scan_status: 'scanned', metadata_gaps: ['cover'] })}
+        onOpenTags={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '1 tag gaps' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button')).toHaveAttribute('title', 'File not found on disk'),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('File not found on disk', 'error'),
+    );
+    expect(screen.queryByRole('button', { name: 'tags ✓' })).not.toBeInTheDocument();
   });
 });

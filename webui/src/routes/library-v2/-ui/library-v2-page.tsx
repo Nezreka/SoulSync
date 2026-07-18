@@ -6226,6 +6226,89 @@ function metadataGapsTooltip(gaps: string[]): string {
   return lines.join('\n');
 }
 
+/** LV2-TAG-STATUS-01/02: the tag-gap cell must not claim "tags ✓" before the
+ *  canonical tag reader has actually scanned this file — an unscanned or
+ *  unreadable file shows an explicit, non-actionable state instead of a
+ *  possibly-false empty gap list. Once genuinely scanned, "tags ✓" opens the
+ *  Tags detail tab and "N tag gaps" is clickable to write this track's
+ *  library metadata into its file tags on the spot (same job/endpoint as
+ *  TrackWriteTagsButton, scoped to just this track) — never optimistic; the
+ *  cell only shows "tags ✓" again once the server confirms it post-write. */
+export function TrackMetadataGapsCell({
+  track,
+  onOpenTags,
+}: {
+  track: LibraryV2Track;
+  onOpenTags: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const jobId = await writeLibraryV2Tags([track.id as number]);
+      const jobError = await awaitBulkJob(queryClient, jobId);
+      if (jobError) throw new Error(jobError);
+    },
+    onSuccess: () => {
+      window.showToast?.('Tags written to file.', 'success');
+    },
+    onError: (error) => {
+      window.showToast?.(mutationErrorMessage(error, 'Write tags failed'), 'error');
+    },
+  });
+
+  const scanStatus = track.metadata_scan_status ?? 'scanned';
+  if (scanStatus === 'pending') {
+    return (
+      <span className={styles.muted} title="File not yet scanned for tags — run Refresh &amp; Scan">
+        scan pending
+      </span>
+    );
+  }
+  if (scanStatus === 'unreadable') {
+    return (
+      <span
+        className={styles.statusWarn}
+        title="The file's tags could not be read on the last scan"
+      >
+        unreadable
+      </span>
+    );
+  }
+  if (track.metadata_gaps.length === 0) {
+    return (
+      <button
+        type="button"
+        className={styles.statusOk}
+        title={metadataGapsTooltip(track.metadata_gaps)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenTags();
+        }}
+      >
+        tags ✓
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={styles.statusWarn}
+      disabled={mutation.isPending || !track.id}
+      title={
+        mutation.isError
+          ? mutationErrorMessage(mutation.error, 'Write tags failed')
+          : `${metadataGapsTooltip(track.metadata_gaps)}\n\nClick to write these tags to the file`
+      }
+      onClick={(e) => {
+        e.stopPropagation();
+        mutation.mutate();
+      }}
+    >
+      {mutation.isPending ? '…' : `${track.metadata_gaps.length} tag gaps`}
+    </button>
+  );
+}
+
 function TrackRow({
   track,
   albumTitle,
@@ -6378,18 +6461,7 @@ function TrackRow({
         return (
           <td key="metadata">
             {track.id && !missing ? (
-              track.metadata_gaps.length === 0 ? (
-                <span className={styles.statusOk} title={metadataGapsTooltip(track.metadata_gaps)}>
-                  tags ✓
-                </span>
-              ) : (
-                <span
-                  className={styles.statusWarn}
-                  title={metadataGapsTooltip(track.metadata_gaps)}
-                >
-                  {track.metadata_gaps.length} tag gaps
-                </span>
-              )
+              <TrackMetadataGapsCell track={track} onOpenTags={() => setDetailTab('tags')} />
             ) : (
               <span className={styles.muted}>—</span>
             )}

@@ -7999,10 +7999,52 @@ History und Feature-Gating geprüft. Die vollständige Matrix,
 Konsolidierungsentscheidungen und der spätere Legacy-Löschplan stehen in
 [`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md).
 
-## 79. Offene Bug-Findings — physischer Tag-Status, Fix-Aktionen und Lyrics (2026-07-18)
+## 79. Bug-Findings — physischer Tag-Status, Fix-Aktionen und Lyrics (2026-07-18)
 
-Diese Findings sind bewusst als Follow-up für den nächsten Implementierungs-
-Chat festgehalten. Es wurde in diesem Schritt nur dokumentiert.
+Status (Folgesession, 2026-07-18): **implementiert.** Alle drei Findings
+(LV2-TAG-STATUS-01, LV2-TAG-STATUS-02, LV2-LYRICS-01) sind umgesetzt und
+durch Regressionstests abgesichert.
+
+- **LV2-TAG-STATUS-01**: `core/library2/status.py` bekommt eine neue
+  `metadata_scan_status()`-Funktion (`'scanned' | 'unreadable' | 'pending'`),
+  die zwischen einem echten Scan-Ergebnis und den unveränderten Schema-
+  Defaults (`tags_json='{}'` + `missing_tags_json='[]'`, numerisch
+  ununterscheidbar von "gescannt, keine Lücken") unterscheidet.
+  `compute_metadata_gaps()` verwendet keinen DB-/Provider-Fallback (u.a.
+  `image_url`) mehr — die Funktion liest ausschließlich den echten
+  Tag-Snapshot der Datei. `core/library2/queries.py::_serialize_track` liefert
+  das neue Feld als `metadata_scan_status` mit aus. Tests:
+  `tests/library2/test_queries.py` (`test_metadata_gaps_never_scanned_file_is_not_reported_gap_free`,
+  `test_metadata_gaps_unreadable_file_does_not_fall_back_to_db_cover`,
+  `test_metadata_gaps_real_scan_with_zero_gaps_is_scanned`,
+  `test_metadata_scan_status_no_file_is_pending`).
+- **LV2-TAG-STATUS-02**: die Metadaten-Zelle in der Track-Tabelle
+  (`webui/.../library-v2-page.tsx`, `TrackMetadataGapsCell`) zeigt jetzt
+  `scan pending`/`unreadable` als reinen Status (nicht klickbar) an, solange
+  `metadata_scan_status !== 'scanned'`. `tags ✓` ist klickbar und öffnet den
+  Tags-Tab der Track-Detailansicht. `N tag gaps` ist klickbar und ruft den
+  bestehenden nativen Retag-Write-Job (`POST /api/library/v2/tags/write`,
+  `core/library2/retag.write_tags`) mit genau diesem Track auf — derselbe
+  Job/Endpoint, den `TrackWriteTagsButton` im Metadata-Tab bereits nutzt.
+  Kein optimistisches `tags ✓`: die Zelle vertraut erst nach erfolgreichem
+  Invalidate wieder dem servergelieferten `metadata_gaps`. Tests:
+  `webui/.../track-feature-badges.test.tsx` (5 neue Fälle unter "library v2
+  metadata-gaps cell").
+- **LV2-LYRICS-01**: `core/repair_worker.py` bekommt einen gemeinsamen
+  `_resolve_finding_path()`-Helper, den `_fix_missing_lyrics` und
+  `_fix_missing_replaygain` jetzt beide nutzen — für native (`lib2:<id>`)
+  Findings wird `resolve_lib2_path()` verwendet (wie beim Scan), für
+  Legacy-Findings weiterhin `_resolve_file_path()`. Ein neuer
+  `_refresh_lib2_tag_cache()`-Helper liest nach erfolgreichem Schreiben
+  `details['library_v2']['file_id']` (von `subject_details()` gesetzt) aus
+  und aktualisiert `tags_json`/`missing_tags_json` sofort, ohne auf den
+  nächsten Refresh & Scan zu warten. `_fix_missing_replaygain` hatte
+  denselben Resolver-Bug (bei der Investigation gefunden, nicht ursprünglich
+  in diesem Finding beschrieben) und wurde konsistent mitgefixt. Tests:
+  `tests/test_missing_lyrics_job.py` (3 neue Fälle) und
+  `tests/test_replaygain_filler_job.py` (2 neue Fälle).
+
+Ursprüngliche Befund-Dokumentation (unverändert erhalten):
 
 ### LV2-TAG-STATUS-01 — `tags ✓` darf keinen ungeprüften oder externen Cover-Status vortäuschen
 
