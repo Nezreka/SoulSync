@@ -71965,3 +71965,13 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .chat-card-row b { color: rgba(255,255,255,0.85); font-weight: 700;
     text-align: right; word-break: break-word; }
 .chat-card-none { justify-content: center; color: rgba(255,255,255,0.35); }
+
+/* artist photo picker: custom URL row */
+.art-picker-custom { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.art-picker-url {
+    width: 100%; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; color: #fff;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+}
+.art-picker-url:focus { outline: none; border-color: rgba(29,185,84,0.6); }
+.art-picker-custom-slot .art-picker-tile { max-width: 180px; }
+.art-picker-custom-err { font-size: 12.5px; color: #f0a05a; }

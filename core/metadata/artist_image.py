@@ -262,10 +262,24 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
             sid = str(ids.get(_SOURCE_ID_COLUMNS.get(source, '')) or '').strip()
             if source == 'audiodb':
                 return _audiodb_candidate(name, sid)
-            client = metadata_registry.get_client_for_source(source)
+            if source == 'spotify':
+                # the registry gate requires FULL Spotify auth, but the wrapper
+                # serves artist metadata in Free mode via its fallback routing —
+                # the picker only needs an image, so ask the wrapper directly
+                client = metadata_registry.get_spotify_client()
+            else:
+                client = metadata_registry.get_client_for_source(source)
             if not client:
                 return None
-            url = _get_artist_image_from_source(source, sid) if sid else None
+            url = None
+            if sid:
+                if source == 'spotify':
+                    try:
+                        url = _extract_artist_image_url(client.get_artist(sid))
+                    except Exception:
+                        url = None
+                else:
+                    url = _get_artist_image_from_source(source, sid)
             if not url and name and hasattr(client, 'search_artists'):
                 results = client.search_artists(name, limit=1) or []
                 if results:
@@ -279,7 +293,13 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
                         top_id = str(getattr(top, 'id', '') or (
                             top.get('id') if isinstance(top, dict) else '') or '').strip()
                         if top_id:
-                            url = _get_artist_image_from_source(source, top_id)
+                            if source == 'spotify':
+                                try:
+                                    url = _extract_artist_image_url(client.get_artist(top_id))
+                                except Exception:
+                                    url = None
+                            else:
+                                url = _get_artist_image_from_source(source, top_id)
             return (source, url) if url else None
         except Exception as exc:
             logger.debug("artist image candidate failed for %s: %s", source, exc)

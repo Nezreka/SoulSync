@@ -18,10 +18,12 @@ import core.metadata.artist_image as ai
 
 
 @pytest.fixture(autouse=True)
-def _no_real_audiodb(monkeypatch):
-    # the gather now ALWAYS asks TheAudioDB — without this stub the legacy
-    # tests would hit the real network (and did, with a real Adele thumb)
+def _no_real_sources(monkeypatch):
+    # the gather now ALWAYS asks TheAudioDB and the Spotify WRAPPER (which
+    # serves Free-mode metadata) — without these stubs the legacy tests hit
+    # real networks. Tests that want these sources override per-test.
     monkeypatch.setattr(ai, "_audiodb", lambda: None)
+    monkeypatch.setattr(ai.metadata_registry, "get_spotify_client", lambda **kw: None)
 
 
 class _Client:
@@ -54,12 +56,14 @@ def _wire_registry(monkeypatch, clients, priority):
 
 def test_gathers_one_candidate_per_connected_source(monkeypatch):
     clients = {
-        "spotify": _Client(image_url="https://sp/img.jpg"),
         "deezer": _Client(search_hit=SimpleNamespace(image_url="https://dz/img.jpg")),
         "itunes": None,                                  # not connected -> skipped
         "audiodb": _Client(boom=True),                   # failing -> contributes nothing
     }
     _wire_registry(monkeypatch, clients, ["spotify", "deezer", "itunes", "audiodb"])
+    # spotify rides the WRAPPER (auth by default, Free route otherwise)
+    monkeypatch.setattr(ai.metadata_registry, "get_spotify_client",
+                        lambda **kw: _Client(image_url="https://sp/img.jpg"))
 
     cands = ai.gather_artist_image_candidates(
         "Adele", {"spotify_artist_id": "sp123"})
@@ -73,11 +77,12 @@ def test_gathers_one_candidate_per_connected_source(monkeypatch):
 def test_duplicate_urls_dedupe_and_skip_sources_excluded(monkeypatch):
     same = "https://cdn/same.jpg"
     clients = {
-        "spotify": _Client(search_hit=SimpleNamespace(image_url=same)),
         "deezer": _Client(search_hit=SimpleNamespace(image_url=same)),
         "musicbrainz": _Client(search_hit=SimpleNamespace(image_url="https://mb/x.jpg")),
     }
     _wire_registry(monkeypatch, clients, ["spotify", "deezer", "musicbrainz"])
+    monkeypatch.setattr(ai.metadata_registry, "get_spotify_client",
+                        lambda **kw: _Client(search_hit=SimpleNamespace(image_url=same)))
 
     cands = ai.gather_artist_image_candidates("Adele", {})
     assert len(cands) == 1                            # deduped by url
@@ -181,3 +186,54 @@ def test_picker_grid_never_goes_silently_blank():
         encoding="utf-8", errors="replace")
     # dead image URLs remove tiles — an emptied grid must SAY so
     assert "none of the images would load" in js
+
+
+def test_spotify_free_mode_contributes(monkeypatch):
+    """The registry gate requires FULL Spotify auth, but the wrapper serves
+    artist metadata in Free mode — the picker asks the wrapper directly, so
+    Spotify Free users finally get Spotify candidates."""
+    wrapper = _Client(image_url="https://sp/free.jpg",
+                      search_hit=SimpleNamespace(id="sp1", image_url="https://sp/free.jpg"))
+    monkeypatch.setattr(ai.metadata_registry, "get_spotify_client", lambda **kw: wrapper)
+    # registry gate says NO client (unauthenticated) — must not matter
+    _wire_registry(monkeypatch, {"spotify": None}, ["spotify"])
+
+    cands = ai.gather_artist_image_candidates("Adele", {})
+    assert cands == [{"source": "spotify", "url": "https://sp/free.jpg"}]
+
+    # stored spotify id path goes through the wrapper too
+    cands = ai.gather_artist_image_candidates("Adele", {"spotify_artist_id": "sp123"})
+    assert cands[0]["url"] == "https://sp/free.jpg"
+
+
+def test_custom_url_apply_rejects_non_images():
+    """Source pins: pasted URLs must not poison the thumb/poster/artist.jpg —
+    downloaded bytes are magic-sniffed BEFORE anything is pinned."""
+    from pathlib import Path
+    ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(
+        encoding="utf-8", errors="replace")
+    handler = ws.split("def set_artist_art")[1].split("\n@app.route")[0]
+    assert "_looks_like_image(image_bytes)" in handler
+    assert "doesn't point to an image" in handler
+    # download+validate happens BEFORE the DB pin
+    assert handler.index("_looks_like_image") < handler.index("set_artist_thumb_url")
+
+
+def test_image_sniffer():
+    import web_server as ws
+    assert ws._looks_like_image(b"\xff\xd8\xff\xe0" + b"0" * 20) is True     # jpeg
+    assert ws._looks_like_image(b"\x89PNG\r\n\x1a\n" + b"0" * 20) is True    # png
+    assert ws._looks_like_image(b"RIFF\x00\x00\x00\x00WEBP" + b"0" * 8) is True
+    assert ws._looks_like_image(b"<!DOCTYPE html><html>...") is False
+    assert ws._looks_like_image(b"") is False
+
+
+def test_picker_has_the_custom_url_row():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
+        encoding="utf-8", errors="replace")
+    assert "_artPickerCustomRow" in js
+    assert "paste an image URL" in js
+    # the row mounts AFTER the innerHTML reset that would wipe it
+    seg = js.split("body.appendChild(grid);")[1][:400]
+    assert "_artPickerCustomRow" in seg
