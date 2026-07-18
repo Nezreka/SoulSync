@@ -39941,6 +39941,8 @@ def _emit_chat_push_loop():
                     from core import chat_codec
                     def _unwrap(m):
                         dec = chat_codec.decode(m.get('message'))
+                        if dec is not None and chat_codec.reaction_of(dec):
+                            return None      # reaction carriers never render/badge
                         out = {'username': m.get('username'),
                                'message': dec['t'] if dec else m.get('message'),
                                'timestamp': m.get('timestamp')}
@@ -39950,15 +39952,16 @@ def _emit_chat_push_loop():
                             if rep:
                                 out['reply'] = rep
                         return out
-                    decoded = [_unwrap(m) for m in fresh]
-                    try:
-                        get_database().add_chat_messages(room, decoded)
-                    except Exception:
-                        logger.debug("chat: loop archive write failed", exc_info=True)
-                    socketio.emit('chat:room_message', {
-                        'room': room,
-                        'messages': decoded[-20:],
-                    })
+                    decoded = [x for x in (_unwrap(m) for m in fresh) if x]
+                    if decoded:      # a reaction-only tick still tracks PMs below
+                        try:
+                            get_database().add_chat_messages(room, decoded)
+                        except Exception:
+                            logger.debug("chat: loop archive write failed", exc_info=True)
+                        socketio.emit('chat:room_message', {
+                            'room': room,
+                            'messages': decoded[-20:],
+                        })
             convos = run_async(_slsk.get_conversations()) or []
             unread_users = [str(c.get('username') or '') for c in convos
                             if c.get('hasUnAcknowledgedMessages')

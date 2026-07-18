@@ -317,15 +317,28 @@
             ? '<div class="chat-reply-ref">↩ <b>' + esc(m.reply.u) + '</b> ' +
               '<span>' + esc(m.reply.x || '') + '</span></div>'
             : '';
-        var replyBtn = (state.view === 'room' && state.canSend && !self)
-            ? '<button type="button" class="chat-line-reply" title="Reply" ' +
-              'data-chat-reply-user="' + attr(m.username || '') + '" ' +
-              'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>'
-            : '';
+        var actions = '';
+        if (state.view === 'room' && state.canSend && !self) {
+            actions = '<span class="chat-line-acts">' +
+                '<button type="button" class="chat-line-reply" title="React" ' +
+                'data-chat-react-user="' + attr(m.username || '') + '" ' +
+                'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>'   // FULL text — the react key is a hash of it +
+                '<button type="button" class="chat-line-reply" title="Reply" ' +
+                'data-chat-reply-user="' + attr(m.username || '') + '" ' +
+                'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button></span>';
+        }
+        var chips = '';
+        if (m.reactions && m.reactions.length) {
+            chips = '<div class="chat-react-row">' + m.reactions.map(function (r) {
+                return '<span class="chat-react-chip" title="' +
+                    attr((r.users || []).join(', ')) + '">' + esc(r.e) +
+                    (r.n > 1 ? ' <b>' + r.n + '</b>' : '') + '</span>';
+            }).join('') + '</div>';
+        }
         return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
             attr(_fullTs(m.timestamp)) + '">' + replyRef +
             (m.rich ? renderRich(m.message) : renderPlain(m.message)) +
-            replyBtn + '</div>';
+            actions + chips + '</div>';
     }
 
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
@@ -563,6 +576,87 @@
         state.replyTo = null;
         var bar = q('[data-chat-reply-bar]');
         if (bar) bar.hidden = true;
+    }
+
+    // ── reactions (chatbic P4) ───────────────────────────────────────────────
+    var QUICK_REACTS = ['👍', '❤️', '😂', '🔥', '🎵', '👀', '💯'];
+
+    function showReactRow(anchorBtn, user, text) {
+        closeReactRow();
+        var row = document.createElement('div');
+        row.className = 'chat-react-pick';
+        row.setAttribute('data-chat-react-pick-row', '1');
+        row.innerHTML = QUICK_REACTS.map(function (e2) {
+            return '<button type="button" class="chat-emoji" data-chat-react-do="' + e2 + '">' + e2 + '</button>';
+        }).join('');
+        row._target = { user: user, text: text };
+        anchorBtn.parentNode.insertBefore(row, anchorBtn.nextSibling);
+    }
+
+    function closeReactRow() {
+        var old = document.querySelector('[data-chat-react-pick-row]');
+        if (old) old.remove();
+    }
+
+    function sendReaction(target, emoji) {
+        closeReactRow();
+        if (!target || !emoji) return;
+        postJSON('/api/chat/room/react', {
+            target_user: target.user, target_text: target.text, e: emoji,
+        }).then(function (res) {
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Reaction not sent', 'error');
+                }
+                return;
+            }
+            state.lastStamp = null;
+            refresh();
+        });
+    }
+
+    // ── user popover card ────────────────────────────────────────────────────
+    function openUserCard(name) {
+        if (!name) return;
+        var overlay = q('[data-chat-user-card]');
+        if (!overlay) { openPm(name); return; }
+        var body = q('[data-chat-user-card-body]');
+        if (body) {
+            body.innerHTML = '<div class="chat-card-head">' + _avatar(name) +
+                '<span class="chat-card-name">' + esc(name) + '</span></div>' +
+                '<div class="chat-card-info">Loading…</div>';
+        }
+        overlay.hidden = false;
+        overlay.setAttribute('data-chat-user-card-for', name);
+        getJSON('/api/chat/user/' + encodeURIComponent(name)).then(function (res) {
+            if (overlay.getAttribute('data-chat-user-card-for') !== name) return;
+            var info = (res.ok && res.body.info) || {};
+            var status = (res.ok && res.body.status) || {};
+            var rows = [];
+            var pres = status.presence || status.status ||
+                (status.isOnline === true ? 'Online' : (status.isOnline === false ? 'Offline' : null));
+            if (pres != null) rows.push(['Status', String(pres)]);
+            if (info.description) rows.push(['About', String(info.description).slice(0, 300)]);
+            if (info.uploadSlots != null) rows.push(['Upload slots', String(info.uploadSlots)]);
+            if (info.queueLength != null) rows.push(['Queue', String(info.queueLength)]);
+            if (info.hasFreeUploadSlot != null) {
+                rows.push(['Free slot', info.hasFreeUploadSlot ? 'yes' : 'no']);
+            }
+            var infoHost = overlay.querySelector('.chat-card-info');
+            if (infoHost) {
+                infoHost.innerHTML = rows.length
+                    ? rows.map(function (r) {
+                        return '<div class="chat-card-row"><span>' + esc(r[0]) +
+                            '</span><b>' + esc(r[1]) + '</b></div>';
+                    }).join('')
+                    : '<div class="chat-card-row chat-card-none">No info available</div>';
+            }
+        });
+    }
+
+    function closeUserCard() {
+        var overlay = q('[data-chat-user-card]');
+        if (overlay) overlay.hidden = true;
     }
 
     // ── @mention autocomplete ────────────────────────────────────────────────
@@ -962,8 +1056,32 @@
             if (t) { openRoom(); return; }
             t = e.target.closest('[data-chat-open-pm]');
             if (t) { openPm(t.getAttribute('data-chat-open-pm')); return; }
+            t = e.target.closest('[data-chat-react-user]');
+            if (t) {
+                showReactRow(t, t.getAttribute('data-chat-react-user'),
+                             t.getAttribute('data-chat-react-text'));
+                return;
+            }
+            t = e.target.closest('[data-chat-react-do]');
+            if (t) {
+                var rowEl = t.closest('[data-chat-react-pick-row]');
+                sendReaction(rowEl && rowEl._target, t.getAttribute('data-chat-react-do'));
+                return;
+            }
+            if (!e.target.closest('[data-chat-react-pick-row]')) closeReactRow();
+            t = e.target.closest('[data-chat-card-message]');
+            if (t) {
+                var ov = q('[data-chat-user-card]');
+                closeUserCard();
+                if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
+                return;
+            }
+            t = e.target.closest('[data-chat-card-close]');
+            if (t) { closeUserCard(); return; }
+            var uc = e.target.closest('[data-chat-user-card]');
+            if (uc && e.target === uc) { closeUserCard(); return; }
             t = e.target.closest('[data-chat-user]');
-            if (t) { openPm(t.getAttribute('data-chat-user')); return; }
+            if (t) { openUserCard(t.getAttribute('data-chat-user')); return; }
         });
 
         var form = q('[data-chat-composer]');

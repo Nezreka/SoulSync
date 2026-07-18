@@ -71937,3 +71937,31 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 }
 .chat-mention-opt:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .chat-mention-opt .chat-avatar { width: 24px; height: 24px; font-size: 11px; margin: 0; }
+
+/* chat: reactions + user card (chatbic P4) */
+.chat-line-acts { position: absolute; right: 4px; top: 0; display: none; gap: 4px; }
+.chat-line:hover .chat-line-acts { display: inline-flex; }
+.chat-line-acts .chat-line-reply { position: static; display: inline-block; }
+.chat-react-row { display: flex; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
+.chat-react-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+    border-radius: 999px; font-size: 13px; cursor: default;
+    background: rgba(88,101,242,0.14); border: 1px solid rgba(88,101,242,0.35);
+}
+.chat-react-chip b { font-size: 11.5px; color: rgba(255,255,255,0.7); }
+.chat-react-pick {
+    position: absolute; right: 4px; top: 24px; z-index: 20; display: flex; gap: 2px;
+    padding: 5px; border-radius: 10px;
+    background: rgba(18,18,22,0.98); border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.chat-user-card { width: min(340px, 92%); }
+.chat-card-head { display: flex; align-items: center; gap: 12px; }
+.chat-card-head .chat-avatar { width: 46px; height: 46px; font-size: 19px; }
+.chat-card-name { font-size: 17px; font-weight: 800; color: #fff; }
+.chat-card-info { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
+.chat-card-row { display: flex; justify-content: space-between; gap: 12px;
+    font-size: 13px; color: rgba(255,255,255,0.6); }
+.chat-card-row b { color: rgba(255,255,255,0.85); font-weight: 700;
+    text-align: right; word-break: break-word; }
+.chat-card-none { justify-content: center; color: rgba(255,255,255,0.35); }
