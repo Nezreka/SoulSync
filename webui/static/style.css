@@ -71806,3 +71806,29 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .chat-day-sep::before, .chat-day-sep::after {
     content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.08);
 }
+
+/* chat: GIF picker (chatux P4) */
+.chat-gif-btn { font-weight: 900; letter-spacing: 0.5px; }
+.chat-gif-pop[hidden] { display: none !important; }
+.chat-gif-pop {
+    position: absolute; bottom: 36px; left: 14px; right: 14px; z-index: 30;
+    max-width: 520px; padding: 12px; border-radius: 14px;
+    background: rgba(18,18,22,0.98); border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+}
+.chat-gif-search { width: 100%; margin-bottom: 10px; }
+.chat-gif-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 6px; max-height: 300px; overflow-y: auto;
+}
+.chat-gif-cell {
+    border: none; padding: 0; border-radius: 8px; overflow: hidden; cursor: pointer;
+    background: rgba(255,255,255,0.04); aspect-ratio: 4 / 3;
+}
+.chat-gif-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-gif-cell:hover { outline: 2px solid #1db954; }
+.chat-gif-hint {
+    grid-column: 1 / -1; text-align: center; padding: 24px 0;
+    font-size: 13px; color: rgba(255,255,255,0.4);
+}
+.chat-embed-img.chat-gif { max-width: min(320px, 100%); }

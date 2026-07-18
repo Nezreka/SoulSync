@@ -210,3 +210,41 @@ class TestBlueprint:
         for path in ("/api/chat/room", "/api/chat/conversations"):
             assert http.get(path).status_code == 503
         assert http.get("/api/chat/status").get_json()["configured"] is False
+
+
+class TestGifProxy:
+    """chatux P4 — /api/chat/gifs (Tenor, key server-side only)."""
+
+    def test_no_key_is_a_helpful_503(self, chat_app):
+        http, state = chat_app
+        r = http.get("/api/chat/gifs?q=cat")
+        assert r.status_code == 503 and "tenor" in r.get_json()["error"].lower()
+
+    def test_search_maps_tenor_shape(self, chat_app, monkeypatch):
+        http, state = chat_app
+        state["config"]["soulseek.chat_tenor_key"] = "k"
+        seen = {}
+
+        def fake_fetch(url, params):
+            seen.update(params)
+            assert "tenor.googleapis.com" in url
+            return {"results": [
+                {"media_formats": {"gif": {"url": "https://media.tenor.com/full.gif"},
+                                   "tinygif": {"url": "https://media.tenor.com/tiny.gif"}}},
+                {"media_formats": {}},                       # no gif → dropped
+            ]}
+        monkeypatch.setattr(chat_api, "_gif_fetch", fake_fetch)
+        res = http.get("/api/chat/gifs?q=excited dance").get_json()
+        assert res["gifs"] == [{"url": "https://media.tenor.com/full.gif",
+                                "preview": "https://media.tenor.com/tiny.gif"}]
+        assert seen["q"] == "excited dance" and seen["key"] == "k"
+
+    def test_empty_query_400_and_upstream_failure_502(self, chat_app, monkeypatch):
+        http, state = chat_app
+        state["config"]["soulseek.chat_tenor_key"] = "k"
+        assert http.get("/api/chat/gifs?q=").status_code == 400
+
+        def boom(url, params):
+            raise RuntimeError("tenor down")
+        monkeypatch.setattr(chat_api, "_gif_fetch", boom)
+        assert http.get("/api/chat/gifs?q=x").status_code == 502

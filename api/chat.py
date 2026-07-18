@@ -100,8 +100,49 @@ def _unwrap_room_messages(messages) -> list:
     return out
 
 
+def _gif_fetch(url: str, params: dict) -> dict:
+    """One seam for the Tenor HTTP call (monkeypatched in tests)."""
+    import requests
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
+
+    @bp.route("/api/chat/gifs", methods=["GET"])
+    def chat_gifs():
+        """GIF search (Tenor v2), proxied so the API key never reaches the
+        browser. Key: ``soulseek.chat_tenor_key`` (free at tenor.com/gifapi).
+        Sending a picked GIF is just sending its URL — the renderer
+        auto-embeds trusted GIF CDNs."""
+        try:
+            key = str(_config_get("soulseek.chat_tenor_key", "") or "")
+        except Exception:
+            key = ""
+        if not key:
+            return jsonify({"error": "No Tenor API key — add soulseek.chat_tenor_key "
+                                     "(free at tenor.com/gifapi) to enable GIF search"}), 503
+        q = str(request.args.get("q") or "").strip()[:100]
+        if not q:
+            return jsonify({"error": "empty query"}), 400
+        try:
+            data = _gif_fetch("https://tenor.googleapis.com/v2/search", {
+                "q": q, "key": key, "limit": 24,
+                "media_filter": "gif,tinygif", "contentfilter": "medium",
+            })
+        except Exception as e:
+            logger.exception("chat: gif search failed")
+            return jsonify({"error": str(e)}), 502
+        gifs = []
+        for res in (data.get("results") or []):
+            fmts = res.get("media_formats") or {}
+            full = (fmts.get("gif") or {}).get("url")
+            tiny = (fmts.get("tinygif") or {}).get("url") or full
+            if full:
+                gifs.append({"url": full, "preview": tiny})
+        return jsonify({"gifs": gifs})
 
     @bp.route("/api/chat/status", methods=["GET"])
     def chat_status():

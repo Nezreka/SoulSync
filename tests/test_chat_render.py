@@ -92,4 +92,6 @@ class TestWiring:
         # through the nocookie host, and nothing sends a referrer out
         assert "data-chat-embed-img" in _CHAT_JS
         assert "youtube-nocookie.com/embed/" in _CHAT_JS
-        assert _CHAT_JS.count('referrerpolicy="no-referrer"') == 2   # img + iframe
+        # every remote-media emitter carries it: yt iframe, expanded image,
+        # gif auto-embed, gif picker previews
+        assert _CHAT_JS.count('referrerpolicy="no-referrer"') >= 4
