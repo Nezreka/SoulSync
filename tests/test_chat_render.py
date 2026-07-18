@@ -55,6 +55,14 @@ class TestWiring:
     def test_own_room_echo_renders_rich(self):
         assert "rich: state.view === 'room'" in _CHAT_JS
 
+    def test_deep_links_are_path_whitelisted(self):
+        # only universal shapes chip: artist source-ids + tmdb video ids;
+        # 'library'-source video ids are local rows and must never travel
+        assert "video-detail\\/tmdb\\/(?:movie|show)" in _CHAT_JS
+        assert "chat-ss-chip" in _CHAT_JS
+        assert "video-detail/library" not in _CHAT_JS.replace(
+            "NEVER 'library'-source video paths", "")
+
     def test_embeds_are_click_to_load_and_private(self):
         # nothing fetches until the reader clicks (IP privacy), youtube goes
         # through the nocookie host, and nothing sends a referrer out
