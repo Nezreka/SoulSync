@@ -304,3 +304,27 @@ class TestChatSettings:
         assert http.get("/api/chat/status").get_json()["is_admin"] is True
         state["admin"] = False
         assert http.get("/api/chat/status").get_json()["is_admin"] is False
+
+    def test_auto_join_off_leaves_the_room_immediately(self, chat_app):
+        http, state = chat_app
+        self._wire_set(state)
+        left = []
+        state["client"].leave_room = lambda room: left.append(room) or True
+        # true -> false: walk out now, not at slskd's next restart
+        http.post("/api/chat/settings", json={"auto_join": False})
+        assert left == ["SoulSync"]
+        # false -> false: nothing to leave again
+        http.post("/api/chat/settings", json={"auto_join": False})
+        assert left == ["SoulSync"]
+        # re-enabling doesn't leave anything
+        http.post("/api/chat/settings", json={"auto_join": True})
+        assert left == ["SoulSync"]
+
+    def test_push_loop_rebaselines_on_room_change(self):
+        from pathlib import Path
+        ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(
+            encoding="utf-8", errors="replace")
+        loop = ws.split("def _emit_chat_push_loop")[1].split("\ndef ")[0]
+        # a renamed room must never replay its history as 'new' badge spam
+        assert "room != _chat_push_state['room']" in loop
+        assert "_chat_push_state['room_key'] = None" in loop
