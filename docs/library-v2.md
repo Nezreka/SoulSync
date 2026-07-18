@@ -7999,6 +7999,84 @@ History und Feature-Gating geprüft. Die vollständige Matrix,
 Konsolidierungsentscheidungen und der spätere Legacy-Löschplan stehen in
 [`library-v2-tool-integration-audit-2026-07-18.md`](library-v2-tool-integration-audit-2026-07-18.md).
 
+## 79. Offene Bug-Findings — physischer Tag-Status, Fix-Aktionen und Lyrics (2026-07-18)
+
+Diese Findings sind bewusst als Follow-up für den nächsten Implementierungs-
+Chat festgehalten. Es wurde in diesem Schritt nur dokumentiert.
+
+### LV2-TAG-STATUS-01 — `tags ✓` darf keinen ungeprüften oder externen Cover-Status vortäuschen
+
+Die Library-v2-Metadatenanzeige soll den Zustand der konkreten Audiodatei
+anzeigen. `tags ✓` darf daher erst erscheinen, wenn die Datei tatsächlich über
+den kanonischen Tag-Reader gelesen wurde. Für `cover` zählt ausschließlich
+eingebettetes Cover-Art in dieser Datei; ein Provider-/DB-`image_url`, der
+Album-Artwork-Cache oder ein Cover eines anderen Tracks darf diesen Tag nicht
+als vorhanden markieren.
+
+Der bestehende Pfad `compute_metadata_gaps()` kann bei fehlendem/unbekanntem
+Tag-Snapshot auf DB-Metadaten zurückfallen. Dadurch kann ein Track ohne
+Embedded-Cover als `tags ✓` erscheinen, während der Cover-Art-Filler korrekt
+fehlendes File-Artwork findet. Ein noch nicht geprüfter, nicht lesbarer oder
+aufgelöster Pfad muss stattdessen einen expliziten Zustand wie `scan pending`,
+`unknown` oder `unreadable` liefern — niemals eine leere Gap-Liste.
+
+`Refresh & Scan` muss für alle Dateien des Scopes wirklich den kanonischen
+Reader ausführen und `tags_json`/`missing_tags_json` danach als authoritative
+Snapshot persistieren. Der Status darf erst nach erfolgreichem Scan als
+vollständig gelten. Die Prüfung muss pro Track/File gelten; der albumweite
+Cover-Art-Filler darf nicht als Ersatz für eine Datei-Prüfung dienen.
+
+### LV2-TAG-STATUS-02 — Tag-Anzeige gleichzeitig als Fix-Aktion verwenden
+
+Die klickbare Tag-Anzeige soll Anzeige und Reparatur-Aktion verbinden:
+
+- `tags ✓` zeigt die geprüften vorhandenen Tags und öffnet die Detailansicht;
+- `N tag gaps` ist anklickbar und öffnet eine gezielte Fix-Auswahl bzw. startet
+  den passenden Repair-Job für genau diesen Track/File-Scope;
+- der Fix-Job muss dieselbe native `lib2_track_files`-ID und denselben
+  aufgelösten Pfad verwenden wie die Anzeige;
+- nach Erfolg werden Tag-Cache, Gap-Status und die Track-Zeile invalidiert;
+- bei Fehlern bleibt der konkrete Fehler sichtbar und `tags ✓` darf nicht
+  optimistisch gesetzt werden.
+
+Für Cover-Art soll die Aktion zwischen Embedded-Cover, Sidecar-Cover und
+Provider-Art unterscheiden können. Ein erfolgreicher Provider-Fetch ohne
+erfolgreiches Schreiben in die Datei darf nicht als Embedded-Cover-Erfolg
+gezählt werden.
+
+### LV2-LYRICS-01 — Lyrics-Fix meldet `File not found on disc`, obwohl die Datei existiert
+
+Reproduktion/Beobachtung: Der Lyrics Filler findet einen Track, danach schlägt
+`Apply Lyrics` mit `File not found on disc` fehl. Dieselbe Datei ist in Library v2
+vorhanden und kann über den Play-Button abgespielt werden.
+
+Der wahrscheinlichste Fehlerbereich ist eine unterschiedliche Pfad-Auflösung:
+Der native Lyrics-Scanner speichert in seinem Finding den über
+`resolve_lib2_path()` aufgelösten Pfad, während der Repair-Worker beim Apply
+noch über den generischen/Legacy-Resolver (`_resolve_file_path`) läuft. Beide
+Pfade müssen für native Findings denselben `lib2_track_files.path`-Resolver
+und dieselbe Mount-/Container-Abbildung verwenden. `lib2:<track_id>` darf
+niemals als Dateipfad interpretiert werden.
+
+Acceptance-Kriterien für den Fix:
+
+1. Eine vorhandene, abspielbare V2-Datei wird vom Lyrics-Apply mit exakt
+   derselben Pfad-Auflösung gefunden.
+2. Ein echter fehlender oder nicht zugreifbarer Pfad liefert weiterhin einen
+   klaren Fehler.
+3. Nach erfolgreichem Schreiben von `.lrc`/Embedded-Lyrics werden
+   `tags_json`, `missing_tags_json` und die Library-v2-Zeile neu gelesen bzw.
+   invalidiert.
+4. Der Fix darf nicht auf eine Legacy-`tracks.file_path`-Zeile angewiesen sein.
+
+### Scope-Hinweis
+
+Der bestehende Cover-Art-Filler arbeitet als albumbezogener Repair-Job mit
+einer repräsentativen Datei und kann deshalb nicht automatisch den
+dateigenauen Tag-Status jedes Tracks garantieren. Die UI-Anzeige und die
+Repair-Findings müssen diesen Unterschied entweder technisch beseitigen oder
+explizit getrennt ausweisen.
+
 Das erste Prioritätspaket ist implementiert: ein exhaustives Datenbasis- und
 V2-Effekt-Manifest, stabile V2-Subjects an Repair-Findings, eine strikt durch
 `features.library_v2 is True` gegatete zentrale Mutation-Synchronisation,
