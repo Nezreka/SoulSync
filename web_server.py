@@ -39890,6 +39890,63 @@ def _emit_watchlist_count_loop():
         except Exception as e:
             logger.debug(f"Error emitting watchlist count: {e}")
 
+# Soulseek chat push (P3): watch the community room + PM unread state through
+# slskd and push deltas over the socket, so the nav badge and the bell react
+# without the chat page being open. First pass after boot only BASELINES the
+# room (no replaying history as "new"). Wholly idle-gated: zero slskd calls
+# while no browser is connected.
+_chat_push_state = {'room_key': None, 'pm_unread': -1}
+
+def _emit_chat_push_loop():
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(6)
+        try:
+            if not _has_connected_clients():
+                continue
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not _slsk or not _slsk.base_url:
+                continue
+            room = str(config_manager.get('soulseek.chat_room', 'soulsync') or 'soulsync')
+            joined = run_async(_slsk.get_joined_rooms()) or []
+            if room not in joined:
+                # auto-join at startup / after an slskd restart (joins don't persist)
+                if not run_async(_slsk.join_room(room)):
+                    continue
+            msgs = run_async(_slsk.get_room_messages(room)) or []
+            msgs.sort(key=lambda m: str(m.get('timestamp') or ''))
+            key = (str(msgs[-1].get('timestamp') or '') + ':' + str(len(msgs))) if msgs else ''
+            prev_key = _chat_push_state['room_key']
+            if prev_key is None:
+                _chat_push_state['room_key'] = key      # baseline, never replay history
+            elif key != prev_key:
+                prev_stamp = prev_key.rsplit(':', 1)[0]
+                fresh = [m for m in msgs if str(m.get('timestamp') or '') > prev_stamp]
+                _chat_push_state['room_key'] = key
+                if fresh:
+                    socketio.emit('chat:room_message', {
+                        'room': room,
+                        'messages': [{'username': m.get('username'),
+                                      'message': m.get('message'),
+                                      'timestamp': m.get('timestamp')} for m in fresh[-20:]],
+                    })
+            convos = run_async(_slsk.get_conversations()) or []
+            unread_users = [str(c.get('username') or '') for c in convos
+                            if c.get('hasUnAcknowledgedMessages')
+                            or (c.get('unAcknowledgedMessageCount') or 0) > 0]
+            unread = len([u for u in unread_users if u])
+            prev = _chat_push_state['pm_unread']
+            if unread != prev:
+                _chat_push_state['pm_unread'] = unread
+                socketio.emit('chat:unread', {
+                    'pms': unread,
+                    'users': [u for u in unread_users if u][:3],
+                    # 'grew' gates the toast: only a RISING count notifies (a read
+                    # clearing the flag must not), and never the boot baseline
+                    'grew': prev >= 0 and unread > prev,
+                })
+        except Exception:
+            logger.debug("chat push loop error", exc_info=True)
+
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
     Skipped entirely while no client is connected — the transfer fetch below is a real
@@ -40998,6 +41055,7 @@ def start_runtime_services():
         socketio.start_background_task(_emit_service_status_loop)
         socketio.start_background_task(_emit_watchlist_count_loop)
         socketio.start_background_task(_emit_download_status_loop)
+        socketio.start_background_task(_emit_chat_push_loop)
         # Server Activity — subscriber-gated live push (idle when no drawer open)
         socketio.start_background_task(_emit_server_activity_loop)
         # Phase 2: Dashboard pollers

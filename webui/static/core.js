@@ -447,6 +447,15 @@ function initializeWebSocket() {
     socket.on('watchlist:count', handleWatchlistCountUpdate);
     socket.on('downloads:batch_update', handleDownloadBatchUpdate);
 
+    // Soulseek chat push (badges + PM toasts live in chat.js; guard: the
+    // module owns all chat state, core.js only routes the events)
+    socket.on('chat:room_message', function (d) {
+        if (window.ChatPage && ChatPage.onRoomMessages) ChatPage.onRoomMessages(d);
+    });
+    socket.on('chat:unread', function (d) {
+        if (window.ChatPage && ChatPage.onUnread) ChatPage.onUnread(d);
+    });
+
     // Phase 2 event listeners (dashboard pollers)
     socket.on('rate-monitor:update', _handleRateMonitorUpdate);
     socket.on('dashboard:stats', handleDashboardStats);

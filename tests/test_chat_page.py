@@ -80,3 +80,29 @@ class TestChatModule:
     def test_read_only_composer_when_sending_gated(self):
         assert "Read-only" in _CHAT_JS
         assert "input.disabled = !state.canSend" in _CHAT_JS
+
+
+class TestPush:
+    """P3 — socket push: badges + PM toasts without the page open."""
+
+    def test_server_loop_is_idle_gated_and_baselines(self):
+        ws = (_ROOT / "web_server.py").read_text(encoding="utf-8", errors="replace")
+        loop = ws.split("def _emit_chat_push_loop")[1].split("\ndef ")[0]
+        assert "_has_connected_clients()" in loop        # zero slskd calls when idle
+        assert "IS_SHUTTING_DOWN" in loop
+        assert "baseline, never replay history" in loop  # boot must not spam badges
+        assert "prev >= 0 and unread > prev" in loop     # toast only on a RISING count
+        assert "socketio.start_background_task(_emit_chat_push_loop)" in ws
+
+    def test_core_routes_events_into_the_chat_module(self):
+        core = (_ROOT / "webui" / "static" / "core.js").read_text(encoding="utf-8", errors="replace")
+        assert "socket.on('chat:room_message'" in core
+        assert "socket.on('chat:unread'" in core
+        assert "ChatPage.onRoomMessages" in core and "ChatPage.onUnread" in core
+
+    def test_badges_update_on_both_sidebars(self):
+        assert "'chat-nav-badge', 'video-chat-nav-badge'" in _CHAT_JS
+        # opening the room clears its share of the badge
+        assert "unread.room = 0; updateBadges();" in _CHAT_JS
+        # a rising PM count toasts (journals into the bell); reads stay silent
+        assert "d.grew && typeof showToast === 'function'" in _CHAT_JS

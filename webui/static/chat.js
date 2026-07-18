@@ -329,5 +329,49 @@
         _armObserver();
     }
 
-    window.ChatPage = { open: open, openPm: openPm };
+    // ── socket push (P3): nav badges + PM toasts, no page required ───────────
+    var unread = { room: 0, pms: 0 };
+
+    function updateBadges() {
+        var total = unread.room + unread.pms;
+        ['chat-nav-badge', 'video-chat-nav-badge'].forEach(function (id) {
+            var b = document.getElementById(id);
+            if (!b) return;
+            if (total > 0) { b.textContent = total > 99 ? '99+' : String(total); b.classList.remove('hidden'); }
+            else { b.classList.add('hidden'); }
+        });
+    }
+
+    function onRoomMessages(d) {
+        if (pageVisible() && state.view === 'room') {
+            refresh();               // live update, nothing to badge
+            return;
+        }
+        unread.room += (d && d.messages ? d.messages.length : 0);
+        updateBadges();
+    }
+
+    function onUnread(d) {
+        unread.pms = (d && d.pms) || 0;
+        // Only a RISING count toasts (server sets grew; reads clearing the flag
+        // stay quiet) — showToast journals it into the bell + history for free.
+        if (d && d.grew && typeof showToast === 'function') {
+            var who = (d.users || []).filter(Boolean).join(', ');
+            showToast('New Soulseek message' + (who ? ' from ' + who : '') +
+                      ' — open Chat to reply', 'info');
+        }
+        updateBadges();
+        if (pageVisible()) refresh();   // conversation rail picks up the dot
+    }
+
+    // Opening the room clears its share of the badge (PM share clears through
+    // slskd acknowledge when the conversation is actually read).
+    var _openRoomBase = openRoom;
+    openRoom = function () {
+        unread.room = 0; updateBadges();
+        _openRoomBase();
+    };
+
+    window.ChatPage = { open: open, openPm: openPm,
+                        onRoomMessages: onRoomMessages, onUnread: onUnread };
 })();
