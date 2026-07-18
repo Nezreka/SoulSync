@@ -820,6 +820,27 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep--missing .vd-ep-badge { color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); }
 .vd-ep--missing .vd-ep-index, .vd-ep--missing .vd-ep-title { opacity: 0.7; }
 
+/* Continue Watching — per-episode watch state (server truth from the scan) */
+.vd-ep-prog { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 4px;
+    background: rgba(255,255,255,0.25); }
+.vd-ep-prog-fill { display: block; height: 100%; background: rgb(var(--vd-accent-rgb, 255 59 59));
+    border-radius: 0 2px 2px 0; }
+.vd-ep-check { flex: none; font-size: 13px; font-weight: 900; color: #4ade80; line-height: 1;
+    align-self: center; }
+.vd-ep--watched .vd-ep-title { color: rgba(255,255,255,0.62); }
+.vd-ep--watched .vd-ep-still { filter: grayscale(0.35) brightness(0.82); }
+.vd-ep--watched:hover .vd-ep-still { filter: grayscale(0.1) brightness(0.72); }
+.vd-ep-next-chip { flex: none; align-self: center; font-size: 10.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 9px; border-radius: 999px;
+    color: #fff; background: rgba(var(--vd-accent-rgb, 255 59 59), 0.85); white-space: nowrap; }
+.vd-ep--next { box-shadow: inset 3px 0 0 rgb(var(--vd-accent-rgb, 255 59 59));
+    background: rgba(var(--vd-accent-rgb, 255 59 59), 0.05); }
+.vd-ep--next:hover { background: rgba(var(--vd-accent-rgb, 255 59 59), 0.09); }
+/* hero: watched tag in the meta line + the S/E tag inside the play button */
+.vd-watched-tag { color: #4ade80 !important; font-weight: 700; }
+.vd-play-ep { font-weight: 800; padding: 2px 8px; border-radius: 6px;
+    background: rgba(255,255,255,0.16); font-size: 0.85em; }
+
 @media (max-width: 820px) {
     .vd-bb-content { padding-left: 24px; padding-right: 24px; }
     .vd-body { padding: 24px 22px 60px; }
