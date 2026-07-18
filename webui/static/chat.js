@@ -250,6 +250,20 @@
                 input.value = text;     // give the words back
                 return;
             }
+            // Optimistic echo: slskd takes a beat to include a just-sent message,
+            // and the poll adds up to 4s more — paint it NOW, then let the next
+            // authoritative render replace it (lastStamp reset forces that).
+            var host = q('[data-chat-messages]');
+            if (host) {
+                var empty = host.querySelector('.chat-empty');
+                if (empty) empty.remove();
+                host.insertAdjacentHTML('beforeend', messageRow({
+                    username: 'you', message: text,
+                    timestamp: new Date().toISOString(), self: true,
+                }));
+                host.scrollTop = host.scrollHeight;
+                state.lastStamp = null;
+            }
             state.stickBottom = true;
             refresh();
         });
