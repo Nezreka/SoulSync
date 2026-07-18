@@ -48,6 +48,15 @@ class TestWiring:
                      'data-chat-fmt="bold"', 'data-chat-fmt="spoiler"'):
             assert hook in html, f"missing {hook}"
 
+    def test_emoji_picker_can_actually_close(self):
+        # display:grid on the popover would override the [hidden] UA rule —
+        # the explicit [hidden] restatement is what lets the toggle work
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(
+            encoding="utf-8", errors="replace")
+        assert ".chat-emoji-pop[hidden] { display: none !important; }" in css
+        # and clicking anywhere else dismisses it
+        assert "toggleEmojiPicker(true);" in _CHAT_JS.split("page.addEventListener('click'")[1][:400]
+
     def test_spoiler_reveals_on_click(self):
         assert "data-chat-spoiler" in _CHAT_JS
         assert "chat-spoiler--shown" in _CHAT_JS

@@ -71711,6 +71711,9 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     font-size: 12.5px; cursor: pointer;
 }
 .chat-fmt-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+/* display:grid would override the [hidden] UA rule — restate it explicitly,
+   or the picker can never close (the toggle sets hidden but grid wins) */
+.chat-emoji-pop[hidden] { display: none !important; }
 .chat-emoji-pop {
     position: absolute; bottom: 36px; left: 14px; z-index: 30;
     display: grid; grid-template-columns: repeat(10, 32px); gap: 2px;
