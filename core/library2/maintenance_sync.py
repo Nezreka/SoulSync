@@ -320,9 +320,18 @@ def v2_uncovered_file_subjects(database: Any, config_manager: Any) -> List[Dict[
                 "(SELECT 1 FROM tracks legacy WHERE legacy.id=f.legacy_track_id))"
             )
         rows = conn.execute(
-            f"""SELECT f.id AS file_id, f.track_id, f.path,
+            f"""SELECT f.id AS file_id, f.track_id, f.path, f.is_primary,
+                       f.format, f.size, f.bitrate,
                        t.album_id, t.title, t.duration,
+                       t.track_number, t.disc_number, t.isrc,
+                       t.spotify_id AS spotify_track_id,
+                       t.musicbrainz_id AS musicbrainz_recording_id,
+                       t.external_ids AS track_external_ids,
                        al.title AS album_title,
+                       al.image_url AS album_image,
+                       al.spotify_id AS spotify_album_id,
+                       al.album_type, al.year AS album_year,
+                       al.track_count AS album_track_count,
                        COALESCE(
                          (SELECT ar.name
                             FROM lib2_track_artists ta
@@ -333,6 +342,8 @@ def v2_uncovered_file_subjects(database: Any, config_manager: Any) -> List[Dict[
                            LIMIT 1),
                          primary_artist.name
                        ) AS artist_name,
+                       primary_artist.image_url AS artist_image,
+                       primary_artist.spotify_id AS spotify_artist_id,
                        al.primary_artist_id AS artist_id
                   FROM lib2_track_files f
                   JOIN lib2_tracks t ON t.id=f.track_id
@@ -343,6 +354,74 @@ def v2_uncovered_file_subjects(database: Any, config_manager: Any) -> List[Dict[
                    AND COALESCE(f.file_state,'active')='active'
                    {legacy_filter}
               ORDER BY al.id, t.disc_number, t.track_number, f.id"""
+        ).fetchall()
+        subjects = []
+        for row in rows:
+            subject = dict(row)
+            external = {}
+            try:
+                parsed = json.loads(subject.pop("track_external_ids", None) or "{}")
+                if isinstance(parsed, Mapping):
+                    external = dict(parsed)
+            except (TypeError, ValueError):
+                pass
+            subject["itunes_track_id"] = external.get("itunes")
+            subject["deezer_track_id"] = external.get("deezer")
+            subjects.append(subject)
+        return subjects
+    finally:
+        conn.close()
+
+
+def v2_uncovered_album_subjects(database: Any, config_manager: Any) -> List[Dict[str, Any]]:
+    """Return V2 albums with active files that a legacy ``albums`` scan misses.
+
+    Album-level sibling of :func:`v2_uncovered_file_subjects` for tools whose
+    unit of work is a release (cover art, tag consistency).  ``rep_path`` is
+    the first active file on the release so on-disk checks have an anchor.
+    Feature-off and pre-schema installs are strict no-ops.
+    """
+    if not library_v2_enabled(config_manager):
+        return []
+    conn = database._get_connection()
+    try:
+        if not _table_exists(conn, "lib2_albums"):
+            return []
+        legacy_filter = ""
+        if _table_exists(conn, "albums"):
+            legacy_filter = (
+                "AND (al.legacy_album_id IS NULL OR NOT EXISTS "
+                "(SELECT 1 FROM albums legacy WHERE legacy.id=al.legacy_album_id))"
+            )
+        rows = conn.execute(
+            f"""SELECT al.id AS album_id, al.title,
+                       al.spotify_id AS spotify_album_id,
+                       al.musicbrainz_id AS musicbrainz_album_id,
+                       al.image_url AS album_image,
+                       al.album_type, al.year AS album_year,
+                       al.track_count AS album_track_count,
+                       al.primary_artist_id AS artist_id,
+                       ar.name AS artist_name,
+                       ar.image_url AS artist_image,
+                       (SELECT f.path
+                          FROM lib2_track_files f
+                          JOIN lib2_tracks t ON t.id=f.track_id
+                         WHERE t.album_id=al.id
+                           AND f.path IS NOT NULL AND f.path<>''
+                           AND COALESCE(f.file_state,'active')='active'
+                      ORDER BY t.disc_number, t.track_number, f.id
+                         LIMIT 1) AS rep_path
+                  FROM lib2_albums al
+             LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+                 WHERE al.title IS NOT NULL AND al.title<>''
+                   AND EXISTS (
+                        SELECT 1 FROM lib2_track_files f
+                        JOIN lib2_tracks t ON t.id=f.track_id
+                       WHERE t.album_id=al.id
+                         AND f.path IS NOT NULL AND f.path<>''
+                         AND COALESCE(f.file_state,'active')='active')
+                   {legacy_filter}
+              ORDER BY al.id"""
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -773,5 +852,6 @@ __all__ = [
     "library_v2_enabled",
     "sync_repair_change",
     "v2_subject_details",
+    "v2_uncovered_album_subjects",
     "v2_uncovered_file_subjects",
 ]

@@ -132,6 +132,20 @@ def _resolve_file_path(file_path, transfer_folder, download_folder=None,
     )
 
 
+def _lib2_id(entity_id) -> Optional[int]:
+    """Native Library-v2 finding subjects use ``lib2:<row_id>`` entity ids so
+    they can never collide with legacy integer ids. Returns the row id, or
+    None for legacy subjects."""
+    text = str(entity_id or '')
+    if not text.startswith('lib2:'):
+        return None
+    try:
+        value = int(text.split(':', 1)[1])
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -1886,10 +1900,17 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
-                (artist_url, album_id))
+            native_album_id = _lib2_id(album_id)
+            if native_album_id is not None:
+                cursor.execute(
+                    "UPDATE lib2_artists SET image_url = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = (SELECT primary_artist_id FROM lib2_albums WHERE id = ?)",
+                    (artist_url, native_album_id))
+            else:
+                cursor.execute(
+                    "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
+                    (artist_url, album_id))
             conn.commit()
             if cursor.rowcount == 0:
                 return {'success': False, 'error': 'Artist not found for this album'}
@@ -1936,31 +1957,58 @@ class RepairWorker:
         album_title = details.get('album_title')
         artist_name = details.get('artist')
         mbid = details.get('musicbrainz_release_id')
+        native_album_id = _lib2_id(album_id)
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                           (artwork_url, album_id))
-            conn.commit()
-            if cursor.rowcount == 0:
-                return {'success': False, 'error': 'Album not found in database'}
+            if native_album_id is not None:
+                if artwork_url:
+                    cursor.execute(
+                        "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (artwork_url, native_album_id))
+                    conn.commit()
+                    if cursor.rowcount == 0:
+                        return {'success': False, 'error': 'Album not found in database'}
+                cursor.execute("""
+                    SELECT al.title, ar.name, al.musicbrainz_id
+                    FROM lib2_albums al LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE al.id = ?
+                """, (native_album_id,))
+                meta_row = cursor.fetchone()
+                if meta_row:
+                    album_title = album_title or meta_row[0]
+                    artist_name = artist_name or meta_row[1]
+                    mbid = mbid or meta_row[2]
+                cursor.execute("""
+                    SELECT f.path FROM lib2_track_files f
+                    JOIN lib2_tracks t ON t.id = f.track_id
+                    WHERE t.album_id = ? AND f.path IS NOT NULL AND f.path != ''
+                      AND COALESCE(f.file_state,'active') = 'active'
+                """, (native_album_id,))
+                track_paths = [r[0] for r in cursor.fetchall()]
+            else:
+                cursor.execute("UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (artwork_url, album_id))
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': 'Album not found in database'}
 
-            # Pull album metadata + local track paths so we can write art to disk.
-            cursor.execute("""
-                SELECT al.title, ar.name, al.musicbrainz_release_id
-                FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE al.id = ?
-            """, (album_id,))
-            meta_row = cursor.fetchone()
-            if meta_row:
-                album_title = album_title or meta_row[0]
-                artist_name = artist_name or meta_row[1]
-                mbid = mbid or meta_row[2]
-            cursor.execute("""
-                SELECT file_path FROM tracks
-                WHERE album_id = ? AND file_path IS NOT NULL AND file_path != ''
-            """, (album_id,))
-            track_paths = [r[0] for r in cursor.fetchall()]
+                # Pull album metadata + local track paths so we can write art to disk.
+                cursor.execute("""
+                    SELECT al.title, ar.name, al.musicbrainz_release_id
+                    FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id
+                    WHERE al.id = ?
+                """, (album_id,))
+                meta_row = cursor.fetchone()
+                if meta_row:
+                    album_title = album_title or meta_row[0]
+                    artist_name = artist_name or meta_row[1]
+                    mbid = mbid or meta_row[2]
+                cursor.execute("""
+                    SELECT file_path FROM tracks
+                    WHERE album_id = ? AND file_path IS NOT NULL AND file_path != ''
+                """, (album_id,))
+                track_paths = [r[0] for r in cursor.fetchall()]
         finally:
             if conn:
                 conn.close()
@@ -1969,7 +2017,11 @@ class RepairWorker:
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
         resolved = []
         for p in track_paths:
-            rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
+            if native_album_id is not None:
+                from core.library2.paths import resolve_lib2_path
+                rp = resolve_lib2_path(p, config_manager=self._config_manager) or p
+            else:
+                rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
             if os.path.isfile(rp):
                 resolved.append(rp)
 

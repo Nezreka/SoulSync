@@ -14,6 +14,9 @@ class _Config:
             return self.enabled
         return default
 
+    def set(self, key, value):
+        return None
+
 
 def _import(legacy_db):
     from core.library2.importer import import_legacy_library
@@ -311,6 +314,249 @@ def test_lyrics_scanner_finds_v2_only_file(legacy_db, tmp_path, monkeypatch):
     assert findings[0]["entity_id"] == f"lib2:{track_id}"
     assert findings[0]["details"]["library_v2"]["file_id"] == file_id
     assert findings[0]["details"]["duration"] == 210
+
+
+def test_v2_file_subjects_carry_full_track_album_context(legacy_db, tmp_path):
+    from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+    _import(legacy_db)
+    audio = tmp_path / "context.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Context Song")
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute(
+            "UPDATE lib2_tracks SET track_number=9, disc_number=2, isrc='ISRC123', "
+            "spotify_id='sp-track', musicbrainz_id='mb-track', "
+            "external_ids='{\"itunes\":\"777\"}' WHERE id=?",
+            (track_id,),
+        )
+        conn.execute(
+            "UPDATE lib2_albums SET image_url='http://album-img', spotify_id='sp-album', "
+            "year=2020, track_count=12 WHERE id="
+            "(SELECT album_id FROM lib2_tracks WHERE id=?)",
+            (track_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    subject = next(
+        row for row in v2_uncovered_file_subjects(legacy_db, _Config(True))
+        if row["file_id"] == file_id
+    )
+    assert subject["track_number"] == 9
+    assert subject["disc_number"] == 2
+    assert subject["isrc"] == "ISRC123"
+    assert subject["spotify_track_id"] == "sp-track"
+    assert subject["musicbrainz_recording_id"] == "mb-track"
+    assert subject["itunes_track_id"] == "777"
+    assert subject["album_image"] == "http://album-img"
+    assert subject["spotify_album_id"] == "sp-album"
+    assert subject["album_year"] == 2020
+    assert subject["album_track_count"] == 12
+    assert subject["is_primary"] == 1
+
+
+def _add_v2_only_album(legacy_db, path, *, title="V2-only Album"):
+    conn = legacy_db._get_connection()
+    try:
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, spotify_id, image_url) "
+            "VALUES('V2 Only Artist','sp-v2-artist','http://artist-img')"
+        ).lastrowid
+        album_id = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id) "
+            "VALUES(?,?, 'sp-v2-album')",
+            (artist_id, title),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+            "VALUES(?,?,'primary')",
+            (album_id, artist_id),
+        )
+        track_id = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?,'T1',1)",
+            (album_id,),
+        ).lastrowid
+        file_id = conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, file_state, is_primary) "
+            "VALUES(?,?, 'active', 1)",
+            (track_id, str(path)),
+        ).lastrowid
+        conn.commit()
+        return int(album_id), int(artist_id), int(track_id), int(file_id)
+    finally:
+        conn.close()
+
+
+def test_v2_album_subject_enumerator_lists_v2_only_albums(legacy_db, tmp_path):
+    from core.library2.maintenance_sync import v2_uncovered_album_subjects
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-album-01.flac"
+    audio.write_bytes(b"audio")
+    album_id, artist_id, _track_id, _file_id = _add_v2_only_album(legacy_db, audio)
+
+    assert v2_uncovered_album_subjects(legacy_db, _Config(False)) == []
+    subjects = v2_uncovered_album_subjects(legacy_db, _Config(True))
+    assert [row["album_id"] for row in subjects] == [album_id]
+    subject = subjects[0]
+    assert subject["artist_id"] == artist_id
+    assert subject["title"] == "V2-only Album"
+    assert subject["artist_name"] == "V2 Only Artist"
+    assert subject["spotify_album_id"] == "sp-v2-album"
+    assert subject["rep_path"] == str(audio)
+
+
+def test_acoustid_scanner_persists_native_verification_for_v2_only_file(
+    legacy_db, tmp_path, monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
+
+    _import(legacy_db)
+    audio = tmp_path / "acoustid-v2.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Native Song")
+    fake_client = SimpleNamespace(
+        fingerprint_and_lookup=lambda path: {
+            "recordings": [
+                {"title": "Native Song", "artist": "Drake", "duration": 210}
+            ],
+            "best_score": 0.95,
+        }
+    )
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        acoustid_client=fake_client,
+        create_finding=lambda **kwargs: True,
+    )
+
+    result = AcoustIDScannerJob().scan(context)
+
+    assert result.scanned >= 1
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT verification_status FROM lib2_track_files WHERE id=?", (file_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "verified"
+
+
+def test_acoustid_scanner_flags_v2_only_mismatch_with_subject(
+    legacy_db, tmp_path,
+):
+    from types import SimpleNamespace
+
+    from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
+
+    _import(legacy_db)
+    audio = tmp_path / "acoustid-wrong.flac"
+    audio.write_bytes(b"audio")
+    track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Expected Song")
+    fake_client = SimpleNamespace(
+        fingerprint_and_lookup=lambda path: {
+            "recordings": [
+                {"title": "Totally Different", "artist": "Someone Else",
+                 "duration": 210}
+            ],
+            "best_score": 0.97,
+        }
+    )
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        acoustid_client=fake_client,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = AcoustIDScannerJob().scan(context)
+
+    assert result.findings_created == 1
+    assert findings[0]["entity_id"] == f"lib2:{track_id}"
+    assert findings[0]["details"]["library_v2"]["file_id"] == file_id
+
+
+def test_cover_art_scanner_flags_v2_only_album(legacy_db, tmp_path, monkeypatch):
+    from core.repair_jobs.missing_cover_art import MissingCoverArtJob
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-cover-01.flac"
+    audio.write_bytes(b"audio")
+    album_id, artist_id, _track_id, _file_id = _add_v2_only_album(
+        legacy_db, audio, title="Artless Album"
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.get_primary_source", lambda: "spotify"
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.get_source_priority",
+        lambda primary: ["spotify"],
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.file_has_embedded_art", lambda p: False
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.folder_has_cover_sidecar", lambda d: False
+    )
+    monkeypatch.setattr(
+        MissingCoverArtJob, "_try_source",
+        lambda self, *args, **kwargs: "http://found-art",
+    )
+    monkeypatch.setattr(
+        MissingCoverArtJob, "_find_artist_art", lambda self, *args, **kwargs: None
+    )
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    MissingCoverArtJob().scan(context)
+
+    native = [f for f in findings if f["entity_id"] == f"lib2:{album_id}"]
+    assert len(native) == 1
+    assert native[0]["entity_type"] == "album"
+    assert native[0]["details"]["library_v2"]["album_id"] == album_id
+    assert native[0]["details"]["found_artwork_url"] == "http://found-art"
+
+
+def test_cover_art_fix_applies_natively_to_v2_album(legacy_db, tmp_path):
+    from core.repair_worker import RepairWorker
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-cover-fix.flac"
+    audio.write_bytes(b"audio")
+    album_id, artist_id, _track_id, _file_id = _add_v2_only_album(
+        legacy_db, audio, title="Fix Album"
+    )
+    worker = RepairWorker(database=legacy_db, transfer_folder=str(tmp_path))
+    worker._config_manager = _Config(True)
+
+    result = worker._fix_missing_cover_art(
+        "album", f"lib2:{album_id}", None,
+        {"found_artwork_url": "http://new-art", "album_title": "Fix Album"},
+    )
+
+    assert result["success"] is True, result
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT image_url FROM lib2_albums WHERE id=?", (album_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "http://new-art"
 
 
 def test_every_registered_job_declares_v2_effects():

@@ -118,7 +118,17 @@ class AcoustIDScannerJob(RepairJob):
 
             # Resolve the DB path to an actual file on disk
             file_path = track_info.get('file_path', '')
-            resolved = self._resolve_path(file_path, context)
+            if track_info.get('lib2_file_id'):
+                # Library-v2 files carry v2 paths; the legacy resolver's
+                # music_paths/Plex heuristics do not apply to them.
+                if os.path.exists(file_path):
+                    resolved = file_path
+                else:
+                    from core.library2.paths import resolve_lib2_path
+                    resolved = resolve_lib2_path(
+                        file_path, config_manager=context.config_manager)
+            else:
+                resolved = self._resolve_path(file_path, context)
             if not resolved:
                 result.skipped += 1
                 continue
@@ -351,6 +361,24 @@ class AcoustIDScannerJob(RepairJob):
                 if _is_force else
                 f'Wrong download: "{expected["title"]}" is actually "{matched_title}"'
             )
+            finding_details = {
+                'expected_title': expected['title'],
+                'expected_artist': expected_artist,
+                'acoustid_title': matched_title,
+                'acoustid_artist': matched_artist,
+                'fingerprint_score': round(best_score, 3),
+                'title_similarity': round(title_sim, 3),
+                'artist_similarity': round(artist_sim, 3),
+                'album_thumb_url': expected.get('album_thumb_url'),
+                'artist_thumb_url': expected.get('artist_thumb_url'),
+                'album_title': expected.get('album_title', ''),
+                'track_number': expected.get('track_number'),
+                'force_imported': file_verif_status == 'force_imported',
+            }
+            subject = expected.get('lib2_subject')
+            if subject:
+                from core.library2.maintenance_sync import v2_subject_details
+                finding_details.update(v2_subject_details(subject))
             inserted = context.create_finding(
                 job_id=self.job_id,
                 finding_type='acoustid_mismatch',
@@ -365,20 +393,7 @@ class AcoustIDScannerJob(RepairJob):
                     f'(fingerprint: {best_score:.0%}, title match: {title_sim:.0%}, '
                     f'artist match: {artist_sim:.0%})'
                 ),
-                details={
-                    'expected_title': expected['title'],
-                    'expected_artist': expected_artist,
-                    'acoustid_title': matched_title,
-                    'acoustid_artist': matched_artist,
-                    'fingerprint_score': round(best_score, 3),
-                    'title_similarity': round(title_sim, 3),
-                    'artist_similarity': round(artist_sim, 3),
-                    'album_thumb_url': expected.get('album_thumb_url'),
-                    'artist_thumb_url': expected.get('artist_thumb_url'),
-                    'album_title': expected.get('album_title', ''),
-                    'track_number': expected.get('track_number'),
-                    'force_imported': file_verif_status == 'force_imported',
-                }
+                details=finding_details
             )
             if inserted:
                 result.findings_created += 1
@@ -410,57 +425,71 @@ class AcoustIDScannerJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cur = conn.cursor()
-            cur.execute(
-                "UPDATE tracks SET verification_status = ? WHERE id = ?",
-                (status, track_id))
+            lib2_file_id = (expected or {}).get('lib2_file_id')
+            if lib2_file_id:
+                # Native Library-v2 subject: the verification fact lives on the
+                # file row itself; there is no legacy ``tracks`` row to update.
+                cur.execute(
+                    "UPDATE lib2_track_files SET verification_status = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (status, lib2_file_id))
+            else:
+                cur.execute(
+                    "UPDATE tracks SET verification_status = ? WHERE id = ?",
+                    (status, track_id))
             exp = expected or {}
             # Find the canonical history row for this file. The stored path is frozen at
             # import time while the file has since moved (media-server import / reorganize),
             # so an exact-path match alone misses it — then the status never lands and a
             # duplicate row gets inserted every scan (#934). Match exact path first, then
             # filename guarded by title, and HEAL the row's path so future scans match cleanly.
-            from core.downloads.history_match import pick_history_row, like_filename_filter
-            current = fpath or db_path
-            basename = os.path.basename(current) if current else ''
-            clauses, params = [], []
-            for p in {p for p in (fpath, db_path) if p}:
-                clauses.append("file_path = ?")
-                params.append(p)
-            if basename:
-                clauses.append("file_path LIKE ? ESCAPE '\\'")
-                params.append(like_filename_filter(basename))
-            row_id = None
-            if clauses:
-                cur.execute(
-                    "SELECT id, file_path, title, download_source FROM library_history WHERE "
-                    + " OR ".join(clauses),
-                    params)
-                row_id = pick_history_row(
-                    cur.fetchall(),
-                    current_paths=(fpath, db_path),
-                    basename=basename, title=exp.get('title') or '')
-            if row_id is not None:
-                cur.execute(
-                    "UPDATE library_history SET verification_status = ?, file_path = ? WHERE id = ?",
-                    (status, current, row_id))
-                # Drop synthetic scan-created duplicates for this exact file (the #934
-                # leftovers). Exact path → collision-free; never touches a real download row.
-                cur.execute(
-                    "DELETE FROM library_history WHERE id != ? AND download_source = 'acoustid_scan' "
-                    "AND file_path = ?",
-                    (row_id, current))
-            elif status == 'unverified':
-                cur.execute(
-                    """INSERT INTO library_history
-                       (event_type, title, artist_name, album_name, file_path,
-                        thumb_url, download_source, verification_status)
-                       VALUES ('download', ?, ?, ?, ?, ?, 'acoustid_scan', ?)""",
-                    (exp.get('title') or os.path.basename(fpath),
-                     exp.get('artist') or None,
-                     exp.get('album_title') or None,
-                     db_path or fpath,
-                     exp.get('album_thumb_url') or None,
-                     status))
+            try:
+                from core.downloads.history_match import pick_history_row, like_filename_filter
+                current = fpath or db_path
+                basename = os.path.basename(current) if current else ''
+                clauses, params = [], []
+                for p in {p for p in (fpath, db_path) if p}:
+                    clauses.append("file_path = ?")
+                    params.append(p)
+                if basename:
+                    clauses.append("file_path LIKE ? ESCAPE '\\'")
+                    params.append(like_filename_filter(basename))
+                row_id = None
+                if clauses:
+                    cur.execute(
+                        "SELECT id, file_path, title, download_source FROM library_history WHERE "
+                        + " OR ".join(clauses),
+                        params)
+                    row_id = pick_history_row(
+                        cur.fetchall(),
+                        current_paths=(fpath, db_path),
+                        basename=basename, title=exp.get('title') or '')
+                if row_id is not None:
+                    cur.execute(
+                        "UPDATE library_history SET verification_status = ?, file_path = ? WHERE id = ?",
+                        (status, current, row_id))
+                    # Drop synthetic scan-created duplicates for this exact file (the #934
+                    # leftovers). Exact path → collision-free; never touches a real download row.
+                    cur.execute(
+                        "DELETE FROM library_history WHERE id != ? AND download_source = 'acoustid_scan' "
+                        "AND file_path = ?",
+                        (row_id, current))
+                elif status == 'unverified':
+                    cur.execute(
+                        """INSERT INTO library_history
+                           (event_type, title, artist_name, album_name, file_path,
+                            thumb_url, download_source, verification_status)
+                           VALUES ('download', ?, ?, ?, ?, ?, 'acoustid_scan', ?)""",
+                        (exp.get('title') or os.path.basename(fpath),
+                         exp.get('artist') or None,
+                         exp.get('album_title') or None,
+                         db_path or fpath,
+                         exp.get('album_thumb_url') or None,
+                         status))
+            except Exception as history_exc:
+                # The review-queue projection must never lose the status write
+                # itself (native V2 installs may have no library_history table).
+                logger.debug("history projection failed for %s: %s", track_id, history_exc)
             getattr(conn, 'commit', lambda: None)()
             if context.report_change:
                 context.report_change(
@@ -546,6 +575,33 @@ class AcoustIDScannerJob(RepairJob):
         finally:
             if conn:
                 conn.close()
+
+        # Native Library-v2 coverage: active files whose track has no legacy
+        # backref never appear in the ``tracks`` query above. Fingerprinting is
+        # expensive, so only the primary file of each uncovered track is added.
+        try:
+            from core.library2.maintenance_sync import v2_uncovered_file_subjects
+
+            for subject in v2_uncovered_file_subjects(context.db, context.config_manager):
+                key = f"lib2:{subject['track_id']}"
+                if key in tracks and not subject.get('is_primary'):
+                    continue
+                tracks[key] = {
+                    'title': subject['title'] or '',
+                    'artist': subject['artist_name'] or '',
+                    'file_path': str(subject['path']),
+                    'track_number': subject.get('track_number'),
+                    'album_title': subject.get('album_title') or '',
+                    'album_thumb_url': subject.get('album_image'),
+                    'artist_thumb_url': subject.get('artist_image'),
+                    'track_artist': subject['artist_name'] or '',
+                    'album_artist': '',
+                    'duration_ms': subject.get('duration') or 0,
+                    'lib2_file_id': subject['file_id'],
+                    'lib2_subject': subject,
+                }
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
         return tracks
 
     def _resolve_path(self, file_path, context):
