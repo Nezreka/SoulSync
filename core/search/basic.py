@@ -41,10 +41,12 @@ def run_basic_search(
     # share URL carries the access token; no other source can find an
     # unlisted track) — force the route no matter which source is selected,
     # the same way manual search does (#865). The user just pastes the link.
+    forced_soundcloud = False
     try:
         from core.soundcloud_client import is_soundcloud_url
         if is_soundcloud_url(query):
             source = 'soundcloud'
+            forced_soundcloud = True
     except Exception as exc:   # noqa: BLE001 - routing sugar must never kill a search
         logger.debug("soundcloud URL routing skipped: %s", exc)
 
@@ -58,6 +60,12 @@ def run_basic_search(
             client = None
 
         if client is None:
+            if forced_soundcloud:
+                # a SoundCloud URL can ONLY resolve on SoundCloud — falling
+                # back would search the raw URL as text and silently return
+                # nothing. Say what's wrong instead (parity with manual search).
+                raise ValueError("SoundCloud isn't connected — enable it in "
+                                 "Settings to resolve a SoundCloud link.")
             logger.warning("basic search: no client for source %r — falling back to orchestrator", source)
             tracks, albums = run_async(download_orchestrator.search(query))
         else:
