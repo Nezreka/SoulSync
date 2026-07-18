@@ -355,6 +355,11 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
                     <span class="nav-text">Automations</span>
                 </a>
+                <a class="nav-button" data-page="chat" href="/chat">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                    <span class="nav-text">Chat</span>
+                    <span class="issues-nav-badge hidden" id="chat-nav-badge">0</span>
+                </a>
                 <a class="nav-button" data-page="tools" href="/tools">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
                     <span class="nav-text">Tools</span>
@@ -468,6 +473,11 @@
                 <a class="nav-button" data-video-page="video-automations" href="/video-automations">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
                     <span class="nav-text">Automations</span>
+                </a>
+                <a class="nav-button" data-video-page="video-chat" href="/video-chat">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                    <span class="nav-text">Chat</span>
+                    <span class="issues-nav-badge hidden" id="video-chat-nav-badge">0</span>
                 </a>
                 <a class="nav-button" data-video-page="video-tools" href="/video-tools">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-.5-.5-2.1 2.7-2.4z"/></svg></span>
@@ -9882,6 +9892,40 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
+            <!-- Chat — Soulseek rooms + private messages, proxied through slskd.
+                 ONE page for the whole app: the video sidebar reveals this same div
+                 via SHARED_PAGES (video-side.js). All content driven by chat.js. -->
+            <div class="page" id="chat-page">
+                <div class="page-shell chat-page-container">
+                    <div class="tools-page-header">
+                        <div class="tools-page-header-left">
+                            <h2 class="tools-page-title">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                Chat
+                            </h2>
+                            <p class="tools-page-subtitle" data-chat-subtitle>Soulseek rooms &amp; private messages</p>
+                        </div>
+                    </div>
+                    <div class="chat-shell">
+                        <aside class="chat-side">
+                            <div class="chat-side-label">Rooms</div>
+                            <div class="chat-side-list" data-chat-rooms></div>
+                            <div class="chat-side-label">Messages</div>
+                            <div class="chat-side-list" data-chat-convos></div>
+                        </aside>
+                        <main class="chat-main">
+                            <div class="chat-head" data-chat-head></div>
+                            <div class="chat-scroll" data-chat-messages></div>
+                            <form class="chat-composer" data-chat-composer>
+                                <input class="chat-input" data-chat-input type="text" maxlength="1000"
+                                       placeholder="Message…" autocomplete="off">
+                                <button class="chat-send-btn" type="submit">Send</button>
+                            </form>
+                        </main>
+                        <aside class="chat-users" data-chat-users></aside>
+                    </div>
+                </div>
+            </div>
             <div class="page" id="tools-page">
                 <div class="page-shell tools-page-container">
                     <div class="tools-page-header">
@@ -11652,6 +11696,7 @@
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->

@@ -247,6 +247,14 @@ body[data-side="video"][data-video-page="video-help"] #help-page {
 body[data-side="video"][data-video-page="video-help"] #video-page-host {
     display: none !important;
 }
+/* Chat is one page for the whole app (Soulseek rooms/PMs are side-neutral) —
+   the video nav reveals the music-side #chat-page, same as Settings/Help. */
+body[data-side="video"][data-video-page="video-chat"] #chat-page {
+    display: block !important;
+}
+body[data-side="video"][data-video-page="video-chat"] #video-page-host {
+    display: none !important;
+}
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
    library mapping) — hidden on the music side. */
 body[data-side="music"] [data-video-only] {
