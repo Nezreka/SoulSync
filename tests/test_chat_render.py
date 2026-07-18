@@ -95,3 +95,24 @@ class TestWiring:
         # every remote-media emitter carries it: yt iframe, expanded image,
         # gif auto-embed, gif picker previews
         assert _CHAT_JS.count('referrerpolicy="no-referrer"') >= 4
+
+
+class TestUnreadAffordances:
+    """chatbic P1 — multiline composer, jump pill, NEW divider."""
+
+    def test_composer_is_a_real_textarea(self):
+        html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
+        assert '<textarea class="chat-input chat-input--area" data-chat-input' in html
+        # Enter sends, Shift+Enter newlines — block syntax needs real newlines
+        assert "e.key === 'Enter' && !e.shiftKey" in _CHAT_JS
+
+    def test_jump_pill_and_new_divider(self):
+        assert "data-chat-jump" in _CHAT_JS
+        assert "showJumpPill(shown.length - state.renderedCount)" in _CHAT_JS
+        assert "chat-new-sep" in _CHAT_JS
+        # the divider position freezes on room open; reading at the bottom
+        # advances only the STORED marker
+        assert "localStorage.getItem('chat_seen_'" in _CHAT_JS
+        assert "localStorage.setItem('chat_seen_'" in _CHAT_JS
+        # a filter flip must never masquerade as new messages
+        assert "a filter flip isn't 'new messages'" in _CHAT_JS

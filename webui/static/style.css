@@ -71860,3 +71860,26 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     font-size: 13px; color: rgba(255,255,255,0.8); cursor: pointer; }
 .chat-settings-check input { accent-color: #1db954; width: 15px; height: 15px; }
 .chat-settings-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+
+/* chat: composer textarea + unread affordances (chatbic P1) */
+.chat-input--area {
+    resize: none; overflow-y: auto; line-height: 1.45; max-height: 132px;
+    font-family: inherit;
+}
+.chat-jump-pill[hidden] { display: none !important; }
+.chat-jump-pill {
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: 104px; z-index: 25;
+    border: none; border-radius: 999px; padding: 7px 16px; cursor: pointer;
+    background: #1db954; color: #06130a; font-size: 12.5px; font-weight: 800;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+.chat-jump-pill:hover { filter: brightness(1.08); }
+.chat-new-sep {
+    display: flex; align-items: center; gap: 10px; margin: 10px 0 4px;
+    color: #f23f43; font-size: 10.5px; font-weight: 800; letter-spacing: 0.8px;
+}
+.chat-new-sep::before, .chat-new-sep::after {
+    content: ''; flex: 1; height: 1px; background: rgba(242,63,67,0.45);
+}
+.chat-new-sep span { flex: none; }
+.chat-new-sep::after { flex: 0 0 12px; }
