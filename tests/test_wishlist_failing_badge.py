@@ -52,5 +52,27 @@ def test_titles_use_the_attr_safe_escape():
 
 def test_css_covers_every_new_class():
     for cls in (".wl-failing-badge", ".wl-moon-failing", ".wl-orb-meta-failing",
-                ".wl-failing-filter.active", ".wl-track-failing"):
+                ".wl-failing-filter.active", ".wl-track-failing",
+                ".wl-tile-track-search", ".wl-moon-search-btn"):
         assert cls in _CSS, f"missing CSS for {cls}"
+
+
+# ── phase 2: manual-search jump ───────────────────────────────────────────────
+
+def test_manual_search_jump_exists_and_prefills():
+    assert "function _searchWishlistTrackManually" in _JS
+    assert "navigateToPage('search')" in _JS
+    assert "enhanced-search-input" in _JS
+
+
+def test_both_track_surfaces_get_the_search_button():
+    assert "wl-tile-track-search" in _JS
+    assert "wl-moon-search-btn" in _JS
+
+
+def test_onclick_args_use_the_inline_js_escape():
+    # artist/track names carry apostrophes (D'Angelo) — a bare escapeHtml
+    # inside onclick="fn('…')" breaks the JS string. Both buttons must use
+    # escapeForInlineJs for both arguments.
+    assert _JS.count("_searchWishlistTrackManually('${escapeForInlineJs(") == 2
+    assert "_searchWishlistTrackManually('${escapeHtml(" not in _JS

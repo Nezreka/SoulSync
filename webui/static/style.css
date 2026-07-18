@@ -64683,6 +64683,24 @@ body.max-performance #page-particles-canvas {
 }
 
 .wl-tile-track:hover .wl-tile-track-remove { opacity: 1; }
+
+/* Manual-search jump (LiveLeak hub phase 2) — mirrors the remove button */
+.wl-tile-track-search {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.35);
+    font-size: 9px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-left: 4px;
+    opacity: 0;
+    transition: all 0.15s;
+}
+.wl-tile-track:hover .wl-tile-track-search { opacity: 1; }
+.wl-tile-track-search:hover { color: #fff; background: rgba(var(--accent-rgb), 0.35); }
 .wl-tile-track-remove:hover { background: rgba(239,68,68,0.2); color: #f87171; }
 
 /* ── Singles orbit (small moons) ── */
@@ -64757,6 +64775,21 @@ body.max-performance #page-particles-canvas {
 }
 
 .wl-single-moon:hover .wl-moon-remove-btn { opacity: 1; }
+.wl-moon-search-btn {
+    position: absolute;
+    top: -2px; left: 2px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
+    font-size: 8px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.wl-single-moon:hover .wl-moon-search-btn { opacity: 1; }
 .wl-moon-remove-btn:hover { transform: scale(1.15); }
 
 @media (max-width: 768px) {

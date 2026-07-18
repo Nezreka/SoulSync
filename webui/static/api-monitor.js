@@ -1636,6 +1636,7 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
                     if (tr.failing) {
                         html += `<span class="wl-failing-badge" title="${_wlAttr(_wlFailTitle(tr))}">&#9888; ${tr.retry}</span>`;
                     }
+                    html += `<button class="wl-tile-track-search" onclick="event.stopPropagation();_searchWishlistTrackManually('${escapeForInlineJs(tr.artist)}','${escapeForInlineJs(tr.track)}')" title="Search manually — pick a source yourself">&#128269;</button>`;
                     html += `<button class="wl-tile-track-remove" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(tr.id)}')" title="Remove track">&#10005;</button>`;
                     html += `</div>`;
                 }
@@ -1651,6 +1652,7 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
                 html += s.image ? `<img src="${s.image}" alt="">` : `<span class="wl-moon-fallback">&#11088;</span>`;
                 if (s.failing) html += `<span class="wl-moon-failing-badge">&#9888;</span>`;
                 html += `<div class="wl-moon-label">${escapeHtml(s.track)}</div>`;
+                html += `<button class="wl-moon-search-btn" onclick="event.stopPropagation();_searchWishlistTrackManually('${escapeForInlineJs(s.artist)}','${escapeForInlineJs(s.track)}')" title="Search manually — pick a source yourself">&#128269;</button>`;
                 html += `<button class="wl-moon-remove-btn" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(s.id)}')" title="Remove">&#10005;</button>`;
                 html += `</div>`;
             }
@@ -1660,6 +1662,22 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
     });
 
     field.innerHTML = html;
+}
+
+// LiveLeak hub phase 2: jump from a stuck wishlist track straight into the
+// enhanced search, prefilled with "artist track" — every result there can be
+// hand-picked from any source and downloaded, which is exactly the manual
+// way out a repeatedly-failing track needs.
+function _searchWishlistTrackManually(artistName, trackName) {
+    navigateToPage('search');
+    setTimeout(() => {
+        const searchInput = document.getElementById('enhanced-search-input');
+        if (searchInput) {
+            searchInput.value = `${artistName || ''} ${trackName || ''}`.trim();
+            searchInput.dispatchEvent(new Event('input'));
+            searchInput.focus();
+        }
+    }, 300);
 }
 
 // Enhancement 8: navigate to the Search page pre-filled with this artist's name
