@@ -106,6 +106,18 @@ class TestUnreadAffordances:
         # Enter sends, Shift+Enter newlines — block syntax needs real newlines
         assert "e.key === 'Enter' && !e.shiftKey" in _CHAT_JS
 
+    def test_enter_respects_open_code_fences(self):
+        # typing ``` then Enter must NEWLINE (Discord rule), not send the
+        # fragment — this is why 'code blocks didn't work' live
+        assert "fences % 2 === 1) return;" in _CHAT_JS
+        assert "codeblock: ['```\\n', '\\n```']" in _CHAT_JS
+        html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
+        assert 'data-chat-fmt="codeblock"' in html
+
+    def test_pm_self_messages_wear_our_name(self):
+        # live-verified: slskd stamps username = the PARTNER on BOTH directions
+        assert "if (self && state.view === 'pm') user = state.selfName || 'you';" in _CHAT_JS
+
     def test_jump_pill_and_new_divider(self):
         assert "data-chat-jump" in _CHAT_JS
         assert "showJumpPill(shown.length - state.renderedCount)" in _CHAT_JS

@@ -350,6 +350,10 @@
             var m = msgs[i];
             var user = m.username || m.user || '?';
             var self = m.self === true || m.direction === 'Out';
+            // slskd stamps username = the CONVERSATION PARTNER on both
+            // directions of a PM (live-verified) — our own messages must
+            // wear our name, not theirs
+            if (self && state.view === 'pm') user = state.selfName || 'you';
             // the envelope IS the app signature: a plaintext room message means
             // the sender is on another Soulseek client, not SoulSync
             var ext = state.view === 'room' && !m.rich && !self;
@@ -535,7 +539,8 @@
 
     // ── composer toolbar (room only) ─────────────────────────────────────────
     var _FMT = { bold: ['**', '**'], italic: ['*', '*'], strike: ['~~', '~~'],
-                 code: ['`', '`'], spoiler: ['||', '||'], quote: ['> ', ''] };
+                 code: ['`', '`'], codeblock: ['```\n', '\n```'],
+                 spoiler: ['||', '||'], quote: ['> ', ''] };
 
     function applyFormat(kind) {
         var input = q('[data-chat-input]');
@@ -1092,7 +1097,13 @@
             // Discord composer: Enter sends, Shift+Enter newlines (the block
             // syntax — code fences, quotes, lists — NEEDS real newlines)
             inputEl.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    // inside an unclosed ``` fence Enter newlines (Discord
+                    // behavior) — otherwise typing a code block is impossible
+                    var fences = (inputEl.value.match(/```/g) || []).length;
+                    if (fences % 2 === 1) return;
+                    e.preventDefault(); send();
+                }
                 if (e.key === 'Escape') {
                     cancelReply();
                     var mp = q('[data-chat-mention-pop]');
@@ -1279,5 +1290,8 @@
                         // exported for the node render harness (XSS contract tests)
                         renderRich: renderRich, renderPlain: renderPlain,
                         renderGroups: renderGroups,
-                        _testSetSelf: function (n) { state.selfName = n; } };
+                        _testSetSelf: function (n) { state.selfName = n; },
+                        _testSetState: function (patch) {
+                            Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });
+                        } };
 })();
