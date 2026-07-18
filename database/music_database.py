@@ -415,12 +415,19 @@ class MusicDatabase:
                     message TEXT NOT NULL,
                     rich INTEGER NOT NULL DEFAULT 0,
                     timestamp TEXT NOT NULL,
+                    reply TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(room, username, timestamp, message) ON CONFLICT IGNORE
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_messages_room "
                            "ON chat_room_messages (room, timestamp)")
+            # the table shipped one commit before the reply column — live dbs
+            # already created it, so the column rides a tolerant ALTER
+            try:
+                cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN reply TEXT")
+            except sqlite3.OperationalError:
+                pass    # already there
 
             # Watchlist table for storing artists to monitor for new releases
             cursor.execute("""
@@ -10305,7 +10312,12 @@ class MusicDatabase:
             ts = str(m.get('timestamp') or '').strip()[:40]
             if not user or not msg or not ts:
                 continue
-            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts))
+            rep = m.get('reply')
+            rep_json = None
+            if isinstance(rep, dict) and rep.get('u'):
+                rep_json = json.dumps({'u': str(rep.get('u'))[:64],
+                                       'x': str(rep.get('x') or '')[:140]})
+            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json))
         if not rows:
             return 0
         try:
@@ -10313,8 +10325,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp) "
-                    "VALUES (?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply) "
+                    "VALUES (?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -10333,7 +10345,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -10346,6 +10358,13 @@ class MusicDatabase:
             rows.reverse()
             for r in rows:
                 r['rich'] = bool(r['rich'])
+                if r.get('reply'):
+                    try:
+                        r['reply'] = json.loads(r['reply'])
+                    except (ValueError, TypeError):
+                        r['reply'] = None
+                if not r.get('reply'):
+                    r.pop('reply', None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)

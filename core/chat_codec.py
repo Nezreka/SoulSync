@@ -34,10 +34,14 @@ MAX_RAW_BYTES = 16384       # decompression ceiling (zip-bomb guard)
 MAX_TEXT_LEN = 4000         # decoded message text cap
 
 
-def encode(text: str) -> str | None:
+def encode(text: str, extra: dict | None = None) -> str | None:
     """Wrap message text in a v1 envelope. None when it can't fit the wire
-    limit (the caller should tell the user, not silently truncate)."""
-    payload = {"v": 1, "t": str(text or "")}
+    limit (the caller should tell the user, not silently truncate).
+    ``extra`` merges additional envelope fields (e.g. the reply reference
+    {"r": {...}}) — the CALLER validates them; "v"/"t" can't be overridden."""
+    payload = dict(extra or {})
+    payload["v"] = 1
+    payload["t"] = str(text or "")
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     packed = MARKER + base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
     if len(packed) > MAX_ENCODED_LEN:
@@ -70,3 +74,16 @@ def decode(text) -> dict | None:
     if not isinstance(t, str) or len(t) > MAX_TEXT_LEN:
         return None
     return payload
+
+
+def reply_of(payload) -> dict | None:
+    """The validated reply reference from a decoded envelope, or None.
+    Everything here is REMOTE input — strict shape, hard caps."""
+    r = (payload or {}).get("r")
+    if not isinstance(r, dict):
+        return None
+    u = str(r.get("u") or "").strip()[:64]
+    x = str(r.get("x") or "").strip()[:140]
+    if not u:
+        return None
+    return {"u": u, "x": x}

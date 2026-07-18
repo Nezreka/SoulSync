@@ -148,8 +148,9 @@ class TestBlueprint:
     def test_status(self, chat_app):
         http, state = chat_app
         res = http.get("/api/chat/status").get_json()
-        assert res == {"configured": True, "room": "SoulSync", "can_send": True,
-                       "is_admin": True}
+        assert res["configured"] is True and res["room"] == "SoulSync"
+        assert res["can_send"] is True and res["is_admin"] is True
+        assert "username" in res    # our slskd name for @mention highlighting
 
     def test_room_hydrate_auto_joins_once(self, chat_app):
         http, state = chat_app
@@ -328,3 +329,46 @@ class TestChatSettings:
         # a renamed room must never replay its history as 'new' badge spam
         assert "room != _chat_push_state['room']" in loop
         assert "_chat_push_state['room_key'] = None" in loop
+
+
+class TestRepliesAndMentions:
+    """chatbic P3 — reply refs through the envelope, username in status."""
+
+    def test_send_carries_a_validated_reply(self, chat_app):
+        http, state = chat_app
+        from core.chat_codec import decode
+        http.post("/api/chat/room/message",
+                  json={"message": "agreed!", "reply": {"u": "alice", "x": "original words"}})
+        payload = decode(state["client"].sent_room[0][1])
+        assert payload["t"] == "agreed!"
+        assert payload["r"] == {"u": "alice", "x": "original words"}
+        # hostile/malformed reply shapes are dropped, message still sends
+        http.post("/api/chat/room/message",
+                  json={"message": "hi", "reply": {"x": "no user"}})
+        assert "r" not in decode(state["client"].sent_room[1][1])
+        http.post("/api/chat/room/message",
+                  json={"message": "hi", "reply": ["not", "a", "dict"]})
+        assert "r" not in decode(state["client"].sent_room[2][1])
+
+    def test_room_read_surfaces_the_reply(self, chat_app):
+        http, state = chat_app
+        from core.chat_codec import encode
+        wire = encode("yes", {"r": {"u": "bob", "x": "should we?"}})
+        state["client"].get_room_messages = lambda room: [
+            {"username": "a", "message": wire, "timestamp": "1"}]
+        msgs = http.get("/api/chat/room").get_json()["messages"]
+        assert msgs[0]["reply"] == {"u": "bob", "x": "should we?"}
+
+    def test_reply_caps_hostile_lengths(self):
+        from core.chat_codec import reply_of
+        r = reply_of({"r": {"u": "u" * 500, "x": "x" * 5000}})
+        assert len(r["u"]) == 64 and len(r["x"]) == 140
+        assert reply_of({"r": {"u": ""}}) is None
+        assert reply_of({}) is None
+
+    def test_status_includes_our_username(self, chat_app):
+        http, state = chat_app
+        import api.chat as mod
+        mod._SELF.update(name="", at=0.0)
+        state["client"].get_session_info = lambda: {"username": "BoulderBadgeDad"}
+        assert http.get("/api/chat/status").get_json()["username"] == "BoulderBadgeDad"
