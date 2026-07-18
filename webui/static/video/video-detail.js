@@ -239,7 +239,7 @@
             var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
             var gg = q('[data-vd-genres]');
             if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(genreChip).join('');
-            renderRatings(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
+            renderRatings(d); renderAwards(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
             return;
         }
         if (d.source === 'tmdb') {
@@ -270,6 +270,11 @@
         if (d.kind === 'show' && d.status) meta.push('<span class="vd-status">' + esc(statusLabel(d.status)) + '</span>');
         if (d.network) meta.push('<span>' + esc(d.network) + '</span>');
         if (d.kind === 'movie' && d.studio) meta.push('<span>' + esc(d.studio) + '</span>');
+        // Mediastinger (already enriched for overlays): don't leave before the credits end.
+        if (d.mediastinger) {
+            meta.push('<span class="vd-stinger" title="This title has an after-credits scene">' +
+                '🎬 After-credits scene</span>');
+        }
         var m = q('[data-vd-meta]'); if (m) m.innerHTML = meta.join('');
 
         renderActions(d);
@@ -299,9 +304,21 @@
         }
         renderSubtitles(d);
         renderRatings(d);
+        renderAwards(d);
         renderCrewLine(d);
         renderNextEpisode(d);
         renderCast(d);
+    }
+
+    // OMDb Awards line ("Won 2 Oscars. 154 wins & 87 nominations total.") — the
+    // overlay system already fetches it; the detail page finally shows it.
+    function renderAwards(d) {
+        var host = q('[data-vd-awards]');
+        if (!host) return;
+        var s = (d && d.awards || '').trim();
+        if (!s || /^n\/?a$/i.test(s)) { host.hidden = true; host.innerHTML = ''; return; }
+        host.hidden = false;
+        host.innerHTML = '<span class="vd-awards-ic">🏆</span>' + esc(s);
     }
 
     // Subtitle availability (OpenSubtitles backfill, #video-enrichment): a chip row
@@ -617,7 +634,61 @@
                 '" title="Re-read this show from your server — picks up new or removed episodes">' +
                 '<span class="vd-manage-ic">⟳</span> Synchronize</button>';
         }
+        // Watched toggle (the /watched API finally gets a UI): local state +
+        // markPlayed/markUnplayed pushed to the server. Library rows only.
+        if (ownLibItem && (d.kind === 'movie' || d.kind === 'show') &&
+                (d.source !== 'tmdb' || d.library_id != null) && (d.owned || d.episode_owned || d.watched)) {
+            html += '<button class="vd-manage-btn" type="button" data-vd-act="watched-toggle" title="' +
+                (d.watched ? 'Mark unwatched (clears played state on your server too)'
+                           : 'Mark watched (marks played on your server too)') + '">' +
+                '<span class="vd-manage-ic">' + (d.watched ? '↺' : '✓') + '</span> ' +
+                (d.watched ? 'Mark unwatched' : 'Mark watched') + '</button>';
+        }
         a.innerHTML = html;
+    }
+
+    // Continue Watching: played/unplayed toggle → POST /detail/<kind>/<id>/watched
+    // (local rows + server markPlayed), then mirror the result in-page.
+    function toggleWatchedState(btn) {
+        if (!data || btn.disabled) return;
+        var kind = data.kind === 'movie' ? 'movie' : 'show';
+        var libId = (data.source !== 'tmdb') ? data.id : data.library_id;
+        if (libId == null) return;
+        var target = !data.watched;
+        btn.disabled = true;
+        fetch(DETAIL_URL + kind + '/' + libId + '/watched', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ watched: target }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                btn.disabled = false;
+                if (!res || !res.ok) throw new Error();
+                // Mirror what the backend did so the page reacts instantly.
+                data.watched = target;
+                if (kind === 'movie') {
+                    data.play_count = target ? 1 : 0;
+                    data.view_offset_ms = 0;
+                } else {
+                    data.watched_episodes = target ? data.episode_total : 0;
+                    (data.seasons || []).forEach(function (s) {
+                        (s.episodes || []).forEach(function (ep) {
+                            ep.watched = target; ep.view_offset_ms = 0;
+                        });
+                    });
+                    data.next_up = null;
+                    if (data.server) { delete data.server.next_up; delete data.server.episode_url; }
+                }
+                renderBillboard(data);
+                if (kind === 'show') renderEpisodes();
+                if (typeof showToast === 'function') {
+                    showToast((target ? 'Marked watched' : 'Marked unwatched') +
+                        (res.pushed ? ' — synced to your server' : ''), 'success');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                if (typeof showToast === 'function') showToast('Could not update watched state', 'error');
+            });
     }
 
     // Open the shared Get modal for the current item (movies use this in place of
@@ -727,6 +798,9 @@
         if (!host) return;
         var rows = [];
         if (d.release_date) rows.push(['Released', d.release_date]);
+        if (d.digital_release_date && d.digital_release_date !== d.release_date) {
+            rows.push(['Digital release', d.digital_release_date]);
+        }
         if (d.runtime_minutes) rows.push(['Runtime', runtimeLabel(d.runtime_minutes)]);
         if (d.studio) rows.push(['Studio', d.studio]);
         if (d.status) rows.push(['Status', statusLabel(d.status)]);
@@ -734,7 +808,9 @@
         // Your media — the technical specs we scanned (Plex-grade).
         var f = d.file;
         if (f) {
-            if (f.resolution) rows.push(['Quality', mediaRes(f.resolution)]);
+            // the ranked quality name when the grab recorded one (Radarr-style
+            // "WEBDL-1080p"), else the plain scanned resolution
+            if (f.quality || f.resolution) rows.push(['Quality', f.quality || mediaRes(f.resolution)]);
             if (f.video_codec) rows.push(['Video', prettyCodec(f.video_codec)]);
             if (f.audio_codec) rows.push(['Audio', String(f.audio_codec).toUpperCase()]);
             if (f.release_source) rows.push(['Source', prettySource(f.release_source)]);
@@ -1411,10 +1487,17 @@
         var nextChip = isNext
             ? '<span class="vd-ep-next-chip">' + (inProgress ? 'Resume' : 'Next up') + '</span>'
             : '';
+        // NEW = landed on the server in the last 7 days and not watched yet.
+        var addedTs = ep.owned && !ep.watched && ep.added_at
+            ? Date.parse(String(ep.added_at).replace(' ', 'T'))   // Safari chokes on the space form
+            : NaN;
+        var newChip = (addedTs && !isNaN(addedTs) && (Date.now() - addedTs) < 7 * 86400000)
+            ? '<span class="vd-ep-new-chip" title="Recently added">New</span>'
+            : '';
         return '<div class="vd-ep ' + owned + '" data-vd-ep-key="' + key + '">' +
             '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + '</div>' +
             '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span>' + prog + '</div>' +
-            '<div class="vd-ep-info"><div class="vd-ep-top">' + check + nextChip + '<span class="vd-ep-title">' +
+            '<div class="vd-ep-info"><div class="vd-ep-top">' + check + nextChip + newChip + '<span class="vd-ep-title">' +
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
@@ -2506,6 +2589,7 @@
             else if (which === 'poster') openPosterModal();
             else if (which === 'manage') openManagePanel();
             else if (which === 'sync-show') syncShowNow(act);
+            else if (which === 'watched-toggle') toggleWatchedState(act);
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);

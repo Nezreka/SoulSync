@@ -4285,7 +4285,7 @@ class VideoDatabase:
                 "FROM seasons WHERE show_id=? ORDER BY season_number", (show_id,)).fetchall()
             eps = conn.execute(
                 "SELECT id, season_number, episode_number, title, overview, air_date, "
-                "runtime_minutes, rating, monitored, has_file, "
+                "runtime_minutes, rating, monitored, has_file, added_at, "
                 "play_count, last_viewed_at, view_offset_ms, "
                 "(still_url IS NOT NULL AND still_url<>'') AS has_still, "
                 # A server may hold several COPIES of one episode — surface them.
@@ -4310,6 +4310,7 @@ class VideoDatabase:
                 "watched": (e["play_count"] or 0) > 0,
                 "last_viewed_at": e["last_viewed_at"],
                 "view_offset_ms": e["view_offset_ms"] or 0,
+                "added_at": e["added_at"],   # NEW badge (freshly landed on the server)
             })
 
         # Seasons declared in the seasons table, plus any season numbers that only
@@ -4346,6 +4347,9 @@ class VideoDatabase:
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
             "watched": (show["watched_episodes"] or 0) >= total > 0,
             "watched_episodes": show["watched_episodes"] or 0,   # raw count for "N of M watched"
+            # Enriched-but-never-surfaced facts (detail BIC P3)
+            "awards": show["awards"],
+            "mediastinger": bool(show["mediastinger"] or 0),
             "overview": show["overview"], "status": show["status"], "network": show["network"],
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
             "tagline": show["tagline"], "rating": show["rating"],
@@ -4431,12 +4435,19 @@ class VideoDatabase:
             if kind == "movie":
                 cur = conn.execute(
                     "UPDATE movies SET play_count=CASE WHEN ? THEN MAX(COALESCE(play_count,0),1) "
-                    "ELSE 0 END WHERE id=?", (1 if watched else 0, item_id))
+                    "ELSE 0 END, view_offset_ms=0 WHERE id=?", (1 if watched else 0, item_id))
             elif kind == "show":
                 cur = conn.execute(
                     "UPDATE shows SET watched_episodes=CASE WHEN ? THEN "
                     "(SELECT COUNT(*) FROM episodes WHERE show_id=shows.id) ELSE 0 END "
                     "WHERE id=?", (1 if watched else 0, item_id))
+                # markPlayed/markUnplayed on a SHOW hits every episode on the
+                # server — mirror that here so the per-episode watch state
+                # (checkmarks, next-up) agrees without waiting for the next scan.
+                conn.execute(
+                    "UPDATE episodes SET play_count=CASE WHEN ? THEN "
+                    "MAX(COALESCE(play_count,0),1) ELSE 0 END, view_offset_ms=0 "
+                    "WHERE show_id=?", (1 if watched else 0, item_id))
             else:
                 return False
             conn.commit()
@@ -7141,6 +7152,10 @@ class VideoDatabase:
             "play_count": m["play_count"] or 0,
             "last_viewed_at": m["last_viewed_at"],
             "view_offset_ms": m["view_offset_ms"] or 0,
+            # Enriched-but-never-surfaced facts (detail BIC P3)
+            "awards": m["awards"],
+            "mediastinger": bool(m["mediastinger"] or 0),
+            "digital_release_date": m["digital_release_date"],
             "overview": m["overview"], "status": m["status"], "studio": m["studio"],
             "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
             "content_rating": m["content_rating"], "tagline": m["tagline"],
