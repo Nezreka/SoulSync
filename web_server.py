@@ -39947,6 +39947,39 @@ def _emit_chat_push_loop():
         except Exception:
             logger.debug("chat push loop error", exc_info=True)
 
+# Anti-leech challenge auto-responder ("please type 'human' in this chat"):
+# NOT idle-gated — the whole point is answering at 3am with no browser open,
+# so blocked overnight grabs unblock themselves. One cheap conversations poll
+# per minute; the heavy lifting + guard rails live in core/chat_autoprove.py.
+def _chat_auto_prove_loop():
+    from core import chat_autoprove
+    state = {}
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(60)
+        try:
+            if not config_manager.get('soulseek.chat_auto_prove', True):
+                continue
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not _slsk or not _slsk.base_url:
+                continue
+            replies = chat_autoprove.scan_and_respond(_slsk, run_async, state=state)
+            for r in replies:
+                msg = "Auto-replied '%s' to %s's prove-you're-human challenge" % (
+                    r['token'], r['username'])
+                # observable both ways: durable bell history + a live toast
+                try:
+                    get_database().add_notifications([{'type': 'info', 'message': msg}],
+                                                     profile_id=1)
+                except Exception:
+                    logger.debug("autoprove: notification write failed", exc_info=True)
+                socketio.emit('dashboard:toast', {
+                    'icon': '🤖', 'title': 'Chat auto-reply',
+                    'subtitle': "answered %s's download challenge with '%s'" % (
+                        r['username'], r['token']),
+                })
+        except Exception:
+            logger.debug("chat auto-prove loop error", exc_info=True)
+
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
     Skipped entirely while no client is connected — the transfer fetch below is a real
@@ -41056,6 +41089,7 @@ def start_runtime_services():
         socketio.start_background_task(_emit_watchlist_count_loop)
         socketio.start_background_task(_emit_download_status_loop)
         socketio.start_background_task(_emit_chat_push_loop)
+        socketio.start_background_task(_chat_auto_prove_loop)
         # Server Activity — subscriber-gated live push (idle when no drawer open)
         socketio.start_background_task(_emit_server_activity_loop)
         # Phase 2: Dashboard pollers
