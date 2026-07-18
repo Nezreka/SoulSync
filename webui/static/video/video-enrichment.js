@@ -76,8 +76,24 @@
     }
 
     // One-time fetch so the buttons aren't blank until the first socket push.
+    // Bundled: one /status-all response primes every service instead of one
+    // request per service (the load-time flood fix); per-service only as a
+    // fallback when the bundle fails.
     function primeOnce() {
-        if (onVideoSide() && !document.hidden) SERVICES.forEach(pollOne);
+        if (!onVideoSide() || document.hidden) return;
+        fetch('/api/video/enrichment/status-all', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (b) {
+                if (b && b.services) {
+                    SERVICES.forEach(function (svc) {
+                        var d = b.services[svc];
+                        if (d && !d.error) reflect(svc, d);
+                    });
+                } else {
+                    SERVICES.forEach(pollOne);
+                }
+            })
+            .catch(function () { SERVICES.forEach(pollOne); });
     }
 
     // Listen on the shared socket (set up by core.js) for the server-pushed

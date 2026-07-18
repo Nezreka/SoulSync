@@ -134,6 +134,31 @@ def create_blueprint() -> Blueprint:
     """Build the Flask blueprint — call once during host startup."""
     bp = Blueprint('enrichment_api', __name__)
 
+    @bp.route('/api/enrichment/status-all', methods=['GET'])
+    def enrichment_status_all():
+        """Every service's status in ONE response — the page-load hydrate
+        (replaces ~13 individual /status requests). Collected CONCURRENTLY:
+        a serial pass would SUM the slow collectors (jiosaavn/bandcamp run
+        3-4s cold) into a 10s+ request. A failing service degrades to its own
+        error field, never the whole bundle."""
+        from concurrent.futures import ThreadPoolExecutor
+        from core.enrichment.services import all_services
+        services = all_services()
+
+        def one(svc):
+            try:
+                return svc.id, _cached_stats(svc)
+            except Exception as e:   # noqa: BLE001 - per-service isolation
+                logger.error("status-all: %s failed: %s", svc.id, e)
+                return svc.id, {'error': str(e)}
+
+        out = {}
+        if services:
+            with ThreadPoolExecutor(max_workers=min(8, len(services))) as ex:
+                for sid, payload in ex.map(one, services):
+                    out[sid] = payload
+        return jsonify({'services': out}), 200
+
     @bp.route('/api/enrichment/<service_id>/status', methods=['GET'])
     def enrichment_status(service_id: str):
         service = get_service(service_id)
