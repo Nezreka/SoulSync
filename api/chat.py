@@ -82,6 +82,23 @@ def _ensure_joined(client, room: str) -> bool:
     return bool(ok)
 
 
+def _unwrap_room_messages(messages) -> list:
+    """Decode SoulSync envelopes in a room message list. Envelope messages get
+    their text swapped for the payload + rich=True (the page renders those with
+    the markdown subset); everything else passes through untouched and renders
+    as escaped plaintext like always."""
+    from core import chat_codec
+    out = []
+    for m in (messages or []):
+        m = dict(m)
+        dec = chat_codec.decode(m.get("message"))
+        if dec is not None:
+            m["message"] = dec["t"]
+            m["rich"] = True
+        out.append(m)
+    return out
+
+
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
@@ -111,7 +128,7 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.exception("chat: room hydrate failed")
             return jsonify({"error": str(e)}), 502
-        return jsonify({"room": room, "messages": messages or [],
+        return jsonify({"room": room, "messages": _unwrap_room_messages(messages),
                         "users": users or [], "can_send": _can_send()})
 
     @bp.route("/api/chat/room/message", methods=["POST"])
@@ -124,11 +141,18 @@ def create_blueprint() -> Blueprint:
         msg = _clean_message(request.get_json(silent=True))
         if not msg:
             return jsonify({"error": "empty message"}), 400
+        # Room messages ride the SoulSync envelope (rich format; other clients
+        # see line noise). PMs are NEVER encoded — they must stay readable to
+        # non-SoulSync users (and the ProveIt bots need literal plaintext).
+        from core import chat_codec
+        wrapped = chat_codec.encode(msg)
+        if wrapped is None:
+            return jsonify({"error": "message too long for Soulseek chat"}), 400
         room = _room_name()
         try:
             if not _ensure_joined(client, room):
                 return jsonify({"error": "Could not join room '%s'" % room}), 502
-            ok = _run_async(client.send_room_message(room, msg))
+            ok = _run_async(client.send_room_message(room, wrapped))
         except Exception as e:
             logger.exception("chat: room send failed")
             return jsonify({"error": str(e)}), 502

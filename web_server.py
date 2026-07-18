@@ -39923,11 +39923,19 @@ def _emit_chat_push_loop():
                 fresh = [m for m in msgs if str(m.get('timestamp') or '') > prev_stamp]
                 _chat_push_state['room_key'] = key
                 if fresh:
+                    # live pushes carry the same DECODED view the API serves
+                    from core import chat_codec
+                    def _unwrap(m):
+                        dec = chat_codec.decode(m.get('message'))
+                        out = {'username': m.get('username'),
+                               'message': dec['t'] if dec else m.get('message'),
+                               'timestamp': m.get('timestamp')}
+                        if dec:
+                            out['rich'] = True
+                        return out
                     socketio.emit('chat:room_message', {
                         'room': room,
-                        'messages': [{'username': m.get('username'),
-                                      'message': m.get('message'),
-                                      'timestamp': m.get('timestamp')} for m in fresh[-20:]],
+                        'messages': [_unwrap(m) for m in fresh[-20:]],
                     })
             convos = run_async(_slsk.get_conversations()) or []
             unread_users = [str(c.get('username') or '') for c in convos
