@@ -3482,15 +3482,14 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.2': [
-        { date: 'July 2026 · 3.1.2' },
-        { title: 'Chat — the SoulSync community, right in the app', desc: 'a whole Soulseek chat page (in the System section on both sides): the community "SoulSync" room + private messages, proxied through slskd. Discord-style — avatars, message grouping, unread badges, mentions with @autocomplete, replies, reactions, GIF search, and click-any-user-to-message from download and search rows.' },
-        { title: 'Rich messages only SoulSync can read', desc: 'messages in the community room are formatted (bold, code blocks, spoilers, emoji, image + YouTube embeds, links that open right inside SoulSync) — other Soulseek clients just see garbled text, so the room stays ours. Sending is admin-only by default; there\'s a settings cog for the room name, GIPHY key, and toggles.' },
-        { title: 'History that survives + auto-answer bots', desc: 'the room keeps a local archive so a slskd restart doesn\'t wipe the conversation, with scroll-back. And SoulSync auto-answers those "type human in chat to download" anti-leech bots so your overnight grabs don\'t sit blocked.' },
-        { title: 'The artist photo picker actually works now', desc: 'the "change artist photo" modal was often empty — it now pulls from Deezer, Spotify (authed OR free), iTunes, AudioDB and Discogs, shows your current photo for comparison, and lets you paste any image URL. One transient source hiccup no longer sticks for 15 minutes.' },
-        { title: 'SoundCloud links resolve anywhere you paste them', desc: 'paste a SoundCloud link (incl. unlisted/private share links) straight into the search bar and SoulSync fetches it — the #865 follow-up. The Link/ID box now points you to the right spot instead of a generic error.' },
-        { title: 'Two stubborn bugs finally fixed (thanks 5BILLION)', desc: 'deep scan now removes artists after switching to an empty Navidrome library (Navidrome answers an empty library with an error, which fooled the old check), and re-releases stop showing as owned on the library page (the year check wasn\'t reaching the matcher there).' },
-        { title: 'Earlier versions', desc: '3.1.1 added Continue Watching on video detail pages + a wave of reported-bug fixes. 3.1.0 gave the video side full Sonarr/Radarr-class acquisition. 3.0.4 rebuilt video Discover + per-profile side access. 3.0.1 shipped the entire video side.' },
+    '3.1.3': [
+        { date: 'July 2026 · 3.1.3' },
+        { title: 'Follow record labels', desc: 'follow a record label the same way you follow an artist, and SoulSync watches it for new releases. Search now finds labels, and each label gets its own page showing its whole catalog newest-first, with an ownership overlay for what you already have, filters, and every release linking through to the real artist.' },
+        { title: 'One watchlist scan for artists + labels', desc: 'the watchlist page gets a Labels tab with follow/backlog controls, and the normal watchlist scan now checks your followed artists AND labels in one pass with one live display — the scheduled automation included. Follow no labels and nothing changes.' },
+        { title: 'Seed music torrents on a leash', desc: 'set a seed ratio and/or time goal in Settings → Downloads and a completed music torrent is removed from your client once it hits the goal (the client\'s own copy only — your library file is separate and untouched). Strictly opt-in: both goals default to off, so grabs seed forever exactly like before.' },
+        { title: 'Multi-disc albums display right + editable Disc # (#1051)', desc: 'an album whose files are all tagged disc 1 no longer drops or misplaces disc-2 tracks in the enhanced view (rows were keyed by disc+track and collided). And Disc # is now editable inline like Track # and Title, so you can fix bad disc tags and Write Tags them to the file. Thanks Tacobell444.' },
+        { title: 'Write Tags only touches changed files (#1052)', desc: 'the batch Write Tags used to rewrite every file even when the preview said "1 will change / 12 unchanged". It now diffs each file first (the same comparison the preview shows) and writes only the affected ones — server sync only pushes what changed too. Thanks Tacobell444.' },
+        { title: 'Earlier versions', desc: '3.1.2 brought a full Soulseek chat page (community room + private messages, Discord-style). 3.1.1 added Continue Watching on video detail pages. 3.1.0 gave the video side full Sonarr/Radarr-class acquisition. 3.0.1 shipped the entire video side.' },
     ],
 };
 
@@ -3521,15 +3520,24 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.2: SoulSync gets a chat",
-        description: "the biggest add since the video side: a full Soulseek chat page — the community 'SoulSync' room + private messages, Discord-class — plus the artist photo picker finally works, SoundCloud links resolve anywhere, and two long-standing reported bugs die.",
+        title: "3.1.3: follow record labels",
+        description: "follow a record label the same way you follow an artist and SoulSync watches it for new releases — plus music torrents can now seed on a leash, and two reported fixes (multi-disc display + write-tags efficiency).",
         features: [
-            "Chat (System section, both music + video sides): the community 'SoulSync' room and private messages, proxied through slskd so the whole thing rides your existing Soulseek connection. avatars, message grouping, day separators, unread nav badges, a jump-to-newest pill, and a NEW divider where you left off",
-            "rich messages other clients can't read: room messages carry bold / italic / code blocks / spoilers / headings / lists / emoji, click-to-load image + pop-in YouTube embeds, and SoulSync deep links that open an artist/movie/show right inside the reader's own install — SoulseekQT/Nicotine+ just see line noise, so the room stays a SoulSync space. sending is admin-only by default (settings cog for the room name, GIPHY key, and member-send / auto-join / auto-answer toggles)",
-            "@mentions with autocomplete + a gold ping when someone @s you anywhere in the app, hover-to-reply with quoted context, emoji reactions, and GIF search/send (GIPHY) — plus click any username on a download or search row to DM them",
-            "a local room archive so an slskd restart doesn't wipe the conversation (with scroll-back), and an auto-responder for anti-leech 'type human in chat to download' bots so overnight grabs don't sit blocked",
-            "the artist photo picker actually delivers photos now: pulls from Deezer, Spotify (authenticated OR the free route), iTunes, AudioDB and Discogs, shows your current photo for comparison, and takes a pasted image URL — and one transient source hiccup no longer sticks 'no photos found' for 15 minutes",
-            "SoundCloud links resolve wherever you paste them, including unlisted/private share links (#865 follow-up); deep scan removes artists after switching to an empty Navidrome library, and re-releases stop showing as owned on the library page (both from 5BILLION's reports, both root-caused from his logs)",
+            "follow record labels: search finds labels, and each label gets a real refreshable page showing its whole catalog newest-first in album cards, with an ownership overlay for what you already have, filters and sort, and every release linking through to the real artist (never the label)",
+            "the watchlist page gets a Labels tab with follow / backlog controls, and the normal watchlist scan now checks your followed artists AND labels in one pass with one live display — the scheduled watchlist automation included. follow no labels and nothing changes",
+            "seed music torrents on a leash: set a seed ratio and/or time goal in Settings → Downloads and a completed grab is removed from your torrent client once it hits the goal (the client's own copy only — your imported library file is separate and untouched). strictly opt-in, both goals default to off",
+            "multi-disc albums display right (#1051, thanks Tacobell444): an album whose tags all say disc 1 no longer drops or misplaces disc-2 tracks in the enhanced view (rows were keyed by disc+track and collided), and Disc # is now editable inline like Track # / Title so you can fix bad disc tags and write them to the file",
+            "Write Tags only touches the files that changed (#1052, thanks Tacobell444): the batch write diffs each file against the DB first (the same comparison the preview shows) and skips the ones already correct instead of rewriting every file — server sync only pushes what changed too",
+        ],
+        usage_note: "labels: search a label name, open it, and hit follow. seeding goals and torrent settings live under Settings → Downloads.",
+    },
+    {
+        title: "Earlier in 3.1.2 — SoulSync gets a chat",
+        description: "a full Soulseek chat page — the community 'SoulSync' room + private messages, Discord-class — plus the artist photo picker finally works, SoundCloud links resolve anywhere, and two long-standing reported bugs die.",
+        features: [
+            "Chat (System section, both sides): the community 'SoulSync' room and private messages, proxied through slskd. rich messages other Soulseek clients can't read (bold / code / spoilers / emoji, image + YouTube embeds, SoulSync deep links), @mentions with autocomplete, replies, reactions, GIF search, a local archive that survives slskd restarts, and an auto-responder for anti-leech bots. sending is admin-only by default",
+            "the artist photo picker actually delivers photos now (Deezer, Spotify authed OR free, iTunes, AudioDB, Discogs, plus paste-a-URL), and one transient source hiccup no longer sticks 'no photos found' for 15 minutes",
+            "SoundCloud links resolve wherever you paste them, including unlisted/private share links (#865 follow-up); deep scan removes artists after switching to an empty Navidrome library, and re-releases stop showing as owned on the library page (both from 5BILLION's reports)",
         ],
     },
     {

@@ -204,7 +204,7 @@ TRIGGERS: list[dict] = [
 ACTIONS: list[dict] = [
     {"type": "process_wishlist", "label": "Process Wishlist", "icon": "list", "description": "Retry failed downloads from wishlist", "available": True,
      "config_fields": [{"key": "category", "type": "select", "label": "Category", "options": [{"value": "all", "label": "All"}, {"value": "albums", "label": "Albums"}, {"value": "singles", "label": "Singles"}], "default": "all"}]},
-    {"type": "scan_watchlist", "label": "Scan Watchlist", "icon": "eye", "description": "Check watched artists for new releases", "available": True},
+    {"type": "scan_watchlist", "label": "Scan Watchlist", "icon": "eye", "description": "Check watched artists AND followed labels for new releases", "available": True},
     {"type": "scan_library", "label": "Scan Library", "icon": "refresh", "description": "Trigger media server library scan", "available": True},
     {"type": "refresh_mirrored", "label": "Refresh Mirrored Playlist", "icon": "copy", "description": "Re-fetch playlist from source and update mirror", "available": True,
      "config_fields": [
@@ -262,6 +262,8 @@ ACTIONS: list[dict] = [
      "description": "Remove old searches from Soulseek", "available": True},
     {"type": "clean_completed_downloads", "label": "Clean Completed Downloads", "icon": "check-square",
      "description": "Clear completed downloads and empty directories", "available": True},
+    {"type": "seeding_sweep", "label": "Seeding Sweep", "icon": "download",
+     "description": "Radarr's seed-until-done tail for music torrents: once a completed torrent grab reaches your seed ratio or seed time goal (Settings → Downloads), remove it from the torrent client — including the client's copy of the file (your imported library copy is separate and never touched). Off until you set a goal. Pair with a half-hourly schedule.", "available": True},
     {"type": "full_cleanup", "label": "Full Cleanup", "icon": "trash",
      "description": "Clear quarantine, download queue, import folder, and search history in one sweep", "available": True},
     {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",

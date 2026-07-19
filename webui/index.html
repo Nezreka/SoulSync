@@ -4248,6 +4248,16 @@
                                                 <div class="enh-compact-list" id="enh-tracks-list"></div>
                                             </div>
 
+                                            <!-- Labels (record labels — monitored like an artist watchlist) -->
+                                            <div id="enh-labels-section" class="enh-dropdown-section hidden">
+                                                <div class="enh-section-header">
+                                                    <span class="enh-section-icon">🏷️</span>
+                                                    <h4 class="enh-section-title">Labels</h4>
+                                                    <span class="enh-section-count" id="enh-labels-count">0</span>
+                                                </div>
+                                                <div class="enh-compact-list" id="enh-labels-list"></div>
+                                            </div>
+
                                         </div>
                                     </div>
                                 </div>
@@ -8312,6 +8322,20 @@
                                                 Abandon frees the slot so the next source can try. Pause keeps the torrent in your client so you can inspect or resume it manually.
                                             </div>
                                         </div>
+                                        <!-- Seeding lifecycle — torrent grabs only. Music twin of the video side. -->
+                                        <div class="form-group" id="music-seeding-goals">
+                                            <label>Seeding goals (torrents):</label>
+                                            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                                                <span class="settings-hint">Ratio</span>
+                                                <input type="number" id="music-seed-ratio" min="0" step="0.1" style="max-width:90px;" placeholder="0">
+                                                <span class="settings-hint">or hours seeded</span>
+                                                <input type="number" id="music-seed-hours" min="0" step="1" style="max-width:90px;" placeholder="0">
+                                                <label style="display:flex; align-items:center; gap:6px; font-size:12.5px;">
+                                                    <input type="checkbox" id="music-seed-remove-data" checked> also delete the client's copy
+                                                </label>
+                                            </div>
+                                            <small class="settings-hint">Once a completed grab hits either goal, it's removed from the torrent client (your imported library copy is separate and never touched). Both at 0 = never remove — exactly the old behavior.</small>
+                                        </div>
                                         <div class="form-group">
                                             <label>Status:</label>
                                             <div class="form-actions" style="margin-top: 4px;">
@@ -9892,6 +9916,57 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
+            <!-- Label detail — a record label's catalog (distinct albums grouped
+                 by their real artist), monitored like the artist watchlist.
+                 Static legacy page; MBID rides the URL. Driven by label-detail.js. -->
+            <div class="page" id="label-detail-page">
+                <div class="page-shell label-detail-container">
+                    <button class="label-detail-back" type="button"
+                            id="label-detail-back-btn">← Back</button>
+                    <div class="label-detail-hero">
+                        <div class="label-detail-hero-art" id="label-detail-hero-art">🏷️</div>
+                        <div class="label-detail-hero-main">
+                            <div class="label-detail-eyebrow">Record Label</div>
+                            <h1 class="label-detail-name" id="label-detail-name">Label</h1>
+                            <div class="label-detail-meta" id="label-detail-meta"></div>
+                        </div>
+                        <div class="label-detail-hero-actions">
+                            <button class="library-artist-watchlist-btn" id="label-detail-watch-btn"
+                                    type="button" hidden>
+                                <span class="watchlist-icon">👁️</span>
+                                <span class="watchlist-text">Add to Watchlist</span>
+                            </button>
+                            <div class="label-detail-backlog" id="label-detail-backlog" hidden>
+                                <span class="label-detail-backlog-label">Monitor</span>
+                                <div class="label-detail-seg">
+                                    <button type="button" data-backlog="0" class="active">New releases</button>
+                                    <button type="button" data-backlog="1">Full backlog</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="label-detail-toolbar" id="label-detail-toolbar" hidden>
+                        <div class="label-detail-filters" id="label-detail-filters">
+                            <button type="button" data-lf="all" class="active">All <span id="lf-count-all">0</span></button>
+                            <button type="button" data-lf="missing">Missing <span id="lf-count-missing">0</span></button>
+                            <button type="button" data-lf="owned">Owned <span id="lf-count-owned">0</span></button>
+                        </div>
+                        <select class="label-detail-sort" id="label-detail-sort">
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="artist">Artist A–Z</option>
+                        </select>
+                    </div>
+
+                    <div class="label-detail-status" id="label-detail-loading">Loading label catalog…</div>
+                    <div class="label-detail-status hidden" id="label-detail-empty">No releases to show.</div>
+                    <div class="label-release-grid" id="label-detail-grid"></div>
+                    <div class="label-detail-sentinel" id="label-detail-sentinel"></div>
+                    <div class="label-detail-status hidden" id="label-detail-more">Loading more…</div>
+                </div>
+            </div>
+
             <!-- Chat — Soulseek rooms + private messages, proxied through slskd.
                  ONE page for the whole app: the video sidebar reveals this same div
                  via SHARED_PAGES (video-side.js). All content driven by chat.js. -->
@@ -10512,6 +10587,14 @@
                     </div>
 
                     <!-- Last scan summary -->
+                    <!-- Artists / Labels tabs (labels = record-label watchlist, additive) -->
+                    <div class="watchlist-tabs" id="watchlist-tabs">
+                        <button class="watchlist-tab active" type="button" data-wl-tab="artists"
+                                onclick="switchWatchlistTab('artists')">Artists</button>
+                        <button class="watchlist-tab" type="button" data-wl-tab="labels"
+                                onclick="switchWatchlistTab('labels')">Labels</button>
+                    </div>
+
                     <div class="watchlist-last-scan-strip" id="watchlist-last-scan-strip" style="display: none;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                         <span id="watchlist-last-scan-text">Last scan: --</span>
@@ -10557,6 +10640,21 @@
                         <h3>Your watchlist is empty</h3>
                         <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
                         <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
+                    </div>
+
+                    <!-- Labels tab (record-label watchlist) — shown via .wl-view-labels -->
+                    <div class="watchlist-labels-tab" id="watchlist-labels-tab">
+                        <div class="watchlist-labels-grid" id="watchlist-labels-list">
+                            <!-- Populated by initializeWatchlistLabelsTab() -->
+                        </div>
+                        <div class="watchlist-page-empty" id="watchlist-labels-empty" style="display: none;">
+                            <div class="watchlist-page-empty-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                            </div>
+                            <h3>No labels followed yet</h3>
+                            <p>Search a record label, open it, and hit Follow to monitor its new releases here.</p>
+                            <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -11757,6 +11855,7 @@
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='label-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->

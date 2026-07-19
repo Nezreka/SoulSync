@@ -4432,16 +4432,26 @@ function _deriveEnhancedMissingTracks(album, canonicalTracks) {
 function _getEnhancedAlbumTrackRows(album) {
     const ownedTracks = Array.isArray(album.tracks) ? album.tracks : [];
     const rowsBySlot = new Map();
+    const ownedSlots = new Set();
     ownedTracks.forEach(track => {
-        const key = _trackSlotKey(track);
-        rowsBySlot.set(key === '1:0' ? `owned:${track.id}` : key, track);
+        // #1051: every owned track is a real physical file — key by its unique id,
+        // NEVER by disc:track slot. Multi-disc albums whose tags all claim disc 1
+        // (or the scanner's #916 disc collapse) make disc1-trackN and disc2-trackN
+        // share a slot; keying the render Map by slot silently overwrote one with
+        // the other, so a disc-2 track rendered in a disc-1 row (some tracks vanished).
+        // Keying by id renders every owned file; ownedSlots still drives the
+        // "is this slot already owned?" check for the missing-track merge below.
+        rowsBySlot.set(`owned:${track.id}`, track);
+        ownedSlots.add(_trackSlotKey(track));
     });
 
     const explicitMissing = Array.isArray(album.missing_tracks) ? album.missing_tracks : [];
     explicitMissing.forEach(missing => {
         const row = _normalizeExpectedMissingTrack(missing, album);
         const key = _trackSlotKey(row);
-        if (row._hasActionableContext && !rowsBySlot.has(key)) rowsBySlot.set(key, row);
+        if (row._hasActionableContext && !ownedSlots.has(key) && !rowsBySlot.has(`missing:${key}`)) {
+            rowsBySlot.set(`missing:${key}`, row);
+        }
     });
 
     return Array.from(rowsBySlot.values()).sort((a, b) => {
@@ -4494,8 +4504,11 @@ function _buildTrackRow(track, album, admin) {
 
     // Disc number
     const discTd = document.createElement('td');
-    discTd.className = 'col-disc';
+    discTd.className = 'col-disc' + (admin ? ' editable' : '');
     discTd.textContent = track.disc_number || '-';
+    // Disc # describes a real file's tags — like the title cell (and unlike a
+    // phantom "Missing" row), it's only editable for owned tracks. #1051
+    if (track._missingExpected) discTd.classList.remove('editable');
     tr.appendChild(discTd);
 
     // Title
@@ -4763,6 +4776,8 @@ function _attachTableDelegation(table, album) {
                 e.stopPropagation();
                 if (cell.classList.contains('col-num')) {
                     startInlineEdit(cell, 'track', track.id, 'track_number', track.track_number || '');
+                } else if (cell.classList.contains('col-disc')) {
+                    startInlineEdit(cell, 'track', track.id, 'disc_number', track.disc_number || '');
                 } else if (cell.classList.contains('col-title')) {
                     startInlineEdit(cell, 'track', track.id, 'title', track.title || '');
                 } else if (cell.classList.contains('col-bpm')) {
@@ -6192,7 +6207,7 @@ function startInlineEdit(cell, type, id, field, currentValue) {
     if (cell.querySelector('.enhanced-inline-input')) return;
     cancelInlineEdit();
 
-    const isNumeric = ['track_number', 'bpm'].includes(field);
+    const isNumeric = ['track_number', 'disc_number', 'bpm'].includes(field);
     const originalContent = cell.innerHTML;
     cell.dataset.originalContent = originalContent;
 
@@ -6201,7 +6216,7 @@ function startInlineEdit(cell, type, id, field, currentValue) {
     input.className = 'enhanced-inline-input' + (isNumeric ? ' num' : '');
     input.value = currentValue || '';
     if (field === 'bpm') input.step = '0.1';
-    if (field === 'track_number') { input.min = '1'; input.step = '1'; }
+    if (field === 'track_number' || field === 'disc_number') { input.min = '1'; input.step = '1'; }
 
     cell.innerHTML = '';
     cell.appendChild(input);
@@ -6235,7 +6250,7 @@ async function saveInlineEdit(type, id, field, newValue) {
     artistDetailPageState.editingCell = null;
 
     let parsedValue = newValue;
-    if (field === 'track_number') parsedValue = parseInt(newValue) || null;
+    if (field === 'track_number' || field === 'disc_number') parsedValue = parseInt(newValue) || null;
     else if (field === 'bpm') parsedValue = parseFloat(newValue) || null;
     else if (field === 'explicit') parsedValue = parseInt(newValue) || 0;
 
@@ -7651,7 +7666,9 @@ function _pollBatchWriteTagsStatus() {
                 }
                 _batchWriteTagsPollTimer = setTimeout(poll, 1000);
             } else if (state.status === 'done') {
-                let msg = `Tags written: ${state.written} succeeded, ${state.failed} failed`;
+                let msg = `Tags written: ${state.written} updated`;
+                if ((state.skipped || 0) > 0) msg += `, ${state.skipped} unchanged`;
+                if (state.failed > 0) msg += `, ${state.failed} failed`;
                 if (state.sync_phase === 'done') {
                     const serverName = state.sync_server === 'plex' ? 'Plex' : state.sync_server === 'jellyfin' ? 'Jellyfin' : state.sync_server;
                     if (state.sync_synced > 0 && state.sync_failed === 0) {

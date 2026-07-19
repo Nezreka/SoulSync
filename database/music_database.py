@@ -447,6 +447,30 @@ class MusicDatabase:
                 )
             """)
 
+            # Label watchlist (labels feature) — follow a record label to monitor
+            # its new releases, mirroring the video-side studio watchlist. Purely
+            # ADDITIVE: a brand-new table, never touched by any existing path;
+            # nothing here reads or alters artists/albums/tracks/watchlist_artists.
+            # A label is monitored like a studio and displayed like a discography;
+            # each release it yields resolves to a REAL artist for acquisition,
+            # never the label itself.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_labels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    musicbrainz_label_id TEXT UNIQUE,
+                    discogs_label_id TEXT,
+                    label_name TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'musicbrainz',
+                    backlog INTEGER NOT NULL DEFAULT 0,  -- 0 = new releases only, 1 = fill backlog too
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_scan_timestamp TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_labels_mbid "
+                           "ON watchlist_labels (musicbrainz_label_id)")
+
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
@@ -2258,6 +2282,28 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_audiodb_id ON track_downloads (audiodb_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
+
+            # Durable record of completed TORRENT grabs so the seeding sweep
+            # (core/downloads/seeding.py) can manage the tail: seed until the
+            # ratio/time goals are met, then remove the torrent from the client.
+            # The music download row holds the torrent_hash only in memory for
+            # the duration of the transfer, so without this table a finished
+            # grab is untrackable after import / restart. Mirrors the video
+            # side's video_downloads seed columns. One row per torrent (hash is
+            # UNIQUE); the sweep only ever touches torrents recorded here, and
+            # a removal only deletes the CLIENT'S copy — the imported library
+            # file is a separate copy and is never touched.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS torrent_seed_grabs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    torrent_hash TEXT NOT NULL UNIQUE,
+                    title TEXT,
+                    category TEXT,
+                    completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    seed_released INTEGER DEFAULT 0
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tsg_released ON torrent_seed_grabs (seed_released)")
 
             # Persistent MusicBrainz album → release-MBID cache.
             # Backs `core/metadata/album_mbid_cache.py`. Keyed by the same
@@ -10785,6 +10831,93 @@ class MusicDatabase:
             logger.error(f"Error checking if artist is in watchlist (ID: {artist_id}): {e}")
             return False
 
+    # ── Label watchlist (labels feature) ─────────────────────────────────────
+    # Self-contained CRUD on watchlist_labels. Additive: no existing method
+    # touches this table, and these touch nothing else.
+
+    def add_watchlist_label(self, mbid: str, name: str, *, discogs_id: str = None,
+                            source: str = 'musicbrainz', backlog: bool = False) -> bool:
+        """Follow a label. Idempotent on musicbrainz_label_id."""
+        mbid = str(mbid or '').strip()
+        name = str(name or '').strip()
+        if not mbid or not name:
+            return False
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO watchlist_labels (musicbrainz_label_id, discogs_label_id, "
+                    "label_name, source, backlog) VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(musicbrainz_label_id) DO UPDATE SET "
+                    "label_name=excluded.label_name, discogs_label_id=excluded.discogs_label_id, "
+                    "backlog=excluded.backlog, updated_at=CURRENT_TIMESTAMP",
+                    (mbid, discogs_id, name, source, 1 if backlog else 0))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error("add_watchlist_label failed: %s", e)
+            return False
+
+    def remove_watchlist_label(self, mbid: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute("DELETE FROM watchlist_labels WHERE musicbrainz_label_id = ?",
+                                   (str(mbid or '').strip(),))
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("remove_watchlist_label failed: %s", e)
+            return False
+
+    def is_label_in_watchlist(self, mbid: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM watchlist_labels WHERE musicbrainz_label_id = ?",
+                    (str(mbid or '').strip(),)).fetchone()
+                return row is not None
+        except Exception:
+            return False
+
+    def get_watchlist_labels(self) -> List[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, musicbrainz_label_id, discogs_label_id, label_name, source, "
+                    "backlog, date_added, last_scan_timestamp FROM watchlist_labels "
+                    "ORDER BY label_name COLLATE NOCASE").fetchall()
+                out = []
+                for r in rows:
+                    d = dict(r)
+                    d['backlog'] = bool(d['backlog'])
+                    out.append(d)
+                return out
+        except Exception as e:
+            logger.error("get_watchlist_labels failed: %s", e)
+            return []
+
+    def set_watchlist_label_backlog(self, mbid: str, backlog: bool) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    "UPDATE watchlist_labels SET backlog = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE musicbrainz_label_id = ?",
+                    (1 if backlog else 0, str(mbid or '').strip()))
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("set_watchlist_label_backlog failed: %s", e)
+            return False
+
+    def mark_watchlist_label_scanned(self, mbid: str) -> None:
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE watchlist_labels SET last_scan_timestamp = CURRENT_TIMESTAMP "
+                    "WHERE musicbrainz_label_id = ?", (str(mbid or '').strip(),))
+                conn.commit()
+        except Exception as e:
+            logger.debug("mark_watchlist_label_scanned failed: %s", e)
+
     def get_watchlist_artists(self, profile_id: int = 1) -> List[WatchlistArtist]:
         """Get all artists in the watchlist for the given profile"""
         try:
@@ -12967,7 +13100,7 @@ class MusicDatabase:
     # Field whitelists for safe updates
     ARTIST_EDITABLE_FIELDS = {'name', 'genres', 'summary', 'style', 'mood', 'label'}
     ALBUM_EDITABLE_FIELDS = {'title', 'year', 'release_date', 'genres', 'style', 'mood', 'label', 'explicit', 'record_type', 'track_count'}
-    TRACK_EDITABLE_FIELDS = {'title', 'track_number', 'bpm', 'explicit', 'style', 'mood'}
+    TRACK_EDITABLE_FIELDS = {'title', 'track_number', 'disc_number', 'bpm', 'explicit', 'style', 'mood'}
 
     def get_artist_full_detail(self, artist_id) -> Dict[str, Any]:
         """
@@ -15134,6 +15267,70 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"Error deleting history rows: {e}")
             return 0
+
+    def record_torrent_seed_grab(self, torrent_hash: str,
+                                 title: Optional[str] = None,
+                                 category: Optional[str] = None) -> None:
+        """Remember a completed torrent grab so the seeding sweep can manage
+        its tail. Idempotent: one row per torrent_hash (INSERT OR IGNORE), so
+        a re-finalize of the same torrent never duplicates. Best-effort — a
+        failure here must never break the download's completion path."""
+        if not torrent_hash:
+            return
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO torrent_seed_grabs (torrent_hash, title, category) "
+                "VALUES (?, ?, ?)",
+                (torrent_hash, title, category),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.warning("Error recording torrent seed grab %s: %s",
+                           torrent_hash[:8] if torrent_hash else "?", e)
+        finally:
+            if conn:
+                conn.close()
+
+    def torrents_awaiting_seed_release(self) -> List[Dict[str, Any]]:
+        """Every recorded torrent grab not yet released back to the client's
+        own management (seed_released=0). The sweep checks each against the
+        ratio/time goals. Returns a list of dicts."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, torrent_hash, title, category, completed_at, seed_released "
+                "FROM torrent_seed_grabs WHERE seed_released = 0"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error reading torrents awaiting seed release: %s", e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def mark_torrent_seed_released(self, grab_id: int) -> None:
+        """Flag a recorded torrent grab as released (goals met + removed, or the
+        client no longer knows it). It drops out of future sweeps."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE torrent_seed_grabs SET seed_released = 1 WHERE id = ?",
+                (grab_id,),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error("Error marking torrent seed grab %s released: %s", grab_id, e)
+        finally:
+            if conn:
+                conn.close()
 
     def clear_completed_download_history(self) -> int:
         """Delete the persisted completed-download history shown on the Downloads

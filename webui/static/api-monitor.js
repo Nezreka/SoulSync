@@ -1259,6 +1259,14 @@ async function updateArtistCardWatchlistStatus() {
  */
 async function initializeWatchlistPage() {
     try {
+        _ensureWatchlistLabelsStyles();   // style the Artists/Labels tabs on load
+        // Always land on the Artists tab (a prior Labels view would otherwise
+        // keep the artist grid hidden via .wl-view-labels).
+        const _wlPage = document.getElementById('watchlist-page');
+        if (_wlPage) _wlPage.classList.remove('wl-view-labels');
+        document.querySelectorAll('#watchlist-tabs .watchlist-tab').forEach(b => {
+            b.classList.toggle('active', b.getAttribute('data-wl-tab') === 'artists');
+        });
         const emptyEl = document.getElementById('watchlist-page-empty');
         const gridEl = document.getElementById('watchlist-artists-list');
         const countEl = document.getElementById('watchlist-page-count');
@@ -1426,6 +1434,176 @@ async function initializeWatchlistPage() {
         showToast('Failed to load watchlist', 'error');
     }
 }
+
+// ============================================================================
+// WATCHLIST — LABELS TAB (record-label watchlist)
+// ----------------------------------------------------------------------------
+// Purely additive: a second tab on the existing watchlist page. Toggling to
+// Labels adds .wl-view-labels to #watchlist-page (CSS hides the artist-only
+// toolbar/grid/scan controls and reveals the labels grid) — the artist flow is
+// never touched. Data comes only from the /api/labels/* blueprint.
+// ============================================================================
+
+function _ensureWatchlistLabelsStyles() {
+    if (document.getElementById('watchlist-labels-styles')) return;
+    const css = `
+    #watchlist-page .watchlist-tabs { display:flex; gap:8px; margin:4px 0 16px; }
+    #watchlist-page .watchlist-tab { background:rgba(255,255,255,0.05); color:var(--text-secondary,#9aa0aa);
+        border:1px solid rgba(255,255,255,0.08); border-radius:999px; padding:7px 18px; cursor:pointer;
+        font-size:13px; font-weight:600; }
+    #watchlist-page .watchlist-tab:hover { color:#fff; background:rgba(255,255,255,0.1); }
+    #watchlist-page .watchlist-tab.active { background:linear-gradient(135deg,#1db954,#12833b); color:#fff; border-color:transparent; }
+    #watchlist-page .watchlist-labels-tab { display:none; }
+    #watchlist-page.wl-view-labels .watchlist-labels-tab { display:block; }
+    #watchlist-page.wl-view-labels .watchlist-toolbar,
+    #watchlist-page.wl-view-labels .watchlist-batch-bar,
+    #watchlist-page.wl-view-labels #watchlist-artists-list,
+    #watchlist-page.wl-view-labels #watchlist-page-empty,
+    #watchlist-page.wl-view-labels .watchlist-last-scan-strip,
+    #watchlist-page.wl-view-labels #watchlist-page-settings-btn { display:none !important; }
+    #watchlist-page .watchlist-labels-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:16px; }
+    #watchlist-page .wl-label-card { position:relative; background:rgba(255,255,255,0.04);
+        border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:18px; cursor:pointer;
+        transition:background .15s, border-color .15s; }
+    #watchlist-page .wl-label-card:hover { background:rgba(255,255,255,0.08); border-color:rgba(29,185,84,0.4); }
+    #watchlist-page .wl-label-icon { font-size:30px; }
+    #watchlist-page .wl-label-name { font-size:15px; font-weight:700; color:#fff; margin-top:10px;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #watchlist-page .wl-label-meta { font-size:12px; color:var(--text-secondary,#8a909a); margin-top:4px; }
+    #watchlist-page .wl-label-backlog-badge { display:inline-block; margin-top:8px; font-size:11px; font-weight:600;
+        padding:2px 8px; border-radius:999px; background:rgba(255,180,40,0.16); color:#ffb84d; }
+    #watchlist-page .wl-label-actions { position:absolute; top:12px; right:12px; display:flex; gap:6px; }
+    #watchlist-page .wl-label-actions button { background:rgba(0,0,0,0.35); border:none; color:#cfd3da;
+        width:26px; height:26px; border-radius:7px; cursor:pointer; display:flex; align-items:center;
+        justify-content:center; font-size:13px; }
+    #watchlist-page .wl-label-actions button:hover { background:rgba(0,0,0,0.6); color:#fff; }`;
+    const style = document.createElement('style');
+    style.id = 'watchlist-labels-styles';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+
+function switchWatchlistTab(tab) {
+    const page = document.getElementById('watchlist-page');
+    if (!page) return;
+    _ensureWatchlistLabelsStyles();
+    const isLabels = tab === 'labels';
+    page.classList.toggle('wl-view-labels', isLabels);
+    document.querySelectorAll('#watchlist-tabs .watchlist-tab').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-wl-tab') === tab);
+    });
+    const countEl = document.getElementById('watchlist-page-count');
+    if (isLabels) {
+        initializeWatchlistLabelsTab();
+    } else if (countEl) {
+        const n = (watchlistPageState.artists || []).length;
+        countEl.textContent = `${n} artist${n !== 1 ? 's' : ''}`;
+    }
+}
+
+async function initializeWatchlistLabelsTab() {
+    _ensureWatchlistLabelsStyles();
+    const grid = document.getElementById('watchlist-labels-list');
+    const empty = document.getElementById('watchlist-labels-empty');
+    const countEl = document.getElementById('watchlist-page-count');
+    if (!grid) return;
+
+    let labels = [];
+    try {
+        const res = await fetch('/api/labels/watchlist').then(r => r.json());
+        labels = (res && res.labels) || [];
+    } catch (e) {
+        labels = [];
+    }
+
+    if (countEl) countEl.textContent = `${labels.length} label${labels.length !== 1 ? 's' : ''}`;
+
+    if (!labels.length) {
+        grid.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    grid.innerHTML = labels.map(l => {
+        const mbid = escapeHtml(l.musicbrainz_label_id || '');
+        const name = escapeHtml(l.label_name || 'Label');
+        const backlog = !!l.backlog;
+        const scanned = l.last_scan_timestamp
+            ? `Scanned ${escapeHtml(formatRelativeScanTime(l.last_scan_timestamp))}`
+            : 'Not scanned yet';
+        return `
+            <div class="wl-label-card" data-label-id="${mbid}" data-label-name="${name}">
+                <div class="wl-label-actions">
+                    <button class="wl-label-backlog-btn" title="${backlog ? 'Monitoring full backlog — click for new-releases-only' : 'Monitoring new releases only — click for full backlog'}">${backlog ? '📚' : '🆕'}</button>
+                    <button class="wl-label-unfollow-btn" title="Unfollow label">✕</button>
+                </div>
+                <div class="wl-label-icon">🏷️</div>
+                <div class="wl-label-name">${name}</div>
+                <div class="wl-label-meta">${scanned}</div>
+                ${backlog ? '<span class="wl-label-backlog-badge">Full backlog</span>' : ''}
+            </div>`;
+    }).join('');
+
+    grid.querySelectorAll('.wl-label-card').forEach(card => {
+        const mbid = card.getAttribute('data-label-id');
+        const name = card.getAttribute('data-label-name');
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.wl-label-actions')) return;
+            if (typeof navigateToLabelDetail === 'function') navigateToLabelDetail(mbid, name);
+        });
+        const backlogBtn = card.querySelector('.wl-label-backlog-btn');
+        if (backlogBtn) backlogBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleWatchlistLabelBacklog(mbid, !!card.querySelector('.wl-label-backlog-badge'));
+        });
+        const unfollowBtn = card.querySelector('.wl-label-unfollow-btn');
+        if (unfollowBtn) unfollowBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            unfollowWatchlistLabel(mbid, name);
+        });
+    });
+}
+
+async function toggleWatchlistLabelBacklog(mbid, currentlyBacklog) {
+    if (!mbid) return;
+    try {
+        const res = await fetch('/api/labels/watchlist/backlog', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ musicbrainz_label_id: mbid, backlog: !currentlyBacklog }),
+        }).then(r => r.json());
+        if (res && res.success) initializeWatchlistLabelsTab();
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not update label setting', 'error');
+    }
+}
+
+async function unfollowWatchlistLabel(mbid, name) {
+    if (!mbid) return;
+    const ok = (typeof showConfirmDialog === 'function')
+        ? await showConfirmDialog({
+            title: 'Unfollow Label',
+            message: `Stop monitoring ${name || 'this label'} for new releases?`,
+            confirmText: 'Unfollow', destructive: true,
+        })
+        : true;
+    if (!ok) return;
+    try {
+        const res = await fetch('/api/labels/watchlist/remove', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ musicbrainz_label_id: mbid }),
+        }).then(r => r.json());
+        if (res && res.success) {
+            initializeWatchlistLabelsTab();
+            if (typeof updateWatchlistButtonCount === 'function') {
+                try { updateWatchlistButtonCount(); } catch (e) { /* non-fatal */ }
+            }
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not unfollow label', 'error');
+    }
+}
+
 
 /**
  * Initialize/refresh the wishlist sidebar page
@@ -3362,6 +3540,7 @@ function _wlPrettyPhase(data) {
     const map = {
         starting: 'Starting…',
         fetching_discography: 'Fetching releases…',
+        scanning_labels: 'Scanning record labels…',
         populating_discovery_pool: 'Populating discovery…',
         updating_listenbrainz: 'Updating ListenBrainz…',
     };

@@ -304,6 +304,23 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
     return diffs
 
 
+def diff_has_actionable_change(diff: List[Dict[str, Any]], embed_cover: bool = True) -> bool:
+    """True if writing would actually change the file. #1052 — lets the batch
+    write skip files the preview marks unchanged, touching only affected files.
+
+    Mirrors the preview's ``has_changes`` (any diff row ``changed``) with one
+    refinement: a cover-only difference counts only when cover embedding is on,
+    since with it off the writer wouldn't touch the file for that alone.
+    """
+    for d in diff:
+        if not d.get('changed'):
+            continue
+        if d.get('file_key') == 'cover_art' and not embed_cover:
+            continue
+        return True
+    return False
+
+
 def download_cover_art(cover_url: str) -> Optional[Tuple[bytes, str]]:
     """
     Download cover art once. Returns (image_data, mime_type) or None on failure.

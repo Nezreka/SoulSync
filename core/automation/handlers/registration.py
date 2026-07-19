@@ -49,6 +49,7 @@ from core.automation.handlers.video_process_wishlist import auto_video_process_w
 from core.automation.handlers.video_rss_sync import auto_video_rss_sync
 from core.automation.handlers.video_import_lists import auto_video_import_lists
 from core.automation.handlers.video_seeding_sweep import auto_video_seeding_sweep
+from core.automation.handlers.seeding_sweep import auto_seeding_sweep
 from core.automation.handlers.video_apply_overlays import auto_video_apply_overlays
 from core.automation.handlers.video_clean_plex_images import auto_video_clean_plex_images
 from core.automation.handlers.video_sync_collections import auto_video_sync_collections
@@ -89,6 +90,10 @@ def register_all(deps: AutomationDeps) -> None:
         lambda config: auto_scan_watchlist(config, deps),
         guard_fn=deps.is_watchlist_actually_scanning,
     )
+    # NOTE: labels are NOT a separate automation kind — the 'scan_watchlist'
+    # action (and the manual scan) run a label phase after the artist scan via
+    # run_label_scan_phase, so followed labels are covered by the normal
+    # watchlist scan with no split path.
     engine.register_action_handler(
         'scan_library',
         lambda config: auto_scan_library(config, deps),
@@ -320,6 +325,13 @@ def register_all(deps: AutomationDeps) -> None:
         'video_seeding_sweep',
         lambda config: auto_video_seeding_sweep(config, deps),
         lambda: __import__('core.video.seeding', fromlist=['is_running']).is_running(),
+    )
+    # Music twin of the above — same seed-until-goals tail for music torrent
+    # grabs (off until goals are set on Settings → Downloads).
+    engine.register_action_handler(
+        'seeding_sweep',
+        lambda config: auto_seeding_sweep(config, deps),
+        lambda: __import__('core.downloads.seeding', fromlist=['is_running']).is_running(),
     )
     # Import lists: recurring auto-add from TMDB/IMDb lists + charts + the Plex
     # account watchlist (per-list seen-set so removals never boomerang back).

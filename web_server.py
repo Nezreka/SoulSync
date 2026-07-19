@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.2"
+_SOULSYNC_BASE_VERSION = "3.1.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -12135,6 +12135,7 @@ _write_tags_batch_state = {
     'total': 0,
     'processed': 0,
     'written': 0,
+    'skipped': 0,       # #1052 — files already matching the DB, not rewritten
     'failed': 0,
     'current_track': '',
     'errors': [],
@@ -12187,6 +12188,7 @@ def write_tracks_tags_batch():
                 'total': len(track_ids),
                 'processed': 0,
                 'written': 0,
+                'skipped': 0,
                 'failed': 0,
                 'current_track': '',
                 'errors': [],
@@ -12209,7 +12211,9 @@ def write_tracks_tags_batch():
         # Run the actual writes in a background thread
         def _run_batch():
             try:
-                from core.tag_writer import write_tags_to_file, download_cover_art
+                from core.tag_writer import (write_tags_to_file, download_cover_art,
+                                             read_file_tags, build_tag_diff,
+                                             diff_has_actionable_change)
 
                 written_tracks = []  # Track dicts that were successfully written (for server sync)
 
@@ -12259,6 +12263,25 @@ def write_tracks_tags_batch():
                         thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
                         if thumb and thumb.startswith('http'):
                             art_data = cover_cache.get(thumb)
+
+                    # #1052 — only touch files that actually differ. Uses the SAME
+                    # build_tag_diff the preview does, so the write matches exactly
+                    # what the "N will change / M unchanged" preview showed. A
+                    # cover-only difference counts only when cover embedding is on
+                    # (otherwise the write wouldn't touch it anyway). If the diff
+                    # read fails, fall through and write — the safe default.
+                    try:
+                        existing_tags = read_file_tags(resolved_path)
+                        if not existing_tags.get('error'):
+                            diff = build_tag_diff(existing_tags, db_data)
+                            if not diff_has_actionable_change(diff, embed_cover):
+                                with _write_tags_batch_lock:
+                                    _write_tags_batch_state['processed'] += 1
+                                    _write_tags_batch_state['skipped'] += 1
+                                continue
+                    except Exception:
+                        logger.debug("tag diff pre-check failed for %s; writing anyway",
+                                     resolved_path, exc_info=True)
 
                     file_lock = get_file_lock(resolved_path)
                     with file_lock:
@@ -30035,6 +30058,20 @@ def start_watchlist_scan():
                     cancel_check=lambda: watchlist_scan_state.get('cancel_requested', False),
                 )
 
+                # --- Label watchlist phase (same thread, same live state) ---
+                # Labels ride the normal watchlist scan via the SHARED helper
+                # (also used by the scheduled automation), so one "Scan Watchlist"
+                # covers artists THEN labels with the identical live display.
+                _lbl_tracks = 0
+                if not watchlist_scan_state.get('cancel_requested', False):
+                    try:
+                        from core.automation.handlers.scan_watchlist_labels import run_label_scan_phase
+                        _lbl_tracks = run_label_scan_phase(
+                            watchlist_scan_state, database=database,
+                            get_deezer=_get_deezer_client, profile_id=scan_profile_id)
+                    except Exception as _lbl_err:
+                        logger.error("Label watchlist scan phase failed: %s", _lbl_err, exc_info=True)
+
                 # Store final results (skip if cancelled — already set by cancel handler)
                 was_cancelled = watchlist_scan_state.get('cancel_requested', False)
                 if not was_cancelled:
@@ -30048,15 +30085,23 @@ def start_watchlist_scan():
                     watchlist_scan_state['completed_at'] = datetime.now()
                     watchlist_scan_state['current_phase'] = 'completed'
 
+                    try:
+                        _labels_scanned = len(database.get_watchlist_labels() or [])
+                    except Exception:
+                        # a label COUNT must never abort an otherwise successful scan
+                        _labels_scanned = 0
                     watchlist_scan_state['summary'] = {
                         'total_artists': len(scan_results),
                         'successful_scans': len(successful_scans),
-                        'new_tracks_found': total_new_tracks,
-                        'tracks_added_to_wishlist': total_added_to_wishlist
+                        'new_tracks_found': total_new_tracks + _lbl_tracks,
+                        'tracks_added_to_wishlist': total_added_to_wishlist + _lbl_tracks,
+                        # label breakdown (additive; existing UI ignores extra keys)
+                        'labels_scanned': _labels_scanned,
+                        'label_tracks_added': _lbl_tracks,
                     }
 
                     logger.info(f"Watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
-                    logger.info(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+                    logger.info(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist (+ {_lbl_tracks} from labels)")
                 else:
                     logger.warning("Watchlist scan cancelled — skipping post-scan steps")
 
@@ -30865,6 +30910,7 @@ def _build_watchlist_auto_scan_deps():
         _set_auto_scanning_timestamp=_set_ts,
         _get_watchlist_scan_state=_get_state,
         _set_watchlist_scan_state=_set_state,
+        get_deezer_client=_get_deezer_client,
     )
 
 
@@ -40428,6 +40474,14 @@ _configure_chat_api(
     db_getter=get_database,
 )
 app.register_blueprint(_create_chat_blueprint())
+
+# Record-label watchlist (search labels / browse a label's catalog / follow) —
+# purely additive, self-contained blueprint reading only watchlist_labels + the
+# keyless MusicBrainz catalog layer; absolute /api/labels/* paths, no prefix.
+from api.labels import configure as _configure_labels_api, create_blueprint as _create_labels_blueprint
+_configure_labels_api(db_getter=get_database, itunes_getter=_get_itunes_client,
+                      deezer_getter=_get_deezer_client)
+app.register_blueprint(_create_labels_blueprint())
 
 # Video side API (isolated: reads database/video_library.db only, never music)
 from api.video import create_video_blueprint as _create_video_blueprint

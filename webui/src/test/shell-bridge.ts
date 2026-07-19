@@ -12,6 +12,7 @@ export function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBr
     activateLegacyPath: vi.fn(),
     cancelSimilarArtistsLoad: vi.fn(),
     navigateToArtistDetail: vi.fn(),
+    navigateToLabelDetail: vi.fn(),
     playLibraryTrack: vi.fn(),
     showReactHost: vi.fn(),
     startStream: vi.fn(),
