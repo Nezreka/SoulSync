@@ -58,8 +58,12 @@
     // so we don't use it. Lazy loading keeps it to visible covers; the server
     // caches (artist, album) → url.
     function _coverUrl(rel) {
-        if (!rel || !rel.album || !rel.artist) return '';
-        return `/api/labels/cover?artist=${encodeURIComponent(rel.artist)}&album=${encodeURIComponent(rel.album)}`;
+        if (!rel) return '';
+        const p = [];
+        if (rel.release_id) p.push(`release_id=${encodeURIComponent(rel.release_id)}`);  // CAA exact lookup
+        if (rel.artist) p.push(`artist=${encodeURIComponent(rel.artist)}`);
+        if (rel.album) p.push(`album=${encodeURIComponent(rel.album)}`);
+        return p.length ? `/api/labels/cover?${p.join('&')}` : '';
     }
 
     function _injectStyles() {
@@ -444,13 +448,17 @@
                 image_url: firstArtist.image_url || (firstArtist.images && firstArtist.images[0] && firstArtist.images[0].url) || '',
                 source: useSrc,
             };
-            const albumImg = (albumData.images && albumData.images[0] && albumData.images[0].url)
-                || _coverResolved.get(_key(rel)) || _coverUrl(rel);
+            // A raw coverartarchive.org URL can't load in the browser — route the
+            // album image through our cover endpoint (CAA proxied, or Deezer/
+            // iTunes) unless the reliable source gave a non-CAA CDN url.
+            const di = (albumData.images && albumData.images[0] && albumData.images[0].url) || '';
+            const diOk = di && di.indexOf('coverartarchive.org') === -1;
+            const albumImg = diOk ? di : _coverUrl(rel);
             const albumObj = {
                 name: albumData.name || rel.album,
                 id: useId,
                 album_type: albumData.album_type || rel.primary_type || 'album',
-                images: (albumData.images && albumData.images.length) ? albumData.images : (albumImg ? [{ url: albumImg }] : []),
+                images: diOk ? albumData.images : (albumImg ? [{ url: albumImg }] : []),
                 image_url: albumImg,
                 release_date: albumData.release_date || (rel.year ? rel.year + '-01-01' : ''),
                 total_tracks: tracks.length,

@@ -190,7 +190,49 @@ class TestCover:
                 calls["n"] += 1
                 return [_ITunesAlbum("Bleach", "https://is1.mzstatic.com/b/3000x3000bb.jpg")]
         labels_api._cover_cache.clear()
+        labels_api._caa_breaker.update(fails=0, skip_until=0.0)
         labels_api.configure(db_getter=lambda: client._db, itunes_getter=lambda: _ITunes())
         client.get("/api/labels/cover?artist=Nirvana&album=Bleach")
         client.get("/api/labels/cover?artist=Nirvana&album=Bleach")
         assert calls["n"] == 1     # second hit served from cache
+
+
+class TestCaaFirst:
+    def test_caa_hit_served_via_same_origin_proxy(self, client, monkeypatch):
+        # CAA is the PREFERRED source (exact by release id); a hit is proxied.
+        import requests as _rq
+        class _R:
+            status_code = 200
+            headers = {"Content-Type": "image/jpeg"}
+        monkeypatch.setattr(_rq, "head", lambda *a, **k: _R())
+        labels_api._caa_breaker.update(fails=0, skip_until=0.0)
+        r = client.get("/api/labels/cover?release_id=rid-1&artist=A&album=B")
+        assert r.status_code == 302
+        loc = r.headers["Location"]
+        assert loc.startswith("/api/image-proxy?url=") and "coverartarchive.org" in loc
+
+    def test_caa_failure_trips_breaker_then_falls_back(self, client, monkeypatch):
+        import requests as _rq
+        def _down(*a, **k):
+            raise RuntimeError("unreachable")
+        monkeypatch.setattr(_rq, "head", _down)
+        labels_api._caa_breaker.update(fails=0, skip_until=0.0)
+        labels_api._cover_cache.clear()
+        # no Deezer/iTunes wired → fallback misses → 404, but CAA was tried + counted
+        labels_api.configure(db_getter=lambda: client._db)
+        r = client.get("/api/labels/cover?release_id=rid-2&artist=A&album=B")
+        assert r.status_code == 404
+        assert labels_api._caa_breaker["fails"] == 1
+
+    def test_breaker_open_skips_caa(self, client, monkeypatch):
+        # when the breaker is open, CAA isn't probed at all (fast fallback)
+        import requests as _rq
+        probed = {"n": 0}
+        def _spy(*a, **k):
+            probed["n"] += 1
+            raise RuntimeError("should not be called")
+        monkeypatch.setattr(_rq, "head", _spy)
+        labels_api._caa_breaker.update(fails=99, skip_until=labels_api._now() + 999)
+        labels_api.configure(db_getter=lambda: client._db)
+        client.get("/api/labels/cover?release_id=rid-3&artist=A&album=B")
+        assert probed["n"] == 0

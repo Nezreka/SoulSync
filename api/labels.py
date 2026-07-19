@@ -37,6 +37,16 @@ _catalog_cache: Dict[str, Dict[str, Any]] = {}   # mbid -> {"at": epoch, "items"
 _COVER_TTL_S = 86400.0
 _cover_cache: Dict[tuple, Dict[str, Any]] = {}
 
+# Cover Art Archive is the PREFERRED source — we have the exact release mbid, so
+# it's a direct lookup (no fuzzy match). But it's frequently slow/unreachable,
+# so a circuit breaker trips after a few failures and we skip it (fast fallback
+# to Deezer/iTunes) for a cooldown, then retry — so a healthy CAA is used and a
+# downed one doesn't cost every request an 11s timeout.
+_CAA_TIMEOUT_S = 4.0
+_CAA_FAIL_THRESHOLD = 3
+_CAA_COOLDOWN_S = 300.0
+_caa_breaker: Dict[str, Any] = {"fails": 0, "skip_until": 0.0}
+
 
 def configure(*, db_getter: Callable, mb_getter: Optional[Callable] = None,
               itunes_getter: Optional[Callable] = None,
@@ -77,11 +87,38 @@ def _norm(s: Any) -> str:
     return _re.sub(r'[^a-z0-9]+', ' ', str(s or '').lower()).strip()
 
 
+def _try_caa(release_id: str) -> str:
+    """A same-origin proxied URL for the release's Cover Art Archive front cover
+    — EXACT, by the release mbid we already have (no fuzzy match). '' when CAA
+    has no art for it or is unreachable. Circuit-broken: after repeated failures
+    we skip CAA for a cooldown so a downed CAA doesn't time out every request."""
+    rid = str(release_id or '').strip()
+    if not rid or _now() < _caa_breaker["skip_until"]:
+        return ''
+    caa = f"https://coverartarchive.org/release/{rid}/front-500"
+    try:
+        import requests
+        r = requests.head(caa, timeout=_CAA_TIMEOUT_S, allow_redirects=True)
+        ok = (r.status_code == 200 and 'image' in (r.headers.get('Content-Type') or ''))
+    except Exception:
+        ok = False
+    if ok:
+        _caa_breaker["fails"] = 0
+        from urllib.parse import quote
+        # Served via the app's image proxy so the BROWSER never has to reach
+        # coverartarchive.org directly (it often can't either).
+        return f"/api/image-proxy?url={quote(caa, safe='')}"
+    _caa_breaker["fails"] += 1
+    if _caa_breaker["fails"] >= _CAA_FAIL_THRESHOLD:
+        _caa_breaker["skip_until"] = _now() + _CAA_COOLDOWN_S
+    return ''
+
+
 def _resolve_cover(artist: str, album: str) -> str:
-    """One reliable cover URL for (artist, album). Tries Deezer first (1s rate
-    limit + reachable CDN) then iTunes (3s) — Cover Art Archive is unreachable
-    for many setups so it's not used. '' on a miss. Only accepts a result whose
-    album name reasonably matches, so a card never shows the WRONG cover."""
+    """Fallback cover URL for (artist, album) when CAA has nothing. Tries Deezer
+    first (1s rate limit + reachable CDN) then iTunes (3s). '' on a miss. Only
+    accepts a result whose album name reasonably matches, so a card never shows
+    the WRONG cover."""
     want = _norm(album)
     for getter in (_deezer_getter, _itunes_getter):
         try:
@@ -109,11 +146,21 @@ def create_blueprint() -> Blueprint:
 
     @bp.route("/api/labels/cover", methods=["GET"])
     def labels_cover():
-        """Redirect to a reliable Apple-CDN cover for (artist, album). The label
-        grid points every card here so the browser fetches art same-origin-ish
-        (302 to Apple) instead of the unreachable Cover Art Archive."""
+        """A cover for a release. Cover Art Archive FIRST (exact, by release
+        mbid, proxied same-origin), then Deezer/iTunes fuzzy-by-name as the
+        fallback. The label grid + download modal both point here."""
+        release_id = str(request.args.get("release_id") or "").strip()
         artist = str(request.args.get("artist") or "").strip()
         album = str(request.args.get("album") or "").strip()
+
+        # 1) Cover Art Archive — preferred, exact lookup by the id we already have.
+        caa = _try_caa(release_id)
+        if caa:
+            resp = redirect(caa, code=302)
+            resp.headers["Cache-Control"] = "private, max-age=86400"
+            return resp
+
+        # 2) Fallback — Deezer/iTunes by name (cached), redirect to their CDN.
         if not artist or not album:
             return "", 404
         key = (artist.lower(), album.lower())
