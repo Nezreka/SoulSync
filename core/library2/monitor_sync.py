@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+from core.library2.sql_util import select_existing_ids
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.monitor_sync")
@@ -710,16 +711,13 @@ def reconcile_track_wishlist(
 
         # Only prune tracks that still exist in lib2 (track_wanted_states raises
         # on unknown ids); orphaned wishlist rows are the delete path's concern.
+        # `wishlisted` scales with the library, so the existence check goes
+        # through the chunk-safe helper — a raw `IN (?, …)` over every
+        # wishlisted id would blow SQLite's variable limit on a large library.
         wishlisted = _wishlisted_lib2_track_ids(conn, profile_id=profile_id)
         wishlisted_set = set(wishlisted)
         stats["wishlisted"] = len(wishlisted)
-        existing = {
-            int(r[0]) for r in conn.execute(
-                "SELECT id FROM lib2_tracks WHERE id IN ("
-                + ",".join("?" for _ in wishlisted) + ")",
-                wishlisted,
-            )
-        } if wishlisted else set()
+        existing = select_existing_ids(conn, "lib2_tracks", wishlisted)
         prune = [t for t in wishlisted if t in existing and t not in wanted_set]
 
         # Only mirror tracks whose Wishlist membership actually needs to change:
