@@ -37,6 +37,19 @@ _TASK_STATUS_BUCKET = {
 }
 
 
+def _safe_int(value: Any) -> Optional[int]:
+    """``int(value)`` that returns ``None`` instead of raising.
+
+    A single task with a malformed ``lib2_track_id`` (e.g. an empty string)
+    must not 500 the whole queue-status endpoint for every other album/track
+    (review A8) — it's simply skipped.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _classify_live_state(state: Optional[str]) -> str:
     """Best-effort bucket for a raw slskd/streaming transfer state string.
 
@@ -97,10 +110,19 @@ def get_queue_status(
     for task in tasks_snapshot:
         track_info = task.get("track_info") or {}
         source_info = track_info.get("source_info") or {}
+        # Bridge-dispatched downloads (Torrent/Usenet bundle-match, manual
+        # grab — core.acquisition.main_pipeline_bridge) carry the Library-v2
+        # identity as a top-level "lib2_entity" dict, not "source_info"
+        # (review A7). Fall back to it so those downloads get a badge too.
+        lib2_entity = track_info.get("lib2_entity") or {}
         raw_track_id = source_info.get("lib2_track_id")
-        if raw_track_id is None or int(raw_track_id) not in wanted:
+        raw_album_id = source_info.get("lib2_album_id")
+        if raw_track_id is None:
+            raw_track_id = lib2_entity.get("track_id")
+            raw_album_id = lib2_entity.get("album_id")
+        track_id = _safe_int(raw_track_id)
+        if track_id is None or track_id not in wanted:
             continue
-        track_id = int(raw_track_id)
         bucket = _TASK_STATUS_BUCKET.get(task.get("status"))
         if bucket is None:
             terminal_track_ids.add(track_id)
@@ -117,16 +139,15 @@ def get_queue_status(
             if live_info:
                 progress_pct = int(live_info.get("percentComplete") or 0)
 
-        _record(track_id, source_info.get("lib2_album_id"), bucket, progress_pct)
+        _record(track_id, raw_album_id, bucket, progress_pct)
 
     with matched_context_lock:
         contexts_snapshot = list(matched_downloads_context.values())
     for context in contexts_snapshot:
         lib2_entity = context.get("lib2_entity") or {}
-        raw_track_id = lib2_entity.get("track_id")
-        if raw_track_id is None:
+        track_id = _safe_int(lib2_entity.get("track_id"))
+        if track_id is None:
             continue
-        track_id = int(raw_track_id)
         # A batch-task entry for the same track already won (more precise
         # status machine); don't let a shadow manual-grab context override it.
         if track_id not in wanted or track_id in tracks or track_id in terminal_track_ids:

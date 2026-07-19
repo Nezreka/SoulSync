@@ -194,6 +194,53 @@ class TestGetQueueStatus:
     def test_empty_track_ids_short_circuits(self):
         assert get_queue_status([], **_deps()) == {"tracks": {}, "albums": {}}
 
+    def test_bridge_dispatched_task_falls_back_to_lib2_entity(self):
+        """A7: core.acquisition.main_pipeline_bridge (Torrent/Usenet bundle
+        match, manual grab) puts the Library-v2 identity in a top-level
+        "lib2_entity" dict, not "source_info" — this download must still get
+        a live badge instead of silently never showing progress."""
+        download_tasks["t1"] = {
+            "status": "downloading",
+            "username": "alice",
+            "filename": "song.flac",
+            "track_info": {"lib2_entity": {"track_id": 10, "album_id": 5}},
+        }
+        live = {_make_context_key("alice", "song.flac"): {"percentComplete": 42}}
+
+        result = get_queue_status([10], **_deps(live))
+
+        assert result == {
+            "tracks": {10: {"status": "downloading", "progress_pct": 42}},
+            "albums": {5: 1},
+        }
+
+    @pytest.mark.parametrize("malformed_track_id", ["", "not-a-number", None])
+    def test_malformed_lib2_track_id_is_skipped_not_raised(self, malformed_track_id):
+        """A8: a malformed lib2_track_id must not crash the whole endpoint —
+        it's skipped, other tasks still report normally."""
+        download_tasks["bad"] = {
+            "status": "downloading",
+            "track_info": {"source_info": {"lib2_track_id": malformed_track_id}},
+        }
+        download_tasks["good"] = {
+            "status": "downloading",
+            "track_info": {"source_info": {"lib2_track_id": 10, "lib2_album_id": 5}},
+        }
+
+        result = get_queue_status([10], **_deps())
+
+        assert result["tracks"] == {10: {"status": "downloading", "progress_pct": 0}}
+
+    def test_malformed_lib2_track_id_in_matched_context_is_skipped_not_raised(self):
+        matched_downloads_context["ctx1"] = {
+            "lib2_entity": {"track_id": "garbage"},
+            "search_result": {"username": "bob", "filename": "track.mp3"},
+        }
+
+        result = get_queue_status([10], **_deps())
+
+        assert result == {"tracks": {}, "albums": {}}
+
 
 class FakeDB:
     def __init__(self, path: str):
