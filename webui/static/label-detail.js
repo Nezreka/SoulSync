@@ -42,10 +42,15 @@
     const _key = (r) => `${(r.artist || '').toLowerCase()}||${(r.album || '').toLowerCase()}`;
 
     // Cover art at RELEASE scope (art lives there far more often than at
-    // release-group scope, which is why the group endpoint was mostly blank).
+    // release-group scope). Routed through the app's /api/image-proxy so the
+    // browser fetches it SAME-ORIGIN — Cover Art Archive isn't reliably
+    // reachable client-side (ERR_CONNECTION_RESET), but the server can fetch +
+    // disk-cache it. Lazy loading means only visible covers get proxied.
     function _coverUrl(rel) {
         const rid = rel && rel.release_id;
-        return rid ? `https://coverartarchive.org/release/${encodeURIComponent(rid)}/front-250` : '';
+        if (!rid) return '';
+        const caa = `https://coverartarchive.org/release/${encodeURIComponent(rid)}/front-250`;
+        return `/api/image-proxy?url=${encodeURIComponent(caa)}`;
     }
 
     function _injectStyles() {
