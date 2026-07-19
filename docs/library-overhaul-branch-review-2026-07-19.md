@@ -88,25 +88,33 @@ Angle A meldete, der Legacy-Post-Sync-Hook (`_post_sync_automation_followup`) tr
 
 ## Teil B — Qualität/Cleanup (kein Blocker, aber wert es anzugehen)
 
-Kurzfassung der wertvollsten Cleanup-Funde (voller Bericht in den Agent-Transkripten verfügbar, hier nur die Essenz):
+Kurzfassung der wertvollsten Cleanup-Funde (voller Bericht in den Agent-Transkripten verfügbar, hier nur die Essenz).
+
+**Status-Nachtrag (2026-07-20):** Der komplette Effizienz-Cluster, die
+Lossless-Set-Konsolidierung, die schema.py-PRAGMA-Simplification und der
+konkret erreichbare IN-Limit-Crash sind umgesetzt (jeweils test-verifiziert,
+volle `tests/library2`-Suite grün). Offen/bewusst verschoben: Frontend-
+Polling, die restlichen ~35 IN-Clause-Stellen (Helper existiert jetzt), das
+monitor_sync-Funktionspaar, der `scoped`-Boolean und `automation_id`-Progress.
+Jeder Punkt unten mit `[✓ …]` / `[~ …]` / `[offen …]` markiert.
 
 **Effizienz (relevant für 24/7-Betrieb auf Unraid):**
-- `core/library2/monitor_sync.py:693` — der **stündliche** `monitoring_list_reconcile`-Job baut für JEDEN wanted Track das volle Wishlist-Payload (~6 Queries) neu auf, auch wenn der Track längst korrekt in der Wishlist steht — bei 100k Tracks mehrere 100k Queries/Stunde im Leerlauf.
-- `core/library2/wanted.py:149` — N+1 Profil-Lookup pro Track in derselben Schleife, plus unbedingtes UPSERT auch bei unverändertem Datensatz.
-- `core/library2/monitor_sync.py:574` — dasselbe Muster: unbedingtes UPSERT jeder Artist-Regel jede Stunde, selbst ohne Änderung.
-- `webui/.../library-v2-page.tsx:5215` — Queue-Status-Polling (3s, unbedingt) pro `AlbumBlock` statt einer gemeinsamen artist-scoped Query — bei 30 Releases 10 Requests/Sekunde dauerhaft.
+- `core/library2/monitor_sync.py:693` — der **stündliche** `monitoring_list_reconcile`-Job baut für JEDEN wanted Track das volle Wishlist-Payload (~6 Queries) neu auf, auch wenn der Track längst korrekt in der Wishlist steht — bei 100k Tracks mehrere 100k Queries/Stunde im Leerlauf. `[✓ reconcile spiegelt nur noch echte Deltas]`
+- `core/library2/wanted.py:149` — N+1 Profil-Lookup pro Track in derselben Schleife, plus unbedingtes UPSERT auch bei unverändertem Datensatz. `[✓ Cascade in die Query gejoint + geteilter Helper + no-op-UPSERT-Guard]`
+- `core/library2/monitor_sync.py:574` — dasselbe Muster: unbedingtes UPSERT jeder Artist-Regel jede Stunde, selbst ohne Änderung. `[✓ no-op-Rewrite übersprungen]`
+- `webui/.../library-v2-page.tsx:5215` — Queue-Status-Polling (3s, unbedingt) pro `AlbumBlock` statt einer gemeinsamen artist-scoped Query — bei 30 Releases 10 Requests/Sekunde dauerhaft. `[offen — Frontend]`
 
 **Reuse (Drift-Risiko):**
-- Lossless-Format-Set existiert **dreifach** unabhängig (`core/quality/lossless.py`, `core/library2/status.py:23`, `core/library2/track_files.py:41`) — bereits auseinandergedriftet (DSD/WavPack/M4A uneinheitlich behandelt); Badge und Datei-Auswahl können sich widersprechen.
-- IN-Clause-Placeholder-Builder mehrfach dupliziert innerhalb `core/library2/` (`maintenance_sync.py:98` vs. `history_feed.py:101`, ~35 weitere Inline-Stellen) — SQLite-999-Var-Limit-Fix müsste an jeder Stelle einzeln nachgezogen werden.
+- Lossless-Format-Set existiert **dreifach** unabhängig (`core/quality/lossless.py`, `core/library2/status.py:23`, `core/library2/track_files.py:41`) — bereits auseinandergedriftet (DSD/WavPack/M4A uneinheitlich behandelt); Badge und Datei-Auswahl können sich widersprechen. `[✓ Badge + Datei-Auswahl auf das Quality-Modell-Set (flac/alac/wav/dsf) vereinheitlicht + Konsistenz-Test]`
+- IN-Clause-Placeholder-Builder mehrfach dupliziert innerhalb `core/library2/` (`maintenance_sync.py:98` vs. `history_feed.py:101`, ~35 weitere Inline-Stellen) — SQLite-999-Var-Limit-Fix müsste an jeder Stelle einzeln nachgezogen werden. `[~ chunk-sicherer Helper core/library2/sql_util.select_existing_ids angelegt + die real erreichbare Crash-Stelle im reconcile migriert; restliche ~35 Stellen inkrementell]`
 
 **Simplification:**
-- `core/library2/monitor_sync.py:89` und `:363` — je zwei ~90-Zeilen- bzw. 15-Zeilen-Funktionspaare (Artist- vs. Track-Variante) sind bereits auseinandergedriftet (Artist-Version nutzt zwei Outbox-Aufrufe, Track-Version nur einen).
-- `core/library2/schema.py:786` — Migrations-Loop fragt `PRAGMA table_info` pro Spalte statt pro Tabelle ab (~30 statt ~4 Abfragen bei jedem Start).
+- `core/library2/monitor_sync.py:89` und `:363` — je zwei ~90-Zeilen- bzw. 15-Zeilen-Funktionspaare (Artist- vs. Track-Variante) sind bereits auseinandergedriftet (Artist-Version nutzt zwei Outbox-Aufrufe, Track-Version nur einen). `[offen]`
+- `core/library2/schema.py:786` — Migrations-Loop fragt `PRAGMA table_info` pro Spalte statt pro Tabelle ab (~30 statt ~4 Abfragen bei jedem Start). `[✓ pro Tabelle gecacht]`
 
 **Altitude:**
-- `core/wishlist/processing.py:995` — der `scoped`-Boolean durchzieht ~10 Verzweigungspunkte derselben Funktion statt eines dedizierten Scope-Objekts — jede zukünftige Änderung riskiert, eine Stelle zu vergessen.
-- `core/automation/handlers/_pipeline_shared.py:334` — `automation_id=None` macht jedes interne Progress-Update im gescopten Playlist-Wishlist-Lauf zum No-op; der Nutzer sieht nur eine Zeile Zusammenfassung statt der reichhaltigen Details, die der Timer-Pfad zeigt.
+- `core/wishlist/processing.py:995` — der `scoped`-Boolean durchzieht ~10 Verzweigungspunkte derselben Funktion statt eines dedizierten Scope-Objekts — jede zukünftige Änderung riskiert, eine Stelle zu vergessen. `[offen]`
+- `core/automation/handlers/_pipeline_shared.py:334` — `automation_id=None` macht jedes interne Progress-Update im gescopten Playlist-Wishlist-Lauf zum No-op; der Nutzer sieht nur eine Zeile Zusammenfassung statt der reichhaltigen Details, die der Timer-Pfad zeigt. `[offen]`
 
 ---
 
