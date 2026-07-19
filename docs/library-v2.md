@@ -48,7 +48,9 @@
 > Abschnitte 4/5.3/6). Am 2026-07-19 wurde Abschnitt 82 ergänzt: direkte
 > user-facing Wishlist→Track-/Watchlist→Artist-Demonitor-Synchronisation,
 > supersedierende Outbox-Removes und Rückkehr des kombinierten neutralen
-> `monitoring_list_reconcile`-Repair-Jobs.
+> `monitoring_list_reconcile`-Repair-Jobs. Am 2026-07-19 wurde Abschnitt 83
+> ergänzt (Acquisition-Review-UI, review A10 — Backend vollständig, Frontend
+> fehlt komplett; offen, noch nicht umgesetzt).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -8500,3 +8502,31 @@ Gespeicherte Einstellungen bzw. Run-Aufrufe der alten IDs
 
 Gezielte Abnahme: 60 Tests über Monitor-Sync, user-facing Wishlist-Routen,
 Ignore-Semantik und Repair-Registry; Ruff für alle betroffenen Python-Dateien.
+
+---
+
+## 83. Acquisition-Review braucht ein UI — 🔍 offen, noch NICHT umgesetzt (review A10, 2026-07-19)
+
+Der komplette Backend-Bereich für die Nachbearbeitung mehrdeutiger Acquisitions
+existiert (`api/library_v2.py:295-1181` — `/acquisition/requests*`,
+`/acquisition/imports*` inkl. `/resolve`, `/acquisition/grabs*`,
+`/acquisition/blocklist*`, `/acquisition/path-health`,
+`/acquisition/correlation-coverage`), hat aber **keine Anbindung** im
+Frontend — `grep` nach diesen Pfaden in `webui/src/` liefert null Treffer.
+
+**Konkreter Nutzerschaden:** Hat ein Soulseek-Album-Bundle-Grab mehrdeutige
+Track-Datei-Zuordnungen (Bundle-Matching kann nicht automatisch jede Datei
+zuordnen), bleibt der Import auf manuelle `assignments` warten. Es gibt aber
+keinen Button/keine Seite, um das aufzulösen — der Import hängt permanent
+fest, obwohl das Backend die Auflösung vollständig unterstützt.
+
+**Zu bauen:** eine Review-UI (vermutlich unter Library v2 → Acquisition oder
+als eigener Tab), die die offenen `/acquisition/imports`-Einträge mit
+mehrdeutigen Zuordnungen auflistet, die Kandidaten-Dateien pro Track anzeigt
+und `/resolve` mit den Nutzer-Zuordnungen aufruft. Umfang der restlichen
+Endpunkte (`requests`, `grabs`, `blocklist`, `path-health`,
+`correlation-coverage`) noch nicht gescoped — vermutlich ein begleitendes
+Diagnose-/Historie-Panel, kein eigener Blocker für den `/resolve`-Flow.
+
+Noch nicht angegangen — nächster Schritt ist Scoping/Brainstorming der
+UI, bevor Code geschrieben wird.
