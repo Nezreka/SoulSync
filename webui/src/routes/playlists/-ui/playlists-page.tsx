@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -22,7 +22,6 @@ const REFRESH_OPTIONS = [
   { value: 6, label: 'Every 6 hours' },
   { value: 12, label: 'Every 12 hours' },
   { value: 24, label: 'Every day' },
-  { value: 48, label: 'Every 2 days' },
   { value: 168, label: 'Every week' },
 ];
 
@@ -92,6 +91,15 @@ export function PlaylistsPage() {
         {isError && (
           <div className={styles.errorState}>
             <p className={styles.errorText}>{errorMessage}</p>
+            <button
+              className={styles.btn}
+              onClick={() => {
+                void kindsQuery.refetch();
+                void playlistsQuery.refetch();
+              }}
+            >
+              Retry
+            </button>
           </div>
         )}
 
@@ -206,9 +214,13 @@ function PlaylistCard({
 
   const refreshMutation = useMutation({
     mutationFn: () => refreshPlaylist(playlist.kind, playlist.variant),
-    onSuccess: () => {
+    onSuccess: (result) => {
       void invalidatePlaylistsQueries(queryClient);
-      window.showToast?.('Playlist refreshed', 'success');
+      if (result.error) {
+        window.showToast?.(result.error, 'warning');
+      } else {
+        window.showToast?.('Playlist refreshed', 'success');
+      }
     },
     onError: (err: Error) => {
       window.showToast?.(err.message || 'Failed to refresh playlist', 'error');
@@ -217,7 +229,11 @@ function PlaylistCard({
 
   const deactivateMutation = useMutation({
     mutationFn: () => deletePlaylist(playlist.kind, playlist.variant),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (!result.success) {
+        window.showToast?.(result.error || 'Failed to deactivate playlist', 'error');
+        return;
+      }
       void invalidatePlaylistsQueries(queryClient);
       window.showToast?.('Playlist deactivated', 'success');
     },
@@ -266,9 +282,17 @@ function PlaylistCard({
     },
   });
 
+  const getConfig = () => {
+    const cached = queryClient.getQueryData(playlistsQueryOptions().queryKey);
+    const list = (cached as { playlists?: PersonalizedPlaylist[] } | undefined)?.playlists;
+    return list?.find((p) => p.kind === playlist.kind && p.variant === playlist.variant)?.config ?? playlist.config;
+  };
+
   useEffect(() => {
-    setNameValue(playlist.name);
-  }, [playlist.name]);
+    if (!editingName) {
+      setNameValue(playlist.name);
+    }
+  }, [playlist.name, editingName]);
 
   const lastGenerated = playlist.last_generated_at
     ? new Date(playlist.last_generated_at).toLocaleString()
@@ -310,9 +334,9 @@ function PlaylistCard({
                   value={nameValue}
                   onChange={(e) => setNameValue(e.target.value)}
                   onBlur={() => {
-                    if (nameValue.trim() && nameValue !== playlist.name) {
+                    if (nameValue.trim() && nameValue !== playlist.name && !updateNameMutation.isPending) {
                       updateNameMutation.mutate(nameValue.trim());
-                    } else {
+                    } else if (!updateNameMutation.isPending) {
                       setEditingName(false);
                       setNameValue(playlist.name);
                     }
@@ -381,16 +405,32 @@ function PlaylistCard({
               value={playlist.refresh_interval_hours}
               onChange={(e) => {
                 e.stopPropagation();
-                intervalMutation.mutate(Number(e.target.value));
+                if (!intervalMutation.isPending) {
+                  intervalMutation.mutate(Number(e.target.value));
+                }
               }}
               onClick={(e) => e.stopPropagation()}
               aria-label={`Refresh interval for ${playlist.name}`}
             >
-              {REFRESH_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
+              {(() => {
+                const hasMatch = REFRESH_OPTIONS.some(
+                  (o) => o.value === playlist.refresh_interval_hours,
+                );
+                const options = hasMatch
+                  ? REFRESH_OPTIONS
+                  : [
+                      ...REFRESH_OPTIONS,
+                      {
+                        value: playlist.refresh_interval_hours,
+                        label: `Every ${playlist.refresh_interval_hours} hours`,
+                      },
+                    ];
+                return options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ));
+              })()}
             </select>
           )}
         </div>
@@ -403,23 +443,30 @@ function PlaylistCard({
             <div className={styles.configGrid}>
               <ConfigField
                 label="Track Limit"
-                value={playlist.config.limit}
-                onChange={(v) => updateConfigMutation.mutate({ limit: Number(v) || 50 })}
+                value={getConfig().limit}
+                onChange={(v) => {
+                  if (updateConfigMutation.isPending) return;
+                  const cfg = getConfig();
+                  updateConfigMutation.mutate({ ...cfg, limit: Number(v) || 50 });
+                }}
                 type="number"
                 min={1}
                 max={2000}
               />
               <ConfigField
                 label="Max Days Since Added"
-                value={(playlist.config.extra?.max_days_since_added as string | number) ?? ''}
-                onChange={(v) =>
+                value={(getConfig().extra?.max_days_since_added as string | number) ?? ''}
+                onChange={(v) => {
+                  if (updateConfigMutation.isPending) return;
+                  const cfg = getConfig();
                   updateConfigMutation.mutate({
+                    ...cfg,
                     extra: {
-                      ...playlist.config.extra,
+                      ...cfg.extra,
                       max_days_since_added: v ? Number(v) : null,
                     },
-                  })
-                }
+                  });
+                }}
                 type="number"
                 min={1}
                 max={3650}
@@ -469,14 +516,36 @@ function ConfigField({
   max?: number;
   placeholder?: string;
 }) {
+  const [localValue, setLocalValue] = useState(String(value ?? ''));
+  const committedRef = useRef(String(value ?? ''));
+
+  useEffect(() => {
+    const next = String(value ?? '');
+    if (next !== committedRef.current) {
+      committedRef.current = next;
+      setLocalValue(next);
+    }
+  }, [value]);
+
   return (
     <label className={styles.configField}>
       <span className={styles.configLabel}>{label}</span>
       <input
         className={styles.configInput}
         type={type}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value)}
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={() => {
+          if (localValue !== committedRef.current) {
+            committedRef.current = localValue;
+            onChange(localValue);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
         min={min}
         max={max}
         placeholder={placeholder}

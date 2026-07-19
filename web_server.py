@@ -32577,7 +32577,7 @@ def personalized_activate_playlist(kind, variant=''):
     try:
         manager = _build_personalized_manager()
         body = request.get_json(silent=True) or {}
-        interval = int(body.get('refresh_interval_hours', 24))
+        interval = max(1, min(168, int(body.get('refresh_interval_hours', 24))))
         return jsonify(_personalized_api.activate_playlist(
             manager, kind, variant, get_current_profile_id(),
             engine=automation_engine, refresh_interval_hours=interval,
@@ -32617,7 +32617,7 @@ def personalized_update_refresh_interval(kind, variant=''):
     try:
         manager = _build_personalized_manager()
         body = request.get_json(silent=True) or {}
-        interval = int(body.get('refresh_interval_hours', 24))
+        interval = max(1, min(168, int(body.get('refresh_interval_hours', 24))))
         return jsonify(_personalized_api.update_refresh_interval(
             manager, kind, variant, get_current_profile_id(),
             engine=automation_engine, refresh_interval_hours=interval,

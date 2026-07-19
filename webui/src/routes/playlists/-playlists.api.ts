@@ -84,7 +84,7 @@ export async function deletePlaylist(
   const path = variant
     ? `personalized/playlist/${encodeURIComponent(kind)}/${encodeURIComponent(variant)}`
     : `personalized/playlist/${encodeURIComponent(kind)}`;
-  return await readJson<{ success: boolean }>(apiClient.delete(path));
+  return await readJson<{ success: boolean; error?: string }>(apiClient.delete(path));
 }
 
 export function kindsQueryOptions() {

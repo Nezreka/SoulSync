@@ -77,6 +77,7 @@ def _match_automation(automations: List[Dict[str, Any]], kind: str, variant: str
 
 def _interval_to_trigger(interval_hours: int):
     """Map refresh_interval_hours to (trigger_type, trigger_config)."""
+    interval_hours = max(1, interval_hours)
     if interval_hours <= 12:
         return 'schedule', {'interval': interval_hours, 'unit': 'hours'}
     if interval_hours <= 48:
@@ -325,8 +326,7 @@ def toggle_auto_refresh(
     """Toggle the automation row's enabled status."""
     automation = _find_playlist_automation(engine, kind, variant, profile_id)
     if automation is None:
-        record = manager.ensure_playlist(kind, variant, profile_id)
-        automation = _find_playlist_automation(engine, kind, variant, profile_id)
+        return {'success': False, 'error': 'Playlist not activated'}
 
     if automation is not None and enabled is not None:
         current = bool(automation.get('enabled', 0))
@@ -334,6 +334,8 @@ def toggle_auto_refresh(
             engine.db.toggle_automation(automation['id'])
             if enabled:
                 engine.schedule_automation(automation['id'])
+            else:
+                engine.cancel_automation(automation['id'])
             automation = _find_playlist_automation(engine, kind, variant, profile_id)
 
     record = manager.get_playlist(kind, variant, profile_id) or manager.ensure_playlist(kind, variant, profile_id)
@@ -354,8 +356,7 @@ def update_refresh_interval(
     """Update the automation's trigger schedule for a playlist."""
     automation = _find_playlist_automation(engine, kind, variant, profile_id)
     if automation is None:
-        record = manager.ensure_playlist(kind, variant, profile_id)
-        automation = _find_playlist_automation(engine, kind, variant, profile_id)
+        return {'success': False, 'error': 'Playlist not activated'}
 
     if automation is not None:
         trigger_type, trigger_config = _interval_to_trigger(refresh_interval_hours)
@@ -391,6 +392,7 @@ def delete_playlist(
 
     automation = _find_playlist_automation(engine, kind, variant, profile_id)
     if automation is not None and engine is not None:
+        engine.cancel_automation(automation['id'])
         engine.db.delete_automation(automation['id'])
 
     return {'success': True}

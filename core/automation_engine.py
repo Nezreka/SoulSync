@@ -737,6 +737,7 @@ class AutomationEngine:
                 rows = [dict(r) for r in cursor.fetchall()]
 
             migrated = 0
+            existing_pipeline = self.db.get_automations_by_action('personalized_pipeline') or []
             for row in rows:
                 try:
                     cfg = json.loads(row.get('config_json') or '{}')
@@ -745,10 +746,11 @@ class AutomationEngine:
                         continue
 
                     # Skip if automation already exists for this playlist
-                    existing = self.db.get_automations_by_action('personalized_pipeline')
                     already_exists = False
-                    for auto in (existing or []):
+                    for auto in existing_pipeline:
                         if auto.get('owned_by') != 'auto_playlist':
+                            continue
+                        if auto.get('profile_id') != row['profile_id']:
                             continue
                         ac = json.loads(auto.get('action_config') or '{}')
                         kinds = ac.get('kinds') or []
@@ -760,20 +762,12 @@ class AutomationEngine:
                     if already_exists:
                         continue
 
-                    interval_hours = int(extra.get('refresh_interval_hours', 24))
+                    interval_hours = max(1, int(extra.get('refresh_interval_hours', 24)))
                     kind_display = row['kind'].replace('_', ' ').title()
                     variant_display = f" ({row['variant']})" if row.get('variant') else ''
 
-                    # Map interval to trigger type
-                    if interval_hours <= 12:
-                        trigger_type = 'schedule'
-                        trigger_config = {'interval': interval_hours, 'unit': 'hours'}
-                    elif interval_hours <= 48:
-                        trigger_type = 'daily_time'
-                        trigger_config = {'time': '01:00'}
-                    else:
-                        trigger_type = 'weekly_time'
-                        trigger_config = {'time': '01:00', 'days': ['mon']}
+                    from core.personalized.api import _interval_to_trigger
+                    trigger_type, trigger_config = _interval_to_trigger(interval_hours)
 
                     action_config = {
                         'kinds': [{'kind': row['kind'], 'variant': row.get('variant') or ''}]

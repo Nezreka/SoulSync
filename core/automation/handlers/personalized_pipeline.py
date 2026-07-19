@@ -60,30 +60,8 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
 
     try:
         kinds_config = config.get('kinds') or []
-        discover_due = bool(config.get('discover_due', False))
 
-        # In discover_due mode, dynamically find all playlists with auto_refresh enabled
         manager = deps.build_personalized_manager()
-        profile_id = deps.get_current_profile_id()
-
-        if discover_due and not kinds_config:
-            kinds_config = _discover_due_playlists(manager, profile_id)
-            if not kinds_config:
-                deps.state.set_pipeline_running(False)
-                deps.update_progress(
-                    automation_id,
-                    progress=100,
-                    phase='No auto-playlists due',
-                    log_line='No auto-playlists due for refresh',
-                    log_type='info',
-                )
-                return {
-                    'status': 'completed',
-                    '_manages_own_progress': True,
-                    'playlists_synced': '0',
-                    'tracks_synced': '0',
-                    'duration_seconds': str(int(time.time() - pipeline_start)),
-                }
 
         if not isinstance(kinds_config, list) or not kinds_config:
             deps.state.set_pipeline_running(False)
@@ -264,49 +242,6 @@ def _build_payloads_for_kinds(
             'sync_id': f'{_SYNC_ID_PREFIX}_{record.kind}_{record.variant or "_"}',
         })
     return payloads
-
-
-def _discover_due_playlists(manager: Any, profile_id: int) -> List[Dict[str, Any]]:
-    """Find all playlists with auto_refresh enabled that are due for refresh.
-
-    Checks each playlist's refresh_interval_hours against last_generated_at
-    and returns only those that need updating."""
-    from datetime import datetime, timezone
-
-    all_playlists = manager.list_playlists(profile_id)
-    due = []
-    now = datetime.now(timezone.utc)
-
-    for record in all_playlists:
-        extra = record.config.extra or {}
-        auto_refresh = extra.get('auto_refresh', False)
-        if not auto_refresh:
-            continue
-
-        refresh_hours = extra.get('refresh_interval_hours', 24)
-        try:
-            refresh_hours = int(refresh_hours)
-        except (TypeError, ValueError):
-            refresh_hours = 24
-
-        if refresh_hours <= 0:
-            continue
-
-        if record.last_generated_at is None:
-            due.append({'kind': record.kind, 'variant': record.variant})
-            continue
-
-        try:
-            last_gen = datetime.fromisoformat(record.last_generated_at)
-            if last_gen.tzinfo is None:
-                last_gen = last_gen.replace(tzinfo=timezone.utc)
-            elapsed = (now - last_gen).total_seconds()
-            if elapsed >= refresh_hours * 3600:
-                due.append({'kind': record.kind, 'variant': record.variant})
-        except (ValueError, TypeError):
-            due.append({'kind': record.kind, 'variant': record.variant})
-
-    return due
 
 
 def _track_to_sync_shape(track: Any) -> Dict[str, Any]:
