@@ -31,6 +31,16 @@
     let _returnTo = 'search';
     let _sentinelObserver = null;
     let _reqToken = 0;
+    // Covers resolve through a rate-limited external lookup (Deezer/iTunes), so
+    // load them SEQUENTIALLY, visible-first — firing all at once just piles up
+    // behind the server's rate lock. Resolved endpoint URLs are cached so
+    // filter/sort/ownership re-renders keep the art.
+    let _coverObserver = null;
+    let _coverResolved = new Map();  // key -> endpoint url (image loaded ok)
+    let _coverAttempted = new Set(); // keys already tried (don't retry misses)
+    let _coverQueue = [];
+    let _coverActive = 0;
+    const _COVER_CONCURRENCY = 2;
 
     function _esc(s) {
         if (typeof escapeHtml === 'function') return escapeHtml(s == null ? '' : String(s));
@@ -130,6 +140,44 @@
             }, { rootMargin: '400px' });
             const sentinel = document.getElementById('label-detail-sentinel');
             if (sentinel) _sentinelObserver.observe(sentinel);
+        }
+        if (!_coverObserver && 'IntersectionObserver' in window) {
+            // A visible, not-yet-resolved cover joins the queue; scrolled-past
+            // cards drop out so we always prioritise what's on screen.
+            _coverObserver = new IntersectionObserver((entries) => {
+                entries.forEach(e => {
+                    const el = e.target;
+                    if (!e.isIntersecting) return;
+                    const key = el.dataset.coverKey;
+                    if (!key || _coverResolved.has(key) || _coverAttempted.has(key)) {
+                        _coverObserver.unobserve(el);
+                        return;
+                    }
+                    _coverQueue.push({ key, url: el.dataset.cover, el });
+                    _coverObserver.unobserve(el);
+                    _pumpCovers();
+                });
+            }, { rootMargin: '150px' });
+        }
+    }
+
+    function _pumpCovers() {
+        while (_coverActive < _COVER_CONCURRENCY && _coverQueue.length) {
+            const job = _coverQueue.shift();
+            if (_coverResolved.has(job.key) || _coverAttempted.has(job.key)) continue;
+            _coverAttempted.add(job.key);
+            _coverActive++;
+            const im = new Image();
+            im.onload = () => {
+                _coverResolved.set(job.key, job.url);
+                if (job.el && job.el.isConnected) {
+                    job.el.style.backgroundImage = `url("${job.url}")`;
+                    delete job.el.dataset.cover;
+                }
+                _coverActive--; _pumpCovers();
+            };
+            im.onerror = () => { _coverActive--; _pumpCovers(); };
+            im.src = job.url;   // hits /api/labels/cover -> 302 -> Deezer/Apple CDN
         }
     }
 
@@ -280,17 +328,25 @@
     }
 
     function _cardHtml(rel) {
-        const cover = _coverUrl(rel);
-        const isOwned = _owned.has(_key(rel));
-        const checked = _checked.has(_key(rel));
+        const key = _key(rel);
+        const endpoint = _coverUrl(rel);
+        const resolved = _coverResolved.get(key);
+        // Already-resolved covers paint inline (survive re-renders); unresolved
+        // ones carry data-cover for the visible-first queue to pick up.
+        const imgAttrs = resolved
+            ? ` style="background-image:url(&quot;${_esc(resolved)}&quot;)"`
+            : (endpoint && !_coverAttempted.has(key)
+                ? ` data-cover="${_esc(endpoint)}" data-cover-key="${_esc(key)}"` : '');
+        const isOwned = _owned.has(key);
+        const checked = _checked.has(key);
         const overlay = isOwned
             ? '<div class="completion-overlay completed"><span class="completion-status">✓ Owned</span></div>'
             : (checked ? '<div class="completion-overlay missing"><span class="completion-status">Missing</span></div>' : '');
         const artistBtn = rel.artist_id
             ? '<button class="label-card-artist-btn" title="Go to artist" data-role="artist">👤</button>' : '';
         return `
-            <div class="release-card album-card" data-key="${_esc(_key(rel))}" data-album-type="${_esc(rel.primary_type || 'album')}">
-                <div class="album-card-image"${cover ? ` data-bg-src="${_esc(cover)}"` : ''}>
+            <div class="release-card album-card" data-key="${_esc(key)}" data-album-type="${_esc(rel.primary_type || 'album')}">
+                <div class="album-card-image"${imgAttrs}>
                     ${overlay}
                     ${artistBtn}
                 </div>
@@ -319,13 +375,9 @@
         }
         if (empty) empty.classList.add('hidden');
         grid.innerHTML = rows.map(_cardHtml).join('');
-        // Lazy background covers via the app's shared IntersectionObserver.
-        if (typeof observeLazyBackgrounds === 'function') {
-            observeLazyBackgrounds(grid);
-        } else {
-            grid.querySelectorAll('.album-card-image[data-bg-src]').forEach(el => {
-                el.style.backgroundImage = `url("${el.dataset.bgSrc}")`;
-            });
+        // Queue covers for the not-yet-resolved cards, visible-first.
+        if (_coverObserver) {
+            grid.querySelectorAll('.album-card-image[data-cover]').forEach(el => _coverObserver.observe(el));
         }
     }
 
@@ -420,6 +472,7 @@
         _reqToken += 1;
         _current = { id: String(labelId), name: labelName || '', watching: false, backlog: false };
         _all = []; _owned = new Set(); _checked = new Set(); _byKey = new Map();
+        _coverResolved = new Map(); _coverAttempted = new Set(); _coverQueue = []; _coverActive = 0;
         _page = 0; _hasMore = false; _loading = false; _filter = 'all'; _sort = 'newest';
         if (typeof window._labelDetailReturnTo === 'string' && window._labelDetailReturnTo) {
             _returnTo = window._labelDetailReturnTo;
