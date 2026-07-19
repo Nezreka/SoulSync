@@ -296,12 +296,19 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                 deps.watchlist_scan_state['status'] = 'completed'
                 deps.watchlist_scan_state['results'] = scan_results
                 deps.watchlist_scan_state['completed_at'] = datetime.now()
+                try:
+                    _labels_scanned = len(database.get_watchlist_labels() or [])
+                except Exception:
+                    # a label COUNT for the summary must never abort an otherwise
+                    # successful artist scan — labels are additive (mirrors the
+                    # defensive label phase above).
+                    _labels_scanned = 0
                 deps.watchlist_scan_state['summary'] = {
                     'total_artists': len(scan_results),
                     'successful_scans': len(successful_scans),
                     'new_tracks_found': total_new_tracks + _lbl_tracks,
                     'tracks_added_to_wishlist': total_added_to_wishlist + _lbl_tracks,
-                    'labels_scanned': len(database.get_watchlist_labels() or []),
+                    'labels_scanned': _labels_scanned,
                     'label_tracks_added': _lbl_tracks,
                 }
 
