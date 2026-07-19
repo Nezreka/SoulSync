@@ -40429,6 +40429,13 @@ _configure_chat_api(
 )
 app.register_blueprint(_create_chat_blueprint())
 
+# Record-label watchlist (search labels / browse a label's catalog / follow) —
+# purely additive, self-contained blueprint reading only watchlist_labels + the
+# keyless MusicBrainz catalog layer; absolute /api/labels/* paths, no prefix.
+from api.labels import configure as _configure_labels_api, create_blueprint as _create_labels_blueprint
+_configure_labels_api(db_getter=get_database)
+app.register_blueprint(_create_labels_blueprint())
+
 # Video side API (isolated: reads database/video_library.db only, never music)
 from api.video import create_video_blueprint as _create_video_blueprint
 app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
