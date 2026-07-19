@@ -467,7 +467,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # is the one point it can be persisted. Best-effort: a DB hiccup here
         # must never affect the (already complete) download.
         if completed_hash:
-            self._record_seed_grab(completed_hash, torrent_name)
+            self._apply_seed_policy(completed_hash, torrent_name)
 
     def _mark_error(self, download_id: str, message: str) -> None:
         logger.error("Torrent download %s failed: %s", download_id[:8], message)
@@ -476,6 +476,29 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             if row is not None:
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
+
+    def _apply_seed_policy(self, torrent_hash: str, title: Optional[str]) -> None:
+        """Route a completed grab per the seed-enforcement mode. 'client' writes
+        the ratio/time limit into the torrent client so it enforces (arr-style);
+        'soulsync' (default) records the grab for the seeding sweep. If a client
+        push fails/isn't supported, fall back to recording so the goal still
+        applies. Best-effort — never raises into the completion path."""
+        try:
+            from config.settings import config_manager
+            mode = config_manager.get('torrent_client.seed_mode', 'soulsync')
+            if mode == 'client':
+                ratio_goal = config_manager.get('torrent_client.seed_ratio_goal', 0)
+                time_goal = config_manager.get('torrent_client.seed_time_goal_hours', 0)
+                if ratio_goal or time_goal:
+                    from core.torrent_clients import get_active_adapter as _adapter
+                    from core.torrent_clients.share_limits import push_seed_goal
+                    if push_seed_goal(_adapter(), torrent_hash, ratio_goal, time_goal):
+                        return  # the client now enforces the goal itself
+                    # push failed/unsupported → fall through to the sweep
+        except Exception as e:
+            logger.warning("Seed policy check failed for %s (%s); recording for sweep",
+                           torrent_hash[:8] if torrent_hash else "?", e)
+        self._record_seed_grab(torrent_hash, title)
 
     def _record_seed_grab(self, torrent_hash: str, title: Optional[str]) -> None:
         """Persist a completed torrent grab for the seeding sweep. Best-effort:

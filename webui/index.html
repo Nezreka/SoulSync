@@ -7109,7 +7109,14 @@
                                             <input type="checkbox" id="video-seed-remove-data" checked> also delete the client's copy
                                         </label>
                                     </div>
-                                    <small class="settings-hint">Once a completed grab hits either goal, it's removed from the torrent client (your imported library copy is separate and never touched). Both at 0 = never remove — exactly the old behavior.</small>
+                                    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                                        <span class="settings-hint">Enforced by</span>
+                                        <select id="video-seed-mode" class="form-select" style="max-width:260px;">
+                                            <option value="soulsync">SoulSync (watches the client + removes)</option>
+                                            <option value="client">Torrent client (writes its own seed limit)</option>
+                                        </select>
+                                    </div>
+                                    <small class="settings-hint">Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client and removes when a goal is hit (your imported library copy is separate and never touched). <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style) and lets it enforce — it shows in the client's share-limit dialog and works even when SS is off.</small>
                                 </div>
                                 <!-- Import lists (arr-parity P6) -->
                                 <div class="form-group" id="video-import-lists">
@@ -8334,7 +8341,14 @@
                                                     <input type="checkbox" id="music-seed-remove-data" checked> also delete the client's copy
                                                 </label>
                                             </div>
-                                            <small class="settings-hint">Once a completed grab hits either goal, it's removed from the torrent client (your imported library copy is separate and never touched). Both at 0 = never remove — exactly the old behavior.</small>
+                                            <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                                                <span class="settings-hint">Enforced by</span>
+                                                <select id="music-seed-mode" class="form-select" style="max-width:260px;">
+                                                    <option value="soulsync">SoulSync (watches the client + removes)</option>
+                                                    <option value="client">Torrent client (writes its own seed limit)</option>
+                                                </select>
+                                            </div>
+                                            <small class="settings-hint">Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client and removes when a goal is hit (your imported library copy is separate and never touched). <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style) and lets it enforce — it shows up in the client's share-limit dialog and works even when SS is off.</small>
                                         </div>
                                         <div class="form-group">
                                             <label>Status:</label>
