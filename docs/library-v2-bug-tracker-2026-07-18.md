@@ -13,6 +13,8 @@ Dieser Tracker bündelt die aktuell bekannten Fehler an den Grenzen zwischen Lib
 - `/home/cyran/Desktop/findings.md`
 - `/home/cyran/Desktop/odetari_analysis_proposal.md`
 - den vom Benutzer am 18. Juli 2026 beschriebenen Reproduktionen
+- dem Produktions-Diagnosebericht `soulsync-path-diagnose-track-14484.json`
+  und den am 19. Juli 2026 direkt im Container verifizierten Dateipfaden
 - einer erneuten Codeanalyse der betroffenen API-, Runtime-, Import-, Scan-, Repair- und UI-Statuspfade
 - einer ausschließlich lesenden Stichprobe aus `database/music_library.db`
 
@@ -33,6 +35,10 @@ Die folgenden Regeln sind die Grundlage für Priorität und Abnahme:
 9. Provider-Identitäten sind stärker als Parser-Fragmente. Zwei Artist-Zeilen mit derselben konfliktfreien Provider-ID müssen zusammengeführt werden können, auch wenn ihre normalisierten Namen verschieden sind.
 10. „Run Pipeline“ auf einer Playlist darf in der Wishlist-Phase ausschließlich Tracks dieser Playlist verarbeiten; ein fehlender Scope darf niemals auf die globale Queue zurückfallen.
 11. Ein neu erzeugter Library-v2-Artist darf nur dann `monitored=1` erhalten, wenn eine echte Watchlist-Zeile oder eine explizite Library-v2-Regel dies begründet.
+12. Eine physische Pfadmutation muss den neuen Pfad in allen betroffenen
+    Dateiindizes atomar oder restart-sicher fortschreiben. Ein erfolgreicher
+    Rename darf insbesondere nicht nur `tracks.file_path`, aber nicht
+    `lib2_track_files.path` aktualisieren.
 
 ## 3. Priorisierte Übersicht
 
@@ -54,6 +60,7 @@ Die folgenden Regeln sind die Grundlage für Priorität und Abnahme:
 | LV2-014 | P2 | OFFEN | Enhanced-Search „In Your Library"-Erkennung sieht rein v2-native Artists nicht |
 | LV2-015 | P0 | IMPLEMENTIERT | Playlist-„Run Pipeline“ verarbeitete in Phase 4 die globale Wishlist |
 | LV2-016 | P0 | IMPLEMENTIERT + REPAIR | Neue Artists starteten per Schema-Default fälschlich als monitored |
+| LV2-017 | P1 | ANALYSIERT, FIX AUSSTEHEND | Rename-only aktualisiert den Legacy-Pfad, lässt aber `lib2_track_files.path` auf dem alten Dateinamen |
 
 ## 4. Detailbefunde und Abnahme
 
@@ -534,10 +541,103 @@ Regressionstests:
 - `tests/library2/test_monitor_sync.py`
 - `tests/repair_jobs/test_monitoring_list_reconcile.py`
 
+### LV2-017 – Reorganize-Rename desynchronisiert den Library-v2-Dateipfad
+
+Produktionsreproduktion vom 19. Juli 2026:
+
+- Library-v2-Track `14484`, Albumtyp `single`, meldete sowohl bei
+  `POST /api/library/v2/tracks/14484/replaygain` als auch bei
+  `POST /api/library/v2/tracks/14484/fetch-lyrics` HTTP 400.
+- `lib2_track_files.path` zeigte weiterhin:
+  `3slow2/One of the Girls (Slowed + Reverb) - I Just Want to Be One of Your Girls Tonight/01-01 - One of the Girls (Slowed + Reverb) - I Just Want to Be One of Your Girls Tonight.flac`.
+- Im selben Docker-Container lag die reale Datei unter demselben Albumordner
+  als `01 - One of the Girls (Slowed + Reverb) - I Just Want to Be One of Your Girls Tonight.flac`.
+- `/app/Transfer` war korrekt auf `/mnt/user/Music` gemountet, vorhanden und
+  beschreibbar. Damit ist ein falscher oder fehlender Docker-Mount als Ursache
+  widerlegt.
+- Weitere vom Benutzer gemeldete stale Pfade folgen demselben systematischen
+  Muster, unter anderem `Adele/Skyfall/01-01 - Skyfall.flac`,
+  `Arc North/Numb/01-01 - Numb.flac` und mehrere Tracks von
+  `Sawano Hiroyuki` mit Präfixen wie `01-03`, `01-02` und `01-10`.
+
+Warum die Dateien umbenannt wurden:
+
+- Vor Commit `1fd2ccc3` expandierten `$disc` und `$discnum` auch bei einem
+  Album mit nur einer Disc zu `01`. Ein Template wie
+  `$disc-$track - $title` erzeugte deshalb `01-03 - Eye-Water.flac`.
+- Seit diesem Commit sind `$disc`/`$discnum` bei Single-Disc-Alben leer; der
+  führende verwaiste Bindestrich wird entfernt. Dasselbe Template erzeugt
+  damit `03 - Eye-Water.flac`.
+- Import und Reorganize verwenden denselben Path Builder. Ein Update oder
+  normaler Scan benennt bestehende Dateien nicht von selbst um; die physische
+  Änderung setzt einen Reorganize-/Rename-only-Lauf oder eine entsprechende
+  bestätigte Pfadreparatur voraus.
+
+Namensverhalten bei Singles:
+
+- Ein als Release vorhandenes Single-Album (`album_info.is_album=true`,
+  `album_type=single`) läuft durch `album_path`, nicht durch `single_path`.
+  Bei einer Disc und `$disc-$track - $title` wird Track 1 zu
+  `01 - Title.flac`, Track 10 zu `10 - Title.flac` – nicht zu
+  `01-10 - Title.flac`.
+- Bei einem echten Multi-Disc-Release bleibt die Discnummer erhalten; Disc 1,
+  Track 10 wird mit demselben Template zu `01-10 - Title.flac`.
+- Nur ein loser Download ohne Albumzuordnung (`album_info.is_album=false`)
+  verwendet `single_path`. Das Default-Template speichert ihn ohne
+  Tracknummer als `$artist/$artist - $title/$title.ext`.
+- Falls `10-XXX` Bestandteil des Titels statt der Tracknummer ist, bleibt es
+  unverändert Bestandteil von `$title`; die vorangestellte Nummer richtet sich
+  weiterhin ausschließlich nach Track-/Disc-Metadaten und dem gewählten
+  Template.
+
+Root Cause der Desynchronisation:
+
+- `core/reorganize_runner.py::_update_track_path()` schreibt nach dem Rename
+  den neuen Pfad direkt in Legacy-`tracks.file_path`.
+- Danach ruft der Runner `sync_repair_change()` mit `entity_id=str(track_id)`
+  auf. Diese ID ist eine bare Legacy-Track-ID.
+- Seit P3 akzeptiert `core/library2/maintenance_sync.py::_native_entity_id()`
+  als native Identität ausschließlich das explizite Format `lib2:<id>`; die
+  frühere Auflösung über `legacy_track_id` wurde entfernt.
+- Der Runner übergibt außerdem nur den bereits neuen Pfad. Weil die
+  Library-v2-Dateizeile noch den alten Pfad besitzt, kann auch der Path-Match
+  das Subject nicht finden und `sync_repair_change()` endet mit
+  `reason=subject_unlinked`.
+- Selbst bei einem anderweitig gefundenen Subject enthält die aktuelle
+  Maintenance-Boundary keine Operation mehr, die `lib2_track_files.path` auf
+  den Zielpfad setzt. Der frühere direkte Pfadabgleich aus Commit `d22fa501`
+  wurde durch die P3-Umstellung in `f3abaf16` entfernt, während der weiterhin
+  legacy-basierte Library-v2-Reorganize-Bridge aktiv blieb.
+- ReplayGain, Lyrics und der Live-File-Read verwenden anschließend den stale
+  Library-v2-Pfad und melden korrekt für genau diesen gespeicherten Pfad
+  „File no longer exists“. Der Tabellen-Play-Button ist kein Gegenbeweis:
+  bei verbundenem Navidrome kann die Wiedergabe über dessen Stream-ID erfolgen,
+  ohne dass der lokale Library-v2-Pfad aufgelöst wird.
+
+Erforderlicher Fix und Abnahme:
+
+- Der Reorganize-Plan muss vor dem Move die stabile `lib2_file_id` beziehungsweise
+  die explizite `lib2:<track_id>`-Identität mitführen und nach erfolgreichem
+  Move `lib2_track_files.path` auf exakt denselben Zielpfad wie
+  `tracks.file_path` setzen.
+- Fehler zwischen physischem Rename und DB-Commit benötigen eine restart-sichere
+  Recovery; ein bloß best-effort ausgeführter, still geschluckter Sync ist für
+  eine Pfadmutation nicht ausreichend.
+- Regressionstest: Library-v2-Reorganize mit `rename_only=true` muss das File
+  physisch von `01-10 - Title.flac` nach `10 - Title.flac` bewegen und beide
+  Dateiindizes aktualisieren. ReplayGain, Lyrics, Live-File-Read und Rescan
+  müssen danach denselben realen Pfad öffnen.
+- Ergänzende Matrix: Single-Release Track 1/10, Single-Disc-Album Track 1/10,
+  Multi-Disc Disc 1/2 Track 10 sowie loser Single ohne Albumzuordnung.
+- Für bereits betroffene Installationen ist zusätzlich ein kontrollierter
+  Backfill nötig, der stale `lib2_track_files.path` über stabile Backrefs und
+  reale Dateiexistenz abgleicht; unsichere Mehrfachtreffer dürfen nicht
+  automatisch gewählt werden.
+
 ## 5. Verbleibende Rollout-/Betriebsaktionen
 
 Die bekannten Codefehler LV2-001 bis LV2-013 sowie LV2-015 und LV2-016 sind
-implementiert. LV2-014 bleibt offen. Keine der
+implementiert. LV2-014 und LV2-017 bleiben offen. Keine der
 folgenden Aktionen ist eine noch offene Codekorrektur:
 
 1. Acquisition- und Integritäts-Dry-Run nach Deployment prüfen und Counts
@@ -546,6 +646,9 @@ folgenden Aktionen ist eine noch offene Codekorrektur:
    die Live-Datenbank wurde in diesem Arbeitslauf bewusst nicht mutiert.
 3. Reale End-to-End-Matrix für Success, Not Found, Cancel, Quarantine,
    Recover/Approve nach Restart und Post-Move-Failure durchführen.
+4. Nach dem LV2-017-Codefix einen read-only Pfad-Dry-Run auf Produktion
+   ausführen und erst danach eindeutig auflösbare stale Library-v2-Pfade
+   reparieren.
 
 ## 6. Teststand dieses Arbeitslaufs
 
