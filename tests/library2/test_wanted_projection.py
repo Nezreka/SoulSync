@@ -78,6 +78,41 @@ def test_explicit_track_rule_beats_every_parent(imported_conn):
     assert _projected(conn, track) == (True, "track_explicit")
 
 
+def _stored_effective_profile(conn, track_id, profile_id=1):
+    row = conn.execute(
+        "SELECT effective_profile_id FROM lib2_wanted_tracks "
+        "WHERE profile_id=? AND track_id=?", (profile_id, track_id)).fetchone()
+    return row["effective_profile_id"] if row else None
+
+
+def test_projection_effective_profile_matches_per_entity_resolver(imported_conn):
+    """The batched effective-profile the projection stores must match the
+    per-entity effective_quality_profile resolver at every cascade level —
+    both share one cascade helper, so the full-recompute N+1 elimination
+    can't drift from the authoritative Track > Album > Artist > Global rule.
+    """
+    from core.library2.profile_lookup import (
+        assign_quality_profile,
+        effective_quality_profile,
+    )
+
+    conn = imported_conn
+    a1, alb1, trk1 = _seed_chain(conn, title="Global Song")      # → global default
+    a2, alb2, trk2 = _seed_chain(conn, title="Artist Song")
+    a3, alb3, trk3 = _seed_chain(conn, title="Album Song")
+    a4, alb4, trk4 = _seed_chain(conn, title="Track Song")
+    assign_quality_profile(conn, "artists", a2, 2)               # artist-level
+    assign_quality_profile(conn, "artists", a3, 2)
+    assign_quality_profile(conn, "albums", alb3, 1)             # album beats artist
+    assign_quality_profile(conn, "tracks", trk4, 2)            # track beats all
+
+    recompute_wanted(conn)  # full run, the N+1-prone path
+
+    for track in (trk1, trk2, trk3, trk4):
+        assert _stored_effective_profile(conn, track) == \
+            effective_quality_profile(conn, "tracks", track)["id"]
+
+
 def test_cascade_track_rule_beats_album_rule(imported_conn):
     """The profile-assign opt-in projects cascade rules onto tracks without
     touching the album rule — the newer per-track intent wins."""

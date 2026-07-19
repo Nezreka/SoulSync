@@ -120,14 +120,31 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
             "NOT IN (SELECT id FROM lib2_tracks)", (int(profile_id),))
         stats["pruned"] = cur.rowcount
 
+    # The effective-profile cascade columns (track/album/artist) are joined
+    # in here so the projection resolves each track's profile from this one
+    # query instead of a per-track effective_quality_profile() call — that
+    # was an N+1 (a 3-table join + a default-profile lookup PER track) on a
+    # full recompute of a large library (review Teil B, efficiency cluster).
+    # The artist join is LEFT so a track whose album has a dangling
+    # primary_artist_id falls through to the default profile rather than
+    # crashing the whole projection (the old per-track resolver used an inner
+    # join and would raise LookupError on such a row).
     rows = conn.execute(
         f"""SELECT t.id AS track_id, t.monitored AS flag,
-                   t.quality_profile_id,
+                   t.quality_profile_id AS trk_prof,
+                   COALESCE(t.quality_profile_explicit, 0) AS trk_prof_expl,
+                   al.id AS album_id,
+                   al.quality_profile_id AS alb_prof,
+                   COALESCE(al.quality_profile_explicit, 0) AS alb_prof_expl,
+                   al.primary_artist_id AS artist_id,
+                   art.quality_profile_id AS art_prof,
+                   COALESCE(art.quality_profile_explicit, 0) AS art_prof_expl,
                    tr.monitored AS trk_mon, tr.provenance AS trk_prov,
                    ab.monitored AS alb_mon, ab.provenance AS alb_prov,
                    aa.monitored AS art_mon, aa.provenance AS art_prov
               FROM lib2_tracks t
               JOIN lib2_albums al ON al.id = t.album_id
+              LEFT JOIN lib2_artists art ON art.id = al.primary_artist_id
               LEFT JOIN lib2_monitor_rules tr
                      ON tr.entity_type='track' AND tr.entity_id=t.id
                     AND tr.profile_id=?
@@ -141,14 +158,29 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
         (int(profile_id), int(profile_id), int(profile_id), *scope_args),
     ).fetchall()
 
+    from core.library2.profile_lookup import (
+        default_quality_profile_id,
+        resolve_profile_cascade,
+    )
+    default_profile_id = default_quality_profile_id(conn)
+
     for r in rows:
         wanted, reason = _decide(r["trk_mon"], r["trk_prov"],
                                  r["alb_mon"], r["alb_prov"],
                                  r["art_mon"], r["art_prov"])
-        from core.library2.profile_lookup import effective_quality_profile
-        effective_profile_id = effective_quality_profile(
-            conn, "tracks", int(r["track_id"])
+        # Same Track > Album > Artist > Global cascade the per-entity
+        # effective_quality_profile uses (shared resolve_profile_cascade).
+        effective_profile_id = resolve_profile_cascade(
+            (
+                ("track", r["track_id"], r["trk_prof"], r["trk_prof_expl"]),
+                ("album", r["album_id"], r["alb_prof"], r["alb_prof_expl"]),
+                ("artist", r["artist_id"], r["art_prof"], r["art_prof_expl"]),
+            ),
+            default_profile_id,
         )["id"]
+        # The WHERE on the upsert skips the write (and its updated_at bump)
+        # when nothing changed — a full hourly recompute otherwise re-writes
+        # every unchanged row, churning indexes for no reason (review Teil B).
         conn.execute(
             """INSERT INTO lib2_wanted_tracks(
                    profile_id, track_id, wanted, reason,
@@ -159,7 +191,13 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
                    reason=excluded.reason,
                    effective_profile_id=excluded.effective_profile_id,
                    projection_version=excluded.projection_version,
-                   updated_at=CURRENT_TIMESTAMP""",
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE lib2_wanted_tracks.wanted IS NOT excluded.wanted
+                  OR lib2_wanted_tracks.reason IS NOT excluded.reason
+                  OR lib2_wanted_tracks.effective_profile_id
+                     IS NOT excluded.effective_profile_id
+                  OR lib2_wanted_tracks.projection_version
+                     IS NOT excluded.projection_version""",
             (int(profile_id), r["track_id"], 1 if wanted else 0, reason,
              effective_profile_id, PROJECTION_VERSION))
         stats["projected"] += 1

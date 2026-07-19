@@ -53,6 +53,32 @@ def default_quality_profile_id(conn) -> int:
     return 1
 
 
+def resolve_profile_cascade(levels, default_id: int) -> Dict[str, Any]:
+    """Pick the effective profile from ordered cascade levels.
+
+    ``levels`` is an ordered iterable of ``(source, source_id, profile_id,
+    explicit)`` tuples (most specific first, e.g. track → album → artist).
+    The first level that explicitly owns a profile wins; otherwise the
+    app-wide ``default_id``. This is the SINGLE cascade implementation shared
+    by both the per-entity :func:`effective_quality_profile` lookup and the
+    batched wanted-projection recompute, so the two can never drift.
+    """
+    for source, source_id, profile_id, explicit in levels:
+        if explicit and profile_id is not None:
+            return {
+                "id": int(profile_id),
+                "source": source,
+                "source_id": int(source_id),
+                "explicit": True,
+            }
+    return {
+        "id": default_id,
+        "source": "global",
+        "source_id": None,
+        "explicit": False,
+    }
+
+
 def effective_quality_profile(conn, entity: str, entity_id: int) -> Dict[str, Any]:
     """Return the effective profile id plus the level that owns the choice.
 
@@ -115,21 +141,7 @@ def effective_quality_profile(conn, entity: str, entity_id: int) -> Dict[str, An
     else:
         raise ValueError("Unknown Library-v2 profile entity")
 
-    default_id = default_quality_profile_id(conn)
-    for source, source_id, profile_id, explicit in levels:
-        if explicit and profile_id is not None:
-            return {
-                "id": int(profile_id),
-                "source": source,
-                "source_id": int(source_id),
-                "explicit": True,
-            }
-    return {
-        "id": default_id,
-        "source": "global",
-        "source_id": None,
-        "explicit": False,
-    }
+    return resolve_profile_cascade(levels, default_quality_profile_id(conn))
 
 
 def assign_quality_profile(
