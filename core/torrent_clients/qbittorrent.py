@@ -328,15 +328,23 @@ class QBittorrentAdapter:
         return await loop.run_in_executor(None, self._pause_sync, torrent_id)
 
     def _pause_sync(self, torrent_id: str) -> bool:
-        resp = self._call('POST', '/api/v2/torrents/pause', data={'hashes': torrent_id})
-        return bool(resp and resp.ok)
+        return self._stop_start('/api/v2/torrents/stop', '/api/v2/torrents/pause', torrent_id)
 
     async def resume(self, torrent_id: str) -> bool:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._resume_sync, torrent_id)
 
     def _resume_sync(self, torrent_id: str) -> bool:
-        resp = self._call('POST', '/api/v2/torrents/resume', data={'hashes': torrent_id})
+        return self._stop_start('/api/v2/torrents/start', '/api/v2/torrents/resume', torrent_id)
+
+    def _stop_start(self, v5_path: str, v4_path: str, torrent_id: str) -> bool:
+        """qBittorrent 5.0 renamed pause→stop / resume→start and REMOVED the old
+        paths (they 404). Try the 5.x endpoint first, fall back to the 4.x one so
+        SoulSync pauses/resumes correctly on both — this is why a stalled torrent
+        wasn't getting paused on qBit 5.x (the old /pause silently 404'd)."""
+        resp = self._call('POST', v5_path, data={'hashes': torrent_id})
+        if resp is not None and resp.status_code == 404:
+            resp = self._call('POST', v4_path, data={'hashes': torrent_id})
         return bool(resp and resp.ok)
 
     async def set_share_limits(self, torrent_id: str, ratio_limit: float,

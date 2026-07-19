@@ -434,3 +434,46 @@ def test_deluge_parse_status_normalises_percent_progress() -> None:
     })
     assert status.progress == pytest.approx(0.42)
     assert status.state == 'downloading'
+
+
+# ---------------------------------------------------------------------------
+# qBittorrent 5.0 pause/resume rename (stop/start) with 4.x fallback
+# ---------------------------------------------------------------------------
+
+
+def _qbit_with_call(path_status):
+    """Bare qBit adapter whose _call returns _mock_response(path_status[path])
+    and records the paths hit, in order."""
+    a = QBittorrentAdapter.__new__(QBittorrentAdapter)
+    calls = []
+
+    def fake_call(method, path, **kw):
+        calls.append(path)
+        return _mock_response(path_status.get(path, 404))
+
+    a._call = fake_call
+    return a, calls
+
+
+def test_pause_uses_stop_on_qbit5_no_fallback():
+    a, calls = _qbit_with_call({'/api/v2/torrents/stop': 200})
+    assert a._pause_sync('HASH') is True
+    assert calls == ['/api/v2/torrents/stop']          # 5.x endpoint, no legacy call
+
+
+def test_pause_falls_back_to_legacy_on_404():
+    a, calls = _qbit_with_call({'/api/v2/torrents/pause': 200})   # stop → 404
+    assert a._pause_sync('HASH') is True
+    assert calls == ['/api/v2/torrents/stop', '/api/v2/torrents/pause']
+
+
+def test_resume_uses_start_then_falls_back():
+    a, calls = _qbit_with_call({'/api/v2/torrents/resume': 200})  # start → 404
+    assert a._resume_sync('HASH') is True
+    assert calls == ['/api/v2/torrents/start', '/api/v2/torrents/resume']
+
+
+def test_pause_reports_failure_when_both_fail():
+    a, calls = _qbit_with_call({})   # both 404
+    assert a._pause_sync('HASH') is False
+    assert calls == ['/api/v2/torrents/stop', '/api/v2/torrents/pause']
