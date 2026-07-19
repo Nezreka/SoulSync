@@ -7666,7 +7666,9 @@ function _pollBatchWriteTagsStatus() {
                 }
                 _batchWriteTagsPollTimer = setTimeout(poll, 1000);
             } else if (state.status === 'done') {
-                let msg = `Tags written: ${state.written} succeeded, ${state.failed} failed`;
+                let msg = `Tags written: ${state.written} updated`;
+                if ((state.skipped || 0) > 0) msg += `, ${state.skipped} unchanged`;
+                if (state.failed > 0) msg += `, ${state.failed} failed`;
                 if (state.sync_phase === 'done') {
                     const serverName = state.sync_server === 'plex' ? 'Plex' : state.sync_server === 'jellyfin' ? 'Jellyfin' : state.sync_server;
                     if (state.sync_synced > 0 && state.sync_failed === 0) {

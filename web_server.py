@@ -12135,6 +12135,7 @@ _write_tags_batch_state = {
     'total': 0,
     'processed': 0,
     'written': 0,
+    'skipped': 0,       # #1052 — files already matching the DB, not rewritten
     'failed': 0,
     'current_track': '',
     'errors': [],
@@ -12187,6 +12188,7 @@ def write_tracks_tags_batch():
                 'total': len(track_ids),
                 'processed': 0,
                 'written': 0,
+                'skipped': 0,
                 'failed': 0,
                 'current_track': '',
                 'errors': [],
@@ -12209,7 +12211,9 @@ def write_tracks_tags_batch():
         # Run the actual writes in a background thread
         def _run_batch():
             try:
-                from core.tag_writer import write_tags_to_file, download_cover_art
+                from core.tag_writer import (write_tags_to_file, download_cover_art,
+                                             read_file_tags, build_tag_diff,
+                                             diff_has_actionable_change)
 
                 written_tracks = []  # Track dicts that were successfully written (for server sync)
 
@@ -12259,6 +12263,25 @@ def write_tracks_tags_batch():
                         thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
                         if thumb and thumb.startswith('http'):
                             art_data = cover_cache.get(thumb)
+
+                    # #1052 — only touch files that actually differ. Uses the SAME
+                    # build_tag_diff the preview does, so the write matches exactly
+                    # what the "N will change / M unchanged" preview showed. A
+                    # cover-only difference counts only when cover embedding is on
+                    # (otherwise the write wouldn't touch it anyway). If the diff
+                    # read fails, fall through and write — the safe default.
+                    try:
+                        existing_tags = read_file_tags(resolved_path)
+                        if not existing_tags.get('error'):
+                            diff = build_tag_diff(existing_tags, db_data)
+                            if not diff_has_actionable_change(diff, embed_cover):
+                                with _write_tags_batch_lock:
+                                    _write_tags_batch_state['processed'] += 1
+                                    _write_tags_batch_state['skipped'] += 1
+                                continue
+                    except Exception:
+                        logger.debug("tag diff pre-check failed for %s; writing anyway",
+                                     resolved_path, exc_info=True)
 
                     file_lock = get_file_lock(resolved_path)
                     with file_lock:
