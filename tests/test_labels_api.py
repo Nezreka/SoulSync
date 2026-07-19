@@ -73,17 +73,28 @@ class TestSearch:
 
 
 class TestCatalog:
-    def test_groups_by_real_artist_newest_first(self, client):
+    def test_releases_flat_newest_first(self, client):
         r = client.get("/api/labels/mbid-subpop/catalog?name=Sub+Pop")
         data = r.get_json()
         assert data["label"]["name"] == "Sub Pop"
-        assert data["release_count"] == 3           # Teen Dream editions collapsed
-        artists = [g["artist"] for g in data["groups"]]
-        assert artists[0] == "Beach House"          # 2010/2011 → newest group first
-        assert set(artists) == {"Beach House", "Mudhoney", "Nirvana"}
+        assert data["total"] == 3                    # Teen Dream editions collapsed
+        assert data["artist_count"] == 3
+        rels = data["releases"]
+        assert [x["album"] for x in rels] == ["Teen Dream", "Bleach", "Superfuzz Bigmuff"]
+        assert rels[0]["artist"] == "Beach House"    # newest first, real artist
         # every release carries a real artist, never the label
-        for g in data["groups"]:
-            assert g["artist"] != "Sub Pop"
+        for x in rels:
+            assert x["artist"] != "Sub Pop"
+
+    def test_catalog_pagination(self, client):
+        p1 = client.get("/api/labels/mbid-subpop/catalog?page=1&page_size=2").get_json()
+        assert len(p1["releases"]) == 2 and p1["has_more"] is True and p1["page"] == 1
+        p2 = client.get("/api/labels/mbid-subpop/catalog?page=2&page_size=2").get_json()
+        assert len(p2["releases"]) == 1 and p2["has_more"] is False
+        # no overlap between pages
+        a1 = {x["album"] for x in p1["releases"]}
+        a2 = {x["album"] for x in p2["releases"]}
+        assert a1.isdisjoint(a2)
 
     def test_catalog_reports_watch_state(self, client):
         client._db.add_watchlist_label("mbid-subpop", "Sub Pop", backlog=True)

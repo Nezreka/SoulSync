@@ -84,6 +84,20 @@ def _artist_from_credit(release: Dict[str, Any]) -> str:
     return ''.join(parts).strip()
 
 
+def _artist_id_from_credit(release: Dict[str, Any]) -> str:
+    """The primary artist's MusicBrainz id from artist-credit, when present —
+    lets a label release link straight to that artist's detail page."""
+    credits = release.get('artist-credit') or []
+    if not isinstance(credits, list):
+        return ''
+    for c in credits:
+        if isinstance(c, dict):
+            aid = str((c.get('artist') or {}).get('id') or '').strip()
+            if aid:
+                return aid
+    return ''
+
+
 def label_catalog(label_mbid: str, *, mb_getter: Optional[Callable] = None,
                   max_pages: int = _MAX_PAGES) -> List[Dict[str, Any]]:
     """Distinct albums released on a label, newest-first, each with its REAL
@@ -129,7 +143,9 @@ def label_catalog(label_mbid: str, *, mb_getter: Optional[Callable] = None,
             date = str(rg.get('first-release-date') or rel.get('date') or '')[:4]
             existing = by_rg.get(rg_id)
             if existing is None or (date and (not existing['year'] or date < existing['year'])):
-                by_rg[rg_id] = {'artist': artist, 'album': title,
+                by_rg[rg_id] = {'artist': artist,
+                                'artist_id': _artist_id_from_credit(rel),
+                                'album': title,
                                 'year': date, 'release_group_id': rg_id}
         if len(releases) < _PAGE_SIZE:
             break
