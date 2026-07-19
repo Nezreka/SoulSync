@@ -125,6 +125,13 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 300,
     },
     {
+        'name': 'Seeding Sweep',                       # release music torrents once seed goals are met
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 30, 'unit': 'minutes'},
+        'action_type': 'seeding_sweep',
+        'initial_delay': 1080,
+    },
+    {
         'name': 'Auto-Deep Scan Library',
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 7, 'unit': 'days'},

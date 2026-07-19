@@ -602,6 +602,15 @@ class ConfigManager:
                 "password": "",
                 "category": "soulsync",
                 "save_path": "",
+                # Seeding lifecycle (mirror of the video side): seed a completed
+                # music torrent grab until the ratio/time goal is met, then remove
+                # it from the client. BOTH goals default 0 = sweep OFF = grabs seed
+                # forever (unchanged behavior). seed_remove_data also deletes the
+                # client's own copy on removal — the imported library file is a
+                # separate copy and is never touched.
+                "seed_ratio_goal": 0,
+                "seed_time_goal_hours": 0,
+                "seed_remove_data": True,
             },
             # Usenet client — receives .nzb URLs / payloads. ``type``
             # picks the adapter (sabnzbd | nzbget). SABnzbd uses an
