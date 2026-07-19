@@ -206,9 +206,11 @@ def resolve_album_for_release(get_deezer: Optional[Callable], artist: str, album
 
 
 def build_default_seams(*, database=None, get_deezer: Optional[Callable] = None,
-                        profile_id: int = 1):
+                        profile_id: int = 1, on_add: Optional[Callable] = None):
     """Wire the real seams for run_label_watchlist_scan. Import-light so the
-    pure engine + tests never pull these in."""
+    pure engine + tests never pull these in. ``on_add(track_name, artist_name,
+    album_name, album_image_url)`` fires per wishlisted track — lets the caller
+    drive a live progress feed (the shared watchlist-scan display)."""
     from core.metadata import label_catalog as lc
     if database is None:
         from database.music_database import get_database
@@ -267,7 +269,17 @@ def build_default_seams(*, database=None, get_deezer: Optional[Callable] = None,
                     source_info=source_info,
                     profile_id=profile_id,
                 )
-                added_any = added_any or bool(ok)
+                if ok:
+                    added_any = True
+                    if on_add:
+                        try:
+                            imgs = album_payload.get('images') or []
+                            on_add(str(payload.get('name') or ''),
+                                   str((payload.get('artists') or [{}])[0].get('name') or artist),
+                                   album_payload.get('name') or album,
+                                   (imgs[0].get('url') if imgs else '') or '')
+                        except Exception as exc:
+                            logger.debug("label scan on_add callback failed: %s", exc)
             except Exception:
                 logger.exception("label scan: enqueue failed for a track of %s - %s", artist, album)
         return added_any

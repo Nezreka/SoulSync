@@ -1453,8 +1453,6 @@ function _ensureWatchlistLabelsStyles() {
         font-size:13px; font-weight:600; }
     #watchlist-page .watchlist-tab:hover { color:#fff; background:rgba(255,255,255,0.1); }
     #watchlist-page .watchlist-tab.active { background:linear-gradient(135deg,#1db954,#12833b); color:#fff; border-color:transparent; }
-    #watchlist-page .watchlist-labels-bar { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
-    #watchlist-page .watchlist-labels-scan-status { font-size:12px; color:var(--text-secondary,#9aa0aa); }
     #watchlist-page .watchlist-labels-tab { display:none; }
     #watchlist-page.wl-view-labels .watchlist-labels-tab { display:block; }
     #watchlist-page.wl-view-labels .watchlist-toolbar,
@@ -1462,7 +1460,6 @@ function _ensureWatchlistLabelsStyles() {
     #watchlist-page.wl-view-labels #watchlist-artists-list,
     #watchlist-page.wl-view-labels #watchlist-page-empty,
     #watchlist-page.wl-view-labels .watchlist-last-scan-strip,
-    #watchlist-page.wl-view-labels #scan-watchlist-btn,
     #watchlist-page.wl-view-labels #watchlist-page-settings-btn { display:none !important; }
     #watchlist-page .watchlist-labels-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:16px; }
     #watchlist-page .wl-label-card { position:relative; background:rgba(255,255,255,0.04);
@@ -1607,58 +1604,6 @@ async function unfollowWatchlistLabel(mbid, name) {
     }
 }
 
-async function scanWatchlistLabels() {
-    const btn = document.getElementById('scan-labels-btn');
-    const status = document.getElementById('labels-scan-status');
-    if (btn) btn.disabled = true;
-    if (status) status.textContent = 'Starting…';
-    try {
-        const r = await fetch('/api/labels/watchlist/scan', { method: 'POST' }).then(r => r.json());
-        if (r && r.running) { if (status) status.textContent = 'Already scanning…'; _pollLabelScan(); }
-        else if (r && r.started) { _pollLabelScan(); }
-        else { if (status) status.textContent = (r && r.error) || 'Could not start'; if (btn) btn.disabled = false; }
-    } catch (e) {
-        if (status) status.textContent = 'Error starting scan';
-        if (btn) btn.disabled = false;
-    }
-}
-
-function _pollLabelScan() {
-    const btn = document.getElementById('scan-labels-btn');
-    const status = document.getElementById('labels-scan-status');
-    if (status) status.textContent = 'Scanning followed labels…';
-    const tick = async () => {
-        try {
-            const s = await fetch('/api/labels/watchlist/scan/status').then(r => r.json());
-            if (s && s.running) { setTimeout(tick, 3000); return; }
-            const res = s && s.last_result;
-            if (status) {
-                if (res) {
-                    // Surface found vs added (+ errors) so "0 added" is never
-                    // ambiguous: 0 found = nothing new; found>0 & added<found = a
-                    // resolution problem worth looking at.
-                    const found = res.releases_found || 0, added = res.releases_added || 0;
-                    const errs = res.errors || 0;
-                    let msg = `Done — ${added} added`;
-                    msg += ` · ${found} new release${found === 1 ? '' : 's'} found`;
-                    msg += ` · ${res.labels_scanned || 0} label${res.labels_scanned === 1 ? '' : 's'}`;
-                    if (errs) msg += ` · ${errs} error${errs === 1 ? '' : 's'}`;
-                    status.textContent = msg;
-                } else {
-                    status.textContent = 'Done';
-                }
-            }
-            if (btn) btn.disabled = false;
-            if (typeof updateWatchlistButtonCount === 'function') {
-                try { updateWatchlistButtonCount(); } catch (e) { /* non-fatal */ }
-            }
-        } catch (e) {
-            if (status) status.textContent = 'Done';
-            if (btn) btn.disabled = false;
-        }
-    };
-    setTimeout(tick, 3000);
-}
 
 /**
  * Initialize/refresh the wishlist sidebar page
@@ -3595,6 +3540,7 @@ function _wlPrettyPhase(data) {
     const map = {
         starting: 'Starting…',
         fetching_discography: 'Fetching releases…',
+        scanning_labels: 'Scanning record labels…',
         populating_discovery_pool: 'Populating discovery…',
         updating_listenbrainz: 'Updating ListenBrainz…',
     };
