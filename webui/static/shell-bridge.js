@@ -194,6 +194,9 @@ window.SoulSyncWebShellBridge = {
     navigateToArtistDetail(artistId, artistName, sourceOverride, options) {
         return navigateToArtistDetail(artistId, artistName, sourceOverride, options);
     },
+    navigateToLabelDetail(labelId, labelName, options) {
+        return navigateToLabelDetail(labelId, labelName, options);
+    },
     playLibraryTrack(track, albumTitle, artistName) {
         return playLibraryTrack(track, albumTitle, artistName);
     },

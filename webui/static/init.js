@@ -3002,19 +3002,22 @@ let _labelDetailReturnTo = 'search';   // where the Back button returns to
 
 function buildLabelDetailPath(labelId, name = null) {
     if (!labelId) throw new Error('labelId is required for label-detail navigation');
-    let path = '/label-detail?id=' + encodeURIComponent(String(labelId));
-    if (name) path += '&name=' + encodeURIComponent(name);
+    // Real path-based route (like artist-detail) so a refresh reloads the page.
+    let path = '/label-detail/' + encodeURIComponent(String(labelId));
+    if (name) path += '?name=' + encodeURIComponent(name);
     return path;
 }
 
-function parseLabelDetailPath() {
-    const params = new URLSearchParams(window.location.search || '');
-    const id = params.get('id') || '';
-    const name = params.get('name') || '';
-    return id ? { id, name } : null;
+function parseLabelDetailPath(pathname = window.location.pathname) {
+    const segs = String(pathname || '').split('/').filter(Boolean);
+    if (segs[0] !== 'label-detail' || segs.length < 2) return null;
+    const id = decodeURIComponent(segs.slice(1).join('/'));
+    if (!id) return null;
+    const name = new URLSearchParams(window.location.search || '').get('name') || '';
+    return { id, name };
 }
 
-function navigateToLabelDetail(labelId, name = null) {
+function navigateToLabelDetail(labelId, name = null, options = {}) {
     if (!labelId) return;
     // Remember where we came from so the label-detail Back button returns there
     // (raw history.back() is unreliable through the SPA router).
@@ -3022,15 +3025,17 @@ function navigateToLabelDetail(labelId, name = null) {
         _labelDetailReturnTo = currentPage;
     }
     window._labelDetailReturnTo = _labelDetailReturnTo;   // read by label-detail.js
+    // The TanStack route component re-fires this on mount; skip the reload if
+    // we're already showing this exact label (mirrors navigateToArtistDetail).
+    if (String(labelId) === String(_labelDetailState.id) && currentPage === 'label-detail') {
+        return;
+    }
     _labelDetailState = { id: String(labelId), name: name || '' };
-    navigateToPage('label-detail');
-    // Carry the id in the URL (navigateToPage pushes a bare /label-detail).
-    try {
-        const url = buildLabelDetailPath(labelId, name);
-        if ((window.location.pathname + window.location.search) !== url) {
-            history.replaceState({ page: 'label-detail' }, '', url);
-        }
-    } catch (e) { /* non-fatal */ }
+    navigateToPage('label-detail', {
+        labelId: String(labelId),
+        labelName: name || '',
+        skipRouteChange: options.skipRouteChange === true,
+    });
 }
 
 // ===============================
@@ -3187,6 +3192,9 @@ function navigateToPage(pageId, options = {}) {
     if (pageId === 'artist-detail' && !options.artistId) {
         return false;
     }
+    if (pageId === 'label-detail' && !options.labelId) {
+        return false;
+    }
 
     const router = getWebRouter();
     if (router && !options.skipRouteChange) {
@@ -3195,7 +3203,7 @@ function navigateToPage(pageId, options = {}) {
         if (route?.kind === 'react') {
             showReactHost(pageId);
             setActivePageChrome(pageId);
-        } else if (route?.kind === 'legacy' && pageId !== 'artist-detail') {
+        } else if (route?.kind === 'legacy' && pageId !== 'artist-detail' && pageId !== 'label-detail') {
             // Show legacy page immediately — don't wait for TanStack Router's async cycle
             showLegacyPage(pageId);
             setActivePageChrome(pageId);
@@ -3210,6 +3218,8 @@ function navigateToPage(pageId, options = {}) {
             artistId: options.artistId,
             artistSource: options.artistSource,
             artistName: options.artistName,
+            labelId: options.labelId,
+            labelName: options.labelName,
         });
     }
 
@@ -3227,6 +3237,7 @@ function navigateToPage(pageId, options = {}) {
     if (!options.skipPushState) {
         const urlPath = pageId === 'dashboard' ? '/'
             : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource, options.artistName)
+            : (pageId === 'label-detail' && options.labelId) ? buildLabelDetailPath(options.labelId, options.labelName)
             : '/' + pageId;
         if (window.location.pathname !== urlPath) {
             if (options.replace === true) {
