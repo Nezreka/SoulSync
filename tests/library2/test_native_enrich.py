@@ -184,6 +184,63 @@ def test_service_enrichment_persists_actual_fallback_provider(imported_conn):
     assert row["image_url"] == "https://img.example/deezer.jpg"
 
 
+def test_artist_service_enrichment_rejects_near_miss_below_dedicated_threshold(
+    imported_conn,
+):
+    """A12: artist fuzzy-matching must use the same dedicated 0.85 gate
+    (core.worker_utils.artist_name_matches) as every other worker match —
+    "Blanke" vs "Blance" scores ~0.83, which the old local 0.72 threshold
+    would have wrongly accepted as the same artist."""
+    aid = _insert_native_artist(imported_conn, "Blanke")
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "artist",
+        aid,
+        "spotify",
+        searcher=lambda service, entity, query: [{
+            "id": "SP-WRONG",
+            "name": "Blance",
+            "provider": "spotify",
+        }],
+    )
+
+    assert result["success"] is False
+    assert result["reason"] == "not_found"
+    row = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE id=?", (aid,)
+    ).fetchone()
+    assert row["spotify_id"] is None
+
+
+def test_artist_service_enrichment_rejects_unrelated_cjk_names(imported_conn):
+    """A12: the old ASCII-only [^a-z0-9]+ normalizer collapsed any CJK name
+    to '', so two completely unrelated CJK artists both normalized to ''
+    and SequenceMatcher('', '').ratio() == 1.0 always accepted the first
+    candidate. The dedicated gate's Unicode-aware normalizer must actually
+    compare the names and reject a real mismatch."""
+    aid = _insert_native_artist(imported_conn, "さよなら")
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "artist",
+        aid,
+        "spotify",
+        searcher=lambda service, entity, query: [{
+            "id": "SP-WRONG-CJK",
+            "name": "こんにちは",
+            "provider": "spotify",
+        }],
+    )
+
+    assert result["success"] is False
+    assert result["reason"] == "not_found"
+    row = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE id=?", (aid,)
+    ).fetchone()
+    assert row["spotify_id"] is None
+
+
 def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
     imported_conn, monkeypatch
 ):

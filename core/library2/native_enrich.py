@@ -277,18 +277,33 @@ def enrich_native_entity_for_service(
             query = f"{artist_name} - {query}"
         candidates = searcher(service, canonical, query) or []
 
-        def normalized(value: Any) -> str:
-            return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+        # Artists use the same dedicated, project-wide name gate every other
+        # worker match uses (core.worker_utils.artist_name_matches, threshold
+        # 0.85 chosen specifically to reject "Blance/Blanke"-style near
+        # misses) instead of a locally re-derived, looser 0.72 threshold —
+        # review A12. Its normalizer also keeps CJK characters (Python's
+        # \w is Unicode-aware) where the old ASCII-only [^a-z0-9]+ filter
+        # collapsed any CJK name to '', making SequenceMatcher('', '').ratio()
+        # == 1.0 always accept the first candidate.
+        if canonical == "artist":
+            from core.worker_utils import ARTIST_NAME_MATCH_THRESHOLD, normalize_artist_name
+            normalize_fn = normalize_artist_name
+            threshold = ARTIST_NAME_MATCH_THRESHOLD
+        else:
+            def normalize_fn(value: Any) -> str:
+                return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+            threshold = 0.72
 
-        wanted = normalized(row["name"])
+        wanted = normalize_fn(row["name"])
         ranked = []
         for candidate in candidates:
             if not isinstance(candidate, dict) or not candidate.get("id"):
                 continue
-            score = SequenceMatcher(
-                None, wanted, normalized(candidate.get("name")),
-            ).ratio()
-            if score >= 0.72:
+            candidate_name = normalize_fn(candidate.get("name"))
+            if not wanted or not candidate_name:
+                continue
+            score = SequenceMatcher(None, wanted, candidate_name).ratio()
+            if score >= threshold:
                 ranked.append((score, candidate))
         if not ranked:
             return {
@@ -364,7 +379,7 @@ def enrich_native_entity_for_service(
 
 
 def _get_or_create_component_artist(
-    conn, name: str, identity: Dict[str, Any], *, monitored: int = 1
+    conn, name: str, identity: Dict[str, Any], *, monitored: int = 0
 ) -> int:
     """Resolve a split component to a lib2 artist id, creating + enriching it.
 
