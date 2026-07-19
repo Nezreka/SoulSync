@@ -34,6 +34,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'skip_audit_cleanup': 'lib2',
     'monitored_discography_refresh': 'lib2',
     'audio_corruption_detector': 'lib2',
+    'monitoring_list_reconcile': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -75,6 +76,7 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'skip_audit_cleanup': frozenset({'none'}),
     'monitored_discography_refresh': frozenset({'discography', 'wanted'}),
     'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
+    'monitoring_list_reconcile': frozenset({'wanted'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -108,6 +110,10 @@ JOB_ID_MIGRATIONS = {
     'lib2_upgrade_scan': 'quality_upgrade_scan',
     'lib2_skips_cleanup': 'skip_audit_cleanup',
     'lib2_discography_refresh': 'monitored_discography_refresh',
+    # The two transitional jobs return as one neutral, complete invariant
+    # repair (pending outbox + Artist/Watchlist + Track/Wishlist).
+    'lib2_mirror_reconcile': 'monitoring_list_reconcile',
+    'lib2_wishlist_reconcile': 'monitoring_list_reconcile',
 }
 
 _imports_done = False
@@ -164,6 +170,7 @@ _JOB_MODULES = [
     'core.repair_jobs.lib2_upgrade_scan',
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
+    'core.repair_jobs.monitoring_list_reconcile',
     # Overrides mature job identities with P3-native catalogue boundaries.
     'core.repair_jobs.native_p3',
 ]

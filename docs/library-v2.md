@@ -45,7 +45,10 @@
 > 80 ergänzt (automatischer Initialimport-Bootstrap) und Abschnitt 81
 > (physische Entfernung von neun bereits seit dem P3-Commit retirierten
 > Repair-Jobs plus Korrektur der dadurch stale gewordenen Audit-Doku-
-> Abschnitte 4/5.3/6).
+> Abschnitte 4/5.3/6). Am 2026-07-19 wurde Abschnitt 82 ergänzt: direkte
+> user-facing Wishlist→Track-/Watchlist→Artist-Demonitor-Synchronisation,
+> supersedierende Outbox-Removes und Rückkehr des kombinierten neutralen
+> `monitoring_list_reconcile`-Repair-Jobs.
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -8446,3 +8449,54 @@ ein Nachtrag im Kopf-Blockzitat ergänzt.
 - `pytest tests/repair tests/repair_jobs tests/test_missing_lyrics_job.py
   tests/test_reorganize_prune_empty_dirs.py tests/test_canonical_orchestration.py`:
   **73 passed**.
+
+---
+
+## 82. Watchlist/Wishlist ⇄ Monitoring-Invariante gehärtet (2026-07-19)
+
+Der in §70 eingeführte Rückweg war unvollständig: Watchlist-Single/Batch-
+Remove demonitorte Artists bereits, aber user-facing Wishlist-Single-/Album-/
+Batch-/Clear-Aktionen demonitorten die betroffenen Library-v2-Tracks nicht.
+Zudem hatte P3 die beiden periodischen Jobs `lib2_mirror_reconcile` und
+`lib2_wishlist_reconcile` entfernt, obwohl die Legacy-Watchlist/Wishlist in
+dieser Übergangsphase weiterhin aktive Mirror-/Acquisition-Grenzen sind.
+
+### 82.1 Direkte Rücksynchronisation
+
+- Alle user-facing Wishlist-Removes erfassen die vollständigen Rows **vor**
+  dem Löschen und lösen sie per `source_info.lib2_track_id`, stabilem
+  `lib2-track:<stable_id>` oder provider-qualifizierter Track-ID auf.
+- Der exakte Track erhält `monitored=0` plus eine
+  `user_explicit`-Track-Regel; Wanted wird sofort neu berechnet. Album-/Artist-
+  Parent-Monitoring kann diesen ausdrücklichen Trackentscheid daher nicht
+  wieder überschreiben.
+- Interne Bereinigung nach erfolgreichem Download ruft weiterhin direkt die
+  DB-Methode auf und **nicht** den user-facing Adapter. Ein erfolgreicher
+  Download demonitort einen Track somit nicht; Monitoring bleibt für spätere
+  Cutoff-Upgrades erhalten.
+- Watchlist- und Wishlist-Remove schreiben nach der Zustandsänderung eine
+  neuere Outbox-Remove-/Projected-Operation und drainieren sie sofort. Dadurch
+  kann ein älteres, crashbedingt noch pending `add` den gerade entfernten
+  Eintrag nicht später wiederbeleben.
+- Die Rückrichtung ist weiterhin strikt admin-only (ADR-01); das Entfernen aus
+  Watchlist/Wishlist eines anderen Profils mutiert keine globale Library v2.
+
+### 82.2 Repair-Job zurückgebracht und konsolidiert
+
+Der neue neutrale Job `monitoring_list_reconcile` ersetzt die beiden alten
+Implementierungsnamen und übernimmt stündlich drei idempotente Schritte:
+
+1. pending `lib2_mirror_outbox` drainieren und erledigte History begrenzen;
+2. Artist⇄Watchlist reparieren: `user_explicit` Library-v2-Intent gewinnt;
+   importierte/default Artist-Flags folgen dagegen der Watchlist, damit ein
+   versehentliches Schema-Default `monitored=1` nicht dadurch legitimiert
+   wird, dass der Job Phantom-Artists zur Watchlist hinzufügt;
+3. die autoritative Wanted-Projektion erneut in die Wishlist spiegeln
+   (missing bzw. upgrade-eligible hinzufügen, nicht mehr Wanted entfernen).
+
+Gespeicherte Einstellungen bzw. Run-Aufrufe der alten IDs
+`lib2_mirror_reconcile` und `lib2_wishlist_reconcile` werden über
+`JOB_ID_MIGRATIONS` auf den neuen Job übernommen.
+
+Gezielte Abnahme: 60 Tests über Monitor-Sync, user-facing Wishlist-Routen,
+Ignore-Semantik und Repair-Registry; Ruff für alle betroffenen Python-Dateien.

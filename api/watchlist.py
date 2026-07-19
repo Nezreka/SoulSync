@@ -67,10 +67,9 @@ def register_routes(bp):
             if ok:
                 try:
                     from config.settings import config_manager
-                    from core.library2 import ADMIN_PROFILE_ID
                     from core.library2.monitor_sync import sync_watchlist_removal
                     sync_watchlist_removal(db, config_manager, descriptor,
-                                           profile_id=ADMIN_PROFILE_ID)
+                                           profile_id=profile_id)
                 except Exception as sync_e:
                     logger.debug("watchlist reverse-sync skipped: %s", sync_e)
                 return api_success({"message": "Artist removed from watchlist."})

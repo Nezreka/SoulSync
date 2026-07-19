@@ -35,4 +35,5 @@ def test_native_jobs_use_neutral_ids():
     assert "quality_upgrade_scan" in registry
     assert "skip_audit_cleanup" in registry
     assert "monitored_discography_refresh" in registry
+    assert "monitoring_list_reconcile" in registry
     assert not any(job_id.startswith("lib2_") for job_id in registry)

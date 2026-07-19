@@ -16,8 +16,11 @@ from core.library2.monitor_rules import (
 )
 from core.library2.monitor_sync import (
     demonitor_lib2_artists_for_removed_watchlist,
+    demonitor_lib2_tracks_for_removed_wishlist,
+    reconcile_artist_watchlist,
     reconcile_track_wishlist,
     sync_watchlist_removal,
+    sync_wishlist_removal,
 )
 from core.library2.wanted import recompute_wanted
 
@@ -30,6 +33,7 @@ class _FakeDB:
         self.added: list = []
         self.removed: list = []
         self.watchlist_removed: list = []
+        self.watchlist_added: list = []
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
@@ -49,6 +53,11 @@ class _FakeDB:
 
     def remove_artist_from_watchlist(self, ext, profile_id, raise_on_error=False):
         self.watchlist_removed.append(ext)
+        return True
+
+    def add_artist_to_watchlist(self, ext, name, profile_id, source=None,
+                                raise_on_error=False):
+        self.watchlist_added.append((ext, name, profile_id, source))
         return True
 
 
@@ -211,3 +220,147 @@ def test_sync_watchlist_removal_feature_gated(imported_conn):
     # Feature off → artist stays monitored.
     assert conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (artist,)
                         ).fetchone()[0] == 1
+
+
+def test_watchlist_removal_supersedes_an_older_pending_add(imported_conn):
+    conn = imported_conn
+    artist = _add_artist(conn, "Pending", monitored=1, spotify_id="pending-sp")
+    record_rule(conn, "artist", artist, True, PROVENANCE_USER)
+    from core.library2.mirror_outbox import enqueue_artist_watchlist
+    enqueue_artist_watchlist(conn, artist, True, profile_id=1)
+    conn.commit()
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    demonitor_lib2_artists_for_removed_watchlist(
+        db, ["pending-sp"], "Pending", profile_id=1,
+    )
+
+    # The stale add is replayed first, then the newer explicit remove wins.
+    assert db.watchlist_added[0][0] == "pending-sp"
+    assert db.watchlist_removed[-1] == "pending-sp"
+    assert conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE id=?", (artist,)
+    ).fetchone()[0] == 0
+
+
+# --- Reverse edge: wishlist removal demonitors the exact lib2 track ----------
+
+
+def test_wishlist_removal_demonitors_by_embedded_lib2_id(imported_conn):
+    conn = imported_conn
+    artist = _add_artist(conn, "Track Artist", monitored=0, spotify_id="ta-sp")
+    track = _add_track(
+        conn, artist, "Remove Me", monitored=1, spotify_id="remove-sp",
+        provenance=PROVENANCE_USER,
+    )
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    result = demonitor_lib2_tracks_for_removed_wishlist(db, [{
+        "spotify_track_id": "remove-sp",
+        "source_info": {"source": "library_v2", "lib2_track_id": track},
+    }])
+
+    assert result["matched"] == 1
+    assert result["demonitored"] == 1
+    assert db.removed[-1] == "remove-sp"
+    row = conn.execute(
+        "SELECT monitored FROM lib2_tracks WHERE id=?", (track,),
+    ).fetchone()
+    assert row[0] == 0
+    rule = conn.execute(
+        "SELECT monitored, provenance FROM lib2_monitor_rules "
+        "WHERE entity_type='track' AND entity_id=?", (track,),
+    ).fetchone()
+    assert dict(rule) == {"monitored": 0, "provenance": PROVENANCE_USER}
+
+
+def test_wishlist_removal_matches_provider_payload_without_lib2_context(imported_conn):
+    conn = imported_conn
+    artist = _add_artist(conn, "Provider Artist", monitored=0)
+    track = _add_track(conn, artist, "Provider Track", monitored=1,
+                       spotify_id="provider-track")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    result = demonitor_lib2_tracks_for_removed_wishlist(db, [{
+        "spotify_track_id": "provider-track::provider-album",
+        "spotify_data": {
+            "id": "provider-track",
+            "provider": "spotify",
+        },
+    }])
+
+    assert result["matched"] == 1
+    assert conn.execute(
+        "SELECT monitored FROM lib2_tracks WHERE id=?", (track,),
+    ).fetchone()[0] == 0
+
+
+def test_sync_wishlist_removal_is_admin_only(imported_conn):
+    conn = imported_conn
+    artist = _add_artist(conn, "Other Profile", monitored=0)
+    track = _add_track(conn, artist, "Private", monitored=1, spotify_id="private-sp")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    class _Cfg:
+        def get(self, key, default=None):
+            return True
+
+    sync_wishlist_removal(
+        db,
+        _Cfg(),
+        [{"spotify_track_id": "private-sp"}],
+        profile_id=2,
+    )
+    assert conn.execute(
+        "SELECT monitored FROM lib2_tracks WHERE id=?", (track,),
+    ).fetchone()[0] == 1
+
+
+# --- Repair: explicit artist intent wins; schema-default drift does not ------
+
+
+def _ensure_watchlist_table(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS watchlist_artists(
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               spotify_artist_id TEXT,
+               musicbrainz_artist_id TEXT,
+               artist_name TEXT NOT NULL,
+               profile_id INTEGER NOT NULL DEFAULT 1)"""
+    )
+
+
+def test_artist_reconcile_readds_explicit_monitored_artist(imported_conn):
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    artist = _add_artist(conn, "Definite", monitored=1, spotify_id="def-sp")
+    record_rule(conn, "artist", artist, True, PROVENANCE_USER)
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    stats = reconcile_artist_watchlist(db, profile_id=1)
+
+    assert stats["watchlist_mirrors"] == 1
+    assert db.watchlist_added[-1][0] == "def-sp"
+    assert conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE id=?", (artist,),
+    ).fetchone()[0] == 1
+
+
+def test_artist_reconcile_clears_nonexplicit_default_drift(imported_conn):
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    artist = _add_artist(conn, "Phantom Default", monitored=1, spotify_id="phantom-sp")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    stats = reconcile_artist_watchlist(db, profile_id=1)
+
+    assert stats["monitor_flags_changed"] >= 1
+    assert db.watchlist_added == []
+    assert conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE id=?", (artist,),
+    ).fetchone()[0] == 0

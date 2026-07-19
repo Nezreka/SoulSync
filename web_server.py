@@ -30338,10 +30338,9 @@ def remove_from_watchlist():
 
         if success:
             try:
-                from core.library2 import ADMIN_PROFILE_ID
                 from core.library2.monitor_sync import sync_watchlist_removal
                 sync_watchlist_removal(database, config_manager, _wl_descriptor,
-                                       profile_id=ADMIN_PROFILE_ID)
+                                       profile_id=get_current_profile_id())
             except Exception as _sync_e:
                 logger.debug("watchlist reverse-sync (single) failed: %s", _sync_e)
             # Push updated count to this profile's WebSocket room immediately
@@ -30545,11 +30544,10 @@ def remove_batch_from_watchlist():
                     removed_descriptors.append(descriptor)
 
         try:
-            from core.library2 import ADMIN_PROFILE_ID
             from core.library2.monitor_sync import sync_watchlist_removal
             for descriptor in removed_descriptors:
                 sync_watchlist_removal(database, config_manager, descriptor,
-                                       profile_id=ADMIN_PROFILE_ID)
+                                       profile_id=get_current_profile_id())
         except Exception as _sync_e:
             logger.debug("watchlist reverse-sync (batch) failed: %s", _sync_e)
 

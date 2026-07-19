@@ -365,6 +365,51 @@ def test_remove_track_from_wishlist_removes_single_track():
     assert service.removed == [("track-1", 1)]
 
 
+def test_remove_track_reverse_syncs_captured_descriptor(monkeypatch):
+    tracks = [{
+        "spotify_track_id": "track-1::album-1",
+        "source_info": {"source": "library_v2", "lib2_track_id": 41},
+        "spotify_data": {"id": "track-1", "name": "Track One"},
+    }]
+    runtime, service, db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+    service.database = db
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda sync_db, _cfg, descriptors, profile_id=1: calls.append(
+            (sync_db, descriptors, profile_id)
+        ),
+    )
+
+    payload, status = remove_track_from_wishlist(runtime, "track-1")
+
+    assert status == 200
+    assert payload["success"] is True
+    assert calls == [(db, tracks, 1)]
+
+
+def test_clear_wishlist_reverse_syncs_every_captured_descriptor(monkeypatch):
+    tracks = [
+        {"spotify_track_id": "track-1", "source_info": {"lib2_track_id": 1}},
+        {"spotify_track_id": "track-2", "source_info": {"lib2_track_id": 2}},
+    ]
+    runtime, service, db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+    service.database = db
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda sync_db, _cfg, descriptors, profile_id=1: calls.append(
+            (sync_db, descriptors, profile_id)
+        ),
+    )
+
+    payload, status = clear_wishlist(runtime)
+
+    assert status == 200
+    assert payload["success"] is True
+    assert calls == [(db, tracks, 1)]
+
+
 def test_remove_album_from_wishlist_matches_album_name():
     tracks = [
         {

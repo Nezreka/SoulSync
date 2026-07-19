@@ -4,7 +4,8 @@
 > Initialimport-Bootstrap umgesetzt am 2026-07-19** (siehe
 > [`library-v2.md`](library-v2.md) §80). Die Abschnitte 3–6 dokumentieren den
 > historischen Ausgangspunkt und die P0–P2-Entscheidungen. Der verbindliche
-> P3-Endzustand steht in Abschnitt 7: 19 registrierte Jobs, keine registrierte
+> P3-Endzustand steht in Abschnitt 7: ursprünglich 19 registrierte Jobs; seit
+> §82 sind es 20 durch den wieder erforderlichen neutralen Reconcile-Job. Keine registrierte
 > Legacy-/Mixed-Datenbasis, native Library-v2-Subjects und neutrale Job-IDs.
 > Punkt 7 der P3-Abschlusscheckliste (automatischer Initialimport) ist damit
 > erledigt; die physische Entfernung der `legacy_*`-Spalten und des Importers
@@ -22,12 +23,20 @@
 > Library Reorganize ebenso (nur der Scan-Job-Wrapper, nicht die aktive
 > Reorganize-Engine). Expired Download Cleaner ist ebenfalls retiriert,
 > aber ohne klar identifizierten 1:1-nativen Nachfolger.
+>
+> Nachtrag 2026-07-19 (`library-v2.md` §82): Solange Watchlist/Wishlist
+> aktive Übergangsgrenzen sind, bleibt periodische Reparatur erforderlich.
+> Die früher getrennten Jobs `lib2_mirror_reconcile` und
+> `lib2_wishlist_reconcile` kehren nicht unter ihren internen Namen zurück;
+> der neutrale kombinierte Job `monitoring_list_reconcile` drainiert die
+> Outbox und repariert Artist⇄Watchlist sowie Wanted-Track⇄Wishlist.
 
 ## 1. Ziel und Ergebnis
 
 Dieser Deep Dive prüfte ursprünglich alle 33 im Repair-Worker registrierten
-Tools gegen die optionale Library v2. P3 hat die Runtime-Registry auf 19
-native bzw. rein operative Jobs konsolidiert. Geprüft wurden nicht nur Namen und UI-Karten,
+Tools gegen die optionale Library v2. P3 hatte die Runtime-Registry auf 19
+native bzw. rein operative Jobs konsolidiert; §82 ergänzt den kombinierten
+Reconcile-Job als zwanzigsten. Geprüft wurden nicht nur Namen und UI-Karten,
 sondern Scanner-Datenbasis, Findings, Fix-Handler, automatische Mutationen,
 Dateioperationen, Quality-/Wanted-Folgen, Artwork-Cache, History und das
 Feature-Gating.
@@ -265,16 +274,18 @@ Spotify-Spalten.
 
 ## 7. P3-Abschlusscheckliste
 
-1. **Erledigt:** Die Registry akzeptiert nur `lib2` und `filesystem`; alle 19
+1. **Erledigt:** Die Registry akzeptiert nur `lib2` und `filesystem`; alle 20
    registrierten Jobs erfüllen den nativen V2-Effektvertrag. Retired-Module
    bleiben im Rollback-Fenster importierbar, können sich aber nicht erneut
    registrieren.
 2. **Erledigt:** Abgelöste Quality-/Discography-/Dedup-/Completeness-/Reorg-/
    Retag-/Canonical-/Unknown-Artist-Jobs sind aus Registry und Maintenance-UI
    entfernt. Native Ersatzpfade sind allein sichtbar.
-3. **Erledigt:** `lib2_mirror_reconcile` und `lib2_wishlist_reconcile` sowie
-   ihre Scheduler-Registrierung sind entfernt. Der transaktionale Outbox-
-   Adapter bleibt nur als Rollback-Ausgang zur alten Wishlist/Watchlist.
+3. **Aktualisiert 2026-07-19 (§82):** `lib2_mirror_reconcile` und
+   `lib2_wishlist_reconcile` sowie ihre alten Scheduler-IDs bleiben entfernt.
+   Solange Wishlist/Watchlist aktive Übergangsgrenzen sind, übernimmt
+   `monitoring_list_reconcile` neutral und kombiniert Outbox-Retry sowie die
+   Artist⇄Watchlist-/Wanted-Track⇄Wishlist-Invarianten.
 4. **Erledigt:** `maintenance_sync.py` enthält nur native ID-Auflösung,
    File-Rescan, Artwork-Invalidation, Wanted-Recompute und History-Events;
    keine Legacy-Projektion und keinen Importer-Aufruf.
@@ -334,7 +345,7 @@ Für jedes mutierende Tool gelten dieselben Tests:
 - `npm run check`: Formatter, Type-Lint und Oxlint vollständig sauber;
 - `npm run build`: Produktions-Build erfolgreich;
 - `node --check webui/static/enrichment.js`: sauber;
-- statischer Registry-Audit: **19 Jobs**, davon 17 `lib2` und zwei rein
+- statischer P3-Registry-Audit vor §82: **19 Jobs**, davon 17 `lib2` und zwei rein
   operative `filesystem`-Jobs; keine registrierte Legacy-/Mixed-Basis;
 - Provider-Regressionen belegen Deezer-/iTunes-Tracklists, tatsächliche
   Fallback-Quelle, MusicBrainz/CAA-Artwork, provider-qualifizierte
