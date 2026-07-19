@@ -168,7 +168,12 @@ def create_blueprint() -> Blueprint:
         caa = _try_caa(release_id)
         if caa:
             resp = redirect(caa, code=302)
-            resp.headers["Cache-Control"] = "private, max-age=86400"
+            # NEVER cache the redirect itself — the resolution changes (CAA
+            # breaker trips → Deezer/iTunes), and a browser-cached 302 would pin
+            # a stale (e.g. dead-CAA) target and skip this endpoint entirely.
+            # Server-side _cover_cache keeps it fast; the final image is cached
+            # by the browser as normal.
+            resp.headers["Cache-Control"] = "no-store"
             return resp
 
         # 2) Fallback — Deezer/iTunes by name (cached), redirect to their CDN.
@@ -185,7 +190,7 @@ def create_blueprint() -> Blueprint:
         if not url:
             return "", 404
         resp = redirect(url, code=302)
-        resp.headers["Cache-Control"] = "private, max-age=86400"
+        resp.headers["Cache-Control"] = "no-store"
         return resp
 
     @bp.route("/api/labels/cover-url", methods=["GET"])
