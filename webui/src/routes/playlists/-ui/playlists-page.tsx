@@ -13,8 +13,8 @@ import {
   playlistDetailQueryOptions,
   playlistsQueryOptions,
   refreshPlaylist,
-  toggleAutoRefresh,
   updatePlaylistConfig,
+  updateRefreshInterval,
 } from '../-playlists.api';
 import styles from './playlists-page.module.css';
 
@@ -250,7 +250,7 @@ function PlaylistCard({
 
   const intervalMutation = useMutation({
     mutationFn: (hours: number) =>
-      toggleAutoRefresh(playlist.kind, playlist.variant, undefined, hours),
+      updateRefreshInterval(playlist.kind, playlist.variant, hours),
     onSuccess: () => {
       void invalidatePlaylistsQueries(queryClient);
     },

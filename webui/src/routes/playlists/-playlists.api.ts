@@ -67,16 +67,27 @@ export async function activatePlaylist(
 export async function toggleAutoRefresh(
   kind: string,
   variant: string = '',
-  autoRefresh?: boolean,
-  refreshIntervalHours?: number,
+  enabled?: boolean,
 ): Promise<ConfigUpdateResponse> {
   const path = variant
     ? `personalized/playlist/${encodeURIComponent(kind)}/${encodeURIComponent(variant)}/auto-refresh`
     : `personalized/playlist/${encodeURIComponent(kind)}/auto-refresh`;
   const body: Record<string, unknown> = {};
-  if (autoRefresh !== undefined) body.auto_refresh = autoRefresh;
-  if (refreshIntervalHours !== undefined) body.refresh_interval_hours = refreshIntervalHours;
+  if (enabled !== undefined) body.enabled = enabled;
   return await readJson<ConfigUpdateResponse>(apiClient.put(path, { json: body }));
+}
+
+export async function updateRefreshInterval(
+  kind: string,
+  variant: string = '',
+  refreshIntervalHours: number,
+): Promise<ConfigUpdateResponse> {
+  const path = variant
+    ? `personalized/playlist/${encodeURIComponent(kind)}/${encodeURIComponent(variant)}/refresh-interval`
+    : `personalized/playlist/${encodeURIComponent(kind)}/refresh-interval`;
+  return await readJson<ConfigUpdateResponse>(
+    apiClient.put(path, { json: { refresh_interval_hours: refreshIntervalHours } }),
+  );
 }
 
 export async function deletePlaylist(

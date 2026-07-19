@@ -54,6 +54,7 @@ export interface PersonalizedPlaylist {
   last_generation_source: string | null;
   last_generation_error: string | null;
   is_stale: boolean;
+  automation_id: number | null;
   auto_refresh: boolean;
   refresh_interval_hours: number;
 }

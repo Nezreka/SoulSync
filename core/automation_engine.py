@@ -145,14 +145,6 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'full_cleanup',
         'initial_delay': 900,  # 15 min after startup
     },
-    {
-        'name': 'Auto-Playlist Refresh',
-        'trigger_type': 'schedule',
-        'trigger_config': {'interval': 1, 'unit': 'hours'},
-        'action_type': 'personalized_pipeline',
-        'action_config': {'discover_due': True},
-        'initial_delay': 600,
-    },
     # ── Video side (isolated app, shared engine) ──────────────────────────
     # owned_by='video' keeps these OFF the music automations page (it filters
     # them out) and ON the video Automations page (it shows only these).
@@ -567,24 +559,6 @@ class AutomationEngine:
                     logger.info(f"Created system automation: {spec['name']} (id={aid})")
                 existing = self.db.get_system_automation_by_action(spec['action_type'])
 
-            # Migrate legacy per-playlist personalized_pipeline entries
-            if existing and spec['action_type'] == 'personalized_pipeline':
-                old_config = json.loads(existing.get('action_config') or '{}')
-                if 'kinds' in old_config and not old_config.get('discover_due'):
-                    new_action_config = json.dumps({'discover_due': True})
-                    self.db.update_automation(existing['id'], name=spec['name'], action_config=new_action_config)
-                    logger.info(f"Migrated personalized_pipeline automation '{spec['name']}' to discover_due mode")
-
-            # Clean up orphaned per-playlist personalized_pipeline automations
-            if spec['action_type'] == 'personalized_pipeline':
-                all_pipeline = self.db.get_automations_by_action('personalized_pipeline')
-                for old_auto in (all_pipeline or []):
-                    if old_auto['id'] != (existing or {}).get('id') and not old_auto.get('is_system'):
-                        old_config = json.loads(old_auto.get('action_config') or '{}')
-                        if 'kinds' in old_config and not old_config.get('discover_due'):
-                            self.db.update_automation(old_auto['id'], enabled=0)
-                            logger.info(f"Disabled legacy per-playlist automation: {old_auto.get('name')} (id={old_auto['id']})")
-
             if existing:
                 if spec.get('initial_delay') is not None:
                     # Compute full interval from trigger config
@@ -641,6 +615,7 @@ class AutomationEngine:
         self._fix_airing_automation_schedule()
         self._fix_deep_scan_schedules()
         self._fix_wishlist_processor_rename()
+        self._migrate_auto_refresh_to_automations()
 
     def _fix_video_scan_default(self):
         """Remove the obsolete standalone 'Scan Video Library' SYSTEM automation — it's
@@ -735,6 +710,107 @@ class AutomationEngine:
                             cfg['days'], cfg['time'], auto.get('id'))
             except Exception:
                 logger.exception("deep-scan schedule migration failed for %s", action_type)
+
+    def _migrate_auto_refresh_to_automations(self):
+        """One-time migration: convert legacy ``auto_refresh``/``refresh_interval_hours``
+        stored in ``config_json.extra`` into proper per-playlist automation rows.
+
+        Each playlist with auto_refresh=True becomes its own automation row with
+        action_type='personalized_pipeline', owned_by='auto_playlist', and the
+        correct profile_id.  Removes the old system 'Auto-Playlist Refresh' row."""
+        try:
+            # Remove the old system automation if it still exists
+            old_system = self.db.get_system_automation_by_action('personalized_pipeline')
+            if old_system:
+                self.db.update_automation(old_system['id'], is_system=0)
+                self.db.delete_automation(old_system['id'])
+                logger.info("Removed legacy system 'Auto-Playlist Refresh' automation (id=%s)",
+                            old_system.get('id'))
+
+            # Find all personalized playlists with auto_refresh in their extra config
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, profile_id, kind, variant, name, config_json "
+                    "FROM personalized_playlists"
+                )
+                rows = [dict(r) for r in cursor.fetchall()]
+
+            migrated = 0
+            for row in rows:
+                try:
+                    cfg = json.loads(row.get('config_json') or '{}')
+                    extra = cfg.get('extra') or {}
+                    if not extra.get('auto_refresh'):
+                        continue
+
+                    # Skip if automation already exists for this playlist
+                    existing = self.db.get_automations_by_action('personalized_pipeline')
+                    already_exists = False
+                    for auto in (existing or []):
+                        ac = json.loads(auto.get('action_config') or '{}')
+                        kinds = ac.get('kinds') or []
+                        if any(k.get('kind') == row['kind']
+                               and k.get('variant', '') == (row.get('variant') or '')
+                               for k in kinds):
+                            already_exists = True
+                            break
+                    if already_exists:
+                        continue
+
+                    interval_hours = int(extra.get('refresh_interval_hours', 24))
+                    kind_display = row['kind'].replace('_', ' ').title()
+                    variant_display = f" ({row['variant']})" if row.get('variant') else ''
+
+                    # Map interval to trigger type
+                    if interval_hours <= 12:
+                        trigger_type = 'schedule'
+                        trigger_config = {'interval': interval_hours, 'unit': 'hours'}
+                    elif interval_hours <= 48:
+                        trigger_type = 'daily_time'
+                        trigger_config = {'time': '01:00'}
+                    else:
+                        trigger_type = 'weekly_time'
+                        trigger_config = {'time': '01:00', 'days': ['mon']}
+
+                    action_config = {
+                        'kinds': [{'kind': row['kind'], 'variant': row.get('variant') or ''}]
+                    }
+
+                    aid = self.db.create_automation(
+                        name=f"Auto-Refresh: {kind_display}{variant_display}",
+                        trigger_type=trigger_type,
+                        trigger_config=json.dumps(trigger_config),
+                        action_type='personalized_pipeline',
+                        action_config=json.dumps(action_config),
+                        profile_id=row['profile_id'],
+                        owned_by='auto_playlist',
+                    )
+                    if aid:
+                        migrated += 1
+                        logger.info("Migrated auto_refresh playlist '%s' → automation id=%s",
+                                    row['name'], aid)
+
+                    # Clean up legacy auto_refresh from config_json.extra
+                    del extra['auto_refresh']
+                    if 'refresh_interval_hours' in extra:
+                        del extra['refresh_interval_hours']
+                    cfg['extra'] = extra
+                    with self.db._get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "UPDATE personalized_playlists SET config_json = ? WHERE id = ?",
+                            (json.dumps(cfg), row['id']),
+                        )
+                        conn.commit()
+
+                except Exception:
+                    logger.exception("Failed to migrate playlist id=%s", row.get('id'))
+
+            if migrated:
+                logger.info("Auto-refresh migration: converted %d playlists to automation rows", migrated)
+        except Exception:
+            logger.exception("auto_refresh → automation migration failed")
 
     def get_system_automation_next_run_seconds(self, action_type):
         """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""

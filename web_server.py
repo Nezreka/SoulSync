@@ -32507,7 +32507,9 @@ def personalized_list_playlists():
     """List every persisted personalized playlist for the active profile."""
     try:
         manager = _build_personalized_manager()
-        return jsonify(_personalized_api.list_playlists(manager, get_current_profile_id()))
+        return jsonify(_personalized_api.list_playlists(
+            manager, get_current_profile_id(), engine=automation_engine,
+        ))
     except Exception as e:
         logger.error(f"Personalized playlists list error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -32522,7 +32524,7 @@ def personalized_get_playlist(kind, variant=''):
     try:
         manager = _build_personalized_manager()
         return jsonify(_personalized_api.get_playlist_with_tracks(
-            manager, kind, variant, get_current_profile_id(),
+            manager, kind, variant, get_current_profile_id(), engine=automation_engine,
         ))
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
@@ -32540,7 +32542,8 @@ def personalized_refresh_playlist(kind, variant=''):
         body = request.get_json(silent=True) or {}
         overrides = body.get('config_overrides') if isinstance(body.get('config_overrides'), dict) else None
         return jsonify(_personalized_api.refresh_playlist(
-            manager, kind, variant, get_current_profile_id(), config_overrides=overrides,
+            manager, kind, variant, get_current_profile_id(),
+            config_overrides=overrides, engine=automation_engine,
         ))
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
@@ -32558,11 +32561,88 @@ def personalized_update_config(kind, variant=''):
         body = request.get_json(silent=True) or {}
         return jsonify(_personalized_api.update_config(
             manager, kind, variant, get_current_profile_id(), body,
+            engine=automation_engine,
         ))
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Personalized playlist config error ({kind}/{variant}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlist/<kind>/activate', methods=['POST'])
+@app.route('/api/personalized/playlist/<kind>/<variant>/activate', methods=['POST'])
+def personalized_activate_playlist(kind, variant=''):
+    """Activate a playlist: create an automation row and do an initial refresh."""
+    try:
+        manager = _build_personalized_manager()
+        body = request.get_json(silent=True) or {}
+        interval = int(body.get('refresh_interval_hours', 24))
+        return jsonify(_personalized_api.activate_playlist(
+            manager, kind, variant, get_current_profile_id(),
+            engine=automation_engine, refresh_interval_hours=interval,
+        ))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Personalized playlist activate error ({kind}/{variant}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlist/<kind>/auto-refresh', methods=['PUT'])
+@app.route('/api/personalized/playlist/<kind>/<variant>/auto-refresh', methods=['PUT'])
+def personalized_toggle_auto_refresh(kind, variant=''):
+    """Toggle the automation row's enabled status."""
+    try:
+        manager = _build_personalized_manager()
+        body = request.get_json(silent=True) or {}
+        enabled = body.get('enabled')
+        if enabled is not None:
+            enabled = bool(enabled)
+        return jsonify(_personalized_api.toggle_auto_refresh(
+            manager, kind, variant, get_current_profile_id(),
+            engine=automation_engine, enabled=enabled,
+        ))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Personalized playlist toggle error ({kind}/{variant}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlist/<kind>/refresh-interval', methods=['PUT'])
+@app.route('/api/personalized/playlist/<kind>/<variant>/refresh-interval', methods=['PUT'])
+def personalized_update_refresh_interval(kind, variant=''):
+    """Update the automation's refresh interval for a playlist."""
+    try:
+        manager = _build_personalized_manager()
+        body = request.get_json(silent=True) or {}
+        interval = int(body.get('refresh_interval_hours', 24))
+        return jsonify(_personalized_api.update_refresh_interval(
+            manager, kind, variant, get_current_profile_id(),
+            engine=automation_engine, refresh_interval_hours=interval,
+        ))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Personalized playlist refresh-interval error ({kind}/{variant}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlist/<kind>', methods=['DELETE'])
+@app.route('/api/personalized/playlist/<kind>/<variant>', methods=['DELETE'])
+def personalized_delete_playlist(kind, variant=''):
+    """Delete a playlist and its associated automation row."""
+    try:
+        manager = _build_personalized_manager()
+        return jsonify(_personalized_api.delete_playlist(
+            manager, kind, variant, get_current_profile_id(),
+            engine=automation_engine,
+        ))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Personalized playlist delete error ({kind}/{variant}): {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
