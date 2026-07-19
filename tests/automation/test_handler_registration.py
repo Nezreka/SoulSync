@@ -33,6 +33,7 @@ from core.automation.handlers import register_all
 EXPECTED_ACTION_NAMES = frozenset({
     'process_wishlist',
     'scan_watchlist',
+    'scan_watchlist_labels',
     'scan_library',
     'refresh_mirrored',
     'sync_playlist',

@@ -205,6 +205,7 @@ ACTIONS: list[dict] = [
     {"type": "process_wishlist", "label": "Process Wishlist", "icon": "list", "description": "Retry failed downloads from wishlist", "available": True,
      "config_fields": [{"key": "category", "type": "select", "label": "Category", "options": [{"value": "all", "label": "All"}, {"value": "albums", "label": "Albums"}, {"value": "singles", "label": "Singles"}], "default": "all"}]},
     {"type": "scan_watchlist", "label": "Scan Watchlist", "icon": "eye", "description": "Check watched artists for new releases", "available": True},
+    {"type": "scan_watchlist_labels", "label": "Scan Label Watchlist", "icon": "tag", "description": "Check followed record labels for new releases", "available": True},
     {"type": "scan_library", "label": "Scan Library", "icon": "refresh", "description": "Trigger media server library scan", "available": True},
     {"type": "refresh_mirrored", "label": "Refresh Mirrored Playlist", "icon": "copy", "description": "Re-fetch playlist from source and update mirror", "available": True,
      "config_fields": [
