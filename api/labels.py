@@ -50,21 +50,6 @@ def _now() -> float:
     return _time.time()
 
 
-def _group_by_artist(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Group a newest-first catalog into per-artist buckets. Because ``items``
-    arrive newest-first, first-appearance ordering puts the artist with the
-    most recent release at the top."""
-    groups: Dict[str, List[Dict[str, Any]]] = {}
-    order: List[str] = []
-    for it in items or []:
-        artist = str(it.get('artist') or '').strip() or 'Unknown Artist'
-        if artist not in groups:
-            groups[artist] = []
-            order.append(artist)
-        groups[artist].append(it)
-    return [{'artist': a, 'releases': groups[a]} for a in order]
-
-
 def _fetch_catalog(mbid: str) -> List[Dict[str, Any]]:
     """Label catalog with a TTL memo so repeat page loads don't re-walk MB."""
     now = _now()
@@ -115,6 +100,21 @@ def create_blueprint() -> Blueprint:
         except Exception:
             logger.exception("labels_catalog failed for %s", mbid)
             return jsonify({"error": "catalog failed"}), 200
+
+        # Newest-first flat grid, paginated so the page paints fast instead of
+        # dumping a whole label (hundreds of releases) in one shot.
+        try:
+            page = max(1, int(request.args.get("page", 1)))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = min(120, max(1, int(request.args.get("page_size", 60))))
+        except (TypeError, ValueError):
+            page_size = 60
+        total = len(items)
+        start = (page - 1) * page_size
+        releases = items[start:start + page_size]
+
         db = _db()
         is_watching = False
         backlog = False
@@ -130,12 +130,19 @@ def create_blueprint() -> Blueprint:
                             break
             except Exception as exc:
                 logger.debug("labels_catalog watch-state lookup failed: %s", exc)
+
+        artist_count = len({str(it.get("artist") or "") for it in items if it.get("artist")})
         return jsonify({
             "label": {"id": mbid, "name": name},
             "is_watching": is_watching,
             "backlog": backlog,
-            "release_count": len(items),
-            "groups": _group_by_artist(items),
+            "total": total,
+            "release_count": total,      # back-compat alias
+            "artist_count": artist_count,
+            "page": page,
+            "page_size": page_size,
+            "has_more": (start + page_size) < total,
+            "releases": releases,
         })
 
     @bp.route("/api/labels/watchlist", methods=["GET"])
