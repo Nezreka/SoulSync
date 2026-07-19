@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, redirect, request
 
 from utils.logging_config import get_logger
 
@@ -25,17 +25,24 @@ logger = get_logger("labels.api")
 # Host-injected callables (configure() below).
 _db_getter: Optional[Callable] = None      # () -> MusicDatabase
 _mb_getter: Optional[Callable] = None       # () -> MusicBrainzClient | None (or None -> label_catalog default)
+_itunes_getter: Optional[Callable] = None   # () -> iTunesClient | None (reliable cover art)
 
 # The label catalog is expensive (MB is rate-limited to ~1 req/s and we page
 # up to 8 deep), so memoize per label for a while. Additive, in-process only.
 _CATALOG_TTL_S = 1800.0
 _catalog_cache: Dict[str, Dict[str, Any]] = {}   # mbid -> {"at": epoch, "items": [...]}
 
+# Cover art resolved by (artist, album) → an Apple-CDN URL (or '' for a miss).
+_COVER_TTL_S = 86400.0
+_cover_cache: Dict[tuple, Dict[str, Any]] = {}
 
-def configure(*, db_getter: Callable, mb_getter: Optional[Callable] = None) -> None:
-    global _db_getter, _mb_getter
+
+def configure(*, db_getter: Callable, mb_getter: Optional[Callable] = None,
+              itunes_getter: Optional[Callable] = None) -> None:
+    global _db_getter, _mb_getter, _itunes_getter
     _db_getter = db_getter
     _mb_getter = mb_getter
+    _itunes_getter = itunes_getter
 
 
 def _db():
@@ -62,8 +69,62 @@ def _fetch_catalog(mbid: str) -> List[Dict[str, Any]]:
     return items
 
 
+def _norm(s: Any) -> str:
+    import re as _re
+    return _re.sub(r'[^a-z0-9]+', ' ', str(s or '').lower()).strip()
+
+
+def _resolve_cover(artist: str, album: str) -> str:
+    """One reliable cover URL for (artist, album) via iTunes — Apple's CDN is
+    browser-reachable where Cover Art Archive is not. '' on a miss. Only accepts
+    a result whose album name reasonably matches, so a card never shows the
+    wrong cover."""
+    try:
+        client = _itunes_getter() if _itunes_getter else None
+    except Exception:
+        client = None
+    if client is None:
+        return ''
+    try:
+        results = client.search_albums(f"{artist} {album}", limit=5) or []
+    except Exception:
+        logger.debug("labels cover: iTunes search failed for %s - %s", artist, album)
+        return ''
+    want = _norm(album)
+    for a in results:
+        name = _norm(getattr(a, 'name', ''))
+        if name and (name == want or want in name or name in want):
+            img = str(getattr(a, 'image_url', '') or '')
+            if img:
+                return img.replace('3000x3000bb', '500x500bb')
+    return ''
+
+
 def create_blueprint() -> Blueprint:
     bp = Blueprint("labels_api", __name__)
+
+    @bp.route("/api/labels/cover", methods=["GET"])
+    def labels_cover():
+        """Redirect to a reliable Apple-CDN cover for (artist, album). The label
+        grid points every card here so the browser fetches art same-origin-ish
+        (302 to Apple) instead of the unreachable Cover Art Archive."""
+        artist = str(request.args.get("artist") or "").strip()
+        album = str(request.args.get("album") or "").strip()
+        if not artist or not album:
+            return "", 404
+        key = (artist.lower(), album.lower())
+        now = _now()
+        hit = _cover_cache.get(key)
+        if hit and (now - hit["at"]) < _COVER_TTL_S:
+            url = hit["url"]
+        else:
+            url = _resolve_cover(artist, album)
+            _cover_cache[key] = {"at": now, "url": url}
+        if not url:
+            return "", 404
+        resp = redirect(url, code=302)
+        resp.headers["Cache-Control"] = "private, max-age=86400"
+        return resp
 
     @bp.route("/api/labels/search", methods=["POST"])
     def labels_search():

@@ -41,16 +41,14 @@
 
     const _key = (r) => `${(r.artist || '').toLowerCase()}||${(r.album || '').toLowerCase()}`;
 
-    // Cover art at RELEASE scope (art lives there far more often than at
-    // release-group scope). Routed through the app's /api/image-proxy so the
-    // browser fetches it SAME-ORIGIN — Cover Art Archive isn't reliably
-    // reachable client-side (ERR_CONNECTION_RESET), but the server can fetch +
-    // disk-cache it. Lazy loading means only visible covers get proxied.
+    // Cover art via /api/labels/cover → resolves the album on iTunes and 302s
+    // to Apple's CDN (browser-reachable). Cover Art Archive proved unreachable
+    // both client-side (ERR_CONNECTION_RESET) AND server-side (502 timeouts),
+    // so we don't use it. Lazy loading keeps it to visible covers; the server
+    // caches (artist, album) → url.
     function _coverUrl(rel) {
-        const rid = rel && rel.release_id;
-        if (!rid) return '';
-        const caa = `https://coverartarchive.org/release/${encodeURIComponent(rid)}/front-250`;
-        return `/api/image-proxy?url=${encodeURIComponent(caa)}`;
+        if (!rel || !rel.album || !rel.artist) return '';
+        return `/api/labels/cover?artist=${encodeURIComponent(rel.artist)}&album=${encodeURIComponent(rel.album)}`;
     }
 
     function _injectStyles() {
