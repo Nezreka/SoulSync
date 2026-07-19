@@ -183,6 +183,17 @@ class TestCover:
         assert client.get("/api/labels/cover?artist=X").status_code == 404
         assert client.get("/api/labels/cover?album=Y").status_code == 404
 
+    def test_cover_url_returns_absolute_cdn_json(self, client):
+        # the modal/wishlist need an ABSOLUTE url (relative ones get mangled by
+        # the wishlist image normaliser) — cover-url returns the iTunes/Deezer cdn
+        self._cfg(client, [_ITunesAlbum("Teen Dream", "https://is1.mzstatic.com/a/3000x3000bb.jpg")])
+        d = client.get("/api/labels/cover-url?artist=Beach+House&album=Teen+Dream").get_json()
+        assert d["url"].startswith("https://") and "mzstatic.com" in d["url"]
+
+    def test_cover_url_empty_on_no_match(self, client):
+        self._cfg(client, [_ITunesAlbum("Different", "https://x/3000x3000bb.jpg")])
+        assert client.get("/api/labels/cover-url?artist=A&album=B").get_json()["url"] == ""
+
     def test_result_is_cached(self, client):
         calls = {"n": 0}
         class _ITunes:
