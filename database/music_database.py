@@ -2283,6 +2283,28 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
 
+            # Durable record of completed TORRENT grabs so the seeding sweep
+            # (core/downloads/seeding.py) can manage the tail: seed until the
+            # ratio/time goals are met, then remove the torrent from the client.
+            # The music download row holds the torrent_hash only in memory for
+            # the duration of the transfer, so without this table a finished
+            # grab is untrackable after import / restart. Mirrors the video
+            # side's video_downloads seed columns. One row per torrent (hash is
+            # UNIQUE); the sweep only ever touches torrents recorded here, and
+            # a removal only deletes the CLIENT'S copy — the imported library
+            # file is a separate copy and is never touched.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS torrent_seed_grabs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    torrent_hash TEXT NOT NULL UNIQUE,
+                    title TEXT,
+                    category TEXT,
+                    completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    seed_released INTEGER DEFAULT 0
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tsg_released ON torrent_seed_grabs (seed_released)")
+
             # Persistent MusicBrainz album → release-MBID cache.
             # Backs `core/metadata/album_mbid_cache.py`. Keyed by the same
             # (normalized_album_key, artist_key) shape the in-memory
@@ -15245,6 +15267,70 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"Error deleting history rows: {e}")
             return 0
+
+    def record_torrent_seed_grab(self, torrent_hash: str,
+                                 title: Optional[str] = None,
+                                 category: Optional[str] = None) -> None:
+        """Remember a completed torrent grab so the seeding sweep can manage
+        its tail. Idempotent: one row per torrent_hash (INSERT OR IGNORE), so
+        a re-finalize of the same torrent never duplicates. Best-effort — a
+        failure here must never break the download's completion path."""
+        if not torrent_hash:
+            return
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO torrent_seed_grabs (torrent_hash, title, category) "
+                "VALUES (?, ?, ?)",
+                (torrent_hash, title, category),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.warning("Error recording torrent seed grab %s: %s",
+                           torrent_hash[:8] if torrent_hash else "?", e)
+        finally:
+            if conn:
+                conn.close()
+
+    def torrents_awaiting_seed_release(self) -> List[Dict[str, Any]]:
+        """Every recorded torrent grab not yet released back to the client's
+        own management (seed_released=0). The sweep checks each against the
+        ratio/time goals. Returns a list of dicts."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, torrent_hash, title, category, completed_at, seed_released "
+                "FROM torrent_seed_grabs WHERE seed_released = 0"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error reading torrents awaiting seed release: %s", e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def mark_torrent_seed_released(self, grab_id: int) -> None:
+        """Flag a recorded torrent grab as released (goals met + removed, or the
+        client no longer knows it). It drops out of future sweeps."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE torrent_seed_grabs SET seed_released = 1 WHERE id = ?",
+                (grab_id,),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error("Error marking torrent seed grab %s released: %s", grab_id, e)
+        finally:
+            if conn:
+                conn.close()
 
     def clear_completed_download_history(self) -> int:
         """Delete the persisted completed-download history shown on the Downloads

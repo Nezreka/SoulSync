@@ -450,6 +450,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             self._mark_error(download_id, f"No audio files found in {save_path}{suffix}")
             return
         primary = audio_files[0]
+        completed_hash = None
         with self._lock:
             row = self.active_downloads.get(download_id)
             if row is not None:
@@ -457,8 +458,16 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 row['progress'] = 100.0
                 row['file_path'] = str(primary)
                 row['audio_files'] = [str(path) for path in audio_files]
+                completed_hash = row.get('torrent_hash')
         logger.info("Torrent download complete: %s -> %s (%d audio files)",
                     download_id[:8], primary.name, len(audio_files))
+        # Durably record this completed grab so the seeding sweep can manage the
+        # tail (seed until ratio/time goals, then remove from the client). The
+        # torrent_hash only lives in the in-memory row for the transfer, so this
+        # is the one point it can be persisted. Best-effort: a DB hiccup here
+        # must never affect the (already complete) download.
+        if completed_hash:
+            self._record_seed_grab(completed_hash, torrent_name)
 
     def _mark_error(self, download_id: str, message: str) -> None:
         logger.error("Torrent download %s failed: %s", download_id[:8], message)
@@ -467,6 +476,18 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             if row is not None:
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
+
+    def _record_seed_grab(self, torrent_hash: str, title: Optional[str]) -> None:
+        """Persist a completed torrent grab for the seeding sweep. Best-effort:
+        never raises into the completion path."""
+        try:
+            from database.music_database import get_database
+            from config.settings import config_manager
+            category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+            get_database().record_torrent_seed_grab(torrent_hash, title, category)
+        except Exception as e:
+            logger.warning("Could not record torrent seed grab %s: %s",
+                           torrent_hash[:8] if torrent_hash else "?", e)
 
     # ------------------------------------------------------------------
     # Status / lifecycle

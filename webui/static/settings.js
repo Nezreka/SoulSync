@@ -1529,6 +1529,13 @@ async function loadSettingsData() {
         if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
         if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
         if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
+        // Seeding goals (torrent grabs) — off (0) by default, mirrors the video side.
+        const _tcRatio = document.getElementById('music-seed-ratio');
+        const _tcHours = document.getElementById('music-seed-hours');
+        const _tcRemove = document.getElementById('music-seed-remove-data');
+        if (_tcRatio) _tcRatio.value = settings.torrent_client?.seed_ratio_goal != null ? settings.torrent_client.seed_ratio_goal : 0;
+        if (_tcHours) _tcHours.value = settings.torrent_client?.seed_time_goal_hours != null ? settings.torrent_client.seed_time_goal_hours : 0;
+        if (_tcRemove) _tcRemove.checked = settings.torrent_client?.seed_remove_data !== false;
         // Stalled-torrent knobs live under download_source but render in the
         // torrent client section. Timeout is stored in SECONDS, shown in MINUTES.
         const _tcStall = document.getElementById('torrent-stall-timeout');
@@ -4457,6 +4464,9 @@ async function saveSettings(quiet = false) {
             password: document.getElementById('torrent-client-password')?.value || '',
             category: document.getElementById('torrent-client-category')?.value || 'soulsync',
             save_path: document.getElementById('torrent-client-save-path')?.value || '',
+            seed_ratio_goal: parseFloat(document.getElementById('music-seed-ratio')?.value) || 0,
+            seed_time_goal_hours: parseInt(document.getElementById('music-seed-hours')?.value, 10) || 0,
+            seed_remove_data: !!(document.getElementById('music-seed-remove-data') || {}).checked,
         },
         usenet_client: {
             type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
