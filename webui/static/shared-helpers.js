@@ -637,9 +637,12 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
     const isArtist = sectionId.includes('artists');
     const isAlbum = sectionId.includes('albums') || sectionId.includes('singles');
     const isTrack = sectionId.includes('tracks');
+    // Labels behave like artists (clickable link-card into a detail page) but
+    // carry no image + skip the artist lazy-image machinery.
+    const isLabel = sectionId.includes('labels');
 
     // Add appropriate grid class to list
-    if (isArtist) {
+    if (isArtist || isLabel) {
         list.classList.add('enh-artists-grid');
     } else if (isAlbum) {
         list.classList.add('enh-albums-grid');
@@ -649,11 +652,13 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
 
     items.forEach(item => {
         const config = mapItem(item);
-        const isLink = isArtist && !!config.href;
+        const isLink = (isArtist || isLabel) && !!config.href;
         const elem = document.createElement(isLink ? 'a' : 'div');
 
         // Add appropriate card class
-        if (isArtist) {
+        if (isLabel) {
+            elem.className = 'enh-compact-item label-card artist-card';
+        } else if (isArtist) {
             elem.className = 'enh-compact-item artist-card';
             // Add data attributes for lazy loading
             if (item.id) {
@@ -682,7 +687,7 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
         let imageClass = 'enh-item-image';
         let placeholderClass = 'enh-item-image-placeholder';
 
-        if (isArtist) {
+        if (isArtist || isLabel) {
             imageClass += ' artist-image';
             placeholderClass += ' artist-placeholder';
         } else if (isAlbum) {

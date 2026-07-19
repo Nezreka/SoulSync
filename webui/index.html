@@ -4248,6 +4248,16 @@
                                                 <div class="enh-compact-list" id="enh-tracks-list"></div>
                                             </div>
 
+                                            <!-- Labels (record labels — monitored like an artist watchlist) -->
+                                            <div id="enh-labels-section" class="enh-dropdown-section hidden">
+                                                <div class="enh-section-header">
+                                                    <span class="enh-section-icon">🏷️</span>
+                                                    <h4 class="enh-section-title">Labels</h4>
+                                                    <span class="enh-section-count" id="enh-labels-count">0</span>
+                                                </div>
+                                                <div class="enh-compact-list" id="enh-labels-list"></div>
+                                            </div>
+
                                         </div>
                                     </div>
                                 </div>
@@ -9892,6 +9902,30 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
+            <!-- Label detail — a record label's catalog (distinct albums grouped
+                 by their real artist), monitored like the artist watchlist.
+                 Static legacy page; MBID rides the URL. Driven by label-detail.js. -->
+            <div class="page" id="label-detail-page">
+                <div class="page-shell label-detail-container">
+                    <div class="label-detail-header">
+                        <button class="label-detail-back" type="button"
+                                onclick="history.back()">← Back</button>
+                        <div class="label-detail-title-row">
+                            <span class="label-detail-icon">🏷️</span>
+                            <h1 class="label-detail-name" id="label-detail-name">Label</h1>
+                            <button class="label-detail-follow-btn" id="label-detail-follow-btn"
+                                    type="button" hidden>Follow</button>
+                        </div>
+                        <div class="label-detail-meta" id="label-detail-meta"></div>
+                    </div>
+                    <div class="label-detail-status" id="label-detail-loading">Loading label catalog…</div>
+                    <div class="label-detail-status hidden" id="label-detail-empty">
+                        No monitored-type releases found for this label.
+                    </div>
+                    <div class="label-detail-groups" id="label-detail-groups"></div>
+                </div>
+            </div>
+
             <!-- Chat — Soulseek rooms + private messages, proxied through slskd.
                  ONE page for the whole app: the video sidebar reveals this same div
                  via SHARED_PAGES (video-side.js). All content driven by chat.js. -->
@@ -11757,6 +11791,7 @@
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='label-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->

@@ -11,6 +11,7 @@ export const shellPageIds = [
   'library',
   'tools',
   'artist-detail',
+  'label-detail',
   'stats',
   'import',
   'settings',
@@ -43,6 +44,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'library', path: '/library', kind: 'legacy' },
   { pageId: 'tools', path: '/tools', kind: 'legacy' },
   { pageId: 'artist-detail', path: '/artist-detail', kind: 'legacy' },
+  { pageId: 'label-detail', path: '/label-detail', kind: 'legacy' },
   { pageId: 'stats', path: '/stats', kind: 'react' },
   { pageId: 'settings', path: '/settings', kind: 'legacy' },
   { pageId: 'issues', path: '/issues', kind: 'react' },
@@ -101,5 +103,8 @@ export function resolveLegacyShellPageFromPath(pathname: string): ShellPageId | 
 
 export function resolveShellNavPage(pageId: ShellPageId): ShellPageId | '' {
   if (pageId === 'artist-detail') return 'library';
+  // Label detail is reached from search + the watchlist; keep the Watchlist
+  // nav entry lit while viewing a label (its natural home).
+  if (pageId === 'label-detail') return 'watchlist';
   return pageId;
 }

@@ -532,6 +532,11 @@ function isPageAllowed(pageId) {
         if (!ap) return true;
         return ap.includes('library') || ap.includes('search');
     }
+    if (normalizedPageId === 'label-detail') {
+        const ap = normalizeProfilePageList(currentProfile.allowed_pages);
+        if (!ap) return true;
+        return ap.includes('search') || ap.includes('watchlist') || ap.includes('library');
+    }
     const ap = normalizeProfilePageList(currentProfile.allowed_pages);
     if (!ap) return true; // null = all pages
     if (ap.includes(normalizedPageId)) return true;
@@ -2988,6 +2993,39 @@ function parseArtistDetailPath(pathname = window.location.pathname) {
     };
 }
 
+// ---- Label detail (a record label's catalog, monitored like a watchlist) ----
+// A static legacy page; the label MBID rides the query string so a reload /
+// browser-back can re-resolve it. Purely additive, parallel to artist-detail
+// but far simpler (no dynamic route, no label stack).
+let _labelDetailState = { id: null, name: null };
+
+function buildLabelDetailPath(labelId, name = null) {
+    if (!labelId) throw new Error('labelId is required for label-detail navigation');
+    let path = '/label-detail?id=' + encodeURIComponent(String(labelId));
+    if (name) path += '&name=' + encodeURIComponent(name);
+    return path;
+}
+
+function parseLabelDetailPath() {
+    const params = new URLSearchParams(window.location.search || '');
+    const id = params.get('id') || '';
+    const name = params.get('name') || '';
+    return id ? { id, name } : null;
+}
+
+function navigateToLabelDetail(labelId, name = null) {
+    if (!labelId) return;
+    _labelDetailState = { id: String(labelId), name: name || '' };
+    navigateToPage('label-detail');
+    // Carry the id in the URL (navigateToPage pushes a bare /label-detail).
+    try {
+        const url = buildLabelDetailPath(labelId, name);
+        if ((window.location.pathname + window.location.search) !== url) {
+            history.replaceState({ page: 'label-detail' }, '', url);
+        }
+    } catch (e) { /* non-fatal */ }
+}
+
 // ===============================
 // MOBILE NAVIGATION
 // ===============================
@@ -3223,6 +3261,18 @@ async function loadPageData(pageId) {
                 initializeSearchModeToggle();
                 initializeFilters();
                 break;
+            case 'label-detail': {
+                // Resolve the label from nav state, falling back to the URL
+                // (reload / browser-back). label-detail.js owns the render.
+                const lab = (_labelDetailState && _labelDetailState.id)
+                    ? _labelDetailState
+                    : (typeof parseLabelDetailPath === 'function' ? parseLabelDetailPath() : null);
+                if (lab && lab.id && typeof loadLabelDetailData === 'function') {
+                    if (typeof initializeLabelDetailPage === 'function') initializeLabelDetailPage();
+                    loadLabelDetailData(lab.id, lab.name || '');
+                }
+                break;
+            }
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;
