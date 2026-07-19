@@ -2998,6 +2998,7 @@ function parseArtistDetailPath(pathname = window.location.pathname) {
 // browser-back can re-resolve it. Purely additive, parallel to artist-detail
 // but far simpler (no dynamic route, no label stack).
 let _labelDetailState = { id: null, name: null };
+let _labelDetailReturnTo = 'search';   // where the Back button returns to
 
 function buildLabelDetailPath(labelId, name = null) {
     if (!labelId) throw new Error('labelId is required for label-detail navigation');
@@ -3015,6 +3016,12 @@ function parseLabelDetailPath() {
 
 function navigateToLabelDetail(labelId, name = null) {
     if (!labelId) return;
+    // Remember where we came from so the label-detail Back button returns there
+    // (raw history.back() is unreliable through the SPA router).
+    if (typeof currentPage === 'string' && currentPage && currentPage !== 'label-detail') {
+        _labelDetailReturnTo = currentPage;
+    }
+    window._labelDetailReturnTo = _labelDetailReturnTo;   // read by label-detail.js
     _labelDetailState = { id: String(labelId), name: name || '' };
     navigateToPage('label-detail');
     // Carry the id in the URL (navigateToPage pushes a bare /label-detail).

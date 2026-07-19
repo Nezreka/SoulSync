@@ -9907,22 +9907,46 @@
                  Static legacy page; MBID rides the URL. Driven by label-detail.js. -->
             <div class="page" id="label-detail-page">
                 <div class="page-shell label-detail-container">
-                    <div class="label-detail-header">
-                        <button class="label-detail-back" type="button"
-                                onclick="history.back()">← Back</button>
-                        <div class="label-detail-title-row">
-                            <span class="label-detail-icon">🏷️</span>
+                    <button class="label-detail-back" type="button"
+                            id="label-detail-back-btn">← Back</button>
+                    <div class="label-detail-hero">
+                        <div class="label-detail-hero-art" id="label-detail-hero-art">🏷️</div>
+                        <div class="label-detail-hero-main">
+                            <div class="label-detail-eyebrow">Record Label</div>
                             <h1 class="label-detail-name" id="label-detail-name">Label</h1>
-                            <button class="label-detail-follow-btn" id="label-detail-follow-btn"
-                                    type="button" hidden>Follow</button>
+                            <div class="label-detail-meta" id="label-detail-meta"></div>
                         </div>
-                        <div class="label-detail-meta" id="label-detail-meta"></div>
+                        <div class="label-detail-hero-actions">
+                            <button class="label-detail-watch-btn" id="label-detail-watch-btn"
+                                    type="button" hidden>Add to Watchlist</button>
+                            <div class="label-detail-backlog" id="label-detail-backlog" hidden>
+                                <span class="label-detail-backlog-label">Monitor</span>
+                                <div class="label-detail-seg">
+                                    <button type="button" data-backlog="0" class="active">New releases</button>
+                                    <button type="button" data-backlog="1">Full backlog</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+
+                    <div class="label-detail-toolbar" id="label-detail-toolbar" hidden>
+                        <div class="label-detail-filters" id="label-detail-filters">
+                            <button type="button" data-lf="all" class="active">All <span id="lf-count-all">0</span></button>
+                            <button type="button" data-lf="missing">Missing <span id="lf-count-missing">0</span></button>
+                            <button type="button" data-lf="owned">Owned <span id="lf-count-owned">0</span></button>
+                        </div>
+                        <select class="label-detail-sort" id="label-detail-sort">
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="artist">Artist A–Z</option>
+                        </select>
+                    </div>
+
                     <div class="label-detail-status" id="label-detail-loading">Loading label catalog…</div>
-                    <div class="label-detail-status hidden" id="label-detail-empty">
-                        No monitored-type releases found for this label.
-                    </div>
-                    <div class="label-detail-groups" id="label-detail-groups"></div>
+                    <div class="label-detail-status hidden" id="label-detail-empty">No releases to show.</div>
+                    <div class="label-release-grid" id="label-detail-grid"></div>
+                    <div class="label-detail-sentinel" id="label-detail-sentinel"></div>
+                    <div class="label-detail-status hidden" id="label-detail-more">Loading more…</div>
                 </div>
             </div>
 
