@@ -209,8 +209,11 @@ class TestCover:
 
 
 class _CaaResp:
-    def __init__(self, status):
+    def __init__(self, status, body=b'\xff\xd8\xff'):
         self.status_code = status
+        self._body = body
+    def iter_content(self, n):
+        yield self._body
     def close(self):
         pass
 
