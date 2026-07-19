@@ -78,11 +78,27 @@ def _match_lib2_artists(
             if values & wanted_ext:
                 ids.add(int(row["id"]))
     if name and not ids:
-        for row in conn.execute(
-            "SELECT id FROM lib2_artists WHERE LOWER(name) = LOWER(?)",
-            (str(name),),
-        ):
-            ids.add(int(row["id"]))
+        # A9: a bare name match is a weak fallback — only usable when it
+        # resolves to exactly ONE lib2 artist. Two rows sharing the removed
+        # watchlist name (genuine same-name artists, or an unmerged
+        # duplicate — see duplicate-artist-name-ordering) must not both get
+        # demonitored/dropped from the Wishlist just because the user
+        # intended only one of them.
+        name_matches = {
+            int(row["id"])
+            for row in conn.execute(
+                "SELECT id FROM lib2_artists WHERE LOWER(name) = LOWER(?)",
+                (str(name),),
+            )
+        }
+        if len(name_matches) > 1:
+            logger.warning(
+                "Watchlist removal name fallback matched %d lib2 artists for "
+                "%r — ambiguous, skipping rather than risk demonitoring the "
+                "wrong artist", len(name_matches), name,
+            )
+        else:
+            ids |= name_matches
     return sorted(ids)
 
 
@@ -449,8 +465,9 @@ def _watchlist_artist_snapshot(
         rows = conn.execute(sql, params).fetchall()
     except Exception:  # noqa: BLE001 - fresh/test DB without legacy tables
         return False, set(), set()
+    from core.library2.importer import normalize_name
     names = {
-        str(row["artist_name"] or "").strip().casefold()
+        normalize_name(row["artist_name"])
         for row in rows if str(row["artist_name"] or "").strip()
     }
     ids = {
@@ -480,7 +497,8 @@ def artist_is_watchlisted(
     )
     if not available:
         return False
-    normalized_name = str(name or "").strip().casefold()
+    from core.library2.importer import normalize_name
+    normalized_name = normalize_name(name)
     ids = {
         str(value).strip()
         for value in (provider_ids or {}).values()
@@ -505,6 +523,7 @@ def reconcile_artist_watchlist(
     ``monitored=1`` schema-default drift instead of legitimizing it by adding
     every phantom artist to the Watchlist.
     """
+    from core.library2.importer import normalize_name
     from core.library2.monitor_rules import PROVENANCE_LEGACY, PROVENANCE_USER, record_rule
     from core.library2.provider_ids import source_ids_from_values
     from core.library2.wanted import entity_track_ids, recompute_wanted
@@ -556,7 +575,7 @@ def reconcile_artist_watchlist(
                 external_ids=row["external_ids"],
             )
             on_watchlist = (
-                str(row["name"] or "").strip().casefold() in watchlist_names
+                normalize_name(row["name"]) in watchlist_names
                 or bool({str(value) for value in ids.values()} & watchlist_ids)
             )
             explicit = row["rule_provenance"] == PROVENANCE_USER

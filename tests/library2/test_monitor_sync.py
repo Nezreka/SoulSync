@@ -205,6 +205,25 @@ def test_demonitor_no_match_is_noop(imported_conn):
     assert result == {"matched": 0, "demonitored": 0}
 
 
+def test_demonitor_name_fallback_is_noop_when_ambiguous(imported_conn):
+    """A9: two lib2 artists sharing the removed Watchlist row's name (a
+    genuine same-name collision, or an unmerged duplicate) must not both get
+    demonitored — the name fallback is only safe when it resolves uniquely."""
+    conn = imported_conn
+    first = _add_artist(conn, "Same Name", monitored=1, spotify_id="dup-sp-1")
+    second = _add_artist(conn, "Same Name", monitored=1, spotify_id="dup-sp-2")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    # Provider id doesn't match either row → falls to the ambiguous name.
+    result = demonitor_lib2_artists_for_removed_watchlist(
+        db, ["no-such-id"], "same name", profile_id=1)
+    assert result == {"matched": 0, "demonitored": 0}
+    assert conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (first,)
+                        ).fetchone()[0] == 1
+    assert conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (second,)
+                        ).fetchone()[0] == 1
+
+
 def test_sync_watchlist_removal_feature_gated(imported_conn):
     conn = imported_conn
     artist = _add_artist(conn, "Gated", monitored=1, spotify_id="gate-sp")
@@ -364,3 +383,27 @@ def test_artist_reconcile_clears_nonexplicit_default_drift(imported_conn):
     assert conn.execute(
         "SELECT monitored FROM lib2_artists WHERE id=?", (artist,),
     ).fetchone()[0] == 0
+
+
+def test_artist_reconcile_name_match_tolerates_double_spaces(imported_conn):
+    """A12: the name-fallback match must use core.library2.importer
+    .normalize_name (collapses internal whitespace), not an ad-hoc
+    strip().casefold() — the same "Odetari w" bug class at a new spot. A
+    lib2 artist name with a stray double space must still match its
+    single-spaced Watchlist row instead of being wrongly demonitored."""
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    artist = _add_artist(conn, "Foo  Bar", monitored=1, spotify_id=None)
+    conn.execute(
+        "INSERT INTO watchlist_artists(artist_name, profile_id) VALUES(?, 1)",
+        ("Foo Bar",),
+    )
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    stats = reconcile_artist_watchlist(db, profile_id=1)
+
+    assert stats["monitor_flags_changed"] == 0
+    assert conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE id=?", (artist,),
+    ).fetchone()[0] == 1
