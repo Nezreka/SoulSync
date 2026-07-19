@@ -10546,6 +10546,14 @@
                     </div>
 
                     <!-- Last scan summary -->
+                    <!-- Artists / Labels tabs (labels = record-label watchlist, additive) -->
+                    <div class="watchlist-tabs" id="watchlist-tabs">
+                        <button class="watchlist-tab active" type="button" data-wl-tab="artists"
+                                onclick="switchWatchlistTab('artists')">Artists</button>
+                        <button class="watchlist-tab" type="button" data-wl-tab="labels"
+                                onclick="switchWatchlistTab('labels')">Labels</button>
+                    </div>
+
                     <div class="watchlist-last-scan-strip" id="watchlist-last-scan-strip" style="display: none;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                         <span id="watchlist-last-scan-text">Last scan: --</span>
@@ -10591,6 +10599,21 @@
                         <h3>Your watchlist is empty</h3>
                         <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
                         <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
+                    </div>
+
+                    <!-- Labels tab (record-label watchlist) — shown via .wl-view-labels -->
+                    <div class="watchlist-labels-tab" id="watchlist-labels-tab">
+                        <div class="watchlist-labels-grid" id="watchlist-labels-list">
+                            <!-- Populated by initializeWatchlistLabelsTab() -->
+                        </div>
+                        <div class="watchlist-page-empty" id="watchlist-labels-empty" style="display: none;">
+                            <div class="watchlist-page-empty-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                            </div>
+                            <h3>No labels followed yet</h3>
+                            <p>Search a record label, open it, and hit Follow to monitor its new releases here.</p>
+                            <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
+                        </div>
                     </div>
                 </div>
             </div>
