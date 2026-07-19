@@ -86,15 +86,28 @@
         #label-detail-page .label-detail-sort { background: rgba(255,255,255,0.05); color: var(--text-primary,#eaecef);
             border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
         #label-detail-page .label-detail-status { color: var(--text-secondary,#9aa0aa); padding: 40px 0; text-align: center; font-size: 15px; }
-        #label-detail-page .label-release-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 20px; }
-        /* the go-to-artist chip on a release card (reuses .album-card art frame) */
-        #label-detail-page .album-card .label-card-artist-btn { position: absolute; top: 8px; right: 8px; z-index: 3;
+        #label-detail-page .label-release-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 20px; align-items: start; }
+        /* The .album-card square/overlay treatment is scoped to #artist-detail-page
+           in style.css; bring the SAME container override here so label cards are
+           full-bleed squares with the info pinned over the art (not the base
+           .release-card 300px stacked layout). .album-card-image/-content are
+           global, so they overlay correctly once the container is fixed. */
+        #label-detail-page .release-card.album-card { background: rgba(18,18,18,1); backdrop-filter: none;
+            border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 0; display: block;
+            height: auto; aspect-ratio: 1; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+        #label-detail-page .release-card.album-card:hover { transform: translateY(-5px) scale(1.02);
+            border-color: rgba(var(--accent-rgb,29,185,84),0.25);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(var(--accent-rgb,29,185,84),0.12); }
+        #label-detail-page .release-card.album-card.missing { opacity: 1; }
+        /* the go-to-artist chip (top-LEFT so it never collides with the
+           top-right Owned/Missing completion badge) */
+        #label-detail-page .album-card .label-card-artist-btn { position: absolute; top: 8px; left: 8px; z-index: 4;
             width: 28px; height: 28px; border-radius: 50%; border: none; cursor: pointer; font-size: 13px;
             background: rgba(0,0,0,0.55); color: #fff; opacity: 0; transition: opacity .15s; display: flex;
             align-items: center; justify-content: center; }
         #label-detail-page .album-card:hover .label-card-artist-btn { opacity: 1; }
         #label-detail-page .album-card .label-card-artist-btn:hover { background: rgb(var(--accent-rgb,29,185,84)); }
-        #label-detail-page .album-card .album-card-year .lc-artist { color: var(--text-primary,#d6d9de); }
+        #label-detail-page .album-card .album-card-year .lc-artist { color: rgba(255,255,255,0.85); }
         @media (max-width: 640px) {
             #label-detail-page .label-detail-container { padding: 16px; }
             #label-detail-page .label-detail-hero-actions { align-items: stretch; width: 100%; }
