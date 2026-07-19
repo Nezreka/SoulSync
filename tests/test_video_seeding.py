@@ -182,16 +182,37 @@ def test_client_mode_pushes_limit_and_releases(db, monkeypatch):
     assert db.torrents_awaiting_seed_release() == []   # released → handed to client
 
 
-def test_client_mode_push_failure_retries_next_sweep(db, monkeypatch):
+def test_client_mode_push_failure_falls_back_to_soulsync(db, monkeypatch):
+    """A failed/unsupported client push must NOT leave the grab unmanaged (e.g. a
+    non-qBit client) — SoulSync takes over (poll + remove per goals)."""
     from core.video.download_config import save
     save(db, {"seed_time_goal_hours": 408, "seed_mode": "client"})
     _torrent_row(db, ref="abc")
     monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
     monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
-                        lambda a, ref, r, h: False)
+                        lambda a, ref, r, h: False)   # client can't take share limits
+    import core.video.client_download as cd
+    # SS fallback polls; goal not met yet → keeps seeding, stays awaiting
+    monkeypatch.setattr(cd, "_get_status", lambda src, ref: SimpleNamespace(ratio=0.1, seeding_time=1000))
     out = seeding.sweep()
     assert out["released"] == 0 and out["seeding"] == 1
-    assert len(db.torrents_awaiting_seed_release()) == 1   # still managed, retry next sweep
+    assert len(db.torrents_awaiting_seed_release()) == 1
+
+
+def test_client_mode_fallback_removes_when_goal_met(db, monkeypatch):
+    """Fallback isn't just a no-op: when the goal IS met it removes, like SS mode."""
+    from core.video.download_config import save
+    save(db, {"seed_time_goal_hours": 24, "seed_mode": "client"})
+    _torrent_row(db, ref="abc")
+    monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
+    monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
+                        lambda a, ref, r, h: False)
+    import core.video.client_download as cd
+    monkeypatch.setattr(cd, "_get_status", lambda src, ref: SimpleNamespace(ratio=5.0, seeding_time=48 * 3600))
+    removed = []
+    monkeypatch.setattr(seeding, "_remove", lambda ref, delete_files: removed.append(ref) or True)
+    out = seeding.sweep()
+    assert out["released"] == 1 and removed == ["abc"]
 
 
 def test_seed_mode_ui_present():
