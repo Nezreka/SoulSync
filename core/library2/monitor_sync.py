@@ -699,6 +699,7 @@ def reconcile_track_wishlist(
         # Only prune tracks that still exist in lib2 (track_wanted_states raises
         # on unknown ids); orphaned wishlist rows are the delete path's concern.
         wishlisted = _wishlisted_lib2_track_ids(conn, profile_id=profile_id)
+        wishlisted_set = set(wishlisted)
         stats["wishlisted"] = len(wishlisted)
         existing = {
             int(r[0]) for r in conn.execute(
@@ -709,7 +710,16 @@ def reconcile_track_wishlist(
         } if wishlisted else set()
         prune = [t for t in wishlisted if t in existing and t not in wanted_set]
 
-        target = sorted(wanted_set | set(prune))
+        # Only mirror tracks whose Wishlist membership actually needs to change:
+        #   * wanted tracks NOT yet in the Wishlist — re-add the missing/upgrade-
+        #     eligible ones (a wanted track already present is already queued;
+        #     add_to_wishlist upserts, so rebuilding its ~6-query payload every
+        #     hour just to re-write an unchanged row is the waste review Teil B
+        #     flagged — several 100k idle queries/hour at 100k tracks);
+        #   * wishlisted tracks no longer wanted — prune.
+        # Skipping present-and-wanted tracks leaves net Wishlist state identical.
+        adds = [t for t in wanted if t not in wishlisted_set]
+        target = sorted(set(adds) | set(prune))
         total = len(target)
         for start in range(0, total, max(1, batch)):
             if should_stop and should_stop():

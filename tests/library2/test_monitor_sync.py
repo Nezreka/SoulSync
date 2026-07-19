@@ -147,6 +147,36 @@ def test_reconcile_is_idempotent(imported_conn):
     assert first["wanted"] == second["wanted"]
 
 
+def test_reconcile_skips_wanted_track_already_in_wishlist(imported_conn):
+    """Efficiency (review Teil B): a wanted track already correctly present in
+    the Wishlist must NOT have its ~6-query payload rebuilt and re-mirrored
+    every run. add_to_wishlist is an upsert, so re-adding a present-and-wanted
+    track leaves net Wishlist state identical — it's pure waste at 100k tracks.
+    Only wanted tracks NOT yet in the Wishlist (re-add) and wishlisted tracks
+    no longer wanted (prune) need a mirror op."""
+    conn = imported_conn
+    artist = _add_artist(conn, "Present Wanted", spotify_id="pw-sp")
+    track = _add_track(conn, artist, "Already Queued", monitored=1,
+                       with_file=False, spotify_id="pw-t")
+    # A correct, already-present library_v2 Wishlist row for this wanted track.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS wishlist_tracks(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, spotify_track_id TEXT,
+               source_type TEXT, source_info TEXT, profile_id INTEGER)""")
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, source_type, source_info, profile_id) "
+        "VALUES('pw-t', 'album', ?, 1)",
+        (f'{{"source": "library_v2", "lib2_track_id": {track}}}',))
+    conn.commit()
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    stats = reconcile_track_wishlist(db, profile_id=1)
+
+    assert "pw-t" not in db.added  # already present → not rebuilt/re-mirrored
+    assert "pw-t" not in db.removed  # still wanted → not pruned
+    assert stats["wanted"] >= 1  # still counted as wanted
+
+
 # --- Reverse edge: watchlist removal demonitors the lib2 artist --------------
 
 
