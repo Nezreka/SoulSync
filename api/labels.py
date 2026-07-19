@@ -98,12 +98,14 @@ def _try_caa(release_id: str) -> str:
     caa = f"https://coverartarchive.org/release/{rid}/front-500"
     try:
         import requests
-        # allow_redirects=False: CAA returns a 3xx to the actual image when art
-        # exists, 404 when not — so we learn "has art" WITHOUT waiting on the
-        # (often unreachable) archive.org redirect target. A downed CAA just
-        # times out fast (2s) → breaker.
-        r = requests.head(caa, timeout=_CAA_TIMEOUT_S, allow_redirects=False)
-        ok = r.status_code in (200, 301, 302, 303, 307, 308)
+        # Must FOLLOW the redirect and test the ACTUAL image host (CAA 307s to
+        # archive.org, which is the part that's often unreachable). Probing only
+        # coverartarchive.org would pass while the real image 502s — so the
+        # breaker would never trip. stream=True checks reachability + status
+        # without downloading the body.
+        r = requests.get(caa, timeout=_CAA_TIMEOUT_S, allow_redirects=True, stream=True)
+        ok = 200 <= r.status_code < 300
+        r.close()
     except Exception:
         ok = False
     if ok:
