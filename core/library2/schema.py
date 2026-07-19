@@ -31,7 +31,7 @@ schema-init steps in ``MusicDatabase._initialize_database``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict
 
 from utils.logging_config import get_logger
 
@@ -782,11 +782,22 @@ def ensure_library_v2_schema(connection: Any) -> None:
     for index_sql in _INDEXES:
         cursor.execute(index_sql)
     # Additive column migrations for installs created before a column existed.
+    # PRAGMA table_info is read ONCE per distinct table and cached — the
+    # previous per-column query re-read the same table's schema ~30 times a
+    # startup (many columns per table in _ADDED_COLUMNS) for ~4 distinct
+    # tables' worth of information.
+    _existing_columns: Dict[str, set] = {}
     for table, column, alter_sql in _ADDED_COLUMNS:
-        cursor.execute(f"PRAGMA table_info({table})")
-        if column not in {r[1] for r in cursor.fetchall()}:
+        columns = _existing_columns.get(table)
+        if columns is None:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = _existing_columns[table] = {r[1] for r in cursor.fetchall()}
+        if column not in columns:
             try:
                 cursor.execute(alter_sql)
+                # Keep the cache truthful so a later column on the same table
+                # sees this one as present (matches the old per-column re-read).
+                columns.add(column)
             except Exception as e:  # noqa: BLE001
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _migrate_lib2_profiles_to_app_wide(cursor)
