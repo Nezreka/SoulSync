@@ -50,6 +50,7 @@
     }
 
     const _key = (r) => `${(r.artist || '').toLowerCase()}||${(r.album || '').toLowerCase()}`;
+    const _normStr = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
     // Cover art via /api/labels/cover → resolves the album on iTunes and 302s
     // to Apple's CDN (browser-reachable). Cover Art Archive proved unreachable
@@ -405,10 +406,29 @@
             }
             return;
         }
-        const rgid = rel.release_group_id;
         if (typeof showLoadingOverlay === 'function') showLoadingOverlay('Loading album...');
         try {
-            const url = `/api/spotify/album/${encodeURIComponent(rgid)}?source=musicbrainz`
+            // MusicBrainz gives us tracks but only Cover Art Archive images
+            // (unreachable) + no artist image. So resolve the release to a real
+            // album on a RELIABLE source (like search does) → its album-detail
+            // carries proper album + artist images for the modal AND the
+            // wishlist entry. Fall back to MB only if nothing resolves.
+            let src = '', albumId = '';
+            try {
+                if (typeof enhancedSearchFetch === 'function') {
+                    const found = await enhancedSearchFetch(`${rel.artist} ${rel.album}`, {});
+                    const albums = (found && found.albums) || [];
+                    const wantA = _normStr(rel.album), wantR = _normStr(rel.artist);
+                    const pick = albums.find(a => _normStr(a.name) === wantA && _normStr(a.artist) === wantR)
+                        || albums.find(a => _normStr(a.name) === wantA)
+                        || albums[0];
+                    if (pick && pick.id) { albumId = String(pick.id); src = pick.source || found.metadata_source || ''; }
+                }
+            } catch (e) { /* fall back to MB below */ }
+
+            const useSrc = src || 'musicbrainz';
+            const useId = albumId || rel.release_group_id;
+            const url = `/api/spotify/album/${encodeURIComponent(useId)}?source=${encodeURIComponent(useSrc)}`
                 + `&name=${encodeURIComponent(rel.album)}&artist=${encodeURIComponent(rel.artist)}`;
             const albumData = await fetch(url).then(r => r.json()).catch(() => ({}));
             const tracks = (albumData && albumData.tracks) || [];
@@ -416,21 +436,30 @@
                 if (typeof showToast === 'function') showToast('No tracks found for this release', 'error');
                 return;
             }
+
+            const firstArtist = (albumData.artists || [])[0] || {};
+            const artistObj = {
+                id: firstArtist.id || rel.artist_id || '',
+                name: firstArtist.name || rel.artist,
+                image_url: firstArtist.image_url || (firstArtist.images && firstArtist.images[0] && firstArtist.images[0].url) || '',
+                source: useSrc,
+            };
+            const albumImg = (albumData.images && albumData.images[0] && albumData.images[0].url)
+                || _coverResolved.get(_key(rel)) || _coverUrl(rel);
             const albumObj = {
                 name: albumData.name || rel.album,
-                id: rgid,
-                album_type: rel.primary_type || 'album',
-                images: albumData.images || [],
-                image_url: (albumData.images && albumData.images[0] && albumData.images[0].url) || _coverUrl(rel),
+                id: useId,
+                album_type: albumData.album_type || rel.primary_type || 'album',
+                images: (albumData.images && albumData.images.length) ? albumData.images : (albumImg ? [{ url: albumImg }] : []),
+                image_url: albumImg,
                 release_date: albumData.release_date || (rel.year ? rel.year + '-01-01' : ''),
                 total_tracks: tracks.length,
-                artists: [{ name: rel.artist }],
-                source: 'musicbrainz',
+                artists: albumData.artists || [{ name: rel.artist }],
+                source: useSrc,
             };
-            const artistObj = { id: rel.artist_id || '', name: rel.artist, image_url: '', source: 'musicbrainz' };
-            const enriched = tracks.map(t => Object.assign({}, t, { source: 'musicbrainz', album: albumObj }));
+            const enriched = tracks.map(t => Object.assign({}, t, { source: useSrc, album: albumObj }));
             openDownloadMissingModalForArtistAlbum(
-                `mb_album_${rgid}`, `[${rel.artist}] ${albumObj.name}`, enriched, albumObj, artistObj, false, 'artist_album');
+                `lbl_album_${useId}`, `[${rel.artist}] ${albumObj.name}`, enriched, albumObj, artistObj, false, 'artist_album');
         } catch (e) {
             if (typeof showToast === 'function') showToast('Could not open this release', 'error');
         } finally {
