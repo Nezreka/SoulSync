@@ -110,7 +110,7 @@ class TestCatalog:
         assert cat[0]["artist"] == "Nirvana"       # the real artist, not 'Sub Pop'
 
     def test_captures_artist_mbid_when_present(self):
-        rel = {"title": "Bleach",
+        rel = {"id": "rel-bleach-1", "title": "Bleach",
                "artist-credit": [{"name": "Nirvana", "joinphrase": "",
                                   "artist": {"id": "5b11f4ce-a62d-471e-81fc-a69a8278c7da",
                                              "name": "Nirvana"}}],
@@ -119,6 +119,9 @@ class TestCatalog:
                                  "first-release-date": "1989"}}
         cat = lc.label_catalog("mbid", mb_getter=lambda: _FakeMB([[rel]]))
         assert cat[0]["artist_id"] == "5b11f4ce-a62d-471e-81fc-a69a8278c7da"
+        # a concrete release mbid + primary type ride along (cover art / badge)
+        assert cat[0]["release_id"] == "rel-bleach-1"
+        assert cat[0]["primary_type"] == "album"
         # and a credit with no artist object degrades gracefully to ''
         cat2 = lc.label_catalog("mbid", mb_getter=lambda: _FakeMB([[_rel("X", "Y", "rg-y", "2020")]]))
         assert cat2[0]["artist_id"] == ""
