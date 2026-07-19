@@ -236,8 +236,8 @@ def _spotify_artist_image(client, artist_id: str):
         url = _extract_artist_image_url(client.get_artist(artist_id))
         if url:
             return url
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("spotify official get_artist(%s) failed, trying free: %s", artist_id, exc)
     try:
         return _extract_artist_image_url(client._free_meta.get_artist(artist_id))
     except Exception:
