@@ -63,6 +63,10 @@
         if (rel.release_id) p.push(`release_id=${encodeURIComponent(rel.release_id)}`);  // CAA exact lookup
         if (rel.artist) p.push(`artist=${encodeURIComponent(rel.artist)}`);
         if (rel.album) p.push(`album=${encodeURIComponent(rel.album)}`);
+        // cache-bust token: earlier builds cached the 302 redirect (max-age=1d),
+        // pinning a dead-CAA target; a new query key forces a fresh request to
+        // the (now no-store) endpoint. bump if this ever needs busting again.
+        if (p.length) p.push('cb=2');
         return p.length ? `/api/labels/cover?${p.join('&')}` : '';
     }
 
