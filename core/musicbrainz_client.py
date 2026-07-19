@@ -353,6 +353,48 @@ class MusicBrainzClient:
             return []
 
     @rate_limited
+    def search_labels(self, label_name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search record labels by name (labels feature). Each hit has `id`
+        (MBID), `name`, `disambiguation`, `type` (imprint/production/etc.),
+        `area`, `life-span`. Additive — no existing path calls this."""
+        name = str(label_name or '').strip()
+        if not name:
+            return []
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}/label",
+                params={'query': f'label:"{_escape_lucene(name)}"', 'fmt': 'json',
+                        'limit': min(limit, 25)},
+                timeout=10)
+            response.raise_for_status()
+            return response.json().get('labels', [])
+        except Exception as e:
+            logger.error(f"Error searching labels for '{name}': {e}")
+            return []
+
+    @rate_limited
+    def browse_label_releases(self, label_mbid: str, limit: int = 100,
+                              offset: int = 0) -> List[Dict[str, Any]]:
+        """Browse releases put out by a label (labels feature). Each release
+        carries `artist-credit` (the REAL artist — never the label) and a
+        `release-group` (the logical album, for collapsing editions). The
+        caller collapses by release-group id to get distinct albums."""
+        mbid = str(label_mbid or '').strip()
+        if not mbid:
+            return []
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}/release",
+                params={'label': mbid, 'fmt': 'json', 'limit': min(limit, 100),
+                        'offset': offset, 'inc': 'artist-credits+release-groups'},
+                timeout=10)
+            response.raise_for_status()
+            return response.json().get('releases', [])
+        except Exception as e:
+            logger.error(f"Error browsing releases for label {mbid}: {e}")
+            return []
+
+    @rate_limited
     def search_recordings_by_artist_mbid(self, artist_mbid: str,
                                          limit: int = 100) -> List[Dict[str, Any]]:
         """Search for recordings linked to an artist via Lucene `arid:` query.
