@@ -6,6 +6,7 @@ import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library
 import {
   libraryV2QualityProfilesQueryOptions,
   listSearchSources,
+  rankSearchResultQuality,
   searchSources,
   startSourceDownload,
   type Lib2EntityRef,
@@ -87,19 +88,6 @@ function ageDays(publishDate?: string | null): number {
   return (Date.now() - then) / 86_400_000;
 }
 
-/** Rank a quality string for sorting (lossless hi-res > lossless > high lossy > rest). */
-function qualityRank(r: SourceSearchResult): number {
-  const q = ((r.result_type === 'album' ? r.dominant_quality : r.quality) ?? '').toLowerCase();
-  const bitDepth = r.bit_depth ?? 0;
-  const lossless = q.includes('flac') || q.includes('alac') || q.includes('wav');
-  if (lossless && bitDepth > 16) return 4;
-  if (lossless) return 3;
-  const kbps = r.bitrate ? (r.bitrate > 5000 ? r.bitrate / 1000 : r.bitrate) : 0;
-  if (kbps >= 256 || q.includes('320')) return 2;
-  if (q) return 1;
-  return 0;
-}
-
 type SortKey = 'source' | 'title' | 'quality' | 'size' | 'age' | 'availability';
 
 function sortValue(r: SourceSearchResult, key: SortKey): number | string {
@@ -109,7 +97,7 @@ function sortValue(r: SourceSearchResult, key: SortKey): number | string {
     case 'title':
       return resultTitle(r).toLowerCase();
     case 'quality':
-      return qualityRank(r);
+      return rankSearchResultQuality(r);
     case 'size':
       return resultSize(r) ?? 0;
     case 'age':
@@ -274,7 +262,10 @@ export function sortSourceSearchResults(
     }
     if (cmp !== 0) return cmp * direction;
     // Stable tiebreak: better quality first, then larger size.
-    return qualityRank(b) - qualityRank(a) || (resultSize(b) ?? 0) - (resultSize(a) ?? 0);
+    return (
+      rankSearchResultQuality(b) - rankSearchResultQuality(a) ||
+      (resultSize(b) ?? 0) - (resultSize(a) ?? 0)
+    );
   });
   return copy;
 }

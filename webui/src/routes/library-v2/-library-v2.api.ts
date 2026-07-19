@@ -1660,6 +1660,25 @@ export interface SourceSearchResult {
   } | null;
 }
 
+/** Rank a search result's quality for sorting/picking (lossless hi-res >
+ *  lossless > high lossy > rest). The SINGLE shared implementation for both
+ *  Interactive Search's "Quality" column/tiebreak and Automatic Search's
+ *  auto-grab pick (review A12) — two independent copies had drifted apart
+ *  before, so extending one (e.g. AIFF/DSD) silently didn't extend the
+ *  other, letting Interactive Search show a different "best" result than
+ *  Automatic Search actually grabbed. */
+export function rankSearchResultQuality(r: SourceSearchResult): number {
+  const q = ((r.result_type === 'album' ? r.dominant_quality : r.quality) ?? '').toLowerCase();
+  const bitDepth = r.bit_depth ?? 0;
+  const lossless = q.includes('flac') || q.includes('alac') || q.includes('wav');
+  if (lossless && bitDepth > 16) return 4;
+  if (lossless) return 3;
+  const kbps = r.bitrate ? (r.bitrate > 5000 ? r.bitrate / 1000 : r.bitrate) : 0;
+  if (kbps >= 256 || q.includes('320')) return 2;
+  if (q) return 1;
+  return 0;
+}
+
 export interface DownloadOptions {
   skipAcoustid?: boolean;
   qualityCheck?: boolean;
@@ -1773,12 +1792,10 @@ export async function autoGrabBest(
   // the pipeline would import one arbitrary file of a whole album.
   const pool = entity?.trackId ? all.filter((r) => r.result_type === 'track') : all;
   if (pool.length === 0) return null;
-  // Prefer lossless, then highest quality_score, then most upload slots.
-  const score = (r: SourceSearchResult) => {
-    const q = (r.quality ?? r.dominant_quality ?? '').toLowerCase();
-    const lossless = q.includes('flac') || q.includes('alac') || q.includes('wav') ? 1 : 0;
-    return lossless * 1e6 + (r.quality_score ?? 0) * 100 + (r.free_upload_slots ?? 0);
-  };
+  // Prefer the same quality tier Interactive Search ranks best, then
+  // highest quality_score, then most upload slots.
+  const score = (r: SourceSearchResult) =>
+    rankSearchResultQuality(r) * 1e6 + (r.quality_score ?? 0) * 100 + (r.free_upload_slots ?? 0);
   const best = [...pool].sort((a, b) => score(b) - score(a))[0];
   await startSourceDownload(best, options, entity);
   return best;

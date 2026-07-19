@@ -8,6 +8,7 @@ import {
   applyLibraryV2AlbumReorganize,
   applyLibraryV2ArtistArt,
   applyLibraryV2ArtistReorganizeAll,
+  autoGrabBest,
   blacklistLibraryV2Source,
   clearLibraryV2EntityMatch,
   deleteLibraryV2Files,
@@ -32,6 +33,7 @@ import {
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   previewLibraryV2AlbumReorganize,
+  rankSearchResultQuality,
   removeLibraryV2FileRecords,
   runLibraryV2PlaylistPipeline,
   runRepairJob,
@@ -639,6 +641,55 @@ describe('library v2 scoped search api', () => {
       ),
     );
     await expect(startLibraryV2ScopedSearch('tracks', 9)).rejects.toThrow('Not found');
+  });
+});
+
+describe('search result quality ranking (review A12 — single shared implementation)', () => {
+  it('ranks hi-res lossless above standard lossless above high-bitrate lossy above unknown', () => {
+    const hiRes = { result_type: 'track', quality: 'flac', bit_depth: 24 } as never;
+    const lossless = { result_type: 'track', quality: 'flac', bit_depth: 16 } as never;
+    const highLossy = { result_type: 'track', quality: 'mp3', bitrate: 320 } as never;
+    const unknownFmt = { result_type: 'track', quality: 'mp3', bitrate: 128 } as never;
+    expect(rankSearchResultQuality(hiRes)).toBeGreaterThan(rankSearchResultQuality(lossless));
+    expect(rankSearchResultQuality(lossless)).toBeGreaterThan(rankSearchResultQuality(highLossy));
+    expect(rankSearchResultQuality(highLossy)).toBeGreaterThan(rankSearchResultQuality(unknownFmt));
+  });
+
+  it("autoGrabBest picks the same 'best' result Interactive Search's Quality column would rank first", async () => {
+    // Both flac ("lossless"), but only A is hi-res. Before the fix, autoGrabBest's
+    // own binary lossless flag treated both as tied and let B's higher
+    // quality_score win — the exact drift the review flagged (A12).
+    const hiResLowScore = {
+      result_type: 'track',
+      username: 'A',
+      filename: 'a.flac',
+      size: 1,
+      quality: 'flac',
+      bit_depth: 24,
+      quality_score: 1,
+    };
+    const standardHighScore = {
+      result_type: 'track',
+      username: 'B',
+      filename: 'b.flac',
+      size: 1,
+      quality: 'flac',
+      bit_depth: 16,
+      quality_score: 100,
+    };
+    server.use(
+      http.post('/api/search', () =>
+        HttpResponse.json({ results: [standardHighScore, hiResLowScore] }),
+      ),
+      http.post('/api/download', async ({ request }) => {
+        expect(await request.json()).toMatchObject({ username: 'A', filename: 'a.flac' });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    const picked = await autoGrabBest('some query');
+
+    expect(picked?.username).toBe('A');
   });
 });
 
