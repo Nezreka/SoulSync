@@ -181,7 +181,7 @@ def materialize_wishlist_intent(
     """
     try:
         from config.settings import config_manager
-        if config_manager.get("features.library_v2", False) is not True:
+        if config_manager.get("features.library_v2", True) is not True:
             return None
         from database.music_database import get_database
         db = get_database()

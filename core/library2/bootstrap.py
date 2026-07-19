@@ -240,7 +240,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     loop — cheap no-ops once the feature is off or the import has completed.
     """
     try:
-        enabled = config_get("features.library_v2", False) is True
+        enabled = config_get("features.library_v2", True) is True
     except Exception:  # noqa: BLE001
         enabled = False
     if not enabled:

@@ -375,7 +375,7 @@ def sync_watchlist_removal(
     """
     try:
         if config_manager is not None and \
-                config_manager.get("features.library_v2", False) is not True:
+                config_manager.get("features.library_v2", True) is not True:
             return {"matched": 0, "demonitored": 0}
         if not _is_admin_profile(profile_id):
             return {"matched": 0, "demonitored": 0}
@@ -402,7 +402,7 @@ def sync_wishlist_removal(
     """Feature-gated, best-effort adapter for user-facing Wishlist removes."""
     try:
         if config_manager is not None and \
-                config_manager.get("features.library_v2", False) is not True:
+                config_manager.get("features.library_v2", True) is not True:
             return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
         if not _is_admin_profile(profile_id) or not descriptors:
             return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}

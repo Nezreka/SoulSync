@@ -215,7 +215,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     """
 
     def _enabled() -> bool:
-        return config_get("features.library_v2", False) is True
+        return config_get("features.library_v2", True) is True
 
     def _guard():
         if not _enabled():

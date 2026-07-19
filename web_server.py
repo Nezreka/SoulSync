@@ -7080,7 +7080,7 @@ def _audit_manual_skip(context_key, title, artist, skip_checks, profile_id=1):
     Best-effort: failures never block the download.
     """
     try:
-        if config_manager.get('features.library_v2', False) is not True:
+        if config_manager.get('features.library_v2', True) is not True:
             return
         from core.library2.manual_skips import record_manual_skip
         record_manual_skip(
@@ -22799,7 +22799,7 @@ def start_missing_tracks_process(playlist_id):
             materialize_confirmed_search_tracks,
         )
         _materialize_search = (
-            config_manager.get('features.library_v2', False) is True
+            config_manager.get('features.library_v2', True) is True
             and get_current_profile_id() == ADMIN_PROFILE_ID
             and is_confirmed_search_process(playlist_id)
         )

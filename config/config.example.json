@@ -74,7 +74,7 @@
     "token": "LISTENBRAINZ_TOKEN"
   },
   "features": {
-    "_comment": "Experimental opt-in features. Off by default.",
-    "library_v2": false
+    "_comment": "library_v2 is the native catalogue/repair-job engine and is on by default; the entire native repair suite (dead-file, orphan, AcoustID, cover-art, lyrics, ReplayGain, quality-upgrade, etc.) is a silent no-op when this is false.",
+    "library_v2": true
   }
 }

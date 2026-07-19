@@ -362,7 +362,7 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
     """
     try:
         from config.settings import config_manager
-        if config_manager.get("features.library_v2", False) is not True:
+        if config_manager.get("features.library_v2", True) is not True:
             return None
 
         file_path = context.get("_final_processed_path") or context.get("_final_path")

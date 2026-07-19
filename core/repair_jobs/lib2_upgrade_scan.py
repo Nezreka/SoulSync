@@ -70,7 +70,7 @@ class Lib2UpgradeScanJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         try:
-            if context.config_manager.get("features.library_v2", False) is not True:
+            if context.config_manager.get("features.library_v2", True) is not True:
                 logger.debug("Library v2 disabled — upgrade scan skipped")
                 return result
         except Exception:

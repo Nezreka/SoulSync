@@ -72,7 +72,7 @@ def library_v2_enabled(config_manager: Any) -> bool:
     if config_manager is None:
         return False
     try:
-        return config_manager.get("features.library_v2", False) is True
+        return config_manager.get("features.library_v2", True) is True
     except Exception:  # noqa: BLE001
         return False
 

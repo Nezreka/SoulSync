@@ -72,7 +72,7 @@ class MonitoringListReconcileJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         try:
-            if context.config_manager.get("features.library_v2", False) is not True:
+            if context.config_manager.get("features.library_v2", True) is not True:
                 return result
         except Exception:  # noqa: BLE001
             return result
