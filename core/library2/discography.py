@@ -178,6 +178,34 @@ def _should_auto_monitor(
     return candidate is not None and candidate > newest_existing
 
 
+_CONTENT_FILTER_DEFAULTS = {
+    "include_live": False,
+    "include_remixes": False,
+    "include_acoustic": False,
+    "include_compilations": False,
+    "include_instrumentals": False,
+}
+
+
+def _artist_content_filters(conn, artist_id: int) -> Dict[str, bool]:
+    """The admin watchlist's Live/Remix/Acoustic/Compilation/Instrumental
+    opt-ins for one artist, same semantics ``core.watchlist_scanner
+    ._should_include_track`` used to enforce before the native discography
+    path replaced it (review A3). Best-effort: an artist with no watchlist
+    row (e.g. a V2-native import) falls back to the same exclude-by-default
+    values a fresh watchlist row would have."""
+    try:
+        from core.library2.artist_settings import get_artist_settings
+
+        settings = get_artist_settings(conn, artist_id)
+        return {
+            key: bool(settings.get(key, default))
+            for key, default in _CONTENT_FILTER_DEFAULTS.items()
+        }
+    except Exception:  # noqa: BLE001
+        return dict(_CONTENT_FILTER_DEFAULTS)
+
+
 def _full_release_date_key(release_date: Any) -> Optional[tuple[int, int, int]]:
     """A yyyy-mm-dd key ONLY when the raw date really carries all three parts.
 
@@ -426,6 +454,9 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
         )
         monitor_new_policy = artist["monitor_new_items"] or "all"
         eligible_reexpansion = bool(had_discography and artist["monitored"])
+        content_filters = (
+            _artist_content_filters(conn, artist_id) if eligible_reexpansion else None
+        )
         existing_dates = [
             key
             for rows in index.values()
@@ -457,6 +488,15 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                 year=year,
                 newest_existing=newest_existing,
             )
+            if (
+                auto_monitor_release
+                and content_filters is not None
+                and not content_filters["include_compilations"]
+            ):
+                from core.watchlist_scanner import is_compilation_album
+
+                if is_compilation_album(title):
+                    auto_monitor_release = False
 
             existing = _match_existing(index, title=title, album_type=album_type,
                                        provider_id=provider_id, source=source,
@@ -562,6 +602,33 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
     return stats
 
 
+def _track_content_excluded(
+    track_title: str, album_title: str, filters: Dict[str, bool],
+) -> bool:
+    """True when ``track_title`` is a Live/Remix/Acoustic/Instrumental
+    version the artist's watchlist settings don't opt into (review A3).
+    Explicit params (not a closure) — this is called from inside a loop over
+    an album's tracks and must not depend on loop-variable capture."""
+    from core.watchlist_scanner import (
+        is_acoustic_version,
+        is_instrumental_version,
+        is_live_version,
+        is_remix_version,
+    )
+
+    if not filters["include_live"] and is_live_version(track_title, album_title):
+        return True
+    if not filters["include_remixes"] and is_remix_version(track_title, album_title):
+        return True
+    if not filters["include_acoustic"] and is_acoustic_version(track_title, album_title):
+        return True
+    if not filters["include_instrumentals"] and is_instrumental_version(
+        track_title, album_title,
+    ):
+        return True
+    return False
+
+
 def auto_monitor_releases(db, config_manager, album_ids: List[int],
                           *, wishlist_profile_id: int = 1) -> int:
     """Make freshly discovered releases genuinely wanted.
@@ -579,6 +646,7 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     from core.library2.completeness import resolve_tracklist
 
     mirrored = 0
+    filters_cache: Dict[int, Dict[str, bool]] = {}
     conn = db._get_connection()
     try:
         for album_id in album_ids:
@@ -637,11 +705,39 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                 explicitly_unmonitored_track_ids,
                 record_rule,
             )
-            album_track_ids = [r[0] for r in conn.execute(
-                "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
+            album_tracks = conn.execute(
+                "SELECT id, title FROM lib2_tracks WHERE album_id=?", (album_id,)).fetchall()
+            album_track_ids = [r["id"] for r in album_tracks]
             vetoed = explicitly_unmonitored_track_ids(
                 conn, album_track_ids, profile_id=wishlist_profile_id)
-            auto_monitor_ids = [t for t in album_track_ids if t not in vetoed]
+
+            # Content-type filters (review A3): a Live/Remix/Acoustic/
+            # Instrumental track must not become wanted unless the artist's
+            # watchlist settings opt in, same enforcement
+            # core.watchlist_scanner._should_include_track used to apply
+            # before the native discography path replaced it. Applied here
+            # (not at album-insert time) so it also covers the materialize
+            # retry path, and via the same "skip the monitored flip" veto
+            # pattern used for explicitly-unmonitored tracks just above, so
+            # the wanted projection excludes them the same way.
+            album_row = conn.execute(
+                "SELECT title, primary_artist_id FROM lib2_albums WHERE id=?",
+                (album_id,)).fetchone()
+            album_title = (album_row["title"] if album_row else "") or ""
+            content_artist_id = album_row["primary_artist_id"] if album_row else None
+            if content_artist_id is None:
+                filters = dict(_CONTENT_FILTER_DEFAULTS)
+            elif content_artist_id in filters_cache:
+                filters = filters_cache[content_artist_id]
+            else:
+                filters = filters_cache[content_artist_id] = _artist_content_filters(
+                    conn, content_artist_id)
+
+            auto_monitor_ids = [
+                r["id"] for r in album_tracks
+                if r["id"] not in vetoed
+                and not _track_content_excluded(r["title"] or "", album_title, filters)
+            ]
             if auto_monitor_ids:
                 marks = ",".join("?" for _ in auto_monitor_ids)
                 conn.execute(
