@@ -90,7 +90,12 @@ RETIRED_JOB_IDS = frozenset({
     'duplicate_detector',
     'expired_download_cleaner',
     'album_completeness',
-    'library_reorganize',
+    # NOT 'library_reorganize': unlike the other entries here, nothing native
+    # regenerates its 'path_mismatch' findings (core.library2.maintenance_sync
+    # .sync_repair_change only mirrors lib2 file/path state under this same
+    # job_id, it never calls create_finding). Pruning this one on every worker
+    # start silently deletes pending admin-review findings with no
+    # replacement — see docs/library-overhaul-branch-review-2026-07-19.md A2.
     'mbid_mismatch_detector',
     'single_album_dedup',
     'unknown_artist_fixer',
