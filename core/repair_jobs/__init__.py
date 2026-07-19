@@ -35,6 +35,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'monitored_discography_refresh': 'lib2',
     'audio_corruption_detector': 'lib2',
     'monitoring_list_reconcile': 'lib2',
+    'quality_info_backfill': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -77,6 +78,10 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'monitored_discography_refresh': frozenset({'discography', 'wanted'}),
     'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
     'monitoring_list_reconcile': frozenset({'wanted'}),
+    # Only re-probes and fills already-NULL bitrate/sample_rate/bit_depth/
+    # quality_tier columns on existing rows — a catalogue metadata update,
+    # nothing file/wanted/artwork related.
+    'quality_info_backfill': frozenset({'metadata'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -159,6 +164,7 @@ _JOB_MODULES = [
     'core.repair_jobs.track_number_repair',
     'core.repair_jobs.cache_evictor',
     'core.repair_jobs.orphan_file_detector',
+    'core.repair_jobs.quality_info_backfill',
     'core.repair_jobs.dead_file_cleaner',
     'core.repair_jobs.acoustid_scanner',
     'core.repair_jobs.missing_cover_art',

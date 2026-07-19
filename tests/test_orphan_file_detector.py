@@ -20,12 +20,19 @@ class _DB:
 
 
 class _Config:
-    def __init__(self, library_v2: bool) -> None:
+    def __init__(self, library_v2: bool, *, music_paths: list | None = None,
+                 scan_library_folder: bool = False) -> None:
         self.library_v2 = library_v2
+        self.music_paths = music_paths or []
+        self.scan_library_folder = scan_library_folder
 
     def get(self, key, default=None):
         if key == "features.library_v2":
             return self.library_v2
+        if key == "library.music_paths":
+            return self.music_paths
+        if key == "repair.jobs.orphan_file_detector.settings":
+            return {"scan_library_folder": self.scan_library_folder}
         return default
 
 
@@ -224,3 +231,92 @@ def test_library_v2_only_file_is_not_reported_as_orphan(tmp_path: Path) -> None:
     assert result.scanned == 1
     assert result.findings_created == 0
     assert findings == []
+
+
+def test_library_folder_untouched_by_default(tmp_path: Path) -> None:
+    """A4 (library-overhaul-branch-review): scan_library_folder defaults to
+    off, so an orphan sitting in the organized library folder must not be
+    reported unless the admin opts in — existing installations keep their
+    current (transfer-only) scan cost unchanged."""
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+
+    transfer = tmp_path / "Transfer"
+    transfer.mkdir()
+    library = tmp_path / "Library"
+    (library / "Some Artist" / "Some Album").mkdir(parents=True)
+    (library / "Some Artist" / "Some Album" / "01 - Untracked.mp3").write_bytes(b"junk")
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(transfer),
+        config_manager=_Config(True, music_paths=[str(library)], scan_library_folder=False),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.scanned == 0
+    assert findings == []
+
+
+def test_library_folder_scanned_when_opted_in_with_quality_details(tmp_path: Path) -> None:
+    """A4: with scan_library_folder on, an untracked file in the organized
+    library folder (not just transfer/staging) surfaces as an orphan finding
+    carrying its real measured quality — the retired quality_upgrade_scanner
+    used to walk the whole music folder for exactly this, the native
+    replacement stopped touching the disk at all."""
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+
+    transfer = tmp_path / "Transfer"
+    transfer.mkdir()
+    library = tmp_path / "Library"
+    album_dir = library / "Some Artist" / "Some Album"
+    album_dir.mkdir(parents=True)
+    (album_dir / "01 - Untracked.mp3").write_bytes(b"junk; unreadable by mutagen")
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(transfer),
+        config_manager=_Config(True, music_paths=[str(library)], scan_library_folder=True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.scanned == 1
+    assert result.findings_created == 1
+    details = findings[0]["details"]
+    # Unreadable-by-mutagen still yields a usable finding: format falls back
+    # to the extension, quality_tier to 'unknown' — never silently dropped.
+    assert details["format"] == "mp3"
+    assert details["quality_tier"] == "unknown"
+    assert "sample_rate" in details and "bit_depth" in details
+
+
+def test_transfer_folder_orphan_finding_now_carries_quality_details(tmp_path: Path) -> None:
+    """Existing transfer-folder orphan findings gain the same quality facts
+    (no behavior change to WHICH files get flagged, only richer details)."""
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+
+    music = tmp_path / "Stray" / "Files"
+    music.mkdir(parents=True)
+    (music / "00 - Stray.mp3").write_bytes(b"no DB match")
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.findings_created == 1
+    assert "quality_tier" in findings[0]["details"]
+    assert "Measured quality" in findings[0]["description"]

@@ -1,4 +1,33 @@
-"""Orphan File Detector Job — finds files in the transfer folder not tracked in the DB."""
+"""Orphan File Detector Job — finds files not tracked in the DB.
+
+Always scans the transfer/staging folder. Optionally (opt-in setting
+``scan_library_folder``, default off so existing installations keep their
+current scan cost) also scans every root the admin has explicitly configured
+in ``library.music_paths`` (Settings → Music Library Paths) — closing review A4:
+the retired legacy ``quality_upgrade_scanner`` used to walk the whole music
+library and quality-check files with no DB match (failed imports, files
+placed outside SoulSync); its native replacement only reads already-imported
+rows via SQL and never touches the disk, so those files stopped getting
+checked at all.
+
+``library.music_paths`` — not ``soulseek.download_path``/``transfer_path`` —
+is deliberately the ONLY source used for "the real library folder(s)" here:
+those two are download-pipeline staging areas, and which folder a given
+installation actually treats as its finished library varies (some point
+media servers straight at the transfer or staging folder). This mirrors the
+existing convention other Library-v2 modules already use for the same
+question (``core.library2.file_delete._library_roots``,
+``core.library.path_resolver``, ``core.library2.paths
+.missing_path_root_is_healthy``) — an explicit, user-declared list, never
+guessed from an unrelated download-pipeline path. Empty by default, so this
+opt-in setting is a genuine no-op until the admin configures at least one
+root.
+
+Rather than add a second job for the same "audio file with no DB match"
+concept, every orphan finding (either source) now also carries the file's
+real measured quality (mutagen — format/bitrate/sample_rate/bit_depth), so
+you can judge what you have before deciding to import or remove it.
+"""
 
 import os
 import re
@@ -13,6 +42,58 @@ logger = get_logger("repair_job.orphan_files")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
+def _library_folder_setting(context: JobContext) -> bool:
+    try:
+        settings = context.config_manager.get(
+            'repair.jobs.orphan_file_detector.settings', {}) or {}
+        return bool(settings.get('scan_library_folder', False)) if isinstance(settings, dict) else False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _configured_music_roots(config_manager) -> list:
+    """Every existing, canonical root the admin explicitly configured in
+    ``library.music_paths`` — same read+resolve pattern as
+    ``core.library2.file_delete._library_roots``."""
+    try:
+        configured = config_manager.get("library.music_paths", []) or []
+    except Exception:  # noqa: BLE001
+        configured = []
+    if isinstance(configured, str):
+        configured = [configured]
+
+    from core.imports.paths import docker_resolve_path
+
+    roots: list = []
+    for raw in configured:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        resolved = os.path.realpath(
+            os.path.abspath(os.path.expanduser(docker_resolve_path(raw.strip())))
+        )
+        if os.path.isdir(resolved) and resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _scan_roots(context: JobContext) -> list:
+    """Folders to walk: transfer always, every configured library.music_paths
+    root too when the opt-in setting is on. De-duplicated."""
+    roots = []
+    transfer = context.transfer_folder
+    if transfer and os.path.isdir(transfer):
+        roots.append(os.path.realpath(transfer))
+    else:
+        logger.warning("Transfer folder does not exist: %s", transfer)
+
+    if _library_folder_setting(context) and context.config_manager is not None:
+        for resolved in _configured_music_roots(context.config_manager):
+            if resolved not in roots:
+                roots.append(resolved)
+
+    return roots
+
+
 @register_job
 class OrphanFileDetectorJob(RepairJob):
     job_id = 'orphan_file_detector'
@@ -20,7 +101,14 @@ class OrphanFileDetectorJob(RepairJob):
     description = 'Finds audio files not tracked in the database'
     help_text = (
         'Walks your transfer folder looking for audio files (FLAC, MP3, M4A, OGG, WAV, etc.) '
-        'that exist on disk but have no matching entry in the SoulSync database.\n\n'
+        'that exist on disk but have no matching entry in the SoulSync database. Each finding '
+        "also carries the file's real measured quality (format/bitrate/sample rate/bit depth), "
+        'so you know what you have before deciding.\n\n'
+        "Optional setting 'scan_library_folder' (off by default) also walks every folder "
+        'configured under Settings → Music Library Paths (library.music_paths), not just the '
+        'transfer/staging area — catches a failed or partial import, or a file placed there '
+        'outside SoulSync entirely. A no-op until at least one library path is configured '
+        'there.\n\n'
         'Orphan files can appear after manual folder edits, interrupted downloads, or database '
         'issues. Each orphan is reported as a finding so you can decide whether to import it '
         'into your library or remove it.\n\n'
@@ -29,7 +117,7 @@ class OrphanFileDetectorJob(RepairJob):
     icon = 'repair-icon-orphan'
     default_enabled = True
     default_interval_hours = 24
-    default_settings = {}
+    default_settings = {'scan_library_folder': False}
     auto_fix = False
 
     def scan(self, context: JobContext) -> JobResult:
@@ -37,13 +125,12 @@ class OrphanFileDetectorJob(RepairJob):
 
         if (
             context.config_manager is None
-            or context.config_manager.get("features.library_v2", False) is not True
+            or context.config_manager.get("features.library_v2", True) is not True
         ):
             return result
 
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            logger.warning("Transfer folder does not exist: %s", transfer)
+        roots = _scan_roots(context)
+        if not roots:
             return result
 
         # Build set of known file-path suffixes from DB.
@@ -98,16 +185,17 @@ class OrphanFileDetectorJob(RepairJob):
             result.errors += 1
             return result
 
-        # Walk transfer folder and find orphans
+        # Walk every scan root and find orphans
         audio_files = []
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    audio_files.append(os.path.join(root, fname))
+        for root_dir in roots:
+            for root, dirs, files in os.walk(root_dir):
+                skip_deleted_quarantine(root, dirs, root_dir)
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        audio_files.append(os.path.join(root, fname))
 
         total = len(audio_files)
         if context.update_progress:
@@ -248,6 +336,9 @@ class OrphanFileDetectorJob(RepairJob):
                         "(0 findings)", result.scanned)
             return result
 
+        from core.imports.file_ops import probe_audio_quality
+        from core.library2.status import quality_tier
+
         for fpath in orphan_files:
             if context.report_progress:
                 context.report_progress(
@@ -257,6 +348,12 @@ class OrphanFileDetectorJob(RepairJob):
             try:
                 stat = os.stat(fpath)
                 ext = os.path.splitext(fpath)[1].lower().lstrip('.')
+                quality = probe_audio_quality(fpath)
+                tier = quality_tier(
+                    quality.format if quality else None,
+                    quality.bitrate if quality else None,
+                    quality.bit_depth if quality else None,
+                )
                 if context.create_finding:
                     inserted = context.create_finding(
                         job_id=self.job_id,
@@ -267,11 +364,16 @@ class OrphanFileDetectorJob(RepairJob):
                         file_path=fpath,
                         title=f'Orphan file: {os.path.basename(fpath)}',
                         description=(
-                            'Audio file in transfer folder is not tracked in the database'
+                            'Audio file is not tracked in the database. '
+                            f'Measured quality: {tier.replace("_", " ")}.'
                         ),
                         details={
                             'file_size': stat.st_size,
-                            'format': ext,
+                            'format': quality.format if quality else ext,
+                            'bitrate': quality.bitrate if quality else None,
+                            'sample_rate': quality.sample_rate if quality else None,
+                            'bit_depth': quality.bit_depth if quality else None,
+                            'quality_tier': tier,
                             'modified': time.strftime('%Y-%m-%d %H:%M:%S',
                                                       time.localtime(stat.st_mtime)),
                             'folder': os.path.dirname(fpath),
@@ -293,13 +395,12 @@ class OrphanFileDetectorJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
+        roots = _scan_roots(context)
         count = 0
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
+        for root_dir in roots:
+            for root, dirs, files in os.walk(root_dir):
+                skip_deleted_quarantine(root, dirs, root_dir)
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                        count += 1
         return count
