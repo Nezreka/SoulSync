@@ -25,7 +25,8 @@ logger = get_logger("labels.api")
 # Host-injected callables (configure() below).
 _db_getter: Optional[Callable] = None      # () -> MusicDatabase
 _mb_getter: Optional[Callable] = None       # () -> MusicBrainzClient | None (or None -> label_catalog default)
-_itunes_getter: Optional[Callable] = None   # () -> iTunesClient | None (reliable cover art)
+_itunes_getter: Optional[Callable] = None   # () -> iTunesClient | None (cover art fallback)
+_deezer_getter: Optional[Callable] = None   # () -> DeezerClient | None (cover art, faster rate limit)
 
 # The label catalog is expensive (MB is rate-limited to ~1 req/s and we page
 # up to 8 deep), so memoize per label for a while. Additive, in-process only.
@@ -38,11 +39,13 @@ _cover_cache: Dict[tuple, Dict[str, Any]] = {}
 
 
 def configure(*, db_getter: Callable, mb_getter: Optional[Callable] = None,
-              itunes_getter: Optional[Callable] = None) -> None:
-    global _db_getter, _mb_getter, _itunes_getter
+              itunes_getter: Optional[Callable] = None,
+              deezer_getter: Optional[Callable] = None) -> None:
+    global _db_getter, _mb_getter, _itunes_getter, _deezer_getter
     _db_getter = db_getter
     _mb_getter = mb_getter
     _itunes_getter = itunes_getter
+    _deezer_getter = deezer_getter
 
 
 def _db():
@@ -75,28 +78,29 @@ def _norm(s: Any) -> str:
 
 
 def _resolve_cover(artist: str, album: str) -> str:
-    """One reliable cover URL for (artist, album) via iTunes — Apple's CDN is
-    browser-reachable where Cover Art Archive is not. '' on a miss. Only accepts
-    a result whose album name reasonably matches, so a card never shows the
-    wrong cover."""
-    try:
-        client = _itunes_getter() if _itunes_getter else None
-    except Exception:
-        client = None
-    if client is None:
-        return ''
-    try:
-        results = client.search_albums(f"{artist} {album}", limit=5) or []
-    except Exception:
-        logger.debug("labels cover: iTunes search failed for %s - %s", artist, album)
-        return ''
+    """One reliable cover URL for (artist, album). Tries Deezer first (1s rate
+    limit + reachable CDN) then iTunes (3s) — Cover Art Archive is unreachable
+    for many setups so it's not used. '' on a miss. Only accepts a result whose
+    album name reasonably matches, so a card never shows the WRONG cover."""
     want = _norm(album)
-    for a in results:
-        name = _norm(getattr(a, 'name', ''))
-        if name and (name == want or want in name or name in want):
-            img = str(getattr(a, 'image_url', '') or '')
-            if img:
-                return img.replace('3000x3000bb', '500x500bb')
+    for getter in (_deezer_getter, _itunes_getter):
+        try:
+            client = getter() if getter else None
+        except Exception:
+            client = None
+        if client is None:
+            continue
+        try:
+            results = client.search_albums(f"{artist} {album}", limit=5) or []
+        except Exception:
+            logger.debug("labels cover: album search failed for %s - %s", artist, album)
+            continue
+        for a in results:
+            name = _norm(getattr(a, 'name', ''))
+            if name and (name == want or want in name or name in want):
+                img = str(getattr(a, 'image_url', '') or '')
+                if img:
+                    return img.replace('3000x3000bb', '500x500bb')
     return ''
 
 

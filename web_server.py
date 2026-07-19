@@ -40433,7 +40433,8 @@ app.register_blueprint(_create_chat_blueprint())
 # purely additive, self-contained blueprint reading only watchlist_labels + the
 # keyless MusicBrainz catalog layer; absolute /api/labels/* paths, no prefix.
 from api.labels import configure as _configure_labels_api, create_blueprint as _create_labels_blueprint
-_configure_labels_api(db_getter=get_database, itunes_getter=_get_itunes_client)
+_configure_labels_api(db_getter=get_database, itunes_getter=_get_itunes_client,
+                      deezer_getter=_get_deezer_client)
 app.register_blueprint(_create_labels_blueprint())
 
 # Video side API (isolated: reads database/video_library.db only, never music)
