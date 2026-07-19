@@ -64,19 +64,6 @@ export async function activatePlaylist(
   );
 }
 
-export async function toggleAutoRefresh(
-  kind: string,
-  variant: string = '',
-  enabled?: boolean,
-): Promise<ConfigUpdateResponse> {
-  const path = variant
-    ? `personalized/playlist/${encodeURIComponent(kind)}/${encodeURIComponent(variant)}/auto-refresh`
-    : `personalized/playlist/${encodeURIComponent(kind)}/auto-refresh`;
-  const body: Record<string, unknown> = {};
-  if (enabled !== undefined) body.enabled = enabled;
-  return await readJson<ConfigUpdateResponse>(apiClient.put(path, { json: body }));
-}
-
 export async function updateRefreshInterval(
   kind: string,
   variant: string = '',
@@ -93,7 +80,7 @@ export async function updateRefreshInterval(
 export async function deletePlaylist(
   kind: string,
   variant: string = '',
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; error?: string }> {
   const path = variant
     ? `personalized/playlist/${encodeURIComponent(kind)}/${encodeURIComponent(variant)}`
     : `personalized/playlist/${encodeURIComponent(kind)}`;

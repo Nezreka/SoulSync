@@ -50,10 +50,23 @@ def _find_playlist_automation(engine, kind: str, variant: str, profile_id: int):
         return None
     all_auto = engine.db.get_automations_by_action('personalized_pipeline')
     for auto in (all_auto or []):
+        if auto.get('owned_by') != 'auto_playlist':
+            continue
         if auto.get('profile_id') != profile_id:
             continue
         if auto.get('is_system'):
             continue
+        ac = json.loads(auto.get('action_config') or '{}')
+        kinds = ac.get('kinds') or []
+        if any(k.get('kind') == kind and k.get('variant', '') == (variant or '')
+               for k in kinds):
+            return auto
+    return None
+
+
+def _match_automation(automations: List[Dict[str, Any]], kind: str, variant: str):
+    """Match a kind/variant against a pre-filtered list of automations."""
+    for auto in automations:
         ac = json.loads(auto.get('action_config') or '{}')
         kinds = ac.get('kinds') or []
         if any(k.get('kind') == kind and k.get('variant', '') == (variant or '')
@@ -178,10 +191,22 @@ def list_playlists(
     """List every persisted playlist for a profile, enriched with
     automation data (auto_refresh, interval) from the engine."""
     records = manager.list_playlists(profile_id)
+
+    # Fetch automations once, then match in Python (avoids N+1 queries)
+    relevant_auto: List[Dict[str, Any]] = []
+    if engine is not None:
+        all_auto = engine.db.get_automations_by_action('personalized_pipeline')
+        relevant_auto = [
+            a for a in (all_auto or [])
+            if a.get('owned_by') == 'auto_playlist'
+            and a.get('profile_id') == profile_id
+            and not a.get('is_system')
+        ]
+
     return {
         'success': True,
         'playlists': [
-            _record_to_dict(r, _find_playlist_automation(engine, r.kind, r.variant, profile_id))
+            _record_to_dict(r, _match_automation(relevant_auto, r.kind, r.variant))
             for r in records
         ],
     }
@@ -356,14 +381,18 @@ def delete_playlist(
     profile_id: int,
     engine=None,
 ) -> Dict[str, Any]:
-    """Delete a playlist and its associated automation row."""
+    """Delete a playlist and its associated automation row.
+
+    Deletes the playlist first so we don't orphan the automation if
+    the playlist deletion fails."""
+    deleted = manager.delete_playlist(kind, variant, profile_id)
+    if not deleted:
+        return {'success': False, 'error': 'Playlist not found'}
+
     automation = _find_playlist_automation(engine, kind, variant, profile_id)
     if automation is not None and engine is not None:
         engine.db.delete_automation(automation['id'])
 
-    deleted = manager.delete_playlist(kind, variant, profile_id)
-    if not deleted:
-        return {'success': False, 'error': 'Playlist not found'}
     return {'success': True}
 
 

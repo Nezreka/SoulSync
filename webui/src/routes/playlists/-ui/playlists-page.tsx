@@ -35,8 +35,6 @@ export function PlaylistsPage() {
   const kinds = kindsQuery.data?.kinds ?? [];
   const playlists = playlistsQuery.data?.playlists ?? [];
 
-  const kindsByKind = useMemo(() => new Map(kinds.map((k) => [k.kind, k])), [kinds]);
-
   const activeKinds = useMemo(() => new Set(playlists.map((pl) => pl.kind)), [playlists]);
 
   const libraryKinds = useMemo(
@@ -107,7 +105,6 @@ export function PlaylistsPage() {
                     <PlaylistCard
                       key={`${pl.kind}-${pl.variant}`}
                       playlist={pl}
-                      kind={kindsByKind.get(pl.kind)!}
                     />
                   ))}
                 </div>
@@ -192,10 +189,8 @@ function KindCard({ kind }: { kind: PlaylistKind }) {
 
 function PlaylistCard({
   playlist,
-  kind: _kind,
 }: {
   playlist: PersonalizedPlaylist;
-  kind: PlaylistKind | undefined;
 }) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);

@@ -748,6 +748,8 @@ class AutomationEngine:
                     existing = self.db.get_automations_by_action('personalized_pipeline')
                     already_exists = False
                     for auto in (existing or []):
+                        if auto.get('owned_by') != 'auto_playlist':
+                            continue
                         ac = json.loads(auto.get('action_config') or '{}')
                         kinds = ac.get('kinds') or []
                         if any(k.get('kind') == row['kind']
@@ -791,18 +793,18 @@ class AutomationEngine:
                         logger.info("Migrated auto_refresh playlist '%s' → automation id=%s",
                                     row['name'], aid)
 
-                    # Clean up legacy auto_refresh from config_json.extra
-                    del extra['auto_refresh']
-                    if 'refresh_interval_hours' in extra:
-                        del extra['refresh_interval_hours']
-                    cfg['extra'] = extra
-                    with self.db._get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "UPDATE personalized_playlists SET config_json = ? WHERE id = ?",
-                            (json.dumps(cfg), row['id']),
-                        )
-                        conn.commit()
+                        # Clean up legacy auto_refresh from config_json.extra
+                        del extra['auto_refresh']
+                        if 'refresh_interval_hours' in extra:
+                            del extra['refresh_interval_hours']
+                        cfg['extra'] = extra
+                        with self.db._get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                "UPDATE personalized_playlists SET config_json = ? WHERE id = ?",
+                                (json.dumps(cfg), row['id']),
+                            )
+                            conn.commit()
 
                 except Exception:
                     logger.exception("Failed to migrate playlist id=%s", row.get('id'))
