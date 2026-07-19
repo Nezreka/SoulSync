@@ -10,7 +10,6 @@ from __future__ import annotations
 from core.automation.deps import AutomationDeps
 from core.automation.handlers.process_wishlist import auto_process_wishlist
 from core.automation.handlers.scan_watchlist import auto_scan_watchlist
-from core.automation.handlers.scan_watchlist_labels import auto_scan_watchlist_labels
 from core.automation.handlers.scan_library import auto_scan_library
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
@@ -90,12 +89,10 @@ def register_all(deps: AutomationDeps) -> None:
         lambda config: auto_scan_watchlist(config, deps),
         guard_fn=deps.is_watchlist_actually_scanning,
     )
-    # Record-label watchlist scan (additive, parallel to scan_watchlist). Its
-    # engine is fully tested; the live enqueue fails safe (see the handler).
-    engine.register_action_handler(
-        'scan_watchlist_labels',
-        lambda config: auto_scan_watchlist_labels(config, deps),
-    )
+    # NOTE: labels are NOT a separate automation kind — the 'scan_watchlist'
+    # action (and the manual scan) run a label phase after the artist scan via
+    # run_label_scan_phase, so followed labels are covered by the normal
+    # watchlist scan with no split path.
     engine.register_action_handler(
         'scan_library',
         lambda config: auto_scan_library(config, deps),
