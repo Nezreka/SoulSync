@@ -56,7 +56,6 @@ def test_standalone_artists_unaffected():
 def test_existing_filters_still_apply_to_canonical_rows():
     conn = _conn()
     unmonitored = _artist(conn, "Unmonitored", monitored=0)
-    never_synced = _artist(conn, "NeverSynced", synced=False)
     none_policy = _artist(conn, "NonePolicy", monitor_new_items="none")
     eligible = _artist(conn, "Eligible")
     conn.commit()
@@ -65,5 +64,20 @@ def test_existing_filters_still_apply_to_canonical_rows():
 
     assert ids == [eligible]
     assert unmonitored not in ids
-    assert never_synced not in ids
     assert none_policy not in ids
+
+
+def test_never_synced_monitored_artist_is_included():
+    """A5 (library-overhaul-branch-review): a monitored artist that was only
+    ever imported/watchlisted and never had "Update Discography" clicked
+    must still get swept — its first fetch landing here instead of a manual
+    click changes nothing, since _expand_artist_discography's own
+    eligible_reexpansion gate (requires had_discography) already keeps a
+    first-ever fetch from auto-monitoring the whole back catalog."""
+    conn = _conn()
+    never_synced = _artist(conn, "NeverSynced", synced=False)
+    conn.commit()
+
+    ids = Lib2DiscographyRefreshJob()._artist_ids(conn)
+
+    assert ids == [never_synced]

@@ -4,12 +4,17 @@
 ('new') releases of a monitored artist become wanted automatically — but the enforcement lives in the
 discography *re-expansion* path, which used to run only when the user pressed
 "Update Discography". This job runs that same re-expansion on a schedule for
-every artist whose catalog was already expanded once, so the promise holds
-without manual clicks.
+every monitored artist, so the promise holds without manual clicks — including
+an artist that was only ever imported/watchlisted and never had its provider
+catalog fetched (review A5): a monitored artist whose first fetch happens to
+land on this sweep instead of a manual click is not a special case downstream.
+``_expand_artist_discography``'s own ``eligible_reexpansion`` gate (it requires
+``had_discography`` — i.e. NOT this artist's first-ever fetch) already keeps a
+first expansion from auto-monitoring the whole back catalog, first-fetched-by-
+sweep or first-fetched-by-click alike, so this job doesn't need its own
+first-expansion guard on top of that.
 
-Scope rules (deliberately conservative):
-- Only artists with ``discography_synced_at`` set — a first expansion stays an
-  explicit user action (it writes the artist's whole provider catalog).
+Scope rules:
 - Only monitored artists with ``monitor_new_items`` != 'none'.
 - Newly discovered releases are materialized + mirrored via the same shared
   helper the API endpoint uses (``discography.auto_monitor_releases``), so the
@@ -36,14 +41,15 @@ class Lib2DiscographyRefreshJob(RepairJob):
     description = "Re-fetch monitored artists' provider catalogs so new releases become wanted."
     help_text = (
         "Re-expands the provider discography of every monitored library "
-        "artist whose catalog was already fetched once. Releases discovered "
-        "since the last expansion are auto-monitored when the artist's "
-        "'monitor new items' setting is 'all'; 'new' only accepts a dated "
-        "release newer than the previously newest known release. Their tracklist is "
-        "materialized and mirrored into the Wishlist, so the normal download "
-        "pipeline picks them up. Artists never expanded stay untouched (the "
-        "first expansion remains an explicit user action). Does nothing when "
-        "the new library feature is off."
+        "artist, including one never manually expanded before — its first "
+        "fetch happening here instead of an 'Update Discography' click "
+        "changes nothing (an artist's very first fetch never auto-monitors "
+        "its back catalog either way). Releases discovered since the last "
+        "expansion are auto-monitored when the artist's 'monitor new items' "
+        "setting is 'all'; 'new' only accepts a dated release newer than the "
+        "previously newest known release. Their tracklist is materialized "
+        "and mirrored into the Wishlist, so the normal download pipeline "
+        "picks them up. Does nothing when the new library feature is off."
     )
     icon = "refresh-cw"
     default_enabled = False
@@ -60,7 +66,6 @@ class Lib2DiscographyRefreshJob(RepairJob):
             """SELECT id FROM lib2_artists
                 WHERE monitored = 1
                   AND COALESCE(monitor_new_items, 'all') <> 'none'
-                  AND discography_synced_at IS NOT NULL
                   AND canonical_artist_id IS NULL
                 ORDER BY id"""
         )]
