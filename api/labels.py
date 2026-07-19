@@ -105,6 +105,11 @@ def _try_caa(release_id: str) -> str:
         # without downloading the body.
         r = requests.get(caa, timeout=_CAA_TIMEOUT_S, allow_redirects=True, stream=True)
         ok = 200 <= r.status_code < 300
+        if ok:
+            # archive.org sometimes returns headers then hangs on the body — pull
+            # one chunk within the timeout to confirm the image actually delivers
+            # (else the browser's later image-proxy fetch 502s and we'd never know)
+            ok = bool(next(r.iter_content(2048), b''))
         r.close()
     except Exception:
         ok = False
