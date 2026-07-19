@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from flask import Blueprint, g, jsonify, redirect, request
+from flask import Blueprint, jsonify, redirect, request
 
 from utils.logging_config import get_logger
 
@@ -46,9 +46,6 @@ _CAA_TIMEOUT_S = 2.0
 _CAA_FAIL_THRESHOLD = 2
 _CAA_COOLDOWN_S = 600.0
 _caa_breaker: Dict[str, Any] = {"fails": 0, "skip_until": 0.0}
-
-# Manual label-scan status (background thread). One at a time.
-_scan_state: Dict[str, Any] = {"running": False, "last_result": None}
 
 
 def configure(*, db_getter: Callable, mb_getter: Optional[Callable] = None,
@@ -391,45 +388,5 @@ def create_blueprint() -> Blueprint:
         except Exception:
             logger.exception("labels_watchlist_backlog failed for %s", mbid)
             return jsonify({"success": False, "error": "backlog toggle failed"}), 500
-
-    @bp.route("/api/labels/watchlist/scan", methods=["POST"])
-    def labels_watchlist_scan():
-        """Kick off a label watchlist scan in the background: fetch each followed
-        label's catalog, wishlist the new releases (each resolved to a real
-        Deezer album so the entries carry proper art). Same engine the scheduled
-        'scan_watchlist_labels' automation uses."""
-        if _scan_state["running"]:
-            return jsonify({"started": False, "running": True})
-        db = _db()
-        if db is None:
-            return jsonify({"started": False, "error": "database unavailable"}), 500
-        try:
-            profile_id = int(getattr(g, "profile_id", 1) or 1)
-        except Exception:
-            profile_id = 1
-
-        def _run():
-            _scan_state["running"] = True
-            try:
-                from core.automation.handlers.scan_watchlist_labels import (
-                    build_default_seams, run_label_watchlist_scan)
-                seams = build_default_seams(database=db, get_deezer=_deezer_getter,
-                                            profile_id=profile_id)
-                _scan_state["last_result"] = run_label_watchlist_scan(**seams)
-                logger.info("manual label scan finished: %s", _scan_state["last_result"])
-            except Exception:
-                logger.exception("manual label scan failed")
-                _scan_state["last_result"] = {"status": "error"}
-            finally:
-                _scan_state["running"] = False
-
-        import threading
-        threading.Thread(target=_run, daemon=True).start()
-        return jsonify({"started": True})
-
-    @bp.route("/api/labels/watchlist/scan/status", methods=["GET"])
-    def labels_watchlist_scan_status():
-        return jsonify({"running": _scan_state["running"],
-                        "last_result": _scan_state["last_result"]})
 
     return bp
