@@ -1040,6 +1040,12 @@ def process_wishlist_automatically(
                         profile_tracks = wishlist_service.get_wishlist_tracks_for_download(
                             profile_id=profile['id']
                         )
+                        for track in profile_tracks:
+                            # A6: remembered so a multi-profile playlist scope
+                            # can dispatch each profile's tracks under its own
+                            # profile_id instead of collapsing everything onto
+                            # whatever runtime.profile_id happens to be set to.
+                            track['_wishlist_profile_id'] = profile['id']
                         raw_wishlist_tracks.extend(
                             track for track in profile_tracks
                             if _track_in_scope(track, requested_track_ids)
@@ -1154,18 +1160,50 @@ def process_wishlist_automatically(
                 # once-per-run cycle toggle on it) and hand off to the SHARED
                 # wishlist engine — the same code path the manual trigger uses.
                 wishlist_run_id = str(uuid.uuid4())
-                _cycle_result = _run_wishlist_cycle(
-                    runtime,
-                    playlist_id=playlist_id,
-                    cycle=current_cycle,
-                    tracks=wishlist_tracks,
-                    run_id=wishlist_run_id,
-                    auto_initiated=True,
-                    batch_extra_fields={
-                        'wishlist_scope': 'playlist',
-                        'toggle_wishlist_cycle': False,
-                    } if scoped else None,
-                )
+                if scoped and len(scoped_profile_ids) > 1:
+                    # A6: tracks in this playlist scope span more than one
+                    # wishlist profile. _run_wishlist_cycle stamps every batch
+                    # it creates with the single runtime.profile_id in effect
+                    # at call time, so each profile's tracks get their own
+                    # cycle run (own batches, own profile_id, own quality
+                    # settings) instead of merging into one dispatch that
+                    # would land entirely under whichever profile
+                    # runtime.profile_id last happened to be.
+                    grouped_by_profile: Dict[int, list] = {}
+                    for track in wishlist_tracks:
+                        group_id = int(track.get('_wishlist_profile_id') or runtime.profile_id)
+                        grouped_by_profile.setdefault(group_id, []).append(track)
+                    _cycle_result = {'submitted': [], 'album_batches': 0, 'residual_count': 0}
+                    for group_profile_id, group_tracks in grouped_by_profile.items():
+                        runtime.profile_id = group_profile_id
+                        group_result = _run_wishlist_cycle(
+                            runtime,
+                            playlist_id=playlist_id,
+                            cycle=current_cycle,
+                            tracks=group_tracks,
+                            run_id=str(uuid.uuid4()),
+                            auto_initiated=True,
+                            batch_extra_fields={
+                                'wishlist_scope': 'playlist',
+                                'toggle_wishlist_cycle': False,
+                            },
+                        )
+                        _cycle_result['submitted'].extend(group_result['submitted'])
+                        _cycle_result['album_batches'] += group_result['album_batches']
+                        _cycle_result['residual_count'] += group_result['residual_count']
+                else:
+                    _cycle_result = _run_wishlist_cycle(
+                        runtime,
+                        playlist_id=playlist_id,
+                        cycle=current_cycle,
+                        tracks=wishlist_tracks,
+                        run_id=wishlist_run_id,
+                        auto_initiated=True,
+                        batch_extra_fields={
+                            'wishlist_scope': 'playlist',
+                            'toggle_wishlist_cycle': False,
+                        } if scoped else None,
+                    )
 
                 _summary_parts: list[str] = []
                 if _cycle_result['album_batches']:

@@ -286,6 +286,71 @@ def test_playlist_scope_dispatches_only_matching_wishlist_tracks_without_cycle_m
     assert batch["toggle_wishlist_cycle"] is False
 
 
+def test_playlist_scope_with_multiple_profiles_dispatches_one_batch_per_profile():
+    """A6 (library-overhaul-branch-review): a "Run Pipeline" playlist scope
+    spanning more than one wishlist profile must not collapse every profile's
+    tracks into a single batch stamped with whatever runtime.profile_id last
+    happened to be — each profile gets its own batch under its own id."""
+    batch_map = {}
+
+    class _MultiProfileWishlistService:
+        def __init__(self):
+            self.tracks_by_profile = {
+                1: [{
+                    "name": "P1 Track",
+                    "track_id": "p1::track",
+                    "spotify_track_id": "p1::track",
+                    "artists": [{"name": "Artist A"}],
+                    "spotify_data": {"id": "p1::track", "album": {"album_type": "single"}},
+                }],
+                2: [{
+                    "name": "P2 Track",
+                    "track_id": "p2::track",
+                    "spotify_track_id": "p2::track",
+                    "artists": [{"name": "Artist B"}],
+                    "spotify_data": {"id": "p2::track", "album": {"album_type": "single"}},
+                }],
+            }
+
+        def get_wishlist_count(self, profile_id=1):
+            return len(self.tracks_by_profile.get(profile_id, []))
+
+        def get_wishlist_tracks_for_download(self, profile_id=1):
+            return list(self.tracks_by_profile.get(profile_id, []))
+
+        def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+            return True
+
+    runtime, _service, _profiles_db, music_db, executor, _logger, _progress, _guards = _build_runtime(
+        tracks=[],
+        cycle_value="albums",
+        count=0,
+        profiles=[{"id": 1}, {"id": 2}],
+        batch_map=batch_map,
+    )
+    processing.get_wishlist_service = lambda: _MultiProfileWishlistService()
+
+    process_wishlist_automatically(
+        runtime,
+        automation_id="playlist-multi-profile",
+        track_ids=["p1", "p2"],
+        profile_ids=[1, 2],
+    )
+
+    assert len(executor.submissions) == 2
+    assert len(batch_map) == 2
+    batches_by_profile = {batch["profile_id"]: batch for batch in batch_map.values()}
+    assert set(batches_by_profile.keys()) == {1, 2}
+    for submitted_fn, submitted_args, submitted_kwargs in executor.submissions:
+        submitted_tracks = submitted_args[2]
+        track_id = submitted_tracks[0]["track_id"]
+        expected_profile = 1 if track_id == "p1::track" else 2
+        # Whichever batch this submission belongs to must carry the same
+        # profile_id as the track it's actually downloading.
+        batch_id = submitted_args[0]
+        assert batch_map[batch_id]["profile_id"] == expected_profile
+
+
 def test_wishlist_albums_cycle_splits_into_per_album_batches():
     """Multi-album wishlist run: each album with at least the
     threshold of missing tracks (default 2) emits its own sub-batch
