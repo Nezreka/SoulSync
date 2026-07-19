@@ -543,10 +543,10 @@ class _ArtistResolver:
         # 3) create a fresh row (may share a name but is id-distinct)
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
-            "external_ids, quality_profile_id) VALUES(?,?,?,?,?,?)",
+            "external_ids, quality_profile_id, monitored) VALUES(?,?,?,?,?,?,?)",
             (name, name, ids.get("spotify"), ids.get("musicbrainz"),
              json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}",
-             self.default_profile_id),
+             self.default_profile_id, 0),
         )
         new_id = self.cursor.lastrowid
         self._by_name.setdefault(key, new_id)  # keep first-seen for name-only lookups
@@ -626,11 +626,11 @@ class _ArtistResolver:
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
             "external_ids, image_url, genres, summary, style, mood, label, "
             "banner_url, aliases, legacy_artist_id, quality_profile_id, "
-            "legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "legacy_import_run_id, monitored) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (fields["name"], fields["sort_name"], spotify_col, mbid_col, external_json,
              fields["image_url"], fields["genres"], fields["summary"],
              fields["style"], fields["mood"], fields["label"], fields["banner_url"],
-             fields["aliases"], legacy_id, self.default_profile_id, run_id),
+             fields["aliases"], legacy_id, self.default_profile_id, run_id, 0),
         )
         new_id = self.cursor.lastrowid
         self._by_legacy[_legacy_key(legacy_id)] = new_id

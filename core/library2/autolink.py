@@ -174,13 +174,16 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
         return row["id"]
 
     from core.library2.profile_lookup import default_quality_profile_id
+    from core.library2.monitor_sync import artist_is_watchlisted
     external_json = (json.dumps({namespace: provider_id})
                      if namespace not in (None, "spotify") else "{}")
+    provider_ids = {namespace: provider_id} if namespace and provider_id else {}
+    monitored = int(artist_is_watchlisted(conn, name, provider_ids, profile_id=1))
     cur = conn.execute(
         "INSERT INTO lib2_artists(name, sort_name, spotify_id, external_ids, "
-        "quality_profile_id) VALUES(?, ?, ?, ?, ?)",
+        "quality_profile_id, monitored) VALUES(?, ?, ?, ?, ?, ?)",
         (name, name, provider_id if namespace == "spotify" else None,
-         external_json, default_quality_profile_id(conn)))
+         external_json, default_quality_profile_id(conn), monitored))
     return cur.lastrowid
 
 

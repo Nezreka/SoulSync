@@ -244,6 +244,48 @@ def test_process_wishlist_automatically_creates_batch_for_matching_tracks():
     assert any("Starting wishlist residual batch" in msg for msg in logger.info_messages)
 
 
+def test_playlist_scope_dispatches_only_matching_wishlist_tracks_without_cycle_mutation():
+    batch_map = {}
+    runtime, _service, _profiles_db, music_db, executor, _logger, _progress, _guards = _build_runtime(
+        tracks=[
+            {
+                "name": "In selected playlist",
+                "track_id": "selected::album-a",
+                "spotify_track_id": "selected::album-a",
+                "artists": [{"name": "Artist A"}],
+                "spotify_data": {"id": "selected", "album": {"album_type": "album"}},
+            },
+            {
+                "name": "Global wishlist only",
+                "track_id": "unrelated",
+                "spotify_track_id": "unrelated",
+                "artists": [{"name": "Artist B"}],
+                "spotify_data": {"id": "unrelated", "album": {"album_type": "single"}},
+            },
+        ],
+        cycle_value="albums",
+        count=2,
+        batch_map=batch_map,
+    )
+
+    process_wishlist_automatically(
+        runtime,
+        automation_id="playlist-run",
+        track_ids=["selected"],
+        profile_ids=[1],
+    )
+
+    assert len(executor.submissions) == 1
+    submitted_tracks = executor.submissions[0][1][2]
+    assert [track["track_id"] for track in submitted_tracks] == ["selected::album-a"]
+    assert music_db.duplicate_removals == []
+    assert music_db.cycle_value == "albums"
+    batch = next(iter(batch_map.values()))
+    assert batch["current_cycle"] == "playlist"
+    assert batch["wishlist_scope"] == "playlist"
+    assert batch["toggle_wishlist_cycle"] is False
+
+
 def test_wishlist_albums_cycle_splits_into_per_album_batches():
     """Multi-album wishlist run: each album with at least the
     threshold of missing tracks (default 2) emits its own sub-batch

@@ -1,6 +1,6 @@
 # Library v2 – Bug- und Integritäts-Tracker
 
-Stand: 18. Juli 2026
+Stand: 19. Juli 2026
 Status dieses Dokuments: aktive Arbeitsgrundlage; ergänzt den Library-v2-Plan und ersetzt dort keine ADRs.
 
 ## 1. Zweck und Quellen
@@ -31,6 +31,8 @@ Die folgenden Regeln sind die Grundlage für Priorität und Abnahme:
 7. Ein physisch verschobenes File darf bei einem späteren Post-Processing-Fehler nicht als unsichtbarer Orphan zurückbleiben.
 8. Ein fehlender Pfad wird nur bei gesundem Storage-Root bestätigt. Der Zwischenzustand `missing_suspected` muss sichtbar sein und darf nicht fälschlich als sicher `present` erscheinen.
 9. Provider-Identitäten sind stärker als Parser-Fragmente. Zwei Artist-Zeilen mit derselben konfliktfreien Provider-ID müssen zusammengeführt werden können, auch wenn ihre normalisierten Namen verschieden sind.
+10. „Run Pipeline“ auf einer Playlist darf in der Wishlist-Phase ausschließlich Tracks dieser Playlist verarbeiten; ein fehlender Scope darf niemals auf die globale Queue zurückfallen.
+11. Ein neu erzeugter Library-v2-Artist darf nur dann `monitored=1` erhalten, wenn eine echte Watchlist-Zeile oder eine explizite Library-v2-Regel dies begründet.
 
 ## 3. Priorisierte Übersicht
 
@@ -49,6 +51,9 @@ Die folgenden Regeln sind die Grundlage für Priorität und Abnahme:
 | LV2-011 | P1 | IMPLEMENTIERT | `w/` erzeugte Artist-Fragmente wie `Odetari w` |
 | LV2-012 | P1 | IMPLEMENTIERT, DATENREPARATUR AUSSTEHEND | Dedup war name-only und ignorierte gemeinsame Provider-ID |
 | LV2-013 | P1 | IMPLEMENTIERT (READ-ONLY) | End-to-End-Reconciler für Disk, Legacy, Library v2, Runtime und Acquisition fehlt |
+| LV2-014 | P2 | OFFEN | Enhanced-Search „In Your Library"-Erkennung sieht rein v2-native Artists nicht |
+| LV2-015 | P0 | IMPLEMENTIERT | Playlist-„Run Pipeline“ verarbeitete in Phase 4 die globale Wishlist |
+| LV2-016 | P0 | IMPLEMENTIERT + REPAIR | Neue Artists starteten per Schema-Default fälschlich als monitored |
 
 ## 4. Detailbefunde und Abnahme
 
@@ -413,9 +418,126 @@ Regressionstests:
 - `tests/library2/test_integrity_reconciler.py`
 - `tests/library2/test_maintenance_reconciliation_endpoints.py`
 
+### LV2-014 – Enhanced-Search erkennt v2-native Artists nicht als „In Your Library"
+
+Symptom:
+
+- Auf der Search-Seite (`enh-db-artists-section` vs. `enh-spotify-artists-section`)
+  kann ein Artist, den der Nutzer über Library v2 bereits importiert/monitort
+  hat, trotzdem in der externen „Artists"-Spalte statt unter „In Your
+  Library" auftauchen.
+
+Root Cause:
+
+- `core/search/orchestrator.py::_build_db_artists()` ruft
+  `deps.database.search_artists(...)` auf, was ausschließlich gegen die
+  Legacy-Medienserver-Spiegel-Tabelle in `database/music_database.py`
+  (befüllt über `insert_or_update_media_artist(..., server_source=...)`)
+  matcht.
+- `core/library2/mirror_outbox.py` spiegelt ausschließlich Watchlist-/
+  Wishlist-Operationen zwischen Library v2 und der Legacy-DB — keine
+  allgemeine Artist-Ownership.
+- Artists, die rein über Library v2 entstehen (Wishlist-Funde,
+  Discography-Discovery) tragen `legacy_artist_id = NULL`
+  (`core/library2/native_enrich.py`) und haben daher nie eine Zeile in der
+  Legacy-Spiegel-Tabelle, gegen die `search_artists()` matcht.
+
+Empfehlung (noch nicht umgesetzt):
+
+- `_build_db_artists()` zusätzlich gegen `lib2_artists` matchen lassen
+  (oder Legacy- und v2-Treffer je Query vereinigen/deduplizieren), sodass
+  v2-native Artists korrekt als „In Your Library" erkannt werden.
+- Kein Blocker für den aktuellen PR-Stand: betrifft nur Artists ohne
+  `legacy_artist_id`-Link, aktuell eine Minderheit. Wird relevanter, je
+  mehr Imports komplett am Legacy-Pfad vorbeilaufen.
+
+### LV2-015 – Playlist-Pipeline darf nicht die globale Wishlist starten
+
+Symptom:
+
+- Ein Klick auf „Run Pipeline“ bei einer einzelnen Mirrored Playlist führte
+  Refresh, Discovery und Sync korrekt nur für diese Playlist aus.
+- Phase 4 startete anschließend jedoch Downloads für beliebige offene
+  Wishlist-Tracks aus der gesamten Library.
+
+Root Cause:
+
+- `core/automation/handlers/_pipeline_shared.py::run_wishlist_phase()` rief
+  `deps.process_wishlist_automatically(automation_id=None)` ohne Track- oder
+  Profilfilter auf.
+- `core/wishlist/processing.py::process_wishlist_automatically()` kombinierte
+  daraufhin wie für den Timer vorgesehen die Wishlist aller Profile und
+  verarbeitete den globalen Album-/Single-Zyklus.
+
+Implementierter Fix:
+
+- Der gemeinsame Pipeline-Tail leitet den Scope aus den tatsächlich
+  verarbeiteten Playlist-Zeilen ab: bevorzugte Discovery-ID,
+  `spotify_hint`, native `source_track_id` sowie das konkrete Profil.
+- Organize-by-Playlist-Einträge sind ausgeschlossen, weil sie ihren eigenen
+  direkten Downloadpfad besitzen.
+- Der Wishlist-Prozessor akzeptiert einen expliziten `track_ids`-/
+  `profile_ids`-Scope, liest nur die exakt passenden Wishlist-Zeilen und
+  verarbeitet in diesem Lauf alle Kategorien.
+- Der gescopte Lauf führt keine globale Duplicate-Cleanup-Mutation aus und
+  verändert den globalen Album-/Single-Zyklus auch bei Completion nicht.
+- Fail closed: Kann keine Track-Identität für die Playlist ermittelt werden,
+  wird Phase 4 übersprungen; die globale Wishlist wird niemals als Fallback
+  gestartet.
+
+Regressionstests:
+
+- `tests/automation/test_playlist_pipeline_folder_mode.py`
+- `tests/wishlist/test_automation.py`
+- `tests/wishlist/test_processing.py`
+
+### LV2-016 – Neue Artists dürfen nicht per Default monitored sein
+
+Symptom:
+
+- Durch Wishlist-/Download-Materialisierung neu angelegte
+  `lib2_artists`-Zeilen erschienen als überwacht, obwohl der Artist nicht auf
+  der Watchlist stand.
+- Auf laufenden Installationen wurde dieser Drift nach dem einmaligen
+  Legacy-Erstimport nicht mehr korrigiert.
+
+Root Cause:
+
+- `core/library2/schema.py` definierte
+  `lib2_artists.monitored INTEGER NOT NULL DEFAULT 1`.
+- Autolink und Artist-Resolver ließen `monitored` beim Insert aus und erbten
+  deshalb den falschen Default.
+- Die einzige vollständige Watchlist-Ableitung lief bisher im initialen
+  `apply_monitoring_from_watchlist_wishlist()`-Importpfad.
+
+Implementierter Fix:
+
+- Der frische Schema-Default ist `0`. Eine idempotente SQLite-Migration stellt
+  auch bestehende Tabellen von Default `1` auf `0` um, ohne vorhandene
+  effektive Monitorwerte zu verändern.
+- Alle Library-v2-Artist-Insertpfade schreiben `monitored` explizit. Importer
+  starten neutral mit `0`; der initiale Import leitet danach weiterhin die
+  echte Watchlist-Projektion ab.
+- Der Autolink-/Materialize-Pfad prüft bei einer neuen Artist-Zeile direkt die
+  Watchlist (Provider-ID, danach Name): nur ein realer Watchlist-Treffer startet
+  als monitored.
+- Der stündliche Repair-Job `monitoring_list_reconcile` gleicht bestehende
+  Installationen dauerhaft ab. Explizite Library-v2-Regeln gewinnen und werden
+  in die Watchlist gespiegelt; alte/default/importierte Flags ohne explizite
+  Regel werden aus der echten Watchlist abgeleitet. Dadurch werden Phantom-
+  Artists demonitoriert, ohne echte Nutzerentscheidungen zu verlieren.
+
+Regressionstests:
+
+- `tests/library2/test_schema.py`
+- `tests/library2/test_autolink.py`
+- `tests/library2/test_monitor_sync.py`
+- `tests/repair_jobs/test_monitoring_list_reconcile.py`
+
 ## 5. Verbleibende Rollout-/Betriebsaktionen
 
-Die bekannten Codefehler LV2-001 bis LV2-013 sind implementiert. Keine der
+Die bekannten Codefehler LV2-001 bis LV2-013 sowie LV2-015 und LV2-016 sind
+implementiert. LV2-014 bleibt offen. Keine der
 folgenden Aktionen ist eine noch offene Codekorrektur:
 
 1. Acquisition- und Integritäts-Dry-Run nach Deployment prüfen und Counts
@@ -444,6 +566,19 @@ pytest tests/imports/test_import_pipeline.py
 Ergebnis: `163 passed`.
 
 Zusätzlich wurden die geänderten Python-Module inklusive `web_server.py` mit `py_compile` geprüft.
+
+Ergänzender Regressionslauf für LV2-015/LV2-016 und den Monitoring-Reconcile
+am 19. Juli 2026:
+
+```text
+pytest tests/automation tests/wishlist tests/library2 tests/repair_jobs -q
+```
+
+Ergebnis: `1453 passed`. Die drei Warnungen sind zwei bereits vorhandene
+Coroutine-Warnungen in `test_handlers_maintenance.py` und eine bestehende
+Python-3.12-SQLite-Deprecation-Warnung; es gab keine Testfehler. Zusätzlich
+waren `ruff check`, `py_compile` und `git diff --check` für alle berührten
+Module sauber.
 
 Breiter Regressionslauf:
 

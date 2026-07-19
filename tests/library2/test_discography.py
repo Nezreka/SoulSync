@@ -1067,7 +1067,9 @@ def test_refresh_fans_out_auto_monitor_and_repair_across_group(
     imported_conn.commit()
     imported_conn.execute(
         "UPDATE lib2_artists SET discography_synced_at=CURRENT_TIMESTAMP, "
-        "monitor_new_items='all' WHERE id IN (?,?)", (drake_id, alias_id))
+        "monitor_new_items='all', monitored=1 WHERE id IN (?,?)",
+        (drake_id, alias_id),
+    )
     imported_conn.commit()
 
     _fake_discography_by_name(monkeypatch, {

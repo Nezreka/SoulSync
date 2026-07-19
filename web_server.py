@@ -18176,7 +18176,12 @@ def is_watchlist_actually_scanning():
 
     return True
 
-def _process_wishlist_automatically(automation_id=None):
+def _process_wishlist_automatically(
+    automation_id=None,
+    *,
+    track_ids=None,
+    profile_ids=None,
+):
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
     from core.wishlist_service import get_wishlist_service
@@ -18220,7 +18225,12 @@ def _process_wishlist_automatically(automation_id=None):
         profile_id=1,
     )
 
-    _process_wishlist_automatically_impl(runtime, automation_id=automation_id)
+    _process_wishlist_automatically_impl(
+        runtime,
+        automation_id=automation_id,
+        track_ids=track_ids,
+        profile_ids=profile_ids,
+    )
 
 # ===============================
 # == DATABASE UPDATER API      ==

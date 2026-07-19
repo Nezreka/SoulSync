@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     aliases TEXT NOT NULL DEFAULT '[]',
     banner_url TEXT,
     enrichment TEXT NOT NULL DEFAULT '{}',            -- provider-keyed extra bio/stats (lastfm/genius/discogs; see importer._artist_enrichment_payload)
-    monitored INTEGER NOT NULL DEFAULT 1,
+    monitored INTEGER NOT NULL DEFAULT 0,
     monitor_new_items TEXT NOT NULL DEFAULT 'all',   -- 'all' | 'none' | 'new'
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
@@ -714,6 +714,51 @@ def _backfill_quality_profile_provenance(cursor: Any) -> None:
     )
 
 
+def _migrate_artist_monitored_default(cursor: Any) -> None:
+    """Change old installs' artist default from monitored to unmonitored.
+
+    SQLite cannot alter a column default in place. A temporary replacement
+    column preserves every existing effective value while making omitted future
+    inserts fail safe. Application writers also pass ``monitored`` explicitly;
+    this migration closes the remaining raw-SQL/default path.
+    """
+    info = {
+        row[1]: row for row in cursor.execute(
+            "PRAGMA table_info(lib2_artists)"
+        ).fetchall()
+    }
+    monitored = info.get("monitored")
+    if monitored is None:
+        return
+    normalized_default = str(monitored[4] or "").strip("()'\" ")
+    if normalized_default == "0":
+        return
+
+    savepoint = "migrate_lib2_artist_monitored_default"
+    cursor.execute(f"SAVEPOINT {savepoint}")
+    try:
+        if "monitored_v2" in info:
+            cursor.execute("ALTER TABLE lib2_artists DROP COLUMN monitored_v2")
+        cursor.execute(
+            "ALTER TABLE lib2_artists ADD COLUMN monitored_v2 "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+        cursor.execute(
+            "UPDATE lib2_artists SET monitored_v2=CASE "
+            "WHEN monitored<>0 THEN 1 ELSE 0 END"
+        )
+        cursor.execute("ALTER TABLE lib2_artists DROP COLUMN monitored")
+        cursor.execute(
+            "ALTER TABLE lib2_artists RENAME COLUMN monitored_v2 TO monitored"
+        )
+        cursor.execute(f"RELEASE {savepoint}")
+        logger.info("Migrated Library-v2 artist monitored default from 1 to 0")
+    except Exception:
+        cursor.execute(f"ROLLBACK TO {savepoint}")
+        cursor.execute(f"RELEASE {savepoint}")
+        raise
+
+
 def ensure_library_v2_schema(connection: Any) -> None:
     """Create the Library v2 tables + indexes if missing.
 
@@ -747,6 +792,7 @@ def ensure_library_v2_schema(connection: Any) -> None:
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
     _backfill_quality_profile_provenance(cursor)
+    _migrate_artist_monitored_default(cursor)
     # §40 alias registry index — runs AFTER the additive column migration
     # above so it also works on installs that predate canonical_artist_id.
     try:

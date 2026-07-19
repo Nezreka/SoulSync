@@ -59,6 +59,36 @@ def test_idempotent_rerun():
     assert idx >= 16
 
 
+def test_migrates_old_artist_monitored_default_without_changing_values():
+    conn = sqlite3.connect(":memory:")
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists(name, monitored) VALUES('On', 1)")
+    conn.execute("INSERT INTO lib2_artists(name, monitored) VALUES('Off', 0)")
+
+    # Recreate the historical DEFAULT 1 shape while preserving row values.
+    conn.execute(
+        "ALTER TABLE lib2_artists ADD COLUMN monitored_old "
+        "INTEGER NOT NULL DEFAULT 1"
+    )
+    conn.execute("UPDATE lib2_artists SET monitored_old=monitored")
+    conn.execute("ALTER TABLE lib2_artists DROP COLUMN monitored")
+    conn.execute(
+        "ALTER TABLE lib2_artists RENAME COLUMN monitored_old TO monitored"
+    )
+
+    ensure_library_v2_schema(conn)
+
+    assert dict(conn.execute(
+        "SELECT name, monitored FROM lib2_artists ORDER BY name"
+    ).fetchall()) == {"Off": 0, "On": 1}
+    info = {
+        column[1]: column for column in conn.execute(
+            "PRAGMA table_info(lib2_artists)"
+        )
+    }
+    assert info["monitored"][4] == "0"
+
+
 def test_migrates_parallel_profile_table_to_app_wide():
     """Old installs carried a parallel lib2_quality_profiles table whose ids
     never reached the pipeline. Ensure remaps assignments by profile name onto
@@ -116,6 +146,13 @@ def test_foreign_keys_and_inserts():
     cur = conn.cursor()
     cur.execute("INSERT INTO lib2_artists(name) VALUES('A')")
     aid = cur.lastrowid
+    assert cur.execute(
+        "SELECT monitored FROM lib2_artists WHERE id=?", (aid,)
+    ).fetchone()[0] == 0
+    artist_info = {
+        column[1]: column for column in cur.execute("PRAGMA table_info(lib2_artists)")
+    }
+    assert artist_info["monitored"][4] == "0"
     cur.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Alb')", (aid,))
     alb = cur.lastrowid
     cur.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'T')", (alb,))

@@ -462,6 +462,36 @@ def _watchlist_artist_snapshot(
     return True, names, ids
 
 
+def artist_is_watchlisted(
+    conn: Any,
+    name: Optional[str],
+    provider_ids: Optional[Mapping[str, Any]] = None,
+    *,
+    profile_id: int = 1,
+) -> bool:
+    """Return the real Watchlist state for a newly materialized artist.
+
+    This is the insert-time counterpart to ``reconcile_artist_watchlist``.
+    Missing legacy tables fail closed to unmonitored; provider identity wins,
+    with the same case-insensitive name fallback used by the repair pass.
+    """
+    available, watchlist_names, watchlist_ids = _watchlist_artist_snapshot(
+        conn, profile_id=profile_id,
+    )
+    if not available:
+        return False
+    normalized_name = str(name or "").strip().casefold()
+    ids = {
+        str(value).strip()
+        for value in (provider_ids or {}).values()
+        if value is not None and str(value).strip()
+    }
+    return bool(
+        (normalized_name and normalized_name in watchlist_names)
+        or ids.intersection(watchlist_ids)
+    )
+
+
 def reconcile_artist_watchlist(
     db: Any,
     *,
@@ -682,6 +712,7 @@ def reconcile_track_wishlist(
 
 
 __all__ = [
+    "artist_is_watchlisted",
     "demonitor_lib2_artists_for_removed_watchlist",
     "demonitor_lib2_tracks_for_removed_wishlist",
     "reconcile_artist_watchlist",

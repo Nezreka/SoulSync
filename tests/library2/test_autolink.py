@@ -79,6 +79,56 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
+def test_new_autolink_artist_is_not_monitored_without_watchlist(lib2_enabled, imported_conn):
+    ctx = _context(_final_processed_path="/music/Newcomer/Debut/01 First.flac")
+    ctx["track_info"] = {
+        "name": "First",
+        "artists": [{"name": "Newcomer", "id": "newcomer-sp"}],
+        "album": {"name": "Debut", "id": "debut-sp", "total_tracks": 1,
+                  "album_type": "single"},
+        "track_number": 1,
+        "provider": "spotify",
+        "id": "first-sp",
+    }
+    ctx["_embedded_id_tags"] = {"SPOTIFY_TRACK_ID": "first-sp"}
+
+    assert A.link_download_into_library_v2(ctx) is not None
+    assert imported_conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE spotify_id='newcomer-sp'"
+    ).fetchone()[0] == 0
+
+
+def test_new_autolink_artist_inherits_real_watchlist_state(lib2_enabled, imported_conn):
+    imported_conn.execute(
+        """CREATE TABLE IF NOT EXISTS watchlist_artists(
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               spotify_artist_id TEXT,
+               artist_name TEXT NOT NULL,
+               profile_id INTEGER NOT NULL DEFAULT 1)"""
+    )
+    imported_conn.execute(
+        "INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+        "VALUES('watched-sp', 'Watched Newcomer', 1)"
+    )
+    imported_conn.commit()
+    ctx = _context(_final_processed_path="/music/Watched Newcomer/Debut/01 First.flac")
+    ctx["track_info"] = {
+        "name": "First",
+        "artists": [{"name": "Watched Newcomer", "id": "watched-sp"}],
+        "album": {"name": "Debut", "id": "watched-debut", "total_tracks": 1,
+                  "album_type": "single"},
+        "track_number": 1,
+        "provider": "spotify",
+        "id": "watched-first",
+    }
+    ctx["_embedded_id_tags"] = {"SPOTIFY_TRACK_ID": "watched-first"}
+
+    assert A.link_download_into_library_v2(ctx) is not None
+    assert imported_conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE spotify_id='watched-sp'"
+    ).fetchone()[0] == 1
+
+
 def test_persists_verification_and_acoustid_status(lib2_enabled, imported_conn):
     """Deep-dive A7/C4: the pipeline already computes these upstream (same
     context) — the autolink callback is the only place that can put them on
