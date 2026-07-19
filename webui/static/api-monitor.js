@@ -1460,6 +1460,7 @@ function _ensureWatchlistLabelsStyles() {
     #watchlist-page.wl-view-labels #watchlist-artists-list,
     #watchlist-page.wl-view-labels #watchlist-page-empty,
     #watchlist-page.wl-view-labels .watchlist-last-scan-strip,
+    #watchlist-page.wl-view-labels #scan-watchlist-btn,
     #watchlist-page.wl-view-labels #watchlist-page-settings-btn { display:none !important; }
     #watchlist-page .watchlist-labels-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:16px; }
     #watchlist-page .wl-label-card { position:relative; background:rgba(255,255,255,0.04);
