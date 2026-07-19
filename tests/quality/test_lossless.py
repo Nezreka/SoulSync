@@ -77,6 +77,27 @@ def test_sql_where_clause_matches_candidates_only():
     assert "LIKE '%.mp3'" not in where and "LIKE '%.aac'" not in where
 
 
+# ── Library-v2 badge + file-election derive from the ONE canonical set ──
+# (review Teil B, reuse: the three lossless sets had drifted; decision was to
+#  align badge + file-selection to the quality model's set.)
+
+def test_lib2_quality_tier_badge_matches_canonical_lossless():
+    from core.library2.status import quality_tier
+    # Every canonical lossless format badges lossless (with a bit depth).
+    for fmt in LOSSLESS_FORMATS:
+        assert quality_tier(fmt, None, 16) in ("lossless", "lossless_hi")
+    # Formats the model does NOT rank lossless must not badge lossless.
+    for fmt in ('aiff', 'ape', 'wv', 'm4a'):
+        assert quality_tier(fmt, 900, 16) not in ("lossless", "lossless_hi")
+
+
+def test_lib2_file_election_lossless_set_matches_canonical():
+    from core.library2.track_files import _LOSSLESS_FORMATS
+    parsed = {tok.strip().strip("'") for tok in
+              _LOSSLESS_FORMATS.strip("()").split(",")}
+    assert parsed == set(LOSSLESS_FORMATS)
+
+
 # ── lossy_output_would_overwrite_source (the safety invariant) ──
 
 def test_overwrite_detected_when_paths_equal():

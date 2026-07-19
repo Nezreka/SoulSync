@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
+from core.quality.lossless import LOSSLESS_FORMATS as _CANONICAL_LOSSLESS
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.track_files")
@@ -38,7 +39,12 @@ logger = get_logger("library2.track_files")
 FILE_STATES = ("active", "missing_suspected", "missing_confirmed",
                "quarantined", "deleted")
 
-_LOSSLESS_FORMATS = "('flac','alac','ape','wav','aiff')"
+# SQL IN-list of lossless formats, derived from the one canonical set the
+# quality engine ranks (flac/alac/wav/dsf) so file election here and the UI
+# badge (core.library2.status) can't disagree about what counts as lossless
+# (review Teil B, reuse). Values are trusted literals from a frozenset.
+_LOSSLESS_FORMATS = "(" + ",".join(
+    f"'{fmt}'" for fmt in sorted(_CANONICAL_LOSSLESS)) + ")"
 
 
 def quality_order(alias: str = "") -> str:

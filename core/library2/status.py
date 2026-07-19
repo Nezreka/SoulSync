@@ -13,16 +13,13 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Mapping, Optional
 
+from core.quality.lossless import is_lossless_format
+
 # Tags the UI surfaces as "present / missing" for a track file. Order = display order.
 EXPECTED_TAGS = (
     "title", "artist", "album", "albumartist", "track_number",
     "disc_number", "year", "genre", "cover",
 )
-
-# Lossless container formats.
-_LOSSLESS_FORMATS = {"flac", "alac", "wav", "aiff", "ape", "wv", "m4a"}
-# m4a is ambiguous (ALAC vs AAC); treated as lossless only when bit_depth is set.
-
 
 def quality_tier(fmt: Optional[str], bitrate: Optional[int], bit_depth: Optional[int]) -> str:
     """Classify a file into a coarse quality tier for at-a-glance display.
@@ -31,7 +28,13 @@ def quality_tier(fmt: Optional[str], bitrate: Optional[int], bit_depth: Optional
     (>=256 kbps), ``'lossy'`` (<256 kbps), or ``'unknown'``.
     """
     f = (fmt or "").lower().lstrip(".")
-    is_lossless = f in _LOSSLESS_FORMATS and not (f == "m4a" and not bit_depth)
+    # One canonical "is this lossless" set (flac/alac/wav/dsf), shared with the
+    # quality-ranking engine (core.quality.lossless) so the badge can never
+    # disagree with how a file is actually scored or elected as primary
+    # (review Teil B, reuse). Formats the engine does not rank as a lossless
+    # tier — aiff/ape/wavpack, and m4a which needs a codec probe this pure
+    # DB-only function can't do — badge as lossy here too, by design.
+    is_lossless = is_lossless_format(f)
     if is_lossless:
         if bit_depth and bit_depth > 16:
             return "lossless_hi"
