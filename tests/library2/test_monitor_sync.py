@@ -12,6 +12,7 @@ import sqlite3
 from core.library2.monitor_rules import (
     PROVENANCE_LEGACY,
     PROVENANCE_USER,
+    PROVENANCE_WISHLIST,
     record_rule,
 )
 from core.library2.monitor_sync import (
@@ -413,6 +414,30 @@ def test_artist_reconcile_clears_nonexplicit_default_drift(imported_conn):
     assert conn.execute(
         "SELECT monitored FROM lib2_artists WHERE id=?", (artist,),
     ).fetchone()[0] == 0
+
+
+def test_artist_reconcile_normalizes_nonlegacy_nonuser_rule(imported_conn):
+    """Efficiency guard (review Teil B) must not skip a rule that needs
+    normalizing: a non-user, non-legacy artist rule (e.g. wishlist_import)
+    is still rewritten to legacy provenance — only an already-matching
+    legacy rule is left untouched to avoid the redundant hourly re-upsert."""
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    artist = _add_artist(conn, "Wishlisted Artist", monitored=1, spotify_id="wa-sp")
+    conn.execute(
+        "INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+        "VALUES('wa-sp', 'Wishlisted Artist', 1)")
+    # An existing non-user, non-legacy rule that must be normalized to legacy.
+    record_rule(conn, "artist", artist, True, PROVENANCE_WISHLIST, profile_id=1)
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    rule = conn.execute(
+        "SELECT monitored, provenance FROM lib2_monitor_rules "
+        "WHERE entity_type='artist' AND entity_id=?", (artist,)).fetchone()
+    assert dict(rule) == {"monitored": 1, "provenance": PROVENANCE_LEGACY}
 
 
 def test_artist_reconcile_name_match_tolerates_double_spaces(imported_conn):

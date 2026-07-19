@@ -590,14 +590,26 @@ def reconcile_artist_watchlist(
                 stats["monitor_flags_changed"] += 1
                 affected_tracks.update(entity_track_ids(conn, "artist", artist_id))
             if not explicit:
-                record_rule(
-                    conn,
-                    "artist",
-                    artist_id,
-                    desired,
-                    PROVENANCE_LEGACY,
-                    profile_id=profile_id,
+                # Skip the no-op rewrite when the legacy rule already matches
+                # (right provenance AND value): a full hourly reconcile
+                # otherwise re-upserts EVERY non-explicit artist's rule,
+                # bumping updated_at and churning the index for nothing
+                # (review Teil B). A differently-provenanced non-user rule
+                # (e.g. wishlist_import) is still normalized to legacy, same
+                # as before.
+                rule_already_matches = (
+                    row["rule_provenance"] == PROVENANCE_LEGACY
+                    and bool(row["rule_monitored"]) == desired
                 )
+                if not rule_already_matches:
+                    record_rule(
+                        conn,
+                        "artist",
+                        artist_id,
+                        desired,
+                        PROVENANCE_LEGACY,
+                        profile_id=profile_id,
+                    )
 
             # Explicit V2 intent wins in either direction. Imported/default
             # rows already mirror the Watchlist and need no outgoing op.
