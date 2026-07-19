@@ -96,6 +96,9 @@ class _FakeDB:
     def get_watchlist_artists(self, profile_id=1):
         return self._watchlist_artists
 
+    def get_watchlist_labels(self, profile_id=None):
+        return []
+
     def get_profiles_with_listenbrainz(self):
         return self._lb_profiles
 
