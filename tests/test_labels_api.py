@@ -150,3 +150,47 @@ class TestWatchlistToggles:
         r = client.get("/api/labels/watchlist")
         names = [l["label_name"] for l in r.get_json()["labels"]]
         assert "Stones Throw" in names
+
+
+class _ITunesAlbum:
+    def __init__(self, name, url):
+        self.name = name
+        self.image_url = url
+
+
+class TestCover:
+    def _cfg(self, client, albums):
+        class _ITunes:
+            def search_albums(self, q, limit=5):
+                return list(albums)
+        labels_api._cover_cache.clear()
+        labels_api.configure(db_getter=lambda: client._db, itunes_getter=lambda: _ITunes())
+
+    def test_redirects_to_itunes_art(self, client):
+        self._cfg(client, [_ITunesAlbum("Teen Dream", "https://is1.mzstatic.com/a/3000x3000bb.jpg")])
+        r = client.get("/api/labels/cover?artist=Beach+House&album=Teen+Dream")
+        assert r.status_code == 302
+        assert "mzstatic.com" in r.headers["Location"]
+        assert "500x500bb" in r.headers["Location"]   # downsized for the grid
+
+    def test_404_when_album_name_mismatches(self, client):
+        # never show the WRONG cover — a non-matching top result is rejected
+        self._cfg(client, [_ITunesAlbum("Some Other Record", "https://x/3000x3000bb.jpg")])
+        r = client.get("/api/labels/cover?artist=Beach+House&album=Teen+Dream")
+        assert r.status_code == 404
+
+    def test_404_on_missing_params(self, client):
+        assert client.get("/api/labels/cover?artist=X").status_code == 404
+        assert client.get("/api/labels/cover?album=Y").status_code == 404
+
+    def test_result_is_cached(self, client):
+        calls = {"n": 0}
+        class _ITunes:
+            def search_albums(self, q, limit=5):
+                calls["n"] += 1
+                return [_ITunesAlbum("Bleach", "https://is1.mzstatic.com/b/3000x3000bb.jpg")]
+        labels_api._cover_cache.clear()
+        labels_api.configure(db_getter=lambda: client._db, itunes_getter=lambda: _ITunes())
+        client.get("/api/labels/cover?artist=Nirvana&album=Bleach")
+        client.get("/api/labels/cover?artist=Nirvana&album=Bleach")
+        assert calls["n"] == 1     # second hit served from cache
