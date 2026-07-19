@@ -146,7 +146,12 @@ def label_catalog(label_mbid: str, *, mb_getter: Optional[Callable] = None,
                 by_rg[rg_id] = {'artist': artist,
                                 'artist_id': _artist_id_from_credit(rel),
                                 'album': title,
-                                'year': date, 'release_group_id': rg_id}
+                                'year': date, 'release_group_id': rg_id,
+                                # a concrete RELEASE mbid → Cover Art Archive art
+                                # lives at release scope far more often than at
+                                # release-group scope (fixes the blank covers)
+                                'release_id': str(rel.get('id') or ''),
+                                'primary_type': primary}
         if len(releases) < _PAGE_SIZE:
             break
 

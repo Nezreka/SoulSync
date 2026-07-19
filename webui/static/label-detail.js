@@ -1,14 +1,15 @@
 // ============================================================================
 // LABEL DETAIL PAGE
 // ----------------------------------------------------------------------------
-// A record label's catalog as an acquisition surface (option A): a newest-first
-// flat release grid with an owned/missing overlay, All/Missing/Owned filter +
-// sort, lazy cover art, and infinite scroll — built to FEEL like the artist
-// detail page, not a spreadsheet dump.
+// A record label's catalog as an acquisition surface: a newest-first flat grid
+// of the SAME .release-card/.album-card the artist-detail discography uses, so
+// it matches the app. Clicking a release opens the standard "get this album"
+// download modal (like clicking an album in search); a secondary button jumps
+// to that artist's page. Owned/missing overlay + All/Missing/Owned filter.
 //
-// Purely additive + self-contained: it only calls the /api/labels/* blueprint
-// (+ the shared /api/enhanced-search/library-check for ownership) and owns its
-// own DOM + scoped styles. Reached via navigateToLabelDetail(id, name).
+// Purely additive + self-contained: it calls the /api/labels/* blueprint, the
+// shared /api/enhanced-search/library-check (ownership), and the shared album
+// detail + download-modal helpers. Reached via navigateToLabelDetail(id, name).
 // ============================================================================
 
 (function () {
@@ -18,19 +19,18 @@
 
     let _wired = false;
     let _current = { id: null, name: '', watching: false, backlog: false };
-    let _all = [];                 // releases loaded so far (newest-first from API)
-    let _owned = new Set();        // "artist||album" keys known owned
-    let _checked = new Set();      // keys we've run the library-check for
-    let _coverLoaded = new Set();  // cover URLs already fetched (so re-renders don't re-fetch)
+    let _all = [];
+    let _owned = new Set();
+    let _checked = new Set();
+    let _byKey = new Map();        // key -> release (for click lookup)
     let _page = 0;
     let _hasMore = false;
     let _loading = false;
-    let _filter = 'all';           // all | missing | owned
-    let _sort = 'newest';          // newest | oldest | artist
+    let _filter = 'all';
+    let _sort = 'newest';
     let _returnTo = 'search';
-    let _coverObserver = null;
     let _sentinelObserver = null;
-    let _reqToken = 0;             // guards against a stale label's responses
+    let _reqToken = 0;
 
     function _esc(s) {
         if (typeof escapeHtml === 'function') return escapeHtml(s == null ? '' : String(s));
@@ -41,6 +41,13 @@
 
     const _key = (r) => `${(r.artist || '').toLowerCase()}||${(r.album || '').toLowerCase()}`;
 
+    // Cover art at RELEASE scope (art lives there far more often than at
+    // release-group scope, which is why the group endpoint was mostly blank).
+    function _coverUrl(rel) {
+        const rid = rel && rel.release_id;
+        return rid ? `https://coverartarchive.org/release/${encodeURIComponent(rid)}/front-250` : '';
+    }
+
     function _injectStyles() {
         if (document.getElementById('label-detail-styles')) return;
         const css = `
@@ -50,63 +57,49 @@
             font-size: 13px; margin-bottom: 20px; }
         #label-detail-page .label-detail-back:hover { background: rgba(255,255,255,0.12); color: #fff; }
         #label-detail-page .label-detail-hero { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
-        #label-detail-page .label-detail-hero-art { width: 108px; height: 108px; border-radius: 16px; flex: 0 0 auto;
-            display: flex; align-items: center; justify-content: center; font-size: 52px;
-            background: linear-gradient(135deg, rgba(29,185,84,0.22), rgba(255,255,255,0.05));
+        #label-detail-page .label-detail-hero-art { width: 104px; height: 104px; border-radius: 16px; flex: 0 0 auto;
+            display: flex; align-items: center; justify-content: center; font-size: 50px;
+            background: linear-gradient(135deg, rgba(var(--accent-rgb,29,185,84),0.22), rgba(255,255,255,0.05));
             border: 1px solid rgba(255,255,255,0.08); }
         #label-detail-page .label-detail-hero-main { flex: 1 1 260px; min-width: 0; }
         #label-detail-page .label-detail-eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 11px;
-            font-weight: 700; color: #1db954; margin-bottom: 6px; }
-        #label-detail-page .label-detail-name { font-size: 34px; font-weight: 800; margin: 0; color: var(--text-primary,#fff);
+            font-weight: 700; color: rgb(var(--accent-light-rgb,52,211,120)); margin-bottom: 6px; }
+        #label-detail-page .label-detail-name { font-size: 32px; font-weight: 800; margin: 0; color: var(--text-primary,#fff);
             line-height: 1.1; overflow: hidden; text-overflow: ellipsis; }
         #label-detail-page .label-detail-meta { color: var(--text-secondary,#9aa0aa); font-size: 13px; margin-top: 8px; }
         #label-detail-page .label-detail-hero-actions { display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
-        #label-detail-page .label-detail-watch-btn { padding: 11px 22px; border-radius: 999px; cursor: pointer;
-            font-size: 14px; font-weight: 700; border: none; white-space: nowrap;
-            background: linear-gradient(135deg,#1db954,#12833b); color: #fff; transition: filter .15s, background .15s; }
-        #label-detail-page .label-detail-watch-btn:hover { filter: brightness(1.08); }
-        #label-detail-page .label-detail-watch-btn.watching { background: rgba(255,255,255,0.08);
-            color: var(--text-secondary,#cfd3da); border: 1px solid rgba(255,255,255,0.16); }
-        #label-detail-page .label-detail-watch-btn.watching:hover { background: rgba(220,60,60,0.16); color: #ff8080; border-color: rgba(220,60,60,0.4); }
         #label-detail-page .label-detail-backlog { display: flex; align-items: center; gap: 8px; }
         #label-detail-page .label-detail-backlog-label { font-size: 12px; color: var(--text-secondary,#8a909a); }
         #label-detail-page .label-detail-seg { display: inline-flex; background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; padding: 2px; }
         #label-detail-page .label-detail-seg button { border: none; background: transparent; color: var(--text-secondary,#9aa0aa);
             font-size: 12px; padding: 4px 12px; border-radius: 999px; cursor: pointer; }
-        #label-detail-page .label-detail-seg button.active { background: #1db954; color: #fff; }
+        #label-detail-page .label-detail-seg button.active { background: rgb(var(--accent-rgb,29,185,84)); color: #fff; }
         #label-detail-page .label-detail-toolbar { display: flex; align-items: center; justify-content: space-between;
             gap: 14px; margin: 26px 0 18px; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 20px; }
         #label-detail-page .label-detail-filters { display: flex; gap: 8px; }
         #label-detail-page .label-detail-filters button { background: rgba(255,255,255,0.05); color: var(--text-secondary,#9aa0aa);
             border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; padding: 7px 16px; cursor: pointer; font-size: 13px; font-weight: 600; }
         #label-detail-page .label-detail-filters button:hover { color: #fff; }
-        #label-detail-page .label-detail-filters button.active { background: linear-gradient(135deg,#1db954,#12833b); color: #fff; border-color: transparent; }
+        #label-detail-page .label-detail-filters button.active { background: rgba(var(--accent-rgb,29,185,84),0.9); color: #fff; border-color: transparent; }
         #label-detail-page .label-detail-filters button span { opacity: .7; font-size: 12px; margin-left: 2px; }
         #label-detail-page .label-detail-sort { background: rgba(255,255,255,0.05); color: var(--text-primary,#eaecef);
             border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
         #label-detail-page .label-detail-status { color: var(--text-secondary,#9aa0aa); padding: 40px 0; text-align: center; font-size: 15px; }
-        #label-detail-page .label-release-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); gap: 18px; }
-        #label-detail-page .label-release-card { position: relative; }
-        #label-detail-page .label-release-card.clickable { cursor: pointer; }
-        #label-detail-page .label-release-coverwrap { position: relative; width: 100%; aspect-ratio: 1/1; border-radius: 10px;
-            overflow: hidden; background: rgba(255,255,255,0.05); }
-        #label-detail-page .label-release-cover { width: 100%; height: 100%; object-fit: cover; display: block; }
-        #label-detail-page .label-release-coverwrap.ph::after { content: '💿'; position: absolute; inset: 0;
-            display: flex; align-items: center; justify-content: center; font-size: 42px; opacity: .5; }
-        #label-detail-page .label-release-card.clickable:hover .label-release-coverwrap { outline: 2px solid rgba(29,185,84,0.6); outline-offset: 2px; }
-        #label-detail-page .label-owned-badge { position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 700;
-            padding: 3px 9px; border-radius: 999px; background: rgba(29,185,84,0.92); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
-        #label-detail-page .label-missing-badge { position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 700;
-            padding: 3px 9px; border-radius: 999px; background: rgba(0,0,0,0.6); color: #cfd3da; }
-        #label-detail-page .label-release-title { font-size: 13px; font-weight: 600; color: var(--text-primary,#eaecef);
-            margin-top: 8px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-        #label-detail-page .label-release-sub { font-size: 12px; color: var(--text-secondary,#8a909a); margin-top: 2px;
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #label-detail-page .label-release-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 20px; }
+        /* the go-to-artist chip on a release card (reuses .album-card art frame) */
+        #label-detail-page .album-card .label-card-artist-btn { position: absolute; top: 8px; right: 8px; z-index: 3;
+            width: 28px; height: 28px; border-radius: 50%; border: none; cursor: pointer; font-size: 13px;
+            background: rgba(0,0,0,0.55); color: #fff; opacity: 0; transition: opacity .15s; display: flex;
+            align-items: center; justify-content: center; }
+        #label-detail-page .album-card:hover .label-card-artist-btn { opacity: 1; }
+        #label-detail-page .album-card .label-card-artist-btn:hover { background: rgb(var(--accent-rgb,29,185,84)); }
+        #label-detail-page .album-card .album-card-year .lc-artist { color: var(--text-primary,#d6d9de); }
         @media (max-width: 640px) {
             #label-detail-page .label-detail-container { padding: 16px; }
             #label-detail-page .label-detail-hero-actions { align-items: stretch; width: 100%; }
-            #label-detail-page .label-release-grid { grid-template-columns: repeat(auto-fill,minmax(108px,1fr)); gap: 12px; }
+            #label-detail-page .label-release-grid { grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 14px; }
+            #label-detail-page .album-card .label-card-artist-btn { opacity: 1; }
         }`;
         const style = document.createElement('style');
         style.id = 'label-detail-styles';
@@ -114,19 +107,7 @@
         document.head.appendChild(style);
     }
 
-    // ---- observers -----------------------------------------------------------
     function _ensureObservers() {
-        if (!_coverObserver && 'IntersectionObserver' in window) {
-            _coverObserver = new IntersectionObserver((entries) => {
-                entries.forEach(e => {
-                    if (!e.isIntersecting) return;
-                    const img = e.target;
-                    const src = img.dataset.src;
-                    if (src) { img.src = src; img.removeAttribute('data-src'); _coverLoaded.add(src); }
-                    _coverObserver.unobserve(img);
-                });
-            }, { rootMargin: '300px' });
-        }
         if (!_sentinelObserver && 'IntersectionObserver' in window) {
             _sentinelObserver = new IntersectionObserver((entries) => {
                 if (entries.some(e => e.isIntersecting) && _hasMore && !_loading) _fetchPage();
@@ -136,15 +117,16 @@
         }
     }
 
-    // ---- watchlist + backlog -------------------------------------------------
+    // ---- watchlist + backlog (standard app watchlist button) -----------------
     function _setWatchState(watching) {
         _current.watching = !!watching;
         const btn = document.getElementById('label-detail-watch-btn');
         const backlog = document.getElementById('label-detail-backlog');
         if (btn) {
             btn.hidden = false;
-            btn.textContent = watching ? 'Remove from Watchlist' : 'Add to Watchlist';
             btn.classList.toggle('watching', !!watching);
+            const txt = btn.querySelector('.watchlist-text');
+            if (txt) txt.textContent = watching ? 'Watching...' : 'Add to Watchlist';
         }
         if (backlog) backlog.hidden = !watching;
     }
@@ -159,7 +141,8 @@
     async function _toggleWatch() {
         if (!_current.id) return;
         const btn = document.getElementById('label-detail-watch-btn');
-        if (btn) btn.disabled = true;
+        const txt = btn && btn.querySelector('.watchlist-text');
+        if (txt) txt.textContent = 'Loading...';
         try {
             const url = _current.watching ? '/api/labels/watchlist/remove' : '/api/labels/watchlist/add';
             const body = _current.watching
@@ -172,26 +155,25 @@
                 if (typeof updateWatchlistButtonCount === 'function') {
                     try { updateWatchlistButtonCount(); } catch (e) { /* non-fatal */ }
                 }
+            } else {
+                _setWatchState(_current.watching);   // restore label
             }
         } catch (e) {
+            _setWatchState(_current.watching);
             if (typeof showToast === 'function') showToast('Could not update watchlist', 'error');
-        } finally {
-            if (btn) btn.disabled = false;
         }
     }
 
     async function _setBacklog(backlog) {
         if (!_current.id || _current.backlog === backlog) return;
-        _setBacklogState(backlog);   // optimistic
+        _setBacklogState(backlog);
         try {
             const d = await fetch('/api/labels/watchlist/backlog', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ musicbrainz_label_id: _current.id, backlog }),
             }).then(r => r.json()).catch(() => ({}));
-            if (!d || !d.success) _setBacklogState(!backlog);   // revert on failure
-        } catch (e) {
-            _setBacklogState(!backlog);
-        }
+            if (!d || !d.success) _setBacklogState(!backlog);
+        } catch (e) { _setBacklogState(!backlog); }
     }
 
     // ---- data ----------------------------------------------------------------
@@ -206,7 +188,7 @@
             const url = `/api/labels/${encodeURIComponent(_current.id)}/catalog?page=${next}&page_size=${PAGE_SIZE}`
                 + (_current.name ? `&name=${encodeURIComponent(_current.name)}` : '');
             const data = await fetch(url).then(r => r.json()).catch(() => ({}));
-            if (token !== _reqToken) return;   // a newer label load superseded us
+            if (token !== _reqToken) return;
 
             if (_page === 0) {
                 const resolvedName = (data.label && data.label.name) || _current.name || 'Label';
@@ -225,6 +207,7 @@
             }
 
             const batch = (data && data.releases) || [];
+            batch.forEach(r => _byKey.set(_key(r), r));
             _all = _all.concat(batch);
             _page = next;
             _hasMore = !!(data && data.has_more);
@@ -257,10 +240,10 @@
             const owned = (resp && resp.albums) || [];
             fresh.forEach((r, i) => { if (owned[i]) _owned.add(_key(r)); });
             _render();
-        } catch (e) { /* ownership is a nicety — never break the page */ }
+        } catch (e) { /* ownership is a nicety */ }
     }
 
-    // ---- render --------------------------------------------------------------
+    // ---- render (reuses .release-card/.album-card markup) --------------------
     function _visible() {
         let rows = _all.slice();
         if (_filter === 'owned') rows = rows.filter(r => _owned.has(_key(r)));
@@ -268,7 +251,6 @@
         if (_sort === 'oldest') rows = rows.slice().reverse();
         else if (_sort === 'artist') rows = rows.slice().sort((a, b) =>
             (a.artist || '').localeCompare(b.artist || '') || (b.year || '').localeCompare(a.year || ''));
-        // 'newest' = API order (already newest-first)
         return rows;
     }
 
@@ -282,31 +264,24 @@
     }
 
     function _cardHtml(rel) {
-        const rgid = rel.release_group_id || '';
-        const cover = rgid ? `https://coverartarchive.org/release-group/${encodeURIComponent(rgid)}/front-250` : '';
+        const cover = _coverUrl(rel);
         const isOwned = _owned.has(_key(rel));
         const checked = _checked.has(_key(rel));
-        const badge = isOwned
-            ? '<div class="label-owned-badge">✓ In Library</div>'
-            : (checked ? '<div class="label-missing-badge">Missing</div>' : '');
-        const clickable = rel.artist_id ? ' clickable' : '';
-        // Already-loaded covers get a real src (browser cache, no re-observe);
-        // new ones get data-src for the IntersectionObserver to lazy-load.
-        const srcAttr = cover
-            ? (_coverLoaded.has(cover) ? `src="${_esc(cover)}"` : `data-src="${_esc(cover)}"`)
-            : '';
-        const imgEl = cover
-            ? `<img class="label-release-cover" alt="" ${srcAttr} onerror="this.style.display='none';this.parentElement.classList.add('ph');">`
-            : '';
+        const overlay = isOwned
+            ? '<div class="completion-overlay completed"><span class="completion-status">✓ Owned</span></div>'
+            : (checked ? '<div class="completion-overlay missing"><span class="completion-status">Missing</span></div>' : '');
+        const artistBtn = rel.artist_id
+            ? '<button class="label-card-artist-btn" title="Go to artist" data-role="artist">👤</button>' : '';
         return `
-            <div class="label-release-card${clickable}" data-artist-id="${_esc(rel.artist_id || '')}"
-                 data-artist="${_esc(rel.artist || '')}" data-album="${_esc(rel.album || '')}">
-                <div class="label-release-coverwrap${cover ? '' : ' ph'}">
-                    ${imgEl}
-                    ${badge}
+            <div class="release-card album-card" data-key="${_esc(_key(rel))}" data-album-type="${_esc(rel.primary_type || 'album')}">
+                <div class="album-card-image"${cover ? ` data-bg-src="${_esc(cover)}"` : ''}>
+                    ${overlay}
+                    ${artistBtn}
                 </div>
-                <div class="label-release-title">${_esc(rel.album)}</div>
-                <div class="label-release-sub">${_esc(rel.artist)}${rel.year ? ' · ' + _esc(rel.year) : ''}</div>
+                <div class="album-card-content">
+                    <div class="album-card-name">${_esc(rel.album)}</div>
+                    <div class="album-card-year"><span class="lc-artist">${_esc(rel.artist)}</span>${rel.year ? ' · ' + _esc(rel.year) : ''}</div>
+                </div>
             </div>`;
     }
 
@@ -328,27 +303,74 @@
         }
         if (empty) empty.classList.add('hidden');
         grid.innerHTML = rows.map(_cardHtml).join('');
-        // lazy-load covers now in the DOM
-        if (_coverObserver) {
-            grid.querySelectorAll('img.label-release-cover[data-src]').forEach(img => _coverObserver.observe(img));
+        // Lazy background covers via the app's shared IntersectionObserver.
+        if (typeof observeLazyBackgrounds === 'function') {
+            observeLazyBackgrounds(grid);
         } else {
-            grid.querySelectorAll('img.label-release-cover[data-src]').forEach(img => {
-                img.src = img.dataset.src; _coverLoaded.add(img.dataset.src); img.removeAttribute('data-src');
+            grid.querySelectorAll('.album-card-image[data-bg-src]').forEach(el => {
+                el.style.backgroundImage = `url("${el.dataset.bgSrc}")`;
             });
         }
     }
 
     function _onGridClick(e) {
-        const card = e.target.closest('.label-release-card.clickable');
+        const card = e.target.closest('.release-card');
         if (!card) return;
-        const artistId = card.getAttribute('data-artist-id');
-        const artist = card.getAttribute('data-artist');
-        if (artistId && typeof navigateToArtistDetail === 'function') {
-            navigateToArtistDetail(artistId, artist, 'musicbrainz');
+        const rel = _byKey.get(card.getAttribute('data-key'));
+        if (!rel) return;
+        if (e.target.closest('[data-role="artist"]')) {
+            e.stopPropagation();
+            if (rel.artist_id && typeof navigateToArtistDetail === 'function') {
+                navigateToArtistDetail(rel.artist_id, rel.artist, 'musicbrainz');
+            }
+            return;
+        }
+        _openReleaseModal(rel);
+    }
+
+    // Open the standard "get this album" download modal, resolving the release's
+    // reliable art + tracklist in one MusicBrainz album-detail call.
+    async function _openReleaseModal(rel) {
+        if (typeof openDownloadMissingModalForArtistAlbum !== 'function') {
+            if (typeof _handoffLibrarySearchToEnhancedSearch === 'function') {
+                _handoffLibrarySearchToEnhancedSearch(`${rel.artist} ${rel.album}`);
+            }
+            return;
+        }
+        const rgid = rel.release_group_id;
+        if (typeof showLoadingOverlay === 'function') showLoadingOverlay('Loading album...');
+        try {
+            const url = `/api/spotify/album/${encodeURIComponent(rgid)}?source=musicbrainz`
+                + `&name=${encodeURIComponent(rel.album)}&artist=${encodeURIComponent(rel.artist)}`;
+            const albumData = await fetch(url).then(r => r.json()).catch(() => ({}));
+            const tracks = (albumData && albumData.tracks) || [];
+            if (!tracks.length) {
+                if (typeof showToast === 'function') showToast('No tracks found for this release', 'error');
+                return;
+            }
+            const albumObj = {
+                name: albumData.name || rel.album,
+                id: rgid,
+                album_type: rel.primary_type || 'album',
+                images: albumData.images || [],
+                image_url: (albumData.images && albumData.images[0] && albumData.images[0].url) || _coverUrl(rel),
+                release_date: albumData.release_date || (rel.year ? rel.year + '-01-01' : ''),
+                total_tracks: tracks.length,
+                artists: [{ name: rel.artist }],
+                source: 'musicbrainz',
+            };
+            const artistObj = { id: rel.artist_id || '', name: rel.artist, image_url: '', source: 'musicbrainz' };
+            const enriched = tracks.map(t => Object.assign({}, t, { source: 'musicbrainz', album: albumObj }));
+            openDownloadMissingModalForArtistAlbum(
+                `mb_album_${rgid}`, `[${rel.artist}] ${albumObj.name}`, enriched, albumObj, artistObj, false, 'artist_album');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Could not open this release', 'error');
+        } finally {
+            if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
         }
     }
 
-    // ---- public hooks (called by init.js loadPageData('label-detail')) -------
+    // ---- public hooks --------------------------------------------------------
     window.initializeLabelDetailPage = function initializeLabelDetailPage() {
         _injectStyles();
         _ensureObservers();
@@ -366,8 +388,7 @@
         document.querySelectorAll('#label-detail-filters button').forEach(b => {
             b.addEventListener('click', () => {
                 _filter = b.getAttribute('data-lf');
-                document.querySelectorAll('#label-detail-filters button').forEach(x =>
-                    x.classList.toggle('active', x === b));
+                document.querySelectorAll('#label-detail-filters button').forEach(x => x.classList.toggle('active', x === b));
                 _render();
             });
         });
@@ -382,13 +403,12 @@
         if (!labelId) return;
         _reqToken += 1;
         _current = { id: String(labelId), name: labelName || '', watching: false, backlog: false };
-        _all = []; _owned = new Set(); _checked = new Set(); _coverLoaded = new Set();
+        _all = []; _owned = new Set(); _checked = new Set(); _byKey = new Map();
         _page = 0; _hasMore = false; _loading = false; _filter = 'all'; _sort = 'newest';
         if (typeof window._labelDetailReturnTo === 'string' && window._labelDetailReturnTo) {
             _returnTo = window._labelDetailReturnTo;
         }
 
-        // reset chrome
         const nameEl = document.getElementById('label-detail-name');
         if (nameEl) nameEl.textContent = labelName || 'Label';
         const metaEl = document.getElementById('label-detail-meta');
