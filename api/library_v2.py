@@ -55,6 +55,13 @@ _artwork_cache_state: Dict[str, Any] = {
 # monitor/upgrade/retag may run concurrently without overwriting each other.
 _job_registry = JobRegistry()
 
+# A11: how long lib2_write_tags waits out an already-running "retag" job
+# (most commonly its own just-triggered cover-embed background job, see
+# lib2_album_art_apply) before falling back to a 409. Module-level so tests
+# can shrink it instead of a real multi-second sleep.
+_RETAG_CONFLICT_WAIT_SECONDS = 10.0
+_RETAG_CONFLICT_POLL_SECONDS = 0.2
+
 _MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 
@@ -4079,11 +4086,34 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             job = _job_registry.start("retag", total=len(track_ids))
         except JobAlreadyRunning as exc:
-            return jsonify({
-                "success": False,
-                "error": str(exc),
-                "job_id": exc.state["job_id"],
-            }), 409
+            # A11: the most common collision here is our own short-lived
+            # background retag from a just-saved album cover (lib2_album_art
+            # _apply also starts a "retag" job) — not a genuine conflicting
+            # request. Wait briefly for it to finish and retry once instead
+            # of surfacing a confusing "already running" error for something
+            # the user didn't consciously start. A still-running unrelated
+            # job (e.g. a large artist-wide write) falls through to the
+            # existing 409 unchanged.
+            blocking_job_id = exc.state["job_id"]
+            deadline = time.monotonic() + _RETAG_CONFLICT_WAIT_SECONDS
+            blocking = _job_registry.get(blocking_job_id)
+            while blocking is not None and blocking.get("running") and time.monotonic() < deadline:
+                time.sleep(_RETAG_CONFLICT_POLL_SECONDS)
+                blocking = _job_registry.get(blocking_job_id)
+            if blocking is not None and blocking.get("running"):
+                return jsonify({
+                    "success": False,
+                    "error": str(exc),
+                    "job_id": blocking_job_id,
+                }), 409
+            try:
+                job = _job_registry.start("retag", total=len(track_ids))
+            except JobAlreadyRunning as exc2:
+                return jsonify({
+                    "success": False,
+                    "error": str(exc2),
+                    "job_id": exc2.state["job_id"],
+                }), 409
         job_id = job["job_id"]
 
         def _run():

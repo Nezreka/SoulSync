@@ -2203,6 +2203,58 @@ def test_retag_write_rejects_non_object_json(api):
     assert response.status_code == 400
 
 
+def test_retag_write_waits_out_a_quickly_finishing_conflicting_job(api):
+    """A11: the most common "retag" conflict is our own short-lived
+    cover-embed background job (lib2_album_art_apply). Write-tags must wait
+    it out and proceed instead of surfacing a confusing 409."""
+    from api import library_v2 as api_module
+
+    client, _db, ids = api
+    blocking = api_module._job_registry.start("retag", total=1)
+
+    def _finish_soon():
+        time.sleep(0.05)
+        api_module._job_registry.finish(blocking["job_id"])
+
+    threading.Thread(target=_finish_soon, daemon=True).start()
+
+    started = time.monotonic()
+    response = client.post(
+        "/api/library/v2/tags/write",
+        json={"track_ids": [ids["album_track"]]},
+    )
+    elapsed = time.monotonic() - started
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    # Resolved on the next poll tick, nowhere near the full wait budget.
+    assert elapsed < api_module._RETAG_CONFLICT_WAIT_SECONDS
+
+
+def test_retag_write_409s_when_conflicting_job_never_finishes(api, monkeypatch):
+    """A still-genuinely-running unrelated retag job must still 409 — the
+    wait is a bounded courtesy, not unconditional blocking."""
+    from api import library_v2 as api_module
+
+    monkeypatch.setattr(api_module, "_RETAG_CONFLICT_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(api_module, "_RETAG_CONFLICT_POLL_SECONDS", 0.01)
+
+    client, _db, ids = api
+    blocking = api_module._job_registry.start("retag", total=1)
+    try:
+        response = client.post(
+            "/api/library/v2/tags/write",
+            json={"track_ids": [ids["album_track"]]},
+        )
+
+        assert response.status_code == 409
+        payload = response.get_json()
+        assert payload["success"] is False
+        assert payload["job_id"] == blocking["job_id"]
+    finally:
+        api_module._job_registry.finish(blocking["job_id"])
+
+
 @pytest.mark.parametrize("limit", ["abc", "0", "-1", "1001"])
 def test_acquisition_history_rejects_invalid_limits(api, limit):
     client, _db, _ids = api
