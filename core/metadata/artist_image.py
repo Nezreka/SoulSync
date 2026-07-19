@@ -210,6 +210,52 @@ _SOURCE_ID_COLUMNS = {
 # Sources that can't produce an artist photo (or aren't image services at all).
 _CANDIDATE_SKIP_SOURCES = {'musicbrainz', 'soulseek', 'youtube_videos', 'hydrabase'}
 
+# TheAudioDB isn't in the metadata priority chain (it's an enrichment worker,
+# not a browse source) but it has excellent keyless artist photos — the picker
+# queries it explicitly. Lazy singleton: one requests session, reused.
+_AUDIODB_CLIENT = None
+
+
+def _audiodb():
+    global _AUDIODB_CLIENT
+    if _AUDIODB_CLIENT is None:
+        try:
+            from core.audiodb_client import AudioDBClient
+            _AUDIODB_CLIENT = AudioDBClient()
+        except Exception:
+            return None
+    return _AUDIODB_CLIENT
+
+
+def _spotify_artist_image(client, artist_id: str):
+    """Artist image via the Spotify WRAPPER, with a free-metadata fall-through:
+    Spotify 403s dev apps whose owner lacks an active Premium subscription —
+    auth still LOOKS healthy (token refresh succeeds), so the wrapper's own
+    free routing never engages. The no-creds backend answers regardless."""
+    try:
+        url = _extract_artist_image_url(client.get_artist(artist_id))
+        if url:
+            return url
+    except Exception as exc:
+        logger.debug("spotify official get_artist(%s) failed, trying free: %s", artist_id, exc)
+    try:
+        return _extract_artist_image_url(client._free_meta.get_artist(artist_id))
+    except Exception:
+        return None
+
+
+def _audiodb_candidate(name: str, sid: str):
+    client = _audiodb()
+    if not client:
+        return None
+    data = None
+    if sid:
+        data = client.lookup_artist_by_id(sid)
+    if not data and name:
+        data = client.search_artist(name)
+    url = (data or {}).get('strArtistThumb') or (data or {}).get('strArtistFanart')
+    return ('audiodb', url) if url else None
+
 
 def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] = None) -> list:
     """One candidate photo per CONNECTED metadata source, for the artist
@@ -225,20 +271,46 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
     ids = source_ids or {}
     sources = [s for s in metadata_registry.get_source_priority(metadata_registry.get_primary_source())
                if s not in _CANDIDATE_SKIP_SOURCES]
+    if 'audiodb' not in sources:
+        sources.append('audiodb')       # the docstring always promised it
 
     def _one(source: str):
         try:
-            client = metadata_registry.get_client_for_source(source)
+            sid = str(ids.get(_SOURCE_ID_COLUMNS.get(source, '')) or '').strip()
+            if source == 'audiodb':
+                return _audiodb_candidate(name, sid)
+            if source == 'spotify':
+                # the registry gate requires FULL Spotify auth, but the wrapper
+                # serves artist metadata in Free mode via its fallback routing —
+                # the picker only needs an image, so ask the wrapper directly
+                client = metadata_registry.get_spotify_client()
+            else:
+                client = metadata_registry.get_client_for_source(source)
             if not client:
                 return None
-            sid = str(ids.get(_SOURCE_ID_COLUMNS.get(source, '')) or '').strip()
-            url = _get_artist_image_from_source(source, sid) if sid else None
+            url = None
+            if sid:
+                if source == 'spotify':
+                    url = _spotify_artist_image(client, sid)
+                else:
+                    url = _get_artist_image_from_source(source, sid)
             if not url and name and hasattr(client, 'search_artists'):
                 results = client.search_artists(name, limit=1) or []
                 if results:
                     top = results[0]
                     url = getattr(top, 'image_url', None) or (
                         top.get('image_url') if isinstance(top, dict) else None)
+                    if not url:
+                        # some sources (iTunes by design) return imageless
+                        # search hits — a second exact fetch by the hit's id
+                        # gets the artwork the search withheld
+                        top_id = str(getattr(top, 'id', '') or (
+                            top.get('id') if isinstance(top, dict) else '') or '').strip()
+                        if top_id:
+                            if source == 'spotify':
+                                url = _spotify_artist_image(client, top_id)
+                            else:
+                                url = _get_artist_image_from_source(source, top_id)
             return (source, url) if url else None
         except Exception as exc:
             logger.debug("artist image candidate failed for %s: %s", source, exc)

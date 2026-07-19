@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.1"
+_SOULSYNC_BASE_VERSION = "3.1.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -6676,6 +6676,10 @@ def search_music():
         results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
+    except ValueError as ve:
+        # user-facing config problem (e.g. SoundCloud link with the source
+        # disabled) — a clear 400, not a silent empty result
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -10293,6 +10297,17 @@ def get_artist_discography(artist_id):
 _ART_OPTIONS_CACHE = {}                       # (artist_lower, album_lower) -> (ts, candidates)
 _ART_OPTIONS_CACHE_LOCK = threading.Lock()
 _ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several slow external calls
+_ART_OPTIONS_EMPTY_TTL_S = 60                  # empties retry fast: one hiccup must not stick
+
+
+def _looks_like_image(data: bytes) -> bool:
+    """Magic-byte sniff — pasted custom URLs must not poison the thumb/poster/
+    artist.jpg with an HTML page. JPEG/PNG/GIF/WEBP/BMP cover real art."""
+    if not data or len(data) < 12:
+        return False
+    return (data[:2] == b"\xff\xd8" or data[:8] == b"\x89PNG\r\n\x1a\n"
+            or data[:4] == b"GIF8" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+            or data[:2] == b"BM")
 
 
 @app.route('/api/album/<album_id>/art-options', methods=['GET'])
@@ -10418,11 +10433,14 @@ def get_artist_art_options(artist_id):
             return jsonify({"error": "Artist not found"}), 404
         name = getattr(artist_row, 'name', '') or ''
 
-        cache_key = ('artist', name.lower())
+        # Key by ROW id, not name: two artists sharing a name must not share
+        # a cache slot. Empty results only stick for a minute — a transient
+        # source failure used to poison the picker with 'no photos' for 15.
+        cache_key = ('artist', int(artist_id))
         now = time.time()
         with _ART_OPTIONS_CACHE_LOCK:
             hit = _ART_OPTIONS_CACHE.get(cache_key)
-            if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+            if hit and now - hit[0] < (_ART_OPTIONS_TTL_S if hit[1] else _ART_OPTIONS_EMPTY_TTL_S):
                 return jsonify({"artist_id": artist_id, "count": len(hit[1]),
                                 "candidates": hit[1], "cached": True})
 
@@ -10466,10 +10484,10 @@ def set_artist_art(artist_id):
             return jsonify({"error": "Artist not found"}), 404
         artist_name = getattr(artist_row, 'name', '') or ''
 
-        if not db.set_artist_thumb_url(int(artist_id), url):
-            return jsonify({"error": "Could not update artist"}), 500
-
-        # Download once; server upload + disk write share the bytes.
+        # Download FIRST (server upload + disk write share the bytes) and
+        # validate: a custom URL that resolves to an HTML page must abort
+        # before anything is pinned. A failed download stays best-effort —
+        # hotlink-protected art can still render in the browser.
         image_bytes = None
         try:
             import urllib.request
@@ -10479,6 +10497,11 @@ def set_artist_art(artist_id):
                 image_bytes = resp.read() or None
         except Exception as exc:
             logger.warning("[set-artist-art] image download failed: %s", exc)
+        if image_bytes is not None and not _looks_like_image(image_bytes):
+            return jsonify({"error": "That URL doesn't point to an image"}), 400
+
+        if not db.set_artist_thumb_url(int(artist_id), url):
+            return jsonify({"error": "Could not update artist"}), 500
 
         # 2. Active media server poster (Plex/Jellyfin have APIs; Navidrome's
         #    update_artist_poster is a documented no-op — disk write covers it).
@@ -11279,12 +11302,20 @@ def library_completion_stream():
             _loop_start = time.perf_counter()
             for _i, (category, item) in enumerate(all_items):
                 try:
-                    # Map Library field names to helper field names
+                    # Map Library field names to helper field names.
+                    # CRUCIAL: carry the card's YEAR through — the re-release
+                    # year gate (0e53851fd) needs it, and dropping it here
+                    # silently disabled the gate on the library page so owning
+                    # the original still lit up every re-release (5BILLION,
+                    # round 2). The artist-detail path already passes the card
+                    # dict straight through; this one rebuilt it and forgot.
                     mapped = {
                         'id': item['id'],
                         'name': item['title'],
                         'total_tracks': item.get('track_count', 0),
-                        'album_type': item.get('album_type', 'album')
+                        'album_type': item.get('album_type', 'album'),
+                        'year': item.get('year'),
+                        'release_date': item.get('release_date') or item.get('releaseDate'),
                     }
 
                     if category == 'singles':
@@ -39890,6 +39921,129 @@ def _emit_watchlist_count_loop():
         except Exception as e:
             logger.debug(f"Error emitting watchlist count: {e}")
 
+# Soulseek chat push (P3): watch the community room + PM unread state through
+# slskd and push deltas over the socket, so the nav badge and the bell react
+# without the chat page being open. First pass after boot only BASELINES the
+# room (no replaying history as "new"). Wholly idle-gated: zero slskd calls
+# while no browser is connected.
+_chat_push_state = {'room_key': None, 'pm_unread': -1, 'room': None}
+
+def _emit_chat_push_loop():
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(6)
+        try:
+            if not _has_connected_clients():
+                continue
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not _slsk or not _slsk.base_url:
+                continue
+            room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
+            if room != _chat_push_state['room']:
+                # room renamed (settings cog): re-baseline so the new room's
+                # history never replays as 'new' badge/notification spam
+                _chat_push_state['room'] = room
+                _chat_push_state['room_key'] = None
+            joined = run_async(_slsk.get_joined_rooms()) or []
+            if room not in joined:
+                # auto-join at startup / after an slskd restart (joins don't
+                # persist). chat_auto_join=false is the opt-out for users who
+                # don't want their account sitting in a public room — without
+                # it the loop would re-join them every 6s (un-leaveable). The
+                # chat PAGE still joins on open (an explicit user action).
+                if not config_manager.get('soulseek.chat_auto_join', True):
+                    room = None
+                elif not run_async(_slsk.join_room(room)):
+                    room = None
+            if not room:
+                msgs = []
+            else:
+                msgs = run_async(_slsk.get_room_messages(room)) or []
+            msgs.sort(key=lambda m: str(m.get('timestamp') or ''))
+            key = (str(msgs[-1].get('timestamp') or '') + ':' + str(len(msgs))) if msgs else ''
+            prev_key = _chat_push_state['room_key']
+            if prev_key is None:
+                _chat_push_state['room_key'] = key      # baseline, never replay history
+            elif key != prev_key:
+                prev_stamp = prev_key.rsplit(':', 1)[0]
+                fresh = [m for m in msgs if str(m.get('timestamp') or '') > prev_stamp]
+                _chat_push_state['room_key'] = key
+                if fresh:
+                    # live pushes carry the same DECODED view the API serves
+                    from core import chat_codec
+                    def _unwrap(m):
+                        dec = chat_codec.decode(m.get('message'))
+                        if dec is not None and chat_codec.reaction_of(dec):
+                            return None      # reaction carriers never render/badge
+                        out = {'username': m.get('username'),
+                               'message': dec['t'] if dec else m.get('message'),
+                               'timestamp': m.get('timestamp')}
+                        if dec:
+                            out['rich'] = True
+                            rep = chat_codec.reply_of(dec)
+                            if rep:
+                                out['reply'] = rep
+                        return out
+                    decoded = [x for x in (_unwrap(m) for m in fresh) if x]
+                    if decoded:      # a reaction-only tick still tracks PMs below
+                        try:
+                            get_database().add_chat_messages(room, decoded)
+                        except Exception:
+                            logger.debug("chat: loop archive write failed", exc_info=True)
+                        socketio.emit('chat:room_message', {
+                            'room': room,
+                            'messages': decoded[-20:],
+                        })
+            convos = run_async(_slsk.get_conversations()) or []
+            unread_users = [str(c.get('username') or '') for c in convos
+                            if c.get('hasUnAcknowledgedMessages')
+                            or (c.get('unAcknowledgedMessageCount') or 0) > 0]
+            unread = len([u for u in unread_users if u])
+            prev = _chat_push_state['pm_unread']
+            if unread != prev:
+                _chat_push_state['pm_unread'] = unread
+                socketio.emit('chat:unread', {
+                    'pms': unread,
+                    'users': [u for u in unread_users if u][:3],
+                    # 'grew' gates the toast: only a RISING count notifies (a read
+                    # clearing the flag must not), and never the boot baseline
+                    'grew': prev >= 0 and unread > prev,
+                })
+        except Exception:
+            logger.debug("chat push loop error", exc_info=True)
+
+# Anti-leech challenge auto-responder ("please type 'human' in this chat"):
+# NOT idle-gated — the whole point is answering at 3am with no browser open,
+# so blocked overnight grabs unblock themselves. One cheap conversations poll
+# per minute; the heavy lifting + guard rails live in core/chat_autoprove.py.
+def _chat_auto_prove_loop():
+    from core import chat_autoprove
+    state = {}
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(60)
+        try:
+            if not config_manager.get('soulseek.chat_auto_prove', True):
+                continue
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not _slsk or not _slsk.base_url:
+                continue
+            replies = chat_autoprove.scan_and_respond(_slsk, run_async, state=state)
+            for r in replies:
+                msg = "Auto-replied '%s' to %s's prove-you're-human challenge" % (
+                    r['token'], r['username'])
+                # observable both ways: durable bell history + a live toast
+                try:
+                    get_database().add_notifications([{'type': 'info', 'message': msg}],
+                                                     profile_id=1)
+                except Exception:
+                    logger.debug("autoprove: notification write failed", exc_info=True)
+                socketio.emit('dashboard:toast', {
+                    'icon': '🤖', 'title': 'Chat auto-reply',
+                    'subtitle': "answered %s's download challenge with '%s'" % (
+                        r['username'], r['token']),
+                })
+        except Exception:
+            logger.debug("chat auto-prove loop error", exc_info=True)
+
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
     Skipped entirely while no client is connected — the transfer fetch below is a real
@@ -40262,6 +40416,18 @@ _configure_enrichment_api(
 )
 
 app.register_blueprint(_create_enrichment_blueprint())
+
+# Soulseek chat (rooms + PMs through slskd) — side-neutral, absolute /api/chat
+# paths, mounted OUTSIDE the video blueprint so music-only profiles reach it.
+from api.chat import configure as _configure_chat_api, create_blueprint as _create_chat_blueprint
+_configure_chat_api(
+    client_getter=lambda: download_orchestrator.client("soulseek"),
+    run_async=run_async,
+    config_get=lambda key, default=None: config_manager.get(key, default),
+    config_set=lambda key, value: config_manager.set(key, value),
+    db_getter=get_database,
+)
+app.register_blueprint(_create_chat_blueprint())
 
 # Video side API (isolated: reads database/video_library.db only, never music)
 from api.video import create_video_blueprint as _create_video_blueprint
@@ -40988,6 +41154,8 @@ def start_runtime_services():
         socketio.start_background_task(_emit_service_status_loop)
         socketio.start_background_task(_emit_watchlist_count_loop)
         socketio.start_background_task(_emit_download_status_loop)
+        socketio.start_background_task(_emit_chat_push_loop)
+        socketio.start_background_task(_chat_auto_prove_loop)
         # Server Activity — subscriber-gated live push (idle when no drawer open)
         socketio.start_background_task(_emit_server_activity_loop)
         # Phase 2: Dashboard pollers

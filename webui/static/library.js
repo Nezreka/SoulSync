@@ -3731,7 +3731,17 @@ function openAlbumArtPicker(album) {
                     '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
                     '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
                     '<span class="art-picker-check">' + _checkSvg + '</span>';
-                tile.querySelector('img').onerror = () => tile.remove();
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
                 tile.onclick = () => {
                     grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
                     tile.classList.add('selected');
@@ -3742,6 +3752,13 @@ function openAlbumArtPicker(album) {
             });
             body.innerHTML = '';
             body.appendChild(grid);
+            // custom-URL row BELOW the grid (and after the innerHTML reset,
+            // which would otherwise wipe it)
+            _artPickerCustomRow(body, grid, tileUrl => {
+                grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                selectedUrl = tileUrl;
+                applyBtn.disabled = false;
+            });
         })
         .catch(() => { body.innerHTML = '<div class="art-picker-empty">Couldn\'t load cover options.</div>'; });
 
@@ -3769,6 +3786,48 @@ function openAlbumArtPicker(album) {
             if (typeof showToast === 'function') showToast('Failed to update art', 'error');
         });
     };
+}
+
+// Custom-URL row for the artist photo picker: paste a link → instant preview
+// tile → click it → Apply. The preview <img> is the validation (a bad link
+// shows its own error); the backend re-validates bytes before applying.
+// NB: module scope — the pickers' _checkSvg consts are function-LOCAL, so
+// this needs its own (referencing theirs was a silent ReferenceError).
+const _ART_CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+function _artPickerCustomRow(body, grid, onSelect) {
+    const row = document.createElement('div');
+    row.className = 'art-picker-custom';
+    row.innerHTML =
+        '<input type="url" class="art-picker-url" placeholder="…or paste an image URL" autocomplete="off">' +
+        '<div class="art-picker-custom-slot"></div>';
+    const input = row.querySelector('.art-picker-url');
+    const slot = row.querySelector('.art-picker-custom-slot');
+    let timer = null;
+    input.addEventListener('input', () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            const url = input.value.trim();
+            slot.innerHTML = '';
+            if (!/^https?:\/\//i.test(url)) return;
+            const tile = document.createElement('button');
+            tile.className = 'art-picker-tile art-picker-tile--custom';
+            tile.innerHTML =
+                '<img loading="lazy" src="' + _esc(url) + '" alt="">' +
+                '<span class="art-picker-badge">custom</span>' +
+                '<span class="art-picker-check">' + _ART_CHECK_SVG + '</span>';
+            tile.querySelector('img').onerror = () => {
+                slot.innerHTML = '<div class="art-picker-custom-err">Couldn\'t load that image.</div>';
+            };
+            tile.onclick = () => {
+                document.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                tile.classList.add('selected');
+                onSelect(url);
+            };
+            slot.appendChild(tile);
+        }, 350);
+    });
+    body.appendChild(row);
 }
 
 function openArtistArtPicker() {
@@ -3833,11 +3892,28 @@ function openArtistArtPicker() {
             const cands = (data && data.candidates) || [];
             if (!cands.length) {
                 body.innerHTML = '<div class="art-picker-empty">No photos found on your connected sources for this artist.</div>';
+                _artPickerCustomRow(body, null, tileUrl => {
+                    selectedUrl = tileUrl;
+                    applyBtn.disabled = false;
+                });
                 return;
             }
             countEl.textContent = cands.length + ' source' + (cands.length === 1 ? '' : 's');
             const grid = document.createElement('div');
             grid.className = 'art-picker-grid';
+            // the CURRENT photo leads the grid as a reference tile — read from
+            // the page (the DB often stores a local cache path, which must
+            // never be re-applied as if it were a source URL). Display-only.
+            const curImg = document.getElementById('artist-detail-image');
+            if (curImg && curImg.src && curImg.style.display !== 'none') {
+                const cur = document.createElement('div');
+                cur.className = 'art-picker-tile art-picker-tile--current';
+                cur.innerHTML =
+                    '<img loading="lazy" src="' + _esc(curImg.src) + '" alt="">' +
+                    '<span class="art-picker-badge art-picker-badge--current">current</span>';
+                cur.querySelector('img').onerror = () => cur.remove();
+                grid.appendChild(cur);
+            }
             cands.forEach(c => {
                 const tile = document.createElement('button');
                 tile.className = 'art-picker-tile';
@@ -3845,7 +3921,17 @@ function openArtistArtPicker() {
                     '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
                     '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
                     '<span class="art-picker-check">' + _checkSvg + '</span>';
-                tile.querySelector('img').onerror = () => tile.remove();
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
                 tile.onclick = () => {
                     grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
                     tile.classList.add('selected');
@@ -3856,6 +3942,13 @@ function openArtistArtPicker() {
             });
             body.innerHTML = '';
             body.appendChild(grid);
+            // custom-URL row BELOW the grid (and after the innerHTML reset,
+            // which would otherwise wipe it)
+            _artPickerCustomRow(body, grid, tileUrl => {
+                grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                selectedUrl = tileUrl;
+                applyBtn.disabled = false;
+            });
         })
         .catch(() => { body.innerHTML = '<div class="art-picker-empty">Couldn\'t load photo options.</div>'; });
 

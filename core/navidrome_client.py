@@ -470,8 +470,12 @@ class NavidromeClient(MediaServerClient):
                 error = subsonic_response.get('error', {})
                 error_message = error.get('message', 'Unknown error')
                 logger.error(f"Navidrome API error: {error_message}")
+                # callers can inspect WHY (e.g. get_all_artists tells an
+                # empty library apart from a broken one — #stale-artists)
+                self.last_api_error = error_message
                 return None
 
+            self.last_api_error = None
             return subsonic_response
 
         except requests.exceptions.RequestException as e:
@@ -509,8 +513,24 @@ class NavidromeClient(MediaServerClient):
                 params['musicFolderId'] = self.music_folder_id
             response = self._make_request('getArtists', params if params else None)
             if not response:
-                # a failed request is a FAILURE, not an empty library — an
-                # empty library still answers with an artists envelope
+                # Navidrome answers getArtists on an EMPTY library with a hard
+                # API error ('Library not found or empty') instead of an empty
+                # envelope (5BILLION's report). 'not found' and 'empty' share
+                # one message, so confirm the selected folder actually EXISTS
+                # before believing 'empty' — a wrong folder id must stay a
+                # failure (never wipe a library on a misconfig).
+                err = str(getattr(self, 'last_api_error', '') or '').lower()
+                if 'empty' in err and self.music_folder_id:
+                    folders = self._fetch_music_folders()
+                    known = {str(f.get('id')) for f in folders if isinstance(f, dict)}
+                    if str(self.music_folder_id) in known:
+                        logger.info(
+                            "Navidrome: selected library %s exists but is empty "
+                            "(API said %r) — verified empty, not a failure",
+                            self.music_folder_id, err)
+                        self.last_fetch_failed = False
+                        return []
+                # anything else is a FAILURE, not an empty library
                 return []
 
             if self._progress_callback:

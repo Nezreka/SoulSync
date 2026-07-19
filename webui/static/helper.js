@@ -3482,19 +3482,15 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.1': [
-        { date: 'July 2026 · 3.1.1' },
-        { title: 'Continue Watching on video detail pages', desc: 'per-episode watch state scanned from plex/jellyfin: checkmarks, progress bars, a Next Up highlight, and the hero button becomes "Resume S2 E4" deep-linking the episode. shows open on the season you\'re actually in. plus a real Mark watched/unwatched toggle that syncs to your server.', page: 'video-library' },
-        { title: 'Detail pages show what we already knew', desc: 'the awards line, an after-credits-scene tag, NEW badges on fresh episodes, digital release dates, your file\'s ranked quality name, and 4K · HDR · Atmos · 7.1 format badges on owned movies.', page: 'video-library' },
-        { title: 'Re-releases no longer show as owned', desc: 'owning the original of an album made every remaster and anniversary edition light up as owned too. album matching now respects the release year, so owning "Album" doesn\'t claim "Album (2011 Remaster)".' },
-        { title: 'Playlist sync stops leaving tracks behind', desc: 'three stacked bugs (#1047): decent matches thrown away, stale plex ratingKeys failing silently, and big playlist writes partially landing unchecked. writes are now chunked and verified against what the server stored.' },
-        { title: 'Force download really replaces the file', desc: '"download again" used to import next to the old file or skip entirely (#1045). a forced re-download now actually replaces what\'s on disk.' },
-        { title: 'Deep scan removes artists that left your library', desc: 'switching to a smaller/empty library kept the old artists forever. deep scan reads the server fresh and cleans them out — and refuses to mass-delete when the server call failed, so a plex hiccup can\'t wipe your list.' },
-        { title: 'Failing wishlist downloads are visible', desc: 'items that keep failing get an attempt counter, a failing badge, a filter, and a jump straight into manual search. both music and video wishlists. thanks LiveLeak.' },
-        { title: 'Synchronize one show', desc: 'a per-show deep scan on the show page reconciles episodes against your server right now and refreshes the airing schedule. vanished episodes demote to missing — never deleted.', page: 'video-library' },
-        { title: 'Way fewer requests at idle', desc: 'duplicate api bursts dedupe client-side, enrichment status hydrates in one bundled call instead of ~28, and pollers slow down and skip when the tab is hidden.' },
-        { title: 'Smaller fixes', desc: 'digit-named artists like 311 open again, the whole-library m3u reports itself in the scan summary (#1041), genres/keywords/where-to-watch on video detail are real links (#1042), mass rename previews big libraries in the background, and youtube episode numbering uses the real upload date.' },
-        { title: 'Earlier versions', desc: '3.1.0 gave the video side full Sonarr/Radarr-class acquisition + a best-in-class pass over every page. 3.0.5 added exact-ID album import + lyrics-travel. 3.0.4 rebuilt video Discover + per-profile side access. 3.0.1 shipped the entire video side.' },
+    '3.1.2': [
+        { date: 'July 2026 · 3.1.2' },
+        { title: 'Chat — the SoulSync community, right in the app', desc: 'a whole Soulseek chat page (in the System section on both sides): the community "SoulSync" room + private messages, proxied through slskd. Discord-style — avatars, message grouping, unread badges, mentions with @autocomplete, replies, reactions, GIF search, and click-any-user-to-message from download and search rows.' },
+        { title: 'Rich messages only SoulSync can read', desc: 'messages in the community room are formatted (bold, code blocks, spoilers, emoji, image + YouTube embeds, links that open right inside SoulSync) — other Soulseek clients just see garbled text, so the room stays ours. Sending is admin-only by default; there\'s a settings cog for the room name, GIPHY key, and toggles.' },
+        { title: 'History that survives + auto-answer bots', desc: 'the room keeps a local archive so a slskd restart doesn\'t wipe the conversation, with scroll-back. And SoulSync auto-answers those "type human in chat to download" anti-leech bots so your overnight grabs don\'t sit blocked.' },
+        { title: 'The artist photo picker actually works now', desc: 'the "change artist photo" modal was often empty — it now pulls from Deezer, Spotify (authed OR free), iTunes, AudioDB and Discogs, shows your current photo for comparison, and lets you paste any image URL. One transient source hiccup no longer sticks for 15 minutes.' },
+        { title: 'SoundCloud links resolve anywhere you paste them', desc: 'paste a SoundCloud link (incl. unlisted/private share links) straight into the search bar and SoulSync fetches it — the #865 follow-up. The Link/ID box now points you to the right spot instead of a generic error.' },
+        { title: 'Two stubborn bugs finally fixed (thanks 5BILLION)', desc: 'deep scan now removes artists after switching to an empty Navidrome library (Navidrome answers an empty library with an error, which fooled the old check), and re-releases stop showing as owned on the library page (the year check wasn\'t reaching the matcher there).' },
+        { title: 'Earlier versions', desc: '3.1.1 added Continue Watching on video detail pages + a wave of reported-bug fixes. 3.1.0 gave the video side full Sonarr/Radarr-class acquisition. 3.0.4 rebuilt video Discover + per-profile side access. 3.0.1 shipped the entire video side.' },
     ],
 };
 
@@ -3525,7 +3521,19 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.1: continue watching + the reported-bugs sweep",
+        title: "3.1.2: SoulSync gets a chat",
+        description: "the biggest add since the video side: a full Soulseek chat page — the community 'SoulSync' room + private messages, Discord-class — plus the artist photo picker finally works, SoundCloud links resolve anywhere, and two long-standing reported bugs die.",
+        features: [
+            "Chat (System section, both music + video sides): the community 'SoulSync' room and private messages, proxied through slskd so the whole thing rides your existing Soulseek connection. avatars, message grouping, day separators, unread nav badges, a jump-to-newest pill, and a NEW divider where you left off",
+            "rich messages other clients can't read: room messages carry bold / italic / code blocks / spoilers / headings / lists / emoji, click-to-load image + pop-in YouTube embeds, and SoulSync deep links that open an artist/movie/show right inside the reader's own install — SoulseekQT/Nicotine+ just see line noise, so the room stays a SoulSync space. sending is admin-only by default (settings cog for the room name, GIPHY key, and member-send / auto-join / auto-answer toggles)",
+            "@mentions with autocomplete + a gold ping when someone @s you anywhere in the app, hover-to-reply with quoted context, emoji reactions, and GIF search/send (GIPHY) — plus click any username on a download or search row to DM them",
+            "a local room archive so an slskd restart doesn't wipe the conversation (with scroll-back), and an auto-responder for anti-leech 'type human in chat to download' bots so overnight grabs don't sit blocked",
+            "the artist photo picker actually delivers photos now: pulls from Deezer, Spotify (authenticated OR the free route), iTunes, AudioDB and Discogs, shows your current photo for comparison, and takes a pasted image URL — and one transient source hiccup no longer sticks 'no photos found' for 15 minutes",
+            "SoundCloud links resolve wherever you paste them, including unlisted/private share links (#865 follow-up); deep scan removes artists after switching to an empty Navidrome library, and re-releases stop showing as owned on the library page (both from 5BILLION's reports, both root-caused from his logs)",
+        ],
+    },
+    {
+        title: "Earlier in 3.1.1 — continue watching + the reported-bugs sweep",
         description: "the video detail pages learn everything your server knows about what you've watched, and a stack of reported music bugs — re-releases showing owned, playlist sync leaving tracks behind, force download not forcing — all die.",
         features: [
             "continue watching: per-episode watch state scanned from plex/jellyfin — checkmarks, progress bars, a Next Up highlight, the hero button becomes 'Resume S2 E4 on Plex' deep-linking the episode, shows open on the season you're actually in, and a Mark watched/unwatched toggle pushes played state back to your server",

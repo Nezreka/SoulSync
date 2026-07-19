@@ -162,3 +162,52 @@ class TestCompletionWiring:
                  "album_type": "ep", "year": "2021"}, ARTIST,
             source_chain=["spotify"])
         assert db.kwargs["expected_year"] == "2021"
+
+
+# ── the caller must actually DELIVER the year to the gate (5BILLION round 2) ──
+# The gate was correct; the library completion-stream rebuilt the album card
+# into a stripped dict WITHOUT year, so expected_year=None and the gate never
+# fired. These pin the year reaching the gate end to end.
+
+class TestYearReachesTheGate:
+    def test_check_album_completion_threads_the_card_year(self, db, monkeypatch):
+        # owned original 2005; the card is the 2024 re-release of the same name
+        db.check_album_exists_with_completeness  # ensure attr exists
+        seen = {}
+        real = db.check_album_exists_with_completeness
+
+        def spy(*a, **kw):
+            seen['expected_year'] = kw.get('expected_year')
+            return real(*a, **kw)
+        monkeypatch.setattr(db, 'check_album_exists_with_completeness', spy)
+
+        metadata_completion.check_album_completion(
+            db,
+            {'id': 'x', 'name': 'The Album', 'total_tracks': 12, 'release_date': '2024-05-01'},
+            ARTIST, source_chain=['itunes'], candidate_albums=[])
+        # the card's year (from release_date) must arrive at the matcher
+        assert seen['expected_year'] == '2024'
+
+    def test_year_key_also_accepted(self, db, monkeypatch):
+        seen = {}
+        real = db.check_album_exists_with_completeness
+        monkeypatch.setattr(db, 'check_album_exists_with_completeness',
+                            lambda *a, **kw: seen.setdefault('y', kw.get('expected_year')) or real(*a, **kw))
+        metadata_completion.check_album_completion(
+            db, {'id': 'x', 'name': 'A', 'total_tracks': 1, 'year': 2019},
+            ARTIST, source_chain=['itunes'], candidate_albums=[])
+        assert seen['y'] == '2019'
+
+
+def test_library_completion_stream_maps_the_year_through():
+    """The library completion-stream endpoint rebuilds each card into a
+    'mapped' dict — it must include year/release_date, or the gate is starved
+    (the artist-detail path passes the card through untouched and was fine)."""
+    import re
+    from pathlib import Path
+    ws = (Path(__file__).resolve().parents[2] / "web_server.py").read_text(
+        encoding="utf-8", errors="replace")
+    # isolate the mapped-dict literal in library_completion_stream
+    block = ws.split("def library_completion_stream")[1].split("mapped = {")[1].split("}")[0]
+    assert "'year'" in block, "library completion mapped dict dropped the year"
+    assert "release_date" in block
