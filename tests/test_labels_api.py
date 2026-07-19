@@ -208,25 +208,30 @@ class TestCover:
         assert calls["n"] == 1     # second hit served from cache
 
 
+class _CaaResp:
+    def __init__(self, status):
+        self.status_code = status
+    def close(self):
+        pass
+
+
 class TestCaaFirst:
     def test_caa_hit_served_via_same_origin_proxy(self, client, monkeypatch):
-        # CAA is the PREFERRED source (exact by release id); a hit is proxied.
+        # CAA is the PREFERRED source (exact by release id); a reachable image
+        # (following the redirect to archive.org) is proxied same-origin.
         import requests as _rq
-        class _R:
-            status_code = 200
-            headers = {"Content-Type": "image/jpeg"}
-        monkeypatch.setattr(_rq, "head", lambda *a, **k: _R())
+        monkeypatch.setattr(_rq, "get", lambda *a, **k: _CaaResp(200))
         labels_api._caa_breaker.update(fails=0, skip_until=0.0)
         r = client.get("/api/labels/cover?release_id=rid-1&artist=A&album=B")
         assert r.status_code == 302
         loc = r.headers["Location"]
         assert loc.startswith("/api/image-proxy?url=") and "coverartarchive.org" in loc
 
-    def test_caa_failure_trips_breaker_then_falls_back(self, client, monkeypatch):
+    def test_caa_unreachable_image_trips_breaker_then_falls_back(self, client, monkeypatch):
         import requests as _rq
         def _down(*a, **k):
-            raise RuntimeError("unreachable")
-        monkeypatch.setattr(_rq, "head", _down)
+            raise RuntimeError("archive.org unreachable")
+        monkeypatch.setattr(_rq, "get", _down)
         labels_api._caa_breaker.update(fails=0, skip_until=0.0)
         labels_api._cover_cache.clear()
         # no Deezer/iTunes wired → fallback misses → 404, but CAA was tried + counted
@@ -242,7 +247,7 @@ class TestCaaFirst:
         def _spy(*a, **k):
             probed["n"] += 1
             raise RuntimeError("should not be called")
-        monkeypatch.setattr(_rq, "head", _spy)
+        monkeypatch.setattr(_rq, "get", _spy)
         labels_api._caa_breaker.update(fails=99, skip_until=labels_api._now() + 999)
         labels_api.configure(db_getter=lambda: client._db)
         client.get("/api/labels/cover?release_id=rid-3&artist=A&album=B")
