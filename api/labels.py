@@ -177,6 +177,27 @@ def create_blueprint() -> Blueprint:
         resp.headers["Cache-Control"] = "private, max-age=86400"
         return resp
 
+    @bp.route("/api/labels/cover-url", methods=["GET"])
+    def labels_cover_url():
+        """The resolved ABSOLUTE cover URL (Deezer/iTunes CDN) for (artist,
+        album) as JSON. Used by the download modal + wishlist entry, which need
+        a directly browser-loadable url: the redirect/proxy cover endpoints are
+        RELATIVE, and the wishlist image normaliser rewrites any relative url
+        (treats '/...' as an internal media path) → breaks it. No CAA here (it
+        needs same-origin proxying, which is relative)."""
+        artist = str(request.args.get("artist") or "").strip()
+        album = str(request.args.get("album") or "").strip()
+        if not artist or not album:
+            return jsonify({"url": ""})
+        key = (artist.lower(), album.lower())
+        now = _now()
+        hit = _cover_cache.get(key)
+        if hit and (now - hit["at"]) < _COVER_TTL_S:
+            return jsonify({"url": hit["url"]})
+        url = _resolve_cover(artist, album)
+        _cover_cache[key] = {"at": now, "url": url}
+        return jsonify({"url": url})
+
     @bp.route("/api/labels/search", methods=["POST"])
     def labels_search():
         """Label search results for the search page's Labels section."""

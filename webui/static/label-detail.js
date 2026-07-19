@@ -448,12 +448,21 @@
                 image_url: firstArtist.image_url || (firstArtist.images && firstArtist.images[0] && firstArtist.images[0].url) || '',
                 source: useSrc,
             };
-            // A raw coverartarchive.org URL can't load in the browser — route the
-            // album image through our cover endpoint (CAA proxied, or Deezer/
-            // iTunes) unless the reliable source gave a non-CAA CDN url.
+            // The modal + wishlist entry need an ABSOLUTE, browser-loadable CDN
+            // url. A reliable-source album detail already gives one (non-CAA);
+            // otherwise resolve one from /api/labels/cover-url (Deezer/iTunes).
+            // We can't use the relative /api/labels/cover endpoint here — the
+            // wishlist image normaliser rewrites any '/...' url and breaks it.
             const di = (albumData.images && albumData.images[0] && albumData.images[0].url) || '';
             const diOk = di && di.indexOf('coverartarchive.org') === -1;
-            const albumImg = diOk ? di : _coverUrl(rel);
+            let albumImg = diOk ? di : '';
+            if (!albumImg) {
+                try {
+                    const cu = await fetch(`/api/labels/cover-url?artist=${encodeURIComponent(rel.artist)}&album=${encodeURIComponent(rel.album)}`)
+                        .then(r => r.json()).catch(() => ({}));
+                    albumImg = (cu && cu.url) || '';
+                } catch (e) { albumImg = ''; }
+            }
             const albumObj = {
                 name: albumData.name || rel.album,
                 id: useId,
