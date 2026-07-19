@@ -1632,9 +1632,22 @@ function _pollLabelScan() {
             const s = await fetch('/api/labels/watchlist/scan/status').then(r => r.json());
             if (s && s.running) { setTimeout(tick, 3000); return; }
             const res = s && s.last_result;
-            if (status) status.textContent = res
-                ? `Done — ${res.releases_added || 0} added from ${res.labels_scanned || 0} label${res.labels_scanned === 1 ? '' : 's'}`
-                : 'Done';
+            if (status) {
+                if (res) {
+                    // Surface found vs added (+ errors) so "0 added" is never
+                    // ambiguous: 0 found = nothing new; found>0 & added<found = a
+                    // resolution problem worth looking at.
+                    const found = res.releases_found || 0, added = res.releases_added || 0;
+                    const errs = res.errors || 0;
+                    let msg = `Done — ${added} added`;
+                    msg += ` · ${found} new release${found === 1 ? '' : 's'} found`;
+                    msg += ` · ${res.labels_scanned || 0} label${res.labels_scanned === 1 ? '' : 's'}`;
+                    if (errs) msg += ` · ${errs} error${errs === 1 ? '' : 's'}`;
+                    status.textContent = msg;
+                } else {
+                    status.textContent = 'Done';
+                }
+            }
             if (btn) btn.disabled = false;
             if (typeof updateWatchlistButtonCount === 'function') {
                 try { updateWatchlistButtonCount(); } catch (e) { /* non-fatal */ }
