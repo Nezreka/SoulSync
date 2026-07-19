@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.2"
+_SOULSYNC_BASE_VERSION = "3.1.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -30085,13 +30085,18 @@ def start_watchlist_scan():
                     watchlist_scan_state['completed_at'] = datetime.now()
                     watchlist_scan_state['current_phase'] = 'completed'
 
+                    try:
+                        _labels_scanned = len(database.get_watchlist_labels() or [])
+                    except Exception:
+                        # a label COUNT must never abort an otherwise successful scan
+                        _labels_scanned = 0
                     watchlist_scan_state['summary'] = {
                         'total_artists': len(scan_results),
                         'successful_scans': len(successful_scans),
                         'new_tracks_found': total_new_tracks + _lbl_tracks,
                         'tracks_added_to_wishlist': total_added_to_wishlist + _lbl_tracks,
                         # label breakdown (additive; existing UI ignores extra keys)
-                        'labels_scanned': len(database.get_watchlist_labels() or []),
+                        'labels_scanned': _labels_scanned,
                         'label_tracks_added': _lbl_tracks,
                     }
 
