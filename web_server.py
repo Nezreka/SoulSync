@@ -30035,67 +30035,17 @@ def start_watchlist_scan():
                     cancel_check=lambda: watchlist_scan_state.get('cancel_requested', False),
                 )
 
-                # --- Label watchlist phase ---------------------------------
-                # Runs in the SAME thread and writes the SAME live state as the
-                # artist scan, so one "Scan Watchlist" covers artists THEN labels
-                # with the identical live per-item display + additions feed.
-                _lbl_counts = {'tracks': 0, 'releases': 0}
+                # --- Label watchlist phase (same thread, same live state) ---
+                # Labels ride the normal watchlist scan via the SHARED helper
+                # (also used by the scheduled automation), so one "Scan Watchlist"
+                # covers artists THEN labels with the identical live display.
+                _lbl_tracks = 0
                 if not watchlist_scan_state.get('cancel_requested', False):
                     try:
-                        from core.automation.handlers.scan_watchlist_labels import (
-                            build_default_seams as _lbl_build_seams,
-                            run_label_watchlist_scan as _lbl_run)
-                        _lbl_labels = database.get_watchlist_labels() or []
-                        if _lbl_labels:
-                            watchlist_scan_state.update({
-                                # keep 'scanning' so the frontend poller + live
-                                # panel stay up (the artist scanner may have
-                                # already flipped status to 'completed').
-                                'status': 'scanning',
-                                'current_phase': 'scanning_labels',
-                                'current_artist_name': 'Record labels',
-                                'current_artist_image_url': '',
-                                'current_album': '', 'current_album_image_url': '',
-                                'current_track_name': '',
-                                'total_labels': len(_lbl_labels), 'current_label_index': 0,
-                            })
-
-                            def _lbl_progress(index=0, total=0, label_name=''):
-                                watchlist_scan_state.update({
-                                    'current_phase': 'scanning_labels',
-                                    'current_artist_name': label_name or 'Record labels',
-                                    'current_artist_image_url': '',
-                                    'total_labels': total, 'current_label_index': index,
-                                    'current_album': '', 'current_track_name': '',
-                                })
-
-                            def _lbl_on_add(track_name, artist_name, album_name, album_image_url):
-                                _lbl_counts['tracks'] += 1
-                                watchlist_scan_state['tracks_found_this_scan'] = \
-                                    watchlist_scan_state.get('tracks_found_this_scan', 0) + 1
-                                watchlist_scan_state['tracks_added_this_scan'] = \
-                                    watchlist_scan_state.get('tracks_added_this_scan', 0) + 1
-                                watchlist_scan_state['current_album'] = album_name
-                                watchlist_scan_state['current_album_image_url'] = album_image_url
-                                watchlist_scan_state['current_track_name'] = track_name
-                                _feed = watchlist_scan_state.setdefault('recent_wishlist_additions', [])
-                                _feed.insert(0, {'track_name': track_name, 'artist_name': artist_name,
-                                                 'album_image_url': album_image_url})
-                                if len(_feed) > 10:
-                                    _feed.pop()
-                                _events = watchlist_scan_state.setdefault('scan_track_events', [])
-                                if len(_events) < 500:
-                                    _events.append({'track_name': track_name, 'artist_name': artist_name,
-                                                    'album_name': album_name, 'album_image_url': album_image_url,
-                                                    'status': 'added'})
-
-                            _lbl_seams = _lbl_build_seams(database=database, get_deezer=_get_deezer_client,
-                                                          profile_id=scan_profile_id, on_add=_lbl_on_add)
-                            _lbl_result = _lbl_run(
-                                **_lbl_seams, on_progress=_lbl_progress,
-                                cancel_check=lambda: watchlist_scan_state.get('cancel_requested', False))
-                            _lbl_counts['releases'] = _lbl_result.get('releases_added', 0)
-                            logger.info("Label watchlist phase: %s", _lbl_result)
+                        from core.automation.handlers.scan_watchlist_labels import run_label_scan_phase
+                        _lbl_tracks = run_label_scan_phase(
+                            watchlist_scan_state, database=database,
+                            get_deezer=_get_deezer_client, profile_id=scan_profile_id)
                     except Exception as _lbl_err:
                         logger.error("Label watchlist scan phase failed: %s", _lbl_err, exc_info=True)
 
@@ -30112,15 +30062,13 @@ def start_watchlist_scan():
                     watchlist_scan_state['completed_at'] = datetime.now()
                     watchlist_scan_state['current_phase'] = 'completed'
 
-                    _lbl_tracks = _lbl_counts.get('tracks', 0)
                     watchlist_scan_state['summary'] = {
                         'total_artists': len(scan_results),
                         'successful_scans': len(successful_scans),
                         'new_tracks_found': total_new_tracks + _lbl_tracks,
                         'tracks_added_to_wishlist': total_added_to_wishlist + _lbl_tracks,
-                        # label-specific breakdown (additive; existing UI ignores it)
+                        # label breakdown (additive; existing UI ignores extra keys)
                         'labels_scanned': len(database.get_watchlist_labels() or []),
-                        'label_releases_added': _lbl_counts.get('releases', 0),
                         'label_tracks_added': _lbl_tracks,
                     }
 
@@ -30934,6 +30882,7 @@ def _build_watchlist_auto_scan_deps():
         _set_auto_scanning_timestamp=_set_ts,
         _get_watchlist_scan_state=_get_state,
         _set_watchlist_scan_state=_set_state,
+        get_deezer_client=_get_deezer_client,
     )
 
 

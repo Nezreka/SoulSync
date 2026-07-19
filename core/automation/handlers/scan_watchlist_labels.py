@@ -297,22 +297,63 @@ def build_default_seams(*, database=None, get_deezer: Optional[Callable] = None,
     }
 
 
-def auto_scan_watchlist_labels(config=None, deps=None):
-    """Automation-kind handler: run the label scan with the real seams. Kept
-    thin so the tested engine carries the logic."""
-    database = None
-    get_deezer = None
-    if deps is not None:
-        try:
-            database = deps.get_database()
-        except Exception:
-            database = None
-        get_deezer = getattr(deps, 'get_deezer_client', None)
-    profile_id = 1
+def run_label_scan_phase(scan_state: dict, *, database, get_deezer: Optional[Callable],
+                         profile_id: int = 1, cancel_check: Optional[Callable] = None) -> int:
+    """Run the label watchlist phase, writing live progress into an EXISTING
+    watchlist ``scan_state`` dict — the same one the artist scan + live UI use —
+    so labels ride the normal watchlist scan with the shared per-item display.
+    Returns the number of label tracks wishlisted (to fold into the summary).
+
+    Shared by the manual scan (web_server.run_scan) AND the scheduled automation
+    (core/watchlist/auto_scan) so the two paths can never drift."""
+    counts = {'tracks': 0}
     try:
-        if config and isinstance(config, dict):
-            profile_id = int(config.get('profile_id', 1) or 1)
+        labels = database.get_watchlist_labels() or []
     except Exception:
-        profile_id = 1
-    seams = build_default_seams(database=database, get_deezer=get_deezer, profile_id=profile_id)
-    return run_label_watchlist_scan(**seams)
+        labels = []
+    if not labels:
+        return 0
+
+    scan_state.update({
+        # keep 'scanning' so the frontend poller + live panel stay up (the artist
+        # scanner may have already flipped status to 'completed').
+        'status': 'scanning', 'current_phase': 'scanning_labels',
+        'current_artist_name': 'Record labels', 'current_artist_image_url': '',
+        'current_album': '', 'current_album_image_url': '', 'current_track_name': '',
+        'total_labels': len(labels), 'current_label_index': 0,
+    })
+
+    def _progress(index=0, total=0, label_name=''):
+        scan_state.update({
+            'current_phase': 'scanning_labels',
+            'current_artist_name': label_name or 'Record labels',
+            'current_artist_image_url': '',
+            'total_labels': total, 'current_label_index': index,
+            'current_album': '', 'current_track_name': '',
+        })
+
+    def _on_add(track_name, artist_name, album_name, album_image_url):
+        counts['tracks'] += 1
+        scan_state['tracks_found_this_scan'] = scan_state.get('tracks_found_this_scan', 0) + 1
+        scan_state['tracks_added_this_scan'] = scan_state.get('tracks_added_this_scan', 0) + 1
+        scan_state['current_album'] = album_name
+        scan_state['current_album_image_url'] = album_image_url
+        scan_state['current_track_name'] = track_name
+        feed = scan_state.setdefault('recent_wishlist_additions', [])
+        feed.insert(0, {'track_name': track_name, 'artist_name': artist_name,
+                        'album_image_url': album_image_url})
+        if len(feed) > 10:
+            feed.pop()
+        events = scan_state.setdefault('scan_track_events', [])
+        if len(events) < 500:
+            events.append({'track_name': track_name, 'artist_name': artist_name,
+                           'album_name': album_name, 'album_image_url': album_image_url,
+                           'status': 'added'})
+
+    seams = build_default_seams(database=database, get_deezer=get_deezer,
+                                profile_id=profile_id, on_add=_on_add)
+    result = run_label_watchlist_scan(
+        **seams, on_progress=_progress,
+        cancel_check=cancel_check or (lambda: scan_state.get('cancel_requested', False)))
+    logger.info("Label watchlist phase: %s", result)
+    return counts['tracks']
