@@ -152,36 +152,61 @@ def run_label_watchlist_scan(
 # test before being relied on (source-dependent album resolution).
 # ---------------------------------------------------------------------------
 
-def _resolve_album_tracks(metadata_service, artist: str, album: str) -> List[Any]:
-    """Best-effort resolve (artist, album) → track list via the active metadata
-    service. Returns [] on ANY uncertainty (so the caller adds nothing rather
-    than guessing). Verifies the resolved album's artist matches before trusting
-    it, so a release can never be filed under the wrong artist."""
-    if metadata_service is None or not artist or not album:
-        return []
+def _norm(s: Any) -> str:
+    import re as _re
+    return _re.sub(r'[^a-z0-9]+', ' ', str(s or '').lower()).strip()
+
+
+def resolve_album_for_release(get_deezer: Optional[Callable], artist: str, album: str):
+    """Resolve (artist, album) to a real Deezer album → (album_payload, tracks).
+    Deezer gives browser-loadable CDN cover images + a track list, so scanned
+    wishlist entries carry the SAME context a manual add does. Verifies the
+    album name matches (never wishlists the WRONG album) and returns (None, [])
+    on any uncertainty so the caller adds nothing rather than guessing."""
+    if not get_deezer or not artist or not album:
+        return None, []
     try:
-        searcher = getattr(metadata_service, 'search_albums_via_artist', None)
-        if not callable(searcher):
-            return []
-        candidates = searcher(artist, album) or []
-        want = album.strip().lower()
-        for cand in candidates:
-            cand_name = str((cand or {}).get('name') or '').strip().lower()
-            cand_artist = str((cand or {}).get('artist')
-                              or ((cand or {}).get('artists') or [{}])[0].get('name', '')).strip().lower()
-            if cand_name == want and cand_artist == artist.strip().lower():
-                getter = getattr(metadata_service, 'get_album', None)
-                full = getter(cand.get('id'), include_tracks=True) if callable(getter) else None
-                items = (full or {}).get('tracks', {})
-                items = items.get('items') if isinstance(items, dict) else items
-                return items or []
+        dz = get_deezer()
+    except Exception:
+        dz = None
+    if dz is None:
+        return None, []
+    want = _norm(album)
+    try:
+        results = dz.search_albums(f"{artist} {album}", limit=5) or []
     except Exception as exc:
-        logger.debug("label album resolution failed for %s — %s: %s", artist, album, exc)
-    return []
+        logger.debug("label scan: deezer search failed for %s - %s: %s", artist, album, exc)
+        return None, []
+    match = None
+    for a in results:
+        name = _norm(getattr(a, 'name', ''))
+        if name and (name == want or want in name or name in want):
+            match = a
+            break
+    if match is None:
+        return None, []
+    try:
+        full = dz.get_album_metadata(str(getattr(match, 'id', '')), include_tracks=True) or {}
+    except Exception as exc:
+        logger.debug("label scan: deezer album fetch failed for %s - %s: %s", artist, album, exc)
+        return None, []
+    items = (full.get('tracks') or {}).get('items') or []
+    if not items:
+        return None, []
+    payload = {
+        'id': str(full.get('id') or ''),
+        'name': full.get('name') or album,
+        'images': full.get('images') or [],
+        'album_type': full.get('album_type') or 'album',
+        'release_date': full.get('release_date') or '',
+        'total_tracks': len(items),
+        'artists': full.get('artists') or [{'name': artist}],
+    }
+    return payload, items
 
 
-def build_default_seams(*, database=None, metadata_service=None, profile_id: int = 1,
-                        scan_state: Optional[dict] = None):
+def build_default_seams(*, database=None, get_deezer: Optional[Callable] = None,
+                        profile_id: int = 1):
     """Wire the real seams for run_label_watchlist_scan. Import-light so the
     pure engine + tests never pull these in."""
     from core.metadata import label_catalog as lc
@@ -189,24 +214,20 @@ def build_default_seams(*, database=None, metadata_service=None, profile_id: int
         from database.music_database import get_database
         database = get_database()
 
-    scanner = None
-    try:
-        from core.watchlist_scanner import WatchlistScanner
-        scanner = WatchlistScanner(metadata_service=metadata_service)
-    except Exception as exc:
-        logger.debug("label scan: could not build WatchlistScanner: %s", exc)
-
     def get_labels():
-        return database.get_watchlist_labels() or []
+        try:
+            return database.get_watchlist_labels() or []
+        except Exception:
+            logger.debug("label scan: get_watchlist_labels failed")
+            return []
 
     def fetch_catalog(mbid):
         return lc.label_catalog(mbid)
 
     def is_owned(item):
-        # Album-level guard when the DB exposes one; otherwise let the per-track
-        # missing check inside add_release be the ownership gate. Note:
-        # check_album_exists returns (album|None, confidence) — a truthy tuple
-        # even on a miss — so key off the matched album object, not the tuple.
+        # Album-level ownership gate. check_album_exists returns
+        # (album|None, confidence) — a truthy tuple even on a miss — so key off
+        # the matched album object, not the tuple.
         checker = getattr(database, 'check_album_exists', None)
         if callable(checker):
             try:
@@ -221,30 +242,34 @@ def build_default_seams(*, database=None, metadata_service=None, profile_id: int
         # DB is the dedupe — mirror the artist scan and don't pre-check here.
         return False
 
-    def add_release(release, _label):
+    def add_release(release, label):
         artist = str(release.get('artist') or '')
         album = str(release.get('album') or '')
-        tracks = _resolve_album_tracks(metadata_service, artist, album)
-        if not tracks:
+        album_payload, tracks = resolve_album_for_release(get_deezer, artist, album)
+        if not album_payload or not tracks:
             return False  # fail safe — resolved nothing, add nothing
+        source_info = {'label_name': str((label or {}).get('label_name') or ''),
+                       'label_mbid': str((label or {}).get('musicbrainz_label_id') or ''),
+                       'album_name': album_payload['name']}
         added_any = False
-        for track in tracks:
+        for t in tracks:
+            payload = dict(t) if isinstance(t, dict) else {}
+            payload['album'] = album_payload
+            if not payload.get('artists'):
+                payload['artists'] = album_payload['artists']
+            if not payload.get('id') or not payload.get('name'):
+                continue
             try:
-                if scanner is not None and not scanner.is_track_missing_from_library(
-                        track, album_name=album):
-                    continue  # already owned
                 ok = database.add_to_wishlist(
-                    spotify_track_data=_track_payload(track, artist, album, release),
+                    spotify_track_data=payload,
                     failure_reason="Missing from library (found by label watchlist scan)",
                     source_type="watchlist_label",
-                    source_info={'label_name': str((_label or {}).get('label_name') or ''),
-                                 'label_mbid': str((_label or {}).get('musicbrainz_label_id') or ''),
-                                 'album_name': album},
+                    source_info=source_info,
                     profile_id=profile_id,
                 )
                 added_any = added_any or bool(ok)
             except Exception:
-                logger.exception("label scan: enqueue failed for a track of %s — %s", artist, album)
+                logger.exception("label scan: enqueue failed for a track of %s - %s", artist, album)
         return added_any
 
     def mark_scanned(mbid):
@@ -260,37 +285,22 @@ def build_default_seams(*, database=None, metadata_service=None, profile_id: int
     }
 
 
-def _track_payload(track, artist, album, release):
-    """A Spotify-shaped payload for database.add_to_wishlist, carrying the REAL
-    artist so the download files correctly."""
-    t = track if isinstance(track, dict) else {}
-    name = str(t.get('name') or getattr(track, 'name', '') or '')
-    year = str(release.get('year') or '')
-    return {
-        'id': t.get('id') or '',
-        'name': name,
-        'artists': [{'name': artist}],
-        'album': {
-            'name': album,
-            'id': release.get('release_group_id') or '',
-            'release_date': year,
-            'artists': [{'name': artist}],
-            'images': [],
-        },
-        'duration_ms': t.get('duration_ms') or 0,
-        'track_number': t.get('track_number') or 0,
-    }
-
-
 def auto_scan_watchlist_labels(config=None, deps=None):
     """Automation-kind handler: run the label scan with the real seams. Kept
     thin so the tested engine carries the logic."""
-    metadata_service = getattr(deps, 'metadata_service', None) if deps else None
+    database = None
+    get_deezer = None
+    if deps is not None:
+        try:
+            database = deps.get_database()
+        except Exception:
+            database = None
+        get_deezer = getattr(deps, 'get_deezer_client', None)
     profile_id = 1
     try:
         if config and isinstance(config, dict):
             profile_id = int(config.get('profile_id', 1) or 1)
     except Exception:
         profile_id = 1
-    seams = build_default_seams(metadata_service=metadata_service, profile_id=profile_id)
+    seams = build_default_seams(database=database, get_deezer=get_deezer, profile_id=profile_id)
     return run_label_watchlist_scan(**seams)
