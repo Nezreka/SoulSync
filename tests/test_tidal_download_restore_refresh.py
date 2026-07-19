@@ -116,3 +116,95 @@ def test_load_failure_returns_false_no_refresh(monkeypatch):
     assert c._restore_and_verify("Bearer", "tok", "r", 0) is False
     assert s.token_refresh_calls == 0
     assert _saved_session(cfg) == []
+
+
+# --- the Netti93 restart loop: boot-phase stash must survive __init__ --------
+# During a boot-phase construction _init_session stashes the saved tokens in
+# _boot_session_tokens for deferred verification; __init__ used to re-initialize
+# that attribute AFTER calling _init_session, silently wiping the stash. Every
+# Docker/gunicorn restart then came up unauthenticated with no error anywhere,
+# while the config still held valid tokens (2.7.0 -> 2.8.6 regression).
+
+def test_boot_phase_construction_keeps_the_deferred_tokens(monkeypatch, tmp_path):
+    import core.boot_phase as boot_phase
+
+    cfg = _Cfg()
+    cfg.get = lambda key, default=None: (
+        {"token_type": "Bearer", "access_token": "tok",
+         "refresh_token": "r", "expiry_time": 9999999999}
+        if key == "tidal_download.session" else
+        (str(tmp_path) if key == "soulseek.download_path" else default)
+    )
+    monkeypatch.setattr(tdc, "config_manager", cfg)
+    monkeypatch.setattr(boot_phase, "is_boot_phase", lambda: True)
+
+    class _FakeTidalapi:
+        Session = _FakeSession
+
+    monkeypatch.setattr(tdc, "tidalapi", _FakeTidalapi)
+
+    c = TidalDownloadClient(download_path=str(tmp_path))
+    assert c._boot_session_tokens is not None, \
+        "boot-phase token stash must survive __init__ (the restart-loop bug)"
+    assert c._boot_session_tokens.get("access_token") == "tok"
+    assert c.is_authenticated() is True              # boot phase: pending tokens count
+
+
+# --- transient restore failures keep the tokens and retry --------------------
+
+def test_transient_restore_failure_keeps_pending_and_stays_authenticated(monkeypatch):
+    import requests
+    s = _FakeSession(load_ok=True, check_results=[])
+
+    def network_down(**kw):
+        raise requests.ConnectionError("Name or service not known")
+
+    s.load_oauth_session = network_down
+    c, cfg = _client(s, monkeypatch)
+    c._boot_session_tokens = {"token_type": "Bearer", "access_token": "tok",
+                              "refresh_token": "r", "expiry_time": 0}
+    c._next_restore_retry_at = 0.0
+    monkeypatch.setattr(tdc, "tidalapi", object())
+
+    assert c._complete_deferred_session() is True    # optimistic, not dropped
+    assert c._boot_session_tokens is not None        # tokens kept for retry
+    assert c._next_restore_retry_at > 0              # retry throttled
+    assert _saved_session(cfg) == []                 # stored config untouched
+
+
+def test_definitive_rejection_drops_pending(monkeypatch):
+    s = _FakeSession(load_ok=False)                  # Tidal says the tokens are dead
+    c, cfg = _client(s, monkeypatch)
+    c._boot_session_tokens = {"token_type": "Bearer", "access_token": "tok",
+                              "refresh_token": "r", "expiry_time": 0}
+    c._next_restore_retry_at = 0.0
+    monkeypatch.setattr(tdc, "tidalapi", object())
+
+    assert c._complete_deferred_session() is False
+    assert c._boot_session_tokens is None            # definitive -> cleared
+
+
+def test_retry_succeeds_after_transient_failure(monkeypatch):
+    import requests
+    s = _FakeSession(check_results=[True])
+    calls = {"n": 0}
+    real_load = s.load_oauth_session
+
+    def flaky(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.ConnectionError("boot: network not up yet")
+        return real_load(**kw)
+
+    s.load_oauth_session = flaky
+    c, cfg = _client(s, monkeypatch)
+    c._boot_session_tokens = {"token_type": "Bearer", "access_token": "tok",
+                              "refresh_token": "r", "expiry_time": 0}
+    c._next_restore_retry_at = 0.0
+    monkeypatch.setattr(tdc, "tidalapi", object())
+
+    assert c._complete_deferred_session() is True    # transient, kept
+    c._next_restore_retry_at = 0.0                   # fast-forward the throttle
+    assert c._complete_deferred_session() is True    # retry restores for real
+    assert c._boot_session_tokens is None            # done — no more pending
+    assert len(_saved_session(cfg)) == 1             # restored session persisted

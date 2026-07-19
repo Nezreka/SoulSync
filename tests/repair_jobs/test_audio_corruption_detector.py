@@ -123,7 +123,7 @@ def _prep(monkeypatch, verdicts):
     """Force a decoder to be 'available' and stub the decode test with a
     path→(ok, reason) mapping."""
     monkeypatch.setattr(mod, "_decoder_available", lambda: True)
-    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p: p)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: p)
     monkeypatch.setattr(mod, "check_flac_integrity",
                         lambda path: verdicts.get(path, (True, "")))
 
@@ -159,7 +159,7 @@ def test_scan_ignores_non_flac(tmp_path, monkeypatch):
     mp3.write_bytes(b"x")
     called = {"n": 0}
     monkeypatch.setattr(mod, "_decoder_available", lambda: True)
-    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p: p)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: p)
     monkeypatch.setattr(mod, "check_flac_integrity",
                         lambda p: (called.__setitem__("n", called["n"] + 1), (True, ""))[1])
 
@@ -196,3 +196,46 @@ def test_scan_only_modified_within_days_narrows(tmp_path, monkeypatch):
     result = AudioCorruptionDetectorJob().scan(ctx)
 
     assert findings == [] and result.skipped == 1
+
+
+def test_scan_resolves_paths_with_the_job_context(tmp_path, monkeypatch):
+    """#1000 follow-up (abclive): the scan called the path resolver BARE — no
+    transfer folder, no config_manager — so it had zero base directories to
+    suffix-walk and every Docker/NAS library path silently resolved to None:
+    '6741 FLAC files decode-tested, 0 corrupt, 6741 skipped' in 0.1s. The
+    resolver must receive the context's transfer folder + config manager."""
+    seen = {}
+
+    def _spy(p, **kw):
+        seen.update(kw)
+        return p
+
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "resolve_library_file_path", _spy)
+    monkeypatch.setattr(mod, "check_flac_integrity", lambda p: (True, ""))
+
+    f = tmp_path / "06 - Track.flac"
+    f.write_bytes(b"x")
+    ctx, _ = _context([_row(12, "Track", str(f))], tmp_path)
+    AudioCorruptionDetectorJob().scan(ctx)
+
+    assert seen.get("transfer_folder") == str(tmp_path)
+    assert seen.get("config_manager") is ctx.config_manager
+
+
+def test_scan_surfaces_total_resolution_failure(tmp_path, monkeypatch):
+    """When EVERY path fails to resolve (the Docker path-mapping case), the job
+    must say so loudly instead of quietly reporting a healthy all-skip run."""
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: None)
+    monkeypatch.setattr(mod, "check_flac_integrity",
+                        lambda p: (_ for _ in ()).throw(AssertionError("nothing should be tested")))
+
+    reports = []
+    ctx, _ = _context([_row(13, "Ghost", "/plex/sees/this.flac")], tmp_path)
+    ctx.report_progress = lambda **kw: reports.append(kw)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert result.skipped == 1 and result.findings_created == 0
+    assert any(r.get("log_type") == "error" and "No library paths" in (r.get("log_line") or "")
+               for r in reports)

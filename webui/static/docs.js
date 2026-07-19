@@ -1461,7 +1461,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Path Templates</strong> &mdash; Configure how files are organized in your library. The default template is <code>Artist/Album/TrackNum - Title.ext</code></li>
                     <li><strong>Log Level</strong> &mdash; Set log verbosity (DEBUG, INFO, WARNING, ERROR) in <strong>Settings &rarr; Advanced &rarr; Logging</strong>. Changes take effect immediately. See <em>Troubleshooting &rarr; Understanding Logs</em> for details.</li>
                     <li><strong>WebSocket</strong> &mdash; Real-time status updates are delivered via WebSocket. All downloads, enrichment progress, scan status, and system events push to the UI without polling.</li>
-                    <li><strong>Music Library Paths</strong> &mdash; In Settings &gt; Library, add folder paths where your music files live. Required for tag writing, streaming, and file detection when your media server stores files at a different path than SoulSync can see. Docker users: mount your music folder(s) with read-write access, then add the container-side path.</li>
+                    <li><strong>Additional Music Libraries</strong> &mdash; In Settings &gt; Paths &amp; Organization, add folder paths for any EXTRA libraries beyond your main Music Library Folder (or when your media server sees the same files at a different path). Used for tag writing, streaming, and file detection. Docker users: mount the folder(s) with read-write access, then add the container-side path.</li>
                     <li><strong>Replace Lower Quality on Import</strong> &mdash; Opt-in toggle in Settings &gt; Library. When importing from Staging, if a track already exists at lower quality (e.g. MP3), it gets replaced with the higher quality version (e.g. FLAC). Disabled by default.</li>
                     <li><strong>HiFi Instance Health</strong> &mdash; In Settings &gt; Downloads &gt; HiFi, click "Check All Instances" to see which community API instances are online, searchable, or able to download.</li>
                     <li><strong>Dead File Fix Options</strong> &mdash; Dead file findings in Library Maintenance now prompt with two choices: "Re-download" (adds to wishlist) or "Remove from DB" (just deletes the stale record). Works for single and bulk fix.</li>
@@ -2674,13 +2674,25 @@ function initializeDocsPage() {
             return offset;
         }
 
+        function place() {
+            // Desktop: .docs-content is its own scroll container. The mobile
+            // layout stacks the panels (overflow: visible) so the page
+            // scroller owns the document instead — assigning scrollTop on
+            // .docs-content is a silent no-op there.
+            if (docsContent.scrollHeight > docsContent.clientHeight + 1) {
+                docsContent.scrollTop = calcOffset(target);
+            } else {
+                target.scrollIntoView();
+            }
+        }
+
         // Initial scroll
-        docsContent.scrollTop = calcOffset(target);
+        place();
 
         // Correction pass after lazy images near the target have had time to load
         // and shift layout. Two passes cover most reflow scenarios.
-        setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 150);
-        setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 500);
+        setTimeout(place, 150);
+        setTimeout(place, 500);
     }
 
     // Section title click → expand/collapse children + scroll
@@ -2823,9 +2835,21 @@ function navigateToDocsSection(sectionId) {
                 }
                 return offset;
             }
-            docsContent.scrollTop = calcOffset(target);
-            setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 150);
-            setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 500);
+            function place() {
+                // Desktop: .docs-content is its own scroll container. The mobile
+                // layout stacks the panels (overflow: visible) so the page scroller
+                // owns the document — assigning scrollTop on .docs-content is a
+                // silent no-op there, so fall back to scrollIntoView (same fix as
+                // scrollDocTarget). Reached from "Learn more →" links / notifications.
+                if (docsContent.scrollHeight > docsContent.clientHeight + 1) {
+                    docsContent.scrollTop = calcOffset(target);
+                } else {
+                    target.scrollIntoView();
+                }
+            }
+            place();
+            setTimeout(place, 150);
+            setTimeout(place, 500);
         }
     }, 300);
 }

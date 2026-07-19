@@ -41,14 +41,28 @@ _FREE_SOURCES = ("caa", "deezer", "itunes", "audiodb")
 # ---------------------------------------------------------------------------
 
 
-def _spotify_available() -> bool:
-    """Spotify art is only usable when the user is connected. Reuse the
-    canonical accessor, which returns a client only when authenticated."""
+def _spotify_art_client():
+    """Spotify client usable for cover art: a CONNECTED account, or the free
+    metadata client when it's active. Free-mode users were losing Spotify as
+    an art source entirely (Sokhi: Spotify has the best JP covers and matches
+    MusicBrainz better than Apple/Deezer there) because the canonical registry
+    accessor only hands Spotify out when authenticated."""
     try:
-        from core.metadata.registry import get_client_for_source
-        return get_client_for_source("spotify") is not None
-    except Exception:
-        return False
+        from core.metadata.registry import get_client_for_source, get_spotify_client
+        client = get_client_for_source("spotify")
+        if client:
+            return client
+        client = get_spotify_client()
+        if client and getattr(client, "_free_active", lambda: False)():
+            return client
+    except Exception as exc:
+        logger.debug("spotify art client resolve failed: %s", exc)
+    return None
+
+
+def _spotify_available() -> bool:
+    """Spotify art is usable when connected OR when the free source is active."""
+    return _spotify_art_client() is not None
 
 
 _AVAILABILITY: Dict[str, Callable[[], bool]] = {
@@ -218,11 +232,15 @@ def _audiodb_art(artist: str, album: str, metadata: dict) -> Optional[str]:
 
 
 def _spotify_art(artist: str, album: str, metadata: dict) -> Optional[str]:
-    from core.metadata.registry import get_client_for_source
-    client = get_client_for_source("spotify")
+    client = _spotify_art_client()
     if not client:
         return None
-    for alb in (client.search_albums(f"{artist} {album}") or []):
+    # allow_fallback=False: this is a SOURCE-SPECIFIC lookup — cross-source
+    # fallback here would return another source's art labeled 'spotify' (the
+    # picker itself falls through to the next source on a miss). artist/album
+    # passed separately enable the free client's no-creds album path.
+    for alb in (client.search_albums(f"{artist} {album}", allow_fallback=False,
+                                     artist=artist, album=album) or []):
         url = getattr(alb, "image_url", None)
         if not url:
             continue

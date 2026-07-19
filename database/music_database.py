@@ -385,6 +385,50 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
 
+            # Notification history (Kazimir): every toast the UI raises is
+            # journaled here so a reflexive "Clear All" in the bell panel
+            # loses nothing — the History modal reads this, filterable +
+            # searchable, pruned per profile so it can't grow unbounded.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notification_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    type TEXT NOT NULL DEFAULT 'info',
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_notification_history_profile "
+                           "ON notification_history (profile_id, id)")
+
+            # Soulseek chat archive (chatbic P2): slskd only holds room
+            # messages in memory since it joined — an slskd restart wipes the
+            # room. This is the durable copy (text stored DECODED + rich flag,
+            # decoding happens at ingest), fed by the push loop + page hydrate,
+            # deduped on the natural key, pruned per room. Rooms only — slskd
+            # already persists PM conversations itself.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_room_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    rich INTEGER NOT NULL DEFAULT 0,
+                    timestamp TEXT NOT NULL,
+                    reply TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room, username, timestamp, message) ON CONFLICT IGNORE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_messages_room "
+                           "ON chat_room_messages (room, timestamp)")
+            # the table shipped one commit before the reply column — live dbs
+            # already created it, so the column rides a tolerant ALTER
+            try:
+                cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN reply TEXT")
+            except sqlite3.OperationalError:
+                pass    # already there
+
             # Watchlist table for storing artists to monitor for new releases
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS watchlist_artists (
@@ -509,6 +553,7 @@ class MusicDatabase:
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
             self._add_profile_settings(cursor)
+            self._add_profile_sides(cursor)
             self._add_profile_listenbrainz_support(cursor)
             self._add_profile_password_support(cursor)
             self._add_profile_recovery_support(cursor)
@@ -4066,6 +4111,38 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in profile support v4 migration: {e}")
 
+    def _add_profile_sides(self, cursor):
+        """Add the allowed_sides column ('music'|'video'|'both') to profiles.
+
+        NULL is meaningful: it reads as 'music' for non-admin profiles (the
+        shipped default — most installs predate the video side) and 'both'
+        for admins (they manage everything; never lockable). Only an explicit
+        admin grant stores 'video'/'both' on a non-admin row."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_sides' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+            try:
+                cursor.execute("ALTER TABLE profiles ADD COLUMN allowed_sides TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_migration_sides', '1')
+            """)
+            logger.info("Profile sides migration completed successfully")
+        except Exception as e:
+            logger.error(f"Error in profile sides migration: {e}")
+
+    @staticmethod
+    def _profile_sides(row, columns, is_admin: bool) -> str:
+        """Resolve a profile row's allowed_sides with the shipped defaults:
+        admins always 'both'; non-admins default 'music' unless explicitly
+        granted 'video'/'both'. Never empty."""
+        if is_admin:
+            return 'both'
+        raw = row['allowed_sides'] if 'allowed_sides' in columns else None
+        return raw if raw in ('music', 'video', 'both') else 'music'
+
     def _add_profile_settings(self, cursor):
         """Add home_page, allowed_pages, can_download columns to profiles table"""
         try:
@@ -5686,6 +5763,7 @@ class MusicDatabase:
                         'recovery_question': row['recovery_question'] if 'recovery_question' in columns else None,
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
+                        'allowed_sides': self._profile_sides(row, columns, bool(row['is_admin'])),
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
@@ -5719,6 +5797,7 @@ class MusicDatabase:
                         'recovery_question': row['recovery_question'] if 'recovery_question' in columns else None,
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
+                        'allowed_sides': self._profile_sides(row, columns, bool(row['is_admin'])),
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
@@ -5733,16 +5812,19 @@ class MusicDatabase:
     def create_profile(self, name: str, avatar_color: str = '#6366f1',
                        pin_hash: Optional[str] = None, is_admin: bool = False,
                        avatar_url: Optional[str] = None, home_page: Optional[str] = None,
-                       allowed_pages: Optional[list] = None, can_download: bool = True) -> Optional[int]:
+                       allowed_pages: Optional[list] = None, can_download: bool = True,
+                       allowed_sides: Optional[str] = None) -> Optional[int]:
         """Create a new profile. Returns new profile ID or None on error."""
+        if allowed_sides not in ('music', 'video', 'both'):
+            allowed_sides = None   # NULL = the shipped default (music for non-admin)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 ap_json = json.dumps(allowed_pages) if allowed_pages is not None else None
                 cursor.execute("""
-                    INSERT INTO profiles (name, avatar_color, pin_hash, is_admin, avatar_url, home_page, allowed_pages, can_download)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, avatar_color, pin_hash, int(is_admin), avatar_url, home_page, ap_json, int(can_download)))
+                    INSERT INTO profiles (name, avatar_color, pin_hash, is_admin, avatar_url, home_page, allowed_pages, can_download, allowed_sides)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, avatar_color, pin_hash, int(is_admin), avatar_url, home_page, ap_json, int(can_download), allowed_sides))
                 conn.commit()
                 return cursor.lastrowid
         except sqlite3.IntegrityError:
@@ -5754,12 +5836,16 @@ class MusicDatabase:
 
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
-        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download'}
+        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         # Serialize allowed_pages list to JSON string for storage
         if 'allowed_pages' in updates:
             v = updates['allowed_pages']
             updates['allowed_pages'] = json.dumps(v) if v is not None else None
+        # Sides: only the three valid values are ever stored; anything else
+        # resets to NULL (= the shipped music-only default for non-admins).
+        if 'allowed_sides' in updates and updates['allowed_sides'] not in ('music', 'video', 'both'):
+            updates['allowed_sides'] = None
         if not updates:
             return False
         try:
@@ -8155,7 +8241,7 @@ class MusicDatabase:
             logger.error(f"Error fetching candidate tracks for {len(album_ids)} album IDs: {e}")
             return []
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -8167,7 +8253,7 @@ class MusicDatabase:
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -8181,7 +8267,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -8204,7 +8290,7 @@ class MusicDatabase:
                 # per-variation SQL widening that the legacy path does.
                 logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
                 for album in candidate_albums:
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
@@ -8237,7 +8323,7 @@ class MusicDatabase:
 
                     # Score each potential match with Smart Edition Matching
                     for album in albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                         logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
 
                         if confidence > best_confidence:
@@ -8273,7 +8359,7 @@ class MusicDatabase:
                             logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
 
                         for album in artist_albums:
-                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                             if confidence > best_confidence:
                                 best_confidence = confidence
                                 best_match = album
@@ -8292,7 +8378,7 @@ class MusicDatabase:
                 try:
                     title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
                     for album in title_only_albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
                         # Slightly penalize cross-artist matches to prefer same-artist when possible
                         if confidence > best_confidence:
                             best_confidence = confidence
@@ -8409,7 +8495,27 @@ class MusicDatabase:
         
         return unique_variations
     
-    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False) -> float:
+    @staticmethod
+    def _release_years_conflict(expected_year, album_year, tolerance: int = 1) -> bool:
+        """True when BOTH years are known and disagree beyond tolerance.
+
+        The re-release guard (#re-releases-as-owned): two same-named releases in
+        a discography only exist as separate cards when their years differ (the
+        variant dedup collapses same-year editions), so a year mismatch means
+        the card is a genuinely different release than the local album. Either
+        year missing/unparseable → False, so behavior falls back to the
+        original name-based matching.
+        """
+        try:
+            ey = int(str(expected_year)[:4])
+            ay = int(str(album_year)[:4])
+        except (TypeError, ValueError):
+            return False
+        if ey <= 0 or ay <= 0:
+            return False
+        return abs(ey - ay) > tolerance
+
+    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False, expected_year=None) -> float:
         """Calculate confidence score for album match with Smart Edition Matching"""
         try:
             # Simple confidence based on string similarity
@@ -8439,6 +8545,19 @@ class MusicDatabase:
                 db_album.track_count,
             ):
                 logger.debug("  Strict discography match rejected: '%s' -> '%s'", search_title, db_album.title)
+                return 0.0
+
+            # Re-release year gate (discography surfaces only): a same-named card
+            # from a different year is a different release — owning the original
+            # must not light up its re-releases. Fires only when BOTH years are
+            # known (±1yr tolerance for edition-date drift); otherwise the match
+            # behaves exactly as before.
+            if (strict_discography_match
+                    and self._release_years_conflict(expected_year,
+                                                     getattr(db_album, 'year', None))):
+                logger.debug(
+                    "  Year gate rejected: '%s' (%s) -> '%s' (%s)",
+                    search_title, expected_year, db_album.title, db_album.year)
                 return 0.0
 
             # Log when normalized matching helps (only if it's the best score and better than others)
@@ -10162,6 +10281,154 @@ class MusicDatabase:
                 return cursor.rowcount
         except Exception as e:
             logger.error("Error clearing wishlist ignore-list: %s", e)
+            return 0
+
+    # ── notification history (Kazimir) ────────────────────────────────────────
+
+    _NOTIFICATION_KEEP = 2000          # per profile — old rows prune on insert
+    _NOTIFICATION_TYPES = ('success', 'error', 'info', 'warning')
+
+    def add_notifications(self, entries, profile_id: int = 1) -> int:
+        """Journal a batch of UI notifications. Types are whitelisted,
+        messages capped at 500 chars, and the profile's history pruned to
+        the newest _NOTIFICATION_KEEP. Returns rows inserted."""
+        rows = []
+        for e in entries or []:
+            if not isinstance(e, dict):
+                continue
+            msg = str(e.get('message') or '').strip()[:500]
+            if not msg:
+                continue
+            t = str(e.get('type') or 'info').lower()
+            rows.append((int(profile_id), t if t in self._NOTIFICATION_TYPES else 'info', msg))
+        if not rows:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.executemany(
+                    "INSERT INTO notification_history (profile_id, type, message) VALUES (?, ?, ?)",
+                    rows)
+                cursor.execute(
+                    "DELETE FROM notification_history WHERE profile_id = ? AND id NOT IN "
+                    "(SELECT id FROM notification_history WHERE profile_id = ? "
+                    " ORDER BY id DESC LIMIT ?)",
+                    (int(profile_id), int(profile_id), self._NOTIFICATION_KEEP))
+                conn.commit()
+                return len(rows)
+        except Exception as e:
+            logger.error("Error journaling notifications: %s", e)
+            return 0
+
+    _CHAT_ARCHIVE_KEEP = 5000     # per room — plenty of scrollback, bounded disk
+
+    def add_chat_messages(self, room: str, messages) -> int:
+        """Archive a batch of DECODED room messages ({username, message, rich,
+        timestamp}). Idempotent — the natural-key UNIQUE swallows replays from
+        the push loop + page hydrate both feeding the same slskd buffer.
+        Returns rows actually inserted."""
+        rows = []
+        for m in messages or []:
+            if not isinstance(m, dict):
+                continue
+            user = str(m.get('username') or '').strip()[:64]
+            msg = str(m.get('message') or '')[:4000]
+            ts = str(m.get('timestamp') or '').strip()[:40]
+            if not user or not msg or not ts:
+                continue
+            rep = m.get('reply')
+            rep_json = None
+            if isinstance(rep, dict) and rep.get('u'):
+                rep_json = json.dumps({'u': str(rep.get('u'))[:64],
+                                       'x': str(rep.get('x') or '')[:140]})
+            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json))
+        if not rows:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                before = conn.total_changes
+                cursor.executemany(
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply) "
+                    "VALUES (?, ?, ?, ?, ?, ?)", rows)
+                inserted = conn.total_changes - before
+                if inserted:
+                    cursor.execute(
+                        "DELETE FROM chat_room_messages WHERE room = ? AND id NOT IN "
+                        "(SELECT id FROM chat_room_messages WHERE room = ? "
+                        " ORDER BY timestamp DESC, id DESC LIMIT ?)",
+                        (str(room), str(room), self._CHAT_ARCHIVE_KEEP))
+                conn.commit()
+                return inserted
+        except Exception as e:
+            logger.error("Error archiving chat messages: %s", e)
+            return 0
+
+    def get_chat_messages(self, room: str, before: str = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """A page of archived room messages, OLDEST-first within the page
+        (ready to render). ``before`` pages backwards: only messages strictly
+        older than that timestamp."""
+        try:
+            q = ("SELECT username, message, rich, timestamp, reply FROM chat_room_messages "
+                 "WHERE room = ?")
+            args: list = [str(room)]
+            if before:
+                q += " AND timestamp < ?"
+                args.append(str(before))
+            q += " ORDER BY timestamp DESC, id DESC LIMIT ?"
+            args.append(max(1, min(int(limit), 500)))
+            with self._get_connection() as conn:
+                rows = [dict(r) for r in conn.execute(q, args).fetchall()]
+            rows.reverse()
+            for r in rows:
+                r['rich'] = bool(r['rich'])
+                if r.get('reply'):
+                    try:
+                        r['reply'] = json.loads(r['reply'])
+                    except (ValueError, TypeError):
+                        r['reply'] = None
+                if not r.get('reply'):
+                    r.pop('reply', None)
+            return rows
+        except Exception as e:
+            logger.error("Error reading chat archive: %s", e)
+            return []
+
+    def get_notification_history(self, profile_id: int = 1, type_filter: str = None,
+                                 search: str = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """A profile's journaled notifications, newest first, optionally
+        filtered by type and/or a case-insensitive message substring."""
+        try:
+            q = "SELECT id, type, message, created_at FROM notification_history WHERE profile_id = ?"
+            args: list = [int(profile_id)]
+            if type_filter and type_filter in self._NOTIFICATION_TYPES:
+                q += " AND type = ?"
+                args.append(type_filter)
+            if search:
+                q += " AND message LIKE ? ESCAPE '\\'"
+                escaped = str(search).replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+                args.append(f"%{escaped}%")
+            q += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            args += [max(1, min(int(limit), 500)), max(0, int(offset))]
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(q, args)
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error reading notification history: %s", e)
+            return []
+
+    def clear_notification_history(self, profile_id: int = 1) -> int:
+        """Drop a profile's journaled notifications. Returns rows removed."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM notification_history WHERE profile_id = ?",
+                               (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Error clearing notification history: %s", e)
             return 0
 
     def get_wishlist_spotify_data(self, track_id: str, profile_id: int = 1) -> Dict[str, Any]:
@@ -12875,6 +13142,26 @@ class MusicDatabase:
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"set_album_thumb_url failed for album {album_id}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def set_artist_thumb_url(self, artist_id, thumb_url: str) -> bool:
+        """Set an artist's photo URL (the user's image-picker choice). A non-empty value also PINS
+        it: every enrichment worker fills artist thumbs only ``WHERE thumb_url IS NULL OR = ''``,
+        so none will overwrite a user pick. Returns True when a row was updated."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (thumb_url, artist_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"set_artist_thumb_url failed for artist {artist_id}: {e}")
             return False
         finally:
             if conn:

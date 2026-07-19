@@ -2,7 +2,7 @@
   <img src="./assets/trans.png" alt="SoulSync Logo">
 </p>
 
-# SoulSync - Intelligent Music Discovery & Automation Platform
+# SoulSync - Intelligent Music & Video Automation Platform
 
 **Spotify-quality music discovery for self-hosted libraries.** Automates downloads, curates playlists, monitors artists, and organizes your collection with zero manual effort.
 
@@ -18,13 +18,15 @@ SoulSync bridges streaming services to your music library with automated discove
 
 1. **Monitors artists** → Automatically detects new releases from your watchlist
 2. **Generates playlists** → Release Radar, Discovery Weekly, Seasonal, Decade/Genre mixes, Cache-powered discovery
-3. **Downloads missing tracks** → From Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube, or any combination via Hybrid mode
+3. **Downloads missing tracks** → From Soulseek, Deezer, Tidal, Qobuz, HiFi, Amazon Music, YouTube, or any combination via Hybrid mode
 4. **Verifies downloads** → AcoustID fingerprinting for all download sources
-5. **Enriches metadata** → 10 enrichment workers (Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz)
+5. **Enriches metadata** → 14 enrichment workers (Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz, JioSaavn, Amazon, Bandcamp, Similar Artists)
 6. **Tags consistently** → Picard-style MusicBrainz release preflight ensures all album tracks get the same release ID
 7. **Organizes files** → Custom templates for clean folder structures
 8. **Manages library** → Plex, Jellyfin, Navidrome, or SoulSync Standalone (no media server required)
 9. **Scrobbles plays** → Automatic scrobbling to Last.fm and ListenBrainz from your media server
+
+**Plus a full video side.** SoulSync also manages **Movies, TV Shows, and YouTube** — the same discovery, automation, and enrichment approach applied to video, with its own isolated database, dashboard, and pipeline. Works with Plex and Jellyfin. See **[Video Library](#video-library--movies-tv-shows--youtube)** below.
 
 ---
 
@@ -59,9 +61,11 @@ SoulSync bridges streaming services to your music library with automated discove
 
 **Beatport** — Full electronic music integration with genre browser (39+ genres)
 
+**Artist Map & Artist Web** — Interactive full-screen graph explorers of your library's taste landscape: every artist as a node, clustered by genre, wired by similarity; plus a Playlist Explorer that renders any playlist as an explorable tree
+
 ### Multi-Source Downloads
 
-**6 Download Sources**: Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube — use any single source or Hybrid mode with drag-to-reorder priority
+**7 Download Sources**: Soulseek, Deezer, Tidal, Qobuz, HiFi, Amazon Music, YouTube — use any single source or Hybrid mode with drag-to-reorder priority
 
 **Deezer Downloads** — ARL token authentication, FLAC lossless / MP3 320 / MP3 128 with automatic quality fallback and Blowfish decryption
 
@@ -77,7 +81,7 @@ SoulSync bridges streaming services to your music library with automated discove
 
 **Hybrid Mode** — Enable any combination of sources, drag to set priority order, automatic fallback chain
 
-**Playlist Sources**: Spotify, Tidal, YouTube, Deezer, Beatport charts, ListenBrainz, Spotify Link (no API needed)
+**Playlist Sources**: Spotify, Tidal, YouTube, Deezer, Qobuz, Beatport charts, ListenBrainz, Spotify/Deezer link paste (no API needed), CSV/TSV/M3U file import
 
 **Post-Download**
 - Lossy copy creation: MP3, Opus, AAC with configurable bitrate (Opus capped at 256kbps)
@@ -101,7 +105,7 @@ SoulSync bridges streaming services to your music library with automated discove
 ### Audio Verification
 
 **AcoustID Fingerprinting** (optional) — Verifies downloaded files match expected tracks
-- Runs for all download sources (Soulseek, Tidal, Qobuz, HiFi, Deezer, YouTube)
+- Runs for all download sources (Soulseek, Tidal, Qobuz, HiFi, Deezer, Amazon Music, YouTube)
 - Catches wrong versions (live, remix, cover) even from streaming API sources
 - Fail-open design: verification errors never block downloads
 
@@ -122,9 +126,9 @@ restores the retag.
 
 ### Metadata & Enrichment
 
-**10 Background Enrichment Workers**: Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz
+**14 Background Enrichment Workers**: Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz, JioSaavn, Amazon, Bandcamp, Similar Artists — plus SoulID generation
 - Each worker independently processes artists, albums, and tracks
-- Pause/resume controls on dashboard, auto-pause during database scans
+- Pause/resume controls on dashboard (animated worker orbs show live status), auto-pause during database scans
 - Error items don't auto-retry in infinite loops (fixed in v2.1)
 
 **Multi-Source Metadata**
@@ -135,7 +139,7 @@ restores the retag.
 
 **Hydrabase** (optional P2P metadata network) — replaces iTunes as the metadata source when connected. Federated lookup with community-matched results, falls back automatically if disconnected. Dev-mode feature, enable in Settings → Connections.
 
-**Genre Whitelist** — filter junk genre tags (artist names, radio show names, playlist names) from all 10 enrichment sources. 272 curated default genres, fully customizable. Off by default for backward compatibility.
+**Genre Whitelist** — filter junk genre tags (artist names, radio show names, playlist names) from all enrichment sources. 272 curated default genres, fully customizable. Off by default for backward compatibility.
 
 **Post-Processing Tag Embedding**
 - Granular per-service tag toggles (18+ MusicBrainz tags, Spotify/iTunes/Deezer IDs, AudioDB mood/style, Tidal/Qobuz ISRCs, Last.fm tags, Genius URLs)
@@ -177,7 +181,9 @@ restores the retag.
 - Followed Spotify playlists that hit 403 errors fall back to public embed scraper
 - Unmatch button on found tracks with DB persistence for mirrored playlists
 
-**Local Profiles** — Multiple configuration profiles with isolated settings, watchlists, and playlists
+**Local Profiles** — Multiple profiles with isolated settings, watchlists, and playlists
+- **Per-profile side access** — each profile can be music-only, video-only, or both; single-side profiles never see the side switcher
+- Per-profile page access, login passwords / quick-switch PINs, per-profile Spotify + Tidal accounts (My Accounts)
 
 ### Library Management
 
@@ -193,6 +199,9 @@ restores the retag.
 - Write Tags to File (MP3/FLAC/OGG/M4A), tag preview with diff
 - Server sync after tag writes (Plex, Jellyfin, Navidrome)
 - Bulk operations, sortable columns, multi-disc support
+- **Re-identify** — re-file an imported track under a different release (staged back through the import pipeline; the original is never deleted until the re-import succeeds)
+- **Artist photo picker** — hover the artist image, pick from every connected source; updates SoulSync, your media server, and artist.jpg on disk (what Navidrome reads) in one click
+- Enhance Quality (upgrade tracks to FLAC/higher bitrate) and Reorganize Album modals
 
 **Library Maintenance** — 10+ automated repair jobs
 - Track Number, Dead Files, Duplicates, Metadata Gaps, Album Completeness, Missing Cover Art, AcoustID Scanner, Orphan Files, Fake Lossless, Library Reorganize, Lossy Converter, MBID Mismatch, Album Tag Consistency, Live/Commentary Cleaner
@@ -204,8 +213,10 @@ restores the retag.
 **Live Log Viewer** — Real-time terminal-style log viewer on Settings → Logs. Color-coded levels (DEBUG/INFO/WARNING/ERROR), live filter + search, switch between log files (app, post-processing, AcoustID, source reuse). Auto-scroll, copy, clear. Updates via WebSocket every 0.5s.
 
 **Import System** — Tag-first matching, auto-grouped album cards, staging folder workflow
+- **Exact-ID identification first** — a Spotify link in the comment tag resolves 1:1; ISRC tags resolve the album by folder consensus (fixes text-search failures on Japanese releases)
 - Auto-Import worker: recursive scan, single file support, AcoustID fingerprinting fallback
 - Confidence-gated: 90%+ auto-imports, 70-90% queued for review
+- `.lrc` lyrics sidecars travel with their tracks (imports and downloads), renamed to match
 
 **SoulSync Standalone Mode** — Use SoulSync without Plex, Jellyfin, or Navidrome
 - Downloads and imports write directly to the library database
@@ -224,9 +235,117 @@ restores the retag.
 
 ### Mobile Responsive
 
-- Comprehensive mobile layouts for Stats, Automations, Hydrabase, Issues, Help pages
+- Comprehensive mobile layouts across both sides — every music page plus the full video side (dashboard through both Studios)
 - Artist hero section, enhanced library track table with bottom sheet action popover
 - Enrichment rings, filter bars, and discover cards all adapt to narrow screens
+
+---
+
+## Video Library — Movies, TV Shows & YouTube
+
+A fully isolated video side that brings SoulSync's discovery/automation/enrichment philosophy to **movies, TV, and YouTube**. Its own database, dashboard, search, calendar, and download pipeline — sharing the automation engine but never touching the music side. Works with **Plex** and **Jellyfin** (per-server isolation).
+
+### Libraries & Scanning
+
+- **Plex + Jellyfin**, source-agnostic — Movies and TV are tracked as independent libraries
+- **Three scan modes**: incremental (a modified-since delta — only re-reads what the server touched), deep (full re-read + prune removed), full (clean reset)
+- **Smart post-download scan** — probes the server with a cheap search and skips the full crawl when it already has the newest grab
+- Weekly deep scans (TV Mondays, Movies Tuesdays) + an hourly incremental safety net for manual additions
+
+### Metadata & Enrichment
+
+**Matchers** — TMDB (movies + shows), TVDB (shows + an episode-metadata fallback for titles/overviews TMDB lacks), OMDb (IMDb / Rotten Tomatoes / Metacritic ratings)
+
+**12 background enrichment workers** — fanart.tv (logos/art), OpenSubtitles (subtitles), Return YouTube Dislike, SponsorBlock, DeArrow (better titles/thumbnails), YouTube upload dates, Trakt (ratings/votes), TVmaze, AniList (anime), Wikidata (official sites), TMDB watch providers (streaming availability), MediaStinger (after-credits scenes) — live status orbs on the dashboard, click to pause/resume, Manage Workers modal with per-service queues and manual matching
+
+- **Gap-fill by design** — enrichment only fills what the media server left blank, never clobbers server data; per-field user locking (a locked field belongs to the user, enrichment skips it forever)
+- **Rolling re-enrichment automation** — keeps ratings, overviews, art, and episode air-dates from going stale: re-pulls the stalest matched items by stored id (never re-search, so no mis-match risk), oldest first, ~monthly per item, self-healing OMDb daily-quota latch
+- **Lazy on-view refresh** + a daily airing-schedule refresh keep what you're actively watching current
+
+### Discover
+
+- **Netflix-style billboard hero** with real title-logo art and a wishlist CTA, auto-rotating over trending titles
+- A deep, **endlessly lazy-loading rail stack**: For You, Top 10 Today, personalized "Because you like…" rails, "On your streaming services", mood/studio/genre/decade/foreign rails
+- Every rail opens as a paged **See All** grid; a **browse filter bar** (kind / genre / decade / provider / language / sort) builds arbitrary grids; **Hide owned** toggle
+- Wishlist / In Library state on every card, everywhere
+
+### Detail Pages & Search
+
+- Source-agnostic **movie / show / person / studio** pages — cinematic full-bleed billboard with trailer autoplay, cast & crew, where-to-watch, similar titles, seasons & episodes
+- **Get modal + download view** — see your quality target, judge any owned copy against it, then per-source **Manual** (pick the release yourself) or **Auto** (grab the best) search — or one header **Auto** that searches every source and grabs the single best
+- **Play on Plex/Jellyfin** deep-link, four switchable season views, "Missing only" episode filter, **Wishlist Missing** (every missing aired episode across all seasons in one click)
+- **Manage panel** — inline metadata edits with per-field locks (a locked field is yours forever), plus a per-service **match editor** (TMDB / TVDB / IMDb re-match)
+- **Poster Manager** — full-screen artwork picker; writes poster.jpg, repoints the DB, pushes to the server
+- **Progressive "Netflix-feel" search** — results stream in per group (movies, TV, YouTube channels, people, studios) as they arrive instead of one blocking load
+
+### TV Calendar
+
+- A real 7-column week grid (today first) with **time-band rows** (Prime Time etc.) and a "Now" cue lighting the current band
+- A **"Next up" billboard hero** — the soonest episodes with Tonight/Today labels
+- Scope toggle: your **watchlist** (followed ∪ airing) vs the **whole library**; compact/comfortable views
+- Wishlist an aired-but-missing episode straight from the calendar modal
+
+### Watchlist → Wishlist → Download Pipeline
+
+**Follow anything** — shows, actors/directors (their whole filmography), studios, YouTube channels, YouTube playlists
+
+- **Studio watchlist** — follow Pixar, A24, Disney… with **family presets** (Disney = Pixar + Marvel + Lucasfilm) and per-member selection (follow just Pixar if you want); a settled-films vote floor keeps obscure shorts out
+- **People watchlist** — every un-owned movie a followed actor/director made, back catalog + upcoming
+- **Look-ahead horizon** — upcoming titles are wishlisted only within ~1 year of theatrical/digital release, so the wishlist never fills with distant announcements but is never out of date
+- **Sonarr-style airing** — wishlist every episode airing today for the shows you follow
+
+### Downloads
+
+- **Sources**: Soulseek (slskd), Prowlarr indexers (torrent + usenet), YouTube (yt-dlp) — reorderable hybrid chain with per-source toggles
+- **Radarr/Sonarr-class quality profiles** — quality ladder, cutoff, upgrade-until-cutoff, reject rules, preferred-words scoring
+- Fulfillment engine, download monitor, organization + sidecars + subtitle fetch, disk guard
+- Downloads page: live rows with an expandable **detail drawer** (format facts, dest path, open item), batch grouping for season packs, cancel/retry per row
+- **Permanent download-history archive** + a History modal (All / Movies / Shows / YouTube tabs)
+- **Release blocklist** (auto-added only on proven-bad-file rejects, one-click block from failed rows, blocklist manager modal) + a **recycle bin** for reversible deletes
+
+### Overlay Studio (Kometa-style overlays)
+
+- Visual **overlay-template editor**, applied via Pillow directly onto Plex/Jellyfin posters
+- Per-scope assignments (movie / show / season / episode), a logo-badge system (provider/resolution/rating badges)
+- Nightly re-apply automation that skips items whose template + art + data are unchanged
+- **Clean Up Plex Images** job reclaims the space poster re-uploads accumulate
+
+### Collection Manager (Kometa-style collections)
+
+- Build **Plex Collections / Jellyfin BoxSets** from smart filters and ranked lists
+- **Ranked list sources**: IMDb charts & lists, TMDB charts & lists, Trakt lists, MDBList — rendered in true rank order (e.g. IMDb Top 250 by rank, not year)
+- Franchise auto-backfill, a paginated gallery, and a nightly **Sync Collections** automation that pushes add/remove to the server
+
+### YouTube
+
+- **Follow channels as shows** and **playlists as shows** (yt-dlp, no API key) — long-form only, Shorts excluded
+- **Import your subscriptions** — upload or paste a ytdl-sub / Kometa `subscriptions.yml` and follow everything in one background pass
+- Paste any channel URL or `@handle` into video search to resolve + follow it
+- Per-channel **keep windows / retention** with an old-episode cleanup job
+- True downloaded-state tracking (ownership derived from download history) + ghost cleanup
+- Headless-friendly: the Settings "Paste cookies.txt" mode applies to video-side YouTube too
+
+### Library Maintenance (repair jobs)
+
+- Broken files, duplicate movies, metadata gaps, missing episodes, naming conformance, quality upgrade, watched-cleanup, wishlist audit, movie collections, YouTube ghosts
+- Rich findings dashboard with lazy detail, mirrored from the music-side Maintenance standard
+
+### Bulk Editing, Locking & Issues
+
+- **Manage panel** — inline metadata edits with per-field locking, plus **re-identify** (re-file an imported title to a different release through the staging pipeline)
+- **Bulk select bar** for mass metadata operations
+- **Issues system** — report a problem from the Manage sidebar; an Issues page + nav badge (full music-side parity)
+
+### Server Activity (Tautulli-style monitoring)
+
+- Live Plex/Jellyfin **now-playing** + watch **history** in an app-wide slide-out drawer, plus statistics & graphs
+- Gated to Plex/Jellyfin servers (hidden when the active server can't provide it)
+
+### Automations & Dashboard
+
+- A dedicated **video Automations page** — the same drag-and-drop builder, showing only video-owned rows (the music page is untouched)
+- A video **event bus** (batch-complete, scan-complete, …) drives the full watchlist → wishlist → download pipeline plus airing refresh, re-enrichment, overlays, collection sync, deep scans, cleanup, and backups
+- **Dashboard** — recently-added hero, library/upcoming/stats cards, enrichment-coverage rings, and a combined Studios (Overlay + Collection) admin card
 
 ---
 
@@ -389,7 +508,7 @@ More detail in [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER-OAUTH-FIX.md).
 
 Open SoulSync at `http://localhost:8008` and go to Settings.
 
-**Download Source**: Choose your preferred source (Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube, or Hybrid)
+**Download Source**: Choose your preferred source (Soulseek, Deezer, Tidal, Qobuz, HiFi, Amazon Music, YouTube, or Hybrid)
 
 **Paths**:
 - **Input Folder**: Container path to slskd's download folder (e.g., `/app/downloads`)
@@ -421,7 +540,7 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 | Cache-Powered Discovery (zero API) | ✓ | ✗ | ✗ | ✗ |
 | Listening Stats Dashboard | ✓ | ✗ | ✗ | ✗ |
 | Last.fm/ListenBrainz Scrobbling | ✓ | ✗ | ✗ | ✗ |
-| 6 Download Sources | ✓ | ✗ | ✗ | ✗ |
+| 7 Download Sources | ✓ | ✗ | ✗ | ✗ |
 | Deezer Downloads (FLAC) | ✓ | ✗ | ✗ | ✗ |
 | Tidal Downloads (Hi-Res) | ✓ | ✗ | ✗ | ✗ |
 | Qobuz Downloads (Hi-Res Max) | ✓ | ✗ | ✗ | ✗ |
@@ -441,7 +560,7 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 
 ## Architecture
 
-**Scale**: ~120,000 lines across Python backend and JavaScript frontend, 80+ API endpoints, handles 10,000+ album libraries
+**Scale**: ~400,000 lines across Python backend and JavaScript/TypeScript frontend, 1,000+ API endpoints, handles 10,000+ album libraries
 
 **Integrations**: Spotify, iTunes/Apple Music, Deezer, Tidal, Qobuz, YouTube, Soulseek (slskd), HiFi, Beatport, ListenBrainz, MusicBrainz, AcoustID, AudioDB, Last.fm, Genius, LRClib, music-map.com, Plex, Jellyfin, Navidrome
 
@@ -449,9 +568,9 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 
 **Core Components**:
 - **Matching Engine** — version-aware fuzzy matching with streaming source bypass
-- **Download Orchestrator** — routes between 6 sources with hybrid fallback and batch processing
+- **Download Orchestrator** — routes between 7 sources with hybrid fallback and batch processing
 - **Discovery System** — personalized playlists, cache-powered sections, seasonal content
-- **Metadata Pipeline** — 9 enrichment workers, Picard-style album consistency, dual-source fallback
+- **Metadata Pipeline** — 14 enrichment workers, Picard-style album consistency, dual-source fallback
 - **Album Consistency** — pre-flight MusicBrainz release lookup before album downloads
 - **Automation Engine** — event-driven workflows with signal chains and pipeline deployment
 - **SoulID System** — deterministic cross-instance artist/album/track identifiers via track-verified API lookup

@@ -131,7 +131,7 @@ class Track:
             duration_ms=0,
             popularity=0,
             image_url=album.get("image"),
-            release_date=album.get("release_date"),
+            release_date=_meta_release_date(album) or None,
             total_tracks=album.get("trackCount"),
             isrc=stream.isrc or None,
         )
@@ -181,13 +181,43 @@ class Album:
         return cls(
             id=str(album_meta.get("asin") or asin or ""),
             name=str(album_meta.get("title") or ""),
-            artists=[str(album_meta.get("artistName") or "Unknown Artist")],
-            release_date=str(album_meta.get("release_date") or album_meta.get("releaseDate") or ""),
+            artists=[_meta_artist_name(album_meta) or "Unknown Artist"],
+            release_date=_meta_release_date(album_meta),
             total_tracks=int(album_meta.get("trackCount") or 0),
             album_type="album",
             image_url=album_meta.get("image"),
             explicit=album_meta.get("explicit"),
         )
+
+
+def _meta_artist_name(meta: Dict[str, Any]) -> str:
+    """albumList artist across upstream revisions: ``artistName`` (legacy) →
+    ``primaryArtistName`` / ``artist.name`` (the 2026-07 T2Tunes migration)."""
+    artist = meta.get("artist") if isinstance(meta.get("artist"), dict) else {}
+    return str(meta.get("artistName") or meta.get("primaryArtistName")
+               or artist.get("name") or "")
+
+
+def _meta_release_date(meta: Dict[str, Any]) -> str:
+    """albumList release date across upstream revisions, normalized to
+    YYYY-MM-DD. Values arrive as ISO timestamps OR epoch seconds/millis
+    (originalReleaseDate on the current backend)."""
+    for key in ("release_date", "releaseDate", "originalReleaseDate",
+                "merchantReleaseDate", "streetDate"):
+        value = meta.get(key)
+        if not value:
+            continue
+        if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+            ts = float(value)
+            if ts > 1e12:                        # epoch millis
+                ts /= 1000.0
+            try:
+                from datetime import datetime, timezone
+                return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+            except (OverflowError, OSError, ValueError):
+                continue
+        return str(value)[:10]
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +392,7 @@ class AmazonClient:
             if album_asin and album_asin in album_metas:
                 meta = album_metas[album_asin]
                 track.image_url = meta.get("image")
-                track.release_date = str(meta.get("release_date") or meta.get("releaseDate") or "")
+                track.release_date = _meta_release_date(meta)
                 track.total_tracks = meta.get("trackCount")
             tracks.append(track)
         return tracks
@@ -490,8 +520,8 @@ class AmazonClient:
         result: Dict[str, Any] = {
             "id": asin,
             "name": _strip_edition(album.get("title", "")),
-            "artists": [{"name": _primary_artist(album.get("artistName", "")), "id": ""}],
-            "release_date": album.get("release_date") or album.get("releaseDate") or "",
+            "artists": [{"name": _primary_artist(_meta_artist_name(album)), "id": ""}],
+            "release_date": _meta_release_date(album),
             "total_tracks": album.get("trackCount", 0),
             "album_type": "album",
             "images": [{"url": album["image"]}] if album.get("image") else [],
@@ -726,10 +756,22 @@ class AmazonClient:
 
     @staticmethod
     def _iter_search_items(response: Any) -> Iterator[T2TunesSearchItem]:
+        """Yield search hits from either T2Tunes response generation.
+
+        The upstream migrated its /search backend around 2026-07 (#1033):
+        the old typesense shape ``{results: [{hits: [{document: {...}}]}]}``
+        became a GraphQL shape ``{data: {searchTracks: {edges: [{node:
+        {...}}]}}}`` with renamed fields (asin→id, artistName→
+        contributingArtists.concatenatedName, albumName/albumAsin→album.title/
+        album.id, no isrc). Both shapes parse so self-hosted instances that
+        still run the old backend keep working.
+        """
         if not isinstance(response, dict):
             raise AmazonClientError(
                 f"Unexpected search response type: {type(response).__name__}"
             )
+
+        # Legacy typesense shape.
         for result in response.get("results") or []:
             if not isinstance(result, dict):
                 continue
@@ -753,6 +795,44 @@ class AmazonClient:
                     isrc=str(doc.get("isrc") or ""),
                 )
 
+        # GraphQL shape (current t2tunes.site).
+        data = response.get("data")
+        if not isinstance(data, dict):
+            return
+        for key, kind in (("searchTracks", "track"), ("searchAlbums", "album"),
+                          ("searchArtists", "artist")):
+            block = data.get(key)
+            if not isinstance(block, dict):
+                continue
+            for edge in block.get("edges") or []:
+                node = edge.get("node") if isinstance(edge, dict) else None
+                if not isinstance(node, dict):
+                    continue
+                asin = str(node.get("id") or "")
+                if not asin:
+                    continue
+                artists = node.get("contributingArtists")
+                artist_name = ""
+                if isinstance(artists, dict):
+                    artist_name = str(artists.get("concatenatedName") or "")
+                    if not artist_name:
+                        for a_edge in artists.get("edges") or []:
+                            a_node = a_edge.get("node") if isinstance(a_edge, dict) else None
+                            if isinstance(a_node, dict) and a_node.get("name"):
+                                artist_name = str(a_node["name"])
+                                break
+                album = node.get("album") if isinstance(node.get("album"), dict) else {}
+                yield T2TunesSearchItem(
+                    asin=asin,
+                    title=str(node.get("title") or ""),
+                    artist_name=artist_name,
+                    item_type=kind,
+                    album_name=str(album.get("title") or ""),
+                    album_asin=str(album.get("id") or ""),
+                    duration_seconds=int(node.get("duration") or 0),
+                    isrc=str(node.get("isrc") or ""),
+                )
+
     @staticmethod
     def _parse_stream_info(item: Dict[str, Any]) -> T2TunesStreamInfo:
         stream_info = item.get("streamInfo") if isinstance(item.get("streamInfo"), dict) else {}
@@ -764,12 +844,18 @@ class AmazonClient:
         raw_key = item.get("decryptionKey")
         decryption_key = str(raw_key) if raw_key else None
 
-        def _int_tag(key: str) -> Optional[int]:
-            v = tags.get(key)
-            try:
-                return int(v) if v is not None else None
-            except (TypeError, ValueError):
-                return None
+        def _int_tag(*keys: str) -> Optional[int]:
+            # The current T2Tunes backend tags these as 'track'/'disc'; the
+            # legacy one used 'trackNumber'/'discNumber' (#1034, Madhu0).
+            for key in keys:
+                v = tags.get(key)
+                if v is None:
+                    continue
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    continue
+            return None
 
         return T2TunesStreamInfo(
             asin=str(item.get("asin") or ""),
@@ -787,10 +873,10 @@ class AmazonClient:
             artist=str(tags.get("artist") or ""),
             album=str(tags.get("album") or ""),
             isrc=str(tags.get("isrc") or ""),
-            cover_url=str(item.get("coverUrl") or ""),
-            track_number=_int_tag("trackNumber"),
-            disc_number=_int_tag("discNumber"),
+            cover_url=str(item.get("coverUrl") or item.get("templateCoverUrl") or ""),
+            track_number=_int_tag("trackNumber", "track"),
+            disc_number=_int_tag("discNumber", "disc"),
             genre=str(tags.get("genre") or ""),
             label=str(tags.get("label") or ""),
-            date=str(tags.get("date") or ""),
+            date=str(tags.get("date") or tags.get("releaseDate") or ""),
         )

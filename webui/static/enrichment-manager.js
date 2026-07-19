@@ -258,9 +258,12 @@ async function refreshEnrichmentManager(btn) {
 // ── Status loading ──────────────────────────────────────────────────────────
 
 async function refreshAllEnrichmentStatuses() {
+    // One bundled request for the whole rail (see _enrichmentStatusFetch in
+    // enrichment.js) — the helper serves every id from a single /status-all
+    // response and falls back per-service only when the bundle misses.
     const results = await Promise.all(_emVisibleWorkers().map(async (w) => {
         try {
-            const res = await fetch(`/api/enrichment/${w.id}/status`);
+            const res = await _enrichmentStatusFetch(w.id);
             return [w.id, res.ok ? await res.json() : null];
         } catch (_e) {
             return [w.id, null];

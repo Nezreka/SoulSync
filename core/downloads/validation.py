@@ -94,6 +94,58 @@ def _duration_mismatch_exceeds_integrity_tolerance(expected_duration_ms, candida
     return drift > tolerance
 
 
+# Version / alternate-recording markers — a candidate carrying one of these
+# when the expected title doesn't is a different recording, not the song.
+# Shared by the structured scoring lane AND the YouTube fallthrough lane.
+_VERSION_KEYWORDS = ['remix', 'live', 'acoustic', 'instrumental', 'radio edit',
+                     'extended', 'slowed', 'sped up', 'reverb', 'karaoke',
+                     # Producer-tag noise common on SoundCloud — "type beat" is
+                     # an instrumental produced in someone's style, tagged with
+                     # the artist name to game search. NEVER the real song.
+                     'type beat',
+                     # YouTube chaff (Kazimir's downloads folder): none of
+                     # these are ever the studio recording.
+                     'react', 'reaction', 'cover', 'nightcore',
+                     'mashup', 'parody', '8d audio', '3d sound']
+
+
+def _has_version_kw(text, kw) -> bool:
+    # WORD-boundary match — a plain substring check penalized "Staying Alive"
+    # for containing 'live' and "Undercover" for containing 'cover'.
+    return bool(re.search(r'(?<!\w)' + re.escape(kw) + r'(?!\w)', text or ''))
+
+
+# Words a legitimate YouTube upload adds around the real title — never
+# identity-bearing. Everything OUTSIDE this set + the wanted title/artist
+# words counts as a foreign word (a different song, a reaction, a rename).
+_UPLOAD_NOISE_WORDS = frozenset({
+    'official', 'video', 'audio', 'music', 'lyrics', 'lyric', 'visualizer',
+    'visualiser', 'mv', 'hd', 'hq', '4k', 'full', 'song', 'topic', 'by',
+    'ft', 'feat', 'featuring', 'with', 'prod', 'explicit', 'clean',
+})
+
+
+def _title_words_are_expected(candidate_title, expected_title, expected_artists) -> bool:
+    """True when every significant word of a candidate's title belongs to the
+    wanted TITLE, the wanted ARTIST(s), or known upload noise.
+
+    The apostrophe trap this closes: "We're Shameless" normalizes to
+    "were shameless", which is a ~0.9 char-similarity to "we were shameless"
+    — a different song by a different artist. Char ratios can't see the
+    foreign word; a word-membership check can. Only consulted for YouTube
+    candidates with NO artist evidence, so a video titled
+    "Artist - Song (Official Video)" (artist parses → evidence) never
+    reaches it."""
+    cand = matching_engine.normalize_string(candidate_title or '')
+    if not cand:
+        return False
+    allowed = set(_UPLOAD_NOISE_WORDS)
+    allowed.update(matching_engine.normalize_string(expected_title or '').split())
+    for artist in (expected_artists or []):
+        allowed.update(matching_engine.normalize_string(artist).split())
+    return all(word in allowed for word in cand.split())
+
+
 def get_valid_candidates(results, spotify_track, query):
     """
     This function is a direct port from sync.py. It scores and filters
@@ -125,14 +177,9 @@ def get_valid_candidates(results, spotify_track, query):
 
         # Detect if the expected track is a specific version (live, remix, acoustic, etc.)
         expected_title_lower = (expected_title or '').lower()
-        _version_keywords = ['remix', 'live', 'acoustic', 'instrumental', 'radio edit',
-                             'extended', 'slowed', 'sped up', 'reverb', 'karaoke',
-                             # Producer-tag noise common on SoundCloud — "type
-                             # beat" is an instrumental track produced in
-                             # someone's style, tagged with the artist name to
-                             # game search. NEVER the real song.
-                             'type beat']
-        expected_is_version = any(kw in expected_title_lower for kw in _version_keywords)
+        _version_keywords = _VERSION_KEYWORDS
+        expected_is_version = any(_has_version_kw(expected_title_lower, kw)
+                                  for kw in _version_keywords)
 
         scored = []
         _strict_duration_sources = {'tidal', 'qobuz', 'hifi', 'deezer_dl', 'amazon'}
@@ -205,24 +252,29 @@ def get_valid_candidates(results, spotify_track, query):
             if not expected_is_version:
                 # Expecting original — penalize versions
                 for kw in _version_keywords:
-                    if kw in r_title_lower and kw not in expected_title_lower:
+                    if _has_version_kw(r_title_lower, kw) and not _has_version_kw(expected_title_lower, kw):
                         confidence *= 0.4  # Heavy penalty
                         is_wrong_version = True
                         break
             else:
                 # Expecting specific version — penalize results that don't have it
                 for kw in _version_keywords:
-                    if kw in expected_title_lower and kw not in r_title_lower:
+                    if _has_version_kw(expected_title_lower, kw) and not _has_version_kw(r_title_lower, kw):
                         confidence *= 0.5
                         is_wrong_version = True
                         break
 
             # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
             # so "My Will" by "B. Starr" should never match expected "B小町".
-            # YouTube stays excluded because video-title parsing is unreliable.
             # Torrent/usenet must also pass this gate so title-only matches
-            # from the wrong artist do not get downloaded.
-            if r.username != 'youtube' and not has_only_fallback_artist:
+            # from the wrong artist do not get downloaded. YouTube gets a SOFT
+            # version below: its artist field (title-parse or channel) is
+            # unreliable, but "no artist evidence at all" now raises the bar
+            # instead of waiving it — the old full exemption downloaded
+            # "We Were Shameless" by the wrong band for "We're Shameless"
+            # (apostrophe folding made the titles near-identical, and nothing
+            # else was checked).
+            if not has_only_fallback_artist:
                 from difflib import SequenceMatcher
                 import re as _re
                 _cand_artist_raw = r.artist or ''
@@ -254,7 +306,25 @@ def get_valid_candidates(results, spotify_track, query):
                 # so falling to SequenceMatcher means the strings are genuinely
                 # different. 0.5 gives a safer buffer without blocking real
                 # matches that would have scored above 0.85 anyway.
-                if r.username in ('torrent', 'usenet') and _best_artist < 0.5:
+                if r.username == 'youtube':
+                    if _best_artist < 0.5:
+                        # No artist evidence (random channel, unparsable video
+                        # title). The title must then carry the WHOLE identity:
+                        # near-exact confidence AND no significant words beyond
+                        # the wanted title/artist + upload noise. This is what
+                        # rejects "We Were Shameless" (the extra 'we'), reaction
+                        # videos and mislabeled uploads while keeping legit
+                        # "Song by Artist (lyrics)"-style uploads alive.
+                        if confidence < 0.75 or not _title_words_are_expected(
+                                r.title, expected_title, expected_artists):
+                            logger.info(
+                                "[%s] Rejecting candidate without artist evidence: "
+                                "expected=%s candidate_artist=%r title=%r conf=%.2f",
+                                source_label, list(expected_artists),
+                                _cand_artist_raw, r.title or '', confidence,
+                            )
+                            continue
+                elif r.username in ('torrent', 'usenet') and _best_artist < 0.5:
                     logger.info(
                         "[%s] Rejecting candidate due to artist mismatch: "
                         "expected=%s candidate=%r title=%r",
@@ -264,7 +334,7 @@ def get_valid_candidates(results, spotify_track, query):
                         r.title or '',
                     )
                     continue
-                if _best_artist < 0.5 and confidence < 0.85:
+                elif _best_artist < 0.5 and confidence < 0.85:
                     continue
 
             r.confidence = confidence
@@ -326,8 +396,33 @@ def get_valid_candidates(results, spotify_track, query):
             artist_word_sets.append(words)
 
     for candidate in quality_filtered_candidates:
-        # Skip artist check for streaming results (title matching is sufficient as processed by matching engine)
+        # Streaming results: the matching engine already scored the title.
+        # YouTube is the exception — this is the FALLTHROUGH lane for results
+        # that failed structured validation, and it used to re-admit exactly
+        # the chaff the gate above rejects (wrong-artist near-titles, renamed
+        # uploads). Same discipline here: artist evidence in the title/artist
+        # fields, or a title made only of wanted words + upload noise.
         if is_streaming_source:
+            if candidate.username == 'youtube':
+                # A cover/remix/reaction is never rescued by the fallthrough,
+                # even from the right artist's own channel.
+                _want_lower = (spotify_track.name or '').lower() if spotify_track else ''
+                _cand_lower = (candidate.title or '').lower()
+                if any(_has_version_kw(_cand_lower, kw) and not _has_version_kw(_want_lower, kw)
+                       for kw in _VERSION_KEYWORDS):
+                    logger.info("[Youtube] Fallthrough rejecting %r — alternate "
+                                "recording marker", candidate.title or '')
+                    continue
+                if artist_word_sets:
+                    cand_text_words = set(matching_engine.normalize_string(
+                        f"{candidate.artist or ''} {candidate.title or ''}").split())
+                    artist_evident = any(w.issubset(cand_text_words) for w in artist_word_sets)
+                    if not artist_evident and not _title_words_are_expected(
+                            candidate.title, spotify_track.name if spotify_track else '',
+                            spotify_artists):
+                        logger.info("[Youtube] Fallthrough rejecting %r — no artist "
+                                    "evidence and foreign title words", candidate.title or '')
+                        continue
             verified_candidates.append(candidate)
             continue
 

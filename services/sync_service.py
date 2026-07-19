@@ -110,6 +110,44 @@ def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
         return None
 
 
+def rescue_stale_plex_track(media_client, db_track, artist_name):
+    """A fuzzy db match whose stored ratingKey went stale (Plex re-keys tracks
+    on a metadata refresh/optimize, and SoulSync's db id IS that old key).
+
+    Same recipe as the manual-match self-heal: search live Plex by the matched
+    track's metadata, prefer the exact file (basename of the db track's stored
+    path) when several versions exist, and return the live Plex object or
+    None. Best-effort — never raises; a miss just leaves the track unmatched
+    exactly as before (#1047)."""
+    try:
+        title = (getattr(db_track, 'title', '') or '').strip()
+        if not title:
+            return None
+        results = media_client.search_tracks(title, artist_name or '', limit=15) or []
+        if not results:
+            return None
+
+        import os as _os
+        file_path = (getattr(db_track, 'file_path', '') or '').strip()
+        want_base = _os.path.basename(file_path.replace('\\', '/')) if file_path else ''
+        chosen = None
+        if want_base:
+            for t in results:
+                live = getattr(t, '_original_plex_track', None)
+                p = _plex_track_file(live) if live is not None else ''
+                if p and _os.path.basename(p.replace('\\', '/')) == want_base:
+                    chosen = t
+                    break
+        if chosen is None:
+            chosen = results[0]   # search_tracks ranks artist→title; best effort
+        live = getattr(chosen, '_original_plex_track', None)
+        if live is None or not hasattr(live, 'ratingKey'):
+            return None
+        return live
+    except Exception:
+        return None
+
+
 @dataclass
 class SyncResult:
     playlist_name: str
@@ -367,7 +405,11 @@ class PlaylistSyncService:
                     spotify_track=track,
                     plex_track=plex_match,
                     confidence=confidence,
-                    match_type="robust_search" if plex_match else "no_match"
+                    match_type="robust_search" if plex_match else "no_match",
+                    # The finder accepts db matches at 0.7 (the app-wide "you
+                    # own this" bar) — is_match must agree, or the 0.70-0.79
+                    # band is wishlisted AND left off the playlist (#1047).
+                    match_threshold=0.7,
                 )
                 match_results.append(match_result)
             
@@ -835,12 +877,25 @@ class PlaylistSyncService:
                                         return actual_plex_track, confidence
                                     else:
                                         logger.warning(f"Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
+                                        rescued = rescue_stale_plex_track(media_client, db_track, artist_name)
+                                        if rescued is not None:
+                                            logger.info(f"[Stale-Key Rescue] '{db_track.title}' re-resolved live "
+                                                        f"(stored id {db_track.id} → {rescued.ratingKey})")
+                                            return rescued, confidence
                                 except ValueError:
                                     logger.warning(f"Invalid Plex track ID format for '{db_track.title}' (ID: {db_track.id}) - skipping this track")
                                     continue
-                                
+
                         except Exception as fetch_error:
+                            # Plex re-keys tracks on metadata refresh — the stored id
+                            # 404s here. The track EXISTS; find it live before giving
+                            # up, or it silently counts as missing (#1047).
                             logger.error(f"Failed to fetch actual {server_type} track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")
+                            rescued = rescue_stale_plex_track(media_client, db_track, artist_name)
+                            if rescued is not None:
+                                logger.info(f"[Stale-Key Rescue] '{db_track.title}' re-resolved live "
+                                            f"(stored id {db_track.id} → {rescued.ratingKey})")
+                                return rescued, confidence
                             # Continue to try other artists rather than fail completely
                             continue
                         

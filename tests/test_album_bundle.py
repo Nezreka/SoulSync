@@ -571,6 +571,64 @@ def test_resolve_uses_custom_usenet_download_path(tmp_path: Path) -> None:
     assert resolved == str(nzb_mount / "MyAlbum")
 
 
+def test_resolve_rejects_an_existing_but_contentless_verbatim_dir(tmp_path: Path) -> None:
+    """TheHomeGuy's bug: the torrent client reports ITS OWN container's
+    '/downloads'; a directory by that name exists in SoulSync's namespace
+    too but doesn't hold this torrent. With the expected content name
+    given, the verbatim short-circuit must NOT win — the configured root
+    that actually contains the release does."""
+    wrong = tmp_path / "wrong-downloads"
+    wrong.mkdir()                                  # exists, but empty
+    right = tmp_path / "real-mount"
+    (right / "My Release").mkdir(parents=True)
+    cfg = _cfg({'soulseek.download_path': str(right)})
+    resolved = resolve_reported_save_path(str(wrong), config_get=cfg,
+                                          expect_name='My Release')
+    assert resolved == str(right)                  # the root ITSELF (save-dir semantics)
+
+
+def test_resolve_verbatim_wins_when_it_actually_contains_the_content(tmp_path: Path) -> None:
+    save_dir = tmp_path / "downloads"
+    (save_dir / "My Release").mkdir(parents=True)
+    resolved = resolve_reported_save_path(str(save_dir), config_get=_cfg({}),
+                                          expect_name='My Release')
+    assert resolved == str(save_dir)
+
+
+def test_resolve_without_expect_name_keeps_the_old_verbatim_behavior(tmp_path: Path) -> None:
+    # Back-compat pin: existing callers pass no expected name and must see
+    # the pre-change acceptance of any readable directory.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert resolve_reported_save_path(str(empty), config_get=_cfg({})) == str(empty)
+
+
+def test_resolve_basename_candidates_are_content_checked(tmp_path: Path) -> None:
+    """Two roots hold a same-named folder; only one actually contains the
+    torrent's content. The content-bearing one must win regardless of
+    config order."""
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    (a / "MyAlbum").mkdir(parents=True)            # empty shell
+    (b / "MyAlbum" / "My Release").mkdir(parents=True)
+    cfg = _cfg({'download_source.torrent_download_path': str(a),
+                'soulseek.download_path': str(b)})
+    resolved = resolve_reported_save_path('/data/x/MyAlbum', config_get=cfg,
+                                          expect_name='My Release')
+    assert resolved == str(b / "MyAlbum")
+
+
+def test_resolve_protocol_neutral_path_mappings_key(tmp_path: Path) -> None:
+    """'download_source.path_mappings' works for torrents — the historical
+    usenet-named key kept nobody with a torrent problem from finding it."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({'download_source.path_mappings': [
+        {'from': '/downloads', 'to': str(tmp_path)},
+    ]})
+    resolved = resolve_reported_save_path('/downloads/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
+
+
 # ---------------------------------------------------------------------------
 # poll_album_download — lifted poll loop for both torrent + usenet plugins.
 # ---------------------------------------------------------------------------

@@ -18,8 +18,11 @@ database/*.db
 database/*.db-shm
 database/*.db-wal
 database/*.db.backup_*
+database/*.histbak
 database/api_call_history.json
-# App-generated video overlay/poster art (logo packs + rendered posters) — can be many GB
+
+# Overlay/poster assets — generated per-instance, never commit: downloaded Kometa
+# logo packs, cached clean bases + first-touch backups, rendered thumbnails, uploads
 database/video_poster_assets/
 storage/image_cache/
 logs/*.log

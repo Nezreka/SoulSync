@@ -357,10 +357,22 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
 
     templates = _get_config_manager().get("file_organization.templates", {})
     template = templates.get(template_type)
+    # The settings page used to seed the singles input with this exact string
+    # and Save persisted it — so most installs carry the old default without
+    # ever having customized anything. A stored value that IS the old default
+    # upgrades to the new one (same pattern as the YouTube template upgrade);
+    # anything the user actually edited is untouched.
+    if template_type == "single_path" and template == "$artist/$artist - $title/$title":
+        template = None
     if not template:
         default_templates = {
             "album_path": "$albumartist/$albumartist - $album/$track - $title",
-            "single_path": "$artist/$artist - $title/$title",
+            # $albumartist, not $artist, for the FOLDER identity: only
+            # $albumartist honors the Collaborative Album Artist setting, so a
+            # multi-artist single ("A, B & C") files under its main artist when
+            # the mode is 'first' (TheHomeGuy). For single-artist tracks the two
+            # are identical; users with a CUSTOM template are untouched.
+            "single_path": "$albumartist/$albumartist - $title/$title",
             "compilation_path": "Compilations/$album/$track - $artist - $title",
             "playlist_path": "$playlist/$artist - $title",
         }
@@ -615,9 +627,16 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # that one folder is whichever disc landed first, so every later track
         # of a box set would be funneled into it — collapsing all discs into a
         # single disc folder and colliding same-numbered filenames.
+        # Reorganize disables reuse outright (`_no_album_folder_reuse`): its whole
+        # job is to move albums OUT of the folder they currently sit in, and the
+        # resolver would answer with exactly that folder — making every reorganize
+        # compute "destination == current location" and no-op (the template-change
+        # complaint from TheHomeGuy).
         reuse_folder = None
         _multi_disc_album = total_discs > 1 or disc_number > 1
-        if filename_base and not _multi_disc_album and raw_album_type not in ("compilation", "compile"):
+        if (filename_base and not _multi_disc_album
+                and raw_album_type not in ("compilation", "compile")
+                and not context.get("_no_album_folder_reuse")):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder
                 from database.music_database import get_database

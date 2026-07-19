@@ -56,10 +56,13 @@ WORKDIR /app
 
 # Install runtime-only system dependencies (no gcc/build tools).
 # unzip is needed by the Deno installer below.
+# flac: the Corrupt File Detector's preferred decode test (`flac -t` also
+# verifies the STREAMINFO MD5 — catches damage that still decodes; #1000).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     ffmpeg \
+    flac \
     libchromaprint-tools \
     unzip \
     && rm -rf /var/lib/apt/lists/*
@@ -139,6 +142,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV DATABASE_PATH=/app/data/music_library.db
+# The video side's DB + its poster-asset store (assets.default_root derives from
+# this path) MUST live in the persisted volume too — without it, every container
+# recreate wiped video_library.db (watchlists, collections, overlays, issues,
+# the YouTube ownership ledger).
+ENV VIDEO_DATABASE_PATH=/app/data/video_library.db
 ENV PUID=1000
 ENV PGID=1000
 ENV UMASK=022

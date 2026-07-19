@@ -76,9 +76,39 @@ class ShortPreviewTrackJob(RepairJob):
     default_settings = {
         "max_duration_seconds": 30,
         "min_expected_drift_seconds": 30,
+        "verify_zero_length": True,
     }
     setting_options: Dict[str, list] = {}
     auto_fix = False
+
+    def _setting_bool(self, context: JobContext, key: str, default: bool) -> bool:
+        cm = getattr(context, "config_manager", None)
+        if cm is None:
+            return default
+        val = cm.get(self.get_config_key(key), default)
+        if isinstance(val, str):
+            return val.strip().lower() in ("1", "true", "yes", "on")
+        return bool(val)
+
+    def _decoded_seconds(self, file_path: str, context: JobContext) -> float:
+        """Real decoded length of a library file via ffmpeg. Resolves the
+        stored (media-server-view) path to one this process can read first —
+        without the base dirs, Docker/NAS installs resolve every path to None
+        (#1000). 0.0 when the file can't be found or decoded."""
+        import os
+
+        from core.imports.file_integrity import probe_decoded_duration
+        from core.library.path_resolver import resolve_library_file_path
+        if not file_path:
+            return 0.0
+        resolved = resolve_library_file_path(
+            file_path,
+            transfer_folder=getattr(context, "transfer_folder", None),
+            config_manager=getattr(context, "config_manager", None),
+        )
+        if not resolved and os.path.isfile(file_path):
+            resolved = file_path
+        return probe_decoded_duration(resolved) if resolved else 0.0
 
     def _setting_int(self, context: JobContext, key: str, default: int) -> int:
         cm = getattr(context, "config_manager", None)
@@ -94,12 +124,20 @@ class ShortPreviewTrackJob(RepairJob):
         max_dur_s = self._setting_int(context, "max_duration_seconds", 30)
         min_drift_s = self._setting_int(context, "min_expected_drift_seconds", 30)
         max_dur_ms = max_dur_s * 1000
+        # HiFi's HLS-assembled FLAC previews store duration 0 (total_samples=0),
+        # so the stored-duration filter alone MISSES them — the exact clips that
+        # replaced sella's tracks. When on (default), also pull zero/NULL-duration
+        # owned files and DECODE them with ffmpeg to get the real length.
+        verify_zero = self._setting_bool(context, "verify_zero_length", True)
 
         conn = context.db._get_connection()
         try:
             cursor = conn.cursor()
+            where_dur = ("(t.duration IS NULL OR t.duration = 0 OR t.duration <= ?)"
+                         if verify_zero else
+                         "t.duration IS NOT NULL AND t.duration > 0 AND t.duration <= ?")
             cursor.execute(
-                """
+                f"""
                 SELECT t.id, t.title, t.duration, t.file_path,
                        t.spotify_track_id, t.itunes_track_id, t.musicbrainz_recording_id,
                        ar.name AS artist_name, ar.thumb_url AS artist_thumb,
@@ -107,7 +145,7 @@ class ShortPreviewTrackJob(RepairJob):
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.duration IS NOT NULL AND t.duration > 0 AND t.duration <= ?
+                WHERE {where_dur}
                   AND t.file_path IS NOT NULL AND t.file_path != ''
                 """,
                 (max_dur_ms,),
@@ -147,6 +185,19 @@ class ShortPreviewTrackJob(RepairJob):
                     pass
 
             file_dur_s = (row["duration"] or 0) / 1000.0
+            # Zero/unknown stored duration = the HiFi fragmented-FLAC shape.
+            # Decode the real length so a faked-full/zero-header preview is
+            # measured by its actual audio, not its lying header.
+            if file_dur_s <= 0 and verify_zero:
+                real_s = self._decoded_seconds(row["file_path"], context)
+                if real_s <= 0:
+                    result.skipped += 1        # can't measure → never flag
+                    continue
+                file_dur_s = real_s
+            elif file_dur_s <= 0:
+                result.skipped += 1
+                continue
+
             source = self._lookup_source(context, row)
 
             # Can't verify the real length → never flag (a delete must be backed by evidence).
@@ -252,11 +303,14 @@ class ShortPreviewTrackJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             max_dur_ms = self._setting_int(context, "max_duration_seconds", 30) * 1000
+            verify_zero = self._setting_bool(context, "verify_zero_length", True)
+            where_dur = ("(duration IS NULL OR duration = 0 OR duration <= ?)"
+                         if verify_zero else "duration > 0 AND duration <= ?")
             conn = context.db._get_connection()
             try:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT COUNT(*) FROM tracks WHERE duration > 0 AND duration <= ? "
+                    f"SELECT COUNT(*) FROM tracks WHERE {where_dur} "
                     "AND file_path IS NOT NULL AND file_path != ''",
                     (max_dur_ms,),
                 )

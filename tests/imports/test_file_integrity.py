@@ -352,3 +352,78 @@ def test_check_never_raises(tmp_path: Path, monkeypatch) -> None:
 
     assert result.ok is True
     assert result.checks.get("mutagen_parse") == "unavailable"
+
+
+# ---------------------------------------------------------------------------
+# HiFi 30s-preview escape (sella's incident): a zero-length header must be
+# DECODED, not blindly trusted, when we have an expected duration.
+# ---------------------------------------------------------------------------
+
+
+def _zero_length_flac(tmp_path: Path) -> Path:
+    """A file mutagen parses to length 0 — the HiFi fragmented-FLAC shape.
+    We fake it by pointing the parse at a real WAV but forcing info.length 0
+    via monkeypatch in the tests that need the branch."""
+    f = tmp_path / "hifi.flac"
+    _write_minimal_wav(f, duration_s=1.0)
+    return f
+
+
+def test_zero_length_with_expected_duration_decodes_and_rejects_a_preview(tmp_path, monkeypatch):
+    f = _zero_length_flac(tmp_path)
+    # force the mutagen length to 0 (fragmented-FLAC shape) …
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", lambda *_a, **_k: 30.0)
+    monkeypatch.setattr(file_integrity, "MutagenFile", None, raising=False)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f), expected_duration_ms=220_000)
+    assert res.ok is False
+    assert "30s" in res.reason and "220s" in res.reason
+    assert res.checks["mutagen_parse"] == "zero_length_decoded_short"
+
+
+def test_zero_length_that_decodes_to_full_length_is_accepted(tmp_path, monkeypatch):
+    f = _zero_length_flac(tmp_path)
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", lambda *_a, **_k: 218.0)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f), expected_duration_ms=220_000)
+    assert res.ok is True
+    assert res.checks["mutagen_parse"] == "zero_length_decoded_ok"
+
+
+def test_zero_length_without_ffmpeg_still_accepts_streamed_flac(tmp_path, monkeypatch):
+    # #756 must still hold: no decode possible → don't quarantine good FLAC
+    f = _zero_length_flac(tmp_path)
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", lambda *_a, **_k: 0.0)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f), expected_duration_ms=220_000)
+    assert res.ok is True
+    assert res.checks["mutagen_parse"] == "zero_length_unknown"
+
+
+def test_zero_length_with_no_expected_duration_is_unchanged(tmp_path, monkeypatch):
+    # no expected duration → nothing to decode against, old accept path
+    f = _zero_length_flac(tmp_path)
+    called = {"n": 0}
+    def _probe(*_a, **_k):
+        called["n"] += 1
+        return 30.0
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", _probe)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f))
+    assert res.ok is True and called["n"] == 0    # never even decoded

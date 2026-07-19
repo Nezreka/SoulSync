@@ -56,62 +56,14 @@ _SLSKD_DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
 )
 
 
-# Search-rate-limit defaults. Pre-fix these were hardcoded magic numbers
-# inside `SoulseekClient.__init__`. Lifted to module level so they're
-# greppable + bumpable in one place, and so the reddit-reported case
-# (Bell Canada anti-abuse trips on slskd peer-connection bursts) can
-# tune them via `soulseek.search_*` config without touching code.
-_DEFAULT_MAX_PER_WINDOW = 35
-_DEFAULT_WINDOW_SECONDS = 220
+# The search budget (35 creations / 220s) lives in core.slskd_throttle and is
+# SHARED with the video side — one slskd instance, one sliding window. Only the
+# min-delay burst-smoother stays a music-side knob: the reddit-reported case
+# (Bell Canada anti-abuse trips on slskd peer-connection bursts) tunes it via
+# `soulseek.search_min_delay_seconds` without touching code.
+from core import slskd_throttle
+
 _DEFAULT_MIN_DELAY_SECONDS = 0  # 0 = disabled (preserves prior behavior)
-
-
-def compute_search_wait_seconds(
-    timestamps: List[float],
-    last_search_at: float,
-    now: float,
-    *,
-    max_per_window: int,
-    window_seconds: float,
-    min_delay_seconds: float,
-) -> float:
-    """Pure scheduler for the slskd search throttle.
-
-    Returns how many seconds the caller should sleep before issuing
-    the next search. ``timestamps`` is the list of recent search
-    timestamps already pruned to the current window (caller's job).
-    ``last_search_at`` is the timestamp of the most recent search
-    (0.0 if there hasn't been one). ``now`` is the current monotonic /
-    wall-clock time (caller chooses — pure function only does math).
-
-    Two independent gates, return the larger:
-
-    1. **Sliding-window cap** — when ``len(timestamps) >= max_per_window``,
-       sleep until the oldest timestamp ages out of the window. Same
-       semantics as the pre-fix hardcoded behavior.
-
-    2. **Min-delay between searches** — when ``min_delay_seconds > 0``,
-       sleep until at least that many seconds have passed since
-       ``last_search_at``. Smooths bursts even when the window isn't
-       full — this is the actual fix for the Reddit-reported case where
-       Bell Canada's anti-abuse trips on the rapid peer-connection
-       bursts that 35 back-to-back searches generate.
-
-    Returns 0.0 (no wait) when ``min_delay_seconds`` is 0 / negative
-    AND the window isn't full. Pure: no I/O, no side effects, no
-    mutation of the inputs.
-    """
-    window_wait = 0.0
-    if max_per_window > 0 and len(timestamps) >= max_per_window:
-        oldest = timestamps[0]
-        window_wait = max(0.0, oldest + window_seconds - now)
-
-    delay_wait = 0.0
-    if min_delay_seconds > 0 and last_search_at > 0:
-        elapsed = now - last_search_at
-        delay_wait = max(0.0, min_delay_seconds - elapsed)
-
-    return max(window_wait, delay_wait)
 
 
 class SoulseekClient(DownloadSourcePlugin):
@@ -121,17 +73,12 @@ class SoulseekClient(DownloadSourcePlugin):
         self.download_path: Path = Path("./downloads")
         self.active_searches: Dict[str, bool] = {}  # search_id -> still_active
 
-        # Rate limiting for searches. Cap + window stay hardcoded —
-        # nobody has reported issues with the 35/220 defaults. The
-        # min-delay knob is the actual fix for the Reddit-reported
-        # case (Bell Canada anti-abuse cuts the WAN after rapid
-        # peer-connection bursts) — smooths bursts even when the
-        # sliding-window cap isn't hit. 0 = disabled (preserves prior
-        # behavior).
-        self.search_timestamps: List[float] = []
-        self._last_search_at: float = 0.0
-        self.max_searches_per_window = _DEFAULT_MAX_PER_WINDOW
-        self.rate_limit_window = _DEFAULT_WINDOW_SECONDS
+        # Rate limiting for searches: the 35/220 window lives in the shared
+        # core.slskd_throttle (one budget with the video side). The min-delay
+        # knob is the fix for the Reddit-reported case (Bell Canada anti-abuse
+        # cuts the WAN after rapid peer-connection bursts) — smooths bursts
+        # even when the sliding-window cap isn't hit. 0 = disabled (preserves
+        # prior behavior).
         self.search_min_delay_seconds = float(
             config_manager.get('soulseek.search_min_delay_seconds', _DEFAULT_MIN_DELAY_SECONDS)
             or _DEFAULT_MIN_DELAY_SECONDS
@@ -173,53 +120,32 @@ class SoulseekClient(DownloadSourcePlugin):
         
         logger.info(f"Soulseek client configured with slskd at {self.base_url}")
     
-    def _clean_old_timestamps(self):
-        """Remove timestamps older than the rate limit window"""
-        current_time = time.time()
-        cutoff_time = current_time - self.rate_limit_window
-        self.search_timestamps = [ts for ts in self.search_timestamps if ts > cutoff_time]
-    
     async def _wait_for_rate_limit(self):
         """Wait if necessary to respect search rate limits.
 
-        Delegates the wait math to ``compute_search_wait_seconds`` so
-        the throttle logic is testable independently of asyncio.sleep
-        and the singleton client. Two gates apply (max wins): sliding-
-        window cap on searches per N seconds, plus optional min-delay
-        between consecutive searches (the burst-smoother).
+        Reserves a creation slot from the PROCESS-WIDE shared throttle
+        (``core.slskd_throttle``) so music and video searches drain one
+        budget — the 35/220 window is slskd's, not per-side. The
+        reservation happens atomically; only the wait is awaited here,
+        so concurrent searchers get distinct slots instead of all
+        computing "no wait". ``search_min_delay_seconds`` spaces this
+        search from the previous one (either side — the bursts it
+        smooths are network-level).
         """
-        self._clean_old_timestamps()
-        wait_time = compute_search_wait_seconds(
-            self.search_timestamps,
-            self._last_search_at,
-            time.time(),
-            max_per_window=self.max_searches_per_window,
-            window_seconds=self.rate_limit_window,
-            min_delay_seconds=self.search_min_delay_seconds,
-        )
+        slot = slskd_throttle.reserve_search_slot(self.search_min_delay_seconds)
+        wait_time = slot - time.monotonic()
         if wait_time > 0:
+            used = slskd_throttle.status()
             logger.info(
                 f"Search rate limit: waiting {wait_time:.1f}s "
-                f"({len(self.search_timestamps)}/{self.max_searches_per_window} in window, "
+                f"({used['searches_in_window']}/{used['max_searches_per_window']} in shared window, "
                 f"min_delay={self.search_min_delay_seconds:.1f}s)"
             )
             await asyncio.sleep(wait_time)
-            self._clean_old_timestamps()
 
-        # Record this search attempt
-        now = time.time()
-        self.search_timestamps.append(now)
-        self._last_search_at = now
-    
     def get_rate_limit_status(self) -> Dict[str, Any]:
-        """Get current rate limiting status"""
-        self._clean_old_timestamps()
-        return {
-            'searches_in_window': len(self.search_timestamps),
-            'max_searches_per_window': self.max_searches_per_window,
-            'window_seconds': self.rate_limit_window,
-            'searches_remaining': max(0, self.max_searches_per_window - len(self.search_timestamps))
-        }
+        """Current shared (music + video) search-budget usage."""
+        return slskd_throttle.status()
     
     def _get_headers(self) -> Dict[str, str]:
         headers = {'Content-Type': 'application/json'}
@@ -286,6 +212,10 @@ class SoulseekClient(DownloadSourcePlugin):
                             self._last_401_logged = True
                         logger.debug(f"API request 401 for {url}")
                     else:
+                        if response.status == 429 and method == 'POST' and endpoint == 'searches':
+                            # slskd's search-creation rate limit — cool the SHARED
+                            # (music + video) budget so both sides back off together.
+                            slskd_throttle.note_rate_limited(response.headers.get('Retry-After'))
                         self._last_401_logged = False
                         logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
                         logger.debug(f"Failed request: {method} {url}")
@@ -2080,6 +2010,74 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.error(f"Error getting session info: {e}")
             return None
     
+    # ── Soulseek chat (rooms + private messages) ──────────────────────────────
+    # Thin pass-throughs to slskd's chat API. slskd IS a full Soulseek client;
+    # these ride the same base_url + X-API-Key the search/transfer calls use.
+    # Room names and usernames can contain spaces/anything → always URL-quote.
+    # slskd expects a JSON-encoded STRING body for join/send (json= handles it).
+
+    @staticmethod
+    def _quote(part: str) -> str:
+        from urllib.parse import quote
+        return quote(str(part), safe="")
+
+    async def get_joined_rooms(self) -> List[str]:
+        """Names of the rooms slskd is currently in ([] when none/unreachable)."""
+        res = await self._make_request('GET', 'rooms/joined')
+        return list(res) if isinstance(res, list) else []
+
+    async def join_room(self, room: str) -> bool:
+        res = await self._make_request('POST', 'rooms/joined', json=str(room))
+        return res is not None
+
+    async def leave_room(self, room: str) -> bool:
+        res = await self._make_request('DELETE', f'rooms/joined/{self._quote(room)}')
+        return res is not None
+
+    async def get_room_messages(self, room: str) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', f'rooms/joined/{self._quote(room)}/messages')
+        return list(res) if isinstance(res, list) else []
+
+    async def get_room_users(self, room: str) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', f'rooms/joined/{self._quote(room)}/users')
+        return list(res) if isinstance(res, list) else []
+
+    async def send_room_message(self, room: str, message: str) -> bool:
+        res = await self._make_request('POST', f'rooms/joined/{self._quote(room)}/messages',
+                                       json=str(message))
+        return res is not None
+
+    async def get_available_rooms(self) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', 'rooms/available')
+        return list(res) if isinstance(res, list) else []
+
+    async def get_conversations(self) -> List[Dict[str, Any]]:
+        res = await self._make_request('GET', 'conversations')
+        return list(res) if isinstance(res, list) else []
+
+    async def get_conversation(self, username: str) -> Any:
+        """One conversation with its messages. Shape varies by slskd version
+        (object with .messages vs a bare list) — callers must tolerate both."""
+        return await self._make_request('GET', f'conversations/{self._quote(username)}')
+
+    async def send_private_message(self, username: str, message: str) -> bool:
+        res = await self._make_request('POST', f'conversations/{self._quote(username)}',
+                                       json=str(message))
+        return res is not None
+
+    async def acknowledge_conversation(self, username: str) -> bool:
+        """Mark a conversation read (clears slskd's unacknowledged flag)."""
+        res = await self._make_request('PUT', f'conversations/{self._quote(username)}')
+        return res is not None
+
+    async def get_user_status(self, username: str) -> Optional[Dict[str, Any]]:
+        """A peer's presence (online/away) — shape varies by slskd version."""
+        return await self._make_request('GET', f'users/{self._quote(username)}/status')
+
+    async def get_user_info(self, username: str) -> Optional[Dict[str, Any]]:
+        """A peer's info card (description, slots, queue) — best-effort."""
+        return await self._make_request('GET', f'users/{self._quote(username)}/info')
+
     async def explore_api_endpoints(self) -> Dict[str, Any]:
         """Explore available API endpoints to find the correct download endpoint"""
         if not self.base_url:

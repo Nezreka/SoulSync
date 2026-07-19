@@ -41,11 +41,22 @@ def needs_replaygain(rg_tags: Optional[Dict[str, Any]]) -> bool:
     return val is None or str(val).strip() == ''
 
 
-def _resolve(file_path: str) -> Optional[str]:
-    """Resolve a stored library path to one this process can read (Docker/host
-    prefix mapping), falling back to the raw path if it's already a real file."""
-    resolved = resolve_library_file_path(file_path) if file_path else None
-    if not resolved and file_path and os.path.isfile(file_path):
+def _resolve(file_path: str, context: JobContext) -> Optional[str]:
+    """Resolve a stored library path to one this process can read.
+
+    MUST pass the context's transfer folder + config_manager — a bare
+    ``resolve_library_file_path(path)`` has no base directories to suffix-walk,
+    so for Docker/NAS users (whose DB paths are the MEDIA SERVER's view) every
+    file silently resolved to None and the scan skipped the whole library
+    (the same hole the Corrupt File Detector shipped with; #1000 follow-up)."""
+    if not file_path:
+        return None
+    resolved = resolve_library_file_path(
+        file_path,
+        transfer_folder=context.transfer_folder,
+        config_manager=context.config_manager,
+    )
+    if not resolved and os.path.isfile(file_path):
         resolved = file_path
     return resolved
 
@@ -119,7 +130,7 @@ class ReplayGainFillerJob(RepairJob):
             track_id, title, artist_name, file_path = row[:4]
             result.scanned += 1
 
-            resolved = _resolve(file_path)
+            resolved = _resolve(file_path, context)
             if not resolved:
                 # Can't read the file from here → can't analyze it on apply either.
                 result.skipped += 1

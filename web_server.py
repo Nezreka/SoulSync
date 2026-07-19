@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.9"
+_SOULSYNC_BASE_VERSION = "3.1.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -475,6 +475,26 @@ socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_
 _log_socketio_startup_status(_socketio_cors_origins, logger)
 _socketio_rejection_logger = _SocketIORejectionLogger(logger)
 set_activity_toast_emitter(socketio.emit)
+# Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
+from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
+_set_overlay_emit(socketio.emit)
+# Live collection-cleanup progress → 'collections:cleanup' socket events (studio).
+from core.video.collections.server_cleanup import set_cleanup_progress_emitter as _set_cleanup_emit
+_set_cleanup_emit(socketio.emit)
+# Live collection-sync progress → 'collections:sync' socket events (bell + studio).
+from core.video.collections.sync_job import set_sync_progress_emitter as _set_colsync_emit
+_set_colsync_emit(socketio.emit)
+# Live artwork-refresh progress → 'collections:artwork' socket events (bell + studio).
+from core.video.collections.poster_gen import set_artwork_progress_emitter as _set_colart_emit
+_set_colart_emit(socketio.emit)
+# Live bulk-metadata progress → 'video:bulk' socket events (bell + library bar).
+from core.video.bulk_ops import set_bulk_progress_emitter as _set_bulk_emit
+_set_bulk_emit(socketio.emit)
+# Video Library Maintenance (jobs & findings): live 'video:repair:progress'
+# socket events + the scheduler thread (force-runs work even when disabled).
+from core.video.repair.worker import get_video_repair_worker as _get_video_repair
+_get_video_repair().set_emitter(socketio.emit)
+_get_video_repair().start()
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}
@@ -609,8 +629,15 @@ def _set_profile_context():
 
     pid = session.get('profile_id', 1)
 
-    # Validate session profile still exists (handles deleted profiles)
+    # Validate session profile still exists (handles deleted profiles), and stash
+    # download permission on g so isolated blueprints (video) can gate without a
+    # music-DB read. Admin (1) is always allowed.
+    g.can_download = True
+    g.profile_name = "Admin"   # display name for isolated blueprints (video issues reporter)
+    g.is_admin = True          # profile 1 is always admin; others per their is_admin flag
+    g.allowed_sides = 'both'   # per-profile side access (music|video|both); admins always both
     if pid != 1 and 'profile_id' in session:
+        g.is_admin = False
         try:
             database = get_database()
             profile = database.get_profile(pid)
@@ -618,6 +645,12 @@ def _set_profile_context():
                 session.pop('profile_id', None)
                 from flask import jsonify as _jsonify
                 return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
+            g.can_download = bool((profile or {}).get('can_download', True))
+            g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
+            g.is_admin = bool((profile or {}).get('is_admin', False))
+            # get_profile resolves defaults (non-admin NULL → 'music'), so the
+            # video blueprint can gate off g without a second music-DB read.
+            g.allowed_sides = (profile or {}).get('allowed_sides') or 'music'
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
@@ -843,6 +876,17 @@ VALID_PAGE_IDS = {
     'help',
     'hydrabase',
     'issues',
+    # Video side — per-profile page toggles (admin-only surfaces are gated separately,
+    # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
+    'video-dashboard',
+    'video-search',
+    'video-discover',
+    'video-library',
+    'video-watchlist',
+    'video-wishlist',
+    'video-downloads',
+    'video-calendar',
+    'video-tools',
 }
 
 def check_download_permission():
@@ -1394,6 +1438,27 @@ def _register_automation_handlers():
     )
     _register_extracted_handlers(_automation_deps)
 
+    # Bridge the isolated video download monitor's batch-complete signal into the
+    # automation engine (core/video can't import the engine). Mirrors how the music
+    # web_scan_manager forwards library_scan_completed. ONE forwarder relays EVERY
+    # published video event (batch complete, download completed/failed, repair
+    # findings, wishlist/watchlist changes, ...) to its same-named event trigger.
+    if automation_engine is not None:
+        try:
+            from core.video.download_events import register_event_forwarder
+            register_event_forwarder(
+                lambda etype, data: automation_engine.emit(etype, data or {}))
+        except Exception:
+            logger.exception("Could not wire video events -> automation engine")
+    # Notifications (arr-parity P11): a second forwarder fans the same events
+    # out to configured Discord/webhook/Telegram connections. Independent of
+    # the engine — notify still works if automations are off.
+    try:
+        from core.video.download_events import register_event_forwarder as _reg_fw
+        from core.video.notifications import handle_event as _notify_handle
+        _reg_fw(_notify_handle)
+    except Exception:
+        logger.exception("Could not wire video events -> notifications")
 
     logger.info("Automation action handlers registered")
 
@@ -3099,6 +3164,79 @@ def get_system_stats():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/server-activity')
+def get_server_activity():
+    """Live Tautulli-style activity — every active Plex stream (music + video):
+    who's playing what, direct play vs transcode, bandwidth, progress. App-wide;
+    never raises (an unconfigured/down server is a normal state the UI shows)."""
+    try:
+        from core.server_activity import get_activity
+        return jsonify(get_activity())
+    except Exception:
+        logger.exception("server activity failed")
+        return jsonify({"ok": False, "reason": "error", "sessions": [],
+                        "summary": {"streams": 0}})
+
+
+@app.route('/api/server-activity/history')
+def get_server_activity_history():
+    """Recent watch/listen history (Tautulli's History) — app-wide."""
+    try:
+        from core.server_activity import get_history
+        limit = request.args.get("limit", default=40, type=int) or 40
+        return jsonify(get_history(limit=limit))
+    except Exception:
+        logger.exception("server activity history failed")
+        return jsonify({"ok": False, "reason": "error", "history": []})
+
+
+@app.route('/api/server-activity/stats')
+def get_server_activity_stats():
+    """Dashboard stats — most-watched, most-active users, plays over time, top
+    devices (Tautulli's Statistics). App-wide; cached; never raises."""
+    try:
+        from core.server_activity import get_stats
+        days = request.args.get("days", default=30, type=int) or 30
+        return jsonify(get_stats(days=days))
+    except Exception:
+        logger.exception("server activity stats failed")
+        return jsonify({"ok": False, "reason": "error"})
+
+
+@app.route('/api/server-activity/stop', methods=['POST'])
+def stop_server_activity_stream():
+    """Terminate an active stream with a message (Tautulli's kill move).
+    Admin-only — a shared server shouldn't let anyone end others' streams."""
+    try:
+        if not getattr(g, 'is_admin', False):
+            return jsonify({"ok": False, "error": "Admin only."}), 403
+        body = request.get_json(silent=True) or {}
+        from core.server_activity import stop_session
+        res = stop_session(str(body.get("session_key") or ""), str(body.get("message") or ""))
+        return jsonify(res), (200 if res.get("ok") else 400)
+    except Exception:
+        logger.exception("stop stream failed")
+        return jsonify({"ok": False, "error": "Failed to stop the stream."}), 500
+
+
+@app.route('/api/server-activity/image')
+def get_server_activity_image():
+    """Proxy a Plex image (poster/art) for the activity view so the token never
+    reaches the browser. ?path=/library/metadata/.../thumb/..."""
+    from flask import Response
+    try:
+        from core.server_activity import fetch_image
+        got = fetch_image(request.args.get("path") or "")
+        if not got:
+            return ("", 404)
+        content, ctype = got
+        return Response(content, mimetype=ctype,
+                        headers={"Cache-Control": "public, max-age=300"})
+    except Exception:
+        logger.exception("server activity image proxy failed")
+        return ("", 404)
+
+
 from core.debug_info import (
     _safe_check,
     get_debug_info as _debug_info_get,
@@ -3473,6 +3611,13 @@ def handle_settings():
                 data['_source_status'] = download_orchestrator.get_source_status()
             except Exception as e:
                 logger.debug("download source status read failed: %s", e)
+            # Deployment environment: the folder-paths guidance differs by world
+            # (Docker: leave container paths alone / bare-metal-LXC: you MUST edit
+            # them). A fresh non-Docker install still on the ./Transfer default
+            # dumps every download onto the install disk — Proxmox LXCs default
+            # to an 8GB root, which fills until the container hangs — so the UI
+            # needs to know which story to tell and when to warn.
+            data['_environment'] = {'docker': os.path.exists('/.dockerenv')}
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -3906,6 +4051,42 @@ def list_automations():
         logger.error(f"Error listing automations: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/automations/master', methods=['GET'])
+def get_automations_master():
+    """The per-side global pause state ({music: bool, video: bool}).
+    It gates whether ANY automation runs on that side — individual enabled
+    flags are untouched, so un-pausing restores exactly what the user had."""
+    try:
+        from core.automation_engine import AutomationEngine
+        return jsonify({side: (automation_engine.master_enabled(side) if automation_engine
+                               else AutomationEngine.MASTER_DEFAULTS[side])
+                        for side in ('music', 'video')})
+    except Exception as e:
+        logger.error(f"Error reading automations master state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/automations/master', methods=['POST'])
+@admin_only
+def set_automations_master():
+    """Flip one side's global automation pause. Body: {side, enabled}.
+    Admin-only — it silences every automation on a side, not just yours."""
+    try:
+        data = request.get_json(silent=True) or {}
+        side = (data.get('side') or '').strip().lower()
+        if side not in ('music', 'video'):
+            return jsonify({"success": False, "error": "side must be music or video"}), 400
+        if automation_engine is None:
+            return jsonify({"success": False, "error": "Automation engine unavailable"}), 503
+        enabled = bool(data.get('enabled'))
+        automation_engine.set_master_enabled(side, enabled)   # persists to the engine DB
+        logger.info("Automations master for %s side set to %s", side, 'ON' if enabled else 'PAUSED')
+        return jsonify({"success": True, "side": side, "enabled": enabled})
+    except Exception as e:
+        logger.error(f"Error setting automations master state: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/automations', methods=['POST'])
 def create_automation():
     """Create a new automation."""
@@ -4062,13 +4243,14 @@ def list_available_scripts():
 
 @app.route('/api/automations/blocks', methods=['GET'])
 def get_automation_blocks():
-    """Return available block types for the automation builder sidebar."""
-    return jsonify({
-        'triggers': _auto_blocks.TRIGGERS,
-        'actions': _auto_blocks.ACTIONS,
-        'notifications': _auto_blocks.NOTIFICATIONS,
-        'known_signals': _collect_known_signals(),
-    })
+    """Return available block types for the automation builder sidebar.
+
+    Music builder only — video-only blocks (scope='video') are filtered out
+    so the music builder never offers a video action. The video side fetches
+    its own scope via /api/video/automations/blocks."""
+    scoped = _auto_blocks.blocks_for_scope('music')
+    scoped['known_signals'] = _collect_known_signals()
+    return jsonify(scoped)
 
 @app.route('/api/mirrored-playlists/list', methods=['GET'])
 def get_mirrored_playlists_list():
@@ -4206,6 +4388,62 @@ def settings_config_status_endpoint():
     except Exception as e:
         logger.error(f"config-status error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ── Config export / import (Kazimir: "checkout" menu for migrating installs) ──
+@app.route('/api/config/export', methods=['GET'])
+@admin_only
+def export_config_bundle():
+    """One portable JSON bundle for BOTH sides. ?secrets=1 embeds real
+    credentials (plaintext — the UI gates this behind an explicit opt-in);
+    default redacts them so the export is safe to share."""
+    if not config_manager:
+        return jsonify({"error": "Config manager unavailable"}), 500
+    from datetime import datetime, timezone
+
+    from api.video import get_video_db
+    from core.config_export import build_bundle
+    include_secrets = request.args.get('secrets', '0') in ('1', 'true', 'yes')
+    # Plaintext-credential export is the ONLY endpoint that leaks real secrets,
+    # so it must sit behind actual authentication. With login OFF, @admin_only
+    # trusts every LAN request as admin — refuse, or anyone who can reach the
+    # port could pull every key. The redacted export stays available to all.
+    if include_secrets and not _require_login_enabled():
+        return jsonify({
+            "success": False,
+            "error": "Exporting credentials requires login mode. Enable "
+                     "Settings → Security → Require login first, or export "
+                     "without credentials (they'll be re-entered on the new install).",
+        }), 403
+    bundle = build_bundle(
+        config_manager, get_video_db(),
+        include_secrets=include_secrets,
+        exported_at=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        app_version=SOULSYNC_VERSION.split('+')[0],
+    )
+    return jsonify(bundle)
+
+
+@app.route('/api/config/import', methods=['POST'])
+@admin_only
+def import_config_bundle():
+    """Apply a config bundle exported from another install. Validates the
+    marker/version first; a secrets-redacted bundle never blanks existing
+    credentials (the config_manager's per-leaf guard skips the mask)."""
+    if not config_manager:
+        return jsonify({"error": "Config manager unavailable"}), 500
+    from api.video import get_video_db
+    from core.config_export import apply_bundle
+    data = request.get_json(silent=True)
+    try:
+        summary = apply_bundle(config_manager, get_video_db(), data or {})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:   # noqa: BLE001
+        logger.exception("config import failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **summary,
+                    "note": "Config imported. Restart SoulSync so every service picks it up."})
 
 
 # ── Per-service verify cache ──
@@ -6438,6 +6676,10 @@ def search_music():
         results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
+    except ValueError as ve:
+        # user-facing config problem (e.g. SoundCloud link with the source
+        # disabled) — a clear 400, not a silent empty result
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -9341,6 +9583,16 @@ def get_artist_detail(artist_id):
                 artist_id,
                 artist_name=artist_info['name'],
                 options=MetadataLookupOptions(
+                    # The user navigated here FROM a specific source's artist
+                    # card — show THAT source's catalog, not the primary's
+                    # (#1026, QT3496): when the artist was already owned, the
+                    # library upgrade discarded the clicked source, so an
+                    # Apple Music card rendered Deezer's 2-album view. The
+                    # override puts the clicked source at the head of the
+                    # chain; the normal priority still backstops it when that
+                    # source has nothing. Library-page opens carry no source
+                    # param → primary as before.
+                    source_override=source_param or None,
                     allow_fallback=True,
                     skip_cache=False,
                     max_pages=0,
@@ -10045,6 +10297,17 @@ def get_artist_discography(artist_id):
 _ART_OPTIONS_CACHE = {}                       # (artist_lower, album_lower) -> (ts, candidates)
 _ART_OPTIONS_CACHE_LOCK = threading.Lock()
 _ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several slow external calls
+_ART_OPTIONS_EMPTY_TTL_S = 60                  # empties retry fast: one hiccup must not stick
+
+
+def _looks_like_image(data: bytes) -> bool:
+    """Magic-byte sniff — pasted custom URLs must not poison the thumb/poster/
+    artist.jpg with an HTML page. JPEG/PNG/GIF/WEBP/BMP cover real art."""
+    if not data or len(data) < 12:
+        return False
+    return (data[:2] == b"\xff\xd8" or data[:8] == b"\x89PNG\r\n\x1a\n"
+            or data[:4] == b"GIF8" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+            or data[:2] == b"BM")
 
 
 @app.route('/api/album/<album_id>/art-options', methods=['GET'])
@@ -10152,6 +10415,155 @@ def set_album_art(album_id):
                         "cover_written": cover_written})
     except Exception as e:
         logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/artist/<artist_id>/art-options', methods=['GET'])
+def get_artist_art_options(artist_id):
+    """Candidate artist photos for the artist image picker (read-only).
+
+    One candidate per CONNECTED metadata source (Spotify/Deezer/iTunes/AudioDB/
+    Discogs/…), resolved concurrently: the artist's stored per-source id when
+    the library row has one (exact), otherwise a name search on that source.
+    Mirrors the album art-options endpoint."""
+    try:
+        db = get_database()
+        artist_row = db.get_artist(int(artist_id))
+        if artist_row is None:
+            return jsonify({"error": "Artist not found"}), 404
+        name = getattr(artist_row, 'name', '') or ''
+
+        # Key by ROW id, not name: two artists sharing a name must not share
+        # a cache slot. Empty results only stick for a minute — a transient
+        # source failure used to poison the picker with 'no photos' for 15.
+        cache_key = ('artist', int(artist_id))
+        now = time.time()
+        with _ART_OPTIONS_CACHE_LOCK:
+            hit = _ART_OPTIONS_CACHE.get(cache_key)
+            if hit and now - hit[0] < (_ART_OPTIONS_TTL_S if hit[1] else _ART_OPTIONS_EMPTY_TTL_S):
+                return jsonify({"artist_id": artist_id, "count": len(hit[1]),
+                                "candidates": hit[1], "cached": True})
+
+        source_ids = {col: getattr(artist_row, col, None)
+                      for col in ('spotify_artist_id', 'deezer_id', 'itunes_artist_id',
+                                  'audiodb_id', 'discogs_id')}
+        from core.metadata.artist_image import gather_artist_image_candidates
+        candidates = gather_artist_image_candidates(name, source_ids)
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
+        return jsonify({"artist_id": artist_id, "count": len(candidates), "candidates": candidates})
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid artist id"}), 400
+    except Exception as e:
+        logger.error("[artist-art-options] failed for %s: %s", artist_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/artist/<artist_id>/art', methods=['POST'])
+def set_artist_art(artist_id):
+    """Apply a photo chosen in the artist image picker — everywhere:
+
+    1. SoulSync DB (``artists.thumb_url``; a non-empty value pins it, the
+       enrichment workers only fill empty thumbs)
+    2. the active media server (Plex/Jellyfin poster upload; Navidrome has no
+       API and is covered by step 3)
+    3. ``artist.jpg`` in the artist's folder on disk (what Navidrome reads;
+       Plex/Jellyfin also honor it as a fallback) + a Navidrome scan nudge
+
+    Steps 2 and 3 are best-effort — the response reports each target so the
+    UI can say exactly what happened. Body: ``{"url": "<image url>"}``."""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+
+        db = get_database()
+        artist_row = db.get_artist(int(artist_id))
+        if artist_row is None:
+            return jsonify({"error": "Artist not found"}), 404
+        artist_name = getattr(artist_row, 'name', '') or ''
+
+        # Download FIRST (server upload + disk write share the bytes) and
+        # validate: a custom URL that resolves to an HTML page must abort
+        # before anything is pinned. A failed download stays best-effort —
+        # hotlink-protected art can still render in the browser.
+        image_bytes = None
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0",
+                                                       "Accept": "image/*"})
+            with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
+                image_bytes = resp.read() or None
+        except Exception as exc:
+            logger.warning("[set-artist-art] image download failed: %s", exc)
+        if image_bytes is not None and not _looks_like_image(image_bytes):
+            return jsonify({"error": "That URL doesn't point to an image"}), 400
+
+        if not db.set_artist_thumb_url(int(artist_id), url):
+            return jsonify({"error": "Could not update artist"}), 500
+
+        # 2. Active media server poster (Plex/Jellyfin have APIs; Navidrome's
+        #    update_artist_poster is a documented no-op — disk write covers it).
+        server_updated = False
+        if image_bytes and media_server_engine:
+            try:
+                active = config_manager.get_active_media_server()
+                client = media_server_engine.client(active)
+                if client and hasattr(client, 'update_artist_poster'):
+                    server_artist = None
+                    if hasattr(client, '_search_artists_by_name'):        # Plex
+                        matches = client._search_artists_by_name(title=artist_name, limit=1)
+                        server_artist = matches[0] if matches else None
+                    elif hasattr(client, 'get_artist_by_id'):             # Jellyfin
+                        server_artist = client.get_artist_by_id(str(artist_id))
+                    if server_artist is not None:
+                        server_updated = bool(client.update_artist_poster(server_artist, image_bytes))
+            except Exception as exc:
+                logger.warning("[set-artist-art] server poster update failed: %s", exc)
+
+        # 3. artist.jpg on disk (Navidrome's mechanism) + scan nudge.
+        disk_written = False
+        try:
+            from core.library.artist_image import derive_artist_folder, write_artist_jpg
+            albums = db.get_albums_by_artist(int(artist_id)) or []
+            artist_folder = None
+            for album in albums:
+                for tr in (db.get_tracks_by_album(album.id) or []):
+                    raw = getattr(tr, 'file_path', None)
+                    if not raw:
+                        continue
+                    resolved = _resolve_library_file_path(raw) or raw
+                    if resolved and os.path.exists(resolved):
+                        artist_folder = derive_artist_folder(os.path.dirname(resolved))
+                        break
+                if artist_folder:
+                    break
+            if artist_folder and image_bytes:
+                ok, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=True)
+                disk_written = bool(ok)
+                if not ok:
+                    logger.warning("[set-artist-art] artist.jpg write failed: %s", detail)
+                elif media_server_engine:
+                    nav = media_server_engine.client('navidrome')
+                    if nav and config_manager.get_active_media_server() == 'navidrome':
+                        try:
+                            nav.trigger_library_scan()
+                        except Exception:
+                            logger.debug("[set-artist-art] navidrome scan nudge failed", exc_info=True)
+        except Exception as exc:
+            logger.warning("[set-artist-art] disk write failed: %s", exc)
+
+        # Invalidate the candidates cache so a re-open reflects reality.
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE.pop(('artist', artist_name.lower()), None)
+
+        return jsonify({"success": True, "artist_id": artist_id, "thumb_url": url,
+                        "server_updated": server_updated, "disk_written": disk_written})
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid artist id"}), 400
+    except Exception as e:
+        logger.error("[set-artist-art] failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -10890,12 +11302,20 @@ def library_completion_stream():
             _loop_start = time.perf_counter()
             for _i, (category, item) in enumerate(all_items):
                 try:
-                    # Map Library field names to helper field names
+                    # Map Library field names to helper field names.
+                    # CRUCIAL: carry the card's YEAR through — the re-release
+                    # year gate (0e53851fd) needs it, and dropping it here
+                    # silently disabled the gate on the library page so owning
+                    # the original still lit up every re-release (5BILLION,
+                    # round 2). The artist-detail path already passes the card
+                    # dict straight through; this one rebuilt it and forgot.
                     mapped = {
                         'id': item['id'],
                         'name': item['title'],
                         'total_tracks': item.get('track_count', 0),
-                        'album_type': item.get('album_type', 'album')
+                        'album_type': item.get('album_type', 'album'),
+                        'year': item.get('year'),
+                        'release_date': item.get('release_date') or item.get('releaseDate'),
                     }
 
                     if category == 'singles':
@@ -13053,17 +13473,39 @@ def _resolve_library_file_path(file_path):
             if found:
                 return found
 
-    # Couldn't resolve — log the bases we searched ONCE so a path/mount mismatch
-    # is diagnosable (e.g. files live under a dir that isn't transfer/download/
-    # a configured library path).
+    # Couldn't resolve — log the bases we searched, throttled to once per 10
+    # minutes. The old once-per-PROCESS guard self-silenced forever, which hid
+    # intermittent failures completely (TheHomeGuy: an NFS mount that drops and
+    # comes back reads as 'occasionally get this error' with no pattern —
+    # because all the other occurrences were swallowed).
     global _resolve_library_diag_logged
-    if not _resolve_library_diag_logged:
-        _resolve_library_diag_logged = True
+    _now = time.monotonic()
+    if not isinstance(_resolve_library_diag_logged, float) or _now - _resolve_library_diag_logged > 600:
+        _resolve_library_diag_logged = _now
+        # Name the FAILURE MODE, not just the miss: a genuinely absent file
+        # stats as ENOENT, while a broken NFS/bind mount surfaces ESTALE or
+        # EIO — and a base dir that suddenly lists 0 entries is an unmounted
+        # mountpoint. Turns "file not found, shrug" into "the mount under it
+        # is broken" (TheHomeGuy's Proxmox LXC bind-of-NFS).
+        import errno as _errno
+        _stat_err = 'ENOENT (plain not-found)'
+        try:
+            os.stat(file_path)
+        except OSError as _se:
+            _stat_err = '%s (errno=%s)' % (_errno.errorcode.get(_se.errno, type(_se).__name__), _se.errno)
+        _base_counts = []
+        for _b in abs_bases:
+            try:
+                _base_counts.append('%s: %d entries' % (_b, len(os.listdir(_b))))
+            except OSError as _le:
+                _base_counts.append('%s: UNLISTABLE (%s)' % (_b, _errno.errorcode.get(_le.errno, type(_le).__name__)))
         logger.warning(
             "[PathResolve] Could not resolve %r — tried direct-join + suffix-scan under %r (cwd=%r). "
+            "Raw-path stat: %s. Base dirs: %s. "
             "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
-            "the dir under Settings > Library music paths.",
-            file_path, abs_bases, os.getcwd(),
+            "the dir under Settings > Library music paths. A base showing 0 entries or "
+            "ESTALE/EIO means the mount under it is broken (remount / restart the container).",
+            file_path, abs_bases, os.getcwd(), _stat_err, '; '.join(_base_counts) or 'none',
         )
     return None
 
@@ -16925,12 +17367,24 @@ def _get_current_commit_sha():
 _current_commit_sha = _get_current_commit_sha()
 
 def _check_for_updates():
-    """Check GitHub for the latest commit SHA on main branch."""
+    """Check GitHub for the latest RELEASE (version + severity) and, as a
+    fallback signal for git-pull users running between releases, the latest
+    commit SHA on main."""
     import time as _time
     now = _time.time()
     if now - _update_cache['last_check'] < _UPDATE_CHECK_INTERVAL:
         return  # Still fresh
     _update_cache['last_check'] = now
+    # Releases first — this is what drives the version glow (green routine /
+    # yellow major / red critical) and gives the user a number, not a hash.
+    try:
+        from core.update_check import evaluate_update, fetch_releases
+        releases = fetch_releases(_GITHUB_REPO)
+        _update_cache['release_info'] = evaluate_update(_SOULSYNC_BASE_VERSION, releases)
+        _update_cache['error'] = None
+    except Exception as e:
+        _update_cache['error'] = str(e)
+        logger.debug(f"Release check failed: {e}")
     try:
         import urllib.request
         import json as _json
@@ -16941,24 +17395,65 @@ def _check_for_updates():
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read().decode())
             _update_cache['latest_sha'] = data.get('sha')
-            _update_cache['error'] = None
     except Exception as e:
         _update_cache['error'] = str(e)
         logger.debug(f"Update check failed: {e}")
 
 @app.route('/api/update-check', methods=['GET'])
 def check_for_update():
-    """Check if a newer version is available on GitHub."""
+    """Check if a newer version is available on GitHub. Release-aware: a
+    published release newer than the running base version reports its
+    number + severity; the commit-SHA comparison stays as the fallback
+    signal when no release info is available."""
     _check_for_updates()
     current = _current_commit_sha
     latest = _update_cache.get('latest_sha')
-    update_available = bool(current and latest and current != latest)
+    rel = _update_cache.get('release_info') or {}
+    sha_update = bool(current and latest and current != latest)
+    update_available = bool(rel.get('available')) or (not rel and sha_update)
     return jsonify({
         'update_available': update_available,
         'current_sha': current[:8] if current else None,
         'latest_sha': latest[:8] if latest else None,
+        'current_version': _SOULSYNC_BASE_VERSION,
+        'latest_version': rel.get('latest_version'),
+        'severity': rel.get('severity'),
+        'release_url': rel.get('release_url'),
         'is_docker': os.path.exists('/.dockerenv'),
     })
+
+
+# ── Notification history (Kazimir) ───────────────────────────────
+@app.route('/api/notifications/log', methods=['POST'])
+def log_notifications():
+    """Journal a batch of UI toasts so 'Clear All' in the bell panel loses
+    nothing. The frontend flushes these fire-and-forget every few seconds."""
+    from database.music_database import get_database
+    body = request.get_json(silent=True) or {}
+    entries = body.get('entries')
+    if not isinstance(entries, list):
+        return jsonify({'success': False, 'error': 'entries must be a list'}), 400
+    logged = get_database().add_notifications(entries[:50], profile_id=get_current_profile_id())
+    return jsonify({'success': True, 'logged': logged})
+
+
+@app.route('/api/notifications/history', methods=['GET', 'DELETE'])
+def notification_history():
+    """The persistent notification journal for the ACTIVE profile —
+    filterable by type, searchable, paginated. DELETE clears it."""
+    from database.music_database import get_database
+    db = get_database()
+    pid = get_current_profile_id()
+    if request.method == 'DELETE':
+        return jsonify({'success': True, 'removed': db.clear_notification_history(pid)})
+    rows = db.get_notification_history(
+        pid,
+        type_filter=request.args.get('type'),
+        search=request.args.get('q'),
+        limit=request.args.get('limit', default=100, type=int) or 100,
+        offset=request.args.get('offset', default=0, type=int) or 0,
+    )
+    return jsonify({'success': True, 'notifications': rows})
 
 
 def _simple_monitor_task():
@@ -17174,6 +17669,9 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     # incremental, full refresh) converges on this callback, so writing here keeps it current.
     # Destination = the configured M3U output folder if set, else the Transfer folder. Fully
     # guarded — a playlist write must never disturb scan completion.
+    # The outcome is surfaced in the scan summary (m3u_note) so "did it trigger?"
+    # is answerable from the UI, not just app.log (#1041).
+    m3u_note = ""
     try:
         if config_manager.get('m3u_export.library_enabled', False):
             from core.library.m3u_export import write_library_m3u
@@ -17185,8 +17683,15 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
             _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
+                m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"
+            else:
+                m3u_note = " | Library M3U write failed (see app.log)"
+        else:
+            # One line per scan so a "never triggers" report diagnoses itself.
+            logger.info("[library-m3u] skipped — Library M3U auto-sync is disabled in Settings")
     except Exception as _m3u_err:
         logger.warning("[library-m3u] auto-sync failed: %s", _m3u_err)
+        m3u_note = " | Library M3U write failed (see app.log)"
     # Check for removal results from the worker
     removed_artists = 0
     removed_albums = 0
@@ -17216,11 +17721,11 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
                 skipped_tracks = getattr(db_update_worker, 'processed_albums', 0)
 
     if total_tracks > 0:
-        phase_msg = f"Completed: {total_artists} artists, {total_albums} albums, {total_tracks} new tracks{removal_msg}."
+        phase_msg = f"Completed: {total_artists} artists, {total_albums} albums, {total_tracks} new tracks{removal_msg}{m3u_note}."
     elif successful > 0:
-        phase_msg = f"Completed: {successful} artists scanned, library up to date{removal_msg}."
+        phase_msg = f"Completed: {successful} artists scanned, library up to date{removal_msg}{m3u_note}."
     else:
-        phase_msg = f"Completed: {successful} successful, {failed} failed{removal_msg}."
+        phase_msg = f"Completed: {successful} successful, {failed} failed{removal_msg}{m3u_note}."
 
     with db_update_lock:
         db_update_state["status"] = "finished"
@@ -17235,6 +17740,7 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     auto_summary = f"{total_tracks} tracks, {total_albums} albums from {total_artists} artists"
     if removed_artists > 0 or removed_albums > 0:
         auto_summary += f" | Removed {removed_artists} artists, {removed_albums} albums"
+    auto_summary += m3u_note
     _update_automation_progress(_db_update_automation_id,
         status='finished', progress=100, phase='Complete',
         log_line=auto_summary, log_type='success')
@@ -21148,6 +21654,13 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
        Find & Add now also records a manual library match (one-way; the manual
        match tool has no playlist to act on, so it doesn't reverse-create)."""
     if not source_track_id:
+        # Nothing to key the override by — the pairing will NOT survive a
+        # reload. Loud, because to the user this looks like "matched it, then
+        # it unmatched itself" (the wolf39us report shape).
+        logger.warning(
+            "[ServerPlaylist] Find & Add match for '%s' NOT persisted — the source row "
+            "carries no source_track_id, so the pairing can't be stored and will "
+            "revert on the next compare load.", server_track_title or source_title or server_track_id)
         return
     db = get_database()
     try:
@@ -21668,6 +22181,12 @@ def start_missing_tracks_process(playlist_id):
             'analysis_processed': 0,
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
+            # Replace-intent (#1045): ONLY a user-checked Force toggle means
+            # "rewrite the existing file". force_download_all alone is NOT that
+            # signal — wishlist batches set it to skip ownership checks, and
+            # Wing It auto-ors it in client-side — so wing_it is excluded here
+            # and the wishlist never sets this key at all.
+            'force_replace': bool(force_download_all and not wing_it),
             'ignore_manual_matches': ignore_manual_matches,
             # Blocklist override (Phase 2b) — the user confirmed "download anyway"
             # at the modal, so the per-track filter (2a) skips this batch.
@@ -27099,13 +27618,26 @@ def hydrate_artist_bubbles():
         # Update bubble statuses with live data
         hydrated_bubbles = {}
         for artist_id, bubble_data in saved_bubbles.items():
+            # A malformed snapshot entry (no artist dict / no downloads list) must be
+            # dropped here — hydrating it breaks the client's Library page init (#1038).
+            if not isinstance(bubble_data, dict) or not isinstance(bubble_data.get('artist'), dict) \
+                    or bubble_data.get('artist', {}).get('id') is None:
+                logger.warning(f"Skipping malformed artist bubble snapshot entry: {artist_id}")
+                continue
             hydrated_bubble = {
                 'artist': bubble_data['artist'],
                 'downloads': [],
                 'hasCompletedDownloads': False
             }
-            
-            for download in bubble_data.get('downloads', []):
+
+            downloads = bubble_data.get('downloads') or []
+            if not isinstance(downloads, list):
+                downloads = []
+            for download in downloads:
+                if not isinstance(download, dict) or not isinstance(download.get('album'), dict) \
+                        or not download.get('virtualPlaylistId'):
+                    logger.warning(f"Skipping malformed download in bubble snapshot for artist {artist_id}")
+                    continue
                 virtual_playlist_id = download['virtualPlaylistId']
                 
                 # Determine current live status
@@ -27468,10 +28000,15 @@ def create_profile():
                             'error': 'Login mode is on — give this profile a login '
                                      'password so they can sign in.'}), 400
 
-        # Profile settings: home_page, allowed_pages, can_download
+        # Profile settings: home_page, allowed_pages, can_download, allowed_sides
         home_page = data.get('home_page') or None
         allowed_pages = data.get('allowed_pages')  # list or None
         can_download = data.get('can_download', True)
+        # Side access — music | video | both, never nothing. Anything else
+        # falls back to the shipped default (music-only for non-admins).
+        allowed_sides = data.get('allowed_sides')
+        if allowed_sides not in ('music', 'video', 'both'):
+            allowed_sides = None
 
         # Validate page IDs
         if home_page and home_page not in VALID_PAGE_IDS:
@@ -27487,7 +28024,8 @@ def create_profile():
 
         profile_id = database.create_profile(
             name, avatar_color, pin_hash, is_admin=False, avatar_url=avatar_url,
-            home_page=home_page, allowed_pages=allowed_pages, can_download=bool(can_download)
+            home_page=home_page, allowed_pages=allowed_pages, can_download=bool(can_download),
+            allowed_sides=allowed_sides
         )
         if profile_id is None:
             return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
@@ -27564,6 +28102,13 @@ def update_profile(profile_id):
                 kwargs['allowed_pages'] = ap
             if 'can_download' in data:
                 kwargs['can_download'] = int(bool(data['can_download']))
+            if 'allowed_sides' in data:
+                # music | video | both, never nothing — invalid values reset to
+                # NULL (the shipped music-only default for non-admins). Stored
+                # values on ADMIN profiles are inert: the read side always
+                # resolves admins to 'both'.
+                sides = data['allowed_sides']
+                kwargs['allowed_sides'] = sides if sides in ('music', 'video', 'both') else None
 
         success = database.update_profile(profile_id, **kwargs)
         return jsonify({'success': success})
@@ -39335,19 +39880,38 @@ def _hydrabase_reconnect_loop():
         except Exception as e:
             logger.debug("hydrabase monitor loop: %s", e)
 
+# --- Global connected-client tracking (gates idle broadcast loops below) ---
+# Same pattern as _activity_sids, but for "is anyone listening at all" rather
+# than a specific room: dashboard-wide push loops have no per-client work to
+# skip, only an all-or-nothing "does this broadcast have an audience".
+_connected_sids = set()
+_connected_sids_lock = threading.Lock()
+
+
+def _has_connected_clients() -> bool:
+    with _connected_sids_lock:
+        return bool(_connected_sids)
+
+
 def _emit_service_status_loop():
-    """Background thread that pushes service status every 5 seconds."""
+    """Background thread that pushes service status every 5 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(5)
+        if not _has_connected_clients():
+            continue
         try:
             socketio.emit('status:update', _build_status_payload())
         except Exception as e:
             logger.debug(f"Error emitting service status: {e}")
 
 def _emit_watchlist_count_loop():
-    """Background thread that pushes watchlist count every 10 seconds to each profile room."""
+    """Background thread that pushes watchlist count every 10 seconds to each profile room.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             database = get_database()
             profiles = database.get_all_profiles()
@@ -39357,10 +39921,139 @@ def _emit_watchlist_count_loop():
         except Exception as e:
             logger.debug(f"Error emitting watchlist count: {e}")
 
+# Soulseek chat push (P3): watch the community room + PM unread state through
+# slskd and push deltas over the socket, so the nav badge and the bell react
+# without the chat page being open. First pass after boot only BASELINES the
+# room (no replaying history as "new"). Wholly idle-gated: zero slskd calls
+# while no browser is connected.
+_chat_push_state = {'room_key': None, 'pm_unread': -1, 'room': None}
+
+def _emit_chat_push_loop():
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(6)
+        try:
+            if not _has_connected_clients():
+                continue
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not _slsk or not _slsk.base_url:
+                continue
+            room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
+            if room != _chat_push_state['room']:
+                # room renamed (settings cog): re-baseline so the new room's
+                # history never replays as 'new' badge/notification spam
+                _chat_push_state['room'] = room
+                _chat_push_state['room_key'] = None
+            joined = run_async(_slsk.get_joined_rooms()) or []
+            if room not in joined:
+                # auto-join at startup / after an slskd restart (joins don't
+                # persist). chat_auto_join=false is the opt-out for users who
+                # don't want their account sitting in a public room — without
+                # it the loop would re-join them every 6s (un-leaveable). The
+                # chat PAGE still joins on open (an explicit user action).
+                if not config_manager.get('soulseek.chat_auto_join', True):
+                    room = None
+                elif not run_async(_slsk.join_room(room)):
+                    room = None
+            if not room:
+                msgs = []
+            else:
+                msgs = run_async(_slsk.get_room_messages(room)) or []
+            msgs.sort(key=lambda m: str(m.get('timestamp') or ''))
+            key = (str(msgs[-1].get('timestamp') or '') + ':' + str(len(msgs))) if msgs else ''
+            prev_key = _chat_push_state['room_key']
+            if prev_key is None:
+                _chat_push_state['room_key'] = key      # baseline, never replay history
+            elif key != prev_key:
+                prev_stamp = prev_key.rsplit(':', 1)[0]
+                fresh = [m for m in msgs if str(m.get('timestamp') or '') > prev_stamp]
+                _chat_push_state['room_key'] = key
+                if fresh:
+                    # live pushes carry the same DECODED view the API serves
+                    from core import chat_codec
+                    def _unwrap(m):
+                        dec = chat_codec.decode(m.get('message'))
+                        if dec is not None and chat_codec.reaction_of(dec):
+                            return None      # reaction carriers never render/badge
+                        out = {'username': m.get('username'),
+                               'message': dec['t'] if dec else m.get('message'),
+                               'timestamp': m.get('timestamp')}
+                        if dec:
+                            out['rich'] = True
+                            rep = chat_codec.reply_of(dec)
+                            if rep:
+                                out['reply'] = rep
+                        return out
+                    decoded = [x for x in (_unwrap(m) for m in fresh) if x]
+                    if decoded:      # a reaction-only tick still tracks PMs below
+                        try:
+                            get_database().add_chat_messages(room, decoded)
+                        except Exception:
+                            logger.debug("chat: loop archive write failed", exc_info=True)
+                        socketio.emit('chat:room_message', {
+                            'room': room,
+                            'messages': decoded[-20:],
+                        })
+            convos = run_async(_slsk.get_conversations()) or []
+            unread_users = [str(c.get('username') or '') for c in convos
+                            if c.get('hasUnAcknowledgedMessages')
+                            or (c.get('unAcknowledgedMessageCount') or 0) > 0]
+            unread = len([u for u in unread_users if u])
+            prev = _chat_push_state['pm_unread']
+            if unread != prev:
+                _chat_push_state['pm_unread'] = unread
+                socketio.emit('chat:unread', {
+                    'pms': unread,
+                    'users': [u for u in unread_users if u][:3],
+                    # 'grew' gates the toast: only a RISING count notifies (a read
+                    # clearing the flag must not), and never the boot baseline
+                    'grew': prev >= 0 and unread > prev,
+                })
+        except Exception:
+            logger.debug("chat push loop error", exc_info=True)
+
+# Anti-leech challenge auto-responder ("please type 'human' in this chat"):
+# NOT idle-gated — the whole point is answering at 3am with no browser open,
+# so blocked overnight grabs unblock themselves. One cheap conversations poll
+# per minute; the heavy lifting + guard rails live in core/chat_autoprove.py.
+def _chat_auto_prove_loop():
+    from core import chat_autoprove
+    state = {}
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(60)
+        try:
+            if not config_manager.get('soulseek.chat_auto_prove', True):
+                continue
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not _slsk or not _slsk.base_url:
+                continue
+            replies = chat_autoprove.scan_and_respond(_slsk, run_async, state=state)
+            for r in replies:
+                msg = "Auto-replied '%s' to %s's prove-you're-human challenge" % (
+                    r['token'], r['username'])
+                # observable both ways: durable bell history + a live toast
+                try:
+                    get_database().add_notifications([{'type': 'info', 'message': msg}],
+                                                     profile_id=1)
+                except Exception:
+                    logger.debug("autoprove: notification write failed", exc_info=True)
+                socketio.emit('dashboard:toast', {
+                    'icon': '🤖', 'title': 'Chat auto-reply',
+                    'subtitle': "answered %s's download challenge with '%s'" % (
+                        r['username'], r['token']),
+                })
+        except Exception:
+            logger.debug("chat auto-prove loop error", exc_info=True)
+
 def _emit_download_status_loop():
-    """Background thread that pushes download batch status every 2 seconds to subscribed rooms."""
+    """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
+    Skipped entirely while no client is connected — the transfer fetch below is a real
+    slskd API call (TTL-cached), so at idle this loop polled slskd every ~2s for nobody.
+    Download progression doesn't depend on it (the workers poll transfers themselves);
+    this cache is populated on demand by its other callers."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         try:
             live_transfers_lookup = get_cached_transfer_data()
             with tasks_lock:
@@ -39377,6 +40070,27 @@ def _emit_download_status_loop():
                         logger.debug(f"Error building batch status for {batch_id}: {e}")
         except Exception as e:
             logger.debug(f"Error in download status emit loop: {e}")
+
+# --- Server Activity (Tautulli replacement) live push ---
+# Subscriber-gated: one Plex/Jellyfin poll per tick broadcast to EVERY open drawer
+# (the multi-client dedup win — N users watching = 1 upstream poll, not N), and the
+# loop idles completely when nobody has the drawer open.
+_activity_sids = set()
+_activity_sids_lock = threading.Lock()
+
+def _emit_server_activity_loop():
+    """Push live server activity to subscribed drawers every 3s. Skips the upstream
+    poll entirely when no client is subscribed, so it costs nothing at rest."""
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(3)
+        try:
+            with _activity_sids_lock:
+                if not _activity_sids:
+                    continue
+            from core.server_activity import get_activity
+            socketio.emit('activity:update', get_activity(), room='activity:live')
+        except Exception as e:
+            logger.debug(f"Error in server activity emit loop: {e}")
 
 # --- Socket.IO event handlers ---
 
@@ -39413,11 +40127,37 @@ def handle_connect():
     if _ws_connection_blocked():
         logger.warning("Rejected WebSocket connection — access gate active, session not verified (#852)")
         return False
+    with _connected_sids_lock:
+        _connected_sids.add(request.sid)
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    # Drop this client from the server-activity live set so the push loop goes
+    # idle again once the last drawer closes / navigates away.
+    try:
+        with _activity_sids_lock:
+            _activity_sids.discard(request.sid)
+    except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
+        pass
+    with _connected_sids_lock:
+        _connected_sids.discard(request.sid)
     logger.info("WebSocket client disconnected")
+
+@socketio.on('activity:subscribe')
+def handle_activity_subscribe():
+    """A drawer opened → join the live room so the push loop starts feeding it."""
+    join_room('activity:live')
+    with _activity_sids_lock:
+        _activity_sids.add(request.sid)
+    logger.debug("activity: client subscribed (%d live)", len(_activity_sids))
+
+@socketio.on('activity:unsubscribe')
+def handle_activity_unsubscribe():
+    """A drawer closed / left the Activity tab → stop feeding this client."""
+    leave_room('activity:live')
+    with _activity_sids_lock:
+        _activity_sids.discard(request.sid)
 
 @socketio.on('downloads:subscribe')
 def handle_download_subscribe(data):
@@ -39450,18 +40190,24 @@ def handle_profile_join(data):
 # --- Phase 2: Dashboard emitters ---
 
 def _emit_system_stats_loop():
-    """Background thread that pushes system stats every 10 seconds."""
+    """Background thread that pushes system stats every 10 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             socketio.emit('dashboard:stats', _build_system_stats())
         except Exception as e:
             logger.debug(f"Error emitting system stats: {e}")
 
 def _emit_activity_feed_loop():
-    """Background thread that pushes activity feed every 2 seconds."""
+    """Background thread that pushes activity feed every 2 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         try:
             with activity_feed_lock:
                 activities = activity_feed[-10:][::-1]
@@ -39470,9 +40216,12 @@ def _emit_activity_feed_loop():
             logger.debug(f"Error emitting activity feed: {e}")
 
 def _emit_db_stats_loop():
-    """Background thread that pushes database stats every 10 seconds."""
+    """Background thread that pushes database stats every 10 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             db = get_database()
             stats = db.get_database_info_for_server()
@@ -39481,9 +40230,12 @@ def _emit_db_stats_loop():
             logger.debug(f"Error emitting db stats: {e}")
 
 def _emit_wishlist_count_loop():
-    """Background thread that pushes wishlist count every 10 seconds to each profile room."""
+    """Background thread that pushes wishlist count every 10 seconds to each profile room.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             from core.wishlist_service import get_wishlist_service
             ws = get_wishlist_service()
@@ -39665,6 +40417,32 @@ _configure_enrichment_api(
 
 app.register_blueprint(_create_enrichment_blueprint())
 
+# Soulseek chat (rooms + PMs through slskd) — side-neutral, absolute /api/chat
+# paths, mounted OUTSIDE the video blueprint so music-only profiles reach it.
+from api.chat import configure as _configure_chat_api, create_blueprint as _create_chat_blueprint
+_configure_chat_api(
+    client_getter=lambda: download_orchestrator.client("soulseek"),
+    run_async=run_async,
+    config_get=lambda key, default=None: config_manager.get(key, default),
+    config_set=lambda key, value: config_manager.set(key, value),
+    db_getter=get_database,
+)
+app.register_blueprint(_create_chat_blueprint())
+
+# Video side API (isolated: reads database/video_library.db only, never music)
+from api.video import create_video_blueprint as _create_video_blueprint
+app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
+
+# Resume video downloads at boot: without this the monitor only starts on a grab or
+# when the Downloads page opens, so in-flight downloads (and orphaned 'searching' rows)
+# after a restart would sit untracked until the user happened to visit the page.
+try:
+    from core.video.download_monitor import ensure_started as _ensure_video_download_monitor
+    from api.video import get_video_db as _get_video_db
+    _ensure_video_download_monitor(_get_video_db)
+except Exception:
+    logger.warning("could not start the video download monitor at boot", exc_info=True)
+
 
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.
@@ -39680,6 +40458,8 @@ def _emit_rate_monitor_loop():
 
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
+        if not _has_connected_clients():
+            continue
         try:
             from core.api_call_tracker import api_call_tracker
             payload = api_call_tracker.get_all_rates()
@@ -39791,6 +40571,11 @@ def _emit_enrichment_status_loop():
         except Exception as e:
             logger.debug(f"Error in download-yield check: {e}")
 
+        # Auto-pause/resume above must run regardless of listeners; the stats
+        # gather + broadcast below is pure UI and costs nothing to skip.
+        if not _has_connected_clients():
+            continue
+
         for name, get_worker in workers.items():
             try:
                 worker = get_worker()
@@ -39804,6 +40589,36 @@ def _emit_enrichment_status_loop():
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")
 
+def _emit_video_enrichment_status_loop():
+    """Push the VIDEO enrichment worker statuses over the socket every 2s, exactly
+    like the music enrichment loop — so the video dashboard listens instead of
+    polling /api/video/enrichment/<svc>/status (that browser polling was flooding
+    the access log). No-op until the video engine is actually running, so this
+    never spins it up on the music side."""
+    from core.video.enrichment.engine import peek_video_enrichment_engine
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(2)
+        eng = peek_video_enrichment_engine()
+        if eng is None:
+            continue
+        # Emit for EVERY registered worker (matchers + backfill: fanart / opensubtitles
+        # / ryd / sponsorblock) so new dashboard buttons get live status with no extra
+        # wiring here.
+        for svc, w in (eng.workers or {}).items():
+            try:
+                socketio.emit(f'enrichment:{svc}', w.get_stats())
+            except Exception as e:
+                logger.debug(f"Error emitting video {svc} status: {e}")
+        # The YouTube date enricher is a standalone daemon (not an engine worker),
+        # but it reports the SAME stats shape — push it on the same socket so its
+        # dashboard orb listens like the others (no /enrichment/youtube/status poll).
+        try:
+            from core.video.youtube_enrichment import get_youtube_date_enricher
+            socketio.emit('enrichment:youtube', get_youtube_date_enricher().stats())
+        except Exception as e:
+            logger.debug(f"Error emitting video youtube status: {e}")
+
+
 def _emit_tool_progress_loop():
     """Background thread that pushes all tool progress statuses every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -39815,6 +40630,16 @@ def _emit_tool_progress_loop():
         # (which skipped HTTP polling while the socket was up) never learned
         # its stream was ready. Each client polls /api/stream/status instead,
         # which resolves its own session from the cookie.
+        # Self-heal a hung DB-update job (#859) — functional, must run even
+        # when nobody's watching the broadcast below.
+        try:
+            _check_db_update_stall()
+        except Exception as e:
+            logger.debug(f"Error in db update stall self-heal: {e}")
+
+        if not _has_connected_clients():
+            continue
+
         # Duplicate Cleaner (add computed space_freed_mb)
         try:
             with duplicate_cleaner_lock:
@@ -39825,7 +40650,6 @@ def _emit_tool_progress_loop():
             logger.debug(f"Error emitting duplicate cleaner status: {e}")
         # DB Update
         try:
-            _check_db_update_stall()  # self-heal a hung job, then broadcast (#859)
             with db_update_lock:
                 socketio.emit('tool:db-update', dict(db_update_state))
         except Exception as e:
@@ -40008,9 +40832,13 @@ def _emit_sync_progress_loop():
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
-            # Reconcile stuck 'syncing' discovery states BEFORE emitting, so the
-            # sync:progress event we push already carries the terminal status.
+            # Reconcile stuck 'syncing' discovery states — this is a functional
+            # self-heal (#972), not just UI push, so it must run even when no
+            # client is connected to see the emit below.
             _reconcile_discovery_sync_phases()
+
+            if not _has_connected_clients():
+                continue
 
             with sync_lock:
                 for pid, state in list(sync_states.items()):
@@ -40326,6 +41154,10 @@ def start_runtime_services():
         socketio.start_background_task(_emit_service_status_loop)
         socketio.start_background_task(_emit_watchlist_count_loop)
         socketio.start_background_task(_emit_download_status_loop)
+        socketio.start_background_task(_emit_chat_push_loop)
+        socketio.start_background_task(_chat_auto_prove_loop)
+        # Server Activity — subscriber-gated live push (idle when no drawer open)
+        socketio.start_background_task(_emit_server_activity_loop)
         # Phase 2: Dashboard pollers
         socketio.start_background_task(_emit_system_stats_loop)
         socketio.start_background_task(_emit_activity_feed_loop)
@@ -40333,6 +41165,9 @@ def start_runtime_services():
         socketio.start_background_task(_emit_wishlist_count_loop)
         # Phase 3: Enrichment sidebar workers
         socketio.start_background_task(_emit_enrichment_status_loop)
+        # Phase 3 (video): push video enrichment status so the video dashboard
+        # listens instead of polling (matches music; no access-log flood).
+        socketio.start_background_task(_emit_video_enrichment_status_loop)
         # Phase 4: Tool progress pollers
         socketio.start_background_task(_emit_tool_progress_loop)
         # Phase 5: Sync/discovery progress + scans

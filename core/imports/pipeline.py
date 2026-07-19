@@ -32,7 +32,12 @@ from core.imports.context import (
     get_import_track_info,
     normalize_import_context,
 )
-from core.imports.file_integrity import check_audio_integrity, expected_duration_for_check, resolve_duration_tolerance
+from core.imports.file_integrity import (
+    check_audio_integrity,
+    expected_duration_for_check,
+    probe_decoded_duration,
+    resolve_duration_tolerance,
+)
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, check_quality_target, move_to_quarantine
 from core.imports.silence import detect_broken_audio
@@ -85,6 +90,56 @@ __all__ = [
     "post_process_matched_download",
     "post_process_matched_download_with_verification",
 ]
+
+
+def _audio_length_seconds(path: str) -> float:
+    """Best-effort real length of an audio file: mutagen's header first, then
+    an ffmpeg decode when the header reads 0 (HiFi's fragmented FLAC does).
+    0.0 when it genuinely can't be determined."""
+    try:
+        from mutagen import File as MutagenFile
+        info = getattr(MutagenFile(path), 'info', None)
+        length = float(getattr(info, 'length', 0) or 0)
+        if length > 0:
+            return length
+    except Exception:   # noqa: BLE001,S110 - fall through to the ffmpeg decode
+        logger.debug("mutagen length read failed for %s, decoding instead", path, exc_info=True)
+    return probe_decoded_duration(path)
+
+
+def _replacement_length_is_safe(existing_path: str, incoming_path: str,
+                                min_ratio: float = 0.8) -> bool:
+    """Guard a library-file replacement: True unless the incoming file plays
+    materially shorter than the file it would replace (a preview/truncated
+    clip). Conservative — if EITHER length can't be determined we allow the
+    replace (the other gates own that case), so this never blocks a legit
+    upgrade, only a clear shrink."""
+    existing_s = _audio_length_seconds(existing_path)
+    incoming_s = _audio_length_seconds(incoming_path)
+    if existing_s <= 0 or incoming_s <= 0:
+        return True
+    return incoming_s >= existing_s * min_ratio
+
+
+def _batch_force_replace(context: dict) -> bool:
+    """True when the USER explicitly forced this download (the 'Force
+    download' toggle on the download modal). An explicit re-download of a
+    track they already own is replace-intent — the metadata-protection skip
+    must not silently discard it (#1045).
+
+    Reads the batch's ``force_replace`` key, which web_server sets ONLY for a
+    user-checked toggle (wing_it excluded). Deliberately NOT
+    ``force_download_all``: the wishlist sets that on every background batch
+    (it means "skip ownership checks" there) and Wing It auto-enables it —
+    neither may ever overwrite library files. Anything missing or unreadable
+    → False, i.e. the protective default."""
+    try:
+        batch_id = (context or {}).get('batch_id')
+        if not batch_id:
+            return False
+        return bool((download_batches.get(batch_id) or {}).get('force_replace'))
+    except Exception:   # noqa: BLE001 - protection is the safe default
+        return False
 
 
 def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
@@ -690,6 +745,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
             safe_move_file(file_path, destination)
             logger.info(f"Moved simple download to: {destination}")
+            from core.imports.file_ops import move_companion_sidecars
+            move_companion_sidecars(file_path, destination)
             cleanup_slskd_dedup_siblings(file_path)
 
             with matched_context_lock:
@@ -909,17 +966,58 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             except (json.JSONDecodeError, TypeError):
                 _enhance_source_info = {}
         is_enhance_download = _enhance_source_info.get('enhance', False)
+        # "Force download" is replace-intent: the user explicitly re-downloaded
+        # something they already own, so the metadata-protection skip must not
+        # discard it (#1045). Rides the same replace path as enhance — the
+        # short-file replacement guard above still applies.
+        force_replace = _batch_force_replace(context)
 
         logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
             if not os.path.exists(file_path):
                 logger.info(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
                 return
+            # THE backstop for sella's incident: an upgrade/replace must NEVER
+            # swap a good library file for a materially shorter one. Every path
+            # below can os.remove(final_path) and move the incoming file in — so
+            # before any of them, compare the REAL decoded lengths. A 30s HiFi
+            # preview replacing a 220s track is caught here even if every header
+            # (and AcoustID) was faked, and even for files no other gate saw.
+            if not _replacement_length_is_safe(final_path, file_path):
+                logger.error(
+                    "[Protection] Refusing to replace %s — the incoming file is "
+                    "far shorter (likely a preview/truncated clip). Quarantining it.",
+                    os.path.basename(final_path))
+                try:
+                    qpath = move_to_quarantine(
+                        file_path, context,
+                        "Replacement guard: incoming file is far shorter than the "
+                        "library file it would replace (preview/truncated clip)",
+                        automation_engine, trigger='integrity')
+                    _mark_task_quarantined(context, qpath)
+                except Exception as _qe:   # noqa: BLE001
+                    logger.error("[Protection] Could not quarantine the short replacement "
+                                 "(leaving in place, NOT replacing): %s", _qe)
+                task_id = context.get('task_id')
+                batch_id = context.get('batch_id')
+                if task_id:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = (
+                                "Replacement rejected: incoming file is far shorter "
+                                "than the existing library file")
+                    if batch_id:
+                        _notify_download_completed(batch_id, task_id, success=False)
+                with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        del matched_downloads_context[context_key]
+                return
             try:
                 from mutagen import File as MutagenFile
                 existing_file = MutagenFile(final_path)
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2
-                if has_metadata and not is_enhance_download:
+                if has_metadata and not is_enhance_download and not force_replace:
                     _replace_lower = _resolve_context_quality_profile(context).get(
                         'replace_lower_quality',
                         config_manager.get('import.replace_lower_quality', False))
@@ -954,8 +1052,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         except Exception as e:
                             logger.error(f"[Protection] Error removing redundant file: {e}")
                         return
-                elif is_enhance_download:
-                    logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
+                elif is_enhance_download or force_replace:
+                    if is_enhance_download:
+                        logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
+                    else:
+                        logger.info(f"[Force] User-forced re-download — replacing existing file: {os.path.basename(final_path)}")
                     try:
                         os.remove(final_path)
                     except Exception as e:
@@ -1008,6 +1109,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
 
         safe_move_file(file_path, final_path)
+        from core.imports.file_ops import move_companion_sidecars
+        move_companion_sidecars(file_path, final_path)
         cleanup_slskd_dedup_siblings(file_path)
 
         if is_enhance_download and _enhance_source_info.get('original_file_path'):
