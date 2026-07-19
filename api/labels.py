@@ -126,18 +126,26 @@ def _try_caa(release_id: str) -> str:
 
 
 def _resolve_cover(artist: str, album: str) -> str:
-    """Fallback cover URL for (artist, album) when CAA has nothing. Tries Deezer
-    first (1s rate limit + reachable CDN) then iTunes (3s). '' on a miss. Only
-    accepts a result whose album name reasonably matches, so a card never shows
-    the WRONG cover."""
+    """Fallback cover URL for (artist, album) when CAA has nothing. Prefers
+    Deezer (1s rate limit + reachable CDN, used exclusively when configured);
+    iTunes is used ONLY when Deezer isn't available — a per-album iTunes MISS
+    lookup stalls behind the enrichment worker's iTunes calls (shared global 3s
+    lock), so we don't pay ~15s just to confirm a miss. '' on a miss. Only
+    accepts a name-matching result so a card never shows the WRONG cover."""
     want = _norm(album)
-    for getter in (_deezer_getter, _itunes_getter):
+    try:
+        dz = _deezer_getter() if _deezer_getter else None
+    except Exception:
+        dz = None
+    if dz is not None:
+        clients = [dz]
+    else:
         try:
-            client = getter() if getter else None
+            clients = [_itunes_getter()] if _itunes_getter else []
         except Exception:
-            client = None
-        if client is None:
-            continue
+            clients = []
+        clients = [c for c in clients if c is not None]
+    for client in clients:
         try:
             results = client.search_albums(f"{artist} {album}", limit=5) or []
         except Exception:
