@@ -13100,7 +13100,7 @@ class MusicDatabase:
     # Field whitelists for safe updates
     ARTIST_EDITABLE_FIELDS = {'name', 'genres', 'summary', 'style', 'mood', 'label'}
     ALBUM_EDITABLE_FIELDS = {'title', 'year', 'release_date', 'genres', 'style', 'mood', 'label', 'explicit', 'record_type', 'track_count'}
-    TRACK_EDITABLE_FIELDS = {'title', 'track_number', 'bpm', 'explicit', 'style', 'mood'}
+    TRACK_EDITABLE_FIELDS = {'title', 'track_number', 'disc_number', 'bpm', 'explicit', 'style', 'mood'}
 
     def get_artist_full_detail(self, artist_id) -> Dict[str, Any]:
         """
