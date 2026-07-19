@@ -126,24 +126,75 @@ class TestOrchestrator:
         assert added == [] and scanned == []
 
 
-class TestResolveFailsSafe:
-    def test_no_metadata_service_adds_nothing(self):
-        assert sl._resolve_album_tracks(None, 'A', 'Al') == []
+class _FakeDzAlbum:
+    def __init__(self, aid, name):
+        self.id = aid
+        self.name = name
 
-    def test_wrong_artist_match_rejected(self):
-        class MS:
-            def search_albums_via_artist(self, artist, album):
-                return [{'id': 'x', 'name': album, 'artists': [{'name': 'Someone Else'}]}]
-            def get_album(self, aid, include_tracks=True):
-                return {'tracks': {'items': [{'name': 't'}]}}
-        # name matches but artist doesn't → resolve to nothing (never misfile)
-        assert sl._resolve_album_tracks(MS(), 'Real Artist', 'Al') == []
 
-    def test_exact_match_resolves_tracks(self):
-        class MS:
-            def search_albums_via_artist(self, artist, album):
-                return [{'id': 'x', 'name': album, 'artists': [{'name': artist}]}]
-            def get_album(self, aid, include_tracks=True):
-                return {'tracks': {'items': [{'name': 't1'}, {'name': 't2'}]}}
-        out = sl._resolve_album_tracks(MS(), 'Real Artist', 'Al')
-        assert [t['name'] for t in out] == ['t1', 't2']
+class _FakeDeezer:
+    def __init__(self, search_name, meta):
+        self._search_name = search_name
+        self._meta = meta
+    def search_albums(self, q, limit=5):
+        return [_FakeDzAlbum('dz1', self._search_name)]
+    def get_album_metadata(self, aid, include_tracks=True):
+        return self._meta
+
+
+def _meta(name='Bleach', items=None):
+    return {'id': 'dz1', 'name': name, 'images': [{'url': 'https://cdn.deezer/x.jpg'}],
+            'album_type': 'album', 'release_date': '1989',
+            'artists': [{'name': 'Nirvana', 'id': '7'}],
+            'tracks': {'items': items if items is not None else
+                       [{'id': 't1', 'name': 'Blew'}, {'id': 't2', 'name': 'Floyd'}]}}
+
+
+class TestResolveAlbum:
+    def test_no_deezer_returns_nothing(self):
+        assert sl.resolve_album_for_release(None, 'A', 'Al') == (None, [])
+
+    def test_name_mismatch_rejected(self):
+        # search returns a differently-named album → never wishlist the wrong one
+        dz = _FakeDeezer('Completely Different', _meta())
+        assert sl.resolve_album_for_release(lambda: dz, 'Nirvana', 'Bleach') == (None, [])
+
+    def test_match_resolves_album_with_images_and_tracks(self):
+        dz = _FakeDeezer('Bleach', _meta())
+        payload, tracks = sl.resolve_album_for_release(lambda: dz, 'Nirvana', 'Bleach')
+        assert payload['images'][0]['url'] == 'https://cdn.deezer/x.jpg'   # real CDN art
+        assert payload['name'] == 'Bleach' and payload['total_tracks'] == 2
+        assert [t['name'] for t in tracks] == ['Blew', 'Floyd']
+
+    def test_no_tracks_resolves_nothing(self):
+        dz = _FakeDeezer('Bleach', _meta(items=[]))
+        assert sl.resolve_album_for_release(lambda: dz, 'Nirvana', 'Bleach') == (None, [])
+
+
+class TestAddReleaseEndToEnd:
+    def test_wishlist_entry_carries_album_image(self, tmp_path):
+        import json
+        from database.music_database import MusicDatabase
+        db = MusicDatabase(str(tmp_path / 'm.db'))
+        dz = _FakeDeezer('Bleach', _meta())
+        seams = sl.build_default_seams(database=db, get_deezer=lambda: dz, profile_id=1)
+        ok = seams['add_release']({'artist': 'Nirvana', 'album': 'Bleach', 'year': '1989'},
+                                  {'label_name': 'Sub Pop', 'musicbrainz_label_id': 'm1'})
+        assert ok is True
+        with db._get_connection() as c:
+            rows = c.execute("SELECT spotify_data FROM wishlist_tracks").fetchall()
+        assert rows, "expected wishlist rows"
+        sd = json.loads(rows[0][0])
+        # the stored entry has a browser-loadable CDN album image (not blank)
+        assert sd['album']['images'][0]['url'] == 'https://cdn.deezer/x.jpg'
+        assert sd['artists'][0]['name'] == 'Nirvana'
+
+    def test_add_release_no_match_adds_nothing(self, tmp_path):
+        from database.music_database import MusicDatabase
+        db = MusicDatabase(str(tmp_path / 'm.db'))
+        dz = _FakeDeezer('Nope', _meta())      # name won't match
+        seams = sl.build_default_seams(database=db, get_deezer=lambda: dz, profile_id=1)
+        ok = seams['add_release']({'artist': 'Nirvana', 'album': 'Bleach'}, {})
+        assert ok is False
+        with db._get_connection() as c:
+            assert c.execute("SELECT COUNT(*) FROM wishlist_tracks").fetchone()[0] == 0
