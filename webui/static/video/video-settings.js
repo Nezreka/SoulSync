@@ -296,6 +296,8 @@
                 setP('video-seed-hours', d.seed_time_goal_hours != null ? d.seed_time_goal_hours : 0);
                 var srd = document.getElementById('video-seed-remove-data');
                 if (srd) srd.checked = d.seed_remove_data !== false;
+                var smd = document.getElementById('video-seed-mode');
+                if (smd) smd.value = d.seed_mode || 'soulsync';
                 renderVideoHybrid();
                 updateVideoSourceUI();
             })
@@ -316,6 +318,7 @@
                 seed_ratio_goal: parseFloat(val('video-seed-ratio')) || 0,
                 seed_time_goal_hours: parseInt(val('video-seed-hours'), 10) || 0,
                 seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
+                seed_mode: val('video-seed-mode') || 'soulsync',
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });

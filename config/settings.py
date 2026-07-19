@@ -611,6 +611,11 @@ class ConfigManager:
                 "seed_ratio_goal": 0,
                 "seed_time_goal_hours": 0,
                 "seed_remove_data": True,
+                # Who enforces the seed goal above: "soulsync" (default) = the
+                # seeding sweep polls the client and removes when the goal is met;
+                # "client" = write the ratio/time limit straight into the torrent
+                # client (arr-style) and let it enforce, shown in its share-limit UI.
+                "seed_mode": "soulsync",
             },
             # Usenet client — receives .nzb URLs / payloads. ``type``
             # picks the adapter (sabnzbd | nzbget). SABnzbd uses an

@@ -98,6 +98,25 @@ def _sweep_inner() -> Dict[str, Any]:
 
     rows = db.torrents_awaiting_seed_release()
     released = seeding = 0
+
+    # Client mode (arr-style): hand the ratio/time goal to the torrent client so
+    # IT enforces, then release the row (SoulSync stops managing it). One push
+    # per grab; a failed push retries next sweep.
+    if cfg.get("seed_mode") == "client":
+        from core.torrent_clients import get_active_adapter
+        from core.torrent_clients.share_limits import push_seed_goal
+        adapter = get_active_adapter()
+        for dl in rows:
+            if push_seed_goal(adapter, str(dl["client_ref"]),
+                              cfg.get("seed_ratio_goal"), cfg.get("seed_time_goal_hours")):
+                db.update_video_download(dl["id"], seed_released=1)
+                released += 1
+                logger.info("seeding: handed '%s' to the torrent client (client mode)", dl.get("title"))
+            else:
+                seeding += 1   # push failed/unsupported → retry next sweep
+        return {"status": "completed", "checked": len(rows),
+                "released": released, "seeding": seeding}
+
     for dl in rows:
         status = _get_status("torrent", str(dl["client_ref"]))
         if status is None:
