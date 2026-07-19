@@ -42,9 +42,9 @@ _cover_cache: Dict[tuple, Dict[str, Any]] = {}
 # so a circuit breaker trips after a few failures and we skip it (fast fallback
 # to Deezer/iTunes) for a cooldown, then retry — so a healthy CAA is used and a
 # downed one doesn't cost every request an 11s timeout.
-_CAA_TIMEOUT_S = 4.0
-_CAA_FAIL_THRESHOLD = 3
-_CAA_COOLDOWN_S = 300.0
+_CAA_TIMEOUT_S = 2.0
+_CAA_FAIL_THRESHOLD = 2
+_CAA_COOLDOWN_S = 600.0
 _caa_breaker: Dict[str, Any] = {"fails": 0, "skip_until": 0.0}
 
 
@@ -98,8 +98,12 @@ def _try_caa(release_id: str) -> str:
     caa = f"https://coverartarchive.org/release/{rid}/front-500"
     try:
         import requests
-        r = requests.head(caa, timeout=_CAA_TIMEOUT_S, allow_redirects=True)
-        ok = (r.status_code == 200 and 'image' in (r.headers.get('Content-Type') or ''))
+        # allow_redirects=False: CAA returns a 3xx to the actual image when art
+        # exists, 404 when not — so we learn "has art" WITHOUT waiting on the
+        # (often unreachable) archive.org redirect target. A downed CAA just
+        # times out fast (2s) → breaker.
+        r = requests.head(caa, timeout=_CAA_TIMEOUT_S, allow_redirects=False)
+        ok = r.status_code in (200, 301, 302, 303, 307, 308)
     except Exception:
         ok = False
     if ok:
