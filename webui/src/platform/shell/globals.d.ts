@@ -33,6 +33,8 @@ declare global {
           artistId?: string | number;
           artistSource?: string | null;
           artistName?: string;
+          labelId?: string | number;
+          labelName?: string;
         },
       ) => Promise<boolean>;
     };
@@ -47,6 +49,13 @@ declare global {
         artistId: string | number,
         artistName: string,
         sourceOverride?: string | null,
+        options?: {
+          skipRouteChange?: boolean;
+        },
+      ) => void;
+      navigateToLabelDetail: (
+        labelId: string,
+        labelName: string,
         options?: {
           skipRouteChange?: boolean;
         },

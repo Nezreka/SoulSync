@@ -435,7 +435,7 @@ function initializeSearchModeToggle() {
                 meta: [lab.type, lab.area].filter(Boolean).join(' • ') || 'Record label',
                 href: (typeof buildLabelDetailPath === 'function')
                     ? buildLabelDetailPath(lab.id, lab.name)
-                    : `/label-detail?id=${encodeURIComponent(lab.id)}`,
+                    : `/label-detail/${encodeURIComponent(lab.id)}`,
                 onClick: (e) => {
                     if (e && e.preventDefault) e.preventDefault();
                     if (typeof navigateToLabelDetail === 'function') {
