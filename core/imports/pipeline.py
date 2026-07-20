@@ -79,6 +79,7 @@ from core.imports.paths import (
 from core.imports.album_naming import resolve_album_group
 from core.metadata.lyrics import generate_lrc_file
 from database.music_database import get_database
+from core.tag_writer import is_placeholder_meta, write_tags_to_file
 from utils.logging_config import get_logger
 
 
@@ -149,6 +150,27 @@ def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
     if isinstance(bypass, (list, tuple, set)):
         return 'all' in bypass or check_name in bypass
     return bypass == check_name
+
+
+def _build_simple_download_tag_data(
+    search_result: dict, album_name: str | None,
+) -> dict[str, str]:
+    """Return only trustworthy metadata known by a direct/simple grab.
+
+    Simple downloads deliberately skip provider enhancement, but their request
+    still carries a title, artist and sometimes an album. Persist those values
+    without ever stamping placeholder text over useful source tags.
+    """
+    values = {
+        "title": search_result.get("title"),
+        "artist_name": search_result.get("artist"),
+        "album_title": album_name,
+    }
+    return {
+        key: str(value).strip()
+        for key, value in values.items()
+        if not is_placeholder_meta(value)
+    }
 
 
 def _resolve_context_quality_profile(context: dict) -> dict:
@@ -748,6 +770,29 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             from core.imports.file_ops import move_companion_sidecars
             move_companion_sidecars(file_path, destination)
             cleanup_slskd_dedup_siblings(file_path)
+
+            simple_tags = _build_simple_download_tag_data(
+                search_result, album_name)
+            if simple_tags:
+                try:
+                    tag_result = write_tags_to_file(
+                        destination, simple_tags, embed_cover=False)
+                    if tag_result.get('success'):
+                        logger.info(
+                            "Embedded direct-download metadata: %s",
+                            ', '.join(simple_tags),
+                        )
+                    else:
+                        logger.warning(
+                            "[Simple Download] Could not embed metadata: %s",
+                            tag_result.get('error', 'unknown error'),
+                        )
+                except Exception as tag_error:
+                    # The file is already safely moved. Tagging is enrichment,
+                    # so a malformed/unsupported source file remains a
+                    # successful direct download with a visible warning.
+                    logger.warning(
+                        "[Simple Download] Metadata write failed: %s", tag_error)
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
