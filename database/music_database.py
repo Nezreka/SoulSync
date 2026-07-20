@@ -9531,9 +9531,11 @@ class MusicDatabase:
 
         References to the deleted id are cleaned up in the same transaction
         (wishlist rows AND library tracks are re-pointed to NULL = "use the
-        default", and a matching Auto-Import override is cleared) — and even
-        a reference missed by that (or written concurrently) safely falls
-        back to the default via `core/quality/selection.py::load_profile_by_id`.
+        default"). A default is guaranteed to exist after this call even if
+        the profile table's is_default bookkeeping was ever left inconsistent
+        (e.g. by a bug or a hand-edited DB) — not just in the common case of
+        deleting the current default. A matching Auto-Import override is
+        cleared after the DB transaction commits.
 
         Returns ``(success, reason)`` — ``reason`` is empty on success.
         """
@@ -9547,12 +9549,22 @@ class MusicDatabase:
             target = next((r for r in rows if r["id"] == profile_id), None)
             if target is None:
                 return False, "Profile not found"
+            remaining = [r for r in rows if r["id"] != profile_id]
             if target["is_default"]:
-                promote_id = next(r["id"] for r in rows if r["id"] != profile_id)
+                promote_id = remaining[0]["id"]
                 conn.execute("UPDATE quality_profiles SET is_default=0 WHERE is_default=1")
                 conn.execute(
                     "UPDATE quality_profiles SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (promote_id,),
+                )
+            elif not any(r["is_default"] for r in remaining):
+                # Defensive: the surviving profiles have no default at all
+                # (inconsistent is_default state pre-dating this delete).
+                # Promote one now instead of leaving the app without one.
+                conn.execute(
+                    "UPDATE quality_profiles SET is_default=1, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (remaining[0]["id"],),
                 )
             conn.execute(
                 "UPDATE wishlist_tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
