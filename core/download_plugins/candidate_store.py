@@ -184,9 +184,15 @@ class CandidateStore:
         result never doubles as profile B's grab authorization.
         """
         binding = current_binding()
-        now = time.time()
         with self._lock, contextlib.closing(self._connect()) as conn:
             with conn:
+                # Captured under the lock, not before it: expires_at must
+                # reflect actual insertion order so a call that loses the
+                # race for the lock can't record an earlier timestamp than
+                # entries inserted moments before it — otherwise the
+                # expiry-ordered eviction below could pick the entry this
+                # very call is about to create.
+                now = time.time()
                 conn.execute(
                     "DELETE FROM candidate_tokens WHERE expires_at < ?", (now,))
                 row = conn.execute(
