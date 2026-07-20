@@ -50,8 +50,14 @@ class CandidateStore:
     def put(self, url: str) -> str:
         """Register a URL; returns its opaque token. The same URL within the
         TTL returns the same token (repeated searches don't grow the store)."""
-        now = time.monotonic()
         with self._lock:
+            # Captured under the lock, not before it: expires_at must
+            # reflect actual insertion order so a call that loses the race
+            # for the lock can't record an earlier timestamp than entries
+            # inserted moments before it — otherwise the expiry-sorted
+            # eviction in _evict_oldest_locked could pick the entry this
+            # very call is about to create.
+            now = time.monotonic()
             self._purge_locked(now)
             token = self._by_url.get(url)
             if token is not None and token in self._by_token:

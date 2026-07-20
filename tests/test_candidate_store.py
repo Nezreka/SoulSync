@@ -8,6 +8,7 @@ download client, and Prowlarr API keys never reach the frontend.
 
 from __future__ import annotations
 
+import time
 from unittest.mock import patch
 
 from core.download_plugins.candidate_store import CandidateStore, TOKEN_PREFIX
@@ -55,6 +56,52 @@ def test_size_cap_evicts_oldest():
     assert len(live) == 3
     # The most recent entries survive.
     assert store.resolve(tokens[-1]) is not None
+
+
+def test_put_captures_timestamp_after_acquiring_the_lock():
+    """The eviction race (put() evicting the entry it just inserted) stems
+    from computing `now` BEFORE acquiring the lock: under contention, a
+    call whose lock acquisition happens LAST can still have captured the
+    EARLIEST timestamp, decoupling insertion order from expires_at order
+    -- so `_evict_oldest_locked`'s expiry-sort can pick the entry a put()
+    call is about to return, in that same call. Assert `now` is captured
+    only once the lock is already held, which makes that ordering
+    inversion structurally impossible (whichever call acquires the lock
+    last also necessarily reads the largest timestamp)."""
+    store = CandidateStore()
+    events: list = []
+    real_lock = store._lock
+
+    class _RecordingLock:
+        def __enter__(self):
+            real_lock.acquire()
+            events.append('acquire')
+            return self
+
+        def __exit__(self, *exc_info):
+            events.append('release')
+            real_lock.release()
+
+    store._lock = _RecordingLock()
+
+    real_monotonic = time.monotonic
+
+    def _recording_monotonic():
+        events.append('monotonic')
+        return real_monotonic()
+
+    with patch(
+        "core.download_plugins.candidate_store.time.monotonic",
+        side_effect=_recording_monotonic,
+    ):
+        store.put("https://x/a.nzb")
+
+    assert events.index('monotonic') > events.index('acquire'), (
+        "now = time.monotonic() must be captured AFTER acquiring the lock, "
+        "not before — otherwise insertion order and expires_at order can "
+        "diverge under contention, letting put() evict the entry it just "
+        f"created. Recorded order: {events}"
+    )
 
 
 def test_plugin_download_rejects_raw_url(monkeypatch):
