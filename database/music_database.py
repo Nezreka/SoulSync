@@ -9702,8 +9702,11 @@ class MusicDatabase:
         References to the deleted id are cleaned up in the same transaction.
         Nullable wishlist/library-track references become NULL ("use the
         default"); non-null Library-v2 artist/album/track references are moved
-        to the surviving default profile. A matching Auto-Import override is
-        cleared after the DB transaction commits.
+        to the surviving default profile. A default is guaranteed to exist
+        after this call even if the profile table's is_default bookkeeping
+        was ever left inconsistent (e.g. by a bug or a hand-edited DB) — not
+        just in the common case of deleting the current default. A matching
+        Auto-Import override is cleared after the DB transaction commits.
 
         Returns ``(success, reason)`` — ``reason`` is empty on success.
         """
@@ -9730,6 +9733,10 @@ class MusicDatabase:
                 current_default = next((r for r in remaining if r["is_default"]), None)
                 replacement_id = (current_default or remaining[0])["id"]
                 if current_default is None:
+                    # Defensive: the surviving profiles have no default at
+                    # all (inconsistent is_default state pre-dating this
+                    # delete). Promote one now instead of leaving the app
+                    # without one.
                     conn.execute(
                         "UPDATE quality_profiles SET is_default=1, "
                         "updated_at=CURRENT_TIMESTAMP WHERE id=?",
