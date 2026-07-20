@@ -25,6 +25,7 @@ from core.download_plugins.album_bundle import (
     TransientMissCounter,
     copy_audio_files_atomically,
     get_completed_no_path_window_seconds,
+    incomplete_path_stability_check,
     pick_best_album_release,
     poll_album_download,
     resolve_reported_save_path,
@@ -319,12 +320,14 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                         # fingerprint on two consecutive polls before
                         # accepting it; otherwise keep polling, bounded by
                         # the outer deadline rather than this window
-                        # (P2-21).
-                        current_snapshot = snapshot_incomplete_path(last_incomplete_path)
-                        stable = (
-                            current_snapshot is not None
-                            and last_incomplete_snapshot_path == last_incomplete_path
-                            and current_snapshot == last_incomplete_snapshot
+                        # (P2-21). Shared with poll_album_download's
+                        # sibling logic in album_bundle.py.
+                        stable, resolved_incomplete_path, current_snapshot = incomplete_path_stability_check(
+                            last_incomplete_path,
+                            last_incomplete_snapshot_path,
+                            last_incomplete_snapshot,
+                            snapshot_path=snapshot_incomplete_path,
+                            resolve_path=resolve_reported_save_path,
                         )
                         if stable:
                             logger.warning(
@@ -333,19 +336,19 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                                 "contents were unchanged across a poll, so "
                                 "post-processing looks done).",
                                 download_id[:8], job_id, completed_no_path_misses.misses,
-                                last_incomplete_path,
+                                resolved_incomplete_path,
                             )
-                            self._finalize_download(download_id, last_incomplete_path)
+                            self._finalize_download(download_id, resolved_incomplete_path)
                             return
                         logger.info(
                             "Usenet %s: '%s' completed but save_path never landed and "
                             "in-progress path %r is still changing (or unreadable) — "
                             "waiting for it to stabilize (poll %d).",
-                            download_id[:8], job_id, last_incomplete_path,
+                            download_id[:8], job_id, resolved_incomplete_path,
                             completed_no_path_misses.misses,
                         )
                         last_incomplete_snapshot = current_snapshot
-                        last_incomplete_snapshot_path = last_incomplete_path
+                        last_incomplete_snapshot_path = resolved_incomplete_path
                         time.sleep(_POLL_INTERVAL_SECONDS)
                         continue
                     self._mark_error(
@@ -552,6 +555,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             complete_states=frozenset(['completed']),
             failed_states=frozenset(['failed']),
             is_shutdown=self.shutdown_check,
+            # P2-21: remap the client-container path before the
+            # incomplete_path stability check runs, not just on the final
+            # save_path — otherwise a split-container SAB/NZBGet mount
+            # never resolves to a locally-readable path and the stability
+            # gate can never stabilize.
+            resolve_path=resolve_reported_save_path,
             log_prefix='[Usenet album]',
         )
         if save_path is None:

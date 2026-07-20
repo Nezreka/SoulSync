@@ -401,6 +401,47 @@ def snapshot_incomplete_path(path: str) -> Optional[tuple]:
         return None
 
 
+def incomplete_path_stability_check(
+    raw_path: str,
+    prior_path: Optional[str],
+    prior_snapshot: Optional[tuple],
+    *,
+    snapshot_path: Callable[[str], Optional[tuple]] = snapshot_incomplete_path,
+    resolve_path: Callable[[str], str] = lambda p: p,
+) -> tuple:
+    """P2-21 stability gate for the ``incomplete_path`` fallback, shared by
+    ``poll_album_download`` and the usenet single-track poll loop.
+
+    ``raw_path`` is the client-reported in-progress directory, which may
+    live inside the client's OWN container/mount and not be directly
+    readable here. ``resolve_path`` (typically ``resolve_reported_save_path``)
+    is applied BEFORE snapshotting so the stability check — and the path
+    returned on success — both operate on somewhere this process can
+    actually read; snapshotting the raw path meant a remote-mounted
+    directory always read as unreadable (``None``) and could never
+    stabilize, stalling the fallback until the outer poll deadline instead
+    of the intended ~120s window.
+
+    A snapshot with zero files never counts as stable either: the client
+    may have just created an empty in-progress directory a moment before
+    starting to populate it, and two empty reads in a row would otherwise
+    look identical to "writes have stopped".
+
+    Returns ``(stable, resolved_path, new_snapshot)``. Callers should
+    remember ``resolved_path``/``new_snapshot`` as ``prior_path``/
+    ``prior_snapshot`` for the next poll regardless of ``stable``.
+    """
+    resolved = resolve_path(raw_path) or raw_path
+    current = snapshot_path(resolved)
+    stable = (
+        current is not None
+        and current[1] > 0
+        and prior_path == resolved
+        and current == prior_snapshot
+    )
+    return stable, resolved, current
+
+
 def poll_album_download(
     *,
     get_status: Callable[[], Optional[Any]],
@@ -416,6 +457,7 @@ def poll_album_download(
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
     snapshot_path: Callable[[str], Optional[tuple]] = snapshot_incomplete_path,
+    resolve_path: Callable[[str], str] = lambda p: p,
     log_prefix: str = '[album_bundle]',
 ) -> Optional[str]:
     """Drive the per-poll status loop for an album-bundle download.
@@ -598,11 +640,12 @@ def poll_album_download(
                     # two consecutive polls (writes have stopped) before
                     # accepting it; otherwise keep polling, bounded by the
                     # outer deadline rather than this window (P2-21).
-                    current_snapshot = snapshot_path(last_incomplete_path)
-                    stable = (
-                        current_snapshot is not None
-                        and last_incomplete_snapshot_path == last_incomplete_path
-                        and current_snapshot == last_incomplete_snapshot
+                    stable, resolved_incomplete_path, current_snapshot = incomplete_path_stability_check(
+                        last_incomplete_path,
+                        last_incomplete_snapshot_path,
+                        last_incomplete_snapshot,
+                        snapshot_path=snapshot_path,
+                        resolve_path=resolve_path,
                     )
                     if stable:
                         logger.warning(
@@ -611,19 +654,19 @@ def poll_album_download(
                             "in-progress path %r as a last resort (its contents were "
                             "unchanged across a poll, so post-processing looks done).",
                             log_prefix, title, completed_no_path_misses.misses,
-                            last_incomplete_path,
+                            resolved_incomplete_path,
                         )
-                        return last_incomplete_path
+                        return resolved_incomplete_path
                     logger.info(
                         "%s '%s' completed on the client but save_path never landed "
                         "and the in-progress path %r is still changing (or unreadable) "
                         "— waiting for it to stabilize before treating it as final "
                         "(poll %d).",
-                        log_prefix, title, last_incomplete_path,
+                        log_prefix, title, resolved_incomplete_path,
                         completed_no_path_misses.misses,
                     )
                     last_incomplete_snapshot = current_snapshot
-                    last_incomplete_snapshot_path = last_incomplete_path
+                    last_incomplete_snapshot_path = resolved_incomplete_path
                     sleep(interval)
                     continue
                 logger.error(
