@@ -75,6 +75,22 @@ def _sab_with_config(url='http://sab:8080', api_key='k'):
     return adapter
 
 
+def test_sab_load_config_strips_incidental_category_whitespace() -> None:
+    """The connection test validates a stripped category against SAB's
+    category list; the adapter must submit that SAME stripped value, or a
+    category configured with incidental whitespace (e.g. a copy-paste)
+    passes the check but still gets silently rewritten to '*' by SAB on
+    the real submit."""
+    with patch('core.usenet_clients.sabnzbd.config_manager') as cm:
+        cm.get.side_effect = lambda key, default=None: {
+            'usenet_client.url': 'http://sab:8080',
+            'usenet_client.api_key': 'k',
+            'usenet_client.category': 'soulsync ',
+        }.get(key, default)
+        adapter = SABnzbdAdapter()
+    assert adapter._category == 'soulsync'
+
+
 def test_sab_is_configured_requires_url_and_key() -> None:
     assert _sab_with_config('http://x', '').is_configured() is False
     assert _sab_with_config('', 'k').is_configured() is False

@@ -64,7 +64,9 @@ class SABnzbdAdapter:
     def _load_config(self) -> None:
         self._url = (config_manager.get('usenet_client.url', '') or '').rstrip('/')
         self._api_key = config_manager.get('usenet_client.api_key', '') or ''
-        self._category = config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
 
     def reload_settings(self) -> None:
         self._load_config()
