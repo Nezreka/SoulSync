@@ -58,6 +58,34 @@ class _SwallowingClient:
         return []
 
 
+class _RecoveringSession:
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise requests.Timeout(
+                "GET https://provider.example/catalog?api_key=super-secret timed out"
+            )
+        return _Response(200, {"results": ["ok"]})
+
+
+class _RecoveringClient:
+    def __init__(self, albums):
+        self.session = _RecoveringSession()
+        self.albums = list(albums)
+
+    def get_artist_albums(self, artist_id, **kwargs):
+        try:
+            self.session.get("https://provider.example/dead-mirror")
+        except requests.RequestException:
+            pass
+        response = self.session.get("https://provider.example/live-mirror")
+        response.raise_for_status()
+        return list(self.albums)
+
+
 class _StaticClient:
     def __init__(self, albums):
         self.albums = list(albums)
@@ -168,6 +196,35 @@ def test_valid_empty_response_is_not_an_access_error():
 
     assert result == []
     assert client.session is original_session
+
+
+def test_recovered_internal_failure_returns_real_results():
+    client = _RecoveringClient([_album("recovered-album")])
+
+    result = call_discography_provider(
+        "example",
+        client,
+        lambda isolated: isolated.get_artist_albums("artist-1"),
+    )
+
+    assert [album.id for album in result] == ["recovered-album"]
+
+
+def test_recorded_failure_explains_an_empty_recovered_call():
+    client = _RecoveringClient([])
+
+    with pytest.raises(ProviderAccessError) as raised:
+        call_discography_provider(
+            "example",
+            client,
+            lambda isolated: isolated.get_artist_albums("artist-1"),
+        )
+
+    message = str(raised.value)
+    assert raised.value.status_code == 504
+    assert "https://provider.example/catalog" in message
+    assert "super-secret" not in message
+    assert "api_key" not in message
 
 
 def test_swallowed_timeout_is_propagated_as_gateway_timeout():

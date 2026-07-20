@@ -9307,7 +9307,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     ``jsonify``.
     """
     from core.artist_source_detail import build_source_only_artist_detail
-    from core.metadata_service import (
+    from core.metadata.discography_strict import (
         get_artist_detail_discography as _get_artist_detail_discography,
     )
 
@@ -9494,9 +9494,10 @@ def get_artist_detail(artist_id):
 
         # Get source-priority discography for proper categorization and missing releases
         artist_detail_discography = None
+        provider_error = None
         try:
             from core.metadata.lookup import MetadataLookupOptions
-            from core.metadata_service import get_artist_detail_discography as _get_artist_detail_discography
+            from core.metadata.discography_strict import get_artist_detail_discography as _get_artist_detail_discography
             from core.source_ids import source_id_map
 
             # Per-source artist IDs, read via the canonical source-ID registry
@@ -9536,16 +9537,24 @@ def get_artist_detail(artist_id):
             )
 
             if artist_detail_discography.get('state') == 'error':
-                return jsonify({
-                    "success": False,
+                provider_error = {
                     "state": "error",
                     "error": artist_detail_discography.get(
                         "error", "Could not access the discography provider"
                     ),
                     "source": artist_detail_discography.get("source", "unknown"),
-                }), int(artist_detail_discography.get("status_code") or 502)
-
-            if artist_detail_discography['success']:
+                    "status_code": int(
+                        artist_detail_discography.get("status_code") or 502
+                    ),
+                }
+                logger.warning(
+                    "Discography provider failed for owned artist %s; "
+                    "returning library releases: %s",
+                    artist_info['name'],
+                    provider_error['error'],
+                )
+                merged_discography = owned_releases
+            elif artist_detail_discography['success']:
                 logger.debug(
                     "Source-priority discography found - "
                     f"Albums: {len(artist_detail_discography['albums'])}, "
@@ -9639,6 +9648,9 @@ def get_artist_detail(artist_id):
             "discography": merged_discography,
             "enrichment_coverage": enrichment_coverage
         }
+
+        if provider_error is not None:
+            response_data["provider_error"] = provider_error
 
         # Add Spotify artist data if available
         if spotify_artist_data:
@@ -10032,7 +10044,7 @@ def get_artist_discography(artist_id):
         # gets the SAME release-type split (albums / eps / singles) the Artist
         # Detail view shows — EPs were being lumped into singles before, leaving
         # the modal's EPs toggle dead.
-        from core.metadata_service import get_artist_detail_discography as _get_artist_discography
+        from core.metadata.discography_strict import get_artist_detail_discography as _get_artist_discography
 
         # Server-side per-source ID resolution. Look up the library row
         # by ANY of the IDs the frontend might send: library DB id,

@@ -1017,6 +1017,13 @@ async function loadArtistDetailData(artistId, artistName) {
             );
         }
 
+        if (data.provider_error?.error) {
+            showToast(
+                `Discography provider warning: ${data.provider_error.error}`,
+                "error"
+            );
+        }
+
         const isSourceOnlyArtist = !data.artist?.server_source;
         if (isSourceOnlyArtist && data.discography) {
             for (const bucket of ['albums', 'eps', 'singles']) {

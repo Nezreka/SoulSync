@@ -15,9 +15,11 @@ non-discography callers retain their existing behaviour.
 from __future__ import annotations
 
 import copy
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class _FailureCapture:
             detail = str(exc).strip() or type(exc).__name__
         if not detail:
             detail = "upstream communication failed"
+        detail = _sanitize_provider_detail(detail)
 
         self.failure = ProviderAccessFailure(
             source=self.source,
@@ -97,6 +100,38 @@ class _FailureCapture:
             ),
             status_code=resolved_status,
         )
+
+
+_PROVIDER_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+
+
+def _sanitize_provider_detail(detail: str) -> str:
+    """Remove credentials, query strings and fragments from exposed URLs."""
+
+    def sanitize_url(match: re.Match[str]) -> str:
+        value = match.group(0)
+        suffix = ""
+        while value and value[-1] in ".,);]}":
+            suffix = value[-1] + suffix
+            value = value[:-1]
+
+        try:
+            parsed = urlsplit(value)
+            hostname = parsed.hostname or ""
+            if not hostname:
+                return "<redacted upstream URL>" + suffix
+            if ":" in hostname and not hostname.startswith("["):
+                hostname = f"[{hostname}]"
+            try:
+                port = parsed.port
+            except ValueError:
+                port = None
+            netloc = f"{hostname}:{port}" if port is not None else hostname
+            return urlunsplit((parsed.scheme, netloc, parsed.path, "", "")) + suffix
+        except Exception:
+            return "<redacted upstream URL>" + suffix
+
+    return _PROVIDER_URL_RE.sub(sanitize_url, detail)
 
 
 def _normalize_source(source: str) -> str:
@@ -424,6 +459,11 @@ def call_discography_provider(
             raise
         raise ProviderAccessError(capture.failure) from exc
 
+    # A provider may recover internally after a failed mirror/request.
+    # Real releases are authoritative for this call; a captured failure only
+    # explains an otherwise empty result.
+    if result:
+        return result
     if capture.failure is not None:
         raise ProviderAccessError(capture.failure)
 

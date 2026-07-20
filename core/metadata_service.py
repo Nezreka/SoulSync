@@ -33,8 +33,6 @@ from core.metadata.discography import (
     _search_albums_for_source,
     _search_artists_for_source,
     _sort_discography_releases,
-)
-from core.metadata.discography_strict import (
     get_artist_detail_discography,
     get_artist_discography,
 )
