@@ -545,6 +545,36 @@ def test_usenet_thread_waits_for_incomplete_path_to_stop_changing() -> None:
     assert row['audio_files'] == [str(Path('/done/track1.flac'))]
 
 
+def test_usenet_thread_resolves_incomplete_path_before_stability_check() -> None:
+    """P2-21 follow-up: a client-container incomplete_path unreadable from
+    here must be remapped via resolve_reported_save_path BEFORE the
+    stability snapshot — the same fix applied to poll_album_download's
+    stability gate — otherwise a split-container SAB/NZBGet mount can
+    never stabilize and the download hangs until the outer deadline."""
+    plugin = UsenetDownloadPlugin()
+    completed_no_path = UsenetStatus(
+        id='job1', name='A', state='completed', progress=1.0,
+        size=100, downloaded=100, download_speed=0,
+        save_path=None, incomplete_path='/client-container/incomplete/A',
+    )
+    with patch(
+        'core.download_plugins.usenet.resolve_reported_save_path',
+        side_effect=lambda p, *a, **kw: (
+            '/local/incomplete/A' if p == '/client-container/incomplete/A' else p
+        ),
+    ):
+        row = _drive_download_thread(
+            plugin, [completed_no_path] * 12,
+            snapshot={
+                'side_effect': lambda path: (
+                    (100, 3, 1.0) if path == '/local/incomplete/A' else None
+                ),
+            },
+        )
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['audio_files'] == [str(Path('/done/track1.flac'))]
+
+
 def test_usenet_thread_errors_when_completed_with_no_path_at_all() -> None:
     """No final save_path AND no incomplete_path → there's nothing to
     scan, so the thread errors (rather than spinning or finalizing a

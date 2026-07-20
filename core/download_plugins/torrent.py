@@ -689,6 +689,14 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # default-'error' fallback the helper treats as transient.
             failed_states=frozenset(['error']),
             is_shutdown=self.shutdown_check,
+            # P2-21: remap the client-container path before the incomplete_path
+            # stability check, not just on the final save_path — otherwise a
+            # split-container mount never resolves to a readable local path and
+            # the fallback can't stabilize. expect_name isn't known this early
+            # (fetched below only after the poll returns), so this is the
+            # weaker no-expect_name resolution; the final walk_root re-resolves
+            # with expect_name for the stricter content-checked path.
+            resolve_path=resolve_reported_save_path,
             log_prefix='[Torrent album]',
         )
         if save_path is None:

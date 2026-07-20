@@ -1109,6 +1109,63 @@ def test_poll_gives_up_if_incomplete_path_never_stabilizes_before_deadline() -> 
     assert 'timed out' in failed_calls[0][1].get('error', '').lower()
 
 
+def test_poll_resolves_incomplete_path_before_stability_check() -> None:
+    """P2-21 follow-up: the client-reported incomplete_path can live inside
+    the client's OWN container/mount, unreadable from here directly. If the
+    stability check snapshots the raw path, it always reads None (path
+    doesn't exist locally) and can never stabilize — the download would
+    hang until the outer deadline instead of falling back within the
+    completed-no-path window. ``resolve_path`` is applied before
+    snapshotting so both the stability check and the returned path operate
+    on the locally-readable, remapped location."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/client-container/incomplete/album', progress=1.0,
+        ),
+        title='Remote Mount Album',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=2,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+        resolve_path=lambda p: '/local/incomplete/album',
+        snapshot_path=lambda p: (100, 3, 1.0) if p == '/local/incomplete/album' else None,
+    )
+    assert result == '/local/incomplete/album'
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_does_not_treat_empty_incomplete_path_as_stable() -> None:
+    """An incomplete_path that exists but is currently empty (the client
+    just created the directory and hasn't started writing into it) must
+    not satisfy the stability gate just because two empty snapshots
+    match — zero files means writes haven't started, not that they've
+    stopped. The poll should keep waiting (and eventually time out here,
+    since it never gains content) rather than hand back an empty dir."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/sab/incomplete/album', progress=1.0,
+        ),
+        title='Empty Then Never Fills',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=2,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=20.0,
+        snapshot_path=lambda path: (0, 0, 0.0),
+    )
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    assert 'timed out' in failed_calls[0][1].get('error', '').lower()
+
+
 def test_poll_fails_when_no_path_and_no_incomplete_path() -> None:
     """Last resort only fires when there's actually a path to scan.
     With neither a final save_path nor an incomplete_path, the poll
