@@ -1,0 +1,192 @@
+name: Apply PR 1032 review fixes
+
+on:
+  push:
+    branches:
+      - fix/discography-provider-errors
+    paths:
+      - .github/workflows/pr1032-review-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-review-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/discography-provider-errors
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply guarded review changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          from pathlib import Path
+
+
+          def replace_exact(path: str, old: str, new: str, *, expected: int = 1) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} exact occurrence(s), found {count}"
+                  )
+              target.write_text(text.replace(old, new), encoding="utf-8")
+
+
+          provider_path = "core/metadata/provider_access.py"
+          replace_exact(
+              provider_path,
+              "import copy\nfrom contextlib import contextmanager\n",
+              "import copy\nimport re\nfrom contextlib import contextmanager\n",
+          )
+          replace_exact(
+              provider_path,
+              "from typing import Any, Callable, Iterator, Optional\n",
+              "from typing import Any, Callable, Iterator, Optional\n"
+              "from urllib.parse import urlsplit, urlunsplit\n",
+          )
+          replace_exact(
+              provider_path,
+              "\n\ndef _normalize_source(source: str) -> str:\n",
+              '''\n\n_PROVIDER_URL_RE = re.compile(r"https?://[^\\s\\\"'<>]+", re.IGNORECASE)\n\n\ndef _sanitize_provider_detail(detail: str) -> str:\n    """Remove credentials, query strings and fragments from exposed URLs."""\n\n    def sanitize_url(match: re.Match[str]) -> str:\n        value = match.group(0)\n        suffix = ""\n        while value and value[-1] in ".,);]}":\n            suffix = value[-1] + suffix\n            value = value[:-1]\n\n        try:\n            parsed = urlsplit(value)\n            hostname = parsed.hostname or ""\n            if not hostname:\n                return "<redacted upstream URL>" + suffix\n            if ":" in hostname and not hostname.startswith("["):\n                hostname = f"[{hostname}]"\n            try:\n                port = parsed.port\n            except ValueError:\n                port = None\n            netloc = f"{hostname}:{port}" if port is not None else hostname\n            return urlunsplit((parsed.scheme, netloc, parsed.path, "", "")) + suffix\n        except Exception:\n            return "<redacted upstream URL>" + suffix\n\n    return _PROVIDER_URL_RE.sub(sanitize_url, detail)\n\n\ndef _normalize_source(source: str) -> str:\n''',
+          )
+          replace_exact(
+              provider_path,
+              '''        if not detail:\n            detail = "upstream communication failed"\n\n        self.failure = ProviderAccessFailure(\n''',
+              '''        if not detail:\n            detail = "upstream communication failed"\n        detail = _sanitize_provider_detail(detail)\n\n        self.failure = ProviderAccessFailure(\n''',
+          )
+          replace_exact(
+              provider_path,
+              '''    if capture.failure is not None:\n        raise ProviderAccessError(capture.failure)\n\n    return result\n''',
+              '''    # A provider may recover internally after a failed mirror/request.\n    # Real releases are authoritative for this call; a captured failure only\n    # explains an otherwise empty result.\n    if result:\n        return result\n    if capture.failure is not None:\n        raise ProviderAccessError(capture.failure)\n\n    return result\n''',
+          )
+
+          metadata_service = "core/metadata_service.py"
+          replace_exact(
+              metadata_service,
+              '''    _search_artists_for_source,\n    _sort_discography_releases,\n)\nfrom core.metadata.discography_strict import (\n    get_artist_detail_discography,\n    get_artist_discography,\n)\n''',
+              '''    _search_artists_for_source,\n    _sort_discography_releases,\n    get_artist_detail_discography,\n    get_artist_discography,\n)\n''',
+          )
+
+          web_server = "web_server.py"
+          replace_exact(
+              web_server,
+              '''    from core.metadata_service import (\n        get_artist_detail_discography as _get_artist_detail_discography,\n    )\n''',
+              '''    from core.metadata.discography_strict import (\n        get_artist_detail_discography as _get_artist_detail_discography,\n    )\n''',
+          )
+          replace_exact(
+              web_server,
+              "from core.metadata_service import get_artist_detail_discography as _get_artist_detail_discography",
+              "from core.metadata.discography_strict import get_artist_detail_discography as _get_artist_detail_discography",
+              expected=1,
+          )
+          replace_exact(
+              web_server,
+              "from core.metadata_service import get_artist_detail_discography as _get_artist_discography",
+              "from core.metadata.discography_strict import get_artist_detail_discography as _get_artist_discography",
+          )
+          replace_exact(
+              web_server,
+              '''        artist_detail_discography = None\n        try:\n''',
+              '''        artist_detail_discography = None\n        provider_error = None\n        try:\n''',
+          )
+          replace_exact(
+              web_server,
+              '''            if artist_detail_discography.get('state') == 'error':\n                return jsonify({\n                    "success": False,\n                    "state": "error",\n                    "error": artist_detail_discography.get(\n                        "error", "Could not access the discography provider"\n                    ),\n                    "source": artist_detail_discography.get("source", "unknown"),\n                }), int(artist_detail_discography.get("status_code") or 502)\n\n            if artist_detail_discography['success']:\n                logger.debug(\n                    "Source-priority discography found - "\n                    f"Albums: {len(artist_detail_discography['albums'])}, "\n                    f"EPs: {len(artist_detail_discography['eps'])}, "\n                    f"Singles: {len(artist_detail_discography['singles'])}"\n                )\n                merged_discography = artist_detail_discography\n            else:\n                logger.debug(f"Source-priority discography not found: {artist_detail_discography.get('error', 'Unknown error')}")\n                merged_discography = owned_releases\n''',
+              '''            if artist_detail_discography.get('state') == 'error':\n                provider_error = {\n                    "state": "error",\n                    "error": artist_detail_discography.get(\n                        "error", "Could not access the discography provider"\n                    ),\n                    "source": artist_detail_discography.get("source", "unknown"),\n                    "status_code": int(\n                        artist_detail_discography.get("status_code") or 502\n                    ),\n                }\n                logger.warning(\n                    "Discography provider failed for owned artist %s; "\n                    "returning library releases: %s",\n                    artist_info['name'],\n                    provider_error['error'],\n                )\n                merged_discography = owned_releases\n            elif artist_detail_discography['success']:\n                logger.debug(\n                    "Source-priority discography found - "\n                    f"Albums: {len(artist_detail_discography['albums'])}, "\n                    f"EPs: {len(artist_detail_discography['eps'])}, "\n                    f"Singles: {len(artist_detail_discography['singles'])}"\n                )\n                merged_discography = artist_detail_discography\n            else:\n                logger.debug(f"Source-priority discography not found: {artist_detail_discography.get('error', 'Unknown error')}")\n                merged_discography = owned_releases\n''',
+          )
+          replace_exact(
+              web_server,
+              '''        # Add Spotify artist data if available\n        if spotify_artist_data:\n''',
+              '''        if provider_error is not None:\n            response_data["provider_error"] = provider_error\n\n        # Add Spotify artist data if available\n        if spotify_artist_data:\n''',
+          )
+
+          library_js = "webui/static/library.js"
+          replace_exact(
+              library_js,
+              '''        if (!response.ok || !data.success) {\n            throw new Error(\n                data.error || `Failed to load artist data: ${response.statusText}`\n            );\n        }\n\n        const isSourceOnlyArtist = !data.artist?.server_source;\n''',
+              '''        if (!response.ok || !data.success) {\n            throw new Error(\n                data.error || `Failed to load artist data: ${response.statusText}`\n            );\n        }\n\n        if (data.provider_error?.error) {\n            showToast(\n                `Discography provider warning: ${data.provider_error.error}`,\n                "error"\n            );\n        }\n\n        const isSourceOnlyArtist = !data.artist?.server_source;\n''',
+          )
+
+          tests_path = "tests/metadata/test_discography_provider_access.py"
+          replace_exact(
+              tests_path,
+              '''class _StaticClient:\n    def __init__(self, albums):\n''',
+              '''class _RecoveringSession:\n    def __init__(self):\n        self.calls = 0\n\n    def get(self, *args, **kwargs):\n        self.calls += 1\n        if self.calls == 1:\n            raise requests.Timeout(\n                "GET https://provider.example/catalog?api_key=super-secret timed out"\n            )\n        return _Response(200, {"results": ["ok"]})\n\n\nclass _RecoveringClient:\n    def __init__(self, albums):\n        self.session = _RecoveringSession()\n        self.albums = list(albums)\n\n    def get_artist_albums(self, artist_id, **kwargs):\n        try:\n            self.session.get("https://provider.example/dead-mirror")\n        except requests.RequestException:\n            pass\n        response = self.session.get("https://provider.example/live-mirror")\n        response.raise_for_status()\n        return list(self.albums)\n\n\nclass _StaticClient:\n    def __init__(self, albums):\n''',
+          )
+          replace_exact(
+              tests_path,
+              '''def test_swallowed_timeout_is_propagated_as_gateway_timeout():\n''',
+              '''def test_recovered_internal_failure_returns_real_results():\n    client = _RecoveringClient([_album("recovered-album")])\n\n    result = call_discography_provider(\n        "example",\n        client,\n        lambda isolated: isolated.get_artist_albums("artist-1"),\n    )\n\n    assert [album.id for album in result] == ["recovered-album"]\n\n\ndef test_recorded_failure_explains_an_empty_recovered_call():\n    client = _RecoveringClient([])\n\n    with pytest.raises(ProviderAccessError) as raised:\n        call_discography_provider(\n            "example",\n            client,\n            lambda isolated: isolated.get_artist_albums("artist-1"),\n        )\n\n    message = str(raised.value)\n    assert raised.value.status_code == 504\n    assert "https://provider.example/catalog" in message\n    assert "super-secret" not in message\n    assert "api_key" not in message\n\n\ndef test_swallowed_timeout_is_propagated_as_gateway_timeout():\n''',
+          )
+
+          web_tests = Path("tests/metadata/test_discography_web_integration.py")
+          web_tests.write_text(
+              '''"""Web integration tests for strict discography provider failures."""\n\nfrom __future__ import annotations\n\nimport ast\nimport re\nfrom pathlib import Path\n\nfrom core.artist_source_detail import build_source_only_artist_detail\nfrom core.metadata import artist_image as metadata_artist_image\n\n\ndef _web_function_node(function_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:\n    source = Path("web_server.py").read_text(encoding="utf-8")\n    tree = ast.parse(source)\n    for node in tree.body:\n        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:\n            return node\n    raise AssertionError(f"Function {function_name!r} was not found in web_server.py")\n\n\ndef _imports_name(node: ast.AST, module: str, name: str) -> bool:\n    return any(\n        isinstance(child, ast.ImportFrom)\n        and child.module == module\n        and any(alias.name == name for alias in child.names)\n        for child in ast.walk(node)\n    )\n\n\ndef _is_state_error_test(test: ast.AST, variable_name: str) -> bool:\n    return (\n        isinstance(test, ast.Compare)\n        and len(test.ops) == 1\n        and isinstance(test.ops[0], ast.Eq)\n        and len(test.comparators) == 1\n        and isinstance(test.comparators[0], ast.Constant)\n        and test.comparators[0].value == "error"\n        and isinstance(test.left, ast.Call)\n        and isinstance(test.left.func, ast.Attribute)\n        and test.left.func.attr == "get"\n        and isinstance(test.left.func.value, ast.Name)\n        and test.left.func.value.id == variable_name\n    )\n\n\ndef _state_error_guard(node: ast.AST, variable_name: str) -> ast.If:\n    for child in ast.walk(node):\n        if isinstance(child, ast.If) and _is_state_error_test(child.test, variable_name):\n            return child\n    raise AssertionError(f"No state=error guard found for {variable_name}")\n\n\ndef test_source_only_artist_detail_preserves_provider_access_error(monkeypatch):\n    monkeypatch.setattr(\n        metadata_artist_image,\n        "get_artist_image_url",\n        lambda *_args, **_kwargs: None,\n    )\n\n    def provider_failure(*_args, **_kwargs):\n        return {\n            "success": False,\n            "state": "error",\n            "albums": [],\n            "eps": [],\n            "singles": [],\n            "source": "deezer",\n            "error": "Could not access deezer: connection timed out",\n            "status_code": 504,\n        }\n\n    payload, status = build_source_only_artist_detail(\n        "123",\n        "Example Artist",\n        "deezer",\n        discography_loader=provider_failure,\n    )\n\n    assert status == 504\n    assert payload == {\n        "success": False,\n        "state": "error",\n        "error": "Could not access deezer: connection timed out",\n        "source": "deezer",\n        "status_code": 504,\n    }\n\n\ndef test_owned_artist_keeps_library_releases_and_exposes_provider_error():\n    node = _web_function_node("get_artist_detail")\n\n    assert _imports_name(\n        node,\n        "core.metadata.discography_strict",\n        "get_artist_detail_discography",\n    )\n    guard = _state_error_guard(node, "artist_detail_discography")\n    assert not any(isinstance(child, ast.Return) for child in ast.walk(guard))\n    assert any(\n        isinstance(child, (ast.Assign, ast.AnnAssign))\n        and any(\n            isinstance(target, ast.Name) and target.id == "merged_discography"\n            for target in (child.targets if isinstance(child, ast.Assign) else [child.target])\n        )\n        for child in ast.walk(guard)\n    )\n    assert any(\n        isinstance(child, ast.Subscript)\n        and isinstance(child.value, ast.Name)\n        and child.value.id == "response_data"\n        and isinstance(child.slice, ast.Constant)\n        and child.slice.value == "provider_error"\n        for child in ast.walk(node)\n    )\n\n\ndef test_download_discography_endpoint_uses_strict_facade():\n    node = _web_function_node("get_artist_discography")\n\n    assert _imports_name(\n        node,\n        "core.metadata.discography_strict",\n        "get_artist_detail_discography",\n    )\n    guard = _state_error_guard(node, "discography")\n    assert any(isinstance(child, ast.Return) for child in ast.walk(guard))\n\n\ndef test_legacy_metadata_facade_remains_lenient():\n    node = ast.parse(Path("core/metadata_service.py").read_text(encoding="utf-8"))\n\n    assert _imports_name(node, "core.metadata.discography", "get_artist_discography")\n    assert _imports_name(\n        node, "core.metadata.discography", "get_artist_detail_discography"\n    )\n    assert not any(\n        isinstance(child, ast.ImportFrom)\n        and child.module == "core.metadata.discography_strict"\n        for child in ast.walk(node)\n    )\n\n\ndef test_artist_detail_frontend_surfaces_api_and_owned_provider_errors():\n    source = Path("webui/static/library.js").read_text(encoding="utf-8")\n\n    assert re.search(\n        r"if\\s*\\(\\s*!response\\.ok\\s*\\|\\|\\s*!data\\.success\\s*\\)",\n        source,\n    )\n    assert re.search(r"throw\\s+new\\s+Error\\([\\s\\S]*?data\\.error", source)\n    assert re.search(r"data\\.provider_error\\?\\.error", source)\n''',
+              encoding="utf-8",
+          )
+
+          workflow = Path(".github/workflows/pr1032-review-fixes.yml")
+          if not workflow.exists():
+              raise SystemExit("Temporary workflow file is missing")
+          workflow.unlink()
+          PY
+
+      - name: Install validation dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest ruff
+
+      - name: Validate review changes
+        shell: bash
+        run: |
+          python -m compileall -q \
+            core/metadata/provider_access.py \
+            core/metadata/discography_strict.py \
+            core/metadata_service.py \
+            core/artist_source_detail.py \
+            tests/metadata/test_discography_provider_access.py \
+            tests/metadata/test_discography_web_integration.py \
+            web_server.py
+          node --check webui/static/library.js
+          git diff --check
+          python -m ruff check \
+            core/metadata/provider_access.py \
+            core/metadata/discography_strict.py \
+            core/metadata_service.py \
+            core/artist_source_detail.py \
+            tests/metadata/test_discography_provider_access.py \
+            tests/metadata/test_discography_web_integration.py \
+            web_server.py
+          python -m pytest -q \
+            tests/metadata/test_discography_provider_access.py \
+            tests/metadata/test_discography_web_integration.py \
+            tests/metadata/test_artist_source_detail.py \
+            tests/metadata/test_metadata_discography.py \
+            tests/metadata/test_discography_typed_path.py \
+            tests/metadata/test_discography_source_override.py
+
+      - name: Commit validated changes
+        shell: bash
+        run: |
+          git config user.name "ragnarlotus"
+          git config user.email "6222619+ragnarlotus@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix discography provider review findings"
+          git push origin HEAD:fix/discography-provider-errors
