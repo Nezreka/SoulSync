@@ -1,28 +1,20 @@
 import asyncio
-import concurrent.futures
-import queue
 import threading
 
 _loop = None
 _thread = None
-_jobs = queue.Queue()
 _lock = threading.Lock()
 
 
 def _run_loop(loop, ready):
     asyncio.set_event_loop(loop)
-    ready.set()
-    while True:
-        coro, future = _jobs.get()
-        if not future.set_running_or_notify_cancel():
-            coro.close()
-            continue
-        try:
-            result = loop.run_until_complete(coro)
-        except BaseException as exc:
-            future.set_exception(exc)
-        else:
-            future.set_result(result)
+    # Scheduled via call_soon (same-thread), not set as the first statement:
+    # this only fires once run_forever() actually starts pumping the loop's
+    # ready queue, so _get_loop() can safely hand the loop to
+    # run_coroutine_threadsafe() the instant `ready` is set, closing the
+    # startup race where a caller submits before the loop is truly running.
+    loop.call_soon(ready.set)
+    loop.run_forever()
 
 
 def _get_loop():
@@ -44,10 +36,11 @@ def run_async(coro):
 
     A dedicated daemon thread runs one event loop for the entire process.
     Callers submit coroutines and block until the result is ready.
-    This avoids creating/destroying event loops per call (FD leak)
-    and works correctly with both long-lived and short-lived threads.
+    This avoids creating/destroying event loops per call (FD leak),
+    works correctly with both long-lived and short-lived threads, and lets
+    concurrently-submitted coroutines interleave at their own await points
+    instead of fully serializing one caller behind another.
     """
-    _get_loop()
-    future = concurrent.futures.Future()
-    _jobs.put((coro, future))
+    loop = _get_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
     return future.result()
