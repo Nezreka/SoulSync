@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.amazon_client import AmazonClient
-from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.worker_utils import idle_backoff_seconds, interruptible_sleep, set_album_api_track_count
 from core.enrichment.manual_match_honoring import honor_stored_match
 from core.amazon_outage import is_source_outage, next_poll_delay_seconds
 
@@ -29,6 +29,9 @@ class AmazonWorker:
         self._stop_event = threading.Event()
 
         self.current_item = None
+
+        # Consecutive empty-queue polls, drives idle_backoff_seconds()
+        self._empty_streak = 0
 
         self.stats = {
             'matched': 0,
@@ -147,9 +150,11 @@ class AmazonWorker:
 
                 if not item:
                     logger.debug("No pending items, sleeping...")
-                    interruptible_sleep(self._stop_event, 10)
+                    interruptible_sleep(self._stop_event, idle_backoff_seconds(self._empty_streak))
+                    self._empty_streak += 1
                     continue
 
+                self._empty_streak = 0
                 self.current_item = item
                 item_id = item.get('id') or item.get('artist_id') or item.get('album_id')
                 if item_id is None:

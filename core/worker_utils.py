@@ -204,6 +204,25 @@ def release_titles(albums) -> list:
     return out
 
 
+# --- Idle-queue back-off ----------------------------------------------------
+# Enrichment workers poll their queue on a fixed cadence even once there's
+# nothing left to enrich — a fully-caught-up library still runs the full
+# multi-query "find next item" lookup every idle wake, forever. Escalating the
+# sleep the longer the queue stays empty (reset the moment work appears) cuts
+# that idle DB/CPU cost without adding latency once real work shows up.
+
+IDLE_BACKOFF_BASE = 10   # first (and normal) idle sleep, seconds — matches the old fixed interval
+IDLE_BACKOFF_CAP = 60    # cap so a freshly-idle worker still notices new work within a minute
+
+
+def idle_backoff_seconds(empty_streak: int) -> float:
+    """Seconds to sleep after finding the queue empty, escalating with
+    ``empty_streak`` (consecutive empty polls) up to IDLE_BACKOFF_CAP."""
+    if empty_streak <= 0:
+        return IDLE_BACKOFF_BASE
+    return min(IDLE_BACKOFF_BASE * (2 ** min(empty_streak, 3)), IDLE_BACKOFF_CAP)
+
+
 def interruptible_sleep(stop_event: threading.Event, seconds: float, step: float = 0.5) -> bool:
     """Sleep in chunks so shutdown can interrupt long waits."""
     if seconds <= 0:
