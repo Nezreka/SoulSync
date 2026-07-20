@@ -1321,7 +1321,18 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             # only ever replaces the constant-1 default, so it can never override
             # a number a real source produced — it just stops every un-numbered
             # track claiming position 1 and all-but-one showing as "missing".
-            scan_order = track_number_from_directory_order(file_path)
+            #
+            # Restricted to genuine album-bundle downloads: a plain
+            # (non-bundle) download lands in a SHARED flat directory (e.g.
+            # Soulseek's download_path) that can hold other, unrelated
+            # in-flight downloads at the same time — applying the fallback
+            # there would compute this file's position among files from a
+            # completely different download, not a real position within
+            # its own album.
+            scan_order = (
+                track_number_from_directory_order(file_path)
+                if is_album_download else None
+            )
             if scan_order is not None:
                 logger.warning(
                     "No per-track number from any source; using scan-order "
