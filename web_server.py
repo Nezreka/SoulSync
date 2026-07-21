@@ -17800,8 +17800,17 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
         logger.info("[DB Update] Database update completed, starting automatic wishlist cleanup...")
-        # Run cleanup in background to avoid blocking the UI
-        missing_download_executor.submit(_automatic_wishlist_cleanup_after_db_update)
+        # Dedicated thread, NOT `missing_download_executor` — that pool (3
+        # workers) also runs post-processing of completed downloads, and on a
+        # big wishlist one cleanup pass takes HOURS (per-track fuzzy matching).
+        # Stacked cleanups saturated the pool and finished downloads stopped
+        # moving to Completed until restart (jadux). The cleanup itself is
+        # overlap-guarded (skip-if-running) in core/wishlist/processing.py.
+        threading.Thread(
+            target=_automatic_wishlist_cleanup_after_db_update,
+            name="WishlistCleanup",
+            daemon=True,
+        ).start()
     except Exception as cleanup_error:
         logger.error(f"[DB Update] Error starting automatic wishlist cleanup: {cleanup_error}")
 
