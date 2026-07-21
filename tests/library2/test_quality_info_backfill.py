@@ -146,7 +146,10 @@ def test_scan_is_noop_when_no_candidates(imported_conn, tmp_path):
     assert result.scanned == 0
 
 
-def test_gated_when_library_v2_disabled(imported_conn, tmp_path):
+def test_deprecated_disable_flag_does_not_gate_scan(imported_conn, tmp_path):
+    """features.library_v2 is a non-disableable cutover (core.library2.feature):
+    the legacy false value is read only to log one deprecation warning and
+    must not silence the native repair scan."""
     context = JobContext(
         db=_DB(_db_path(imported_conn)),
         transfer_folder=str(tmp_path),
@@ -155,5 +158,4 @@ def test_gated_when_library_v2_disabled(imported_conn, tmp_path):
 
     result = QualityInfoBackfillJob().scan(context)
 
-    assert result.auto_fixed == 0
-    assert result.scanned == 0
+    assert result.scanned == 2

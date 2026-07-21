@@ -259,8 +259,10 @@ def test_missing_entity_404(api):
     assert response.status_code == 404
 
 
-def test_disabled_flag_guards_the_route(tmp_path):
+def test_deprecated_disable_flag_does_not_guard_the_route(tmp_path):
+    """features.library_v2 is a non-disableable cutover (core.library2.feature):
+    the legacy false value must not 403 the route."""
     client, db, ids = _build_api(tmp_path)
     db.config["features.library_v2"] = False
     response = client.post(f"/api/library/v2/tracks/{ids['ep_track']}/search")
-    assert response.status_code == 403
+    assert response.status_code == 200
