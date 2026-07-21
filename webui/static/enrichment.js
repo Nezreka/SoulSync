@@ -3212,10 +3212,13 @@ function _renderFindingMedia(d) {
     if (artistUrl) {
         const artistLabel = d.artist_name || d.artist || 'Artist';
         const hasName = !!(d.artist_name || d.artist);
-        // Clickable → the artist's page. The id isn't stored in finding details,
-        // so it resolves by exact name at click time (works for OLD findings too).
+        // Clickable → the artist's page. New findings store the library
+        // artist_id (exact, ambiguity-proof); older findings predate it and
+        // resolve by exact name at click time instead.
+        const idAttr = (d.artist_id != null && d.artist_id !== '')
+            ? ` data-artist-id="${Number(d.artist_id)}"` : '';
         const clickAttrs = hasName
-            ? ` data-artist-name="${_escFinding(artistLabel)}" onclick="event.stopPropagation(); openFindingArtist(this)"
+            ? `${idAttr} data-artist-name="${_escFinding(artistLabel)}" onclick="event.stopPropagation(); openFindingArtist(this)"
                 title="Open ${_escFinding(artistLabel)}'s page" role="link"`
             : '';
         html += `<div class="repair-finding-media-card${hasName ? ' repair-finding-media-card--link' : ''}"${clickAttrs}>
@@ -3234,6 +3237,13 @@ function _renderFindingMedia(d) {
 async function openFindingArtist(el) {
     const name = el.getAttribute('data-artist-name');
     if (!name) return;
+    // New findings carry the library artist id — navigate directly, no lookup,
+    // immune to same-name ambiguity.
+    const storedId = el.getAttribute('data-artist-id');
+    if (storedId && typeof navigateToArtistDetail === 'function') {
+        navigateToArtistDetail(parseInt(storedId, 10), name);
+        return;
+    }
     try {
         // limit=50: the search is a CONTAINS match sorted alphabetically, so a
         // short name ("Low") can sort after many substring hits ("Below",

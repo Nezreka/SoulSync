@@ -53,7 +53,7 @@ class SingleAlbumDedupJob(RepairJob):
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, al.record_type, al.track_count,
                        t.file_path, t.bitrate, t.duration, al.thumb_url, ar.thumb_url,
-                       t.track_number
+                       t.track_number, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -86,7 +86,7 @@ class SingleAlbumDedupJob(RepairJob):
         for row in tracks:
             (track_id, title, artist_name, album_title, album_type,
              total_track_count, file_path, bitrate, duration,
-             album_thumb, artist_thumb, track_number) = row
+             album_thumb, artist_thumb, track_number, artist_id) = row
 
             entry = {
                 'id': track_id,
@@ -103,6 +103,7 @@ class SingleAlbumDedupJob(RepairJob):
                 'track_number': track_number,
                 'album_thumb_url': album_thumb or None,
                 'artist_thumb_url': artist_thumb or None,
+                'artist_id': artist_id,
             }
 
             # Classify: only actual singles — EPs are intentional multi-track releases
@@ -233,6 +234,7 @@ class SingleAlbumDedupJob(RepairJob):
                                 },
                                 'album_thumb_url': best_album_match.get('album_thumb_url') or single.get('album_thumb_url'),
                                 'artist_thumb_url': best_album_match.get('artist_thumb_url') or single.get('artist_thumb_url'),
+                                'artist_id': best_album_match.get('artist_id') or single.get('artist_id'),
                             }
                         )
                         if inserted:

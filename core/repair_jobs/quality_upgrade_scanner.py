@@ -433,6 +433,7 @@ class QualityUpgradeScannerJob(RepairJob):
                         'track_number': meta.get('track_number'),
                         'album_thumb_url': meta.get('album_thumb_url'),
                         'artist_thumb_url': meta.get('artist_thumb_url'),
+                        'artist_id': meta.get('artist_id'),
                         'profile_config_fingerprint': config_fingerprint,
                         'quality_profile_id': quality_profile_id,
                         'quality_profile_name': quality_profile_name,
@@ -524,7 +525,7 @@ class QualityUpgradeScannerJob(RepairJob):
                        COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                        t.file_path, t.track_number,
                        al.title AS album_title, al.thumb_url, ar.thumb_url,
-                       t.quality_profile_id
+                       t.quality_profile_id, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -544,6 +545,7 @@ class QualityUpgradeScannerJob(RepairJob):
                     'album_thumb_url': row[6] or None,
                     'artist_thumb_url': row[7] or None,
                     'quality_profile_id': row[8],
+                    'artist_id': row[9],
                 }
                 for depth in range(1, min(4, len(parts) + 1)):
                     suffix = '/'.join(parts[-depth:]).lower()

@@ -402,6 +402,7 @@ class AlbumCompletenessJob(RepairJob):
                             'missing_tracks': missing_tracks,
                             'album_thumb_url': album_thumb or None,
                             'artist_thumb_url': artist_thumb or None,
+                            'artist_id': row['artist_id'],
                         },
                     )
                     if inserted:

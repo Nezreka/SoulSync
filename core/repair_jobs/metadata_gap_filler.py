@@ -70,6 +70,7 @@ class MetadataGapFillerJob(RepairJob):
                 "t.musicbrainz_recording_id",
                 "al.thumb_url",
                 "ar.thumb_url",
+                "ar.id",
             ]
             column_map = [
                 ("spotify_track_id", "t.spotify_track_id"),
@@ -117,6 +118,7 @@ class MetadataGapFillerJob(RepairJob):
                 return result
 
             track_id, title, artist_name, album_title, isrc, mb_id, album_thumb, artist_thumb = row[:8]
+            artist_id = row[8]
             source_track_ids = {
                 'spotify': row[column_index['spotify_track_id']] if 'spotify_track_id' in column_index else None,
                 'itunes': row[column_index['itunes_track_id']] if 'itunes_track_id' in column_index else None,
@@ -200,6 +202,7 @@ class MetadataGapFillerJob(RepairJob):
                                 'found_fields': found_fields,
                                 'album_thumb_url': album_thumb or None,
                                 'artist_thumb_url': artist_thumb or None,
+                                'artist_id': artist_id,
                             }
                         )
                         if inserted:

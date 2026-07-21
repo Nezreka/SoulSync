@@ -197,6 +197,7 @@ def _build_tracks_in_db(tmp_path: Path, *,
             'album_title': album_title,
             'album_thumb': None,
             'artist_thumb': None,
+            'artist_row_id': 42,
         })
     return rows
 

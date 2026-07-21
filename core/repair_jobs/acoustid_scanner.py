@@ -352,6 +352,7 @@ class AcoustIDScannerJob(RepairJob):
                     'artist_similarity': round(artist_sim, 3),
                     'album_thumb_url': expected.get('album_thumb_url'),
                     'artist_thumb_url': expected.get('artist_thumb_url'),
+                    'artist_id': expected.get('artist_id'),
                     'album_title': expected.get('album_title', ''),
                     'track_number': expected.get('track_number'),
                     'force_imported': file_verif_status == 'force_imported',
@@ -473,7 +474,8 @@ class AcoustIDScannerJob(RepairJob):
                        al.title AS album_title, al.thumb_url, ar.thumb_url,
                        NULLIF(t.track_artist, '') AS track_artist,
                        ar.name AS album_artist,
-                       t.duration
+                       t.duration,
+                       ar.id AS artist_row_id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -504,6 +506,7 @@ class AcoustIDScannerJob(RepairJob):
                     # collisions where the matched recording is a
                     # totally different length.
                     'duration_ms': row[10] or 0,
+                    'artist_id': row[11],
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)

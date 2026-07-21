@@ -130,7 +130,7 @@ class LiveCommentaryCleanerJob(RepairJob):
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, al.id, al.record_type,
                        t.file_path, t.bitrate, t.duration, t.track_number,
-                       al.thumb_url, ar.thumb_url
+                       al.thumb_url, ar.thumb_url, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -177,7 +177,7 @@ class LiveCommentaryCleanerJob(RepairJob):
 
             (track_id, title, artist_name, album_title, album_id,
              album_type, file_path, bitrate, duration, track_number,
-             album_thumb, artist_thumb) = row
+             album_thumb, artist_thumb, artist_id) = row
 
             # Check track title
             content_type = _detect_content_type(title, '')
@@ -237,6 +237,7 @@ class LiveCommentaryCleanerJob(RepairJob):
                             'album_matched': album_matched,
                             'album_thumb_url': album_thumb or None,
                             'artist_thumb_url': artist_thumb or None,
+                            'artist_id': artist_id,
                         }
                     )
                     if inserted:

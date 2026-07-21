@@ -73,7 +73,7 @@ class DeadFileCleanerJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, t.file_path,
-                       al.thumb_url, ar.thumb_url
+                       al.thumb_url, ar.thumb_url, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -127,7 +127,7 @@ class DeadFileCleanerJob(RepairJob):
             if i % 200 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb = row
+            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb, artist_id = row
             result.scanned += 1
 
             if context.report_progress and i % 50 == 0:
@@ -177,7 +177,7 @@ class DeadFileCleanerJob(RepairJob):
 
         # A small fraction unresolvable — treat as genuine dead files and report.
         for row in dead_rows:
-            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb = row
+            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb, artist_id = row
             if context.report_progress:
                 context.report_progress(
                     log_line=f'Missing: {title or "Unknown"} — {os.path.basename(file_path)}',
@@ -202,6 +202,7 @@ class DeadFileCleanerJob(RepairJob):
                             'original_path': file_path,
                             'album_thumb_url': album_thumb or None,
                             'artist_thumb_url': artist_thumb or None,
+                            'artist_id': artist_id,
                         }
                     )
                     if inserted:
