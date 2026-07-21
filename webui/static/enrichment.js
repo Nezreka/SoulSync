@@ -3235,7 +3235,10 @@ async function openFindingArtist(el) {
     const name = el.getAttribute('data-artist-name');
     if (!name) return;
     try {
-        const res = await fetch(`/api/library/artists?search=${encodeURIComponent(name)}&limit=10`);
+        // limit=50: the search is a CONTAINS match sorted alphabetically, so a
+        // short name ("Low") can sort after many substring hits ("Below",
+        // "Flower", …) — a small page could push the exact match off page 1.
+        const res = await fetch(`/api/library/artists?search=${encodeURIComponent(name)}&limit=50`);
         const data = await res.json();
         const artists = (data && data.artists) || [];
         const exact = artists.find(a => (a.name || '').toLowerCase() === name.toLowerCase());
