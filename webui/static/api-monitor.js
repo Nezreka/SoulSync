@@ -1848,12 +1848,30 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
 // way out a repeatedly-failing track needs.
 function _searchWishlistTrackManually(artistName, trackName) {
     navigateToPage('search');
+    const query = `${artistName || ''} ${trackName || ''}`.trim();
+    // The user is here because AUTO downloads kept failing — at this point they
+    // want the FILE, not metadata browsing. Land on the Soulseek (basic) surface
+    // with the search already running, instead of the default metadata source
+    // (same handoff the global search widget's Soulseek path uses).
     setTimeout(() => {
-        const searchInput = document.getElementById('enhanced-search-input');
-        if (searchInput) {
-            searchInput.value = `${artistName || ''} ${trackName || ''}`.trim();
-            searchInput.dispatchEvent(new Event('input'));
-            searchInput.focus();
+        const basicInput = document.getElementById('downloads-search-input');
+        if (basicInput) basicInput.value = query;
+        // Sync the controller's query BEFORE clicking the icon — otherwise
+        // onSoulseekSelected fires with whatever was last typed on /search
+        // and overwrites the input with a stale value.
+        if (typeof _searchPageController !== 'undefined' && _searchPageController) {
+            _searchPageController.state.query = query;
+        }
+        const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+        if (soulseekIcon) { soulseekIcon.click(); return; }
+        // Fallback: controller not initialized yet (first /search visit) —
+        // swap sections and run the basic search directly.
+        const basicSection = document.getElementById('basic-search-section');
+        const enhancedSection = document.getElementById('enhanced-search-section');
+        if (basicSection) basicSection.classList.add('active');
+        if (enhancedSection) enhancedSection.classList.remove('active');
+        if (basicInput && basicInput.value && typeof performDownloadsSearch === 'function') {
+            performDownloadsSearch();
         }
     }, 300);
 }
