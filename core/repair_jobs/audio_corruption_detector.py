@@ -220,14 +220,7 @@ class AudioCorruptionDetectorJob(RepairJob):
             title = row['title'] or 'Unknown'
             artist = row['artist_name'] or 'Unknown'
             subject = native_subjects.get(str(row['file_path']))
-            if subject:
-                from core.library2.paths import resolve_lib2_path
-
-                resolved = row['file_path'] if os.path.isfile(row['file_path']) else (
-                    resolve_lib2_path(row['file_path'],
-                                      config_manager=context.config_manager))
-            else:
-                resolved = _resolve(row['file_path'], context)
+            resolved = _resolve(row['file_path'], context)
 
             if not resolved:
                 unresolved += 1

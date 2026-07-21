@@ -135,16 +135,7 @@ class ReplayGainFillerJob(RepairJob):
             result.scanned += 1
 
             subject = native_subjects.get(str(file_path))
-            if subject:
-                from core.library2.paths import resolve_lib2_path
-
-                resolved = resolve_lib2_path(
-                    file_path, config_manager=context.config_manager,
-                )
-                if not resolved and os.path.isfile(file_path):
-                    resolved = file_path
-            else:
-                resolved = _resolve(file_path, context)
+            resolved = _resolve(file_path, context)
             if not resolved:
                 # Can't read the file from here → can't analyze it on apply either.
                 result.skipped += 1
