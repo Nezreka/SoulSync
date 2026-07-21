@@ -3751,6 +3751,15 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 @media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, .vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }
 
 /* 'Search all missing' — toolbar sibling of Clear all */
+/* "⚠ Failing" filter chip — the LiveLeak fix-it hub toggle */
+.vwsh-failing-filter { height: 42px; padding: 0 14px; box-sizing: border-box; border-radius: 12px;
+    border: 1px solid rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.08);
+    color: rgba(245, 158, 11, 0.9); font-size: 13px; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s ease; }
+.vwsh-failing-filter:hover { background: rgba(245, 158, 11, 0.18); }
+.vwsh-failing-filter--on { background: rgba(245, 158, 11, 0.9); border-color: transparent; color: #1a1a1a; }
+.vwsh-failing-filter[hidden] { display: none; }
+.vwsh-failing-n:empty { display: none; }
 .vwsh-searchall { margin-left: auto; height: 42px; padding: 0 16px; box-sizing: border-box; border-radius: 12px;
     display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
     border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.4); color: #fff;

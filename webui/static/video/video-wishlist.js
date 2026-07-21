@@ -14,7 +14,11 @@
     var LIMIT = 60;
     var state = { loaded: false, tab: 'movie', search: '', sort: 'added', page: 1,
                   counts: { movie: 0, show: 0, episode: 0 }, ytChannel: 0, ytVideo: 0,
-                  showData: {}, showInfo: {} };
+                  showData: {}, showInfo: {},
+                  // "⚠ Failing" filter (the LiveLeak fix-it hub): show only items
+                  // that keep failing to download. lastItems = the unfiltered load,
+                  // so toggling re-renders without a refetch.
+                  failingOnly: false, lastItems: null };
 
     var searchTimer = null;
 
@@ -373,8 +377,49 @@
         '</div>';
     }
 
+    // Same rule as the failing badges: repeated searches without a grab, and only
+    // while the item is still wanted (a downloading item isn't "failing").
+    function isFailingItem(x) {
+        var st = liveStatus(x);
+        return (Number(x.search_attempts) || 0) >= 3 && (st === 'wanted' || st === 'upgrade');
+    }
+
+    function _updateFailingChip(rawItems) {
+        var chip = $('[data-vwsh-failing]'); if (!chip) return;
+        var n = 0;
+        if (state.tab === 'movie') {
+            n = (rawItems || []).filter(isFailingItem).length;
+        } else if (state.tab === 'show') {
+            (rawItems || []).forEach(function (sh) {
+                (sh.seasons || []).forEach(function (se) {
+                    (se.episodes || []).forEach(function (e) { if (isFailingItem(e)) n += 1; });
+                });
+            });
+        }
+        // Keep the chip visible while the filter is ON even at count 0, so the
+        // user can always toggle back out of the filtered view.
+        chip.hidden = state.tab === 'youtube' || (!n && !state.failingOnly);
+        chip.classList.toggle('vwsh-failing-filter--on', state.failingOnly);
+        var nn = $('[data-vwsh-failing-n]'); if (nn) nn.textContent = n ? String(n) : '';
+    }
+
     function render(items) {
         var grid = $('[data-vwsh-grid]'); if (!grid) return;
+        state.lastItems = items;                       // unfiltered — the chip toggles re-render from this
+        _updateFailingChip(items);
+        // "⚠ Failing" filter: movies filter directly; shows keep only seasons/
+        // episodes that are failing (clones — the raw items stay intact).
+        if (state.failingOnly && state.tab !== 'youtube') {
+            items = state.tab === 'movie'
+                ? items.filter(isFailingItem)
+                : items.map(function (sh) {
+                    var seasons = (sh.seasons || []).map(function (se) {
+                        var eps = (se.episodes || []).filter(isFailingItem);
+                        return eps.length ? Object.assign({}, se, { episodes: eps }) : null;
+                    }).filter(Boolean);
+                    return seasons.length ? Object.assign({}, sh, { seasons: seasons }) : null;
+                }).filter(Boolean);
+        }
         // YouTube uses the SAME nebula as TV (channel=show, year=season, video=episode).
         var nebula = state.tab === 'show' || state.tab === 'youtube';
         grid.classList.toggle('wl-nebula-field', nebula);
@@ -774,6 +819,11 @@
         });
         var sortSel = $('[data-vwsh-sort]');
         if (sortSel) sortSel.addEventListener('change', function () { state.sort = sortSel.value; state.page = 1; load(); });
+        var failBtn = $('[data-vwsh-failing]');
+        if (failBtn) failBtn.addEventListener('click', function () {
+            state.failingOnly = !state.failingOnly;
+            if (state.lastItems) render(state.lastItems); else load();
+        });
         var clearBtn = $('[data-vwsh-clear]');
         if (clearBtn) clearBtn.addEventListener('click', clearAll);
         var saBtn = $('[data-vwsh-searchall]');

@@ -37,3 +37,13 @@ def test_modal_supports_movie_scope():
 def test_pick_buttons_do_not_overlap_the_auto_buttons():
     assert ".vwsh-movie-art .vwsh-hunt.vwsh-pick { right: 72px; }" in _CSS
     assert ".vwsh-nebula .vwsh-szn-hunt.vwsh-pick { right: 56px; }" in _CSS
+
+
+def test_failing_filter_chip_wired():
+    # the fix-it hub: a "⚠ Failing" chip filters the wishlist to stuck items,
+    # each carrying auto + manual + remove — video parity with the music chip.
+    _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    assert "data-vwsh-failing" in _INDEX
+    assert "isFailingItem" in _WISHLIST_JS
+    assert "state.failingOnly" in _WISHLIST_JS
+    assert ".vwsh-failing-filter--on" in _CSS
