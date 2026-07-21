@@ -68,6 +68,27 @@ def _reject_non_audio_found_file(found_file: Optional[str], file_location: Optio
     return found_file, file_location
 
 
+def _found_file_matches_expected(found_file: Optional[str],
+                                 expected_final_filename: Optional[str]) -> bool:
+    """True iff a file found in the TRANSFER folder is the file this task's
+    context describes — same name stem as the context-derived expected final
+    filename. Extension is ignored because ``expected_final_filename`` is
+    generated with a hardcoded ``.flac``.
+
+    jadux's wrong-metadata report: under heavy concurrency the finder (fuzzy
+    basename search) or the context lookup (fuzzy fallback) can pair THIS
+    task's context with ANOTHER track's already-imported file; writing tags
+    then stamps the wrong track's metadata into a correct file. The name the
+    tagging context itself predicts is the identity check: if the found file
+    isn't named what this context would have named it, it isn't ours to write.
+    """
+    if not found_file or not expected_final_filename:
+        return False
+    found_stem = os.path.splitext(os.path.basename(found_file))[0]
+    expected_stem = os.path.splitext(expected_final_filename)[0]
+    return found_stem.casefold() == expected_stem.casefold()
+
+
 def _normalize_match_text(value: str) -> str:
     return ''.join(ch.lower() for ch in str(value or '') if ch.isalnum())
 
@@ -247,8 +268,18 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             with matched_context_lock:
                 similar_keys = [k for k in matched_downloads_context.keys()
                                 if k.startswith(f"{task_username}::") and task_basename in k]
+            if len(similar_keys) > 1:
+                # jadux's wrong-metadata report: with 49 wishlist album batches
+                # in flight, guessing `similar_keys[0]` can hand this task ANOTHER
+                # track's context — whose metadata then gets written into a file.
+                # Ambiguity → refuse; a no-context completion never writes tags.
+                logger.warning(
+                    f"[Post-Processing] {len(similar_keys)} candidate contexts for "
+                    f"'{task_basename}' from {task_username} — ambiguous, refusing to guess"
+                )
+                similar_keys = []
             if similar_keys:
-                # Use the first similar key found
+                # Exactly one candidate from the same uploader — safe to use
                 fuzzy_key = similar_keys[0]
                 context = matched_downloads_context.get(fuzzy_key)
                 logger.info(f"[Post-Processing] Found context using fuzzy key matching: {fuzzy_key}")
@@ -482,7 +513,20 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             if not metadata_enhanced:
                 logger.warning("[Post-Processing] File in transfer folder missing metadata enhancement - completing now")
                 # Attempt to complete metadata enhancement using context
-                if context and expected_final_filename:
+                if context and expected_final_filename and \
+                        not _found_file_matches_expected(found_file, expected_final_filename):
+                    # jadux #wrong-metadata: the found transfer file is NOT the
+                    # file this context describes (fuzzy file finder / fuzzy
+                    # context under heavy concurrency). Writing here stamped
+                    # another track's metadata into a correctly-imported
+                    # neighbor. Never write to a transfer file whose name
+                    # doesn't match what this context would have named it.
+                    logger.warning(
+                        f"[Post-Processing] Transfer file '{os.path.basename(found_file)}' does not "
+                        f"match this task's expected '{expected_final_filename}' — refusing to write "
+                        f"tags to a file that isn't provably this track's"
+                    )
+                elif context and expected_final_filename:
                     try:
                         context = normalize_import_context(context)
                         # Extract required data from context
@@ -576,9 +620,13 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         if found_file and os.path.exists(found_file):
                             deps.wipe_source_tags(found_file)
                 else:
-                    logger.warning("[Post-Processing] Cannot complete metadata enhancement - missing context or expected filename")
-                    if found_file and os.path.exists(found_file):
-                        deps.wipe_source_tags(found_file)
+                    # No context / expected name → the found file's identity is
+                    # unverifiable. A transfer-folder file has already been
+                    # through the import pipeline, so even a "harmless" tag wipe
+                    # here can hit a NEIGHBORING track's finished file (jadux).
+                    # No identity, no writes.
+                    logger.warning("[Post-Processing] Cannot verify transfer file identity "
+                                   "(missing context or expected filename) - skipping all tag writes")
             else:
                 logger.info("[Post-Processing] File already has metadata enhancement completed")
 
