@@ -22,7 +22,7 @@ database/*.histbak
 database/api_call_history.json
 # Runtime caches/download state are instance data, never source assets.
 database/lib2_artwork/
-downloads/
+/downloads/
 
 # Overlay/poster assets — generated per-instance, never commit: downloaded Kometa
 # logo packs, cached clean bases + first-touch backups, rendered thumbnails, uploads
