@@ -207,9 +207,16 @@ def _resolve_links(
         ).fetchall()
         albums.update(int(row[0]) for row in rows)
     if albums:
+        # Only the primary album artist becomes its own maintenance-event
+        # subject here — matching _record_events' album_to_artist (which
+        # reads lib2_albums.primary_artist_id). Pulling in every featured/
+        # secondary lib2_album_artists row instead produced a spurious extra
+        # "artist-only" event for guest artists whenever a track they merely
+        # feature on was repaired (e.g. an acoustid re-verify on a single
+        # file spawned an unrelated event for the featured artist alone).
         rows = conn.execute(
             f"SELECT DISTINCT artist_id FROM lib2_album_artists WHERE album_id IN "
-            f"({_marks(sorted(albums))})",
+            f"({_marks(sorted(albums))}) AND role='primary'",
             sorted(albums),
         ).fetchall()
         artists.update(int(row[0]) for row in rows)
