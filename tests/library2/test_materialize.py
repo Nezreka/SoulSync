@@ -260,7 +260,9 @@ class TestMaterializeFromSpotifyTrack:
 
 
 class TestMaterializeWishlistIntent:
-    def test_noop_when_feature_flag_disabled(self, monkeypatch, legacy_db, imported_conn):
+    def test_deprecated_false_flag_does_not_disable_materialization(
+        self, monkeypatch, legacy_db, imported_conn
+    ):
         from config.settings import config_manager
         monkeypatch.setattr(
             config_manager, "get",
@@ -270,14 +272,14 @@ class TestMaterializeWishlistIntent:
         before = imported_conn.execute("SELECT COUNT(*) c FROM lib2_tracks").fetchone()["c"]
         result = materialize_wishlist_intent({
             "id": "sp-flagged-off",
-            "name": "Should Not Materialize",
+            "name": "Must Materialize",
             "artists": [{"name": "Nobody"}],
             "album": {"name": "Nowhere"},
-        })
-        assert result is None
+        }, actor_profile_id=1)
+        assert result is not None
         assert imported_conn.execute(
             "SELECT COUNT(*) c FROM lib2_tracks"
-        ).fetchone()["c"] == before
+        ).fetchone()["c"] == before + 1
 
     def test_commits_and_returns_result_when_enabled(self, monkeypatch, legacy_db, imported_conn):
         from config.settings import config_manager
@@ -297,7 +299,7 @@ class TestMaterializeWishlistIntent:
             "artists": [{"name": "Somebody", "id": "sp-somebody"}],
             "album": {"name": "Somewhere", "id": "sp-somewhere"},
             "track_number": 1,
-        })
+        }, actor_profile_id=1)
 
         assert result is not None
         row = imported_conn.execute(
@@ -323,8 +325,29 @@ class TestMaterializeWishlistIntent:
 
         result = materialize_wishlist_intent({
             "id": "sp-x", "name": "X", "artists": [{"name": "Y"}], "album": {"name": "Z"},
-        })
+        }, actor_profile_id=1)
         assert result is None
+
+    def test_non_admin_actor_never_opens_or_mutates_v2(self, monkeypatch, imported_conn):
+        monkeypatch.setattr(
+            "database.music_database.get_database",
+            lambda: (_ for _ in ()).throw(AssertionError("database must not be opened")),
+        )
+        before = imported_conn.execute(
+            "SELECT COUNT(*) FROM lib2_tracks"
+        ).fetchone()[0]
+
+        result = materialize_wishlist_intent({
+            "id": "profile-2-track",
+            "name": "Private Wishlist Track",
+            "artists": [{"name": "Private Artist"}],
+            "album": {"name": "Private Album"},
+        }, profile_id=2, actor_profile_id=2)
+
+        assert result is None
+        assert imported_conn.execute(
+            "SELECT COUNT(*) FROM lib2_tracks"
+        ).fetchone()[0] == before
 
 
 def test_numeric_provider_ids_never_land_in_spotify_columns(imported_conn):

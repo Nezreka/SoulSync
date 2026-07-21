@@ -80,7 +80,7 @@ def test_finding_annotation_attaches_stable_v2_subjects(legacy_db):
     assert len(details["library_v2"]["file_ids"]) == 1
 
 
-def test_feature_gate_keeps_disabled_library_untouched(legacy_db):
+def test_deprecated_false_flag_cannot_silence_maintenance_sync(legacy_db):
     from core.library2.maintenance_sync import sync_repair_change
 
     _import(legacy_db)
@@ -95,13 +95,14 @@ def test_feature_gate_keeps_disabled_library_untouched(legacy_db):
         file_path="/m/01.flac",
     )
 
-    assert outcome == {"enabled": False, "reason": "feature_disabled"}
+    assert outcome["enabled"] is True
+    assert outcome["reason"] == "synchronized"
     conn = legacy_db._get_connection()
     try:
         count = conn.execute("SELECT COUNT(*) FROM lib2_maintenance_events").fetchone()[0]
     finally:
         conn.close()
-    assert count == 0
+    assert count == 1
 
 
 def test_verification_change_updates_v2_file_and_history(legacy_db):
@@ -197,6 +198,183 @@ def test_successful_delete_marks_v2_file_deleted_and_recomputes_wanted(legacy_db
     assert "file_state" in event[1]
 
 
+def test_remove_only_suppresses_wanted_even_for_monitored_track(legacy_db):
+    from core.library2.maintenance_sync import sync_repair_change
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
+    _import(legacy_db)
+    conn = legacy_db._get_connection()
+    native = conn.execute(
+        "SELECT t.id AS track_id, f.id AS file_id FROM lib2_tracks t "
+        "JOIN lib2_track_files f ON f.track_id=t.id WHERE t.legacy_track_id=100"
+    ).fetchone()
+    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (native["track_id"],))
+    record_rule(conn, "track", native["track_id"], True, PROVENANCE_USER)
+    conn.commit()
+    conn.close()
+
+    sync_repair_change(
+        legacy_db, _Config(True), job_id="dead_file_cleaner",
+        finding_type="dead_file", action="removed", entity_type="track",
+        entity_id=f"lib2:{native['track_id']}", file_path="/m/01.flac",
+        details={"library_v2": {
+            "track_id": native["track_id"], "track_ids": [native["track_id"]],
+            "file_id": native["file_id"], "file_ids": [native["file_id"]],
+        }},
+        result={"library_v2_file_deleted": True, "repair_intent": "remove"},
+    )
+
+    conn = legacy_db._get_connection()
+    try:
+        assert conn.execute(
+            "SELECT monitored FROM lib2_tracks WHERE id=?", (native["track_id"],)
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE profile_id=1 AND track_id=?",
+            (native["track_id"],),
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_redownload_forces_wanted_even_for_unmonitored_track(legacy_db):
+    from core.library2.maintenance_sync import sync_repair_change
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
+    _import(legacy_db)
+    conn = legacy_db._get_connection()
+    native = conn.execute(
+        "SELECT t.id AS track_id, f.id AS file_id FROM lib2_tracks t "
+        "JOIN lib2_track_files f ON f.track_id=t.id WHERE t.legacy_track_id=100"
+    ).fetchone()
+    conn.execute("UPDATE lib2_tracks SET monitored=0 WHERE id=?", (native["track_id"],))
+    record_rule(conn, "track", native["track_id"], False, PROVENANCE_USER)
+    conn.commit()
+    conn.close()
+
+    outcome = sync_repair_change(
+        legacy_db, _Config(True), job_id="dead_file_cleaner",
+        finding_type="dead_file", action="redownload", entity_type="track",
+        entity_id=f"lib2:{native['track_id']}", file_path="/m/01.flac",
+        details={"library_v2": {
+            "track_id": native["track_id"], "track_ids": [native["track_id"]],
+            "file_id": native["file_id"], "file_ids": [native["file_id"]],
+        }},
+        result={"library_v2_file_deleted": True, "repair_intent": "redownload"},
+    )
+
+    assert outcome["repair_intent"] == "redownload"
+    conn = legacy_db._get_connection()
+    try:
+        assert conn.execute(
+            "SELECT monitored FROM lib2_tracks WHERE id=?", (native["track_id"],)
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE profile_id=1 AND track_id=?",
+            (native["track_id"],),
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
+    legacy_db, tmp_path, monkeypatch
+):
+    from core.repair_jobs.native_p3 import NativeTrackNumberRepairJob
+
+    _import(legacy_db)
+    audio = tmp_path / "01 - Owned.flac"
+    audio.write_bytes(b"not decoded because inspection is stubbed")
+    conn = legacy_db._get_connection()
+    existing = conn.execute(
+        """SELECT t.id AS track_id, t.album_id, f.id AS file_id
+             FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id
+            WHERE t.legacy_track_id=100"""
+    ).fetchone()
+    conn.execute(
+        "UPDATE lib2_track_files SET path=? WHERE id=?",
+        (str(audio), existing["file_id"]),
+    )
+    missing = conn.execute(
+        "INSERT INTO lib2_tracks(album_id,title,track_number,disc_number) "
+        "VALUES(?,'Missing Canonical Track',2,1)",
+        (existing["album_id"],),
+    ).lastrowid
+    conn.commit()
+    conn.close()
+    captured = []
+    monkeypatch.setattr(
+        "core.library2.completeness.resolve_tracklist",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.native_p3._check_single_track",
+        lambda _path, _name, tracks, _similarity: captured.append(tracks) or None,
+    )
+    context = JobContext(
+        db=legacy_db, transfer_folder=str(tmp_path), config_manager=_Config(True),
+    )
+
+    NativeTrackNumberRepairJob().scan(context)
+
+    assert captured
+    canonical_ids = {row["lib2_track_id"] for row in captured[0]}
+    assert existing["track_id"] in canonical_ids
+    assert missing in canonical_ids
+
+
+def test_native_track_number_fix_updates_legacy_and_v2_atomically(
+    legacy_db, tmp_path
+):
+    from core.repair_worker import RepairWorker
+
+    _import(legacy_db)
+    original = tmp_path / "01 - Song.flac"
+    original.write_bytes(b"tag update intentionally skipped")
+    conn = legacy_db._get_connection()
+    native = conn.execute(
+        """SELECT t.id AS track_id, f.id AS file_id
+             FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id
+            WHERE t.legacy_track_id=100"""
+    ).fetchone()
+    conn.execute(
+        "UPDATE lib2_track_files SET path=? WHERE id=?",
+        (str(original), native["file_id"]),
+    )
+    conn.execute("UPDATE tracks SET file_path=? WHERE id=100", (str(original),))
+    conn.commit()
+    conn.close()
+    worker = RepairWorker(legacy_db, transfer_folder=str(tmp_path))
+
+    result = worker._fix_track_number(
+        "track", f"lib2:{native['track_id']}", str(original), {
+            "correct_track_num": 2,
+            "tag_ok": True,
+            "new_filename": "02 - Song.flac",
+            "library_v2": {"file_id": native["file_id"]},
+        },
+    )
+
+    assert result["success"] is True
+    renamed = tmp_path / "02 - Song.flac"
+    assert renamed.exists() and not original.exists()
+    conn = legacy_db._get_connection()
+    try:
+        v2 = conn.execute(
+            "SELECT track_number FROM lib2_tracks WHERE id=?", (native["track_id"],)
+        ).fetchone()[0]
+        v2_path = conn.execute(
+            "SELECT path FROM lib2_track_files WHERE id=?", (native["file_id"],)
+        ).fetchone()[0]
+        legacy = conn.execute(
+            "SELECT track_number, file_path FROM tracks WHERE id=100"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert v2 == legacy["track_number"] == 2
+    assert v2_path == legacy["file_path"] == str(renamed)
+
+
 def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
     from core.library2.maintenance_sync import sync_repair_change
 
@@ -264,7 +442,7 @@ def test_cover_fix_invalidates_both_managed_cache_variants(legacy_db):
     assert not thumb.exists()
 
 
-def test_v2_file_subject_enumerator_is_gated_and_lists_the_full_native_catalogue(
+def test_v2_file_subject_enumerator_ignores_deprecated_disable_flag(
     legacy_db, tmp_path,
 ):
     from core.library2.maintenance_subjects import active_file_subjects
@@ -274,7 +452,10 @@ def test_v2_file_subject_enumerator_is_gated_and_lists_the_full_native_catalogue
     audio.write_bytes(b"audio")
     track_id, file_id = _add_v2_only_file(legacy_db, audio)
 
-    assert active_file_subjects(legacy_db, _Config(False)) == []
+    disabled_key_subjects = active_file_subjects(legacy_db, _Config(False))
+    assert (track_id, file_id) in [
+        (row["track_id"], row["file_id"]) for row in disabled_key_subjects
+    ]
     subjects = active_file_subjects(legacy_db, _Config(True))
     assert (track_id, file_id) in [
         (row["track_id"], row["file_id"]) for row in subjects
@@ -419,7 +600,9 @@ def test_v2_album_subject_enumerator_lists_all_native_albums(legacy_db, tmp_path
     audio.write_bytes(b"audio")
     album_id, artist_id, _track_id, _file_id = _add_v2_only_album(legacy_db, audio)
 
-    assert active_album_subjects(legacy_db, _Config(False)) == []
+    assert album_id in [
+        row["album_id"] for row in active_album_subjects(legacy_db, _Config(False))
+    ]
     subjects = active_album_subjects(legacy_db, _Config(True))
     assert album_id in [row["album_id"] for row in subjects]
     subject = next(row for row in subjects if row["album_id"] == album_id)

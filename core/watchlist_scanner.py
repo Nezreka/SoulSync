@@ -2388,12 +2388,14 @@ class WatchlistScanner:
                 lib2_result = materialize_wishlist_intent(
                     spotify_track_data,
                     profile_id=getattr(watchlist_artist, 'profile_id', 1),
+                    actor_profile_id=getattr(watchlist_artist, 'profile_id', 1),
                 )
                 if lib2_result:
                     lib2_profile_id = lib2_result["quality_profile"]["id"]
             except Exception:
                 lib2_result = None
-            if lib2_result is None:
+            if (lib2_result is None
+                    and getattr(watchlist_artist, 'profile_id', 1) == 1):
                 try:
                     from core.library2.profile_lookup import lib2_quality_profile_for_artist
                     lib2_profile_id = lib2_quality_profile_for_artist(

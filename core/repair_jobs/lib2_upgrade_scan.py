@@ -11,7 +11,7 @@ admin profile explicitly (ADR-01: Library v2 is admin-only, and every other
 scheduled acquisition path is scoped the same way) — never to whatever a
 default parameter happens to be.
 
-No-op when ``features.library_v2`` is off. Never touches files.
+Runs against the native Library-v2 catalogue. Never touches files.
 """
 
 from __future__ import annotations
@@ -48,6 +48,9 @@ class Lib2UpgradeScanJob(RepairJob):
     auto_fix = True  # in automatic mode queueing IS the fix
 
     def _mode(self, context: JobContext) -> str:
+        run_mode = str((context.scope or {}).get('mode', '')).strip().lower()
+        if run_mode in ('automatic', 'review'):
+            return run_mode
         try:
             settings = context.config_manager.get(
                 f"repair.jobs.{self.job_id}.settings", {}) or {}
@@ -69,12 +72,8 @@ class Lib2UpgradeScanJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        try:
-            if context.config_manager.get("features.library_v2", True) is not True:
-                logger.debug("Library v2 disabled — upgrade scan skipped")
-                return result
-        except Exception:
-            return result
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(context.config_manager)
 
         from core.library2.wishlist_mirror import (
             mirror_projected_tracks_wishlist,

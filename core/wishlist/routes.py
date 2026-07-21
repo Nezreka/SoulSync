@@ -47,19 +47,26 @@ def _bare_wishlist_track_id(value: Any) -> str:
 def _wishlist_descriptors_for_ids(
     tracks: list[dict[str, Any]], track_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return pre-delete rows represented by the requested bare track ids."""
-    wanted = (
-        {_bare_wishlist_track_id(track_id) for track_id in track_ids}
-        if track_ids is not None else None
-    )
+    """Return pre-delete rows represented by the requested wishlist keys.
+
+    A composite ``track::album`` request is exact. A legacy bare request keeps
+    its historical all-releases behavior because the database removal method
+    still treats it as a wildcard.
+    """
+    wanted = [str(track_id or "") for track_id in track_ids or []]
     descriptors = []
     for track in tracks:
         if not isinstance(track, dict):
             continue
-        row_id = _bare_wishlist_track_id(
+        row_key = str(
             track.get("spotify_track_id") or track.get("track_id") or track.get("id")
         )
-        if wanted is None or row_id in wanted:
+        matches = track_ids is None or any(
+            row_key == requested if "::" in requested
+            else _bare_wishlist_track_id(row_key) == _bare_wishlist_track_id(requested)
+            for requested in wanted
+        )
+        if matches:
             descriptors.append(track)
     return descriptors
 
@@ -702,7 +709,8 @@ def add_album_track_to_wishlist(
                 "album": album,
                 "track_number": track.get("track_number"),
                 "disc_number": track.get("disc_number"),
-            })
+            }, profile_id=runtime.profile_id,
+               actor_profile_id=runtime.profile_id)
             return {"success": True, "message": f"Added '{track.get('name')}' to wishlist"}, 200
 
         runtime.logger.error("Failed to add track '%s' to wishlist", track.get("name"))

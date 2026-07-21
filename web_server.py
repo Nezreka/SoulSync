@@ -1447,7 +1447,10 @@ def _register_automation_handlers():
         duplicate_cleaner_lock=duplicate_cleaner_lock,
         duplicate_cleaner_executor=duplicate_cleaner_executor,
         run_duplicate_cleaner=_run_duplicate_cleaner,
-        run_repair_job_now=lambda job_id: repair_worker.run_job_now(job_id) if repair_worker else None,
+        run_repair_job_now=(
+            lambda job_id, scope=None: repair_worker.run_job_now(job_id, scope=scope)
+            if repair_worker else None
+        ),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -7080,8 +7083,8 @@ def _audit_manual_skip(context_key, title, artist, skip_checks, profile_id=1):
     Best-effort: failures never block the download.
     """
     try:
-        if config_manager.get('features.library_v2', True) is not True:
-            return
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
         from core.library2.manual_skips import record_manual_skip
         record_manual_skip(
             get_database(),
@@ -7224,16 +7227,18 @@ def start_download():
             # the per-file requests of this album grab together.
             _album_batch_id = str(uuid.uuid4())
 
-            started_downloads = 0
-            for track_data in tracks:
-                try:
+            # Two-phase album grab: validate and persist every acquisition
+            # preparation before the first external client dispatch. A strict
+            # gate failure can therefore truthfully report zero starts and a
+            # browser retry cannot duplicate tracks that already escaped.
+            _prepared_album_tracks = []
+            try:
+                for track_data in tracks:
                     username = track_data.get('username')
-                    filename = track_data.get('filename')
-                    file_size = track_data.get('size', 0)
                     _manual_result = {
                         'username': username,
-                        'filename': filename,
-                        'size': file_size,
+                        'filename': track_data.get('filename'),
+                        'size': track_data.get('size', 0),
                         'title': track_data.get('title'),
                         'artist': track_data.get('artist'),
                         'album': data.get('album_name'),
@@ -7246,19 +7251,36 @@ def start_download():
                         _lib2_ctx,
                         batch_id=_album_batch_id,
                     )
-                    if _manual_acquisition_dispatch_blocked(
-                            username, _acq_markers):
+                    _prepared_album_tracks.append((track_data, _acq_markers))
+                    if _manual_acquisition_dispatch_blocked(username, _acq_markers):
                         _record_manual_acquisition_gap(
                             username, _acq_markers, blocked=True)
-                        logger.error(
-                            "Manual album dispatch blocked: acquisition "
-                            "preparation is required")
-                        return jsonify({
-                            "success": False,
-                            "error": "Acquisition preparation unavailable; download not started.",
-                        }), 503
+                        raise RuntimeError(
+                            "Acquisition preparation unavailable; album download not started."
+                        )
                     _record_manual_acquisition_gap(
                         username, _acq_markers, blocked=False)
+            except Exception as preflight_error:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+
+                for _track, prepared_markers in _prepared_album_tracks:
+                    fail_prepared_correlated_grab(
+                        prepared_markers, "album preflight aborted before dispatch")
+                logger.error("Manual album preflight failed: %s", preflight_error)
+                return jsonify({
+                    "success": False,
+                    "error": str(preflight_error),
+                    "started": 0,
+                    "requested": len(tracks),
+                }), 503
+
+            started_downloads = 0
+            failed_downloads = 0
+            for track_data, _acq_markers in _prepared_album_tracks:
+                try:
+                    username = track_data.get('username')
+                    filename = track_data.get('filename')
+                    file_size = track_data.get('size', 0)
                     try:
                         with _cand_scope():
                             download_id = run_async(download_orchestrator.download(
@@ -7319,8 +7341,10 @@ def start_download():
                         from core.acquisition.manual_grab import fail_prepared_correlated_grab
                         fail_prepared_correlated_grab(
                             _acq_markers, "legacy client rejected the dispatch")
+                        failed_downloads += 1
                 except Exception as e:
                     logger.error(f"Failed to start track download: {e}")
+                    failed_downloads += 1
                     continue
 
             # Add activity for album download start
@@ -7330,7 +7354,10 @@ def start_download():
 
             return jsonify({
                 "success": True,
-                "message": f"Started {started_downloads} downloads from album"
+                "message": f"Started {started_downloads}/{len(tracks)} downloads from album",
+                "started": started_downloads,
+                "failed": failed_downloads,
+                "requested": len(tracks),
             })
         
         else:
@@ -13991,7 +14018,11 @@ def library_play_track():
             # Not on disk. For a streaming server (Navidrome/Subsonic) we can
             # play it through the server's own stream API instead of requiring
             # the library to be mounted into the SoulSync container (#809).
-            stream_url = _build_library_stream_url(data.get('track_id'), file_path)
+            server_track_id = (
+                data.get('server_track_id') or data.get('legacy_track_id')
+                or (None if data.get('lib2_track_id') else data.get('track_id'))
+            )
+            stream_url = _build_library_stream_url(server_track_id, file_path)
             if not stream_url:
                 return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
 
@@ -22795,8 +22826,7 @@ def start_missing_tracks_process(playlist_id):
             materialize_confirmed_search_tracks,
         )
         _materialize_search = (
-            config_manager.get('features.library_v2', True) is True
-            and get_current_profile_id() == ADMIN_PROFILE_ID
+            get_current_profile_id() == ADMIN_PROFILE_ID
             and is_confirmed_search_process(playlist_id)
         )
         if _materialize_search:
@@ -31951,8 +31981,8 @@ def _autostart_library_v2_bootstrap_import():
     persisted claim/heartbeat/retry mechanics this loop just drives repeatedly.
 
     Exits for good once the import has actually completed; otherwise keeps
-    retrying with backoff so a transient failure or a `features.library_v2` flag
-    flipped on later at runtime both still get picked up without a restart."""
+    retrying with backoff so a transient failure is picked up without a
+    restart."""
     import time as _t
     from core.library2 import bootstrap as lib2_bootstrap
     delay = 30
@@ -41217,7 +41247,7 @@ except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
 
 # Library Manager v2 (opt-in) — UI-facing read API mounted on /api/library/v2/*.
-# Gated on features.library_v2; no-op surface when the flag is off.
+# Library V2 is the native, non-disableable catalogue surface.
 from api.library_v2 import register_library_v2_routes as _register_library_v2_routes
 
 
@@ -41507,12 +41537,29 @@ def _run_library_v2_integrity_report(*, max_findings=1000):
         conn.close()
 
 
+def _library_v2_profile_page_allowed(page_id):
+    """Apply the persisted profile page ACL to Library v2 API reads.
+
+    Library v2 intentionally shares the legacy ``library`` permission instead
+    of introducing a second checkbox during the cutover.
+    """
+    profile_id = get_current_profile_id()
+    if profile_id == 1:
+        return True
+    profile = get_database().get_profile(profile_id)
+    if not profile:
+        return False
+    allowed_pages = profile.get('allowed_pages')
+    return allowed_pages is None or page_id in allowed_pages
+
+
 _register_library_v2_routes(
     app,
     get_database=get_database,
     config_get=lambda key, default=None: config_manager.get(key, default),
     config_manager=config_manager,
     profile_id_getter=get_current_profile_id,
+    profile_page_allowed_getter=_library_v2_profile_page_allowed,
     acquisition_submission_adapter_getter=_library_v2_submission_adapter,
     run_enrichment=_run_single_enrichment,
     scoped_wishlist_search_dispatcher=_library_v2_scoped_wishlist_search,
@@ -42153,7 +42200,7 @@ def start_runtime_services():
             usenet_acquisition_monitor.start()
 
         # Existing-installation bootstrap: import legacy -> lib2_* on its own the
-        # first time features.library_v2 is on, no UI click required (§78).
+        # native catalogue bootstrap, no UI click required (§78).
         try:
             threading.Thread(target=_autostart_library_v2_bootstrap_import, daemon=True,
                              name='Lib2BootstrapImportAutostart').start()

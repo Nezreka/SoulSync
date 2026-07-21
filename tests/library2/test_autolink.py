@@ -45,11 +45,11 @@ def _context(**overrides):
     return ctx
 
 
-def test_disabled_flag_is_noop(monkeypatch, legacy_db, imported_conn):
+def test_deprecated_false_flag_cannot_disable_autolink(monkeypatch, legacy_db, imported_conn):
     from config.settings import config_manager
     monkeypatch.setattr(config_manager, "get",
                         lambda key, default=None: False if key == "features.library_v2" else default)
-    assert A.link_download_into_library_v2(_context()) is None
+    assert A.link_download_into_library_v2(_context()) is not None
 
 
 def test_links_new_album_track_and_file(lib2_enabled, imported_conn):

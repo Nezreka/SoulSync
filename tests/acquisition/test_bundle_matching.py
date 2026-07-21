@@ -165,6 +165,38 @@ def test_manual_matches_validate_bundle_and_expected_tracks(conn):
         )
 
 
+def test_manual_matches_reject_partial_bundle_resolution(conn):
+    pending, _request, _candidate = _pending_import(conn)
+    record_inventory_result(
+        conn,
+        pending.id,
+        [
+            {"relative_path": "01.flac"},
+            {"relative_path": "02.flac"},
+        ],
+        resolved_path="/local",
+    )
+    record_matching_result(
+        conn,
+        pending.id,
+        [],
+        [{"code": "ambiguous_match"}],
+        decision="needs_review",
+    )
+    record = get_import(conn, pending.id)
+    expected = [
+        _expected("One", number=1, track_id=41),
+        _expected("Two", number=2, track_id=42),
+    ]
+
+    with pytest.raises(ValueError, match="every file"):
+        build_manual_matches(
+            record,
+            expected,
+            [{"relative_path": "01.flac", "track_id": 41}],
+        )
+
+
 # ---------------------------------------------------------------------------
 # normalize_title
 # ---------------------------------------------------------------------------

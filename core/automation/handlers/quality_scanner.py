@@ -18,7 +18,13 @@ from core.automation.deps import AutomationDeps
 def auto_start_quality_scan(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     automation_id = config.get('_automation_id')
 
-    triggered = deps.run_repair_job_now('quality_upgrade_scan')
+    # Compatibility invariant: the long-standing automation was review-only.
+    # Force that mode for this run even if the newly introduced job setting is
+    # absent or globally configured for automatic scheduled upgrades.
+    triggered = deps.run_repair_job_now(
+        'quality_upgrade_scan',
+        scope={'mode': 'review', 'compatibility_source': 'start_quality_scan'},
+    )
     if not triggered:
         deps.update_progress(
             automation_id, status='error', phase='Unavailable',

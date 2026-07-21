@@ -15,12 +15,9 @@ from core.library2.provider_ids import source_ids_from_values
 
 
 def _enabled(config_manager: Any) -> bool:
-    if config_manager is None:
-        return False
-    try:
-        return config_manager.get("features.library_v2", True) is True
-    except Exception:  # noqa: BLE001
-        return False
+    from core.library2.feature import library_v2_enabled
+
+    return library_v2_enabled(config_manager)
 
 
 def _table_exists(conn: Any, table: str) -> bool:
@@ -249,6 +246,15 @@ def subject_details(subject: Mapping[str, Any]) -> Dict[str, Any]:
     return {
         "library_v2_native": True,
         "library_v2": linked,
+        "dedup_file": {
+            "id": subject.get("file_id"),
+            "content_hash": subject.get("content_hash"),
+            "size": subject.get("size"),
+            "format": subject.get("format"),
+            "bitrate": subject.get("bitrate"),
+            "sample_rate": subject.get("sample_rate"),
+            "bit_depth": subject.get("bit_depth"),
+        } if subject.get("file_id") is not None else None,
         "provider_ids": {
             "artist": dict(subject.get("artist_source_ids") or {}),
             "album": dict(subject.get("album_source_ids") or {}),

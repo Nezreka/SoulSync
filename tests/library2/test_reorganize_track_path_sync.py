@@ -64,7 +64,7 @@ def imported_legacy_db(legacy_db):
     return legacy_db
 
 
-def test_legacy_path_update_does_not_project_into_lib2(
+def test_legacy_path_update_atomically_updates_linked_lib2_file(
     monkeypatch, tmp_path, imported_legacy_db
 ):
     captured = {}
@@ -104,7 +104,7 @@ def test_legacy_path_update_does_not_project_into_lib2(
             "SELECT path FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
         assert lib2_row is not None, "importer should have linked track 100 via legacy_track_id"
-        assert lib2_row['path'] == '/m/01.flac'
+        assert lib2_row['path'] == '/library/Drake/Views/01 One Dance.flac'
     finally:
         conn.close()
 

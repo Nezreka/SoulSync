@@ -38,7 +38,26 @@ def _track_ids_from_mirror_row(track: Dict[str, Any]) -> set[str]:
     the same playlist row, while Wishlist rows may have been written before or
     after discovery replaced the preferred id.
     """
-    ids = {_bare_track_id(track.get('id')), _bare_track_id(track.get('source_track_id'))}
+    identities: list[tuple[str, str]] = []
+
+    def _remember(payload: Any, *, fallback_id: Any = None, fallback_album: Any = None):
+        if isinstance(payload, dict):
+            track_id = _bare_track_id(payload.get('id') or fallback_id)
+            album = payload.get('album') or {}
+            album_id = (
+                album.get('id') if isinstance(album, dict) else None
+            ) or payload.get('album_id') or fallback_album
+        else:
+            track_id = _bare_track_id(fallback_id)
+            album_id = fallback_album
+        if track_id:
+            identities.append((track_id, str(album_id or '').strip()))
+
+    _remember(
+        track if isinstance(track.get('id'), dict) else None,
+        fallback_id=track.get('id') or track.get('source_track_id'),
+        fallback_album=track.get('source_album_id') or track.get('album_id'),
+    )
     extra = track.get('extra_data') or {}
     if isinstance(extra, str):
         try:
@@ -49,10 +68,19 @@ def _track_ids_from_mirror_row(track: Dict[str, Any]) -> set[str]:
         matched = extra.get('matched_data') or {}
         hint = extra.get('spotify_hint') or {}
         if isinstance(matched, dict):
-            ids.add(_bare_track_id(matched.get('id')))
+            _remember(matched)
         if isinstance(hint, dict):
-            ids.add(_bare_track_id(hint.get('id')))
-    return {track_id for track_id in ids if track_id}
+            _remember(hint)
+
+    # Prefer exact album-qualified keys whenever the mirror carries one.
+    # A bare alias remains only when that identity has no album fact at all;
+    # the Wishlist boundary will accept it only if it resolves uniquely.
+    exact_bases = {track_id for track_id, album_id in identities if album_id}
+    return {
+        f'{track_id}::{album_id}' if album_id else track_id
+        for track_id, album_id in identities
+        if album_id or track_id not in exact_bases
+    }
 
 
 def _playlist_wishlist_scope(

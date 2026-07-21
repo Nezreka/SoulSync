@@ -1,8 +1,8 @@
 """Tests for the automatic idempotent initial-import bootstrap (docs/library-v2.md §78,
 docs/library-v2-tool-integration-audit-2026-07-18.md §7 item 7).
 
-On an existing installation, the very first server start with
-``features.library_v2`` enabled must trigger ``import_legacy_library()``
+On an existing installation, the very first server start after the native
+catalogue cutover must trigger ``import_legacy_library()``
 without anyone opening the Library v2 UI. That needs a persisted (crash-
 surviving) status, a lock against two overlapping runs, and safe retry after
 a failure — see ``core/library2/bootstrap.py``.
@@ -33,18 +33,18 @@ def test_get_state_defaults_when_uninitialized(legacy_db):
     assert state["last_error"] is None
 
 
-def test_run_bootstrap_if_needed_noop_when_feature_disabled(legacy_db, monkeypatch):
+def test_deprecated_false_flag_cannot_disable_native_bootstrap(legacy_db, monkeypatch):
     calls = []
     monkeypatch.setattr(
         lib2_bootstrap, "_import_legacy_library",
-        lambda *a, **k: calls.append((a, k)),
+        lambda *a, **k: calls.append((a, k)) or {"artists": 1},
     )
 
     result = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _disabled)
 
-    assert result == {"skipped": "disabled"}
-    assert lib2_bootstrap.get_state(legacy_db)["status"] == "pending"
-    assert calls == []
+    assert result == {"success": True, "stats": {"artists": 1}}
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
+    assert len(calls) == 1
 
 
 def test_run_bootstrap_if_needed_first_run_imports_and_marks_done(legacy_db):
@@ -107,14 +107,16 @@ def test_run_bootstrap_if_needed_marks_failed_and_is_retryable(legacy_db, monkey
 
 
 def test_try_claim_blocks_concurrent_run_with_fresh_heartbeat(legacy_db):
-    assert lib2_bootstrap.try_claim(legacy_db) is True
-    lib2_bootstrap.heartbeat(legacy_db, stage="artists", current=1, total=10)
+    owner = lib2_bootstrap.try_claim(legacy_db)
+    assert owner
+    assert lib2_bootstrap.heartbeat(
+        legacy_db, owner, stage="artists", current=1, total=10) is True
 
-    assert lib2_bootstrap.try_claim(legacy_db) is False
+    assert lib2_bootstrap.try_claim(legacy_db) is None
 
 
 def test_try_claim_reclaims_stale_running_lock(legacy_db):
-    assert lib2_bootstrap.try_claim(legacy_db) is True
+    assert lib2_bootstrap.try_claim(legacy_db)
 
     conn = legacy_db._get_connection()
     try:
@@ -126,7 +128,31 @@ def test_try_claim_reclaims_stale_running_lock(legacy_db):
     finally:
         conn.close()
 
-    assert lib2_bootstrap.try_claim(legacy_db, stale_after_seconds=600) is True
+    assert lib2_bootstrap.try_claim(legacy_db, stale_after_seconds=600)
+
+
+def test_stale_owner_cannot_overwrite_reclaimed_run(legacy_db):
+    stale_owner = lib2_bootstrap.try_claim(legacy_db)
+    assert stale_owner
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute(
+            "UPDATE lib2_bootstrap_state SET heartbeat_at='2000-01-01T00:00:00+00:00' "
+            "WHERE id=1"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    current_owner = lib2_bootstrap.try_claim(legacy_db, stale_after_seconds=600)
+    assert current_owner and current_owner != stale_owner
+    assert lib2_bootstrap.mark_failed(legacy_db, stale_owner, "late failure") is False
+    assert lib2_bootstrap.heartbeat(legacy_db, stale_owner, stage="late") is False
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "running"
+    assert lib2_bootstrap.mark_done(
+        legacy_db, current_owner,
+        watermark=lib2_bootstrap.source_watermark(legacy_db),
+    ) is True
 
 
 def test_try_claim_can_reclaim_after_done(legacy_db):
@@ -137,12 +163,13 @@ def test_try_claim_can_reclaim_after_done(legacy_db):
     # A manual "reset & reimport" admin action must still be able to acquire
     # the lock even though the bootstrap already completed once — "done"
     # only means "no need to auto-trigger again", never "permanently locked".
-    assert lib2_bootstrap.try_claim(legacy_db) is True
+    assert lib2_bootstrap.try_claim(legacy_db)
 
 
 def test_heartbeat_persists_progress(legacy_db):
-    assert lib2_bootstrap.try_claim(legacy_db) is True
-    lib2_bootstrap.heartbeat(legacy_db, stage="tracks", current=3, total=9)
+    owner = lib2_bootstrap.try_claim(legacy_db)
+    assert owner
+    lib2_bootstrap.heartbeat(legacy_db, owner, stage="tracks", current=3, total=9)
 
     state = lib2_bootstrap.get_state(legacy_db)
     assert state["stage"] == "tracks"
@@ -152,13 +179,14 @@ def test_heartbeat_persists_progress(legacy_db):
 
 
 def test_mark_failed_records_error_and_leaves_state_retryable(legacy_db):
-    assert lib2_bootstrap.try_claim(legacy_db) is True
-    lib2_bootstrap.mark_failed(legacy_db, "boom")
+    owner = lib2_bootstrap.try_claim(legacy_db)
+    assert owner
+    lib2_bootstrap.mark_failed(legacy_db, owner, "boom")
 
     state = lib2_bootstrap.get_state(legacy_db)
     assert state["status"] == "failed"
     assert state["last_error"] == "boom"
-    assert lib2_bootstrap.try_claim(legacy_db) is True
+    assert lib2_bootstrap.try_claim(legacy_db)
 
 
 def test_try_claim_concurrent_race_has_exactly_one_winner(legacy_db):
@@ -178,5 +206,41 @@ def test_try_claim_concurrent_race_has_exactly_one_winner(legacy_db):
     for t in threads:
         t.join()
 
-    assert results.count(True) == 1
+    assert sum(bool(value) for value in results) == 1
     assert len(results) == 8
+
+
+def test_empty_fresh_install_retries_after_first_library_rows_arrive(legacy_db):
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute("DELETE FROM tracks")
+        conn.execute("DELETE FROM albums")
+        conn.execute("DELETE FROM artists")
+        conn.commit()
+    finally:
+        conn.close()
+
+    first = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
+    assert first["success"] is True
+    assert first["waiting_for_source"] is True
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "waiting_for_source"
+    assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled) == {
+        "skipped": "empty_source"
+    }
+
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute("INSERT INTO artists(id, name) VALUES(90001, 'Late Artist')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    second = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
+    assert second["success"] is True
+    conn = legacy_db._get_connection()
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_artists WHERE legacy_artist_id=90001"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()

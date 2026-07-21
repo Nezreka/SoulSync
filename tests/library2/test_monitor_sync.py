@@ -178,6 +178,52 @@ def test_reconcile_skips_wanted_track_already_in_wishlist(imported_conn):
     assert stats["wanted"] >= 1  # still counted as wanted
 
 
+def test_reconcile_recognizes_legacy_bare_id_with_album_payload(imported_conn):
+    """A pre-cutover Wishlist row must not churn into a second composite row."""
+    conn = imported_conn
+    artist = _add_artist(conn, "Legacy Identity", spotify_id="legacy-artist")
+    first = _add_track(
+        conn, artist, "Shared Recording A", monitored=1,
+        with_file=False, spotify_id="shared-recording",
+    )
+    second = _add_track(
+        conn, artist, "Shared Recording B", monitored=1,
+        with_file=False, spotify_id="shared-recording",
+    )
+    first_album = conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (first,),
+    ).fetchone()[0]
+    second_album = conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (second,),
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE lib2_albums SET spotify_id='release-a' WHERE id=?", (first_album,),
+    )
+    conn.execute(
+        "UPDATE lib2_albums SET spotify_id='release-b' WHERE id=?", (second_album,),
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS wishlist_tracks(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, spotify_track_id TEXT,
+               spotify_data TEXT, source_type TEXT, source_info TEXT,
+               profile_id INTEGER)"""
+    )
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_type, "
+        "profile_id) VALUES('shared-recording', ?, 'album', 1)",
+        ('{"id":"shared-recording","album":{"id":"release-a"}}',),
+    )
+    conn.commit()
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    first_stats = reconcile_track_wishlist(db, profile_id=1)
+    second_stats = reconcile_track_wishlist(db, profile_id=1)
+
+    assert db.added.count("shared-recording::release-a") == 0
+    assert first_stats["wishlisted"] == second_stats["wishlisted"] == 1
+    assert first_stats["mirrored"] == second_stats["mirrored"] == 1
+
+
 # --- Reverse edge: watchlist removal demonitors the lib2 artist --------------
 
 
@@ -255,7 +301,7 @@ def test_demonitor_name_fallback_is_noop_when_ambiguous(imported_conn):
                         ).fetchone()[0] == 1
 
 
-def test_sync_watchlist_removal_feature_gated(imported_conn):
+def test_deprecated_false_flag_cannot_disable_watchlist_sync(imported_conn):
     conn = imported_conn
     artist = _add_artist(conn, "Gated", monitored=1, spotify_id="gate-sp")
     conn.commit()
@@ -267,9 +313,9 @@ def test_sync_watchlist_removal_feature_gated(imported_conn):
 
     sync_watchlist_removal(db, _Cfg(), {"external_ids": ["gate-sp"], "name": "Gated"},
                            profile_id=1)
-    # Feature off → artist stays monitored.
+    # The cutover is non-disableable: the stale config key is ignored.
     assert conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (artist,)
-                        ).fetchone()[0] == 1
+                        ).fetchone()[0] == 0
 
 
 def test_watchlist_removal_supersedes_an_older_pending_add(imported_conn):
@@ -345,6 +391,37 @@ def test_wishlist_removal_matches_provider_payload_without_lib2_context(imported
     assert conn.execute(
         "SELECT monitored FROM lib2_tracks WHERE id=?", (track,),
     ).fetchone()[0] == 0
+
+
+def test_composite_removal_demonitors_only_the_exact_release(imported_conn):
+    conn = imported_conn
+    artist = _add_artist(conn, "Shared Recording Artist", monitored=0)
+    album_a_track = _add_track(
+        conn, artist, "Shared Recording A", monitored=1, spotify_id="same-track")
+    album_b_track = _add_track(
+        conn, artist, "Shared Recording B", monitored=1, spotify_id="same-track")
+    conn.execute(
+        "UPDATE lib2_albums SET spotify_id='album-a' WHERE id=(SELECT album_id FROM lib2_tracks WHERE id=?)",
+        (album_a_track,),
+    )
+    conn.execute(
+        "UPDATE lib2_albums SET spotify_id='album-b' WHERE id=(SELECT album_id FROM lib2_tracks WHERE id=?)",
+        (album_b_track,),
+    )
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    result = demonitor_lib2_tracks_for_removed_wishlist(db, [{
+        "spotify_track_id": "same-track::album-a",
+        "spotify_data": {"id": "same-track", "provider": "spotify"},
+    }])
+
+    assert result["matched"] == 1
+    states = dict(conn.execute(
+        "SELECT id, monitored FROM lib2_tracks WHERE id IN (?, ?)",
+        (album_a_track, album_b_track),
+    ).fetchall())
+    assert states == {album_a_track: 0, album_b_track: 1}
 
 
 def test_sync_wishlist_removal_is_admin_only(imported_conn):
@@ -462,3 +539,43 @@ def test_artist_reconcile_name_match_tolerates_double_spaces(imported_conn):
     assert conn.execute(
         "SELECT monitored FROM lib2_artists WHERE id=?", (artist,),
     ).fetchone()[0] == 1
+
+
+def test_artist_reconcile_rejects_same_name_with_conflicting_spotify_id(imported_conn):
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    intended = _add_artist(conn, "The Twins", monitored=0, spotify_id="spotify-a")
+    collision = _add_artist(conn, "The Twins", monitored=1, spotify_id="spotify-b")
+    conn.execute(
+        "INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+        "VALUES('spotify-a', 'The Twins', 1)"
+    )
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    states = dict(conn.execute(
+        "SELECT id, monitored FROM lib2_artists WHERE id IN (?, ?)",
+        (intended, collision),
+    ).fetchall())
+    assert states == {intended: 1, collision: 0}
+
+
+def test_watchlist_provider_ids_are_compared_with_their_namespace(imported_conn):
+    from core.library2.monitor_sync import artist_is_watchlisted
+
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(watchlist_artists)")}
+    if "itunes_artist_id" not in columns:
+        conn.execute("ALTER TABLE watchlist_artists ADD COLUMN itunes_artist_id TEXT")
+    conn.execute(
+        "INSERT INTO watchlist_artists(itunes_artist_id, artist_name, profile_id) "
+        "VALUES('42', 'Different Artist', 1)"
+    )
+    conn.commit()
+
+    assert artist_is_watchlisted(
+        conn, "Deezer Artist", {"deezer": "42"}, profile_id=1,
+    ) is False

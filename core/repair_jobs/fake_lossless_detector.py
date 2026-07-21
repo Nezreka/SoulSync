@@ -52,9 +52,9 @@ class FakeLosslessDetectorJob(RepairJob):
         settings = self._get_settings(context)
         cutoff_khz = settings.get('spectral_cutoff_khz', 16.0)
 
-        # P3 catalogue boundary: scan every active native file exactly once.
-        # Unindexed transfer files belong to staging/orphan detection, not to a
-        # catalogue repair job.
+        # Indexed subjects carry stable catalogue identity. Filesystem-only
+        # subjects remain eligible too: spectral analysis does not require an
+        # import, and dropping those files was a cutover regression.
         lossless_files = []
         native_subjects = {}
         try:
@@ -76,6 +76,13 @@ class FakeLosslessDetectorJob(RepairJob):
         except Exception as e:
             logger.warning("V2 subject enumeration failed: %s", e)
             result.errors += 1
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for resolved in filesystem_audio_files(
+            context, extensions=LOSSLESS_EXTENSIONS,
+        ):
+            if resolved not in native_subjects and resolved not in lossless_files:
+                lossless_files.append(resolved)
 
         total = len(lossless_files)
         if context.update_progress:
@@ -187,7 +194,15 @@ class FakeLosslessDetectorJob(RepairJob):
                 if os.path.splitext(raw)[1].lower() in LOSSLESS_EXTENSIONS:
                     count += 1
         except Exception:
-            return 0
+            pass
+        try:
+            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+            count += len(filesystem_audio_files(
+                context, extensions=LOSSLESS_EXTENSIONS,
+            ))
+        except Exception:
+            pass
         return count
 
 

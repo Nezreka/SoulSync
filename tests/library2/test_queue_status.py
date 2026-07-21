@@ -115,6 +115,24 @@ class TestGetQueueStatus:
 
         assert result == {"tracks": {}, "albums": {}}
 
+    def test_malformed_album_id_does_not_break_other_queue_status(self):
+        download_tasks["t1"] = {
+            "status": "queued",
+            "track_info": {
+                "source_info": {
+                    "lib2_track_id": 10,
+                    "lib2_album_id": "not-an-integer",
+                },
+            },
+        }
+
+        result = get_queue_status([10], **_deps())
+
+        assert result == {
+            "tracks": {10: {"status": "queued", "progress_pct": 0}},
+            "albums": {},
+        }
+
     def test_manual_grab_with_no_live_transfer_yet_defaults_to_queued(self):
         matched_downloads_context["ctx1"] = {
             "lib2_entity": {"track_id": 20, "album_id": 6},

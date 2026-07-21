@@ -242,7 +242,7 @@ def test_scan_decodes_zero_duration_hifi_previews(tmp_path: Path, monkeypatch):
     findings = []
     result = ShortPreviewTrackJob().scan(_ctx(db, findings, _FakeSpotify()))
     assert len(findings) == 1
-    assert findings[0]['entity_id'] == '1'
+    assert findings[0]['entity_id'] == 'lib2:1'
     assert findings[0]['details']['file_duration_s'] == pytest.approx(30.0)
     assert result.scanned == 2
 

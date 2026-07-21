@@ -142,11 +142,15 @@ def _scope_snapshot(
     conn = database._get_connection()
     try:
         if entity == "artists":
+            from core.library2.artist_aliases import resolve_alias_group
+
             entity_row = conn.execute(
                 "SELECT name FROM lib2_artists WHERE id=?", (int(entity_id),)
             ).fetchone()
             if not entity_row:
                 raise FileDeleteError("Artist not found", 404)
+            artist_ids = resolve_alias_group(conn, entity_id)
+            artist_marks = ",".join("?" for _ in artist_ids)
             rows = conn.execute(
                 f"""SELECT tf.id AS file_id, tf.track_id, tf.path AS stored_path,
                           tf.size AS db_size, tf.file_state, t.title AS track_title,
@@ -154,9 +158,10 @@ def _scope_snapshot(
                      FROM lib2_track_files tf
                      JOIN lib2_tracks t ON t.id=tf.track_id
                      JOIN lib2_albums al ON al.id=t.album_id
-                    WHERE al.primary_artist_id=? AND tf.file_state<>'deleted'{id_filter}
+                    WHERE al.primary_artist_id IN ({artist_marks})
+                      AND tf.file_state<>'deleted'{id_filter}
                     ORDER BY al.id, t.id, tf.id""",
-                (int(entity_id), *id_params),
+                (*artist_ids, *id_params),
             ).fetchall()
             title = entity_row["name"]
         else:

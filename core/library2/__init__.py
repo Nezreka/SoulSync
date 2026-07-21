@@ -1,7 +1,7 @@
 """Library Manager v2 — opt-in, database-as-source-of-truth library subsystem.
 
 This package is the foundation of the parallel "Library v2" redesign. It is gated
-behind the ``features.library_v2`` config flag and never touches the existing
+as the native catalogue cutover and never destructively rewrites the existing
 ``artists`` / ``albums`` / ``tracks`` tables destructively — it lives in its own
 ``lib2_*`` tables and *imports* from the legacy library read-only.
 

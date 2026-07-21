@@ -10,7 +10,7 @@ override is recent — this job consumes stale ones:
 - rows older than the retention window (the user's one-time decision shouldn't
   shield a file forever from ever-improving checks).
 
-No-op when ``features.library_v2`` is off. Deletes ONLY audit rows — never
+Deletes ONLY Library-v2 audit rows — never
 files, never findings.
 """
 
@@ -56,11 +56,8 @@ class Lib2SkipsCleanupJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        try:
-            if context.config_manager.get("features.library_v2", True) is not True:
-                return result
-        except Exception:
-            return result
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(context.config_manager)
 
         settings = self._get_settings(context)
         try:

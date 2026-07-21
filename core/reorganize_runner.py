@@ -68,36 +68,71 @@ def build_runner(
     from core.reorganize_queue import get_queue
 
     def _update_track_path(track_id, new_path):
+        lib2_links = {"track_ids": [], "file_ids": []}
+        config_manager = get_config_manager() if get_config_manager is not None else None
         try:
             db = get_database()
             with db._get_connection() as conn:
+                from core.library2.feature import library_v2_enabled
+                library_v2_enabled(config_manager)
+                has_v2_files = bool(conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='lib2_track_files'"
+                ).fetchone())
+                if has_v2_files:
+                    rows = conn.execute(
+                        """SELECT f.id AS file_id, f.track_id
+                             FROM lib2_track_files f
+                             JOIN lib2_tracks t ON t.id=f.track_id
+                            WHERE f.legacy_track_id=? OR t.legacy_track_id=?""",
+                        (str(track_id), str(track_id)),
+                    ).fetchall()
+                    lib2_links = {
+                        "track_ids": sorted({int(row["track_id"]) for row in rows}),
+                        "file_ids": sorted({int(row["file_id"]) for row in rows}),
+                    }
                 conn.execute(
                     "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (new_path, str(track_id)),
                 )
+                if lib2_links["file_ids"]:
+                    marks = ",".join("?" for _ in lib2_links["file_ids"])
+                    conn.execute(
+                        f"UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({marks})",
+                        (new_path, *lib2_links["file_ids"]),
+                    )
                 conn.commit()
         except Exception as db_err:
             logger.warning(f"[Reorganize] DB path update failed for {track_id}: {db_err}")
             return
         # A lib2-imported track keeps a legacy_track_id back-reference. Route
         # the update through the common boundary so path, file snapshot,
-        # artwork state and History stay coherent. Crucially this is gated by
-        # ``features.library_v2``; merely retaining lib2 tables after the
-        # feature is turned off must not activate any v2 behavior.
+        # artwork state and History stay coherent under the native-catalogue
+        # cutover contract.
         try:
-            if get_config_manager is not None:
+            if config_manager is not None:
                 from core.library2.maintenance_sync import sync_repair_change
 
                 sync_repair_change(
                     db,
-                    get_config_manager(),
+                    config_manager,
                     job_id="library_reorganize",
                     finding_type="path_mismatch",
                     action="moved_file",
                     entity_type="track",
-                    entity_id=str(track_id),
+                    entity_id=(
+                        f"lib2:{lib2_links['track_ids'][0]}"
+                        if len(lib2_links["track_ids"]) == 1 else str(track_id)
+                    ),
                     file_path=new_path,
-                    details={"to_abs": new_path},
+                    details={
+                        "to_abs": new_path,
+                        "library_v2": {
+                            "track_ids": lib2_links["track_ids"],
+                            "file_ids": lib2_links["file_ids"],
+                        },
+                    },
                     result={"success": True, "action": "moved_file"},
                 )
         except Exception as lib2_err:

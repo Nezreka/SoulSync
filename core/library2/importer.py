@@ -885,6 +885,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
 
         preserved_album_intent = {}
 
+        def report_progress(stage: str, current: int, total: int) -> None:
+            if not progress:
+                return
+            if getattr(progress, "lib2_connection_aware", False):
+                progress(stage, current, total, connection=conn)
+            else:
+                progress(stage, current, total)
+
         if reset:
             # Local ids change across a destructive rebuild. Preserve deliberate
             # album intent by provider/stable identity, never by surrogate id.
@@ -914,8 +922,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # --- Artists -------------------------------------------------------
         cursor.execute("SELECT * FROM artists")
         artist_rows = cursor.fetchall()
-        if progress:
-            progress("artists", 0, len(artist_rows))
+        report_progress("artists", 0, len(artist_rows))
         for i, row in enumerate(artist_rows):
             name = row["name"]
             if not name:
@@ -964,10 +971,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # through the same COALESCE-on-UPDATE columns as name/image/genres.
             _merge_artist_enrichment(cursor, lib2_artist_id, _artist_enrichment_payload(row))
             stats["artists"] += 1
-            if progress and (i + 1) % 200 == 0:
-                progress("artists", i + 1, len(artist_rows))
-        if progress:
-            progress("artists", len(artist_rows), len(artist_rows))
+            if (i + 1) % 200 == 0:
+                report_progress("artists", i + 1, len(artist_rows))
+        report_progress("artists", len(artist_rows), len(artist_rows))
 
         # --- Albums (map legacy album id -> lib2 album id) -----------------
         album_map: Dict[str, int] = {}
@@ -977,8 +983,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
 
         cursor.execute("SELECT * FROM albums")
         album_rows = cursor.fetchall()
-        if progress:
-            progress("albums", 0, len(album_rows))
+        report_progress("albums", 0, len(album_rows))
         # Legacy media-server ids are TEXT and may be provider-shaped (for
         # example a 22-character Spotify album id).  Use the same normalized
         # key as ``album_map`` instead of assuming that ``tracks.album_id`` is
@@ -1100,10 +1105,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "VALUES(?,?, 'primary')", (album_id, lib2_artist),
             )
             stats["albums"] += 1
-            if progress and (i + 1) % 200 == 0:
-                progress("albums", i + 1, len(album_rows))
-        if progress:
-            progress("albums", len(album_rows), len(album_rows))
+            if (i + 1) % 200 == 0:
+                report_progress("albums", i + 1, len(album_rows))
+        report_progress("albums", len(album_rows), len(album_rows))
 
         # --- Tracks + track files + track-artist junctions -----------------
         track_map: Dict[str, int] = {}
@@ -1149,8 +1153,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
 
         cursor.execute("SELECT * FROM tracks")
         track_rows = cursor.fetchall()
-        if progress:
-            progress("tracks", 0, len(track_rows))
+        report_progress("tracks", 0, len(track_rows))
         for i, row in enumerate(track_rows):
             album_id = album_map.get(_legacy_key(row["album_id"]))
             if album_id is None:
@@ -1307,10 +1310,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
                          _pick(row, "verification_status"), row["id"], run_id, file_id),
                     )
-            if progress and (i + 1) % 200 == 0:
-                progress("tracks", i + 1, len(track_rows))
-        if progress:
-            progress("tracks", len(track_rows), len(track_rows))
+            if (i + 1) % 200 == 0:
+                report_progress("tracks", i + 1, len(track_rows))
+        report_progress("tracks", len(track_rows), len(track_rows))
 
         stats.update(_reconcile_legacy_snapshot(cursor, run_id))
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
@@ -1904,20 +1906,52 @@ def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] =
     if _table_exists(cursor, "watchlist_artists"):
         clause, params = _profile_filter(cursor, "watchlist_artists", profile_id)
         cursor.execute("UPDATE lib2_artists SET monitored=0")
+        watchlist_columns = _existing_columns(cursor, "watchlist_artists")
+        identity_columns = {
+            "spotify_artist_id": "spotify",
+            "itunes_artist_id": "itunes",
+            "deezer_artist_id": "deezer",
+            "discogs_artist_id": "discogs",
+            "amazon_artist_id": "amazon",
+            "musicbrainz_artist_id": "musicbrainz",
+        }
+        present_id_columns = [
+            column for column in identity_columns if column in watchlist_columns
+        ]
         wl = cursor.execute(
-            "SELECT spotify_artist_id, musicbrainz_artist_id, lower(artist_name) AS n "
+            f"SELECT artist_name{''.join(', ' + col for col in present_id_columns)} "
             "FROM watchlist_artists" + (f" WHERE {clause}" if clause else ""),
             params,
         ).fetchall()
-        ext_ids = {x for r in wl for x in (r["spotify_artist_id"], r["musicbrainz_artist_id"]) if x}
-        names = {r["n"] for r in wl if r["n"]}
-        for ext in ext_ids:
-            cursor.execute(
-                "UPDATE lib2_artists SET monitored=1 WHERE spotify_id=? OR musicbrainz_id=?",
-                (ext, ext),
+        watchlist_entries = [{
+            "name": row["artist_name"],
+            "provider_ids": {
+                identity_columns[column]: str(row[column]).strip()
+                for column in present_id_columns
+                if row[column] is not None and str(row[column]).strip()
+            },
+        } for row in wl]
+        from core.library2.monitor_sync import _artist_identity_matches
+        from core.library2.provider_ids import source_ids_from_values
+        for artist in cursor.execute(
+            "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
+        ).fetchall():
+            artist_ids = source_ids_from_values(
+                spotify_id=artist["spotify_id"],
+                musicbrainz_id=artist["musicbrainz_id"],
+                external_ids=artist["external_ids"],
             )
-        for nm in names:
-            cursor.execute("UPDATE lib2_artists SET monitored=1 WHERE lower(name)=?", (nm,))
+            if any(
+                _artist_identity_matches(
+                    artist["name"], artist_ids,
+                    entry["name"], entry["provider_ids"],
+                )
+                for entry in watchlist_entries
+            ):
+                cursor.execute(
+                    "UPDATE lib2_artists SET monitored=1 WHERE id=?",
+                    (artist["id"],),
+                )
 
     # Tracks ← wishlist. Do not reset non-wishlist tracks: monitored also powers
     # Lidarr-style upgrade checks after a file has already been downloaded.

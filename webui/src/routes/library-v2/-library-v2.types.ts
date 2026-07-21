@@ -18,7 +18,10 @@ export const LIBRARY_V2_WANTED_KINDS = ['missing', 'cutoff_unmet'] as const;
 export type LibraryV2WantedKind = (typeof LIBRARY_V2_WANTED_KINDS)[number];
 
 export const libraryV2SearchSchema = z.object({
-  section: z.enum(['artists', 'playlists', 'wanted']).default('artists').catch('artists'),
+  section: z
+    .enum(['artists', 'playlists', 'wanted', 'import-review'])
+    .default('artists')
+    .catch('artists'),
   q: z.string().default('').catch(''),
   sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
   view: z.enum(['table', 'cards']).default('cards').catch('cards'),
@@ -371,6 +374,9 @@ export interface LibraryV2FileTags {
 export interface LibraryV2Track {
   /** null for a "missing" placeholder row (an expected track we don't have yet). */
   id: number | null;
+  lib2_track_id?: number | null;
+  legacy_track_id?: string | number | null;
+  server_track_id?: string | number | null;
   title: string | null;
   track_number: number | null;
   disc_number: number | null;

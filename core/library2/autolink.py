@@ -2,8 +2,7 @@
 
 Called from the post-processing side effects (``core/imports/side_effects.py``)
 once a download has its final processed path. Best-effort and strictly additive:
-it never raises into the pipeline and does nothing unless ``features.library_v2``
-is enabled.
+it never raises into the pipeline and follows the native catalogue cutover.
 
 This closes the wanted-loop: monitor a discography release → tracks mirror into
 the wishlist → the download pipeline fetches a file → the file appears in
@@ -294,13 +293,14 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
     profile_id = ((album_profile["quality_profile_id"] if album_profile else None)
                   or default_quality_profile_id(conn))
     cur = conn.execute(
-        """INSERT INTO lib2_tracks(album_id, title, track_number, spotify_id,
-               external_ids, quality_profile_id)
-           VALUES(?,?,?,?,?,?)""",
+        """INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
+               spotify_id, external_ids, quality_profile_id)
+           VALUES(?,?,?,?,?,?,?)""",
         (
             album_id,
             title,
             track_number,
+            disc_number if disc_number is not None else 1,
             provider_id if namespace == "spotify" else None,
             json.dumps({namespace: provider_id})
             if namespace not in (None, "spotify") else "{}",
@@ -356,14 +356,14 @@ def _pipeline_result_json(context: Dict[str, Any]) -> str:
 def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
     """Link a finished download's file into ``lib2_*``. Returns the file-row id.
 
-    Safe to call unconditionally from the pipeline: gated on the feature flag,
-    never raises, and idempotent (an existing path on the same track is updated,
+    Safe to call unconditionally from the pipeline: it never raises and is
+    idempotent (an existing path on the same track is updated,
     not duplicated).
     """
     try:
         from config.settings import config_manager
-        if config_manager.get("features.library_v2", True) is not True:
-            return None
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
 
         file_path = context.get("_final_processed_path") or context.get("_final_path")
         if not file_path:

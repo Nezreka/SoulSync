@@ -8,6 +8,7 @@ The worker is deactivated by default — the user must explicitly enable it.
 """
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -236,15 +237,82 @@ class RepairWorker:
         # Load master enabled state
         if config_manager:
             self.enabled = config_manager.get('repair.master_enabled', True)
-            # P3 renamed the remaining implementation-prefixed job ids. Copy
-            # old user settings once when the neutral key has not been saved;
-            # keep the source key untouched for rollback/export compatibility.
-            from core.repair_jobs import JOB_ID_MIGRATIONS
-            for old_id, new_id in JOB_ID_MIGRATIONS.items():
-                old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
-                new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
-                if new_cfg is None and isinstance(old_cfg, dict):
-                    config_manager.set(f'repair.jobs.{new_id}', old_cfg)
+            self._migrate_legacy_job_configs(config_manager)
+
+    @staticmethod
+    def _merge_migrated_configs(configs: List[dict], existing: Optional[dict],
+                                *, force_review: bool = False) -> dict:
+        """Merge old job configs without silently weakening automation.
+
+        Activation is the union of the old jobs, the shortest positive
+        interval wins, and settings merge in the caller's stable priority
+        order. Explicit fields already stored under the new id always win.
+        """
+        valid = [dict(cfg) for cfg in configs if isinstance(cfg, dict)]
+        current = dict(existing) if isinstance(existing, dict) else {}
+        merged: dict = {}
+        if valid:
+            merged['enabled'] = any(bool(cfg.get('enabled', False)) for cfg in valid)
+            intervals = []
+            for cfg in valid:
+                try:
+                    value = float(cfg.get('interval_hours'))
+                    if value > 0:
+                        intervals.append(value)
+                except (TypeError, ValueError):
+                    pass
+            if intervals:
+                shortest = min(intervals)
+                merged['interval_hours'] = int(shortest) if shortest.is_integer() else shortest
+        settings: dict = {}
+        for cfg in valid:
+            if isinstance(cfg.get('settings'), dict):
+                settings.update(cfg['settings'])
+        if isinstance(current.get('settings'), dict):
+            settings.update(current['settings'])
+        if force_review and 'mode' not in (current.get('settings') or {}):
+            settings['mode'] = 'review'
+        if settings:
+            merged['settings'] = settings
+        for key in ('enabled', 'interval_hours'):
+            if key in current:
+                merged[key] = current[key]
+        return merged
+
+    def _migrate_legacy_job_configs(self, config_manager) -> None:
+        """Migrate stable pre-V2 repair identities once, without deleting them."""
+        quality_old = [
+            config_manager.get('repair.jobs.quality_upgrade', None),
+            config_manager.get('repair.jobs.quality_upgrade_scanner', None),
+        ]
+        quality_new = config_manager.get('repair.jobs.quality_upgrade_scan', None)
+        if any(isinstance(cfg, dict) for cfg in quality_old):
+            merged = self._merge_migrated_configs(
+                quality_old, quality_new, force_review=True)
+            config_manager.set('repair.jobs.quality_upgrade_scan', merged)
+
+        disc_old = config_manager.get('repair.jobs.discography_backfill', None)
+        disc_new = config_manager.get('repair.jobs.monitored_discography_refresh', None)
+        if isinstance(disc_old, dict):
+            # The old job was review-first. Preserve that contract explicitly;
+            # the native job's review mode creates album-level findings and
+            # only materializes/wishlists after approval.
+            merged = self._merge_migrated_configs(
+                [disc_old], disc_new, force_review=True)
+            settings = merged.setdefault('settings', {})
+            settings.setdefault('migration_source', 'discography_backfill')
+            config_manager.set('repair.jobs.monitored_discography_refresh', merged)
+
+        # P3 implementation-prefix renames are lossless one-to-one copies.
+        from core.repair_jobs import JOB_ID_MIGRATIONS
+        for old_id, new_id in JOB_ID_MIGRATIONS.items():
+            if old_id in {'quality_upgrade', 'quality_upgrade_scanner',
+                           'discography_backfill'}:
+                continue
+            old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+            new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
+            if new_cfg is None and isinstance(old_cfg, dict):
+                config_manager.set(f'repair.jobs.{new_id}', old_cfg)
 
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
@@ -477,16 +545,20 @@ class RepairWorker:
         moved to a native Library-v2 engine; the native scan regenerates
         anything still relevant). Resolved/dismissed history is kept."""
         try:
-            from core.repair_jobs import RETIRED_JOB_IDS
-            if not RETIRED_JOB_IDS:
+            from core.repair_jobs import (
+                PRESERVED_RETIRED_FINDING_IDS,
+                RETIRED_JOB_IDS,
+            )
+            prune_ids = RETIRED_JOB_IDS - PRESERVED_RETIRED_FINDING_IDS
+            if not prune_ids:
                 return
             conn = self.db._get_connection()
             try:
-                marks = ','.join('?' for _ in RETIRED_JOB_IDS)
+                marks = ','.join('?' for _ in prune_ids)
                 cursor = conn.execute(
                     f"DELETE FROM repair_findings WHERE status = 'pending' "
                     f"AND job_id IN ({marks})",
-                    tuple(sorted(RETIRED_JOB_IDS)),
+                    tuple(sorted(prune_ids)),
                 )
                 if cursor.rowcount:
                     logger.info("Pruned %d pending findings of retired jobs",
@@ -949,18 +1021,6 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            # Dedup check: skip if same finding already exists (pending, resolved, OR dismissed)
-            cursor.execute("""
-                SELECT id FROM repair_findings
-                WHERE job_id = ? AND finding_type = ?
-                  AND status IN ('pending', 'resolved', 'dismissed')
-                  AND ((entity_type = ? AND entity_id = ?) OR (file_path = ? AND file_path IS NOT NULL))
-                LIMIT 1
-            """, (job_id, finding_type, entity_type, entity_id, file_path))
-
-            if cursor.fetchone():
-                return False  # Already exists or was already fixed
-
             enriched_details = details or {}
             try:
                 from core.library2.maintenance_sync import annotate_finding_details
@@ -977,6 +1037,55 @@ class RepairWorker:
                 # Finding creation remains fail-open: a bridge problem must not
                 # hide the repair issue itself.
                 logger.debug("Library-v2 finding annotation skipped: %s", e)
+
+            fingerprint_payload = dict(enriched_details)
+            if file_path and os.path.isfile(file_path):
+                try:
+                    stat = os.stat(file_path)
+                    fingerprint_payload["_file_stat"] = {
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                except OSError:
+                    pass
+            dedup_fingerprint = hashlib.sha256(
+                json.dumps(
+                    fingerprint_payload, sort_keys=True, separators=(',', ':'),
+                    default=str,
+                ).encode('utf-8')
+            ).hexdigest()
+            enriched_details = dict(enriched_details)
+            enriched_details["_dedup_fingerprint"] = dedup_fingerprint
+
+            # A file finding is keyed by its concrete path, not merely by its
+            # parent track: multiple active files for one track are independent
+            # repair subjects. Pending rows always suppress duplicates. A prior
+            # resolved/dismissed row suppresses only the same file/config
+            # fingerprint, so a replacement file or changed quality target can
+            # legitimately surface again.
+            if file_path is not None:
+                cursor.execute("""
+                    SELECT status, details_json FROM repair_findings
+                    WHERE job_id=? AND finding_type=?
+                      AND status IN ('pending','resolved','dismissed')
+                      AND file_path=?
+                """, (job_id, finding_type, file_path))
+            else:
+                cursor.execute("""
+                    SELECT status, details_json FROM repair_findings
+                    WHERE job_id=? AND finding_type=?
+                      AND status IN ('pending','resolved','dismissed')
+                      AND entity_type=? AND entity_id=? AND file_path IS NULL
+                """, (job_id, finding_type, entity_type, entity_id))
+            for previous in cursor.fetchall():
+                if previous["status"] == "pending":
+                    return False
+                try:
+                    old_details = json.loads(previous["details_json"] or "{}")
+                except (TypeError, ValueError):
+                    old_details = {}
+                if old_details.get("_dedup_fingerprint") == dedup_fingerprint:
+                    return False
 
             cursor.execute("""
                 INSERT INTO repair_findings
@@ -1149,7 +1258,19 @@ class RepairWorker:
                         'reason': 'error',
                         'error': str(sync_error),
                     }
-                self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
+                sync_state = result.get('library_v2_sync') or {}
+                if sync_state.get('reason') == 'error':
+                    # The physical mutation happened, but the catalogue is not
+                    # converged. Keep the finding as the durable retry anchor.
+                    result['success'] = False
+                    result['error'] = (
+                        'Repair applied, but Library V2 sync failed; finding '
+                        'left pending for retry'
+                    )
+                    result['retryable'] = True
+                else:
+                    self.resolve_finding(
+                        finding_id, action=result.get('action', 'auto_fix'))
 
             return result
 
@@ -1170,6 +1291,7 @@ class RepairWorker:
             'missing_cover_art': self._fix_missing_cover_art,
             'missing_lyrics': self._fix_missing_lyrics,
             'missing_replaygain': self._fix_missing_replaygain,
+            'expired_download': self._fix_expired_download,
             'empty_folder': self._fix_empty_folder,
             'metadata_gap': self._fix_metadata_gap,
             'album_tag_inconsistency': self._fix_album_tag_inconsistency,
@@ -1178,6 +1300,9 @@ class RepairWorker:
             'unwanted_content': self._fix_unwanted_content,
             'acoustid_mismatch': self._fix_acoustid_mismatch,
             'quality_below_cutoff': self._fix_quality_below_cutoff,
+            'quality_upgrade': self._fix_legacy_quality_upgrade,
+            'missing_discography_track': self._fix_legacy_discography_track,
+            'missing_discography_release': self._fix_discography_release,
             'short_preview_track': self._fix_short_preview_track,
             'corrupt_audio': self._fix_corrupt_audio,
         }
@@ -1185,6 +1310,116 @@ class RepairWorker:
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_expired_download(self, entity_type, entity_id, file_path, details):
+        """Apply an expired-origin finding through the cleaner's safe helper."""
+        from core.repair_jobs.expired_download_cleaner import delete_origin_download
+
+        entry = {
+            'id': details.get('history_id') or entity_id,
+            'file_path': details.get('file_path') or file_path,
+        }
+        if not entry['id']:
+            return {'success': False, 'error': 'No history id in finding'}
+        outcome = delete_origin_download(self.db, entry, self._config_manager)
+        if outcome.get('error'):
+            return {
+                'success': False,
+                'action': 'deleted_expired',
+                'error': f"Could not delete file: {outcome['error']}",
+            }
+        verb = (
+            'deleted file + entry' if outcome.get('file_deleted')
+            else 'removed entry (file already gone)'
+        )
+        return {
+            'success': True,
+            'action': 'deleted_expired',
+            'message': f'Expired download — {verb}',
+        }
+
+    def _fix_legacy_quality_upgrade(self, entity_type, entity_id, file_path, details):
+        """Approve a preserved pre-V2 quality finding without deleting its file."""
+        track_data = details.get('matched_track_data') or details.get('track_data')
+        if not track_data:
+            return {
+                'success': False,
+                'error': 'Legacy quality finding has no reusable track payload; rerun the native review scan',
+            }
+        try:
+            added = self.db.add_to_wishlist(
+                spotify_track_data=track_data,
+                failure_reason='Quality upgrade (migrated review finding)',
+                source_type='repair',
+                source_info={
+                    'job': 'quality_upgrade_scan',
+                    'legacy_job': details.get('job_id') or 'quality_upgrade',
+                    'original_file_path': file_path,
+                },
+                quality_profile_id=details.get('quality_profile_id'),
+            )
+            if not added:
+                return {'success': False, 'error': 'Track is already queued or could not be added'}
+            return {'success': True, 'action': 'added_to_wishlist'}
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+
+    def _fix_legacy_discography_track(self, entity_type, entity_id, file_path, details):
+        """Approve a preserved pre-V2 discography finding."""
+        track_data = details.get('track_data')
+        if not track_data:
+            return {'success': False, 'error': 'Legacy discography finding has no track payload'}
+        try:
+            added = self.db.add_to_wishlist(
+                spotify_track_data=track_data,
+                failure_reason='Discography backfill (migrated review finding)',
+                source_type='repair',
+                source_info={
+                    'job': 'monitored_discography_refresh',
+                    'legacy_job': 'discography_backfill',
+                    'artist': details.get('artist_name', ''),
+                },
+            )
+            if not added:
+                return {'success': False, 'error': 'Track is already queued or could not be added'}
+            return {'success': True, 'action': 'added_to_wishlist'}
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+
+    def _fix_discography_release(self, entity_type, entity_id, file_path, details):
+        """Approve a native review-mode monitor-new-items release."""
+        album_id = details.get('lib2_album_id') or _lib2_id(entity_id)
+        if album_id is None:
+            return {'success': False, 'error': 'Not a Library-v2 album finding'}
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.execute(
+                """UPDATE lib2_albums
+                      SET monitored=1, tracklist_status='pending',
+                          tracklist_error=NULL, tracklist_retry_at=NULL,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (int(album_id),),
+            )
+            if cursor.rowcount == 0:
+                return {'success': False, 'error': 'Library-v2 album no longer exists'}
+            conn.commit()
+        finally:
+            conn.close()
+        try:
+            from core.library2 import ADMIN_PROFILE_ID
+            from core.library2.discography import auto_monitor_releases
+            mirrored = auto_monitor_releases(
+                self.db, self._config_manager, [int(album_id)],
+                wishlist_profile_id=ADMIN_PROFILE_ID,
+            )
+            return {
+                'success': True,
+                'action': 'approved_new_release',
+                'mirrored_tracks': mirrored,
+            }
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
 
     def _fix_quality_below_cutoff(self, entity_type, entity_id, file_path, details):
         """Approve a native quality-review finding: queue the upgrade search
@@ -1238,6 +1473,7 @@ class RepairWorker:
                     else f'Queued "{title}" for re-download'
                 ),
                 'library_v2_file_deleted': True,
+                'repair_intent': 'remove' if fix_action == 'remove' else 'redownload',
             }
 
         # Simple removal — just delete the dead track record
@@ -1440,6 +1676,7 @@ class RepairWorker:
                     else f'Queued "{title}" for full download (file already gone)'
                 ),
                 'library_v2_file_deleted': True,
+                'repair_intent': 'redownload',
             }
         conn = None
         try:
@@ -1584,6 +1821,7 @@ class RepairWorker:
                     else f'Queued "{title}" for download (file already gone)'
                 ),
                 'library_v2_file_deleted': True,
+                'repair_intent': 'redownload',
             }
         conn = None
         try:
@@ -1789,11 +2027,22 @@ class RepairWorker:
         if native_track_id is not None:
             conn = self.db._get_connection()
             try:
-                conn.execute(
+                legacy = conn.execute(
+                    "SELECT legacy_track_id FROM lib2_tracks WHERE id=?",
+                    (native_track_id,),
+                ).fetchone()
+                cursor = conn.execute(
                     "UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP "
                     "WHERE id=?",
                     (int(correct_num), native_track_id),
                 )
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': 'Library-v2 track no longer exists'}
+                if legacy and legacy[0] is not None:
+                    conn.execute(
+                        "UPDATE tracks SET track_number=? WHERE id=?",
+                        (int(correct_num), legacy[0]),
+                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -1886,6 +2135,19 @@ class RepairWorker:
                                 "WHERE track_id=? AND path IN (?,?)",
                                 (new_path, native_track_id, file_path, resolved),
                             )
+                        legacy_ids = [row[0] for row in cursor.execute(
+                            """SELECT DISTINCT COALESCE(f.legacy_track_id, t.legacy_track_id)
+                                 FROM lib2_tracks t
+                            LEFT JOIN lib2_track_files f ON f.track_id=t.id
+                                WHERE t.id=?
+                                  AND COALESCE(f.legacy_track_id, t.legacy_track_id) IS NOT NULL""",
+                            (native_track_id,),
+                        ).fetchall()]
+                        for legacy_track_id in legacy_ids:
+                            cursor.execute(
+                                "UPDATE tracks SET file_path=? WHERE id=?",
+                                (new_path, legacy_track_id),
+                            )
                     else:
                         cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                                        (new_path, file_path))
@@ -1894,7 +2156,17 @@ class RepairWorker:
                                            (new_path, resolved))
                     conn.commit()
                 except Exception as e:
-                    logger.debug("Failed to update DB file_path after rename: %s", e)
+                    logger.error("Failed to update dual DB file_path after rename: %s", e)
+                    try:
+                        if new_path and os.path.exists(new_path) and not os.path.exists(resolved):
+                            os.replace(new_path, resolved)
+                    except OSError as rollback_error:
+                        logger.error("Could not roll back track-number rename: %s", rollback_error)
+                    return {
+                        'success': False,
+                        'error': f'Could not synchronize renamed file path: {e}',
+                        'retryable': True,
+                    }
                 finally:
                     if conn:
                         conn.close()
@@ -2344,6 +2616,7 @@ class RepairWorker:
                     + (' (file deleted)' if removed.get('deleted_file') else '')
                 ),
                 'library_v2_file_deleted': True,
+                'repair_intent': 'remove',
             }
 
         # Remove from DB
@@ -2427,6 +2700,9 @@ class RepairWorker:
                         else 'Removed wrong audio file'
                     ),
                     'library_v2_file_deleted': True,
+                    'repair_intent': (
+                        'redownload' if fix_action == 'redownload' else 'remove'
+                    ),
                 }
             if fix_action == 'relocate':
                 from core.library2.paths import resolve_lib2_path
@@ -2987,7 +3263,11 @@ class RepairWorker:
                 # from the resolved path we just moved, which is exactly the #978
                 # population (so without this the file moves but the DB stays stale).
                 try:
-                    tid = int(entity_id) if entity_id not in (None, '') else None
+                    legacy_track_id = details.get('legacy_track_id')
+                    raw_track_id = (
+                        legacy_track_id if legacy_track_id not in (None, '') else entity_id
+                    )
+                    tid = int(raw_track_id) if raw_track_id not in (None, '') else None
                 except (TypeError, ValueError):
                     tid = None
                 if tid is not None:
@@ -3007,6 +3287,17 @@ class RepairWorker:
                             (dst, '%/' + escaped))
                     except Exception as e:
                         logger.debug("Suffix-match DB path update failed: %s", e)
+                lib2_track_id = details.get('lib2_track_id')
+                try:
+                    lib2_track_id = int(lib2_track_id) if lib2_track_id is not None else None
+                except (TypeError, ValueError):
+                    lib2_track_id = None
+                if lib2_track_id is not None:
+                    cursor.execute(
+                        "UPDATE lib2_track_files SET path=? "
+                        "WHERE track_id=? AND (path=? OR path=?)",
+                        (dst, lib2_track_id, src, rel_from),
+                    )
                 conn.commit()
             except Exception as e:
                 logger.debug("DB path update failed for %s: %s", src, e)

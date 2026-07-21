@@ -61,15 +61,36 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
             by_album.setdefault(int(subject["album_id"]), []).append(subject)
         total = len(subjects)
 
-        for album_subjects in by_album.values():
+        # Files are the mutation subjects, never the canonical tracklist.
+        # Materialize/cache the complete edition list first, then read every
+        # track row for the album so missing files still contribute to totals
+        # and multi-disc numbering heuristics.
+        canonical_by_album: Dict[int, list[Dict[str, Any]]] = {}
+        conn = context.db._get_connection()
+        try:
+            from core.library2.completeness import resolve_tracklist
+
+            for album_id in by_album:
+                try:
+                    resolve_tracklist(context.config_manager, conn, album_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "Canonical tracklist resolution failed for album %s: %s",
+                        album_id, exc,
+                    )
+                canonical_by_album[album_id] = [dict(row) for row in conn.execute(
+                    """SELECT id AS lib2_track_id, title AS name,
+                              track_number, COALESCE(disc_number, 1) AS disc_number
+                         FROM lib2_tracks WHERE album_id=?
+                     ORDER BY COALESCE(disc_number, 1), track_number, id""",
+                    (album_id,),
+                ).fetchall()]
+        finally:
+            conn.close()
+
+        for album_id, album_subjects in by_album.items():
             api_tracks = [
-                {
-                    "name": row.get("title") or "",
-                    "track_number": row.get("track_number"),
-                    "disc_number": row.get("disc_number") or 1,
-                    "lib2_track_id": int(row["track_id"]),
-                }
-                for row in album_subjects
+                row for row in canonical_by_album.get(album_id, [])
                 if row.get("track_number") is not None
             ]
             if not api_tracks:

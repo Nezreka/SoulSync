@@ -113,6 +113,16 @@ class LossyConverterJob(RepairJob):
         except Exception as e:
             logger.warning("V2 subject enumeration failed: %s", e)
             result.errors += 1
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for file_path in filesystem_audio_files(
+            context, extensions=LOSSLESS_CANDIDATE_EXTENSIONS,
+        ):
+            tracks.append((
+                None, os.path.splitext(os.path.basename(file_path))[0],
+                None, os.path.basename(os.path.dirname(file_path)), file_path,
+                None, None,
+            ))
 
         total = len(tracks)
         if context.update_progress:
@@ -214,8 +224,8 @@ class LossyConverterJob(RepairJob):
                         job_id=self.job_id,
                         finding_type='missing_lossy_copy',
                         severity='info',
-                        entity_type='track',
-                        entity_id=str(track_id),
+                        entity_type='track' if subject else 'file',
+                        entity_id=str(track_id) if track_id is not None else None,
                         file_path=file_path,
                         title=f'No {quality_label} copy: {title or "Unknown"}',
                         description=(
@@ -255,14 +265,26 @@ class LossyConverterJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
+        count = 0
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
-            return sum(
+            count += sum(
                 1 for subject in active_file_subjects(
                     context.db, context.config_manager,
                 ) if os.path.splitext(str(subject.get("path") or ""))[1].lower()
                 in LOSSLESS_CANDIDATE_EXTENSIONS
             )
         except Exception:
-            return 0
+            pass
+        try:
+            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+            count += sum(
+                1 for path in filesystem_audio_files(
+                    context, extensions=LOSSLESS_CANDIDATE_EXTENSIONS,
+                ) if os.path.splitext(path)[1].lower() in LOSSLESS_CANDIDATE_EXTENSIONS
+            )
+        except Exception:
+            pass
+        return count

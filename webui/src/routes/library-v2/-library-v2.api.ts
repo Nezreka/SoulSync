@@ -73,6 +73,133 @@ export async function fetchLibraryV2Enabled(): Promise<boolean> {
   return Boolean(payload.enabled);
 }
 
+export interface LibraryV2AcquisitionImportSummary {
+  id: string;
+  request_id: string;
+  download_id: string;
+  status: 'pending' | 'matching' | 'needs_review' | 'importing' | 'recovered_to_staging';
+  expected_scope: string;
+  expected_entity_id: number;
+  inventory_count: number;
+  match_count: number;
+  rejection_count: number;
+  attempts: number;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LibraryV2AcquisitionInventoryFile {
+  relative_path: string;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  track_number?: number | null;
+  disc_number?: number | null;
+  duration_seconds?: number | null;
+  container?: string | null;
+}
+
+export interface LibraryV2AcquisitionExpectedTrack {
+  expected_key: string;
+  release_track_id: number | null;
+  recording_id: number | null;
+  track_id: number | null;
+  disc_number: number;
+  track_number: number | null;
+  expected_title: string;
+  expected_duration_seconds: number | null;
+}
+
+export interface LibraryV2AcquisitionImportDetail
+  extends LibraryV2AcquisitionImportSummary {
+  inventory: LibraryV2AcquisitionInventoryFile[];
+  expected_tracks: LibraryV2AcquisitionExpectedTrack[];
+  matches: Array<{ relative_path: string; track_id: number | null }>;
+  rejections: Array<Record<string, unknown>>;
+  quarantined: Array<Record<string, unknown>>;
+  processed_count: number;
+  quarantined_count: number;
+}
+
+export async function fetchLibraryV2AcquisitionImports(): Promise<
+  LibraryV2AcquisitionImportSummary[]
+> {
+  const payload = await readJson<{
+    success: boolean;
+    imports?: LibraryV2AcquisitionImportSummary[];
+    error?: string;
+  }>(apiClient.get('library/v2/acquisition/imports'));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load import review queue');
+  return payload.imports ?? [];
+}
+
+export function libraryV2AcquisitionImportsQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-imports'],
+    queryFn: fetchLibraryV2AcquisitionImports,
+    refetchInterval: 5_000,
+  });
+}
+
+export async function fetchLibraryV2AcquisitionImport(
+  importId: string,
+): Promise<LibraryV2AcquisitionImportDetail> {
+  const payload = await readJson<{
+    success: boolean;
+    import?: LibraryV2AcquisitionImportDetail;
+    error?: string;
+  }>(apiClient.get(`library/v2/acquisition/imports/${importId}`));
+  if (!payload.success || !payload.import) {
+    throw new Error(payload.error || 'Failed to load import review');
+  }
+  return payload.import;
+}
+
+export function libraryV2AcquisitionImportQueryOptions(importId: string) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-import', importId],
+    queryFn: () => fetchLibraryV2AcquisitionImport(importId),
+    refetchInterval: 5_000,
+  });
+}
+
+async function mutateLibraryV2AcquisitionImport(
+  importId: string,
+  action: 'resolve' | 'rescan' | 'resume',
+  json?: Record<string, unknown>,
+): Promise<LibraryV2AcquisitionImportDetail> {
+  const payload = await readJson<{
+    success: boolean;
+    import?: LibraryV2AcquisitionImportDetail;
+    error?: string;
+  }>(
+    apiClient.post(`library/v2/acquisition/imports/${importId}/${action}`, {
+      ...(json ? { json } : {}),
+      timeout: 120_000,
+    }),
+  );
+  if (!payload.success || !payload.import) {
+    throw new Error(payload.error || `Failed to ${action} import`);
+  }
+  return payload.import;
+}
+
+export function resolveLibraryV2AcquisitionImport(
+  importId: string,
+  assignments: Array<{ relative_path: string; track_id: number }>,
+) {
+  return mutateLibraryV2AcquisitionImport(importId, 'resolve', { assignments });
+}
+
+export function rescanLibraryV2AcquisitionImport(importId: string) {
+  return mutateLibraryV2AcquisitionImport(importId, 'rescan');
+}
+
+export function resumeLibraryV2AcquisitionImport(importId: string) {
+  return mutateLibraryV2AcquisitionImport(importId, 'resume');
+}
+
 export async function fetchLibraryV2Artists(
   search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'>,
 ): Promise<ArtistsResponse> {

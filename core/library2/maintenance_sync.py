@@ -69,12 +69,9 @@ def ensure_maintenance_event_schema(cursor: Any) -> None:
 
 
 def library_v2_enabled(config_manager: Any) -> bool:
-    if config_manager is None:
-        return False
-    try:
-        return config_manager.get("features.library_v2", True) is True
-    except Exception:  # noqa: BLE001
-        return False
+    from core.library2.feature import library_v2_enabled as cutover_enabled
+
+    return cutover_enabled(config_manager)
 
 
 def _table_exists(conn: Any, table: str) -> bool:
@@ -447,6 +444,24 @@ def sync_repair_change(
             for file_id in links["files"]:
                 if set_file_state(conn, file_id, "deleted"):
                     changed_fields.add("file_state")
+        repair_intent = str(result.get("repair_intent") or "").strip().lower()
+        if repair_intent in {"remove", "redownload"} and links["tracks"]:
+            from core.library2 import ADMIN_PROFILE_ID
+            from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
+            wanted = repair_intent == "redownload"
+            marks = _marks(links["tracks"])
+            conn.execute(
+                f"UPDATE lib2_tracks SET monitored=?, updated_at=CURRENT_TIMESTAMP "
+                f"WHERE id IN ({marks})",
+                [1 if wanted else 0, *links["tracks"]],
+            )
+            for track_id in links["tracks"]:
+                record_rule(
+                    conn, "track", track_id, wanted, PROVENANCE_USER,
+                    profile_id=ADMIN_PROFILE_ID,
+                )
+            changed_fields.add("repair_intent")
         new_file_id = _link_new_output_file(conn, links, result)
         if new_file_id is not None:
             links["files"] = sorted(set(links["files"]) | {new_file_id})
@@ -526,6 +541,7 @@ def sync_repair_change(
         "events": events,
         "artwork_invalidated": artwork_invalidated,
         "wishlist_mirrored": mirrored,
+        "repair_intent": repair_intent or None,
         "scan": scan_stats,
     }
 

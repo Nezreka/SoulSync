@@ -81,8 +81,12 @@ def register_routes(bp):
             db = get_database()
             descriptors = [
                 row for row in db.get_wishlist_tracks(profile_id=profile_id)
-                if str(row.get("spotify_track_id") or "").split("::", 1)[0]
-                == str(track_id).split("::", 1)[0]
+                if (
+                    str(row.get("spotify_track_id") or "") == str(track_id)
+                    if "::" in str(track_id)
+                    else str(row.get("spotify_track_id") or "").split("::", 1)[0]
+                    == str(track_id).split("::", 1)[0]
+                )
             ]
             ok = db.remove_from_wishlist(track_id, profile_id=profile_id)
             if ok:

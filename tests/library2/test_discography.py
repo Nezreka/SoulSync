@@ -373,6 +373,47 @@ def test_reexpansion_auto_monitors_new_release(legacy_db, imported_conn, fake_di
         "SELECT monitored FROM lib2_albums WHERE title='Scorpion'").fetchone()["monitored"] == 0
 
 
+def test_review_reexpansion_defers_monitoring_and_materialization(
+    legacy_db, imported_conn, fake_discography, monkeypatch
+):
+    aid = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    conn.execute(
+        "UPDATE lib2_artists SET monitored=1, monitor_new_items='all' WHERE id=?",
+        (aid,),
+    )
+    conn.commit()
+    conn.close()
+    D.expand_artist_discography(legacy_db, aid)
+
+    grown = _cards(
+        ("albums", {"id": "sp-views", "title": "Views", "album_type": "album"}),
+        ("albums", {"id": "sp-scorpion", "title": "Scorpion", "album_type": "album"}),
+        ("albums", {"id": "sp-review", "title": "Review Me", "album_type": "album"}),
+        ("singles", {"id": "sp-onedance", "title": "One Dance", "album_type": "single"}),
+    )
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: grown,
+    )
+
+    stats = D._expand_artist_discography(
+        legacy_db, aid, defer_auto_monitor=True)
+
+    assert len(stats["auto_monitor_album_ids"]) == 1
+    album_id = stats["auto_monitor_album_ids"][0]
+    row = imported_conn.execute(
+        "SELECT monitored, tracklist_status FROM lib2_albums WHERE id=?",
+        (album_id,),
+    ).fetchone()
+    assert row["monitored"] == 0
+    assert row["tracklist_status"] == "idle"
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=?",
+        (album_id,),
+    ).fetchone()[0] == 0
+
+
 def test_reexpansion_auto_monitors_even_after_all_rows_claimed(
         legacy_db, imported_conn, fake_discography, monkeypatch):
     """The first-vs-re-expansion distinction must survive every discography row

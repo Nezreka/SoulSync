@@ -31,6 +31,8 @@ import {
   LIBRARY_V2_QUERY_KEY,
   invalidateLibraryV2,
   libraryV2AlbumMatchStatusQueryOptions,
+  libraryV2AcquisitionImportQueryOptions,
+  libraryV2AcquisitionImportsQueryOptions,
   libraryV2AlbumQueryOptions,
   libraryV2ArtistAliasesQueryOptions,
   libraryV2ArtistMatchStatusQueryOptions,
@@ -57,6 +59,9 @@ import {
   refreshLibraryV2Discography,
   reconcileUnmappedArtists,
   reconcileWishlist,
+  rescanLibraryV2AcquisitionImport,
+  resolveLibraryV2AcquisitionImport,
+  resumeLibraryV2AcquisitionImport,
   retryLibraryV2Mirror,
   runRepairJob,
   runLibraryV2PlaylistPipeline,
@@ -1251,7 +1256,7 @@ function ArtistMatchChips({
  *  alias id's detail response to its canonical — see docs §24.4), so the
  *  rendered chips are exactly its linked aliases. Deliberately minimal (no
  *  suggestion/recovery UX) — that is §41's separate, larger scope. */
-function ArtistAliases({ artistId, artistName }: { artistId: number; artistName: string }) {
+export function ArtistAliases({ artistId, artistName }: { artistId: number; artistName: string }) {
   const queryClient = useQueryClient();
   const [linking, setLinking] = useState(false);
   const query = useQuery(libraryV2ArtistAliasesQueryOptions(artistId));
@@ -1278,6 +1283,21 @@ function ArtistAliases({ artistId, artistName }: { artistId: number; artistName:
           </button>
         </span>
       ))}
+      {unlink.isError ? (
+        <span className={styles.mutationError} role="alert">
+          <span>{mutationErrorMessage(unlink.error, 'Unlink failed')}</span>
+          <button
+            type="button"
+            className={styles.inlineRetry}
+            disabled={unlink.isPending || unlink.variables == null}
+            onClick={() => {
+              if (unlink.variables != null) unlink.mutate(unlink.variables);
+            }}
+          >
+            Retry
+          </button>
+        </span>
+      ) : null}
       <button
         type="button"
         className={styles.aliasLinkButton}
@@ -1402,10 +1422,17 @@ export function MonitoringModal({
   const futureReleasesMutation = useMutation({
     mutationFn: (value: 'all' | 'none' | 'new') => editLibraryV2Artist(artistId, value),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+    onMutate: (value) => {
+      const previous = newItems;
+      setNewItems(value);
+      return { previous };
+    },
+    onError: (_error, _value, context) => {
+      setNewItems(context?.previous ?? initialNewItems);
+    },
   });
 
   function saveFutureReleases(value: 'all' | 'none' | 'new') {
-    setNewItems(value);
     futureReleasesMutation.mutate(value);
   }
 
@@ -1506,7 +1533,9 @@ export function MonitoringModal({
           <button
             type="button"
             className={styles.inlineRetry}
-            onClick={() => futureReleasesMutation.mutate(newItems)}
+            onClick={() =>
+              futureReleasesMutation.mutate(futureReleasesMutation.variables ?? newItems)
+            }
           >
             Retry
           </button>
@@ -2265,7 +2294,7 @@ function AlbumMetadataForm({
  *  nothing. `onDeleted` lets the deep-link view navigate back to the artist
  *  after a successful delete; the row doesn't need it (it just disappears
  *  once the query invalidates). */
-function AlbumOverflowMenu({
+export function AlbumOverflowMenu({
   album,
   onDeleted,
 }: {
@@ -2287,6 +2316,13 @@ function AlbumOverflowMenu({
       const jobId = await startLibraryV2AlbumReplayGain(album.id);
       const jobError = await awaitBulkJob(queryClient, jobId);
       if (jobError) throw new Error(jobError);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      window.showToast?.('Album ReplayGain analyzed and written.', 'success');
+    },
+    onError: (error) => {
+      window.showToast?.(mutationErrorMessage(error, 'ReplayGain analysis failed'), 'error');
     },
   });
 
@@ -2406,6 +2442,19 @@ function AlbumOverflowMenu({
             Delete
           </button>
         </div>
+      ) : null}
+      {replaygain.isError ? (
+        <span className={styles.mutationError} role="alert">
+          <span>{mutationErrorMessage(replaygain.error, 'ReplayGain analysis failed')}</span>
+          <button
+            type="button"
+            className={styles.inlineRetry}
+            disabled={replaygain.isPending}
+            onClick={() => replaygain.mutate()}
+          >
+            Retry
+          </button>
+        </span>
       ) : null}
       {showHistory ? (
         <HistoryModal scope="album" entityId={album.id} onClose={() => setShowHistory(false)} />
@@ -3382,11 +3431,8 @@ export function LibraryV2Page() {
     return (
       <div className={styles.page}>
         <div className={styles.emptyState}>
-          <h2>Library v2 is disabled</h2>
-          <p>
-            Enable <code>features.library_v2</code> in Settings to try the experimental library
-            manager.
-          </p>
+          <h2>Library is unavailable</h2>
+          <p>This profile does not have Library access, or the server is still starting.</p>
         </div>
       </div>
     );
@@ -3405,6 +3451,8 @@ export function LibraryV2Page() {
         <PlaylistIndexView />
       ) : search.section === 'wanted' ? (
         <WantedIndexView />
+      ) : search.section === 'import-review' ? (
+        <AcquisitionImportReviewView />
       ) : (
         <ArtistIndexView />
       )}
@@ -3679,6 +3727,304 @@ function LibrarySectionTabs() {
       >
         Wanted
       </button>
+      <button
+        type="button"
+        className={search.section === 'import-review' ? styles.viewActive : ''}
+        onClick={() =>
+          void navigate({
+            search: (previous) => ({
+              ...previous,
+              section: 'import-review',
+              q: '',
+              playlist: undefined,
+              artist: undefined,
+              album: undefined,
+              page: 1,
+            }),
+          })
+        }
+      >
+        Import review
+      </button>
+    </div>
+  );
+}
+
+function AcquisitionImportReviewView() {
+  const queryClient = useQueryClient();
+  const importsQuery = useQuery(libraryV2AcquisitionImportsQueryOptions());
+  const imports = importsQuery.data ?? [];
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const activeId =
+    selectedId && imports.some((item) => item.id === selectedId)
+      ? selectedId
+      : (imports[0]?.id ?? null);
+  const detailQuery = useQuery({
+    ...libraryV2AcquisitionImportQueryOptions(activeId ?? 'none'),
+    enabled: activeId !== null,
+  });
+  const [assignments, setAssignments] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const detail = detailQuery.data;
+    if (!detail) return;
+    setAssignments(
+      Object.fromEntries(
+        detail.matches
+          .filter((match) => match.track_id !== null)
+          .map((match) => [match.relative_path, Number(match.track_id)]),
+      ),
+    );
+  }, [detailQuery.data]);
+
+  const refresh = async (importId: string) => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-imports'],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-import', importId],
+      }),
+    ]);
+  };
+  const resolveMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeId) throw new Error('No import selected');
+      const payload = Object.entries(assignments).map(([relative_path, track_id]) => ({
+        relative_path,
+        track_id,
+      }));
+      await resolveLibraryV2AcquisitionImport(activeId, payload);
+      return resumeLibraryV2AcquisitionImport(activeId);
+    },
+    onSettled: async () => {
+      if (activeId) await refresh(activeId);
+    },
+  });
+  const rescanMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeId) throw new Error('No import selected');
+      await rescanLibraryV2AcquisitionImport(activeId);
+      return resumeLibraryV2AcquisitionImport(activeId);
+    },
+    onSettled: async () => {
+      if (activeId) await refresh(activeId);
+    },
+  });
+  const resumeMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeId) throw new Error('No import selected');
+      return resumeLibraryV2AcquisitionImport(activeId);
+    },
+    onSettled: async () => {
+      if (activeId) await refresh(activeId);
+    },
+  });
+
+  const detail = detailQuery.data;
+  const expectedTracks = detail?.expected_tracks.filter((track) => track.track_id !== null) ?? [];
+  const chosenTrackIds = Object.values(assignments);
+  const completeAssignment = Boolean(
+    detail &&
+      detail.inventory.length > 0 &&
+      detail.inventory.every((file) => assignments[file.relative_path]) &&
+      expectedTracks.length === detail.inventory.length &&
+      new Set(chosenTrackIds).size === chosenTrackIds.length &&
+      chosenTrackIds.length === expectedTracks.length,
+  );
+  const mutation = resolveMutation.isError
+    ? resolveMutation
+    : rescanMutation.isError
+      ? rescanMutation
+      : resumeMutation;
+  const busy = resolveMutation.isPending || rescanMutation.isPending || resumeMutation.isPending;
+
+  return (
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div>
+          <h1 className={styles.title}>Import review</h1>
+          <p className={styles.subtitle}>
+            Resolve ambiguous bundle matches without exposing server filesystem paths.
+          </p>
+        </div>
+      </header>
+      <div className={styles.toolbar}>
+        <LibrarySectionTabs />
+      </div>
+
+      {importsQuery.isLoading ? <div className={styles.loading}>Loading review queue…</div> : null}
+      {importsQuery.isError ? (
+        <div className={styles.mutationError} role="alert">
+          {mutationErrorMessage(importsQuery.error, 'Import review queue could not be loaded')}
+        </div>
+      ) : null}
+      {!importsQuery.isLoading && imports.length === 0 ? (
+        <div className={styles.emptyState}>
+          <h2>No imports need attention</h2>
+          <p>Ambiguous or interrupted bundle imports will appear here automatically.</p>
+        </div>
+      ) : null}
+
+      {imports.length > 0 ? (
+        <div className={styles.reviewLayout}>
+          <aside className={styles.reviewQueue} aria-label="Open imports">
+            {imports.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={item.id === activeId ? styles.reviewQueueActive : ''}
+                onClick={() => setSelectedId(item.id)}
+              >
+                <strong>{item.expected_scope.replaceAll('_', ' ')}</strong>
+                <span>#{item.expected_entity_id} · {item.status.replaceAll('_', ' ')}</span>
+                <small>
+                  {item.inventory_count} files · {item.rejection_count} conflicts
+                </small>
+              </button>
+            ))}
+          </aside>
+
+          <section className={styles.reviewDetail}>
+            {detailQuery.isLoading ? <div className={styles.loading}>Loading import…</div> : null}
+            {detailQuery.isError ? (
+              <div className={styles.mutationError} role="alert">
+                {mutationErrorMessage(detailQuery.error, 'Import could not be loaded')}
+              </div>
+            ) : null}
+            {detail ? (
+              <>
+                <div className={styles.reviewHeading}>
+                  <div>
+                    <h2>Bundle assignments</h2>
+                    <p className={styles.muted}>
+                      Status: {detail.status.replaceAll('_', ' ')} · attempt {detail.attempts}
+                    </p>
+                  </div>
+                  <div className={styles.headerActions}>
+                    <button
+                      type="button"
+                      className={styles.btnGhost}
+                      disabled={busy || !['pending', 'matching', 'needs_review'].includes(detail.status)}
+                      onClick={() => rescanMutation.mutate()}
+                    >
+                      {rescanMutation.isPending ? 'Rescanning…' : 'Rescan & resume'}
+                    </button>
+                    {detail.status === 'importing' ? (
+                      <button
+                        type="button"
+                        className={styles.btnPrimary}
+                        disabled={busy}
+                        onClick={() => resumeMutation.mutate()}
+                      >
+                        {resumeMutation.isPending ? 'Resuming…' : 'Resume import'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {detail.rejections.length > 0 ? (
+                  <div className={styles.reviewConflicts} role="status">
+                    <strong>{detail.rejections.length} matching conflict(s)</strong>
+                    <ul>
+                      {detail.rejections.map((rejection, index) => (
+                        <li key={`${String(rejection.code ?? 'conflict')}-${index}`}>
+                          {String(rejection.code ?? 'Unresolved match').replaceAll('_', ' ')}
+                          {rejection.relative_path ? ` · ${String(rejection.relative_path)}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Bundle file</th>
+                        <th>Tags</th>
+                        <th>Expected track</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.inventory.map((file) => (
+                        <tr key={file.relative_path}>
+                          <td>{file.relative_path}</td>
+                          <td>
+                            {file.title || 'Unknown title'}
+                            <small className={styles.reviewMeta}>
+                              {file.disc_number ? `Disc ${file.disc_number} · ` : ''}
+                              {file.track_number ? `Track ${file.track_number}` : 'No position'}
+                            </small>
+                          </td>
+                          <td>
+                            <select
+                              className={styles.select}
+                              aria-label={`Expected track for ${file.relative_path}`}
+                              value={assignments[file.relative_path] ?? ''}
+                              disabled={detail.status !== 'needs_review' || busy}
+                              onChange={(event) => {
+                                const trackId = Number(event.target.value);
+                                setAssignments((current) => {
+                                  const next = { ...current };
+                                  if (trackId) next[file.relative_path] = trackId;
+                                  else delete next[file.relative_path];
+                                  return next;
+                                });
+                              }}
+                            >
+                              <option value="">Choose a track…</option>
+                              {expectedTracks.map((track) => {
+                                const trackId = Number(track.track_id);
+                                const usedElsewhere = Object.entries(assignments).some(
+                                  ([path, selected]) => path !== file.relative_path && selected === trackId,
+                                );
+                                return (
+                                  <option key={track.expected_key} value={trackId} disabled={usedElsewhere}>
+                                    D{track.disc_number} · {track.track_number ?? '—'} ·{' '}
+                                    {track.expected_title}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {detail.status === 'needs_review' && expectedTracks.length !== detail.inventory.length ? (
+                  <div className={styles.mutationError} role="alert">
+                    This bundle has {detail.inventory.length} files but {expectedTracks.length} assignable
+                    tracks. Rescan or correct the edition before importing; partial imports are blocked.
+                  </div>
+                ) : null}
+                {mutation.isError ? (
+                  <div className={styles.mutationError} role="alert">
+                    {mutationErrorMessage(mutation.error, 'Import action failed')}
+                  </div>
+                ) : null}
+                {detail.error ? (
+                  <div className={styles.mutationError} role="alert">{detail.error}</div>
+                ) : null}
+                {detail.status === 'needs_review' ? (
+                  <div className={styles.modalActions}>
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      disabled={!completeAssignment || busy}
+                      onClick={() => resolveMutation.mutate()}
+                    >
+                      {resolveMutation.isPending ? 'Applying & resuming…' : 'Apply assignments & resume'}
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -5035,25 +5381,19 @@ async function awaitBulkJobState(
   queryClient: ReturnType<typeof useQueryClient>,
   jobId: string,
 ): Promise<LibraryV2JobState> {
-  for (let i = 0; i < 300; i += 1) {
+  let polls = 0;
+  for (;;) {
     const state = await fetchLibraryV2JobStatus(jobId);
     if (!state.running) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       return state;
     }
-    await new Promise((r) => setTimeout(r, 1000));
+    polls += 1;
+    // A long-running server job stays running. After five minutes back off to
+    // reduce traffic, but never manufacture a terminal failure client-side.
+    const delayMs = polls < 300 ? 1000 : 5000;
+    await new Promise((r) => setTimeout(r, delayMs));
   }
-  return {
-    job_id: jobId,
-    running: false,
-    kind: null,
-    current: 0,
-    total: 0,
-    result: null,
-    error: 'Timed out waiting for the bulk job',
-    started_at: null,
-    finished_at: null,
-  };
 }
 
 /** Poll the background bulk-job status until it settles, then refresh. */
@@ -6576,12 +6916,15 @@ export function TrackPlayButton({
         if (trackId == null || filePath == null) return;
         void getShellBridge()?.playLibraryTrack(
           {
-            id: trackId,
+            id: track.server_track_id ?? track.legacy_track_id ?? null,
+            lib2_track_id: trackId,
+            legacy_track_id: track.legacy_track_id ?? null,
+            server_track_id: track.server_track_id ?? null,
             title: track.title ?? 'Unknown Track',
             file_path: filePath,
             bitrate: track.file?.bitrate ?? null,
-            artist_id: track.artists[0]?.id ?? null,
-            album_id: albumId ?? null,
+            artist_id: null,
+            album_id: null,
           },
           albumTitle,
           artistName,

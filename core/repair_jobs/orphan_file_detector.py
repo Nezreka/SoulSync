@@ -121,12 +121,8 @@ class OrphanFileDetectorJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-
-        if (
-            context.config_manager is None
-            or context.config_manager.get("features.library_v2", True) is not True
-        ):
-            return result
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(context.config_manager)
 
         roots = _scan_roots(context)
         if not roots:

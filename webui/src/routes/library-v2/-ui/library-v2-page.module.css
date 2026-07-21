@@ -903,6 +903,93 @@ button.featureTag:disabled {
   font-style: italic;
 }
 
+.reviewLayout {
+  display: grid;
+  grid-template-columns: minmax(210px, 280px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.reviewQueue,
+.reviewDetail {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.reviewQueue {
+  display: grid;
+  overflow: hidden;
+}
+
+.reviewQueue button {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reviewQueue button:hover,
+.reviewQueue .reviewQueueActive {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.reviewQueue span,
+.reviewQueue small,
+.reviewMeta {
+  color: var(--text-muted);
+}
+
+.reviewDetail {
+  min-width: 0;
+  padding: 18px;
+}
+
+.reviewHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.reviewHeading h2 {
+  margin: 0 0 4px;
+}
+
+.reviewConflicts {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.reviewConflicts ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.reviewMeta {
+  display: block;
+  margin-top: 3px;
+}
+
+@media (max-width: 820px) {
+  .reviewLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .reviewHeading {
+    flex-direction: column;
+  }
+}
+
 /* --- artist cards --- */
 .cardGrid {
   display: grid;

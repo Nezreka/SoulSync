@@ -1,7 +1,10 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
+
+import { getProfileHomePath } from '@/platform/shell/bridge';
 
 import {
   libraryV2AlbumQueryOptions,
+  libraryV2AcquisitionImportsQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
   libraryV2PlaylistQueryOptions,
@@ -13,6 +16,12 @@ import { LibraryV2Page } from './-ui/library-v2-page';
 
 export const Route = createFileRoute('/library-v2')({
   validateSearch: libraryV2SearchSchema,
+  beforeLoad: ({ context }) => {
+    const { bridge } = context.shell;
+    if (!bridge.isPageAllowed('library-v2')) {
+      throw redirect({ href: getProfileHomePath(bridge), replace: true });
+    }
+  },
   loaderDeps: ({ search }) => ({
     q: search.q,
     sort: search.sort,
@@ -37,6 +46,8 @@ export const Route = createFileRoute('/library-v2')({
       void context.queryClient.prefetchQuery(
         libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),
       );
+    } else if (deps.section === 'import-review') {
+      void context.queryClient.prefetchQuery(libraryV2AcquisitionImportsQueryOptions());
     } else if (deps.album) {
       void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
     } else {

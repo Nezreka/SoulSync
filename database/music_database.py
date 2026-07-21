@@ -4958,17 +4958,28 @@ class MusicDatabase:
             return False
         inserted = self.insert_listening_events([event])
         db_id = event.get('db_track_id')
-        if db_id is not None:
+        lib2_id = event.get('lib2_track_id')
+        if db_id is not None or lib2_id is not None:
             conn = None
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                cursor.execute("""
-                    UPDATE tracks
-                    SET play_count = COALESCE(play_count, 0) + 1,
-                        last_played = ?
-                    WHERE id = ?
-                """, (event.get('played_at'), db_id))
+                if db_id is not None:
+                    cursor.execute("""
+                        UPDATE tracks
+                        SET play_count = COALESCE(play_count, 0) + 1,
+                            last_played = ?
+                        WHERE id = ?
+                    """, (event.get('played_at'), db_id))
+                if lib2_id is not None and cursor.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_tracks'"
+                ).fetchone():
+                    cursor.execute("""
+                        UPDATE lib2_tracks
+                        SET play_count = COALESCE(play_count, 0) + 1,
+                            last_played = ?, updated_at=CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (event.get('played_at'), lib2_id))
                 conn.commit()
             except Exception as e:
                 logger.error(f"Error bumping play_count for track {db_id}: {e}")
@@ -9757,10 +9768,39 @@ class MusicDatabase:
                 ).fetchone()
                 if exists is not None:
                     conn.execute(
-                        f"UPDATE {table} SET quality_profile_id=? "
+                        f"UPDATE {table} SET quality_profile_id=?, "
+                        "quality_profile_explicit=0 "
                         "WHERE quality_profile_id=?",
                         (replacement_id, profile_id),
                     )
+            # Re-project every inherited row top-down. An explicitly assigned
+            # album/track that lost its deleted profile must inherit its
+            # parent, not remain pinned to the replacement that happened to
+            # be the app default at deletion time.
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='lib2_albums'"
+            ).fetchone():
+                conn.execute(
+                    """UPDATE lib2_albums
+                          SET quality_profile_id=COALESCE(
+                              (SELECT a.quality_profile_id FROM lib2_artists a
+                                WHERE a.id=lib2_albums.primary_artist_id), ?)
+                        WHERE COALESCE(quality_profile_explicit, 0)=0""",
+                    (replacement_id,),
+                )
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='lib2_tracks'"
+            ).fetchone():
+                conn.execute(
+                    """UPDATE lib2_tracks
+                          SET quality_profile_id=COALESCE(
+                              (SELECT al.quality_profile_id FROM lib2_albums al
+                                WHERE al.id=lib2_tracks.album_id), ?)
+                        WHERE COALESCE(quality_profile_explicit, 0)=0""",
+                    (replacement_id,),
+                )
             cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (profile_id,))
             conn.commit()
             if cur.rowcount == 0:
@@ -11093,8 +11133,16 @@ class MusicDatabase:
                 row = cursor.fetchone()
                 if not row:
                     return None
-                external_ids = [row[c] for c in id_cols if row[c]]
-                return {"name": row["artist_name"], "external_ids": external_ids}
+                provider_ids = {
+                    c.removesuffix('_artist_id'): row[c]
+                    for c in id_cols if row[c]
+                }
+                return {
+                    "name": row["artist_name"],
+                    "provider_ids": provider_ids,
+                    # Kept for rollback/read compatibility with older workers.
+                    "external_ids": list(provider_ids.values()),
+                }
         except Exception as e:
             logger.debug(f"get_watchlist_artist_descriptor failed (ID: {artist_id}): {e}")
             return None

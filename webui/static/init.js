@@ -526,10 +526,13 @@ function isPageAllowed(pageId) {
     if (currentProfile.id === 1) return true;
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
-    // Library v2 is an experimental opt-in gated by the features.library_v2 flag
-    // (the nav entry only shows when enabled), so don't also gate it on per-profile
-    // page permissions — treat it as reachable like help/issues.
-    if (normalizedPageId === 'library-v2') return true;
+    // Library v2 replaces the legacy Library surface and therefore inherits
+    // that page permission.  It must not become a permission bypass merely
+    // because its route id differs from the persisted `library` page id.
+    if (normalizedPageId === 'library-v2') {
+        const ap = normalizeProfilePageList(currentProfile.allowed_pages);
+        return !ap || ap.includes('library') || ap.includes('library-v2');
+    }
     if (normalizedPageId === 'settings') return currentProfile.is_admin;
     if (normalizedPageId === 'artist-detail') {
         const ap = normalizeProfilePageList(currentProfile.allowed_pages);
@@ -1406,8 +1409,7 @@ function updateProfileIndicator() {
         } else if (currentProfile.id === 1) {
             btn.style.display = ''; // Root admin sees all
         } else {
-            const ap = currentProfile.allowed_pages;
-            btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
+            btn.style.display = isPageAllowed(page) ? '' : 'none';
         }
     });
 
@@ -2866,16 +2868,19 @@ async function _continueAppInit() {
     initApp();
 }
 
-// Reveal the experimental "Library v2" nav entry only when the
-// features.library_v2 flag is enabled. Self-contained + fail-safe: any error
-// just leaves the entry hidden (its default), never blocking app init.
+// Reveal the native Library v2 entry after the server confirms availability
+// and the active profile owns the persisted `library` page permission.
 function revealLibraryV2NavIfEnabled() {
     const navEl = document.getElementById('library-v2-nav');
     if (!navEl) return;
     fetch('/api/library/v2/enabled')
         .then(r => r.ok ? r.json() : null)
         .then(data => {
-            if (data && data.enabled) navEl.style.display = '';
+            if (data && data.enabled && isPageAllowed('library-v2')) {
+                navEl.style.display = '';
+            } else {
+                navEl.style.display = 'none';
+            }
         })
         .catch(() => { /* leave hidden */ });
 }

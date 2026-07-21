@@ -264,21 +264,6 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         except Exception as e:
             logger.debug("blacklist check failed: %s", e)
         
-        # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
-        # This must happen BEFORE starting download to prevent multiple retries from picking same source
-        used_sources_snapshot = None
-        with tasks_lock:
-            if task_id in download_tasks:
-                download_tasks[task_id]['used_sources'].add(source_key)
-                logger.info(f"[Modal Worker] Marked source as used before download attempt: {source_key}")
-                if acquisition_walk_ref:
-                    used_sources_snapshot = set(download_tasks[task_id]['used_sources'])
-        if used_sources_snapshot is not None:
-            # Acquisition walks persist every retry-relevant fact BEFORE
-            # external work starts, so a restart cannot re-pick this source
-            # (docs/library-v2.md §8). Fail-open, outside tasks_lock.
-            _persist_acquisition_used_sources(task_id, used_sources_snapshot)
-
         logger.info(f"[Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
         
         try:
@@ -428,6 +413,24 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         if task_id in download_tasks:
                             download_tasks[task_id]['status'] = 'searching'
                     continue
+            # Consume the candidate only after every local/acquisition gate
+            # has prepared successfully, but still before external dispatch.
+            # A transient preparation failure remains retryable; the lock and
+            # active-download check continue to prevent overlapping picks.
+            used_sources_snapshot = None
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['used_sources'].add(source_key)
+                    logger.info(
+                        "[Modal Worker] Marked prepared source as used: %s",
+                        source_key,
+                    )
+                    if acquisition_walk_ref:
+                        used_sources_snapshot = set(
+                            download_tasks[task_id]['used_sources']
+                        )
+            if used_sources_snapshot is not None:
+                _persist_acquisition_used_sources(task_id, used_sources_snapshot)
             try:
                 download_id = deps.run_async(
                     deps.download_orchestrator.download(username, filename, size))

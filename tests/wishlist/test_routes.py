@@ -388,6 +388,25 @@ def test_remove_track_reverse_syncs_captured_descriptor(monkeypatch):
     assert calls == [(db, tracks, 1)]
 
 
+def test_remove_composite_reverse_syncs_only_requested_album(monkeypatch):
+    tracks = [
+        {"spotify_track_id": "same::album-a", "source_info": {"lib2_track_id": 41}},
+        {"spotify_track_id": "same::album-b", "source_info": {"lib2_track_id": 42}},
+    ]
+    runtime, service, db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+    service.database = db
+    captured = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda _db, _cfg, descriptors, profile_id=1: captured.extend(descriptors),
+    )
+
+    payload, status = remove_track_from_wishlist(runtime, "same::album-a")
+
+    assert status == 200 and payload["success"] is True
+    assert [row["spotify_track_id"] for row in captured] == ["same::album-a"]
+
+
 def test_clear_wishlist_reverse_syncs_every_captured_descriptor(monkeypatch):
     tracks = [
         {"spotify_track_id": "track-1", "source_info": {"lib2_track_id": 1}},

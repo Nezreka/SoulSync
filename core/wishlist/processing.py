@@ -961,21 +961,56 @@ def _normalize_track_scope(track_ids: Iterable[Any]) -> set[str]:
     return {
         normalized
         for value in track_ids
-        if (normalized := _bare_scope_track_id(value))
+        if (normalized := str(value or '').strip())
     }
 
 
-def _track_in_scope(track: Dict[str, Any], track_ids: set[str]) -> bool:
+def _track_scope_identities(track: Dict[str, Any]) -> set[str]:
     nested = track.get('track_data') or track.get('spotify_data') or {}
     if not isinstance(nested, dict):
         nested = {}
-    candidates = (
+    candidates = {
+        str(value).strip()
+        for value in (
         track.get('track_id'),
         track.get('spotify_track_id'),
         track.get('id'),
         nested.get('id'),
-    )
-    return any(_bare_scope_track_id(value) in track_ids for value in candidates if value)
+        )
+        if value
+    }
+    album = nested.get('album') if isinstance(nested, dict) else None
+    album_id = album.get('id') if isinstance(album, dict) else None
+    if album_id:
+        candidates.update(
+            f'{_bare_scope_track_id(value)}::{album_id}'
+            for value in tuple(candidates)
+            if _bare_scope_track_id(value)
+        )
+    return candidates
+
+
+def _tracks_in_scope(
+    tracks: Iterable[Dict[str, Any]], track_ids: set[str]
+) -> List[Dict[str, Any]]:
+    """Resolve composite scope exactly; accept legacy bare ids only uniquely."""
+    rows = list(tracks)
+    identities = [_track_scope_identities(track) for track in rows]
+    exact = {value for value in track_ids if '::' in value}
+    bare = {value for value in track_ids if '::' not in value}
+    bare_matches: Dict[str, List[int]] = {value: [] for value in bare}
+    for index, row_ids in enumerate(identities):
+        row_bases = {_bare_scope_track_id(value) for value in row_ids}
+        for value in bare & row_bases:
+            bare_matches[value].append(index)
+    unique_indexes = {
+        indexes[0] for indexes in bare_matches.values() if len(indexes) == 1
+    }
+    return [
+        track
+        for index, (track, row_ids) in enumerate(zip(rows, identities))
+        if row_ids & exact or index in unique_indexes
+    ]
 
 
 def process_wishlist_automatically(
@@ -1047,8 +1082,7 @@ def process_wishlist_automatically(
                             # whatever runtime.profile_id happens to be set to.
                             track['_wishlist_profile_id'] = profile['id']
                         raw_wishlist_tracks.extend(
-                            track for track in profile_tracks
-                            if _track_in_scope(track, requested_track_ids)
+                            _tracks_in_scope(profile_tracks, requested_track_ids)
                         )
                     count = len(raw_wishlist_tracks)
                 else:

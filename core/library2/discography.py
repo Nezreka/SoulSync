@@ -355,7 +355,9 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
     return _aggregate_group_stats(artist_id, per_member)
 
 
-def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
+def _expand_artist_discography(
+    database, artist_id: int, *, defer_auto_monitor: bool = False,
+) -> Dict[str, Any]:
     """Fetch + persist the artist's full discography. Returns stats.
 
     Safe to re-run: existing rows are enriched, not duplicated; pruning only
@@ -540,20 +542,21 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                    VALUES(?,?,?,?,?,?,?,?,?,?, 'discography', ?, ?)""",
                 (artist_id, title, album_type, release_date, year, spotify_id,
                  external_ids, image_url, track_count, track_count,
-                 1 if auto_monitor_release else 0,
+                 1 if auto_monitor_release and not defer_auto_monitor else 0,
                  artist["quality_profile_id"] or fallback_profile),
             )
             new_id = cursor.lastrowid
             seen_ids.add(new_id)
             if auto_monitor_release:
-                cursor.execute(
-                    "UPDATE lib2_albums SET tracklist_status='pending', "
-                    "tracklist_error=NULL, tracklist_retry_at=NULL WHERE id=?",
-                    (new_id,),
-                )
-                from core.library2.monitor_rules import (
-                    PROVENANCE_NEW_RELEASE, record_rule)
-                record_rule(conn, "album", new_id, True, PROVENANCE_NEW_RELEASE)
+                if not defer_auto_monitor:
+                    cursor.execute(
+                        "UPDATE lib2_albums SET tracklist_status='pending', "
+                        "tracklist_error=NULL, tracklist_retry_at=NULL WHERE id=?",
+                        (new_id,),
+                    )
+                    from core.library2.monitor_rules import (
+                        PROVENANCE_NEW_RELEASE, record_rule)
+                    record_rule(conn, "album", new_id, True, PROVENANCE_NEW_RELEASE)
                 stats["auto_monitor_album_ids"].append(new_id)
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
@@ -871,14 +874,20 @@ def repair_incomplete_library_tracklists(
 
 def _refresh_one_artist(
     database, artist_id: int, config_manager, *, wishlist_profile_id: int,
+    auto_monitor: bool = True,
 ) -> tuple[Dict[str, Any], int]:
     """The original single-artist refresh sequence, unchanged: one lock held
     across fetch + auto-monitor + track-number-collision repair."""
     with _sync_lock(database, artist_id):
-        stats = _expand_artist_discography(database, artist_id)
+        stats = (
+            _expand_artist_discography(database, artist_id)
+            if auto_monitor
+            else _expand_artist_discography(
+                database, artist_id, defer_auto_monitor=True)
+        )
         album_ids = stats.get("auto_monitor_album_ids") or []
         mirrored = 0
-        if album_ids:
+        if album_ids and auto_monitor:
             mirrored = auto_monitor_releases(
                 database,
                 config_manager,
@@ -898,6 +907,7 @@ def refresh_artist_discography(
     config_manager,
     *,
     wishlist_profile_id: int = 1,
+    auto_monitor: bool = True,
 ) -> tuple[Dict[str, Any], int]:
     """Run snapshot refresh and its auto-monitor side effects as one sequence.
 
@@ -910,7 +920,8 @@ def refresh_artist_discography(
     members = _resolve_group(database, artist_id)
     if len(members) == 1:
         return _refresh_one_artist(
-            database, artist_id, config_manager, wishlist_profile_id=wishlist_profile_id)
+            database, artist_id, config_manager,
+            wishlist_profile_id=wishlist_profile_id, auto_monitor=auto_monitor)
 
     per_member: Dict[int, Dict[str, Any]] = {}
     total_mirrored = 0
@@ -918,7 +929,8 @@ def refresh_artist_discography(
     for member_id in members:
         try:
             member_stats, member_mirrored = _refresh_one_artist(
-                database, member_id, config_manager, wishlist_profile_id=wishlist_profile_id)
+                database, member_id, config_manager,
+                wishlist_profile_id=wishlist_profile_id, auto_monitor=auto_monitor)
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Alias-group discography refresh failed for artist %s "

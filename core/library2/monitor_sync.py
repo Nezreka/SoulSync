@@ -46,8 +46,48 @@ logger = get_logger("library2.monitor_sync")
 # ---------------------------------------------------------------------------
 
 
+_WATCHLIST_ID_COLUMNS = {
+    "spotify_artist_id": "spotify",
+    "itunes_artist_id": "itunes",
+    "deezer_artist_id": "deezer",
+    "discogs_artist_id": "discogs",
+    "amazon_artist_id": "amazon",
+    "musicbrainz_artist_id": "musicbrainz",
+}
+
+
+def _artist_identity_matches(
+    candidate_name: Optional[str],
+    candidate_ids: Mapping[str, Any],
+    watchlist_name: Optional[str],
+    watchlist_ids: Mapping[str, Any],
+) -> bool:
+    """Namespace-aware artist match with conflict-safe name fallback."""
+    from core.library2.importer import normalize_name
+
+    candidate = {
+        str(source).lower(): str(value).strip()
+        for source, value in (candidate_ids or {}).items() if str(value or "").strip()
+    }
+    watched = {
+        str(source).lower(): str(value).strip()
+        for source, value in (watchlist_ids or {}).items() if str(value or "").strip()
+    }
+    shared = set(candidate) & set(watched)
+    if any(candidate[source] == watched[source] for source in shared):
+        return True
+    # A same-name fallback must never overrule a contradictory strong id in
+    # the same namespace (two artists called the same thing, different Spotify ids).
+    if any(candidate[source] != watched[source] for source in shared):
+        return False
+    return bool(
+        normalize_name(candidate_name)
+        and normalize_name(candidate_name) == normalize_name(watchlist_name)
+    )
+
+
 def _match_lib2_artists(
-    conn, external_ids: Sequence[str], name: Optional[str]
+    conn, external_ids: Any, name: Optional[str]
 ) -> List[int]:
     """lib2 artist ids matching a removed Watchlist row.
 
@@ -57,28 +97,38 @@ def _match_lib2_artists(
     name act as a fallback (the same name-equality the legacy manual-match
     bridge accepts, ``web_server._watchlist_row_matches_legacy_artist``).
     """
-    exts = [str(e) for e in external_ids if e]
+    from core.library2.provider_ids import source_ids_from_values
+
+    qualified = (
+        {str(k).lower(): str(v) for k, v in external_ids.items() if v}
+        if isinstance(external_ids, Mapping) else {}
+    )
+    exts = [str(e) for e in (external_ids or []) if e] if not qualified else []
     ids: set[int] = set()
-    if exts:
-        marks = ",".join("?" for _ in exts)
-        for row in conn.execute(
-            f"""SELECT id FROM lib2_artists
-                 WHERE spotify_id IN ({marks}) OR musicbrainz_id IN ({marks})""",
-            (*exts, *exts),
-        ):
-            ids.add(int(row["id"]))
-        wanted_ext = set(exts)
-        for row in conn.execute(
-            "SELECT id, external_ids FROM lib2_artists "
-            "WHERE external_ids IS NOT NULL AND external_ids NOT IN ('', '{}')"
-        ):
-            try:
-                values = {str(v) for v in json.loads(row["external_ids"]).values()}
-            except Exception:  # noqa: BLE001
-                continue
-            if values & wanted_ext:
+    rows = conn.execute(
+        "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
+    ).fetchall()
+    if qualified:
+        for row in rows:
+            candidate_ids = source_ids_from_values(
+                spotify_id=row["spotify_id"],
+                musicbrainz_id=row["musicbrainz_id"],
+                external_ids=row["external_ids"],
+            )
+            if _artist_identity_matches(row["name"], candidate_ids, name, qualified):
                 ids.add(int(row["id"]))
-    if name and not ids:
+    elif exts:
+        # Backward compatibility for descriptors captured by older builds.
+        wanted_ext = set(exts)
+        for row in rows:
+            candidate_ids = source_ids_from_values(
+                spotify_id=row["spotify_id"],
+                musicbrainz_id=row["musicbrainz_id"],
+                external_ids=row["external_ids"],
+            )
+            if wanted_ext & {str(value) for value in candidate_ids.values()}:
+                ids.add(int(row["id"]))
+    if name and not ids and not qualified:
         # A9: a bare name match is a weak fallback — only usable when it
         # resolves to exactly ONE lib2 artist. Two rows sharing the removed
         # watchlist name (genuine same-name artists, or an unmerged
@@ -211,18 +261,22 @@ def _provider_ids(value: Any) -> Dict[str, str]:
 def _descriptor_lib2_track_ids(
     conn: Any, descriptors: Sequence[Mapping[str, Any]],
 ) -> List[int]:
-    """Resolve removed Wishlist rows to Library-v2 tracks by strong identity."""
-    direct_ids: set[int] = set()
-    stable_ids: set[str] = set()
-    generic_ids: set[str] = set()
-    qualified_ids: Dict[str, set[str]] = {}
+    """Resolve each removed Wishlist row without widening composite identity.
 
-    def add_qualified(source: Any, provider_id: Any) -> None:
-        source_key = str(source or "").strip().lower()
-        value = str(provider_id or "").strip()
-        if source_key and value and source_key != "library_v2":
-            qualified_ids.setdefault(source_key, set()).add(value)
-
+    Embedded lib2/stable ids are terminal. Provider fallbacks are accepted
+    only when unique, or when the composite album suffix uniquely identifies
+    one release of a shared recording.
+    """
+    matched: set[int] = set()
+    rows = conn.execute(
+        """SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids,
+                  t.isrc, t.stable_id, al.spotify_id AS album_spotify_id,
+                  al.musicbrainz_id AS album_musicbrainz_id,
+                  al.external_ids AS album_external_ids,
+                  al.stable_id AS album_stable_id
+             FROM lib2_tracks t
+             JOIN lib2_albums al ON al.id=t.album_id"""
+    ).fetchall()
     for descriptor in descriptors:
         if not isinstance(descriptor, Mapping):
             continue
@@ -233,9 +287,23 @@ def _descriptor_lib2_track_ids(
         raw_lib2_id = source_info.get("lib2_track_id") or descriptor.get("lib2_track_id")
         try:
             if raw_lib2_id is not None:
-                direct_ids.add(int(raw_lib2_id))
+                direct = conn.execute(
+                    "SELECT id FROM lib2_tracks WHERE id=?", (int(raw_lib2_id),)
+                ).fetchone()
+                if direct:
+                    matched.add(int(direct[0]))
+                    continue
         except (TypeError, ValueError):
             pass
+
+        qualified_ids: Dict[str, set[str]] = {}
+        generic_ids: set[str] = set()
+
+        def add_qualified(source: Any, provider_id: Any) -> None:
+            source_key = str(source or "").strip().lower()
+            value = str(provider_id or "").strip()
+            if source_key and value and source_key != "library_v2":
+                qualified_ids.setdefault(source_key, set()).add(value)
 
         for values in (
             source_info.get("track_provider_ids"),
@@ -250,9 +318,33 @@ def _descriptor_lib2_track_ids(
             or descriptor.get("track_id")
             or track_data.get("id")
         )
-        raw_id = str(raw_id or "").split("::", 1)[0].strip()
+        raw_key = str(raw_id or "").strip()
+        raw_id, _, album_identity = raw_key.partition("::")
+        raw_id = raw_id.strip()
+        album_identity = album_identity.strip()
+        if not album_identity:
+            album_data = _as_mapping(track_data.get("album"))
+            album_candidates = [
+                album_data.get("id"),
+                source_info.get("album_id"),
+                descriptor.get("album_id"),
+            ]
+            album_candidates.extend(_provider_ids(
+                album_data.get("provider_ids") or album_data.get("external_ids")
+            ).values())
+            album_identity = next(
+                (str(value).strip() for value in album_candidates
+                 if str(value or "").strip()),
+                "",
+            )
         if raw_id.startswith("lib2-track:"):
-            stable_ids.add(raw_id.removeprefix("lib2-track:"))
+            stable = raw_id.removeprefix("lib2-track:")
+            direct = conn.execute(
+                "SELECT id FROM lib2_tracks WHERE stable_id=?", (stable,)
+            ).fetchone()
+            if direct:
+                matched.add(int(direct[0]))
+                continue
         elif raw_id:
             source = (
                 track_data.get("provider")
@@ -265,32 +357,39 @@ def _descriptor_lib2_track_ids(
             else:
                 generic_ids.add(raw_id)
 
-    matched: set[int] = set()
-    if direct_ids:
-        marks = ",".join("?" for _ in direct_ids)
-        matched.update(int(row[0]) for row in conn.execute(
-            f"SELECT id FROM lib2_tracks WHERE id IN ({marks})", sorted(direct_ids),
-        ))
-    rows = conn.execute(
-        "SELECT id, spotify_id, musicbrainz_id, external_ids, isrc, stable_id "
-        "FROM lib2_tracks"
-    ).fetchall()
-    for row in rows:
-        if row["stable_id"] and str(row["stable_id"]) in stable_ids:
-            matched.add(int(row["id"]))
-            continue
-        row_ids = _provider_ids(row["external_ids"])
-        if row["spotify_id"]:
-            row_ids.setdefault("spotify", str(row["spotify_id"]))
-        if row["musicbrainz_id"]:
-            row_ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
-        if row["isrc"]:
-            row_ids.setdefault("isrc", str(row["isrc"]))
-        if any(
-            row_ids.get(source) in provider_values
-            for source, provider_values in qualified_ids.items()
-        ) or generic_ids.intersection(row_ids.values()):
-            matched.add(int(row["id"]))
+        candidates = []
+        for row in rows:
+            row_ids = _provider_ids(row["external_ids"])
+            if row["spotify_id"]:
+                row_ids.setdefault("spotify", str(row["spotify_id"]))
+            if row["musicbrainz_id"]:
+                row_ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+            if row["isrc"]:
+                row_ids.setdefault("isrc", str(row["isrc"]))
+            if any(
+                row_ids.get(source) in provider_values
+                for source, provider_values in qualified_ids.items()
+            ) or generic_ids.intersection(row_ids.values()):
+                candidates.append(row)
+
+        if len(candidates) > 1 and album_identity:
+            narrowed = []
+            for row in candidates:
+                album_ids = set(_provider_ids(row["album_external_ids"]).values())
+                album_ids.update(str(value) for value in (
+                    row["album_spotify_id"], row["album_musicbrainz_id"],
+                    row["album_stable_id"],
+                ) if value)
+                if album_identity in album_ids:
+                    narrowed.append(row)
+            candidates = narrowed
+        if len(candidates) == 1:
+            matched.add(int(candidates[0]["id"]))
+        elif len(candidates) > 1:
+            logger.warning(
+                "Wishlist removal identity %r matched %d Library-v2 tracks; "
+                "skipping ambiguous provider fallback", raw_key, len(candidates),
+            )
     return sorted(matched)
 
 
@@ -391,16 +490,15 @@ def sync_watchlist_removal(
     raises — a reverse-sync hiccup must not fail the user's watchlist removal.
     """
     try:
-        if config_manager is not None and \
-                config_manager.get("features.library_v2", True) is not True:
-            return {"matched": 0, "demonitored": 0}
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
         if not _is_admin_profile(profile_id):
             return {"matched": 0, "demonitored": 0}
         if not descriptor:
             return {"matched": 0, "demonitored": 0}
         return demonitor_lib2_artists_for_removed_watchlist(
             db,
-            descriptor.get("external_ids") or [],
+            descriptor.get("provider_ids") or descriptor.get("external_ids") or [],
             descriptor.get("name"),
             profile_id=profile_id,
         )
@@ -418,9 +516,8 @@ def sync_wishlist_removal(
 ) -> Dict[str, int]:
     """Feature-gated, best-effort adapter for user-facing Wishlist removes."""
     try:
-        if config_manager is not None and \
-                config_manager.get("features.library_v2", True) is not True:
-            return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
         if not _is_admin_profile(profile_id) or not descriptors:
             return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
         return demonitor_lib2_tracks_for_removed_wishlist(
@@ -438,25 +535,15 @@ def sync_wishlist_removal(
 
 def _watchlist_artist_snapshot(
     conn: Any, *, profile_id: int,
-) -> tuple[bool, set[str], set[str]]:
-    """Return normalized names and provider-id values in the Watchlist."""
+) -> tuple[bool, list[dict[str, Any]]]:
+    """Return per-row namespaced identities from the Watchlist."""
     try:
         columns = {
             str(row[1]) for row in conn.execute("PRAGMA table_info(watchlist_artists)")
         }
         if not columns:
-            return False, set(), set()
-        id_columns = [
-            column for column in (
-                "spotify_artist_id",
-                "itunes_artist_id",
-                "deezer_artist_id",
-                "discogs_artist_id",
-                "amazon_artist_id",
-                "musicbrainz_artist_id",
-            )
-            if column in columns
-        ]
+            return False, []
+        id_columns = [column for column in _WATCHLIST_ID_COLUMNS if column in columns]
         select = ["artist_name", *id_columns]
         sql = f"SELECT {', '.join(select)} FROM watchlist_artists"
         params: tuple[Any, ...] = ()
@@ -465,19 +552,16 @@ def _watchlist_artist_snapshot(
             params = (int(profile_id),)
         rows = conn.execute(sql, params).fetchall()
     except Exception:  # noqa: BLE001 - fresh/test DB without legacy tables
-        return False, set(), set()
-    from core.library2.importer import normalize_name
-    names = {
-        normalize_name(row["artist_name"])
-        for row in rows if str(row["artist_name"] or "").strip()
-    }
-    ids = {
-        str(row[column]).strip()
-        for row in rows
-        for column in id_columns
-        if row[column] is not None and str(row[column]).strip()
-    }
-    return True, names, ids
+        return False, []
+    entries = [{
+        "name": row["artist_name"],
+        "provider_ids": {
+            _WATCHLIST_ID_COLUMNS[column]: str(row[column]).strip()
+            for column in id_columns
+            if row[column] is not None and str(row[column]).strip()
+        },
+    } for row in rows]
+    return True, entries
 
 
 def artist_is_watchlisted(
@@ -493,21 +577,15 @@ def artist_is_watchlisted(
     Missing legacy tables fail closed to unmonitored; provider identity wins,
     with the same case-insensitive name fallback used by the repair pass.
     """
-    available, watchlist_names, watchlist_ids = _watchlist_artist_snapshot(
+    available, watchlist_entries = _watchlist_artist_snapshot(
         conn, profile_id=profile_id,
     )
     if not available:
         return False
-    from core.library2.importer import normalize_name
-    normalized_name = normalize_name(name)
-    ids = {
-        str(value).strip()
-        for value in (provider_ids or {}).values()
-        if value is not None and str(value).strip()
-    }
-    return bool(
-        (normalized_name and normalized_name in watchlist_names)
-        or ids.intersection(watchlist_ids)
+    return any(
+        _artist_identity_matches(
+            name, provider_ids or {}, entry["name"], entry["provider_ids"])
+        for entry in watchlist_entries
     )
 
 
@@ -531,7 +609,7 @@ def reconcile_artist_watchlist(
 
     conn = db._get_connection()
     try:
-        watchlist_available, watchlist_names, watchlist_ids = _watchlist_artist_snapshot(
+        watchlist_available, watchlist_entries = _watchlist_artist_snapshot(
             conn, profile_id=profile_id,
         )
         if not watchlist_available:
@@ -575,9 +653,10 @@ def reconcile_artist_watchlist(
                 musicbrainz_id=row["musicbrainz_id"],
                 external_ids=row["external_ids"],
             )
-            on_watchlist = (
-                normalize_name(row["name"]) in watchlist_names
-                or bool({str(value) for value in ids.values()} & watchlist_ids)
+            on_watchlist = any(
+                _artist_identity_matches(
+                    row["name"], ids, entry["name"], entry["provider_ids"])
+                for entry in watchlist_entries
             )
             explicit = row["rule_provenance"] == PROVENANCE_USER
             desired = bool(row["rule_monitored"]) if explicit else on_watchlist
@@ -648,30 +727,30 @@ def reconcile_artist_watchlist(
 def _wishlisted_lib2_track_ids(conn, *, profile_id: int) -> List[int]:
     """lib2 track ids currently represented in the legacy Wishlist.
 
-    Library-v2 wishlist rows carry ``lib2_track_id`` in their ``source_info``
-    JSON (``wishlist_mirror.track_wishlist_payload``). Parsed in Python because
-    the payload is opaque JSON; the ``LIKE`` prefilter keeps it cheap.
+    New rows carry ``lib2_track_id`` in ``source_info``. Older rows can contain
+    a bare or album-qualified provider id without that marker, so feed every
+    available identity field through the same ambiguity-safe resolver used by
+    reverse Wishlist sync. Otherwise each reconcile run re-adds an already
+    present legacy row under a second identity.
     """
-    ids: set[int] = set()
     try:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(wishlist_tracks)").fetchall()
+        }
+        wanted_columns = (
+            "spotify_track_id", "spotify_data", "source_info",
+        )
+        selected = [name for name in wanted_columns if name in columns]
+        if "spotify_track_id" not in selected:
+            return []
         rows = conn.execute(
-            "SELECT source_info FROM wishlist_tracks "
-            "WHERE profile_id=? AND source_info LIKE '%library_v2%'",
+            f"SELECT {', '.join(selected)} FROM wishlist_tracks WHERE profile_id=?",
             (int(profile_id),),
         ).fetchall()
     except Exception:  # noqa: BLE001 — table absent (fresh install / test DB)
         return []
-    for row in rows:
-        try:
-            info = json.loads(row["source_info"] or "{}")
-        except Exception:  # noqa: BLE001
-            continue
-        tid = info.get("lib2_track_id")
-        if isinstance(tid, int):
-            ids.add(tid)
-        elif isinstance(tid, str) and tid.isdigit():
-            ids.add(int(tid))
-    return sorted(ids)
+    return _descriptor_lib2_track_ids(conn, [dict(row) for row in rows])
 
 
 def reconcile_track_wishlist(

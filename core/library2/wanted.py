@@ -230,8 +230,8 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
 def entity_track_ids(conn: Any, entity: str, entity_id: int) -> List[int]:
     """All lib2 track ids belonging to one artist/album/track.
 
-    Artists scope through the PRIMARY-artist chain — the same chain the
-    projection's artist tier reads; featured credits don't inherit rules.
+    Artists scope through every PRIMARY-artist chain in the alias group — the
+    same scope presented by artist detail; featured credits don't inherit rules.
     """
     if entity in ("track", "tracks"):
         return [int(entity_id)]
@@ -239,10 +239,14 @@ def entity_track_ids(conn: Any, entity: str, entity_id: int) -> List[int]:
         return [r[0] for r in conn.execute(
             "SELECT id FROM lib2_tracks WHERE album_id=?", (int(entity_id),))]
     if entity in ("artist", "artists"):
+        from core.library2.artist_aliases import resolve_alias_group
+
+        artist_ids = resolve_alias_group(conn, entity_id)
+        marks = ",".join("?" for _ in artist_ids)
         return [r[0] for r in conn.execute(
             """SELECT t.id FROM lib2_tracks t
                JOIN lib2_albums al ON al.id = t.album_id
-              WHERE al.primary_artist_id=?""", (int(entity_id),))]
+              WHERE al.primary_artist_id IN (""" + marks + ")", artist_ids)]
     return []
 
 

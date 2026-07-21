@@ -6623,7 +6623,7 @@ function _gsRenderFromState(state) {
 
     if (dbArtists.length) {
         h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
-        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, null) : '#'}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
+        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.library_v2_id ? `/library-v2?artist=${encodeURIComponent(a.library_v2_id)}` : (a.id ? buildArtistDetailPath(a.id, null) : '#')}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
         h += '</div>';
     }
 

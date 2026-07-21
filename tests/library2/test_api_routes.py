@@ -111,6 +111,7 @@ def api(tmp_path):
     # ADR-01: lib2 writes are admin-only (profile 1). Tests flip this to a
     # non-admin id to probe the rejection path.
     db.active_profile = 1
+    db.library_page_allowed = True
     db.config = {"features.library_v2": True}
     db.acquisition_search_adapters = []
     db.acquisition_submission_adapters = {}
@@ -122,6 +123,7 @@ def api(tmp_path):
         config_get=lambda key, default=None: db.config.get(key, default),
         config_manager=None,
         profile_id_getter=lambda: db.active_profile,
+        profile_page_allowed_getter=lambda _page: db.library_page_allowed,
         acquisition_search_adapters_getter=(
             lambda _criteria: db.acquisition_search_adapters),
         acquisition_async_runner=asyncio.run,
@@ -136,6 +138,73 @@ def api(tmp_path):
 
 def _conn(db: FakeDB) -> sqlite3.Connection:
     return db._get_connection()
+
+
+def test_library_page_permission_guards_api_reads(api):
+    client, db, _ids = api
+    db.active_profile = 7
+    db.library_page_allowed = False
+
+    enabled = client.get("/api/library/v2/enabled")
+    artists = client.get("/api/library/v2/artists")
+
+    assert enabled.get_json()["enabled"] is False
+    assert artists.status_code == 403
+    assert "not allowed" in artists.get_json()["error"]
+
+
+def test_artist_alias_group_monitor_and_quality_profile_are_atomic_scope(api):
+    client, db, ids = api
+    conn = _conn(db)
+    alias_id = conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name, spotify_id) VALUES(?,?,?)",
+        ("Drake Alias", "Drake Alias", "sp-drake-alias"),
+    ).lastrowid
+    alias_album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?,?)",
+        (alias_id, "Alias Album"),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+        (alias_album, alias_id),
+    )
+    alias_track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, spotify_id) VALUES(?,?,?)",
+        (alias_album, "Alias Track", "sp-alias-track"),
+    ).lastrowid
+    from core.library2.artist_aliases import link_artist_alias
+
+    link_artist_alias(conn, alias_id, ids["artist"])
+    profile_id = conn.execute(
+        "SELECT id FROM quality_profiles ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    conn.commit()
+    conn.close()
+
+    monitor = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/monitor",
+        json={"monitored": True},
+    )
+    quality = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json={"quality_profile_id": profile_id},
+    )
+
+    assert monitor.status_code == 200
+    assert quality.status_code == 200
+    conn = _conn(db)
+    assert [row[0] for row in conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE id IN (?,?) ORDER BY id",
+        (ids["artist"], alias_id),
+    )] == [1, 1]
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_artists WHERE id=?", (alias_id,)
+    ).fetchone()[0] == profile_id
+    assert conn.execute(
+        "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1",
+        (alias_track,),
+    ).fetchone()[0] == 1
+    conn.close()
 
 
 def test_canonical_api_rejects_chains_and_invalid_ids(api):

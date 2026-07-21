@@ -73,12 +73,15 @@ describe('library v2 track play button (H1)', () => {
 
     expect(window.SoulSyncWebShellBridge?.playLibraryTrack).toHaveBeenCalledWith(
       {
-        id: 7,
+        id: null,
+        lib2_track_id: 7,
+        legacy_track_id: null,
+        server_track_id: null,
         title: 'Track Title',
         file_path: '/music/track.flac',
         bitrate: 1234,
-        artist_id: 3,
-        album_id: 42,
+        artist_id: null,
+        album_id: null,
       },
       'Some Album',
       'Some Artist',

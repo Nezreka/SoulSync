@@ -255,8 +255,8 @@ def lib2_quality_profile_for_artist(database, artist_name: str) -> Optional[int]
         return None
     try:
         from config.settings import config_manager
-        if config_manager.get("features.library_v2", True) is not True:
-            return None
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
         from .importer import normalize_name
         key = normalize_name(artist_name)
         conn = database._get_connection()

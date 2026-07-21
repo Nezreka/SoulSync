@@ -71,11 +71,8 @@ class MonitoringListReconcileJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        try:
-            if context.config_manager.get("features.library_v2", True) is not True:
-                return result
-        except Exception:  # noqa: BLE001
-            return result
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(context.config_manager)
         if context.check_stop() or context.wait_if_paused():
             return result
 

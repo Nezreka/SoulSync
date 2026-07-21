@@ -22,7 +22,7 @@ Scope rules:
 
 Scheduled runs have no request context; wishlist mirrors are scoped to the
 admin profile (1), matching every other scheduled acquisition path. No-op when
-``features.library_v2`` is off. Never touches files.
+the native Library-v2 catalogue. Never touches files.
 """
 
 from __future__ import annotations
@@ -54,7 +54,62 @@ class Lib2DiscographyRefreshJob(RepairJob):
     icon = "refresh-cw"
     default_enabled = False
     default_interval_hours = 168  # weekly
-    auto_fix = True  # queueing IS the fix; there is nothing to review
+    default_settings = {"mode": "automatic"}
+    setting_options = {"mode": ["automatic", "review"]}
+    auto_fix = True
+
+    def _mode(self, context: JobContext) -> str:
+        run_mode = str((context.scope or {}).get("mode", "")).strip().lower()
+        if run_mode in {"automatic", "review"}:
+            return run_mode
+        try:
+            settings = context.config_manager.get(
+                f"repair.jobs.{self.job_id}.settings", {}) or {}
+            mode = str(settings.get("mode", "automatic")).strip().lower()
+        except Exception:  # noqa: BLE001
+            mode = "automatic"
+        return mode if mode in {"automatic", "review"} else "automatic"
+
+    def _create_review_findings(self, context: JobContext, album_ids: list[int],
+                                result: JobResult) -> None:
+        if not context.create_finding or not album_ids:
+            return
+        conn = context.db._get_connection()
+        try:
+            for album_id in album_ids:
+                row = conn.execute(
+                    """SELECT al.id, al.title, ar.name AS artist_name,
+                              al.release_date, al.year
+                         FROM lib2_albums al
+                    LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+                        WHERE al.id=?""",
+                    (int(album_id),),
+                ).fetchone()
+                if not row:
+                    continue
+                inserted = context.create_finding(
+                    job_id=self.job_id,
+                    finding_type="missing_discography_release",
+                    severity="info",
+                    entity_type="album",
+                    entity_id=f"lib2:{row['id']}",
+                    file_path=None,
+                    title=f"New release: {row['title']} — {row['artist_name'] or 'Unknown'}",
+                    description=(
+                        "This release was discovered by monitor-new-items. "
+                        "Approve it to materialize its tracklist and add wanted tracks."
+                    ),
+                    details={
+                        "lib2_album_id": int(row["id"]),
+                        "artist_name": row["artist_name"],
+                        "release_date": row["release_date"],
+                        "year": row["year"],
+                    },
+                )
+                if inserted:
+                    result.findings_created += 1
+        finally:
+            conn.close()
 
     def _artist_ids(self, conn) -> list:
         # §40: alias-member rows (canonical_artist_id set) are skipped as
@@ -82,12 +137,8 @@ class Lib2DiscographyRefreshJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        try:
-            if context.config_manager.get("features.library_v2", True) is not True:
-                logger.debug("Library v2 disabled — discography refresh skipped")
-                return result
-        except Exception:
-            return result
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(context.config_manager)
 
         from core.library2.discography import refresh_artist_discography
 
@@ -98,6 +149,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
             conn.close()
 
         total = len(artist_ids)
+        mode = self._mode(context)
         discovered = 0
         mirrored = 0
         for _i, artist_id in enumerate(artist_ids):
@@ -109,10 +161,13 @@ class Lib2DiscographyRefreshJob(RepairJob):
                     artist_id,
                     context.config_manager,
                     wishlist_profile_id=1,
+                    auto_monitor=(mode == "automatic"),
                 )
                 auto_ids = stats.get("auto_monitor_album_ids") or []
                 discovered += len(auto_ids)
                 mirrored += artist_mirrored
+                if mode == "review":
+                    self._create_review_findings(context, auto_ids, result)
             except Exception as e:  # noqa: BLE001
                 logger.debug("discography refresh failed (artist %s): %s", artist_id, e)
                 result.errors += 1
@@ -120,9 +175,10 @@ class Lib2DiscographyRefreshJob(RepairJob):
             if context.update_progress:
                 context.update_progress(result.scanned, total)
 
-        result.auto_fixed = discovered
+        result.auto_fixed = discovered if mode == "automatic" else 0
         if total:
-            logger.info("lib2 discography refresh: %d artists re-expanded, "
-                        "%d new releases auto-monitored (%d tracks mirrored)",
-                        result.scanned, discovered, mirrored)
+            logger.info("lib2 discography refresh (%s): %d artists re-expanded, "
+                        "%d new releases discovered (%d tracks mirrored, %d findings)",
+                        mode, result.scanned, discovered, mirrored,
+                        result.findings_created)
         return result

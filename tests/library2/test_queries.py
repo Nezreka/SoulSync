@@ -346,6 +346,33 @@ def test_get_artist_on_alias_id_resolves_to_canonical_header(imported_conn):
     assert [a["title"] for a in data["albums"]] == ["Views"]
 
 
+def test_artist_track_files_include_alias_owned_releases(imported_conn):
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    alias_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Drake Alias')"
+    ).lastrowid
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Alias Album')",
+        (alias_id,),
+    ).lastrowid
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Alias Track')",
+        (album_id,),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/alias.flac')",
+        (track_id,),
+    )
+    _link_alias(imported_conn, alias_id, drake_id)
+
+    files, total = Q.list_artist_track_files(imported_conn, drake_id, limit=500)
+
+    assert total >= 2
+    assert "/m/alias.flac" in {item["path"] for item in files}
+
+
 def test_get_album_track_status(imported_conn):
     views_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]

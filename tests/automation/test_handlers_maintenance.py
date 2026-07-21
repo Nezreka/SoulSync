@@ -184,14 +184,21 @@ class TestDuplicateCleaner:
 class TestQualityScanner:
     def test_triggers_native_upgrade_scan_job(self):
         triggered = []
-        deps = _build_deps(run_repair_job_now=lambda job_id: triggered.append(job_id) or True)
+        deps = _build_deps(
+            run_repair_job_now=lambda job_id, **kwargs: triggered.append(
+                (job_id, kwargs.get('scope'))
+            ) or True
+        )
         result = auto_start_quality_scan({}, deps)
-        assert triggered == ['quality_upgrade_scan']
+        assert triggered == [(
+            'quality_upgrade_scan',
+            {'mode': 'review', 'compatibility_source': 'start_quality_scan'},
+        )]
         assert result['status'] == 'completed'
         assert result['triggered'] is True
 
     def test_error_when_worker_unavailable(self):
-        deps = _build_deps(run_repair_job_now=lambda job_id: None)
+        deps = _build_deps(run_repair_job_now=lambda job_id, **kwargs: None)
         result = auto_start_quality_scan({}, deps)
         assert result['status'] == 'error'
 

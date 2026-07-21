@@ -127,6 +127,19 @@ class TrackNumberRepairJob(RepairJob):
             logger.warning("V2 subject enumeration failed: %s", e)
             result.errors += 1
 
+        # Restore pre-import coverage for configured library roots as well as
+        # transfer. Track tags and folder grouping are sufficient for this job.
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for resolved in filesystem_audio_files(
+            context, include_indexed=True, extensions=AUDIO_EXTENSIONS,
+        ):
+            folder = os.path.dirname(resolved)
+            name = os.path.basename(resolved)
+            bucket = album_folders.setdefault(folder, [])
+            if name not in bucket:
+                bucket.append(name)
+
         total = sum(len(fnames) for fnames in album_folders.values())
         if context.update_progress:
             context.update_progress(0, total)
@@ -175,16 +188,11 @@ class TrackNumberRepairJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
-        count = 0
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
-        return count
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        return len(filesystem_audio_files(
+            context, include_indexed=True, extensions=AUDIO_EXTENSIONS,
+        ))
 
     def _get_settings(self, context: JobContext) -> dict:
         """Read job settings from config, falling back to defaults."""

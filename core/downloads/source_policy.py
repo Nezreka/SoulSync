@@ -87,10 +87,12 @@ def resolve_source_policy(
     if resolved_search_mode not in SEARCH_MODES:
         resolved_search_mode = SEARCH_MODE_PRIORITY
 
-    available = (
-        {canonical_source_name(item) for item in available_sources}
-        if available_sources is not None else None
+    available_order = tuple(
+        source
+        for item in (available_sources or ())
+        if (source := canonical_source_name(item))
     )
+    available = set(available_order) if available_sources is not None else None
 
     def accepted(value: Any) -> Optional[str]:
         source = normalizer(value)
@@ -103,7 +105,8 @@ def resolve_source_policy(
 
     if resolved_mode != "hybrid":
         source = accepted(resolved_mode)
-        chain = (source,) if source else ()
+        fallback = accepted("soulseek") or (available_order[0] if available_order else None)
+        chain = (source or fallback,) if source or fallback else ()
     else:
         raw_chain = list(hybrid_order or ())
         if not raw_chain:
@@ -112,9 +115,20 @@ def resolve_source_policy(
         seen = set()
         for raw in raw_chain:
             source = accepted(raw)
+            if source is None:
+                # Compatibility with the legacy primary/secondary resolver:
+                # obsolete or unavailable configured slots fell back to
+                # Soulseek instead of silently shortening the chain.
+                source = accepted("soulseek")
             if source and source not in seen:
                 ordered.append(source)
                 seen.add(source)
+        if not ordered:
+            fallback = accepted("soulseek") or (
+                available_order[0] if available_order else None
+            )
+            if fallback:
+                ordered.append(fallback)
         chain = tuple(ordered)
 
     return SourcePolicy(

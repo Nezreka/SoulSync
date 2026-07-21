@@ -15,7 +15,7 @@ here fires without an actual confirmed write already having happened.
 Reuse-first: the resolve-or-create semantics are exactly the ones
 ``core/library2/autolink.py`` already uses for the POST-download link step;
 this module runs the same resolver PRE-download/PRE-search. Best-effort and
-strictly additive like autolink: gated on ``features.library_v2``, never
+strictly additive like autolink: part of the native catalogue cutover, never
 raises into the caller.
 
 Only the named TRACK becomes explicitly monitored/wanted here — this must
@@ -172,6 +172,7 @@ def materialize_wishlist_intent(
     explicit_profile_id: Optional[int] = None,
     provenance: str = PROVENANCE_WISHLIST,
     profile_id: int = 1,
+    actor_profile_id: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """Best-effort, fail-open entry point for callers OUTSIDE ``core.library2``
     (Search routes, Playlist-Sync, Watchlist-Scanner): opens its own
@@ -180,9 +181,17 @@ def materialize_wishlist_intent(
     materialization failure can never break the wishlist add it accompanies.
     """
     try:
-        from config.settings import config_manager
-        if config_manager.get("features.library_v2", True) is not True:
+        from core.library2 import ADMIN_PROFILE_ID
+        # Library-v2 intent is global. Fail closed unless the caller proves
+        # that the action belongs to the admin profile; a non-admin wishlist,
+        # watchlist or playlist may only mutate its own legacy list.
+        if int(actor_profile_id or 0) != ADMIN_PROFILE_ID:
             return None
+        if int(profile_id) != ADMIN_PROFILE_ID:
+            return None
+        from config.settings import config_manager
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
         from database.music_database import get_database
         db = get_database()
         conn = db._get_connection()

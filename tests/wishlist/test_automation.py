@@ -286,6 +286,59 @@ def test_playlist_scope_dispatches_only_matching_wishlist_tracks_without_cycle_m
     assert batch["toggle_wishlist_cycle"] is False
 
 
+def test_playlist_composite_scope_does_not_dispatch_same_track_from_other_album():
+    batch_map = {}
+    runtime, _service, _profiles_db, _music_db, executor, _logger, _progress, _guards = _build_runtime(
+        tracks=[
+            {
+                "name": "Album A",
+                "track_id": "same::album-a",
+                "spotify_track_id": "same::album-a",
+                "artists": [{"name": "Artist"}],
+                "spotify_data": {"id": "same", "album": {"id": "album-a", "album_type": "album"}},
+            },
+            {
+                "name": "Album B",
+                "track_id": "same::album-b",
+                "spotify_track_id": "same::album-b",
+                "artists": [{"name": "Artist"}],
+                "spotify_data": {"id": "same", "album": {"id": "album-b", "album_type": "album"}},
+            },
+        ],
+        count=2,
+        batch_map=batch_map,
+    )
+
+    process_wishlist_automatically(
+        runtime,
+        automation_id="playlist-album-a",
+        track_ids=["same::album-a"],
+        profile_ids=[1],
+    )
+
+    submitted = executor.submissions[0][1][2]
+    assert [track["track_id"] for track in submitted] == ["same::album-a"]
+
+
+def test_playlist_legacy_bare_scope_fails_closed_when_album_is_ambiguous():
+    runtime, _service, _profiles_db, _music_db, executor, _logger, _progress, _guards = _build_runtime(
+        tracks=[
+            {"track_id": "same::album-a", "spotify_track_id": "same::album-a", "spotify_data": {"id": "same"}},
+            {"track_id": "same::album-b", "spotify_track_id": "same::album-b", "spotify_data": {"id": "same"}},
+        ],
+        count=2,
+    )
+
+    process_wishlist_automatically(
+        runtime,
+        automation_id="ambiguous-bare",
+        track_ids=["same"],
+        profile_ids=[1],
+    )
+
+    assert executor.submissions == []
+
+
 def test_playlist_scope_with_multiple_profiles_dispatches_one_batch_per_profile():
     """A6 (library-overhaul-branch-review): a "Run Pipeline" playlist scope
     spanning more than one wishlist profile must not collapse every profile's

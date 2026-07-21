@@ -74,7 +74,7 @@
     "token": "LISTENBRAINZ_TOKEN"
   },
   "features": {
-    "_comment": "library_v2 is the native catalogue/repair-job engine and is on by default; the entire native repair suite (dead-file, orphan, AcoustID, cover-art, lyrics, ReplayGain, quality-upgrade, etc.) is a silent no-op when this is false.",
+    "_comment": "library_v2 is retained only for config compatibility. Library V2 is now the non-disableable native catalogue and repair engine; false is ignored with a migration warning.",
     "library_v2": true
   }
 }

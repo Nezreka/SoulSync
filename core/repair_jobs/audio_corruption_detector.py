@@ -184,7 +184,18 @@ class AudioCorruptionDetectorJob(RepairJob):
                 })
         except Exception as e:
             logger.warning("[Corrupt File Detector] V2 subject enumeration failed: %s", e)
-            result.errors += 1
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for file_path in filesystem_audio_files(
+            context, extensions=_CORRUPT_CHECK_EXTS,
+        ):
+            rows.append({
+                'id': None,
+                'title': os.path.splitext(os.path.basename(file_path))[0],
+                'artist_name': None,
+                'album_title': os.path.basename(os.path.dirname(file_path)),
+                'file_path': file_path,
+            })
 
         # Narrow to FLAC up front so progress reflects the real work-list.
         rows = [r for r in rows
@@ -278,8 +289,8 @@ class AudioCorruptionDetectorJob(RepairJob):
                         job_id=self.job_id,
                         finding_type='corrupt_audio',
                         severity='error',
-                        entity_type='track',
-                        entity_id=str(row['id']),
+                        entity_type='track' if subject else 'file',
+                        entity_id=str(row['id']) if row['id'] is not None else None,
                         file_path=row['file_path'],
                         title=f'Corrupt file: {artist} - {title}',
                         description=(
@@ -321,13 +332,23 @@ class AudioCorruptionDetectorJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
+        count = 0
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
-            return sum(
+            count += sum(
                 1 for subject in active_file_subjects(
                     context.db, context.config_manager,
                 ) if str(subject.get("path") or "").lower().endswith(".flac")
             )
         except Exception:
-            return 0
+            pass
+        try:
+            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+            count += len(filesystem_audio_files(
+                context, extensions=_CORRUPT_CHECK_EXTS,
+            ))
+        except Exception:
+            pass
+        return count

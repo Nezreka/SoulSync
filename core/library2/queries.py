@@ -225,15 +225,21 @@ def list_artist_track_files(conn, artist_id: int, *, search: str = "",
                             ) -> Tuple[List[Dict[str, Any]], int]:
     """Paginated flat file list for one artist (C2: Lidarr "Manage Track
     Files"). Mirrors ``core.library2.file_delete._scope_snapshot``'s artist
-    scope exactly (``primary_artist_id``, non-deleted files) so a selection
+    scope exactly (alias-group ``primary_artist_id``, non-deleted files) so a selection
     made from this list lines up with what the ADR-05 preview/execute
     endpoints will actually see for the same file ids.
     """
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
     offset = (page - 1) * limit
-    clauses = ["al.primary_artist_id = :artist_id", "tf.file_state <> 'deleted'"]
-    params: Dict[str, Any] = {"artist_id": int(artist_id)}
+    from core.library2.artist_aliases import resolve_alias_group
+
+    artist_ids = resolve_alias_group(conn, artist_id)
+    artist_marks = ",".join(f":artist_id_{i}" for i in range(len(artist_ids)))
+    clauses = [f"al.primary_artist_id IN ({artist_marks})", "tf.file_state <> 'deleted'"]
+    params: Dict[str, Any] = {
+        f"artist_id_{i}": value for i, value in enumerate(artist_ids)
+    }
     if search:
         clauses.append("(t.title LIKE :like OR al.title LIKE :like)")
         params["like"] = f"%{search}%"
@@ -873,6 +879,11 @@ def _serialize_track(
         }
     return {
         "id": t["id"],
+        "lib2_track_id": t["id"],
+        "legacy_track_id": t["legacy_track_id"] if "legacy_track_id" in keys else None,
+        # Legacy ids originate from the media-server-backed tracks table and
+        # are therefore also the only safe server stream id available here.
+        "server_track_id": t["legacy_track_id"] if "legacy_track_id" in keys else None,
         "title": effective["title"],
         "track_number": effective["track_number"],
         "disc_number": effective["disc_number"],

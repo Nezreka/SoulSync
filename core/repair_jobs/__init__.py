@@ -36,6 +36,8 @@ JOB_DATA_BASIS: dict[str, str] = {
     'audio_corruption_detector': 'lib2',
     'monitoring_list_reconcile': 'lib2',
     'quality_info_backfill': 'lib2',
+    'expired_download_cleaner': 'filesystem',
+    'library_reorganize': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -82,6 +84,8 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # quality_tier columns on existing rows — a catalogue metadata update,
     # nothing file/wanted/artwork related.
     'quality_info_backfill': frozenset({'metadata'}),
+    'expired_download_cleaner': frozenset({'delete', 'wanted'}),
+    'library_reorganize': frozenset({'observe', 'path'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -93,7 +97,6 @@ RETIRED_JOB_IDS = frozenset({
     'quality_upgrade',
     'discography_backfill',
     'duplicate_detector',
-    'expired_download_cleaner',
     'album_completeness',
     # NOT 'library_reorganize': unlike the other entries here, nothing native
     # regenerates its 'path_mismatch' findings (core.library2.maintenance_sync
@@ -117,6 +120,12 @@ RETIRED_JOB_IDS = frozenset({
 # Read-only compatibility for saved settings/automation references.  Runtime
 # registration and API responses expose only the neutral identities.
 JOB_ID_MIGRATIONS = {
+    # Stable pre-V2 ids remain accepted by saved automations/API callers.
+    # Both quality jobs converge on the native scanner; RepairWorker performs
+    # the config merge and forces migrated installs into review mode.
+    'quality_upgrade_scanner': 'quality_upgrade_scan',
+    'quality_upgrade': 'quality_upgrade_scan',
+    'discography_backfill': 'monitored_discography_refresh',
     'lib2_upgrade_scan': 'quality_upgrade_scan',
     'lib2_skips_cleanup': 'skip_audit_cleanup',
     'lib2_discography_refresh': 'monitored_discography_refresh',
@@ -125,6 +134,16 @@ JOB_ID_MIGRATIONS = {
     'lib2_mirror_reconcile': 'monitoring_list_reconcile',
     'lib2_wishlist_reconcile': 'monitoring_list_reconcile',
 }
+
+# These retired jobs produced review findings whose replacement must be
+# approved by the user. Keep their pending rows and service them through the
+# compatibility fix handlers; only implementation identities with a fully
+# regenerating replacement may be pruned at startup.
+PRESERVED_RETIRED_FINDING_IDS = frozenset({
+    'quality_upgrade_scanner',
+    'quality_upgrade',
+    'discography_backfill',
+})
 
 _imports_done = False
 
@@ -182,6 +201,8 @@ _JOB_MODULES = [
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
     'core.repair_jobs.monitoring_list_reconcile',
+    'core.repair_jobs.expired_download_cleaner',
+    'core.repair_jobs.library_reorganize',
     # Overrides mature job identities with P3-native catalogue boundaries.
     'core.repair_jobs.native_p3',
 ]

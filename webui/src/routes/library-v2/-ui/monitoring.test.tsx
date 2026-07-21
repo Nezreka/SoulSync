@@ -44,7 +44,7 @@ describe('library v2 monitoring mutations', () => {
     expect(toggle).toBeEnabled();
   });
 
-  it('keeps a failed future-release choice visible and retries it explicitly', async () => {
+  it('rolls back a failed future-release choice and retries the rejected value', async () => {
     let attempts = 0;
     const submitted: unknown[] = [];
     server.use(
@@ -65,7 +65,7 @@ describe('library v2 monitoring mutations', () => {
     fireEvent.change(select, { target: { value: 'new' } });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Monitor rule could not be saved');
-    expect(select).toHaveValue('new');
+    expect(select).toHaveValue('all');
     expect(select).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

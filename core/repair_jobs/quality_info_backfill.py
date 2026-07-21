@@ -21,7 +21,7 @@ schedule instead of requiring N manual per-album clicks. Purely additive:
 overwrites a good measured value, so running this is always safe — auto_fix
 because there's nothing to review, only real quality facts get written.
 
-No-op when ``features.library_v2`` is off. Never touches files.
+Runs against the native Library-v2 catalogue. Never touches files.
 """
 
 from __future__ import annotations
@@ -96,11 +96,8 @@ class QualityInfoBackfillJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        try:
-            if context.config_manager.get("features.library_v2", True) is not True:
-                return result
-        except Exception:
-            return result
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(context.config_manager)
 
         from core.library2.scan import rescan_files
 

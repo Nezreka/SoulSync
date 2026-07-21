@@ -230,11 +230,12 @@ def test_artist_art_options_returns_candidates(monkeypatch, api):
     client, _db, ids = api
     captured = {}
 
-    def fake_gather(artist_name):
+    def fake_gather(artist_name, source_ids):
         captured["artist"] = artist_name
+        captured["source_ids"] = source_ids
         return [{"url": "https://example.com/a.jpg", "source": "spotify"}]
 
-    monkeypatch.setattr("core.metadata.art_lookup.gather_artist_image_candidates", fake_gather)
+    monkeypatch.setattr("core.metadata.artist_image.gather_artist_image_candidates", fake_gather)
 
     resp = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
     assert resp.status_code == 200
@@ -242,6 +243,7 @@ def test_artist_art_options_returns_candidates(monkeypatch, api):
     assert body["success"] is True
     assert body["candidates"] == [{"url": "https://example.com/a.jpg", "source": "spotify"}]
     assert captured["artist"] == "Drake"
+    assert "spotify_artist_id" in captured["source_ids"]
 
 
 def test_artist_art_options_404_for_missing_artist(api):
@@ -261,8 +263,8 @@ def test_artist_art_options_honors_name_override(monkeypatch, api):
 
     captured = {}
     monkeypatch.setattr(
-        "core.metadata.art_lookup.gather_artist_image_candidates",
-        lambda artist_name: captured.update({"artist": artist_name}) or [],
+        "core.metadata.artist_image.gather_artist_image_candidates",
+        lambda artist_name, _source_ids: captured.update({"artist": artist_name}) or [],
     )
     resp = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
     assert resp.status_code == 200
@@ -273,8 +275,8 @@ def test_artist_art_options_caches_within_ttl_until_refresh(monkeypatch, api):
     client, _db, ids = api
     calls = []
     monkeypatch.setattr(
-        "core.metadata.art_lookup.gather_artist_image_candidates",
-        lambda artist_name: calls.append(1) or [{"url": "x", "source": "spotify"}],
+        "core.metadata.artist_image.gather_artist_image_candidates",
+        lambda artist_name, _source_ids: calls.append(1) or [{"url": "x", "source": "spotify"}],
     )
     first = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
     second = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
@@ -300,8 +302,8 @@ def test_artist_and_album_art_options_caches_do_not_collide_on_a_shared_id(monke
         lambda artist, album, metadata: [{"url": "album-pick", "source": "deezer"}],
     )
     monkeypatch.setattr(
-        "core.metadata.art_lookup.gather_artist_image_candidates",
-        lambda artist_name: [{"url": "artist-pick", "source": "spotify"}],
+        "core.metadata.artist_image.gather_artist_image_candidates",
+        lambda artist_name, _source_ids: [{"url": "artist-pick", "source": "spotify"}],
     )
 
     album_resp = client.get(f"/api/library/v2/albums/{ids['album']}/art-options")

@@ -102,11 +102,16 @@ def _in_clause(values: Sequence[int]) -> str:
     return ",".join("?" * len(values))
 
 
-def _album_ids_for_artist(conn, artist_id: int) -> List[int]:
+def _album_ids_for_artists(conn, artist_ids: Sequence[int]) -> List[int]:
     """Owned AND featured-on albums (junction table, not just primary_artist_id —
     a primary-only filter silently misses linked/featured releases, see §30/G8)."""
+    if not artist_ids:
+        return []
     rows = _rows(
-        conn, "SELECT album_id FROM lib2_album_artists WHERE artist_id=?", (artist_id,)
+        conn,
+        f"SELECT DISTINCT album_id FROM lib2_album_artists "
+        f"WHERE artist_id IN ({_in_clause(artist_ids)})",
+        artist_ids,
     )
     return [int(r[0]) for r in rows]
 
@@ -155,16 +160,18 @@ def _track_ids_for_albums(conn, album_ids: Sequence[int]) -> List[int]:
 def _acquisition_request_ids(
     conn,
     *,
-    artist_id: Optional[int] = None,
+    artist_ids: Sequence[int] = (),
     album_ids: Sequence[int] = (),
     edition_ids: Sequence[int] = (),
     recording_ids: Sequence[int] = (),
 ) -> List[str]:
     clauses: List[str] = []
     params: List[Any] = []
-    if artist_id is not None:
-        clauses.append("(scope='artist_missing' AND entity_id=?)")
-        params.append(artist_id)
+    if artist_ids:
+        clauses.append(
+            f"(scope='artist_missing' AND entity_id IN ({_in_clause(artist_ids)}))"
+        )
+        params.extend(artist_ids)
     if album_ids:
         clauses.append(f"(scope='release_group' AND entity_id IN ({_in_clause(album_ids)}))")
         params.extend(album_ids)
@@ -292,13 +299,16 @@ def _entity_history_events(conn, track_ids: Sequence[int], limit: int) -> List[D
 
 
 def _file_delete_events(
-    conn, *, artist_id: Optional[int] = None, album_ids: Sequence[int] = (), limit: int,
+    conn, *, artist_ids: Sequence[int] = (), album_ids: Sequence[int] = (), limit: int,
 ) -> List[Dict[str, Any]]:
     clauses: List[str] = []
     params: List[Any] = []
-    if artist_id is not None:
-        clauses.append("(entity_type IN ('artist','artists') AND entity_id=?)")
-        params.append(artist_id)
+    if artist_ids:
+        clauses.append(
+            f"(entity_type IN ('artist','artists') "
+            f"AND entity_id IN ({_in_clause(artist_ids)}))"
+        )
+        params.extend(artist_ids)
     if album_ids:
         clauses.append(
             f"(entity_type IN ('release_group','albums') "
@@ -557,21 +567,26 @@ def scoped_history(
 
     events: List[Dict[str, Any]] = []
     if scope == "artist":
-        album_ids = _album_ids_for_artist(conn, entity_id)
+        from core.library2.artist_aliases import resolve_alias_group
+
+        artist_ids = resolve_alias_group(conn, entity_id)
+        album_ids = _album_ids_for_artists(conn, artist_ids)
         edition_ids = _edition_ids_for_albums(conn, album_ids)
         recording_ids = _recording_ids_for_editions(conn, edition_ids)
         track_ids = _track_ids_for_albums(conn, album_ids)
         request_ids = _acquisition_request_ids(
-            conn, artist_id=entity_id, album_ids=album_ids,
+            conn, artist_ids=artist_ids, album_ids=album_ids,
             edition_ids=edition_ids, recording_ids=recording_ids,
         )
         download_events, matched_ids = _track_download_events(conn, track_ids, limit)
         events += _acquisition_events(conn, request_ids, limit)
         events += _entity_history_events(conn, track_ids, limit)
-        events += _file_delete_events(conn, artist_id=entity_id, album_ids=album_ids, limit=limit)
+        events += _file_delete_events(
+            conn, artist_ids=artist_ids, album_ids=album_ids, limit=limit
+        )
         events += _manual_skip_events(conn, track_ids, limit)
         events += _maintenance_events(
-            conn, artist_ids=[entity_id], album_ids=album_ids,
+            conn, artist_ids=artist_ids, album_ids=album_ids,
             track_ids=track_ids, limit=limit,
         )
         events += download_events

@@ -609,6 +609,11 @@ def build_manual_matches(
             "strategy": "manual",
             "warnings": [],
         })
+    if seen_paths != inventory_paths:
+        raise ValueError("manual import must assign every file in the bundle")
+    expected_track_ids = set(expected)
+    if seen_tracks != expected_track_ids:
+        raise ValueError("manual import must assign every expected track")
     return tuple(matches)
 
 

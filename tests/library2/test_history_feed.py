@@ -97,6 +97,23 @@ def test_recording_grab_rolls_up_to_album_and_artist_scope(imported_conn):
     assert any(e["event_type"] == "grab_submitted" for e in artist_history)
 
 
+def test_artist_history_includes_linked_alias_releases(imported_conn):
+    drake = _drake_ids(imported_conn)
+    alias = _second_artist(imported_conn)
+    from core.library2.artist_aliases import link_artist_alias
+
+    link_artist_alias(imported_conn, alias["artist_id"], drake["artist_id"])
+    _acquisition_grab(
+        imported_conn, scope="recording", entity_id=alias["recording_id"]
+    )
+
+    history = scoped_history(
+        imported_conn, scope="artist", entity_id=drake["artist_id"]
+    )
+
+    assert any(e["event_type"] == "grab_submitted" for e in history)
+
+
 def test_structured_pipeline_checks_surface_status_quality_and_reason(imported_conn):
     from core.acquisition.history import record_history_event
 

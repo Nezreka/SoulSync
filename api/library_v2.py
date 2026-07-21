@@ -1,7 +1,6 @@
-"""Library Manager v2 — UI-facing API (opt-in, Lidarr-style).
+"""Library Manager v2 — UI-facing API (native catalogue, Lidarr-style).
 
-Routes are mounted directly on the Flask ``app`` under ``/api/library/v2/*`` and
-gated on the ``features.library_v2`` config flag.
+Routes are mounted directly on the Flask ``app`` under ``/api/library/v2/*``.
 
 Design notes:
 - **Artwork is media-server-independent.** Image URLs returned here point at the
@@ -163,6 +162,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                config_get: Callable[..., Any],
                                config_manager: Any = None,
                                profile_id_getter: Optional[Callable[[], int]] = None,
+                               profile_page_allowed_getter:
+                                   Optional[Callable[[str], bool]] = None,
                                acquisition_runtime_getter: Optional[Callable[..., Any]] = None,
                                acquisition_search_adapters_getter: Optional[Callable[..., Any]] = None,
                                acquisition_async_runner: Optional[Callable[..., Any]] = None,
@@ -187,7 +188,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     """Attach the Library v2 routes to ``app``.
 
     ``get_database`` → shared ``MusicDatabase``; ``config_get(key, default)`` reads
-    config (feature flag); ``config_manager`` is passed to the artwork/path resolver;
+    config; ``config_manager`` is passed to the artwork/path resolver;
     ``profile_id_getter`` resolves the active profile (defaults to 1).
     ``run_enrichment(service, entity_type, legacy_id, name, artist_name) -> dict``
     delegates to ``web_server._run_single_enrichment`` (the same per-provider
@@ -222,11 +223,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     """
 
     def _enabled() -> bool:
-        return config_get("features.library_v2", True) is True
+        from core.library2.feature import library_v2_enabled
+
+        return library_v2_enabled(config_get=config_get)
+
+    def _page_allowed() -> bool:
+        if profile_page_allowed_getter is None:
+            return True
+        try:
+            return bool(profile_page_allowed_getter("library"))
+        except Exception as exc:  # noqa: BLE001 - fail closed on auth lookup errors
+            logger.warning("Library v2 profile permission lookup failed: %s", exc)
+            return False
 
     def _guard():
         if not _enabled():
             return jsonify({"success": False, "error": "Library v2 is disabled"}), 403
+        if not _page_allowed():
+            return jsonify({
+                "success": False,
+                "error": "Library access is not allowed for this profile",
+            }), 403
         # ADR-01 (admin-only): Library v2 has exactly ONE authoritative user
         # intent — the admin profile (profiles.id = 1). Mutations from any
         # other profile are rejected outright, not silently ignored: the lib2
@@ -295,7 +312,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/enabled")
     def lib2_enabled():
-        return jsonify({"success": True, "enabled": _enabled()})
+        return jsonify({"success": True, "enabled": _enabled() and _page_allowed()})
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
 
@@ -760,7 +777,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return None, None
         return record, owner
 
-    def _public_import_detail(record):
+    def _expected_import_tracks(conn, record, owner):
+        from core.acquisition.bundle_matching import load_expected_tracks
+
+        return load_expected_tracks(
+            conn,
+            record.expected_scope,
+            record.expected_entity_id,
+            search_options=owner.search_options,
+        )
+
+    def _public_import_detail(record, expected=()):
         quarantined = [
             {
                 "relative_path": item.get("relative_path"),
@@ -776,6 +803,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "inventory": [dict(item) for item in record.inventory],
             "matches": [dict(item) for item in record.matches],
             "rejections": [dict(item) for item in record.rejections],
+            "expected_tracks": [item.to_dict() for item in expected],
             "processed_count": len(record.result.get("processed", [])),
             "quarantined_count": len(quarantined),
             "quarantined": quarantined,
@@ -873,10 +901,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return guard
         conn = _conn()
         try:
-            record, _owner = _owned_import(conn, import_id)
+            record, owner = _owned_import(conn, import_id)
             if record is None:
                 return jsonify({"success": False, "error": "Import not found"}), 404
-            return jsonify({"success": True, "import": _public_import_detail(record)})
+            expected = _expected_import_tracks(conn, record, owner)
+            return jsonify({
+                "success": True,
+                "import": _public_import_detail(record, expected),
+            })
         finally:
             conn.close()
 
@@ -896,24 +928,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             }), 400
         conn = _conn()
         try:
-            from core.acquisition.bundle_matching import (
-                build_manual_matches,
-                load_expected_tracks,
-            )
+            from core.acquisition.bundle_matching import build_manual_matches
             from core.acquisition.imports import record_manual_resolution
             record, owner = _owned_import(conn, import_id)
             if record is None:
                 return jsonify({"success": False, "error": "Import not found"}), 404
-            expected = load_expected_tracks(
-                conn,
-                record.expected_scope,
-                record.expected_entity_id,
-                search_options=owner.search_options,
-            )
+            expected = _expected_import_tracks(conn, record, owner)
             matches = build_manual_matches(record, expected, assignments)
             updated = record_manual_resolution(conn, record.id, matches)
             conn.commit()
-            return jsonify({"success": True, "import": _public_import_detail(updated)})
+            return jsonify({
+                "success": True,
+                "import": _public_import_detail(updated, expected),
+            })
         except ValueError as exc:
             conn.rollback()
             return jsonify({"success": False, "error": str(exc)}), 400
@@ -930,7 +957,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return guard
         conn = _conn()
         try:
-            record, _owner = _owned_import(conn, import_id)
+            record, owner = _owned_import(conn, import_id)
             if record is None:
                 return jsonify({"success": False, "error": "Import not found"}), 404
             if record.status not in {"pending", "matching", "needs_review"}:
@@ -963,10 +990,67 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 resolved_path=inventory.resolved_path,
             )
             conn.commit()
-            return jsonify({"success": True, "import": _public_import_detail(updated)})
+            expected = _expected_import_tracks(conn, updated, owner)
+            return jsonify({
+                "success": True,
+                "import": _public_import_detail(updated, expected),
+            })
         except ValueError as exc:
             conn.rollback()
             return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/imports/<import_id>/resume",
+        methods=["POST"],
+    )
+    def lib2_resume_acquisition_import(import_id):
+        """Advance a reviewed/rescanned import through the shared pipeline.
+
+        This is deliberately explicit for the review UI: a failed browser
+        request can be retried safely, while the durable import row remains
+        the source of truth across refreshes and restarts.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            record, _owner = _owned_import(conn, import_id)
+            if record is None:
+                return jsonify({"success": False, "error": "Import not found"}), 404
+            if record.status == "needs_review":
+                return jsonify({
+                    "success": False,
+                    "error": "Resolve all assignments before resuming the import",
+                }), 409
+            if record.status not in {"pending", "matching", "importing"}:
+                return jsonify({
+                    "success": False,
+                    "error": f"Import cannot be resumed while {record.status}",
+                }), 409
+        finally:
+            conn.close()
+
+        from core.acquisition.import_pipeline import advance_import
+
+        outcome = advance_import(
+            get_database()._get_connection,
+            import_id,
+            config_get=config_get,
+        )
+        conn = _conn()
+        try:
+            updated, owner = _owned_import(conn, import_id)
+            if updated is None:
+                return jsonify({"success": False, "error": "Import not found"}), 404
+            expected = _expected_import_tracks(conn, updated, owner)
+            return jsonify({
+                "success": True,
+                "outcome": outcome,
+                "import": _public_import_detail(updated, expected),
+            })
         finally:
             conn.close()
 
@@ -2107,10 +2191,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     @app.route("/api/library/v2/artists/<int:artist_id>/art-options")
     def lib2_artist_art_options(artist_id):
         """Candidate photos for an artist, for the image picker (deep-dive
-        A9, read-only). One candidate per configured source (Spotify/Deezer/
-        iTunes/Discogs), via ``core.metadata.art_lookup.gather_artist_image_
-        candidates`` — no legacy record needed, works for discography-only
-        artists too."""
+        A9, read-only). Stored provider ids are tried exactly before a guarded
+        name fallback via ``core.metadata.artist_image`` — no legacy record
+        needed, works for discography-only artists too."""
         guard = _guard()
         if guard:
             return guard
@@ -2118,7 +2201,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         try:
             row = conn.execute(
-                "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
+                "SELECT name, spotify_id, musicbrainz_id, external_ids "
+                "FROM lib2_artists WHERE id=?", (artist_id,)
             ).fetchone()
             if row is None:
                 return jsonify({"success": False, "error": "Artist not found"}), 404
@@ -2128,6 +2212,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 provider_fields={"name": row["name"]},
             )
             artist_name = effective["name"]
+            try:
+                external_ids = json.loads(row["external_ids"] or "{}")
+            except (TypeError, ValueError):
+                external_ids = {}
+            source_ids = {
+                "spotify_artist_id": row["spotify_id"],
+                "musicbrainz_artist_id": row["musicbrainz_id"],
+                "deezer_id": external_ids.get("deezer"),
+                "itunes_artist_id": external_ids.get("itunes"),
+                "audiodb_id": external_ids.get("audiodb"),
+                "discogs_id": external_ids.get("discogs"),
+            }
         finally:
             conn.close()
 
@@ -2141,8 +2237,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         "candidates": hit[1], "cached": True,
                     })
 
-        from core.metadata.art_lookup import gather_artist_image_candidates
-        candidates = gather_artist_image_candidates(artist_name)
+        from core.metadata.artist_image import gather_artist_image_candidates
+        candidates = gather_artist_image_candidates(artist_name, source_ids)
         with _artist_art_options_cache_lock:
             _artist_art_options_cache[artist_id] = (now, candidates)
         return jsonify({"success": True, "count": len(candidates), "candidates": candidates})
@@ -2235,6 +2331,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = db._get_connection()
         try:
             cur = conn.cursor()
+            entity_ids = [eid]
+            if entity == "artists":
+                from core.library2.artist_aliases import resolve_alias_group
+
+                entity_ids = resolve_alias_group(conn, eid)
             # Monitoring a discography-only release must first materialize its
             # provider tracklist into real, monitorable track rows — otherwise
             # there is nothing to mirror into the wishlist (Lidarr: monitoring
@@ -2249,7 +2350,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         resolve_tracklist(config_manager, conn, eid)
                     except Exception as e:  # noqa: BLE001
                         logger.debug("monitor tracklist resolve failed (%s): %s", eid, e)
-            cur.execute(f"UPDATE {table} SET monitored=? WHERE id=?", (1 if monitored else 0, eid))
+            marks = ",".join("?" for _ in entity_ids)
+            cur.execute(
+                f"UPDATE {table} SET monitored=? WHERE id IN ({marks})",
+                (1 if monitored else 0, *entity_ids),
+            )
             if not cur.rowcount:
                 return jsonify({"success": False, "error": "Not found"}), 404
             # Monitor provenance (audit P1-13/P1-14): this endpoint is a direct
@@ -2262,9 +2367,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 record_rule,
                 record_rules,
             )
-            record_rule(conn, {"artists": "artist", "albums": "album",
-                               "tracks": "track"}[entity], eid, monitored,
-                        PROVENANCE_USER, profile_id=_profile())
+            for entity_scope_id in entity_ids:
+                record_rule(conn, {"artists": "artist", "albums": "album",
+                                   "tracks": "track"}[entity], entity_scope_id,
+                            monitored, PROVENANCE_USER, profile_id=_profile())
             track_ids: List[int] = []
             preserved_track_ids: List[int] = []
             if entity == "albums":
@@ -2315,8 +2421,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             )
             outbox_ids: List[int] = []
             if entity == "artists":
-                outbox_ids = enqueue_artist_watchlist(conn, eid, monitored,
-                                                      profile_id=_profile())
+                for artist_scope_id in entity_ids:
+                    outbox_ids.extend(enqueue_artist_watchlist(
+                        conn, artist_scope_id, monitored, profile_id=_profile()
+                    ))
             elif track_ids:
                 # Only the track-level toggle is a direct user action on that
                 # track; an album toggle is a cascade and must respect a
@@ -2386,9 +2494,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return jsonify({"success": False, "error": "Quality profile not found"}), 404
             from core.library2.profile_lookup import assign_quality_profile
             try:
-                assignment = assign_quality_profile(
-                    conn, entity, eid, requested_profile_id
-                )
+                entity_ids = [eid]
+                if entity == "artists":
+                    from core.library2.artist_aliases import resolve_alias_group
+
+                    entity_ids = resolve_alias_group(conn, eid)
+                assignments = [
+                    assign_quality_profile(conn, entity, scope_id, requested_profile_id)
+                    for scope_id in entity_ids
+                ]
+                assignment = assignments[0]
             except LookupError:
                 return jsonify({"success": False, "error": "Not found"}), 404
             profile_id = int(assignment["id"])
@@ -2410,7 +2525,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 )
                 settings = {}
             cur = conn.cursor()
-            updated = int(assignment["updated"])
+            updated = sum(int(item["updated"]) for item in assignments)
             auto_monitored = 0
             auto_monitor_track_ids: List[int] = []
             from core.library2.quality_eval import is_upgrade_policy
@@ -2420,11 +2535,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # just cleaned up. An explicit single-track assignment still wins.
             if monitor_existing and is_upgrade_policy(profile["upgrade_policy"]):
                 if entity == "artists":
+                    marks = ",".join("?" for _ in entity_ids)
                     auto_monitor_track_ids = [r["id"] for r in conn.execute(
                         f"SELECT id FROM lib2_tracks "
-                        f"WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?) "
+                        f"WHERE album_id IN (SELECT id FROM lib2_albums "
+                        f"WHERE primary_artist_id IN ({marks})) "
                         f"AND {_NOT_CONSOLIDATED_SQL}",
-                        (eid,),
+                        entity_ids,
                     )]
                 elif entity == "albums":
                     auto_monitor_track_ids = [r["id"] for r in conn.execute(
@@ -4251,7 +4368,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # Shares the persisted claim with the automatic first-run bootstrap
             # (core/library2/bootstrap.py) so a manual click can never run
             # import_legacy_library() concurrently with the background autostart.
-            if not lib2_bootstrap.try_claim(get_database()):
+            bootstrap_owner = lib2_bootstrap.try_claim(get_database())
+            if not bootstrap_owner:
                 return jsonify({
                     "success": False,
                     "error": "Library import already running in the background",
@@ -4267,8 +4385,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.importer import import_legacy_library
             import time as _t
 
-            def _progress(stage, current, total):
+            def _progress(stage, current, total, *, connection=None):
                 _import_state.update(stage=stage, current=current, total=total)
+                lib2_bootstrap.heartbeat(
+                    get_database(), bootstrap_owner,
+                    stage=stage, current=current, total=total,
+                    connection=connection,
+                )
+
+            _progress.lib2_connection_aware = True
 
             try:
                 stats = import_legacy_library(get_database(), reset=reset, progress=_progress,
@@ -4296,13 +4421,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # committed already.  Mark the import complete and let artwork
                 # continue independently so the UI can browse immediately.
                 _import_state.update(stage="done", current=0, total=0)
-                lib2_bootstrap.mark_done(get_database())
+                lib2_bootstrap.mark_done(
+                    get_database(), bootstrap_owner,
+                    watermark=lib2_bootstrap.source_watermark(get_database()),
+                )
                 _start_artwork_cache(get_database, config_manager)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")
                 try:
-                    lib2_bootstrap.mark_failed(get_database(), str(e))
+                    lib2_bootstrap.mark_failed(get_database(), bootstrap_owner, str(e))
                 except Exception as mark_err:  # noqa: BLE001
                     logger.debug("lib2 bootstrap mark_failed skipped: %s", mark_err)
             finally:
