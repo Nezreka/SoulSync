@@ -222,8 +222,10 @@ def test_file_found_in_transfer_with_metadata_enhanced_skips_enhancement_and_com
     assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
 
 
-def test_file_found_in_transfer_no_context_no_filename_wipes_tags(monkeypatch):
-    """Transfer file but missing context AND expected filename -> wipe tags only."""
+def test_file_found_in_transfer_no_context_writes_nothing(monkeypatch):
+    """jadux #wrong-metadata: a transfer-folder file whose identity can't be
+    verified (no context / expected filename) must not be written to AT ALL —
+    the old tag wipe could hit a neighboring track's finished file."""
     download_tasks['t1'] = {
         'status': 'post_processing',
         'filename': 'song.flac',
@@ -236,10 +238,130 @@ def test_file_found_in_transfer_no_context_no_filename_wipes_tags(monkeypatch):
         find_completed_file=lambda *a, **kw: ('/transfer/song.flac', 'transfer'),
     )
     pp.run_post_processing_worker('t1', 'b1', deps)
-    # wipe_source_tags called (no full enhancement possible)
-    assert any(c[0] == 'wipe' for c in rec.calls)
-    # Still completed
+    # NO writes of any kind to an unidentified transfer file
+    assert not any(c[0] == 'wipe' for c in rec.calls)
+    assert not any(c[0] == 'enhance' for c in rec.calls)
+    # Still completed (nothing touched, task closes out)
     assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
+
+
+def _transfer_task_with_context(title, track_number=1):
+    """Task + matched context whose expected final filename is
+    '0{track_number} - {title}.flac'."""
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': 'remote/original.flac',
+        'username': 'u1',
+        'track_info': {'name': title},
+        'metadata_enhanced': False,
+    }
+    matched_downloads_context['u1::remote/original.flac'] = {
+        'original_search_result': {'title': title, 'track_number': track_number,
+                                   'album': 'Some Album'},
+        'artist': {'name': 'Artist', 'id': 'a1'},
+        'album': {'name': 'Some Album', 'id': 'al1'},
+    }
+
+
+def test_transfer_file_matching_expected_name_is_enhanced(monkeypatch):
+    """The legit lag case (stream processor moved OUR file, flag not yet set)
+    keeps working: found name matches the context-derived expected name."""
+    _transfer_task_with_context('Money', track_number=1)
+    monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: ('/transfer/01 - Money.flac', 'transfer'),
+        enhance_file_metadata=lambda *a, **kw: True,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1'].get('metadata_enhanced') is True
+    assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
+
+
+def test_transfer_file_matching_expected_stem_different_ext_is_enhanced(monkeypatch):
+    """expected_final_filename hardcodes .flac — a legit .mp3 with the same
+    stem must still pass the identity check."""
+    _transfer_task_with_context('Money', track_number=1)
+    monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: ('/transfer/01 - Money.mp3', 'transfer'),
+        enhance_file_metadata=lambda *a, **kw: True,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1'].get('metadata_enhanced') is True
+
+
+def test_transfer_file_of_another_track_is_never_tagged(monkeypatch):
+    """THE jadux incident: this task's context says '01 - 0bpm.flac' but the
+    finder handed back a different track's imported file ('01 - Bimo.flac').
+    Writing would stamp 0bpm's metadata into Bimo's file — must refuse."""
+    _transfer_task_with_context('0bpm', track_number=1)
+    monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    enhanced = []
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: ('/transfer/01 - Bimo.flac', 'transfer'),
+        enhance_file_metadata=lambda *a, **kw: enhanced.append(a) or True,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert enhanced == []                                   # no tag write
+    assert not any(c[0] == 'wipe' for c in rec.calls)       # no wipe either
+    assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
+
+
+def test_ambiguous_fuzzy_context_is_refused(monkeypatch):
+    """Exact context key missing + MULTIPLE same-user candidate keys → refuse
+    to guess (similar_keys[0] used to pick arbitrarily → wrong track's tags)."""
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': 'dir/01 - Intro.flac',
+        'username': 'u1',
+        'track_info': {'name': 'Intro'},
+        'metadata_enhanced': False,
+    }
+    # Two candidates, both same user, both containing the basename
+    matched_downloads_context['u1::albumA/01 - Intro.flac'] = {
+        'original_search_result': {'title': 'Intro A', 'track_number': 1},
+        'artist': {'name': 'A', 'id': 'a'},
+        'album': {'name': 'Album A', 'id': 'alA'},
+    }
+    matched_downloads_context['u1::albumB/01 - Intro.flac'] = {
+        'original_search_result': {'title': 'Intro B', 'track_number': 1},
+        'artist': {'name': 'B', 'id': 'b'},
+        'album': {'name': 'Album B', 'id': 'alB'},
+    }
+    monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: ('/transfer/01 - Intro.flac', 'transfer'),
+        enhance_file_metadata=lambda *a, **kw: True,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    # ambiguous → no context → identity unverifiable → no writes
+    assert not any(c[0] == 'enhance' for c in rec.calls)
+    assert not any(c[0] == 'wipe' for c in rec.calls)
+
+
+def test_unique_fuzzy_context_still_recovers(monkeypatch):
+    """Exactly ONE same-user candidate → the legit recovery path still works
+    (context found, expected name derived, matching file enhanced)."""
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': 'dir/01 - Money.flac',
+        'username': 'u1',
+        'track_info': {'name': 'Money'},
+        'metadata_enhanced': False,
+    }
+    matched_downloads_context['u1::other-dir/01 - Money.flac'] = {
+        'original_search_result': {'title': 'Money', 'track_number': 1,
+                                   'album': 'Some Album'},
+        'artist': {'name': 'Artist', 'id': 'a1'},
+        'album': {'name': 'Some Album', 'id': 'al1'},
+    }
+    monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: ('/transfer/01 - Money.flac', 'transfer'),
+        enhance_file_metadata=lambda *a, **kw: True,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1'].get('metadata_enhanced') is True
 
 
 def test_file_found_in_downloads_with_context_runs_post_process_with_verification():
@@ -251,8 +373,8 @@ def test_file_found_in_downloads_with_context_runs_post_process_with_verificatio
     }
     matched_downloads_context['u1::song.flac'] = {
         'original_search_result': {'title': 'Money', 'track_number': 1},
-        'context_artist': {'name': 'Pink Floyd', 'id': 'art1'},
-        'context_album': {'name': 'DSOTM'},
+        'artist': {'name': 'Pink Floyd', 'id': 'art1'},
+        'album': {'name': 'DSOTM'},
     }
     deps, rec = _build_deps(
         find_completed_file=lambda *a, **kw: ('/downloads/song.flac', 'download'),
