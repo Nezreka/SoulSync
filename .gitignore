@@ -41,6 +41,10 @@ bin/
 .tool-versions
 Staging/
 Transfer/
+
+# Graphify-generated knowledge graph (regenerate with `graphify .`; never source)
+graphify-out/
+**/graphify-out/
 docker-compose.local-image.yml
 *-container-inspect.json
 # Any hidden folders
