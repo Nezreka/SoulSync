@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -1007,6 +1008,16 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
         raise
 
 
+# jadux's stall: every DB-update completion fires a cleanup, and on a big
+# wishlist (3450 tracks) one pass takes HOURS (per-track fuzzy matching), so
+# they stacked until every worker of the shared pool was grinding cleanups and
+# completed downloads queued behind them forever. One cleanup at a time —
+# a request that arrives while one is running is SKIPPED (the next DB update
+# will fire another against fresher state; nothing is lost by not stacking).
+_auto_cleanup_lock = threading.Lock()
+_auto_cleanup_running = False
+
+
 def automatic_wishlist_cleanup_after_db_update(
     *,
     wishlist_service=None,
@@ -1015,7 +1026,37 @@ def automatic_wishlist_cleanup_after_db_update(
     active_server: str | None = None,
     logger=logger,
 ) -> int:
-    """Remove wishlist entries that already exist in the library after a DB update."""
+    """Remove wishlist entries that already exist in the library after a DB update.
+
+    Overlap-guarded: only one cleanup runs at a time; concurrent requests are
+    skipped (returning 0), never queued."""
+    global _auto_cleanup_running
+    with _auto_cleanup_lock:
+        if _auto_cleanup_running:
+            logger.info("[Auto Cleanup] Previous cleanup still running — skipping this one")
+            return 0
+        _auto_cleanup_running = True
+    try:
+        return _automatic_wishlist_cleanup_inner(
+            wishlist_service=wishlist_service,
+            profiles_database=profiles_database,
+            music_database=music_database,
+            active_server=active_server,
+            logger=logger,
+        )
+    finally:
+        with _auto_cleanup_lock:
+            _auto_cleanup_running = False
+
+
+def _automatic_wishlist_cleanup_inner(
+    *,
+    wishlist_service=None,
+    profiles_database=None,
+    music_database=None,
+    active_server: str | None = None,
+    logger=logger,
+) -> int:
     try:
         from config.settings import config_manager
         from database.music_database import MusicDatabase, get_database
