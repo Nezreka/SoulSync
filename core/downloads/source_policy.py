@@ -15,6 +15,22 @@ SEARCH_MODE_PRIORITY = "priority"
 SEARCH_MODE_BEST_QUALITY = "best_quality"
 SEARCH_MODES = frozenset({SEARCH_MODE_PRIORITY, SEARCH_MODE_BEST_QUALITY})
 
+# Streaming plugins (and Torrent/Usenet) stamp their canonical source name as
+# the download's "username"; Soulseek uses the real peer name instead, so
+# anything not in this set is a Soulseek peer. Single source of truth for
+# every consumer that needs to bucket a username by source (retry budgeting,
+# engine-status fallback, candidate-source inference) — they used to each
+# hardcode their own copy, which silently drifted apart whenever a new source
+# was added to one copy and not the others.
+STREAMING_SOURCE_NAMES = frozenset((
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud',
+    'amazon', 'torrent', 'usenet',
+))
+
+# The subset of STREAMING_SOURCE_NAMES that are release-grabbing sources
+# (whole-release download engines), not per-track streaming rippers.
+RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
+
 
 def canonical_source_name(value: Any) -> Optional[str]:
     """Normalize config aliases without initializing the plugin registry."""
@@ -133,6 +149,8 @@ __all__ = [
     "SEARCH_MODE_BEST_QUALITY",
     "SEARCH_MODE_PRIORITY",
     "SEARCH_MODES",
+    "STREAMING_SOURCE_NAMES",
+    "RELEASE_SOURCE_NAMES",
     "SourcePolicy",
     "canonical_source_name",
     "resolve_source_policy",

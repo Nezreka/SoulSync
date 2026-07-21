@@ -702,8 +702,9 @@ def reconcile_track_wishlist(
     stats = {"scanned": 0, "wanted": 0, "wishlisted": 0, "mirrored": 0}
     conn = db._get_connection()
     try:
-        recompute_wanted(conn, profile_id=profile_id)
+        recompute_stats = recompute_wanted(conn, profile_id=profile_id)
         conn.commit()
+        changed_set = set(recompute_stats.get("changed_track_ids") or [])
 
         wanted = wanted_track_ids(conn, profile_id=profile_id)
         wanted_set = set(wanted)
@@ -720,16 +721,24 @@ def reconcile_track_wishlist(
         existing = select_existing_ids(conn, "lib2_tracks", wishlisted)
         prune = [t for t in wishlisted if t in existing and t not in wanted_set]
 
-        # Only mirror tracks whose Wishlist membership actually needs to change:
+        # Only mirror tracks whose Wishlist membership or projected state
+        # actually needs to change:
         #   * wanted tracks NOT yet in the Wishlist — re-add the missing/upgrade-
         #     eligible ones (a wanted track already present is already queued;
         #     add_to_wishlist upserts, so rebuilding its ~6-query payload every
         #     hour just to re-write an unchanged row is the waste review Teil B
         #     flagged — several 100k idle queries/hour at 100k tracks);
-        #   * wishlisted tracks no longer wanted — prune.
-        # Skipping present-and-wanted tracks leaves net Wishlist state identical.
+        #   * wishlisted tracks no longer wanted — prune;
+        #   * wanted tracks already wishlisted whose projection just changed
+        #     (e.g. a quality-profile reassignment) — recompute_wanted's
+        #     upsert only touches rows it actually changed, so this re-mirrors
+        #     exactly the tracks whose cached wishlist payload (quality
+        #     target, etc.) would otherwise go stale until the track happens
+        #     to leave and re-enter `wanted`, without re-touching every
+        #     genuinely-unchanged row.
         adds = [t for t in wanted if t not in wishlisted_set]
-        target = sorted(set(adds) | set(prune))
+        refresh = [t for t in wanted if t in wishlisted_set and t in changed_set]
+        target = sorted(set(adds) | set(prune) | set(refresh))
         total = len(target)
         for start in range(0, total, max(1, batch)):
             if should_stop and should_stop():

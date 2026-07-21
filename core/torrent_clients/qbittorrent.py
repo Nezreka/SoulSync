@@ -67,7 +67,9 @@ class QBittorrentAdapter:
         self._url = normalize_client_url(config_manager.get('torrent_client.url', ''))
         self._username = config_manager.get('torrent_client.username', '') or ''
         self._password = config_manager.get('torrent_client.password', '') or ''
-        self._category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
         self._save_path = config_manager.get('torrent_client.save_path', '') or ''
         # Drop any existing session — credentials may have changed.
         with self._session_lock:

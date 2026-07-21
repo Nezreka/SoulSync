@@ -102,8 +102,9 @@ def get_queue_status(
 
     def _record(track_id: int, album_id: Any, status: str, progress_pct: int) -> None:
         tracks[track_id] = {"status": status, "progress_pct": progress_pct}
-        if album_id is not None:
-            albums[int(album_id)] = albums.get(int(album_id), 0) + 1
+        safe_album_id = _safe_int(album_id)
+        if safe_album_id is not None:
+            albums[safe_album_id] = albums.get(safe_album_id, 0) + 1
 
     with tasks_lock:
         tasks_snapshot = list(download_tasks.values())

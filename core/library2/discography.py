@@ -649,6 +649,20 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     filters_cache: Dict[int, Dict[str, bool]] = {}
     conn = db._get_connection()
     try:
+        # Batched once up front (not per-album inside the loop below): a
+        # sweep over every monitored artist's releases can cover thousands
+        # of albums, and title/primary_artist_id never change mid-loop.
+        album_meta: Dict[int, Any] = {}
+        unique_album_ids = list({int(a) for a in album_ids})
+        for start in range(0, len(unique_album_ids), 900):
+            chunk = unique_album_ids[start:start + 900]
+            marks = ",".join("?" for _ in chunk)
+            for row in conn.execute(
+                f"SELECT id, title, primary_artist_id FROM lib2_albums "
+                f"WHERE id IN ({marks})", chunk,
+            ):
+                album_meta[row["id"]] = row
+
         for album_id in album_ids:
             error = None
             try:
@@ -720,9 +734,7 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
             # retry path, and via the same "skip the monitored flip" veto
             # pattern used for explicitly-unmonitored tracks just above, so
             # the wanted projection excludes them the same way.
-            album_row = conn.execute(
-                "SELECT title, primary_artist_id FROM lib2_albums WHERE id=?",
-                (album_id,)).fetchone()
+            album_row = album_meta.get(album_id)
             album_title = (album_row["title"] if album_row else "") or ""
             content_artist_id = album_row["primary_artist_id"] if album_row else None
             if content_artist_id is None:

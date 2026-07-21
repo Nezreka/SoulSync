@@ -92,10 +92,19 @@ def test_lib2_quality_tier_badge_matches_canonical_lossless():
 
 
 def test_lib2_file_election_lossless_set_matches_canonical():
+    """File election's set is the canonical names PLUS the raw-extension
+    aliases (aiff/aif/aifc/dff) the DB's ``format`` column may hold verbatim
+    when a row was never probed — NOT a bare copy of the canonical set, or a
+    genuinely lossless aiff/dff file loses to a lossy file on election
+    (ambiguous m4a/mp4 stay excluded, matching core.quality.lossless)."""
     from core.library2.track_files import _LOSSLESS_FORMATS
     parsed = {tok.strip().strip("'") for tok in
               _LOSSLESS_FORMATS.strip("()").split(",")}
-    assert parsed == set(LOSSLESS_FORMATS)
+    expected = set(LOSSLESS_FORMATS) | {
+        ext.lstrip('.') for ext in LOSSLESS_CANDIDATE_EXTENSIONS
+        if ext.lstrip('.') not in ('m4a', 'mp4')
+    }
+    assert parsed == expected
 
 
 # ── lossy_output_would_overwrite_source (the safety invariant) ──

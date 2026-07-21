@@ -10,11 +10,20 @@ call site.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Set
 
 # Well under SQLite's oldest documented SQLITE_MAX_VARIABLE_NUMBER (999), so a
 # single chunk's placeholder count is safe on every SQLite build we run on.
 _CHUNK = 900
+
+# table/column are meant to be trusted internal literals, never user input —
+# but they're interpolated directly into the query text (can't be bound as
+# parameters), so a plain identifier check is cheap insurance: today's one
+# caller always passes hardcoded strings, but nothing stopped a future caller
+# from deriving either from a variable and turning this into an injection
+# point. A valid identifier can't break out of the query, whatever it means.
+_VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def select_existing_ids(
@@ -25,8 +34,11 @@ def select_existing_ids(
 
     Chunk-safe: an ``IN`` list larger than SQLite's variable limit would
     otherwise raise. ``table``/``column`` are trusted internal literals (never
-    user input), same as every inline query this replaces.
+    user input), same as every inline query this replaces — validated as
+    plain identifiers regardless, since they're interpolated into the SQL text.
     """
+    if not _VALID_IDENTIFIER.match(table) or not _VALID_IDENTIFIER.match(column):
+        raise ValueError(f"Invalid table/column identifier: {table!r}.{column!r}")
     unique = list({int(i) for i in ids})
     found: Set[int] = set()
     for start in range(0, len(unique), max(1, chunk)):

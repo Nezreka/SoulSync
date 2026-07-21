@@ -8050,12 +8050,7 @@ def clear_finished_downloads():
         logger.error(f"Error clearing finished downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-# Streaming sources where the candidate's `username` field IS the source name
-# (Soulseek uses a real peer username; everything else stamps the source string).
-_STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
-    'torrent', 'usenet',
-))
+from core.downloads.source_policy import STREAMING_SOURCE_NAMES as _STREAMING_SOURCE_NAMES
 
 
 def _infer_candidate_source(username: str) -> str:

@@ -98,15 +98,21 @@ def _decide(trk_mon: Optional[int], trk_prov: Optional[str],
 
 
 def recompute_wanted(conn: Any, *, profile_id: int = 1,
-                     track_ids: Optional[List[int]] = None) -> Dict[str, int]:
+                     track_ids: Optional[List[int]] = None) -> Dict[str, Any]:
     """Recompute the projection — fully, or scoped to ``track_ids``.
 
     Upserts one row per (profile, track); full runs also prune rows of
     deleted tracks. ``flag_mismatches`` counts tracks whose projected wanted
     state differs from the operative ``monitored`` flag — observability for
-    the staged ADR-02 cutover, no flags are changed. Does not commit.
+    the staged ADR-02 cutover, no flags are changed. ``projected`` counts
+    every row CONSIDERED (the scope size), not rows actually written — the
+    upsert's WHERE clause skips writing/touching ``updated_at`` for rows
+    whose wanted/reason/profile/version didn't change, so use ``written``
+    (== ``len(changed_track_ids)``) to gauge real write volume. Does not
+    commit.
     """
     stats = {"projected": 0, "wanted": 0, "pruned": 0, "flag_mismatches": 0}
+    changed_track_ids: List[int] = []
     scope_sql, scope_args = "", []
     if track_ids is not None:
         if not track_ids:
@@ -181,7 +187,7 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
         # The WHERE on the upsert skips the write (and its updated_at bump)
         # when nothing changed — a full hourly recompute otherwise re-writes
         # every unchanged row, churning indexes for no reason (review Teil B).
-        conn.execute(
+        cur = conn.execute(
             """INSERT INTO lib2_wanted_tracks(
                    profile_id, track_id, wanted, reason,
                    effective_profile_id, projection_version)
@@ -200,6 +206,13 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
                      IS NOT excluded.projection_version""",
             (int(profile_id), r["track_id"], 1 if wanted else 0, reason,
              effective_profile_id, PROJECTION_VERSION))
+        # rowcount is 0 when the upsert's WHERE found nothing to change (a
+        # genuine no-op row) — callers (e.g. the wishlist reconcile) use this
+        # to re-mirror a track whose wanted/profile state just changed even
+        # when it's already wishlisted, without re-touching every unchanged
+        # row (review Teil B's original efficiency goal).
+        if cur.rowcount:
+            changed_track_ids.append(int(r["track_id"]))
         stats["projected"] += 1
         if wanted:
             stats["wanted"] += 1
@@ -209,6 +222,8 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
         logger.info("Wanted projection: %d of %d tracks diverge from their "
                     "monitored flag (profile %s)", stats["flag_mismatches"],
                     stats["projected"], profile_id)
+    stats["changed_track_ids"] = changed_track_ids
+    stats["written"] = len(changed_track_ids)
     return stats
 
 

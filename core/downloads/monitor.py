@@ -9,6 +9,10 @@ import threading
 import time
 
 from config.settings import config_manager
+from core.downloads.source_policy import (
+    RELEASE_SOURCE_NAMES as _RELEASE_SOURCE_NAMES,
+    STREAMING_SOURCE_NAMES as _STREAMING_SOURCE_NAMES,
+)
 from core.runtime_state import (
     download_batches,
     download_tasks,
@@ -35,7 +39,6 @@ _start_next_batch_of_downloads = None
 _orphaned_download_keys = None
 missing_download_executor = None
 download_orchestrator = None
-_RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 
 # Hard ceiling on automatic next-candidate retries after a download was
 # quarantined (AcoustID mismatch / integrity / duration). The natural
@@ -55,16 +58,6 @@ MAX_QUARANTINE_RETRIES = 5
 # one 'soulseek' bucket), but this ceiling caps the TOTAL retries across every
 # source so a misbehaving source-resolution can never loop forever.
 MAX_TOTAL_QUARANTINE_RETRIES = 100
-
-# Streaming plugins report their source name as the download's "username"
-# (see download_orchestrator._streaming_sources). Soulseek uses the peer name
-# instead, so anything not in this set is bucketed under 'soulseek' for the
-# per-source retry budget.
-_STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
-    'torrent', 'usenet',
-))
-
 
 def _resolve_download_source(username):
     """Map a download's username to its logical source for per-source budgeting.

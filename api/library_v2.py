@@ -4094,6 +4094,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the user didn't consciously start. A still-running unrelated
             # job (e.g. a large artist-wide write) falls through to the
             # existing 409 unchanged.
+            def _conflict_response(err, job_id_):
+                return jsonify({
+                    "success": False,
+                    "error": str(err),
+                    "job_id": job_id_,
+                }), 409
+
             blocking_job_id = exc.state["job_id"]
             deadline = time.monotonic() + _RETAG_CONFLICT_WAIT_SECONDS
             blocking = _job_registry.get(blocking_job_id)
@@ -4101,19 +4108,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 time.sleep(_RETAG_CONFLICT_POLL_SECONDS)
                 blocking = _job_registry.get(blocking_job_id)
             if blocking is not None and blocking.get("running"):
-                return jsonify({
-                    "success": False,
-                    "error": str(exc),
-                    "job_id": blocking_job_id,
-                }), 409
+                return _conflict_response(exc, blocking_job_id)
             try:
                 job = _job_registry.start("retag", total=len(track_ids))
             except JobAlreadyRunning as exc2:
-                return jsonify({
-                    "success": False,
-                    "error": str(exc2),
-                    "job_id": exc2.state["job_id"],
-                }), 409
+                return _conflict_response(exc2, exc2.state["job_id"])
         job_id = job["job_id"]
 
         def _run():

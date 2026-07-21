@@ -34,8 +34,13 @@ logger = get_logger("repair_job.quality_info_backfill")
 
 # Bit depth is only meaningful for lossless containers — a lossy file (mp3,
 # aac, ogg, opus, wma) legitimately has NULL bit_depth forever, that must
-# never be mistaken for "never probed".
-_LOSSLESS_FORMATS = ("flac", "wav", "aiff", "alac", "dsf", "dff", "ape", "wv")
+# never be mistaken for "never probed". Restricted to formats
+# ``core.imports.file_ops.probe_audio_quality`` can actually populate
+# bit_depth for: ape/wv have no probe branch at all (always returns None)
+# and dff has no mutagen reader (bit_depth always None), so including them
+# here would make every such file a permanent re-probe candidate that can
+# never resolve.
+_LOSSLESS_FORMATS = ("flac", "wav", "aiff", "alac", "dsf")
 
 _CANDIDATE_QUERY = f"""
     SELECT id FROM lib2_track_files

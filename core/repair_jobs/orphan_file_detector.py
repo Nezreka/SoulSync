@@ -51,34 +51,32 @@ def _library_folder_setting(context: JobContext) -> bool:
         return False
 
 
-def _configured_music_roots(config_manager) -> list:
-    """Every existing, canonical root the admin explicitly configured in
-    ``library.music_paths`` — same read+resolve pattern as
-    ``core.library2.file_delete._library_roots``."""
-    try:
-        configured = config_manager.get("library.music_paths", []) or []
-    except Exception:  # noqa: BLE001
-        configured = []
-    if isinstance(configured, str):
-        configured = [configured]
+def _drop_nested_roots(roots: list) -> list:
+    """Drop any root that IS, or sits inside, another root in the list.
 
-    from core.imports.paths import docker_resolve_path
-
-    roots: list = []
-    for raw in configured:
-        if not isinstance(raw, str) or not raw.strip():
-            continue
-        resolved = os.path.realpath(
-            os.path.abspath(os.path.expanduser(docker_resolve_path(raw.strip())))
-        )
-        if os.path.isdir(resolved) and resolved not in roots:
-            roots.append(resolved)
-    return roots
+    Some installs point ``library.music_paths`` at a directory that is an
+    ancestor of (or identical to) the transfer/staging folder (module
+    docstring above). Without this, both would get walked and every file
+    under the overlap would be probed/found twice — wasted work, since
+    walking the outer root already covers everything beneath it.
+    """
+    def _contains(outer: str, inner: str) -> bool:
+        if outer == inner:
+            return True
+        try:
+            return os.path.commonpath([outer, inner]) == outer
+        except ValueError:
+            return False  # e.g. different drives — never nested
+    return [
+        root for root in roots
+        if not any(other != root and _contains(other, root) for other in roots)
+    ]
 
 
 def _scan_roots(context: JobContext) -> list:
     """Folders to walk: transfer always, every configured library.music_paths
-    root too when the opt-in setting is on. De-duplicated."""
+    root too when the opt-in setting is on. De-duplicated (including nested
+    roots — see ``_drop_nested_roots``)."""
     roots = []
     transfer = context.transfer_folder
     if transfer and os.path.isdir(transfer):
@@ -87,11 +85,12 @@ def _scan_roots(context: JobContext) -> list:
         logger.warning("Transfer folder does not exist: %s", transfer)
 
     if _library_folder_setting(context) and context.config_manager is not None:
-        for resolved in _configured_music_roots(context.config_manager):
+        from core.library2.file_delete import _library_roots
+        for resolved in _library_roots(context.config_manager):
             if resolved not in roots:
                 roots.append(resolved)
 
-    return roots
+    return _drop_nested_roots(roots)
 
 
 @register_job
@@ -349,11 +348,11 @@ class OrphanFileDetectorJob(RepairJob):
                 stat = os.stat(fpath)
                 ext = os.path.splitext(fpath)[1].lower().lstrip('.')
                 quality = probe_audio_quality(fpath)
-                tier = quality_tier(
-                    quality.format if quality else None,
-                    quality.bitrate if quality else None,
-                    quality.bit_depth if quality else None,
-                )
+                q_format = quality.format if quality else None
+                q_bitrate = quality.bitrate if quality else None
+                q_sample_rate = quality.sample_rate if quality else None
+                q_bit_depth = quality.bit_depth if quality else None
+                tier = quality_tier(q_format, q_bitrate, q_bit_depth)
                 if context.create_finding:
                     inserted = context.create_finding(
                         job_id=self.job_id,
@@ -369,10 +368,10 @@ class OrphanFileDetectorJob(RepairJob):
                         ),
                         details={
                             'file_size': stat.st_size,
-                            'format': quality.format if quality else ext,
-                            'bitrate': quality.bitrate if quality else None,
-                            'sample_rate': quality.sample_rate if quality else None,
-                            'bit_depth': quality.bit_depth if quality else None,
+                            'format': q_format or ext,
+                            'bitrate': q_bitrate,
+                            'sample_rate': q_sample_rate,
+                            'bit_depth': q_bit_depth,
                             'quality_tier': tier,
                             'modified': time.strftime('%Y-%m-%d %H:%M:%S',
                                                       time.localtime(stat.st_mtime)),

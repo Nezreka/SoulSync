@@ -15,7 +15,9 @@ Primary selection strategy (the ADR requires ONE documented strategy, not
 implicit code):
 
 1. ``active`` files before any other state;
-2. lossless formats (flac/alac/ape/wav/aiff) before lossy;
+2. lossless formats (flac/alac/wav/dsf, plus the aiff/aif/aifc/dff raw-
+   extension spellings of wav/dsf — see ``_LOSSLESS_FORMATS`` below) before
+   lossy;
 3. higher bit depth, then higher sample rate, then higher bitrate;
 4. the NEWER row wins ties (highest id) — the exact opposite of the old
    accidental "oldest row" behaviour, because a newer import of equal quality
@@ -32,6 +34,9 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Optional
 
 from core.quality.lossless import LOSSLESS_FORMATS as _CANONICAL_LOSSLESS
+from core.quality.lossless import (
+    LOSSLESS_CANDIDATE_EXTENSIONS as _CANONICAL_LOSSLESS_EXTS,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.track_files")
@@ -42,9 +47,19 @@ FILE_STATES = ("active", "missing_suspected", "missing_confirmed",
 # SQL IN-list of lossless formats, derived from the one canonical set the
 # quality engine ranks (flac/alac/wav/dsf) so file election here and the UI
 # badge (core.library2.status) can't disagree about what counts as lossless
-# (review Teil B, reuse). Values are trusted literals from a frozenset.
+# (review Teil B, reuse). The DB's ``format`` column sometimes holds the raw
+# file extension verbatim (importer seed path) rather than the unified format
+# name a probe produces — aiff/aif/aifc and dff are unambiguously lossless
+# (they normalize to wav/dsf) but aren't spelled that way when unprobed, so
+# their raw extensions are included too. Ambiguous containers (m4a/mp4 —
+# ALAC-or-AAC) are deliberately excluded: without a codec probe they must not
+# be assumed lossless, exactly like ``core.quality.lossless`` itself.
+_LOSSLESS_TOKENS = set(_CANONICAL_LOSSLESS) | {
+    ext.lstrip('.') for ext in _CANONICAL_LOSSLESS_EXTS
+    if ext.lstrip('.') not in ('m4a', 'mp4')
+}
 _LOSSLESS_FORMATS = "(" + ",".join(
-    f"'{fmt}'" for fmt in sorted(_CANONICAL_LOSSLESS)) + ")"
+    f"'{fmt}'" for fmt in sorted(_LOSSLESS_TOKENS)) + ")"
 
 
 def quality_order(alias: str = "") -> str:

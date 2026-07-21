@@ -1181,7 +1181,7 @@ def process_wishlist_automatically(
                             playlist_id=playlist_id,
                             cycle=current_cycle,
                             tracks=group_tracks,
-                            run_id=str(uuid.uuid4()),
+                            run_id=wishlist_run_id,
                             auto_initiated=True,
                             batch_extra_fields={
                                 'wishlist_scope': 'playlist',

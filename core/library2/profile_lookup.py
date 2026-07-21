@@ -89,6 +89,12 @@ def effective_quality_profile(conn, entity: str, entity_id: int) -> Dict[str, An
     """
     normalized = _ENTITY_ALIASES.get(str(entity).strip().lower())
     if normalized == "tracks":
+        # LEFT JOINs: a track whose album has a NULL/dangling
+        # primary_artist_id must still resolve (falling through to the
+        # default profile at that level), not raise "Track not found" — an
+        # INNER JOIN would drop the row entirely and make a real track
+        # indistinguishable from a nonexistent one (matches the batched
+        # resolver in core.library2.wanted.recompute_wanted).
         row = conn.execute(
             """SELECT t.id AS track_id, t.quality_profile_id AS track_profile,
                       COALESCE(t.quality_profile_explicit, 0) AS track_explicit,
@@ -97,8 +103,8 @@ def effective_quality_profile(conn, entity: str, entity_id: int) -> Dict[str, An
                       a.id AS artist_id, a.quality_profile_id AS artist_profile,
                       COALESCE(a.quality_profile_explicit, 0) AS artist_explicit
                  FROM lib2_tracks t
-                 JOIN lib2_albums al ON al.id=t.album_id
-                 JOIN lib2_artists a ON a.id=al.primary_artist_id
+                 LEFT JOIN lib2_albums al ON al.id=t.album_id
+                 LEFT JOIN lib2_artists a ON a.id=al.primary_artist_id
                 WHERE t.id=?""",
             (int(entity_id),),
         ).fetchone()
@@ -110,13 +116,16 @@ def effective_quality_profile(conn, entity: str, entity_id: int) -> Dict[str, An
             ("artist", row["artist_id"], row["artist_profile"], row["artist_explicit"]),
         )
     elif normalized == "albums":
+        # LEFT JOIN for the same reason as the tracks branch above — an
+        # album with a dangling primary_artist_id must resolve to its own
+        # explicit choice or the default, not a spurious "Album not found".
         row = conn.execute(
             """SELECT al.id AS album_id, al.quality_profile_id AS album_profile,
                       COALESCE(al.quality_profile_explicit, 0) AS album_explicit,
                       a.id AS artist_id, a.quality_profile_id AS artist_profile,
                       COALESCE(a.quality_profile_explicit, 0) AS artist_explicit
                  FROM lib2_albums al
-                 JOIN lib2_artists a ON a.id=al.primary_artist_id
+                 LEFT JOIN lib2_artists a ON a.id=al.primary_artist_id
                 WHERE al.id=?""",
             (int(entity_id),),
         ).fetchone()
