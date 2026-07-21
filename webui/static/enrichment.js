@@ -3211,7 +3211,14 @@ function _renderFindingMedia(d) {
     }
     if (artistUrl) {
         const artistLabel = d.artist_name || d.artist || 'Artist';
-        html += `<div class="repair-finding-media-card">
+        const hasName = !!(d.artist_name || d.artist);
+        // Clickable → the artist's page. The id isn't stored in finding details,
+        // so it resolves by exact name at click time (works for OLD findings too).
+        const clickAttrs = hasName
+            ? ` data-artist-name="${_escFinding(artistLabel)}" onclick="event.stopPropagation(); openFindingArtist(this)"
+                title="Open ${_escFinding(artistLabel)}'s page" role="link"`
+            : '';
+        html += `<div class="repair-finding-media-card${hasName ? ' repair-finding-media-card--link' : ''}"${clickAttrs}>
             <img class="repair-finding-media-img artist" src="${_escFinding(artistUrl)}" alt="Artist"
                  onerror="this.parentElement.style.display='none'" />
             <span class="repair-finding-media-label">${_escFinding(artistLabel)}</span>
@@ -3219,6 +3226,27 @@ function _renderFindingMedia(d) {
     }
     html += '</div>';
     return html;
+}
+
+// Findings don't store the library artist id — resolve it by exact name and
+// navigate. Ambiguity rule: exact (case-insensitive) name match wins; without
+// one we DON'T guess a fuzzy result, we say so.
+async function openFindingArtist(el) {
+    const name = el.getAttribute('data-artist-name');
+    if (!name) return;
+    try {
+        const res = await fetch(`/api/library/artists?search=${encodeURIComponent(name)}&limit=10`);
+        const data = await res.json();
+        const artists = (data && data.artists) || [];
+        const exact = artists.find(a => (a.name || '').toLowerCase() === name.toLowerCase());
+        if (exact && exact.id != null && typeof navigateToArtistDetail === 'function') {
+            navigateToArtistDetail(exact.id, exact.name);
+        } else {
+            showToast(`"${name}" isn't in your library`, 'info');
+        }
+    } catch (err) {
+        showToast('Could not open artist page', 'error');
+    }
 }
 
 function _renderFindingDetail(f) {

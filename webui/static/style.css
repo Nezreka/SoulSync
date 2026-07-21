@@ -56205,6 +56205,16 @@ tr.tag-diff-same {
     gap: 8px;
     min-width: 0;
 }
+/* clickable artist card → artist page */
+.repair-finding-media-card--link { cursor: pointer; border-radius: 12px; transition: transform 0.15s ease; }
+.repair-finding-media-card--link:hover { transform: translateY(-2px); }
+.repair-finding-media-card--link:hover .repair-finding-media-img {
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 29, 185, 84), 0.7);
+}
+.repair-finding-media-card--link:hover .repair-finding-media-label {
+    color: rgb(var(--accent-rgb, 29, 185, 84));
+    text-decoration: underline;
+}
 .repair-finding-media-img {
     width: 150px;
     height: 150px;
