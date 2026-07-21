@@ -1163,7 +1163,9 @@
         var scope = opts.scope || (opts.episode != null ? 'episode' : 'season');
         var scopeLabel = scope === 'episode'
             ? ('S' + opts.season + 'E' + opts.episode)
-            : (scope === 'series' ? 'Complete series' : ('Season ' + opts.season));
+            : scope === 'movie'
+                ? (opts.year ? String(opts.year) : 'Movie')
+                : (scope === 'series' ? 'Complete series' : ('Season ' + opts.season));
         var ov = document.createElement('div');
         ov.className = 'vms-overlay';
         ov.innerHTML =
@@ -1223,6 +1225,7 @@
             srcs.forEach(function (s) {
                 var res = body.querySelector('[data-vms-results-for="' + s + '"]');
                 searchInto(ov, res, { scope: scope, title: opts.title, season: opts.season,
+                    year: opts.year || null,   // movies search title+year (same as the get-modal)
                     episode: (scope === 'episode' ? opts.episode : null), source: s }, []);
             });
         });

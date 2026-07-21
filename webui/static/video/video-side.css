@@ -3732,6 +3732,8 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-hunt--busy svg { animation: vwsh-hunt-spin 0.9s linear infinite; }
 @keyframes vwsh-hunt-spin { to { transform: rotate(360deg); } }
 .vwsh-movie-art .vwsh-hunt { position: absolute; top: 8px; right: 40px; z-index: 3; opacity: 0; }
+/* manual release-picker sits left of the auto-search button (rm 8 · hunt 40 · pick 72) */
+.vwsh-movie-art .vwsh-hunt.vwsh-pick { right: 72px; }
 .vwsh-movie:hover .vwsh-movie-art .vwsh-hunt { opacity: 1; }
 .vwsh-nebula .vwsh-epc-hunt { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: none;
     background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6); cursor: pointer;
@@ -3744,6 +3746,8 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
 .vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-hunt { opacity: 1; }
 .vwsh-nebula .vwsh-szn-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); color: #fff; }
+/* manual release-picker sits left of the season auto-search (rm 4 · hunt 30 · pick 56) */
+.vwsh-nebula .vwsh-szn-hunt.vwsh-pick { right: 56px; }
 @media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, .vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }
 
 /* 'Search all missing' — toolbar sibling of Clear all */

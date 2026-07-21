@@ -78,6 +78,21 @@
             '</button>';
     }
 
+    // Manual search (LiveLeak's failing-hub follow-up): every wishable item gets
+    // BOTH buttons, Sonarr-style — auto (huntBtn: the system picks) and manual
+    // (pickBtn: opens the shared release-picker modal, the same one the detail
+    // page uses, and the USER picks). List+magnifier icon = "show me the options".
+    var PICK_ICON =
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+        'stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h9M4 18h6"/>' +
+        '<circle cx="17.5" cy="16.5" r="3.4"/><path d="M21.8 20.8l-2-2"/></svg>';
+
+    function pickBtn(cls, scope, attrs) {
+        return '<button class="' + cls + ' vwsh-pick" type="button" ' +
+            'title="Manual search — pick a release" aria-label="Manual search" ' +
+            'data-vwsh-pick="' + scope + '"' + attrs + '>' + PICK_ICON + '</button>';
+    }
+
     // ── movie card ────────────────────────────────────────────────────────────
     function movieCard(it) {
         var owned = it.library_id != null;
@@ -105,6 +120,9 @@
             '<div class="vwsh-movie-art">' + art + '<div class="vwsh-movie-scrim"></div>' +
             statusPill(st, tip) + failChip +
             (st === 'downloading' ? '' : huntBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"')) +
+            (st === 'downloading' ? '' : pickBtn('vwsh-hunt', 'movie',
+                ' data-tmdb="' + esc(it.tmdb_id) + '" data-title="' + esc(it.title || '') +
+                '" data-year="' + esc(it.year || '') + '" data-poster="' + esc(it.poster_url || '') + '"')) +
             rmBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') + '</div>' +
             '<div class="vwsh-movie-info"><span class="vwsh-movie-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span>' + (meta ? '<span class="vwsh-movie-meta">' + esc(meta) + '</span>' : '') +
@@ -162,6 +180,8 @@
                         'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Search this season now">' +
                         '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
                         'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
+                    (yt ? '' : pickBtn('vwsh-szn-hunt', 'season',
+                        ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '"')) +
                     '<button class="vwsh-szn-rm" type="button" ' + sRm + ' title="Remove">&#10005;</button>' +
                 '</div>' +
                 '<div class="vwsh-ep-grid">' + cards + '</div>' +
@@ -346,6 +366,9 @@
                   '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Search now">' +
                   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
                   'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
+            (yt || st === 'downloading' ? ''
+                : pickBtn('vwsh-epc-hunt', 'episode', ' data-tmdb="' + esc(sh.tmdb_id) +
+                  '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"')) +
             '<button class="vwsh-epc-rm" type="button" ' + rm + ' title="Remove">&#10005;</button>' +
         '</div>';
     }
@@ -658,7 +681,33 @@
             .catch(fail);
     }
 
+    // Manual pick — open the shared release-picker modal (VideoDownload.manualSearch,
+    // the exact modal the detail page uses). No media context is passed: like a
+    // tmdb-only item on the detail page, the grab lands as a plain download+import.
+    function doPick(btn) {
+        if (!window.VideoDownload || !VideoDownload.manualSearch) {
+            if (typeof showToast === 'function') showToast('Manual search unavailable', 'error');
+            return;
+        }
+        var scope = btn.getAttribute('data-vwsh-pick');
+        if (scope === 'movie') {
+            VideoDownload.manualSearch({
+                title: btn.getAttribute('data-title') || '', scope: 'movie',
+                year: btn.getAttribute('data-year') || null,
+                poster: btn.getAttribute('data-poster') || null });
+            return;
+        }
+        var sh = state.showData[parseInt(btn.getAttribute('data-tmdb'), 10)] || {};
+        VideoDownload.manualSearch({
+            title: sh.title || '', scope: scope,
+            season: parseInt(btn.getAttribute('data-s'), 10),
+            episode: btn.hasAttribute('data-e') ? parseInt(btn.getAttribute('data-e'), 10) : null,
+            year: sh.year || null, poster: sh.poster_url || null });
+    }
+
     function onGridClick(e) {
+        var pick = e.target.closest('[data-vwsh-pick]');
+        if (pick) { e.preventDefault(); e.stopPropagation(); doPick(pick); return; }
         var hunt = e.target.closest('[data-vwsh-hunt]');
         if (hunt) { e.preventDefault(); e.stopPropagation(); doHunt(hunt); return; }
         var rm = e.target.closest('[data-vwsh-rm]');
