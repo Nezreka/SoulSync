@@ -261,6 +261,48 @@ def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[s
     return result.url if result is not None else None
 
 
+def _apply_descriptive_metadata(
+    conn: Any, entity_type: str, entity_id: int, metadata: Any,
+) -> Optional[str]:
+    """Persist only normalized, non-null provider fields onto one native row."""
+
+    columns = {
+        "artist": {
+            "image_url": "image_url", "genres": "genres", "summary": "summary",
+            "style": "style", "mood": "mood", "label": "label",
+            "banner_url": "banner_url",
+        },
+        "album": {
+            "image_url": "image_url", "genres": "genres", "year": "year",
+            "release_date": "release_date", "label": "label", "upc": "upc",
+            "style": "style", "mood": "mood", "explicit": "explicit",
+        },
+        "track": {
+            "duration_ms": "duration", "bpm": "bpm", "explicit": "explicit",
+            "lyrics": "genius_lyrics", "copyright": "copyright",
+            "style": "style", "mood": "mood",
+        },
+    }[entity_type]
+    assignments = []
+    values: List[Any] = []
+    for attribute, column in columns.items():
+        value = getattr(metadata, attribute, None)
+        if value is None:
+            continue
+        if attribute == "genres":
+            value = json.dumps(list(value))
+        assignments.append(f"{column}=?")
+        values.append(value)
+    if assignments:
+        values.append(int(entity_id))
+        conn.execute(
+            f"UPDATE lib2_{entity_type}s SET {', '.join(assignments)}, "
+            "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            values,
+        )
+    return getattr(metadata, "image_url", None)
+
+
 def enrich_native_entity_for_service(
     conn: Any,
     entity_type: str,
@@ -405,7 +447,17 @@ def enrich_native_entity_for_service(
         actor="native_enrichment",
     )
 
-    image_url = str(hit.get("image") or "").strip() or None
+    from core.library2.provider_adapters import fetch_descriptive_metadata
+    metadata = fetch_descriptive_metadata(
+        canonical,
+        {actual_source: provider_id},
+        source_order=(actual_source,),
+    )
+    metadata_image = (
+        _apply_descriptive_metadata(conn, canonical, int(entity_id), metadata)
+        if metadata is not None else None
+    )
+    image_url = metadata_image or str(hit.get("image") or "").strip() or None
     if canonical == "artist":
         if not image_url:
             image_url = default_artwork_fetcher(
@@ -433,16 +485,6 @@ def enrich_native_entity_for_service(
                 "WHERE id=?", (image_url, int(entity_id)),
             )
     else:
-        from core.library2.provider_adapters import fetch_track_metadata
-        metadata = fetch_track_metadata(
-            {actual_source: provider_id}, source_order=(actual_source,),
-        )
-        if metadata and metadata.duration_ms is not None:
-            conn.execute(
-                "UPDATE lib2_tracks SET duration=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=?", (metadata.duration_ms, int(entity_id)),
-            )
-        image_url = metadata.image_url if metadata else image_url
         if image_url and row["album_id"]:
             conn.execute(
                 "UPDATE lib2_albums SET image_url=COALESCE(image_url, ?), "

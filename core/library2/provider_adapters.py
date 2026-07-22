@@ -203,6 +203,29 @@ class TrackMetadataProviderResult:
     image_url: Optional[str]
 
 
+@dataclass(frozen=True)
+class DescriptiveMetadataProviderResult:
+    """Provider-qualified descriptive fields for native Library-v2 rows."""
+
+    provider: str
+    provider_entity_id: str
+    image_url: Optional[str] = None
+    genres: Optional[Tuple[str, ...]] = None
+    summary: Optional[str] = None
+    year: Optional[int] = None
+    release_date: Optional[str] = None
+    label: Optional[str] = None
+    upc: Optional[str] = None
+    style: Optional[str] = None
+    mood: Optional[str] = None
+    explicit: Optional[bool] = None
+    duration_ms: Optional[int] = None
+    bpm: Optional[float] = None
+    lyrics: Optional[str] = None
+    copyright: Optional[str] = None
+    banner_url: Optional[str] = None
+
+
 def _normalized_source_ids(
     source_ids: Optional[Mapping[str, str]],
 ) -> Dict[str, str]:
@@ -302,6 +325,205 @@ def _track_art_url(details: Mapping[str, Any]) -> Optional[str]:
             for small in ("100x100bb", "60x60bb", "30x30bb"):
                 art = art.replace(small, "600x600bb")
             return art
+    return None
+
+
+def _mapping_payload(payload: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(payload, Mapping):
+        normalized = dict(payload)
+    elif is_dataclass(payload):
+        normalized = asdict(payload)
+    elif hasattr(payload, "__dict__"):
+        normalized = dict(vars(payload))
+    else:
+        return None
+    raw = normalized.get("raw_data") or normalized.get("_raw_data")
+    if isinstance(raw, Mapping):
+        return {**raw, **normalized}
+    return normalized
+
+
+def _first(payload: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if payload.get(key) not in (None, ""):
+            return payload[key]
+    return None
+
+
+def _image_url(payload: Mapping[str, Any]) -> Optional[str]:
+    for key in (
+        "image_url", "artwork_url", "artworkUrl100", "cover_xl",
+        "cover_big", "cover_medium", "picture_xl", "picture_big",
+        "strArtistThumb", "strAlbumThumb",
+    ):
+        url = _optional_text(payload.get(key))
+        if url:
+            for small in ("100x100bb", "60x60bb", "30x30bb"):
+                url = url.replace(small, "600x600bb")
+            return url
+    images = payload.get("images")
+    if isinstance(images, list):
+        for image in images:
+            if isinstance(image, Mapping):
+                url = _optional_text(image.get("url"))
+                if url:
+                    return url
+    return _track_art_url(payload)
+
+
+def _string_values(value: Any) -> Optional[Tuple[str, ...]]:
+    if isinstance(value, Mapping):
+        value = value.get("data") or value.get("items") or value.get("values")
+    if isinstance(value, str):
+        values = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        values = value
+    else:
+        return None
+    result = tuple(
+        text for item in values if (text := _optional_text(
+            item.get("name") if isinstance(item, Mapping) else item
+        ))
+    )
+    return result or None
+
+
+def _optional_bool(value: Any) -> Optional[bool]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1", "explicit"}:
+            return True
+        if normalized in {"false", "no", "0", "clean", "notexplicit"}:
+            return False
+        return None
+    return bool(value)
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _descriptive_getter(client: Any, entity_type: str) -> Optional[Any]:
+    names = {
+        "artist": ("get_artist", "get_artist_details", "get_artist_metadata"),
+        "album": ("get_album_metadata", "get_album", "get_album_details"),
+        "track": ("get_track_details", "get_track", "get_track_metadata"),
+    }[entity_type]
+    return next(
+        (getter for name in names if callable(getter := getattr(client, name, None))),
+        None,
+    )
+
+
+def _call_descriptive_getter(getter: Any, entity_type: str, provider_id: str) -> Any:
+    try:
+        return getter(provider_id, allow_fallback=False)
+    except TypeError:
+        if entity_type == "album":
+            try:
+                return getter(provider_id, include_tracks=False)
+            except TypeError:
+                pass
+        return getter(provider_id)
+
+
+def fetch_descriptive_metadata(
+    entity_type: str,
+    source_ids: Mapping[str, str],
+    *,
+    source_order: Optional[Tuple[str, ...]] = None,
+    clients: Optional[Mapping[str, Any]] = None,
+) -> Optional[DescriptiveMetadataProviderResult]:
+    """Fetch normalized metadata without crossing provider-id namespaces."""
+
+    from core.metadata.registry import get_client_for_source
+
+    canonical = str(entity_type or "").strip().lower()
+    if canonical not in {"artist", "album", "track"}:
+        raise ValueError("entity_type must be artist, album, or track")
+    normalized_ids = _normalized_source_ids(source_ids)
+    order = list(source_order or _configured_source_order())
+    order.extend(sorted(set(normalized_ids) - set(order)))
+    for provider in order:
+        provider_id = normalized_ids.get(provider)
+        if not provider_id:
+            continue
+        try:
+            client = (clients or {}).get(provider) or get_client_for_source(provider)
+            getter = _descriptive_getter(client, canonical) if client else None
+            if getter is None:
+                continue
+            payload = _mapping_payload(
+                _call_descriptive_getter(getter, canonical, provider_id)
+            )
+            if payload is None:
+                continue
+            release_date = _optional_text(_first(
+                payload, "release_date", "releaseDate", "date", "released",
+            ))
+            year = _optional_nonnegative_int(_first(
+                payload, "year", "release_year", "releaseYear",
+            ))
+            if year is None and release_date:
+                year = _optional_nonnegative_int(release_date[:4])
+            duration = _optional_nonnegative_int(_first(
+                payload, "duration_ms", "trackTimeMillis", "durationMillis",
+            ))
+            if duration is None and provider == "deezer":
+                seconds = _optional_nonnegative_int(payload.get("duration"))
+                duration = seconds * 1000 if seconds is not None else None
+            result = DescriptiveMetadataProviderResult(
+                provider=provider,
+                provider_entity_id=provider_id,
+                image_url=_image_url(payload),
+                genres=_string_values(_first(
+                    payload, "genres", "genre", "primaryGenreName", "strGenre", "tags",
+                )),
+                summary=_optional_text(_first(
+                    payload, "summary", "bio", "biography", "description",
+                    "strBiographyEN",
+                )),
+                year=year,
+                release_date=release_date,
+                label=_optional_text(_first(
+                    payload, "label", "label_name", "recordLabel", "strLabel",
+                )),
+                upc=_optional_text(_first(payload, "upc", "barcode")),
+                style=_optional_text(_first(payload, "style", "strStyle")),
+                mood=_optional_text(_first(payload, "mood", "strMood")),
+                explicit=_optional_bool(_first(
+                    payload, "explicit", "explicit_lyrics", "trackExplicitness",
+                )),
+                duration_ms=duration,
+                bpm=_optional_float(_first(payload, "bpm", "tempo")),
+                lyrics=_optional_text(_first(
+                    payload, "genius_lyrics", "lyrics", "strTrackLyrics",
+                )),
+                copyright=_optional_text(_first(
+                    payload, "copyright", "copyright_text", "copyrightNotice",
+                )),
+                banner_url=_optional_text(_first(
+                    payload, "banner_url", "banner", "strArtistBanner",
+                )),
+            )
+            if any(
+                value is not None
+                for name, value in vars(result).items()
+                if name not in {"provider", "provider_entity_id"}
+            ):
+                return result
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "%s %s lookup failed (%s): %s",
+                provider, canonical, provider_id, exc,
+            )
     return None
 
 
@@ -708,6 +930,7 @@ __all__ = [
     "DISCOGRAPHY_PARSER_VERSION",
     "TRACKLIST_PARSER_VERSION",
     "ArtworkProviderResult",
+    "DescriptiveMetadataProviderResult",
     "DiscographyProviderResult",
     "DiscographyRelease",
     "TracklistProviderResult",
@@ -716,5 +939,6 @@ __all__ = [
     "fetch_album_tracklist",
     "fetch_artwork_url",
     "fetch_artist_discography",
+    "fetch_descriptive_metadata",
     "fetch_track_metadata",
 ]
