@@ -246,6 +246,8 @@ class TrackNumberRepairJob(RepairJob):
                                 details['album_title'] = art_info['album_title']
                             if art_info.get('artist_name'):
                                 details['artist_name'] = art_info['artist_name']
+                            if art_info.get('artist_id') is not None:
+                                details['artist_id'] = art_info['artist_id']
                             inserted = context.create_finding(
                                 job_id=self.job_id,
                                 finding_type='track_number_mismatch',
@@ -1092,7 +1094,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
     (e.g., /mnt/musicBackup/... vs H:\\Music\\...).
     """
     result = {'album_thumb_url': None, 'artist_thumb_url': None,
-              'album_title': None, 'artist_name': None}
+              'album_title': None, 'artist_name': None, 'artist_id': None}
     if not context.db:
         return result
 
@@ -1104,7 +1106,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
         # First try exact path match (fast)
         for fpath, *_rest in file_track_data:
             cursor.execute("""
-                SELECT al.thumb_url, ar.thumb_url, al.title, ar.name
+                SELECT al.thumb_url, ar.thumb_url, al.title, ar.name, ar.id
                 FROM tracks t
                 LEFT JOIN albums al ON al.id = t.album_id
                 LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -1117,6 +1119,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
                 result['artist_thumb_url'] = row[1] or None
                 result['album_title'] = row[2] or None
                 result['artist_name'] = row[3] or None
+                result['artist_id'] = row[4]
                 return result
 
         # Fallback: suffix-based matching (handles cross-environment path mismatches)
@@ -1129,7 +1132,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
                 suffix = '/'.join(parts[-2:])
                 # Use LIKE with the suffix for cross-platform matching
                 cursor.execute("""
-                    SELECT al.thumb_url, ar.thumb_url, al.title, ar.name
+                    SELECT al.thumb_url, ar.thumb_url, al.title, ar.name, ar.id
                     FROM tracks t
                     LEFT JOIN albums al ON al.id = t.album_id
                     LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -1142,6 +1145,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
                     result['artist_thumb_url'] = row[1] or None
                     result['album_title'] = row[2] or None
                     result['artist_name'] = row[3] or None
+                    result['artist_id'] = row[4]
 
     except Exception as e:
         logger.debug("Error looking up album/artist art from DB: %s", e)

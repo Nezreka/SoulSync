@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.3"
+_SOULSYNC_BASE_VERSION = "3.1.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -9383,6 +9383,9 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     ``jsonify``.
     """
     from core.artist_source_detail import build_source_only_artist_detail
+    from core.metadata.discography_strict import (
+        get_artist_detail_discography as _get_artist_detail_discography,
+    )
 
     # Resolve the per-source clients defensively — the original inline code
     # wrapped the whole source-side lookup in try/except so a failing
@@ -9452,6 +9455,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         jiosaavn_client=js,
         bandcamp_client=bc,
         lastfm_api_key=lastfm_api_key,
+        discography_loader=_get_artist_detail_discography,
     )
     return jsonify(payload), status
 
@@ -9566,9 +9570,10 @@ def get_artist_detail(artist_id):
 
         # Get source-priority discography for proper categorization and missing releases
         artist_detail_discography = None
+        provider_error = None
         try:
             from core.metadata.lookup import MetadataLookupOptions
-            from core.metadata_service import get_artist_detail_discography as _get_artist_detail_discography
+            from core.metadata.discography_strict import get_artist_detail_discography as _get_artist_detail_discography
             from core.source_ids import source_id_map
 
             # Per-source artist IDs, read via the canonical source-ID registry
@@ -9607,7 +9612,25 @@ def get_artist_detail(artist_id):
                 ),
             )
 
-            if artist_detail_discography['success']:
+            if artist_detail_discography.get('state') == 'error':
+                provider_error = {
+                    "state": "error",
+                    "error": artist_detail_discography.get(
+                        "error", "Could not access the discography provider"
+                    ),
+                    "source": artist_detail_discography.get("source", "unknown"),
+                    "status_code": int(
+                        artist_detail_discography.get("status_code") or 502
+                    ),
+                }
+                logger.warning(
+                    "Discography provider failed for owned artist %s; "
+                    "returning library releases: %s",
+                    artist_info['name'],
+                    provider_error['error'],
+                )
+                merged_discography = owned_releases
+            elif artist_detail_discography['success']:
                 logger.debug(
                     "Source-priority discography found - "
                     f"Albums: {len(artist_detail_discography['albums'])}, "
@@ -9701,6 +9724,9 @@ def get_artist_detail(artist_id):
             "discography": merged_discography,
             "enrichment_coverage": enrichment_coverage
         }
+
+        if provider_error is not None:
+            response_data["provider_error"] = provider_error
 
         # Add Spotify artist data if available
         if spotify_artist_data:
@@ -10094,7 +10120,7 @@ def get_artist_discography(artist_id):
         # gets the SAME release-type split (albums / eps / singles) the Artist
         # Detail view shows — EPs were being lumped into singles before, leaving
         # the modal's EPs toggle dead.
-        from core.metadata.discography import get_artist_detail_discography as _get_artist_discography
+        from core.metadata.discography_strict import get_artist_detail_discography as _get_artist_discography
 
         # Server-side per-source ID resolution. Look up the library row
         # by ANY of the IDs the frontend might send: library DB id,
@@ -10170,6 +10196,16 @@ def get_artist_discography(artist_id):
                 artist_source_ids=artist_source_ids or None,
             ),
         )
+
+        if discography.get('state') == 'error':
+            return jsonify({
+                "success": False,
+                "state": "error",
+                "error": discography.get(
+                    "error", "Could not access the discography provider"
+                ),
+                "source": discography.get("source", "unknown"),
+            }), int(discography.get("status_code") or 502)
 
         album_list = discography['albums']
         eps_list = discography.get('eps', [])
@@ -11870,6 +11906,13 @@ def batch_update_library_tracks():
 def _build_library_tag_db_data(track_data, album_genres=None):
     """Build the metadata payload consumed by core.tag_writer."""
     album_genres = album_genres or []
+    # #1057 — strict genre filtering applies at the tag-write seam too, so
+    # 'Write Tags' cleans up genres written before the whitelist was enabled.
+    # The tag PREVIEW uses this same builder, so the diff modal shows the
+    # cleanup as a pending change. Strict off → filter_genres is a no-op.
+    if album_genres:
+        from core.genre_filter import filter_genres
+        album_genres = filter_genres(album_genres, config_manager)
     db_data = {
         'title': track_data.get('title'),
         'artist_name': track_data.get('artist_name'),
@@ -12506,7 +12549,7 @@ from core.replaygain import (
     analyze_track as _rg_analyze_track,
     write_replaygain_tags as _rg_write_tags,
     is_ffmpeg_available as _rg_ffmpeg_available,
-    RG_REFERENCE_LUFS as _RG_REFERENCE_LUFS,
+    get_target_lufs as _rg_get_target_lufs,
 )
 
 # State machine for album-level ReplayGain jobs
@@ -12561,7 +12604,7 @@ def analyze_track_replaygain(track_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-    track_gain_db = _RG_REFERENCE_LUFS - lufs
+    track_gain_db = _rg_get_target_lufs(config_manager) - lufs
 
     file_lock = get_file_lock(file_path)
     with file_lock:
@@ -12638,7 +12681,7 @@ def analyze_album_replaygain(album_id):
                 lufs, peak_dbfs = _rg_analyze_track(file_path)
                 lufs_values.append(lufs)
                 peak_values.append(peak_dbfs)
-                track_gain_db = _RG_REFERENCE_LUFS - lufs
+                track_gain_db = _rg_get_target_lufs(config_manager) - lufs
                 track_results.append((file_path, track_gain_db, peak_dbfs))
                 with _rg_album_lock:
                     _rg_album_state['analyzed'] += 1
@@ -12655,7 +12698,7 @@ def analyze_album_replaygain(album_id):
         album_peak_dbfs = None
         if lufs_values:
             mean_lufs = sum(lufs_values) / len(lufs_values)
-            album_gain_db = _RG_REFERENCE_LUFS - mean_lufs
+            album_gain_db = _rg_get_target_lufs(config_manager) - mean_lufs
             album_peak_dbfs = max(peak_values)
 
         # Pass 2: write tags to every successfully analyzed track
@@ -12750,7 +12793,7 @@ def analyze_tracks_replaygain_batch():
 
             try:
                 lufs, peak_dbfs = _rg_analyze_track(file_path)
-                track_gain_db = _RG_REFERENCE_LUFS - lufs
+                track_gain_db = _rg_get_target_lufs(config_manager) - lufs
                 file_lock = get_file_lock(file_path)
                 with file_lock:
                     _rg_write_tags(file_path, track_gain_db, peak_dbfs)
@@ -17800,8 +17843,17 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
         logger.info("[DB Update] Database update completed, starting automatic wishlist cleanup...")
-        # Run cleanup in background to avoid blocking the UI
-        missing_download_executor.submit(_automatic_wishlist_cleanup_after_db_update)
+        # Dedicated thread, NOT `missing_download_executor` — that pool (3
+        # workers) also runs post-processing of completed downloads, and on a
+        # big wishlist one cleanup pass takes HOURS (per-track fuzzy matching).
+        # Stacked cleanups saturated the pool and finished downloads stopped
+        # moving to Completed until restart (jadux). The cleanup itself is
+        # overlap-guarded (skip-if-running) in core/wishlist/processing.py.
+        threading.Thread(
+            target=_automatic_wishlist_cleanup_after_db_update,
+            name="WishlistCleanup",
+            daemon=True,
+        ).start()
     except Exception as cleanup_error:
         logger.error(f"[DB Update] Error starting automatic wishlist cleanup: {cleanup_error}")
 

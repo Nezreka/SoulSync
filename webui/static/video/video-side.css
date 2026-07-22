@@ -2386,6 +2386,23 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vreq-denyin { flex: 1; padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
     border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
 .vreq-empty { padding: 40px 0; text-align: center; color: rgba(255, 255, 255, 0.45); font-size: 13.5px; }
+.vreq-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin: 0 0 16px; flex-wrap: wrap; }
+.vreq-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.vreq-tab { padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.65); }
+.vreq-tab:hover { background: rgba(255, 255, 255, 0.09); color: #fff; }
+.vreq-tab.active { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+.vreq-tab-n { opacity: 0.65; font-weight: 600; margin-left: 2px; }
+.vreq-btn--clear { border-color: rgba(255, 255, 255, 0.1); background: transparent;
+    color: rgba(255, 255, 255, 0.55); font-size: 12px; padding: 7px 12px; }
+.vreq-btn--clear:hover { color: #fff; }
+.vreq-btn--x { padding: 4px 10px; font-size: 15px; line-height: 1; color: rgba(255, 255, 255, 0.5); }
+.vreq-btn--x:hover { color: #fff; background: rgba(239, 68, 68, 0.35); border-color: transparent; }
+/* Approved keeps telling the story: acquiring until the library has it. */
+.vreq-st--lib { background: rgba(34, 197, 94, 0.85); color: #04150a; }
+.vreq-st--acq { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
 @media (max-width: 640px) { .vreq-row { flex-wrap: wrap; } .vreq-actions { width: 100%; justify-content: flex-end; } }
 
 /* Custom Formats editor rows (P3) */
@@ -3732,6 +3749,8 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-hunt--busy svg { animation: vwsh-hunt-spin 0.9s linear infinite; }
 @keyframes vwsh-hunt-spin { to { transform: rotate(360deg); } }
 .vwsh-movie-art .vwsh-hunt { position: absolute; top: 8px; right: 40px; z-index: 3; opacity: 0; }
+/* manual release-picker sits left of the auto-search button (rm 8 · hunt 40 · pick 72) */
+.vwsh-movie-art .vwsh-hunt.vwsh-pick { right: 72px; }
 .vwsh-movie:hover .vwsh-movie-art .vwsh-hunt { opacity: 1; }
 .vwsh-nebula .vwsh-epc-hunt { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: none;
     background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6); cursor: pointer;
@@ -3744,9 +3763,20 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
 .vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-hunt { opacity: 1; }
 .vwsh-nebula .vwsh-szn-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); color: #fff; }
+/* manual release-picker sits left of the season auto-search (rm 4 · hunt 30 · pick 56) */
+.vwsh-nebula .vwsh-szn-hunt.vwsh-pick { right: 56px; }
 @media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, .vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }
 
 /* 'Search all missing' — toolbar sibling of Clear all */
+/* "⚠ Failing" filter chip — the LiveLeak fix-it hub toggle */
+.vwsh-failing-filter { height: 42px; padding: 0 14px; box-sizing: border-box; border-radius: 12px;
+    border: 1px solid rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.08);
+    color: rgba(245, 158, 11, 0.9); font-size: 13px; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s ease; }
+.vwsh-failing-filter:hover { background: rgba(245, 158, 11, 0.18); }
+.vwsh-failing-filter--on { background: rgba(245, 158, 11, 0.9); border-color: transparent; color: #1a1a1a; }
+.vwsh-failing-filter[hidden] { display: none; }
+.vwsh-failing-n:empty { display: none; }
 .vwsh-searchall { margin-left: auto; height: 42px; padding: 0 16px; box-sizing: border-box; border-radius: 12px;
     display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
     border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.4); color: #fff;

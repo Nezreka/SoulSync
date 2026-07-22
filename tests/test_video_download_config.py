@@ -49,7 +49,8 @@ class _FakeDB:
 
 
 # seeding lifecycle keys (arr-parity P5) ride the same config payload
-_SEED_DEFAULTS = {"seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True}
+_SEED_DEFAULTS = {"seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
+                  "seed_mode": "soulsync"}
 
 
 def test_load_defaults():

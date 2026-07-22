@@ -17,6 +17,34 @@ logger = logging.getLogger(__name__)
 # ReplayGain 2.0 reference level (EBU R128)
 RG_REFERENCE_LUFS = -18.0
 
+
+def get_target_lufs(config_manager=None) -> float:
+    """#1060 — the loudness target gains are written against.
+
+    Default is the ReplayGain 2.0 reference (-18 LUFS). Players that apply RG
+    without their own pre-amp can leave libraries sounding too quiet; setting a
+    hotter target (e.g. -14) bakes the offset into the written gains — the same
+    thing rsgain/foobar2000 call "target loudness". Deliberately shared by
+    EVERY gain writer (import pipeline, repair fix, per-track/album analyze
+    endpoints) so the whole library stays consistent.
+
+    Stored under the ReplayGain Filler job's settings
+    (repair.jobs.replaygain_filler.target_lufs). Tolerates a positive "14" as
+    meaning -14; junk/unset -> -18; clamped to [-30, -5]."""
+    if config_manager is None:
+        return RG_REFERENCE_LUFS
+    # NOTE the '.settings.' segment: the job-settings UI saves into a nested
+    # dict at repair.jobs.<id>.settings (see set_job_settings) — the flat
+    # get_config_key path would silently miss every UI-saved value.
+    raw = config_manager.get('repair.jobs.replaygain_filler.settings.target_lufs', RG_REFERENCE_LUFS)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return RG_REFERENCE_LUFS
+    if value > 0:
+        value = -value
+    return max(-30.0, min(-5.0, value))
+
 # Tag names used across all formats
 _TAG_TRACK_GAIN = "REPLAYGAIN_TRACK_GAIN"
 _TAG_TRACK_PEAK = "REPLAYGAIN_TRACK_PEAK"

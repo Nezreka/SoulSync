@@ -59,8 +59,8 @@ class _Cfg:
 
 
 def _row(i, path):
-    # (track_id, title, artist, album, file_path, album_thumb, artist_thumb)
-    return (i, f"Track {i}", "Yellowcard", "Ocean Avenue", path, None, None)
+    # (track_id, title, artist, album, file_path, album_thumb, artist_thumb, artist_id)
+    return (i, f"Track {i}", "Yellowcard", "Ocean Avenue", path, None, None, 42)
 
 
 def _run(rows, transfer_folder, cfg_overrides=None):

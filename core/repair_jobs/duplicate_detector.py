@@ -61,7 +61,7 @@ class DuplicateDetectorJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, t.file_path,
-                       t.bitrate, t.duration, al.thumb_url, ar.thumb_url
+                       t.bitrate, t.duration, al.thumb_url, ar.thumb_url, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -88,7 +88,7 @@ class DuplicateDetectorJob(RepairJob):
         # Bucket by first 4 chars of normalized title for efficiency
         buckets = defaultdict(list)
         for row in tracks:
-            track_id, title, artist_name, album_title, file_path, bitrate, duration, album_thumb, artist_thumb = row
+            track_id, title, artist_name, album_title, file_path, bitrate, duration, album_thumb, artist_thumb, artist_id = row
             norm_title = _normalize(title)
             bucket_key = norm_title[:4] if len(norm_title) >= 4 else norm_title
             buckets[bucket_key].append({
@@ -103,6 +103,7 @@ class DuplicateDetectorJob(RepairJob):
                 'duration': duration,
                 'album_thumb_url': album_thumb or None,
                 'artist_thumb_url': artist_thumb or None,
+                'artist_id': artist_id,
             })
 
         # Find duplicates within each bucket
@@ -300,6 +301,7 @@ class DuplicateDetectorJob(RepairJob):
                                 'count': len(group),
                                 'album_thumb_url': group[0].get('album_thumb_url'),
                                 'artist_thumb_url': group[0].get('artist_thumb_url'),
+                                'artist_id': group[0].get('artist_id'),
                             }
                         )
                         if inserted:

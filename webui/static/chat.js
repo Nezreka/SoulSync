@@ -524,6 +524,7 @@
         var form = q('[data-chat-composer]');
         var input = q('[data-chat-input]');
         if (!form || !input) return;
+        form.hidden = false;   // the join gate hides it; every normal render restores it
         form.classList.toggle('chat-composer--locked', !state.canSend);
         input.disabled = !state.canSend;
         input.placeholder = state.canSend
@@ -826,6 +827,38 @@
         renderUsers(null);
     }
 
+    // Auto-join is off: the user left the room and stays out until THEY say
+    // otherwise. Join flips the setting back on; the next poll joins + renders.
+    function renderJoinGate() {
+        renderHead();
+        var comp = q('[data-chat-composer]');
+        if (comp) comp.hidden = true;
+        var host = q('[data-chat-messages]');
+        if (host && !host.querySelector('[data-chat-join-gate]')) {
+            host.innerHTML =
+                '<div class="chat-problem" data-chat-join-gate>' +
+                    'You’ve left the ' + esc(state.room || 'SoulSync') + ' room.' +
+                    '<div style="margin-top:10px;">' +
+                        '<button class="chat-join-btn" type="button" data-chat-join>Join room</button>' +
+                    '</div>' +
+                '</div>';
+            var btn = host.querySelector('[data-chat-join]');
+            if (btn) btn.addEventListener('click', function () {
+                btn.disabled = true;
+                postJSON('/api/chat/settings', { auto_join: true }).then(function (res) {
+                    if (!res.ok) {
+                        btn.disabled = false;
+                        if (typeof showToast === 'function') showToast('Could not join the room', 'error');
+                        return;
+                    }
+                    state.msgs = [];
+                    refresh();
+                });
+            });
+        }
+        renderUsers(null);
+    }
+
     // ── room message store (archive pages + live tail) ───────────────────────
     function _msgKey(m) {
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
@@ -883,6 +916,12 @@
                 }
                 state.room = res.body.room || state.room;
                 state.canSend = !!res.body.can_send;
+                // auto-join OFF → the server no longer joins for us; show the
+                // join gate instead of the room (popwaffle9000's leave fix).
+                if (res.body.joined === false) {
+                    renderJoinGate();
+                    return;
+                }
                 renderHead(); renderComposer();
                 mergeMessages(res.body.messages);
                 renderMessages(state.msgs);

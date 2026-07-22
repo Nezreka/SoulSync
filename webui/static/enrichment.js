@@ -2091,7 +2091,7 @@ async function loadRepairJobs() {
                         <label>${label}</label>
                         <input type="${inputType}" class="repair-setting-input"
                                data-job="${job.job_id}" data-key="${key}"${inputVal}
-                               ${inputType === 'number' ? 'step="0.01" min="0"' : ''}>
+                               ${inputType === 'number' ? (typeof val === 'number' && val < 0 ? 'step="0.01"' : 'step="0.01" min="0"') : ''}>
                     </div>`;
                 }).join('');
 
@@ -3052,9 +3052,12 @@ async function loadRepairFindings() {
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
-            missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
+            missing_replaygain: 'No ReplayGain', replaygain_retag: 'RG Re-analyze',
+            empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
-            quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip'
+            quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip',
+            genre_cleanup: 'Genres',
+            comma_artist_split: 'Comma Artist'
         };
 
         // Finding types that have an automated fix action
@@ -3065,6 +3068,7 @@ async function loadRepairFindings() {
             missing_cover_art: 'Apply Art',
             missing_lyrics: 'Apply Lyrics',
             missing_replaygain: 'Apply RG',
+            replaygain_retag: 'Re-analyze',
             empty_folder: 'Delete Folder',
             expired_download: 'Delete',
             metadata_gap: 'Apply',
@@ -3076,6 +3080,8 @@ async function loadRepairFindings() {
             missing_discography_track: 'Add to Wishlist',
             library_retag: 'Apply Tags',
             short_preview_track: 'Re-download',
+            genre_cleanup: 'Clean Genres',
+            comma_artist_split: 'Split Artists',
         };
 
         container.innerHTML = items.map(f => {
@@ -3083,6 +3089,8 @@ async function loadRepairFindings() {
             const age = formatCacheAge(f.created_at);
             const actionLabels = {
                 removed_db_entry: 'Entry Removed', added_to_wishlist: 'Wishlisted', deleted_file: 'File Deleted',
+                genres_cleaned: 'Genres Cleaned',
+                artists_split: 'Artists Split',
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
                 applied_lyrics: 'Lyrics Applied',
@@ -3211,7 +3219,19 @@ function _renderFindingMedia(d) {
     }
     if (artistUrl) {
         const artistLabel = d.artist_name || d.artist || 'Artist';
-        html += `<div class="repair-finding-media-card">
+        const hasName = !!(d.artist_name || d.artist);
+        // Clickable → the artist's page. New findings store the library
+        // artist_id (exact, ambiguity-proof); older findings predate it and
+        // resolve by exact name at click time instead.
+        // Ids are opaque server keys — numeric on Plex but alphanumeric on
+        // Navidrome/Jellyfin, so never coerce with Number() (→ "NaN").
+        const idAttr = (d.artist_id != null && d.artist_id !== '')
+            ? ` data-artist-id="${_escFinding(String(d.artist_id))}"` : '';
+        const clickAttrs = hasName
+            ? `${idAttr} data-artist-name="${_escFinding(artistLabel)}" onclick="event.stopPropagation(); openFindingArtist(this)"
+                title="Open ${_escFinding(artistLabel)}'s page" role="link"`
+            : '';
+        html += `<div class="repair-finding-media-card${hasName ? ' repair-finding-media-card--link' : ''}"${clickAttrs}>
             <img class="repair-finding-media-img artist" src="${_escFinding(artistUrl)}" alt="Artist"
                  onerror="this.parentElement.style.display='none'" />
             <span class="repair-finding-media-label">${_escFinding(artistLabel)}</span>
@@ -3221,12 +3241,101 @@ function _renderFindingMedia(d) {
     return html;
 }
 
+// Findings don't store the library artist id — resolve it by exact name and
+// navigate. Ambiguity rule: exact (case-insensitive) name match wins; without
+// one we DON'T guess a fuzzy result, we say so.
+async function openFindingArtist(el) {
+    const name = el.getAttribute('data-artist-name');
+    if (!name) return;
+    // New findings carry the library artist id — navigate directly, no lookup,
+    // immune to same-name ambiguity.
+    const storedId = el.getAttribute('data-artist-id');
+    if (storedId && typeof navigateToArtistDetail === 'function') {
+        // navigateToArtistDetail treats the id as opaque; only parse when it
+        // really is numeric (Plex) — Navidrome/Jellyfin ids are alphanumeric.
+        navigateToArtistDetail(/^\d+$/.test(storedId) ? parseInt(storedId, 10) : storedId, name);
+        return;
+    }
+    try {
+        // limit=50: the search is a CONTAINS match sorted alphabetically, so a
+        // short name ("Low") can sort after many substring hits ("Below",
+        // "Flower", …) — a small page could push the exact match off page 1.
+        const res = await fetch(`/api/library/artists?search=${encodeURIComponent(name)}&limit=50`);
+        const data = await res.json();
+        const artists = (data && data.artists) || [];
+        const exact = artists.find(a => (a.name || '').toLowerCase() === name.toLowerCase());
+        if (exact && exact.id != null && typeof navigateToArtistDetail === 'function') {
+            navigateToArtistDetail(exact.id, exact.name);
+        } else {
+            showToast(`"${name}" isn't in your library`, 'info');
+        }
+    } catch (err) {
+        showToast('Could not open artist page', 'error');
+    }
+}
+
 function _renderFindingDetail(f) {
     const d = f.details || {};
     const rows = [];
     const media = _renderFindingMedia(d);
 
     switch (f.finding_type) {
+        case 'genre_cleanup': {
+            // #1057 — show exactly what stays and what goes; the fix applies
+            // kept_genres verbatim, so this IS the contract.
+            const kept = Array.isArray(d.kept_genres) ? d.kept_genres : [];
+            const removed = Array.isArray(d.removed_genres) ? d.removed_genres : [];
+            rows.push(['Kept', kept.length ? kept.join(', ') : '— none (all genres are off your whitelist)']);
+            rows.push(['Removed', removed.join(', ')]);
+            if (d.entity) rows.push(['Applies to', d.entity === 'artist' ? 'Artist genres' : 'Album genres']);
+            return media + _gridRows(rows);
+        }
+
+        case 'comma_artist_split': {
+            // jadux — the contract: exactly what the artist tag becomes.
+            const parts = Array.isArray(d.split_artists) ? d.split_artists : [];
+            const res = Array.isArray(d.parts_resolution) ? d.parts_resolution : [];
+            rows.push(['Current artist tag', d.combined_name || '']);
+            rows.push(['New artist tag', d.new_display_artist || parts.join('; ')]);
+            if (d.primary_artist) rows.push(['Album artist', `becomes "${d.primary_artist}" (only where it was the combined name)`]);
+            if (Array.isArray(d.checked_sources) && d.checked_sources.length) {
+                rows.push(['Checked against', d.checked_sources.join(', ')]);
+            }
+            if (d.track_count != null) rows.push(['Tracks affected', String(d.track_count)]);
+            let html = media + _gridRows(rows);
+            // "Splits into" chips — parts already in the library are clickable
+            // and jump to that artist's page (same resolver as the artist card).
+            const chipSrc = res.length ? res : parts.map(p => ({ name: p }));
+            html += `<div style="margin:8px 0 2px;font-weight:600">Splits into</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">` +
+                chipSrc.map(p => {
+                    const mark = p.in_library ? ' ✓ in your library' : (p.verified_via ? ` ✓ ${p.verified_via}` : '');
+                    const base = `padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.07);font-size:12px`;
+                    if (p.in_library) {
+                        const idAttr = (p.library_artist_id != null && p.library_artist_id !== '')
+                            ? ` data-artist-id="${_escFinding(String(p.library_artist_id))}"` : '';
+                        return `<span style="${base};cursor:pointer;text-decoration:underline"${idAttr}
+                            data-artist-name="${_escFinding(p.name)}" role="link"
+                            title="Open ${_escFinding(p.name)}'s page"
+                            onclick="event.stopPropagation(); openFindingArtist(this)">${_escFinding(p.name)}${mark}</span>`;
+                    }
+                    return `<span style="${base}">${_escFinding(p.name)}${mark}</span>`;
+                }).join('') + '</div>';
+            const tracks = Array.isArray(d.tracks) ? d.tracks : [];
+            if (tracks.length) {
+                html += `<div style="margin:8px 0 2px;font-weight:600">Tracks</div>`;
+                tracks.slice(0, 40).forEach(t => {
+                    const label = [t.title, t.album].filter(Boolean).join(' — ');
+                    html += `<div class="repair-finding-meta" style="margin:0 0 2px">${_escFinding(label || (t.file_path || '').split(/[\\/]/).pop() || 'Unknown')}</div>`;
+                });
+                if ((d.track_count || 0) > tracks.length) {
+                    html += `<div class="repair-finding-meta" style="margin-top:6px">…and ${(d.track_count || 0) - tracks.length} more track(s)</div>`;
+                }
+            }
+            html += `<div class="repair-finding-meta" style="margin-top:8px">Your media server picks up the split on its next scan.</div>`;
+            return html;
+        }
+
         case 'dead_file':
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album) rows.push(['Album', d.album]);

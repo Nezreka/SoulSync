@@ -15,13 +15,13 @@
     'use strict';
 
     var DETAIL_URL = '/api/video/detail/';
-    var TMDB_LOGO = 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg';
-    var TVDB_LOGO = 'https://www.svgrepo.com/show/443500/brand-tvdb.svg';
+    var TMDB_LOGO = '/static/img/brands/tmdb.svg';
+    var TVDB_LOGO = '/static/img/brands/tvdb.svg';
     // Real media-server logos for the "Play on your server" watch tile (same
     // sources as the header server toggle).
     var SERVER_LOGOS = {
-        Plex: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg',
-        Jellyfin: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png',
+        Plex: '/static/img/brands/plex.png',
+        Jellyfin: '/static/img/brands/jellyfin.png',
     };
     var VIEW_KEY = 'soulsync_vd_season_view';
     var VIEWS = [

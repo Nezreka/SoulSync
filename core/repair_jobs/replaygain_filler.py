@@ -74,13 +74,29 @@ class ReplayGainFillerJob(RepairJob):
         'analysis (EBU R128) the import pipeline uses and writes the ReplayGain '
         'tags in place — no files are moved or renamed. This also lets you re-fill '
         'tracks where the original analysis failed.\n\n'
-        'Requires ffmpeg to be installed (the analysis cannot run without it).'
+        'Requires ffmpeg to be installed (the analysis cannot run without it).\n\n'
+        'Settings (#1060): "target_lufs" sets the loudness target gains are written '
+        'against (default -18, the ReplayGain 2.0 reference; try -14 if your player '
+        'leaves the library too quiet — the SAME target is used by import-time '
+        'analysis and the library page buttons, so everything stays consistent). '
+        '"rescan_existing" also flags tracks that ALREADY have ReplayGain tags so '
+        'they can be re-analyzed at the current target — turn it on after changing '
+        'the target, approve the findings in batches, then turn it off.'
     )
     icon = 'repair-icon-replaygain'
     default_enabled = False
     default_interval_hours = 48
-    default_settings = {}
+    default_settings = {
+        # #1060 — loudness target written into gains (see get_target_lufs)
+        'target_lufs': -18.0,
+        # #1060 — also flag already-tagged tracks for re-analysis at the target
+        'rescan_existing': False,
+    }
     auto_fix = False
+
+    # Flood guard for rescan_existing: a whole library re-flag lands in batches
+    # of this many findings per scan run (the cap is LOGGED, never silent).
+    RESCAN_BATCH_LIMIT = 500
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -94,6 +110,13 @@ class ReplayGainFillerJob(RepairJob):
             logger.info("[ReplayGain Filler] ffmpeg not available — skipping scan "
                         "(analysis cannot run without it)")
             return result
+
+        cfgm = context.config_manager
+        # '.settings.' segment: that's where the job-settings UI saves (see
+        # set_job_settings) — get_config_key's flat path would miss it.
+        rescan_existing = bool(cfgm.get(f'repair.jobs.{self.job_id}.settings.rescan_existing', False)) if cfgm else False
+        rescan_capped = False
+        rescan_flagged = 0
 
         rows = []
         conn = None
@@ -143,36 +166,74 @@ class ReplayGainFillerJob(RepairJob):
                 result.skipped += 1
                 continue
 
-            if not needs_replaygain(rg):
+            already_tagged = not needs_replaygain(rg)
+            if already_tagged and not rescan_existing:
                 result.skipped += 1
                 if context.update_progress and (i + 1) % 25 == 0:
                     context.update_progress(i + 1, total)
+                continue
+            if already_tagged and rescan_capped:
+                result.skipped += 1
                 continue
 
             if context.report_progress:
                 context.report_progress(
                     scanned=i + 1, total=total,
-                    log_line=f'No ReplayGain: {title} — {artist_name or "Unknown"}',
+                    log_line=(f'Re-analyze at target: {title} — {artist_name or "Unknown"}'
+                              if already_tagged else
+                              f'No ReplayGain: {title} — {artist_name or "Unknown"}'),
                     log_type='info')
 
             if context.create_finding:
                 try:
-                    inserted = context.create_finding(
-                        job_id=self.job_id,
-                        finding_type='missing_replaygain',
-                        severity='info',
-                        entity_type='track',
-                        entity_id=str(track_id),
-                        file_path=file_path,
-                        title=f'No ReplayGain: {title or "Unknown"}',
-                        description=(f'"{title}" by {artist_name or "Unknown"} has no '
-                                     'ReplayGain tag — loudness can be analyzed + written.'),
-                        details={
-                            'track_id': track_id,
-                            'track_title': title,
-                            'artist': artist_name,
-                            'file_path': file_path,
-                        })
+                    if already_tagged:
+                        # #1060 rescan: distinct finding type so a prior resolved
+                        # missing_replaygain finding can't dedup-block the re-tag.
+                        current_gain = (rg or {}).get('track_gain')
+                        inserted = context.create_finding(
+                            job_id=self.job_id,
+                            finding_type='replaygain_retag',
+                            severity='info',
+                            entity_type='track',
+                            entity_id=str(track_id),
+                            file_path=file_path,
+                            title=f'Re-analyze ReplayGain: {title or "Unknown"}',
+                            description=(f'"{title}" by {artist_name or "Unknown"} already has '
+                                         f'ReplayGain ({current_gain or "unknown gain"}) — approving '
+                                         're-analyzes it at your current loudness target.'),
+                            details={
+                                'track_id': track_id,
+                                'track_title': title,
+                                'artist': artist_name,
+                                'file_path': file_path,
+                                'current_gain': current_gain,
+                            })
+                        if inserted:
+                            rescan_flagged += 1
+                            if rescan_flagged >= self.RESCAN_BATCH_LIMIT:
+                                rescan_capped = True
+                                if context.report_progress:
+                                    context.report_progress(
+                                        log_line=(f'Re-analyze batch capped at {self.RESCAN_BATCH_LIMIT} '
+                                                  'this run — run the job again for the next batch.'),
+                                        log_type='warning')
+                    else:
+                        inserted = context.create_finding(
+                            job_id=self.job_id,
+                            finding_type='missing_replaygain',
+                            severity='info',
+                            entity_type='track',
+                            entity_id=str(track_id),
+                            file_path=file_path,
+                            title=f'No ReplayGain: {title or "Unknown"}',
+                            description=(f'"{title}" by {artist_name or "Unknown"} has no '
+                                         'ReplayGain tag — loudness can be analyzed + written.'),
+                            details={
+                                'track_id': track_id,
+                                'track_title': title,
+                                'artist': artist_name,
+                                'file_path': file_path,
+                            })
                     if inserted:
                         result.findings_created += 1
                     else:

@@ -128,6 +128,33 @@ def _source_quality_score(source: Any) -> float:
         return 0.0
 
 
+def owned_hit_is_rerelease_original(db, requested_album: str, expected_year,
+                                    db_track) -> bool:
+    """True when a global per-track ownership hit landed on the ORIGINAL of the
+    re-release being analyzed (5BILLION round 3): the matched track's album is
+    the same release family as the requested album (edition-variant name) but
+    its year conflicts. Owning the original must not read as owning THIS
+    edition. Unrelated albums/compilations return False — the anti-duplicate
+    default ('you already have this song') stands for them.
+
+    Fail-open: any missing piece (no year, no album row, lookup error) returns
+    False, i.e. the hit counts as owned exactly as before."""
+    if not expected_year or not requested_album or db_track is None:
+        return False
+    try:
+        meta = db.get_album_title_year(getattr(db_track, 'album_id', None))
+        if not meta:
+            return False
+        matched_title, matched_year = meta
+        same_family = db._string_similarity(
+            db._clean_album_title_for_comparison(requested_album),
+            db._clean_album_title_for_comparison(matched_title or ''),
+        ) >= 0.8
+        return bool(same_family and db._release_years_conflict(expected_year, matched_year))
+    except Exception:   # noqa: BLE001 - the guard must never break the analysis
+        return False
+
+
 def _album_context_richness(album_ctx: dict) -> int:
     if not isinstance(album_ctx, dict):
         return 0
@@ -476,6 +503,14 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         # ALBUM FAST PATH: If this is an album download, try to find the album in the DB first
         # and match tracks within it — faster and more accurate than N global searches
         album_tracks_map = {}  # Maps normalized title -> DatabaseTrack for album-scoped matching
+        # Release year of the album being analyzed — powers the re-release gate
+        # (5BILLION round 3): owning 'Chaosphere' (1998) must not read as owning
+        # 'Chaosphere (25th Anniversary Remastered 2023 Edition)'.
+        batch_expected_year = None
+        if batch_album_context:
+            _ry = str(batch_album_context.get('release_date')
+                      or batch_album_context.get('year') or '')[:4]
+            batch_expected_year = _ry if _ry.isdigit() else None
         if batch_is_album and batch_album_context and batch_artist_context and not force_download_all:
             album_name = batch_album_context.get('name', '')
             artist_name = batch_artist_context.get('name', '')
@@ -486,7 +521,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         title=album_name, artist=artist_name,
                         confidence_threshold=0.7,
                         expected_track_count=total_tracks if total_tracks > 0 else None,
-                        server_source=active_server
+                        server_source=active_server,
+                        expected_year=batch_expected_year
                     )
                     if db_album and album_confidence >= 0.7:
                         db_album_tracks = db.get_tracks_by_album(db_album.id)
@@ -617,6 +653,16 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                     track_name, artist_name, confidence_threshold=0.7, server_source=active_server, album=_fallback_album
                                 )
                                 if db_track and track_confidence >= 0.7:
+                                    # Re-release gate (5BILLION round 3): the hit
+                                    # came from the ORIGINAL of this re-release →
+                                    # not ownership of THIS edition; keep missing.
+                                    if owned_hit_is_rerelease_original(
+                                            db, _fallback_album, batch_expected_year, db_track):
+                                        logger.info(
+                                            "[Album Analysis] '%s' owned only on the original "
+                                            "release of '%s' — re-release stays missing",
+                                            track_name, _fallback_album)
+                                        continue
                                     found, confidence = True, track_confidence
                                     matched_track = db_track
                                     break

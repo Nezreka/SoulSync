@@ -53,7 +53,7 @@ class _FakeDB:
         return (None, 0.0)
 
     def check_album_exists_with_editions(self, title, artist, confidence_threshold=0.7,
-                                         expected_track_count=None, server_source=None):
+                                         expected_track_count=None, server_source=None, expected_year=None):
         return (self.album, self.album_confidence)
 
     def get_tracks_by_album(self, album_id):

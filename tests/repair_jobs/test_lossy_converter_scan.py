@@ -54,8 +54,8 @@ class _FakeDB:
 
 
 def _row(track_id, title, path):
-    # (t.id, t.title, ar.name, al.title, t.file_path, al.thumb_url, ar.thumb_url)
-    return (track_id, title, "Artist", "Album", path, None, None)
+    # (t.id, t.title, ar.name, al.title, t.file_path, al.thumb_url, ar.thumb_url, ar.id)
+    return (track_id, title, "Artist", "Album", path, None, None, 42)
 
 
 def _context(rows, tmp_path: Path):

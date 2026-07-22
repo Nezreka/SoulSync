@@ -3482,14 +3482,18 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.3': [
-        { date: 'July 2026 · 3.1.3' },
-        { title: 'Follow record labels', desc: 'follow a record label the same way you follow an artist, and SoulSync watches it for new releases. Search now finds labels, and each label gets its own page showing its whole catalog newest-first, with an ownership overlay for what you already have, filters, and every release linking through to the real artist.' },
-        { title: 'One watchlist scan for artists + labels', desc: 'the watchlist page gets a Labels tab with follow/backlog controls, and the normal watchlist scan now checks your followed artists AND labels in one pass with one live display — the scheduled automation included. Follow no labels and nothing changes.' },
-        { title: 'Seed music torrents on a leash', desc: 'set a seed ratio and/or time goal in Settings → Downloads and a completed music torrent is removed from your client once it hits the goal (the client\'s own copy only — your library file is separate and untouched). Strictly opt-in: both goals default to off, so grabs seed forever exactly like before.' },
-        { title: 'Multi-disc albums display right + editable Disc # (#1051)', desc: 'an album whose files are all tagged disc 1 no longer drops or misplaces disc-2 tracks in the enhanced view (rows were keyed by disc+track and collided). And Disc # is now editable inline like Track # and Title, so you can fix bad disc tags and Write Tags them to the file. Thanks Tacobell444.' },
-        { title: 'Write Tags only touches changed files (#1052)', desc: 'the batch Write Tags used to rewrite every file even when the preview said "1 will change / 12 unchanged". It now diffs each file first (the same comparison the preview shows) and writes only the affected ones — server sync only pushes what changed too. Thanks Tacobell444.' },
-        { title: 'Earlier versions', desc: '3.1.2 brought a full Soulseek chat page (community room + private messages, Discord-style). 3.1.1 added Continue Watching on video detail pages. 3.1.0 gave the video side full Sonarr/Radarr-class acquisition. 3.0.1 shipped the entire video side.' },
+    '3.1.4': [
+        { date: 'July 2026 · 3.1.4' },
+        { title: 'Comma Artist Splitter (jadux)', desc: 'a new Tools job finds fake combined artists like "Camellia, Toby Fox" (one comma-joined tag your server turns into an art-less dummy artist) and splits them safely: real comma-named artists like "Tyler, The Creator" are recognized via the metadata APIs and left alone, and every part must be a known artist before anything is flagged. Approving re-tags the files with a proper multi-artist tag.' },
+        { title: 'ReplayGain target loudness (#1060)', desc: 'set the loudness reference (default -18 LUFS) the ReplayGain job — and every other RG write in the app — analyzes against, plus an opt-in re-run over tracks whose stored gain used a different target so the whole library converges.' },
+        { title: 'Genre Tag Cleanup (#1057)', desc: 'strict genre filtering only gated NEW metadata — this job re-checks genres stored before you enabled it, shows exactly what would be kept vs removed per artist/album, and the fix removes only (never invents).' },
+        { title: 'Fix All actually fixes all', desc: 'the Tools bulk-fix kept a second list of fixable finding types that had drifted — some findings counted in "Fix All N" but were silently skipped. Now derived from the fix handlers, so it can never drift again. Artist pictures on findings are clickable too.' },
+        { title: 'Video Requests page, best in class', desc: 'approved requests now show "Acquiring…" until the title lands in your library, then flip to "In library". Status tabs with counts, removable history, a Clear-resolved sweep, and an honest-approve fix (no more success toast while the row still says Approve).' },
+        { title: 'Seed limits your client enforces (TheHomeGuy)', desc: 'an "Enforced by" toggle (music + video) can write your seed ratio/time goals into the torrent as native share limits, so the client stops seeding on its own even if SoulSync is down. Also: stall-pause works on qBittorrent 5.x.' },
+        { title: 'Every logo ships with the app', desc: 'all service/brand logos now load from your own server instead of 10+ external CDNs — no more broken images from rate limits, dead URLs, or LAN-only installs.' },
+        { title: 'Reported fixes', desc: 'downloads freezing mid-batch + a metadata identity guard (jadux); re-releases finally download — analysis respects release years (5BILLION); deep scan removes artists on an empty Navidrome (5BILLION); unchecking chat auto-join actually leaves the room (popwaffle9000); $year renders for TV in rename templates (musicagine); a source search timeout knob (#1056); airing shows catch up missed days.' },
+        { title: 'Community PRs', desc: 'enrichment workers idle-backoff their polling for a big idle-CPU drop (#1054, thegabriele97), and discographies fall through the provider chain instead of erroring when the primary source is down (#1032, ragnarlotus).' },
+        { title: 'Earlier versions', desc: '3.1.3 added record-label following + music torrent seeding goals. 3.1.2 brought the Soulseek chat page. 3.1.1 added Continue Watching. 3.1.0 gave the video side full Sonarr/Radarr-class acquisition.' },
     ],
 };
 
@@ -3520,7 +3524,23 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.3: follow record labels",
+        title: "3.1.4: the tools + requests release",
+        description: "two new library-maintenance jobs (comma artist splitter + genre cleanup), ReplayGain loudness targets, the video Requests page grown up, seed limits your torrent client can enforce itself, every logo shipping with the app, and a big stack of reported fixes.",
+        features: [
+            "comma artist splitter (thanks jadux): a Tools job that finds fake combined artists like 'Camellia, Toby Fox' and splits their tags safely — real comma artists like 'Tyler, The Creator' are recognized via the metadata APIs and left alone, every part must be a known artist before anything is flagged, and each finding shows exactly how it will split with clickable chips to the real artists. approving re-tags the files with a proper multi-artist tag and your server dissolves the dummy on its next scan",
+            "replaygain target loudness (#1060): set the reference (default -18 LUFS) every RG write analyzes against, plus an opt-in re-run over tracks computed against a different target; genre tag cleanup (#1057): re-check genres stored before strict filtering was enabled, removal-only",
+            "fix all actually fixes all: the Tools bulk-fix silently skipped some finding types its own counter included ('fixed 0 of N') — the fixable set is now derived from the fix handlers; artist pictures on findings click through to the artist's page",
+            "video requests, best in class: approved requests show 'Acquiring…' until the title lands in your library then flip to 'In library', status tabs with counts, removable history + a Clear-resolved sweep, and no more success toast while the row still says Approve",
+            "seed limits your client enforces (thanks TheHomeGuy): an 'Enforced by' toggle (music + video) writes ratio/time goals into the torrent as native share limits so the client stops seeding on its own even if SoulSync is down — and stall-pause works on qBittorrent 5.x",
+            "the wishlist failing hub (thanks LiveLeak): a '⚠ Failing' filter chip on the video wishlist, a manual release picker on every movie/season/episode, and music's 'Search manually' now lands on the actual soulseek search prefilled",
+            "every logo ships with the app: ~86 hotlinked images from 10+ external CDNs now load from your own server — no more broken logos from rate limits, dead URLs, or LAN-only installs",
+            "reported fixes: downloads freezing mid-batch + a metadata identity guard (jadux), re-releases finally download — analysis respects release years (5BILLION), deep scan removes artists on an empty Navidrome (5BILLION), unchecking chat auto-join actually leaves (popwaffle9000), $year renders for TV renames (musicagine), a source-search timeout knob (#1056), airing shows catch up missed days",
+            "community: enrichment workers idle-backoff their polling (#1054, thegabriele97), discographies fall through the provider chain when the primary source is down (#1032, ragnarlotus)",
+        ],
+        usage_note: "the new jobs live on the Tools page (Comma Artist Splitter and Genre Tag Cleanup are report-only until you approve findings). seed enforcement and the timeout knob are under Settings → Downloads / Soulseek.",
+    },
+    {
+        title: "Earlier in 3.1.3 — follow record labels",
         description: "follow a record label the same way you follow an artist and SoulSync watches it for new releases — plus music torrents can now seed on a leash, and two reported fixes (multi-disc display + write-tags efficiency).",
         features: [
             "follow record labels: search finds labels, and each label gets a real refreshable page showing its whole catalog newest-first in album cards, with an ownership overlay for what you already have, filters and sort, and every release linking through to the real artist (never the label)",

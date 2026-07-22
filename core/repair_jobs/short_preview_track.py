@@ -141,7 +141,8 @@ class ShortPreviewTrackJob(RepairJob):
                 SELECT t.id, t.title, t.duration, t.file_path,
                        t.spotify_track_id, t.itunes_track_id, t.musicbrainz_recording_id,
                        ar.name AS artist_name, ar.thumb_url AS artist_thumb,
-                       al.title AS album_title, al.thumb_url AS album_thumb
+                       al.title AS album_title, al.thumb_url AS album_thumb,
+                       ar.id AS artist_row_id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -239,6 +240,7 @@ class ShortPreviewTrackJob(RepairJob):
                             "album": row["album_title"],
                             "album_thumb_url": album_image,
                             "artist_thumb_url": row["artist_thumb"],
+                            "artist_id": row["artist_row_id"],
                             "file_duration_s": round(file_dur_s, 1),
                             "expected_duration_s": round(expected_dur_s, 1),
                             "original_path": row["file_path"],

@@ -96,10 +96,33 @@ def _sweep_inner() -> Dict[str, Any]:
     if not cfg.get("seed_ratio_goal") and not cfg.get("seed_time_goal_hours"):
         return {"status": "skipped", "reason": "no_goals_set", "checked": 0, "released": 0}
 
+    # Client mode (arr-style): hand the ratio/time goal to the torrent client so
+    # IT enforces, then release the row. If the push fails or the client can't
+    # take share limits (non-qBit), fall through to SoulSync's own management so
+    # the goal still gets enforced — never leave a grab unmanaged.
+    client_mode = cfg.get("seed_mode") == "client"
+    adapter = None
+    push_seed_goal = None
+    if client_mode:
+        from core.torrent_clients import get_active_adapter
+        from core.torrent_clients.share_limits import push_seed_goal as _psg
+        adapter = get_active_adapter()
+        push_seed_goal = _psg
+
     rows = db.torrents_awaiting_seed_release()
     released = seeding = 0
     for dl in rows:
-        status = _get_status("torrent", str(dl["client_ref"]))
+        ref = str(dl["client_ref"])
+
+        if client_mode and push_seed_goal(adapter, ref, cfg.get("seed_ratio_goal"),
+                                          cfg.get("seed_time_goal_hours")):
+            db.update_video_download(dl["id"], seed_released=1)
+            released += 1
+            logger.info("seeding: handed '%s' to the torrent client (client mode)", dl.get("title"))
+            continue
+        # soulsync mode, OR client-mode push failed → SoulSync polls + removes.
+
+        status = _get_status("torrent", ref)
         if status is None:
             # client forgot it (user removed by hand, or a restart lost it) —
             # nothing left to manage
@@ -110,7 +133,7 @@ def _sweep_inner() -> Dict[str, Any]:
         if not reason:
             seeding += 1
             continue
-        if _remove(str(dl["client_ref"]), bool(cfg.get("seed_remove_data", True))):
+        if _remove(ref, bool(cfg.get("seed_remove_data", True))):
             db.update_video_download(dl["id"], seed_released=1)
             released += 1
             logger.info("seeding: released '%s' — %s", dl.get("title"), reason)

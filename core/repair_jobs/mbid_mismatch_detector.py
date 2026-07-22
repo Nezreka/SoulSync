@@ -333,7 +333,7 @@ class MbidMismatchDetectorJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, t.file_path,
-                       al.thumb_url, ar.thumb_url
+                       al.thumb_url, ar.thumb_url, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -387,7 +387,7 @@ class MbidMismatchDetectorJob(RepairJob):
             if i % 100 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb = row
+            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb, artist_id = row
 
             if context.update_progress and (i + 1) % 50 == 0:
                 context.update_progress(i + 1, total)
@@ -429,7 +429,7 @@ class MbidMismatchDetectorJob(RepairJob):
                     # MBID doesn't exist — definitely wrong
                     self._create_mismatch_finding(
                         context, result, track_id, title, artist_name, album_title,
-                        resolved, album_thumb, artist_thumb, mbid,
+                        resolved, album_thumb, artist_thumb, mbid, artist_id=artist_id,
                         mb_title='[MBID not found]', mb_artist='[Unknown]',
                         reason='MBID does not exist in MusicBrainz'
                     )
@@ -449,7 +449,7 @@ class MbidMismatchDetectorJob(RepairJob):
                 if not _title_matches(file_title, mb_title):
                     self._create_mismatch_finding(
                         context, result, track_id, title, artist_name, album_title,
-                        resolved, album_thumb, artist_thumb, mbid,
+                        resolved, album_thumb, artist_thumb, mbid, artist_id=artist_id,
                         mb_title=mb_title, mb_artist=mb_artist,
                         reason=f'MBID points to "{mb_title}" by {mb_artist}, expected "{file_title}"'
                     )
@@ -506,7 +506,8 @@ class MbidMismatchDetectorJob(RepairJob):
             cursor.execute("""
                 SELECT t.id, t.title, t.album_id, t.file_path,
                        ar.name AS artist_name, al.title AS album_title,
-                       al.thumb_url AS album_thumb, ar.thumb_url AS artist_thumb
+                       al.thumb_url AS album_thumb, ar.thumb_url AS artist_thumb,
+                       ar.id AS artist_row_id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -552,6 +553,7 @@ class MbidMismatchDetectorJob(RepairJob):
                 'artist_name': row['artist_name'],
                 'album_thumb': row['album_thumb'],
                 'artist_thumb': row['artist_thumb'],
+                'artist_id': row['artist_row_id'],
                 'file_path': file_path,
                 'resolved': resolved,
                 'album_mbid': album_mbid,
@@ -646,6 +648,7 @@ class MbidMismatchDetectorJob(RepairJob):
                         ),
                         'album_thumb_url': track['album_thumb'] or None,
                         'artist_thumb_url': track['artist_thumb'] or None,
+                        'artist_id': track.get('artist_id'),
                     }
                 )
                 if inserted:
@@ -659,7 +662,7 @@ class MbidMismatchDetectorJob(RepairJob):
 
     def _create_mismatch_finding(self, context, result, track_id, title, artist_name,
                                   album_title, file_path, album_thumb, artist_thumb,
-                                  mbid, mb_title, mb_artist, reason):
+                                  mbid, mb_title, mb_artist, reason, artist_id=None):
         """Create a finding for a mismatched MBID."""
         if context.report_progress:
             context.report_progress(
@@ -693,6 +696,7 @@ class MbidMismatchDetectorJob(RepairJob):
                         'reason': reason,
                         'album_thumb_url': album_thumb or None,
                         'artist_thumb_url': artist_thumb or None,
+                        'artist_id': artist_id,
                     }
                 )
                 if inserted:

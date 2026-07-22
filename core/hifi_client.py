@@ -368,7 +368,13 @@ class HiFiClient(DownloadSourcePlugin):
                 time.sleep(self._min_interval - elapsed)
             self._last_api_call = time.time()
 
-    def _api_get(self, path: str, params: dict = None, timeout: int = 15) -> Optional[dict]:
+    def _api_get(self, path: str, params: dict = None, timeout: int = None) -> Optional[dict]:
+        # #1056: default timeout honours the user's source-search-timeout
+        # override (Settings → Downloads); unset keeps the historical 15s.
+        # Callers that pass an explicit timeout (e.g. the 20s manifest/track
+        # fetches) are unaffected.
+        if timeout is None:
+            timeout = config_manager.get_source_search_timeout() or 15
         tried = set()
 
         while True:

@@ -59,11 +59,11 @@ def _make_context(rows):
 def test_load_db_tracks_skips_null_ids_and_normalizes_track_ids():
     job = AcoustIDScannerJob()
     context = _make_context([
-        # 11 columns: id, title, artist (COALESCE'd), file_path, track_number,
+        # 12 columns: id, title, artist (COALESCE'd), file_path, track_number,
         # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
-        # album_artist, duration_ms (issue #587 — duration guard).
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000),
+        # album_artist, duration_ms (issue #587 — duration guard), artist_row_id.
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000, 7),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000, 7),
     ])
 
     tracks = job._load_db_tracks(context)
@@ -80,8 +80,8 @@ def test_scan_handles_mixed_track_id_types(monkeypatch):
         # 11 columns: id, title, artist (COALESCE'd), file_path, track_number,
         # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
         # album_artist, duration_ms.
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000),
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000, 7),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000, 7),
     ])
 
     monkeypatch.setattr(job, "_resolve_path", lambda file_path, _context: file_path)

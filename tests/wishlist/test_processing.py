@@ -574,3 +574,90 @@ def test_finalize_auto_wishlist_completion_with_no_tracks_added_still_resets_sta
     ]
     assert db.connection.committed is True
 
+
+
+# ---------------------------------------------------------------------------
+# jadux's stall: the auto cleanup must never stack — a request arriving while
+# one is running is SKIPPED, and post-run the guard resets so the next DB
+# update's cleanup runs normally.
+# ---------------------------------------------------------------------------
+
+
+def test_auto_cleanup_overlap_guard_skips_concurrent_and_resets(monkeypatch):
+    import threading as _threading
+
+    entered = _threading.Event()
+    release = _threading.Event()
+    calls = []
+
+    def _slow_remove(*args, **kwargs):
+        calls.append(1)
+        entered.set()
+        assert release.wait(timeout=10), "test deadlock: release never set"
+        return 0
+
+    monkeypatch.setattr(processing, "remove_tracks_already_in_library", _slow_remove)
+
+    kwargs = dict(
+        wishlist_service=_CleanupWishlistService([{  # one track so the inner body runs
+            "name": "Song", "artists": [{"name": "A"}],
+            "spotify_track_id": "sp-1", "album": {"name": "Al"},
+        }]),
+        profiles_database=_CleanupProfilesDatabase(),
+        music_database=_CleanupMusicDatabase(),
+        active_server="navidrome",
+        logger=_FakeLogger(),
+    )
+
+    t = _threading.Thread(target=lambda: processing.automatic_wishlist_cleanup_after_db_update(**kwargs))
+    t.start()
+    assert entered.wait(timeout=10), "first cleanup never started"
+
+    # Second request while the first is mid-flight → skipped, does NOT stack.
+    log2 = _FakeLogger()
+    out = processing.automatic_wishlist_cleanup_after_db_update(**{**kwargs, "logger": log2})
+    assert out == 0
+    assert calls == [1]          # the worker body ran exactly once
+    assert any("skipping" in str(m).lower() for m in log2.infos)
+
+    release.set()
+    t.join(timeout=10)
+    assert not t.is_alive()
+
+    # Guard reset → the next cleanup runs again.
+    release.set()  # keep the fake non-blocking for the third call
+    processing.automatic_wishlist_cleanup_after_db_update(**kwargs)
+    assert calls == [1, 1]
+
+
+def test_auto_cleanup_guard_resets_after_inner_error(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(processing, "remove_tracks_already_in_library", _boom)
+    kwargs = dict(
+        wishlist_service=_CleanupWishlistService([{
+            "name": "Song", "artists": [{"name": "A"}],
+            "spotify_track_id": "sp-1", "album": {"name": "Al"},
+        }]),
+        profiles_database=_CleanupProfilesDatabase(),
+        music_database=_CleanupMusicDatabase(),
+        active_server="navidrome",
+        logger=_FakeLogger(),
+    )
+    assert processing.automatic_wishlist_cleanup_after_db_update(**kwargs) == 0
+    # inner swallowed the error AND the guard reset — a second call still runs
+    # (it would return 0/skip forever if the flag leaked)
+    assert processing.automatic_wishlist_cleanup_after_db_update(**kwargs) == 0
+    with processing._auto_cleanup_lock:
+        assert processing._auto_cleanup_running is False
+
+
+def test_db_update_cleanup_runs_on_dedicated_thread_not_shared_pool():
+    """Source guard: the post-DB-update cleanup must not ride the shared
+    3-worker missing_download_executor (it starves download post-processing)."""
+    from pathlib import Path
+    src = Path(processing.__file__).resolve().parents[2] / "web_server.py"
+    text = src.read_text(encoding="utf-8")
+    assert "missing_download_executor.submit(_automatic_wishlist_cleanup_after_db_update)" not in text
+    assert 'name="WishlistCleanup"' in text

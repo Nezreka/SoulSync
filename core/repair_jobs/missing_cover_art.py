@@ -102,6 +102,7 @@ class MissingCoverArtJob(RepairJob):
                 ("(SELECT t.file_path FROM tracks t WHERE t.album_id = al.id "
                  "AND t.file_path IS NOT NULL AND t.file_path != '' "
                  "ORDER BY t.disc_number, t.track_number LIMIT 1) AS rep_path"),
+                "ar.id",
             ]
             column_map = [
                 ("itunes_album_id", "al.itunes_album_id"),
@@ -160,6 +161,7 @@ class MissingCoverArtJob(RepairJob):
                 return result
 
             album_id, title, artist_name, spotify_album_id, album_thumb, artist_thumb, rep_path = row[:7]
+            artist_id = row[7]
             source_album_ids = {
                 'spotify': spotify_album_id,
                 'itunes': row[column_index['itunes_album_id']] if 'itunes_album_id' in column_index else None,
@@ -312,6 +314,7 @@ class MissingCoverArtJob(RepairJob):
                                 'found_artwork_url': artwork_url,
                                 'spotify_album_id': spotify_album_id,
                                 'artist_thumb_url': artist_thumb or None,
+                                'artist_id': artist_id,
                                 # Found artist image (None if none matched, or it
                                 # equals the current one — nothing to offer then).
                                 'found_artist_url': (

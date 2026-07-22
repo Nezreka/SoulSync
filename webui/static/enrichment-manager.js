@@ -38,11 +38,11 @@ const ENRICHMENT_WORKERS = [
     // relationship:true tells the detail panel to drop the (inapplicable)
     // manual-match affordance.
     { id: 'similar_artists', name: 'Similar Artists', color: '#a855f7', relationship: true,
-      logoUrl: 'https://www.music-map.com/elements/objects/og_logo.png', imgRound: true },
+      logoUrl: '/static/img/brands/musicmap.png', imgRound: true },
     // Experimental (core.metadata.registry.EXPERIMENTAL_SOURCES), no dashboard
     // bubble/logo element — falls back to the colored-initial chip.
     { id: 'bandcamp',    name: 'Bandcamp',     color: '#1da0c3',
-      logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg' },
+      logoUrl: '/static/img/brands/bandcamp.svg' },
 ];
 
 const _emWorkerById = Object.fromEntries(ENRICHMENT_WORKERS.map(w => [w.id, w]));

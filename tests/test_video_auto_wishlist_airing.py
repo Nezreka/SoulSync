@@ -1,9 +1,19 @@
 """Sonarr-style 'wishlist today's airings' automation handler — pure logic with the
-calendar read + wishlist write injected, so it runs without a DB or media server."""
+calendar read + wishlist write + catch-up bookmark injected, so it runs without a
+DB or media server.
+
+Catch-up (Boulder's Sunday gap): each run covers (bookmark+1 .. today), capped at
+CATCHUP_MAX_DAYS, so days a slept-through 01:00 trigger skipped heal on the next
+run — while each day is only ever offered ONCE (removals never boomerang).
+"""
 
 from __future__ import annotations
 
-from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
+from core.automation.handlers.video_auto_wishlist_airing import (
+    CATCHUP_MAX_DAYS,
+    auto_video_add_airing_episodes,
+    compute_catchup_window,
+)
 
 
 class _Deps:
@@ -17,6 +27,22 @@ class _Deps:
 def _row(tid, title, s, e, owned=False):
     return {"show_tmdb_id": tid, "show_id": tid * 100, "show_title": title, "season_number": s,
             "episode_number": e, "title": "Ep", "air_date": "2026-06-21", "has_file": owned}
+
+
+def _run(config=None, deps=None, **overrides):
+    """Invoke the handler with hermetic defaults for every seam — the production
+    defaults reach the real video DB (api.video), which tests must never touch."""
+    kw = dict(
+        fetch_airing=lambda start, end: [],
+        add_episodes=lambda *a, **k: 0,
+        today_fn=lambda: "2026-06-21",
+        season_meta=lambda *a: None,
+        get_bookmark=lambda: None,
+        set_bookmark=lambda d: None,
+    )
+    kw.update(overrides)
+    return auto_video_add_airing_episodes(
+        config or {"_automation_id": "a", "prune_ended": False}, deps or _Deps(), **kw)
 
 
 def test_adds_unowned_airings_grouped_by_show():
@@ -33,10 +59,7 @@ def test_adds_unowned_airings_grouped_by_show():
         added.append((tid, title, len(eps), library_id, poster_url))
         return len(eps)
 
-    res = auto_video_add_airing_episodes(
-        {"_automation_id": "a1", "prune_ended": False}, _Deps(),
-        fetch_airing=lambda today: rows, add_episodes=add, today_fn=lambda: "2026-06-21",
-        season_meta=lambda *a: None)
+    res = _run(fetch_airing=lambda s, e: rows, add_episodes=add)
 
     assert res["status"] == "completed"
     assert res["episodes_added"] == 3        # 2 of Widows Bay + 1 of Another Show
@@ -66,9 +89,7 @@ def test_uses_tmdb_season_metadata_like_a_manual_add():
         captured["eps"] = eps
         return len(eps)
 
-    auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
-                                   fetch_airing=lambda t: rows, add_episodes=add,
-                                   today_fn=lambda: "2026-06-21", season_meta=season_meta)
+    _run(fetch_airing=lambda s, e: rows, add_episodes=add, season_meta=season_meta)
     ep = captured["eps"][0]
     assert ep["overview"] == "TMDB overview"                 # TMDB preferred over DB
     assert ep["still_url"] == "https://img/tmdb/s2e3.jpg"
@@ -85,9 +106,7 @@ def test_falls_back_to_db_values_when_tmdb_unavailable():
         captured["eps"] = eps
         return len(eps)
 
-    auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
-                                   fetch_airing=lambda t: rows, add_episodes=add,
-                                   today_fn=lambda: "2026-06-21", season_meta=lambda *a: None)
+    _run(fetch_airing=lambda s, e: rows, add_episodes=add)
     ep = captured["eps"][0]
     assert ep["overview"] == "db synopsis"
     assert ep["still_url"] == "/library/metadata/9/thumb/1"
@@ -96,32 +115,106 @@ def test_falls_back_to_db_values_when_tmdb_unavailable():
 def test_queries_the_calendar_for_today():
     seen = {}
 
-    def fetch(today):
-        seen["today"] = today
+    def fetch(start, end):
+        seen["window"] = (start, end)
         return []
 
-    auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
-                                   fetch_airing=fetch, add_episodes=lambda *a: 0,
-                                   today_fn=lambda: "2026-06-21")
-    assert seen["today"] == "2026-06-21"     # start == end == today
+    _run(fetch_airing=fetch)
+    assert seen["window"] == ("2026-06-21", "2026-06-21")     # start == end == today
 
 
 def test_nothing_airing_is_a_clean_noop():
-    res = auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
-                                         fetch_airing=lambda t: [], add_episodes=lambda *a: 0,
-                                         today_fn=lambda: "2026-06-21")
+    res = _run()
     assert res["status"] == "completed" and res["episodes_added"] == 0
 
 
 def test_error_is_caught_and_reported():
-    def boom(today):
+    def boom(start, end):
         raise RuntimeError("calendar down")
 
     deps = _Deps()
-    res = auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, deps,
-                                         fetch_airing=boom, add_episodes=lambda *a: 0)
+    res = _run(deps=deps, fetch_airing=boom)
     assert res["status"] == "error" and "calendar down" in res["error"]
     assert any(p.get("status") == "error" for p in deps.progress)
+
+
+# ── catch-up window (Boulder's Sunday gap) ───────────────────────────────────
+
+
+def test_window_no_bookmark_is_today_only():
+    assert compute_catchup_window("2026-06-21", None) == "2026-06-21"
+    assert compute_catchup_window("2026-06-21", "") == "2026-06-21"
+    assert compute_catchup_window("2026-06-21", "junk") == "2026-06-21"
+
+
+def test_window_normal_night_collapses_to_today():
+    # bookmark = yesterday → window starts today: identical to pre-catch-up behavior
+    assert compute_catchup_window("2026-06-21", "2026-06-20") == "2026-06-21"
+
+
+def test_window_after_gap_covers_missed_days():
+    # gone Thu–Sun (last covered Wed 17th) → window = Thu 18th .. today
+    assert compute_catchup_window("2026-06-21", "2026-06-17") == "2026-06-18"
+
+
+def test_window_is_capped():
+    # bookmark a month old → clamp to (today - CATCHUP_MAX_DAYS + 1)
+    assert CATCHUP_MAX_DAYS == 7
+    assert compute_catchup_window("2026-06-21", "2026-05-01") == "2026-06-15"
+
+
+def test_window_future_or_same_day_bookmark_clamps_to_today():
+    assert compute_catchup_window("2026-06-21", "2026-06-21") == "2026-06-21"
+    assert compute_catchup_window("2026-06-21", "2026-06-25") == "2026-06-21"
+
+
+def test_gap_run_fetches_window_and_advances_bookmark():
+    seen = {}
+    marks = []
+
+    def fetch(start, end):
+        seen["window"] = (start, end)
+        return [_row(1, "Widows Bay", 1, 1)]
+
+    res = _run(fetch_airing=fetch, add_episodes=lambda *a, **k: 1,
+               get_bookmark=lambda: "2026-06-17", set_bookmark=marks.append)
+    assert seen["window"] == ("2026-06-18", "2026-06-21")   # the missed days + today
+    assert marks == ["2026-06-21"]                          # bookmark advanced to today
+    assert res["episodes_added"] == 1
+
+
+def test_failed_run_does_not_advance_bookmark():
+    marks = []
+
+    def boom(start, end):
+        raise RuntimeError("calendar down")
+
+    res = _run(fetch_airing=boom, get_bookmark=lambda: "2026-06-17", set_bookmark=marks.append)
+    assert res["status"] == "error"
+    assert marks == []                       # next run re-covers the same window
+
+
+def test_bookmark_read_failure_degrades_to_today_only():
+    seen = {}
+
+    def fetch(start, end):
+        seen["window"] = (start, end)
+        return []
+
+    def bad_bookmark():
+        raise RuntimeError("db hiccup")
+
+    res = _run(fetch_airing=fetch, get_bookmark=bad_bookmark)
+    assert res["status"] == "completed"
+    assert seen["window"] == ("2026-06-21", "2026-06-21")
+
+
+def test_bookmark_write_failure_does_not_fail_the_run():
+    def bad_write(day):
+        raise RuntimeError("db hiccup")
+
+    res = _run(set_bookmark=bad_write)
+    assert res["status"] == "completed"
 
 
 # ── watchlist hygiene: prune ended/canceled follows ─────────────────────────
@@ -164,18 +257,13 @@ def test_prune_never_removes_on_unknown_status_or_lookup_error():
 
 def test_airing_handler_runs_the_prune_pass():
     removed = []
-    res = auto_video_add_airing_episodes(
-        {"_automation_id": "a"}, _Deps(),
-        fetch_airing=lambda t: [], add_episodes=lambda *a, **k: 0, today_fn=lambda: "2026-06-21",
-        prune_follows=lambda: [{"tmdb_id": 7, "title": "Old", "status": "Ended"}],
-        show_status=lambda t: None, remove_show=removed.append)
+    res = _run(config={"_automation_id": "a"},
+               prune_follows=lambda: [{"tmdb_id": 7, "title": "Old", "status": "Ended"}],
+               show_status=lambda t: None, remove_show=removed.append)
     assert res["status"] == "completed" and res["shows_pruned"] == 1 and removed == [7]
 
 
 def test_airing_handler_can_disable_the_prune():
     called = {"n": 0}
-    auto_video_add_airing_episodes(
-        {"_automation_id": "a", "prune_ended": False}, _Deps(),
-        fetch_airing=lambda t: [], add_episodes=lambda *a, **k: 0, today_fn=lambda: "2026-06-21",
-        prune_follows=lambda: called.update(n=called["n"] + 1) or [])
+    _run(prune_follows=lambda: called.update(n=called["n"] + 1) or [])
     assert called["n"] == 0                          # prune skipped entirely

@@ -13,18 +13,60 @@ touch a DB or a media server; production lazily binds the real calls.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from core.automation.deps import AutomationDeps
 
+# Self-healing catch-up (Boulder's Sunday gap): a daily_time trigger that fires
+# while the box is asleep is discarded, not made up — so with a today-only window
+# every slept-through day was permanently skipped. Each run now covers
+# (last-covered-bookmark + 1 .. today), capped at this many days including today,
+# so any gap ≤ a week heals on the next nightly run. The bookmark guarantees each
+# day is offered exactly ONCE, ever — a deliberately-deleted wishlist episode is
+# never re-offered by a later run (removals must not boomerang; the wishlist
+# upsert has no deletion tombstone).
+CATCHUP_MAX_DAYS = 7
+_BOOKMARK_KEY = 'airing_last_covered'
 
-def _default_fetch_airing(today: str) -> List[Dict[str, Any]]:
-    """Production wiring: the calendar's episodes airing on ``today`` for followed shows."""
+
+def _default_fetch_airing(start: str, end: str) -> List[Dict[str, Any]]:
+    """Production wiring: the calendar's episodes airing in [start, end] for followed shows."""
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
     return get_video_db().calendar_upcoming(
-        today, today, server_source=resolve_video_server(), watchlist_only=True)
+        start, end, server_source=resolve_video_server(), watchlist_only=True)
+
+
+def _default_get_bookmark() -> Optional[str]:
+    from api.video import get_video_db
+    return get_video_db().get_setting(_BOOKMARK_KEY)
+
+
+def _default_set_bookmark(day: str) -> None:
+    from api.video import get_video_db
+    get_video_db().set_setting(_BOOKMARK_KEY, day)
+
+
+def compute_catchup_window(today: str, bookmark: Optional[str],
+                           max_days: int = CATCHUP_MAX_DAYS) -> str:
+    """The window START for this run: the day after the bookmark, clamped to
+    [today - (max_days-1), today]. No/invalid bookmark → today (the pre-catch-up
+    behavior — a fresh install never backfills history). Pure."""
+    if not bookmark:
+        return today
+    try:
+        bm_d = date.fromisoformat(str(bookmark))
+        t_d = date.fromisoformat(str(today))
+    except ValueError:
+        return today
+    start_d = bm_d + timedelta(days=1)
+    floor_d = t_d - timedelta(days=max(1, int(max_days)) - 1)
+    if start_d < floor_d:
+        start_d = floor_d
+    if start_d > t_d:
+        start_d = t_d
+    return start_d.isoformat()
 
 
 def _default_add_episodes(show_tmdb_id: Any, show_title: Any, episodes: List[Dict[str, Any]],
@@ -131,13 +173,15 @@ def auto_video_add_airing_episodes(
     config: Dict[str, Any],
     deps: AutomationDeps,
     *,
-    fetch_airing: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
+    fetch_airing: Optional[Callable[[str, str], List[Dict[str, Any]]]] = None,
     add_episodes: Optional[Callable[[Any, Any, List[Dict[str, Any]]], int]] = None,
     today_fn: Optional[Callable[[], str]] = None,
     season_meta: Optional[Callable[[Any, Any], Any]] = None,
     prune_follows: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     show_status: Optional[Callable[[Any], Any]] = None,
     remove_show: Optional[Callable[[Any], None]] = None,
+    get_bookmark: Optional[Callable[[], Optional[str]]] = None,
+    set_bookmark: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Add today's airing (unowned, followed-show) episodes to the video wishlist, and
     first tidy the watchlist by dropping shows that have ended / been canceled.
@@ -148,10 +192,19 @@ def auto_video_add_airing_episodes(
     add_episodes = add_episodes or _default_add_episodes
     season_meta = season_meta or _default_season_meta
     today_fn = today_fn or (lambda: date.today().isoformat())
+    get_bookmark = get_bookmark or _default_get_bookmark
+    set_bookmark = set_bookmark or _default_set_bookmark
     automation_id = config.get('_automation_id')
     prune_ended = config.get('prune_ended', True)
     try:
         today = today_fn()
+        # Catch-up window: heal any days a slept-through 01:00 run skipped.
+        try:
+            bookmark = get_bookmark()
+        except Exception:   # noqa: BLE001 - a bookmark read failure degrades to today-only
+            bookmark = None
+        window_start = compute_catchup_window(today, bookmark)
+        caught_up_days = (date.fromisoformat(today) - date.fromisoformat(window_start)).days
         # Watchlist hygiene first: a followed show that has since ended/been canceled
         # won't air again, so drop it (ended LIBRARY shows are already auto-excluded;
         # this catches explicit eye-button follows).
@@ -161,9 +214,13 @@ def auto_video_add_airing_episodes(
                                  log_line='Removing shows that have ended or been canceled', log_type='info')
             pruned = prune_ended_show_follows(deps, automation_id, fetch_follows=prune_follows,
                                               show_status=show_status, remove_show=remove_show)
-        deps.update_progress(automation_id, phase="Checking today's airings…", progress=25,
-                             log_line='Reading the calendar for episodes airing today', log_type='info')
-        rows = fetch_airing(today) or []
+        deps.update_progress(
+            automation_id, phase="Checking today's airings…", progress=25,
+            log_line=('Reading the calendar for episodes airing today' if not caught_up_days
+                      else 'Reading the calendar for %s → %s (catching up %d missed day(s))'
+                      % (window_start, today, caught_up_days)),
+            log_type='info')
+        rows = fetch_airing(window_start, today) or []
 
         # Group what to wish for by show: airing today, NOT already owned, with a
         # real season/episode. add_episodes_to_wishlist is idempotent, so re-runs
@@ -202,8 +259,18 @@ def auto_video_add_airing_episodes(
                                       _show_poster_url(grp['library_id'])) or 0)
         shows = len(by_show)
 
+        # Advance the bookmark ONLY on success — a failed run must re-cover its
+        # window next time. A bookmark write failure never fails the run.
+        try:
+            set_bookmark(today)
+        except Exception:   # noqa: BLE001
+            deps.update_progress(automation_id, log_line='Could not persist the catch-up bookmark',
+                                 log_type='warning')
+
         done = ('Added %d airing episode(s) across %d show(s) to the wishlist'
                 % (added, shows)) if added else 'No new airing episodes to wishlist today'
+        if caught_up_days:
+            done += ' · caught up %d missed day(s)' % caught_up_days
         if pruned:
             done += ' · pruned %d ended show(s)' % pruned
         deps.update_progress(

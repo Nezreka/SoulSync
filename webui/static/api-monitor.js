@@ -25,17 +25,17 @@ const _RATE_GAUGE_COLORS = {
 // reads as branded chips, not anonymous initials. AudioDB ships
 // no public logo URL, so it lives as a local static file.
 const _RATE_GAUGE_LOGOS = {
-    spotify:    'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
-    itunes:     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
-    deezer:     'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
-    jiosaavn:   'https://cdn-1.webcatalog.io/catalog/jiosaavn/jiosaavn-icon-filled-256.webp?v=1782693273643',
-    lastfm:     'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
-    genius:     'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png',
-    musicbrainz:'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
+    spotify:    '/static/img/brands/spotify.png',
+    itunes:     '/static/img/brands/itunes.png',
+    deezer:     '/static/img/brands/deezer.png',
+    jiosaavn:   '/static/img/brands/jiosaavn.webp',
+    lastfm:     '/static/img/brands/lastfm.png',
+    genius:     '/static/img/brands/genius.png',
+    musicbrainz:'/static/img/brands/musicbrainz.png',
     audiodb:    '/static/audiodb.png',
-    tidal:      'https://www.svgrepo.com/show/519734/tidal.svg',
-    qobuz:      'https://www.svgrepo.com/show/504778/qobuz.svg',
-    discogs:    'https://www.svgrepo.com/show/305957/discogs.svg',
+    tidal:      '/static/img/brands/tidal.svg',
+    qobuz:      '/static/img/brands/qobuz.svg',
+    discogs:    '/static/img/brands/discogs.svg',
     amazon:     '/static/amazon.svg',
 };
 
@@ -1848,14 +1848,47 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
 // way out a repeatedly-failing track needs.
 function _searchWishlistTrackManually(artistName, trackName) {
     navigateToPage('search');
-    setTimeout(() => {
-        const searchInput = document.getElementById('enhanced-search-input');
-        if (searchInput) {
-            searchInput.value = `${artistName || ''} ${trackName || ''}`.trim();
-            searchInput.dispatchEvent(new Event('input'));
-            searchInput.focus();
+    const query = `${artistName || ''} ${trackName || ''}`.trim();
+    // The user is here because AUTO downloads kept failing — at this point they
+    // want the FILE, not metadata browsing. Land on the Soulseek (basic) surface
+    // with the search already running, instead of the default metadata source.
+    //
+    // The source-picker controller initializes ASYNCHRONOUSLY on a fresh
+    // /search visit (settings fetch builds the icon row + sets the default
+    // source). Swapping sections before it finishes gets overridden the moment
+    // its first render fires (it re-activates the enhanced section for the
+    // default source) — the "lands on basic then flips to metadata" bug. So:
+    // WAIT for the soulseek icon to exist and click it — then the CONTROLLER
+    // holds the soulseek state and its own renders short-circuit, nothing can
+    // flip back. Only after ~4s without an icon do we fall back to a manual
+    // section swap.
+    let attempts = 0;
+    const tryHandoff = () => {
+        attempts += 1;
+        const basicInput = document.getElementById('downloads-search-input');
+        const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+        if (soulseekIcon) {
+            if (basicInput) basicInput.value = query;
+            // Sync the controller's query BEFORE clicking — otherwise
+            // onSoulseekSelected fires with a stale query and overwrites it.
+            if (typeof _searchPageController !== 'undefined' && _searchPageController) {
+                _searchPageController.state.query = query;
+            }
+            soulseekIcon.click();
+            return;
         }
-    }, 300);
+        if (attempts < 25) { setTimeout(tryHandoff, 160); return; }
+        // Controller never came up — swap sections and run the search directly.
+        const basicSection = document.getElementById('basic-search-section');
+        const enhancedSection = document.getElementById('enhanced-search-section');
+        if (basicSection) basicSection.classList.add('active');
+        if (enhancedSection) enhancedSection.classList.remove('active');
+        if (basicInput) basicInput.value = query;
+        if (basicInput && basicInput.value && typeof performDownloadsSearch === 'function') {
+            performDownloadsSearch();
+        }
+    };
+    setTimeout(tryHandoff, 200);
 }
 
 // Enhancement 8: navigate to the Search page pre-filled with this artist's name

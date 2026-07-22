@@ -56,6 +56,10 @@ def _norm_hours(value: Any) -> int:
         return 0
 
 
+def _norm_seed_mode(value: Any) -> str:
+    return "client" if str(value or "").strip().lower() == "client" else "soulsync"
+
+
 def load(db) -> dict:
     return {
         "download_mode": normalize_mode(db.get_setting("download_mode")),
@@ -66,6 +70,9 @@ def load(db) -> dict:
         "seed_ratio_goal": _norm_ratio(db.get_setting("seed_ratio_goal")),
         "seed_time_goal_hours": _norm_hours(db.get_setting("seed_time_goal_hours")),
         "seed_remove_data": (db.get_setting("seed_remove_data") or "1") != "0",
+        # Who enforces the goal: "soulsync" (sweep polls + removes) or "client"
+        # (write the ratio/time limit into the torrent client, arr-style).
+        "seed_mode": _norm_seed_mode(db.get_setting("seed_mode")),
     }
 
 
@@ -82,6 +89,8 @@ def save(db, body: Any) -> dict:
         db.set_setting("seed_time_goal_hours", str(_norm_hours(body.get("seed_time_goal_hours"))))
     if "seed_remove_data" in body:
         db.set_setting("seed_remove_data", "1" if body.get("seed_remove_data") else "0")
+    if "seed_mode" in body:
+        db.set_setting("seed_mode", _norm_seed_mode(body.get("seed_mode")))
     return load(db)
 
 

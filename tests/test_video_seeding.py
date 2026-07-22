@@ -147,3 +147,74 @@ def test_settings_ui_has_the_goal_fields():
     assert 'id="video-seed-ratio"' in _INDEX and 'id="video-seed-hours"' in _INDEX
     assert 'id="video-seed-remove-data"' in _INDEX
     assert "seed_ratio_goal" in _SETTINGS_JS and "seed_time_goal_hours" in _SETTINGS_JS
+
+
+# ---------------------------------------------------------------------------
+# seed_mode toggle (client vs soulsync)
+# ---------------------------------------------------------------------------
+
+def test_seed_mode_config_defaults_and_normalizes(db):
+    from core.video.download_config import load, save
+    assert load(db)["seed_mode"] == "soulsync"
+    save(db, {"seed_mode": "client"})
+    assert load(db)["seed_mode"] == "client"
+    save(db, {"seed_mode": "CLIENT"})
+    assert load(db)["seed_mode"] == "client"
+    save(db, {"seed_mode": "junk"})
+    assert load(db)["seed_mode"] == "soulsync"
+
+
+def test_client_mode_pushes_limit_and_releases(db, monkeypatch):
+    from core.video.download_config import save
+    save(db, {"seed_time_goal_hours": 408, "seed_mode": "client"})
+    _torrent_row(db, ref="abc", title="Heat")
+    pushes = []
+    monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
+    monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
+                        lambda a, ref, r, h: pushes.append((ref, r, h)) or True)
+    # In client mode the sweep must NOT poll the client for status.
+    import core.video.client_download as cd
+    monkeypatch.setattr(cd, "_get_status",
+                        lambda src, ref: (_ for _ in ()).throw(AssertionError("polled in client mode")))
+    out = seeding.sweep()
+    assert out == {"status": "completed", "checked": 1, "released": 1, "seeding": 0}
+    assert pushes == [("abc", 0.0, 408)]
+    assert db.torrents_awaiting_seed_release() == []   # released → handed to client
+
+
+def test_client_mode_push_failure_falls_back_to_soulsync(db, monkeypatch):
+    """A failed/unsupported client push must NOT leave the grab unmanaged (e.g. a
+    non-qBit client) — SoulSync takes over (poll + remove per goals)."""
+    from core.video.download_config import save
+    save(db, {"seed_time_goal_hours": 408, "seed_mode": "client"})
+    _torrent_row(db, ref="abc")
+    monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
+    monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
+                        lambda a, ref, r, h: False)   # client can't take share limits
+    import core.video.client_download as cd
+    # SS fallback polls; goal not met yet → keeps seeding, stays awaiting
+    monkeypatch.setattr(cd, "_get_status", lambda src, ref: SimpleNamespace(ratio=0.1, seeding_time=1000))
+    out = seeding.sweep()
+    assert out["released"] == 0 and out["seeding"] == 1
+    assert len(db.torrents_awaiting_seed_release()) == 1
+
+
+def test_client_mode_fallback_removes_when_goal_met(db, monkeypatch):
+    """Fallback isn't just a no-op: when the goal IS met it removes, like SS mode."""
+    from core.video.download_config import save
+    save(db, {"seed_time_goal_hours": 24, "seed_mode": "client"})
+    _torrent_row(db, ref="abc")
+    monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
+    monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
+                        lambda a, ref, r, h: False)
+    import core.video.client_download as cd
+    monkeypatch.setattr(cd, "_get_status", lambda src, ref: SimpleNamespace(ratio=5.0, seeding_time=48 * 3600))
+    removed = []
+    monkeypatch.setattr(seeding, "_remove", lambda ref, delete_files: removed.append(ref) or True)
+    out = seeding.sweep()
+    assert out["released"] == 1 and removed == ["abc"]
+
+
+def test_seed_mode_ui_present():
+    assert 'id="video-seed-mode"' in _INDEX
+    assert "seed_mode" in _SETTINGS_JS

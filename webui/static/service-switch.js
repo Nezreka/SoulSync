@@ -21,13 +21,13 @@ const _SS_TABS = [
 const _SS_SERVER_INFO = {
     // `dark`: the logo is a white/light wordmark, so it needs a dark disc to be
     // visible (it'd vanish on the default white disc).
-    plex:      { name: 'Plex',      logo: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg', dark: true },
-    jellyfin:  { name: 'Jellyfin',  logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png' },
-    navidrome: { name: 'Navidrome', logo: 'https://tweakers.net/ext/i/2007323764.png' },
+    plex:      { name: 'Plex',      logo: '/static/img/brands/plex.png', dark: true },
+    jellyfin:  { name: 'Jellyfin',  logo: '/static/img/brands/jellyfin.png' },
+    navidrome: { name: 'Navidrome', logo: '/static/img/brands/navidrome.png' },
     soulsync:  { name: 'SoulSync',  logo: '/static/trans2.png', dark: true },
 };
 const _SS_META_FALLBACK = {
-    spotify_free: { text: 'Spotify (no auth)', icon: '🆓', logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png' },
+    spotify_free: { text: 'Spotify (no auth)', icon: '🆓', logo: '/static/img/brands/spotify.png' },
 };
 // Brand colors drive each card's logo ring + active glow (the Manage-Workers feel).
 const _SS_BRAND = {

@@ -231,3 +231,69 @@ def test_start_preview_is_idempotent_while_running(env):
     assert st["running"] is True
     with mr._preview_lock:                # cleanup so we don't wedge later tests
         mr._preview_state.update(running=False)
+
+
+# ── $year for episode templates (musicagine) ─────────────────────────────────
+# Some servers report a show PremiereDate but no ProductionYear, so shows.year
+# lands NULL and '$series ($year)' rendered as 'Better Call Saul' while movies
+# were fine. Two seams: the upsert derives year from first_air_date, and the
+# rename query COALESCEs for rows written before that fix (incremental scans
+# skip complete shows, so old rows never heal on their own).
+
+
+def _seed_episode_file(db, base_dir, *, year=None, first_air_date=None):
+    p = base_dir / "bcs.s03e05.mkv"
+    p.write_bytes(b"x" * 2048)
+    db.set_setting("tv_path", str(base_dir))
+    db.upsert_show_tree("plex", {
+        "server_id": "s1", "title": "Better Call Saul", "year": year,
+        "first_air_date": first_air_date,
+        "seasons": [{"server_id": "sea3", "season_number": 3, "episodes": [{
+            "server_id": "ep35", "season_number": 3, "episode_number": 5,
+            "title": "Imbroglio", "has_file": True,
+            "file": {"relative_path": str(p), "size_bytes": p.stat().st_size},
+        }]}],
+    })
+    conn = db._get_connection()
+    conn.execute("UPDATE episodes SET has_file=1")
+    conn.commit()
+    conn.close()
+    return p
+
+
+def test_show_upsert_derives_year_from_premiere_date(env):
+    db, movies = env
+    _seed_episode_file(db, movies, year=None, first_air_date="2015-02-08")
+    conn = db._get_connection()
+    row = conn.execute("SELECT year FROM shows WHERE server_id='s1'").fetchone()
+    conn.close()
+    assert row["year"] == 2015
+
+
+def test_show_upsert_prefers_server_year_over_premiere(env):
+    db, movies = env
+    _seed_episode_file(db, movies, year=2014, first_air_date="2015-02-08")
+    conn = db._get_connection()
+    row = conn.execute("SELECT year FROM shows WHERE server_id='s1'").fetchone()
+    conn.close()
+    assert row["year"] == 2014
+
+
+def test_rename_rows_coalesce_year_from_first_air_date(env):
+    """Rows written BEFORE the upsert fix (year NULL, premiere present) still
+    feed $year — the rename query derives it at read time."""
+    db, movies = env
+    _seed_episode_file(db, movies, year=None, first_air_date="2015-02-08")
+    conn = db._get_connection()
+    conn.execute("UPDATE shows SET year=NULL")     # simulate a pre-fix row
+    conn.commit()
+    conn.close()
+    rows = db.rename_owned_episode_files()
+    assert rows and rows[0]["show_year"] == 2015
+
+
+def test_rename_rows_year_null_when_neither_exists(env):
+    db, movies = env
+    _seed_episode_file(db, movies, year=None, first_air_date=None)
+    rows = db.rename_owned_episode_files()
+    assert rows and rows[0]["show_year"] is None

@@ -14,7 +14,11 @@
     var LIMIT = 60;
     var state = { loaded: false, tab: 'movie', search: '', sort: 'added', page: 1,
                   counts: { movie: 0, show: 0, episode: 0 }, ytChannel: 0, ytVideo: 0,
-                  showData: {}, showInfo: {} };
+                  showData: {}, showInfo: {},
+                  // "⚠ Failing" filter (the LiveLeak fix-it hub): show only items
+                  // that keep failing to download. lastItems = the unfiltered load,
+                  // so toggling re-renders without a refetch.
+                  failingOnly: false, lastItems: null };
 
     var searchTimer = null;
 
@@ -78,6 +82,21 @@
             '</button>';
     }
 
+    // Manual search (LiveLeak's failing-hub follow-up): every wishable item gets
+    // BOTH buttons, Sonarr-style — auto (huntBtn: the system picks) and manual
+    // (pickBtn: opens the shared release-picker modal, the same one the detail
+    // page uses, and the USER picks). List+magnifier icon = "show me the options".
+    var PICK_ICON =
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+        'stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h9M4 18h6"/>' +
+        '<circle cx="17.5" cy="16.5" r="3.4"/><path d="M21.8 20.8l-2-2"/></svg>';
+
+    function pickBtn(cls, scope, attrs) {
+        return '<button class="' + cls + ' vwsh-pick" type="button" ' +
+            'title="Manual search — pick a release" aria-label="Manual search" ' +
+            'data-vwsh-pick="' + scope + '"' + attrs + '>' + PICK_ICON + '</button>';
+    }
+
     // ── movie card ────────────────────────────────────────────────────────────
     function movieCard(it) {
         var owned = it.library_id != null;
@@ -105,6 +124,9 @@
             '<div class="vwsh-movie-art">' + art + '<div class="vwsh-movie-scrim"></div>' +
             statusPill(st, tip) + failChip +
             (st === 'downloading' ? '' : huntBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"')) +
+            (st === 'downloading' ? '' : pickBtn('vwsh-hunt', 'movie',
+                ' data-tmdb="' + esc(it.tmdb_id) + '" data-title="' + esc(it.title || '') +
+                '" data-year="' + esc(it.year || '') + '" data-poster="' + esc(it.poster_url || '') + '"')) +
             rmBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') + '</div>' +
             '<div class="vwsh-movie-info"><span class="vwsh-movie-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span>' + (meta ? '<span class="vwsh-movie-meta">' + esc(meta) + '</span>' : '') +
@@ -162,6 +184,8 @@
                         'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Search this season now">' +
                         '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
                         'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
+                    (yt ? '' : pickBtn('vwsh-szn-hunt', 'season',
+                        ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '"')) +
                     '<button class="vwsh-szn-rm" type="button" ' + sRm + ' title="Remove">&#10005;</button>' +
                 '</div>' +
                 '<div class="vwsh-ep-grid">' + cards + '</div>' +
@@ -346,12 +370,56 @@
                   '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Search now">' +
                   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
                   'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
+            (yt || st === 'downloading' ? ''
+                : pickBtn('vwsh-epc-hunt', 'episode', ' data-tmdb="' + esc(sh.tmdb_id) +
+                  '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"')) +
             '<button class="vwsh-epc-rm" type="button" ' + rm + ' title="Remove">&#10005;</button>' +
         '</div>';
     }
 
+    // Same rule as the failing badges: repeated searches without a grab, and only
+    // while the item is still wanted (a downloading item isn't "failing").
+    function isFailingItem(x) {
+        var st = liveStatus(x);
+        return (Number(x.search_attempts) || 0) >= 3 && (st === 'wanted' || st === 'upgrade');
+    }
+
+    function _updateFailingChip(rawItems) {
+        var chip = $('[data-vwsh-failing]'); if (!chip) return;
+        var n = 0;
+        if (state.tab === 'movie') {
+            n = (rawItems || []).filter(isFailingItem).length;
+        } else if (state.tab === 'show') {
+            (rawItems || []).forEach(function (sh) {
+                (sh.seasons || []).forEach(function (se) {
+                    (se.episodes || []).forEach(function (e) { if (isFailingItem(e)) n += 1; });
+                });
+            });
+        }
+        // Keep the chip visible while the filter is ON even at count 0, so the
+        // user can always toggle back out of the filtered view.
+        chip.hidden = state.tab === 'youtube' || (!n && !state.failingOnly);
+        chip.classList.toggle('vwsh-failing-filter--on', state.failingOnly);
+        var nn = $('[data-vwsh-failing-n]'); if (nn) nn.textContent = n ? String(n) : '';
+    }
+
     function render(items) {
         var grid = $('[data-vwsh-grid]'); if (!grid) return;
+        state.lastItems = items;                       // unfiltered — the chip toggles re-render from this
+        _updateFailingChip(items);
+        // "⚠ Failing" filter: movies filter directly; shows keep only seasons/
+        // episodes that are failing (clones — the raw items stay intact).
+        if (state.failingOnly && state.tab !== 'youtube') {
+            items = state.tab === 'movie'
+                ? items.filter(isFailingItem)
+                : items.map(function (sh) {
+                    var seasons = (sh.seasons || []).map(function (se) {
+                        var eps = (se.episodes || []).filter(isFailingItem);
+                        return eps.length ? Object.assign({}, se, { episodes: eps }) : null;
+                    }).filter(Boolean);
+                    return seasons.length ? Object.assign({}, sh, { seasons: seasons }) : null;
+                }).filter(Boolean);
+        }
         // YouTube uses the SAME nebula as TV (channel=show, year=season, video=episode).
         var nebula = state.tab === 'show' || state.tab === 'youtube';
         grid.classList.toggle('wl-nebula-field', nebula);
@@ -658,7 +726,33 @@
             .catch(fail);
     }
 
+    // Manual pick — open the shared release-picker modal (VideoDownload.manualSearch,
+    // the exact modal the detail page uses). No media context is passed: like a
+    // tmdb-only item on the detail page, the grab lands as a plain download+import.
+    function doPick(btn) {
+        if (!window.VideoDownload || !VideoDownload.manualSearch) {
+            if (typeof showToast === 'function') showToast('Manual search unavailable', 'error');
+            return;
+        }
+        var scope = btn.getAttribute('data-vwsh-pick');
+        if (scope === 'movie') {
+            VideoDownload.manualSearch({
+                title: btn.getAttribute('data-title') || '', scope: 'movie',
+                year: btn.getAttribute('data-year') || null,
+                poster: btn.getAttribute('data-poster') || null });
+            return;
+        }
+        var sh = state.showData[parseInt(btn.getAttribute('data-tmdb'), 10)] || {};
+        VideoDownload.manualSearch({
+            title: sh.title || '', scope: scope,
+            season: parseInt(btn.getAttribute('data-s'), 10),
+            episode: btn.hasAttribute('data-e') ? parseInt(btn.getAttribute('data-e'), 10) : null,
+            year: sh.year || null, poster: sh.poster_url || null });
+    }
+
     function onGridClick(e) {
+        var pick = e.target.closest('[data-vwsh-pick]');
+        if (pick) { e.preventDefault(); e.stopPropagation(); doPick(pick); return; }
         var hunt = e.target.closest('[data-vwsh-hunt]');
         if (hunt) { e.preventDefault(); e.stopPropagation(); doHunt(hunt); return; }
         var rm = e.target.closest('[data-vwsh-rm]');
@@ -725,6 +819,11 @@
         });
         var sortSel = $('[data-vwsh-sort]');
         if (sortSel) sortSel.addEventListener('change', function () { state.sort = sortSel.value; state.page = 1; load(); });
+        var failBtn = $('[data-vwsh-failing]');
+        if (failBtn) failBtn.addEventListener('click', function () {
+            state.failingOnly = !state.failingOnly;
+            if (state.lastItems) render(state.lastItems); else load();
+        });
         var clearBtn = $('[data-vwsh-clear]');
         if (clearBtn) clearBtn.addEventListener('click', clearAll);
         var saBtn = $('[data-vwsh-searchall]');

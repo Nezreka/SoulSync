@@ -825,15 +825,15 @@ function toggleAllServiceAccordions(btn) {
 
 // ── Hybrid source priority list (drag-and-drop) ──
 const HYBRID_SOURCES = [
-    { id: 'soulseek', name: 'Soulseek', icon: 'https://raw.githubusercontent.com/slskd/slskd/master/docs/icon.png', emoji: '🎵' },
-    { id: 'youtube', name: 'YouTube', icon: 'https://www.svgrepo.com/show/13671/youtube.svg', emoji: '▶️' },
-    { id: 'tidal', name: 'Tidal', icon: 'https://www.svgrepo.com/show/519734/tidal.svg', emoji: '🌊' },
-    { id: 'qobuz', name: 'Qobuz', icon: 'https://www.svgrepo.com/show/504778/qobuz.svg', emoji: '🎧' },
+    { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
+    { id: 'youtube', name: 'YouTube', icon: '/static/img/brands/youtube.svg', emoji: '▶️' },
+    { id: 'tidal', name: 'Tidal', icon: '/static/img/brands/tidal.svg', emoji: '🌊' },
+    { id: 'qobuz', name: 'Qobuz', icon: '/static/img/brands/qobuz.svg', emoji: '🎧' },
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
-    { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
+    { id: 'deezer_dl', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
     { id: 'amazon', name: 'Amazon Music', icon: null, emoji: '🛒' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
-    { id: 'soundcloud', name: 'SoundCloud', icon: 'https://www.svgrepo.com/show/452219/soundcloud.svg', emoji: '☁️' },
+    { id: 'soundcloud', name: 'SoundCloud', icon: '/static/img/brands/soundcloud.png', emoji: '☁️' },
     { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
     { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
@@ -1124,10 +1124,10 @@ function getHybridOrder() {
 
 // ---- Preferred album-art sources (reuses the hybrid-source-list styling) ----
 const ART_SOURCES = [
-    { id: 'caa', name: 'Cover Art Archive', icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png', emoji: '🎨' },
-    { id: 'deezer', name: 'Deezer', icon: 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610', emoji: '🎧' },
-    { id: 'itunes', name: 'iTunes', icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png', emoji: '🍎' },
-    { id: 'spotify', name: 'Spotify', icon: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png', emoji: '🟢' },
+    { id: 'caa', name: 'Cover Art Archive', icon: '/static/img/brands/musicbrainz.png', emoji: '🎨' },
+    { id: 'deezer', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
+    { id: 'itunes', name: 'iTunes', icon: '/static/img/brands/itunes.png', emoji: '🍎' },
+    { id: 'spotify', name: 'Spotify', icon: '/static/img/brands/spotify.png', emoji: '🟢' },
     { id: 'audiodb', name: 'TheAudioDB', icon: null, emoji: '💿' },
 ];
 let _artSourceEnabled = {};   // id -> bool
@@ -1503,6 +1503,9 @@ async function loadSettingsData() {
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
         document.getElementById('stream-source').value = settings.download_source?.stream_source || 'youtube';
         document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
+        // #1056 — 0/blank = each source's built-in default
+        const _sst = document.getElementById('source-search-timeout');
+        if (_sst) _sst.value = settings.download_source?.source_search_timeout || '';
         loadHybridSourceOrder(settings);
         loadArtSourceOrder(settings);
         // Per-source download quality is now derived from the global Quality
@@ -1536,6 +1539,8 @@ async function loadSettingsData() {
         if (_tcRatio) _tcRatio.value = settings.torrent_client?.seed_ratio_goal != null ? settings.torrent_client.seed_ratio_goal : 0;
         if (_tcHours) _tcHours.value = settings.torrent_client?.seed_time_goal_hours != null ? settings.torrent_client.seed_time_goal_hours : 0;
         if (_tcRemove) _tcRemove.checked = settings.torrent_client?.seed_remove_data !== false;
+        const _tcSeedMode = document.getElementById('music-seed-mode');
+        if (_tcSeedMode) _tcSeedMode.value = settings.torrent_client?.seed_mode || 'soulsync';
         // Stalled-torrent knobs live under download_source but render in the
         // torrent client section. Timeout is stored in SECONDS, shown in MINUTES.
         const _tcStall = document.getElementById('torrent-stall-timeout');
@@ -4419,6 +4424,8 @@ async function saveSettings(quiet = false) {
             hybrid_order: getHybridOrder(),
             stream_source: document.getElementById('stream-source').value,
             max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
+            // #1056 — streaming-source search timeout override; 0 = source defaults
+            source_search_timeout: parseInt(document.getElementById('source-search-timeout')?.value) || 0,
             // Stalled-torrent knobs (rendered in the torrent client section).
             // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
             // 0 stays 0 (disabled).
@@ -4467,6 +4474,7 @@ async function saveSettings(quiet = false) {
             seed_ratio_goal: parseFloat(document.getElementById('music-seed-ratio')?.value) || 0,
             seed_time_goal_hours: parseInt(document.getElementById('music-seed-hours')?.value, 10) || 0,
             seed_remove_data: !!(document.getElementById('music-seed-remove-data') || {}).checked,
+            seed_mode: document.getElementById('music-seed-mode')?.value || 'soulsync',
         },
         usenet_client: {
             type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
