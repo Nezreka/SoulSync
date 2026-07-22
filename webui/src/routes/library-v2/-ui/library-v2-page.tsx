@@ -533,7 +533,12 @@ function IconActionButton({
 export function ArtistRefreshButton({ artistId }: { artistId: number }) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    mutationFn: () => refreshLibraryV2('artists', artistId),
+    mutationFn: async () => {
+      const jobId = await refreshLibraryV2('artists', artistId);
+      const state = await awaitBulkJobState(queryClient, jobId);
+      if (state.error) throw new Error(state.error);
+      return state;
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
   });
 

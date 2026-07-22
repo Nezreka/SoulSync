@@ -4279,33 +4279,72 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if not exists:
                 return jsonify({"success": False,
                                 "error": f"{entity[:-1].capitalize()} {eid} not found"}), 404
-            # Collect the album ids in scope, then bust their cached artwork so the
-            # next artwork request re-resolves from the (possibly retagged) files.
+            # Capture the exact scope before handing the filesystem work to
+            # the observable background job.
             if entity == "albums":
                 album_ids = [eid]
+                artist_ids = []
             else:
-                from core.library2.artist_aliases import artist_album_scope_ids
+                from core.library2.artist_aliases import (
+                    artist_album_scope_ids,
+                    resolve_alias_group,
+                )
                 album_ids = artist_album_scope_ids(conn, eid)
-            # Bust full image AND thumbnail — the thumb wins the serve fast
-            # path, so leaving it behind would pin the stale cover in lists.
-            for aid in album_ids:
-                _delete_artwork_files(db, "album", aid)
-            if entity == "artists":
-                from core.library2.artist_aliases import resolve_alias_group
-                for artist_id in resolve_alias_group(conn, eid):
-                    _delete_artwork_files(db, "artist", artist_id)
+                artist_ids = resolve_alias_group(conn, eid)
         finally:
             conn.close()
-        # Probe the files in scope so quality evaluation runs against measured
-        # sample-rate/bit-depth instead of format-based fallbacks.
-        scan_stats = {}
+
         try:
-            from core.library2.scan import rescan_files
-            scan_stats = rescan_files(db, album_ids=album_ids)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("file rescan failed (%s %s): %s", entity, eid, e)
-        return jsonify({"success": True, "refreshed_albums": len(album_ids),
-                        "scan": scan_stats})
+            job = _job_registry.start(f"refresh:{entity}:{eid}")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False,
+                "error": str(exc),
+                "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
+
+        def _run():
+            try:
+                # Bust full image AND thumbnail — the thumb wins the serve
+                # fast path, so leaving it behind pins stale covers in lists.
+                for album_id in album_ids:
+                    _delete_artwork_files(db, "album", album_id)
+                for artist_id in artist_ids:
+                    _delete_artwork_files(db, "artist", artist_id)
+
+                # Per-file probe errors stay tolerant inside rescan_files; a
+                # top-level scope/database failure terminates this observable
+                # job with an error instead of being reported as success.
+                from core.library2.scan import rescan_files
+
+                def _progress(_stage, current, total):
+                    _job_registry.update(job_id, current=current, total=total)
+
+                scan_stats = rescan_files(
+                    db, album_ids=album_ids, progress=_progress,
+                )
+                _job_registry.update(
+                    job_id,
+                    current=int(scan_stats.get("scanned", 0))
+                    + int(scan_stats.get("missing", 0)),
+                    result={"refreshed_albums": len(album_ids), **scan_stats},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Library v2 refresh failed (%s %s): %s",
+                    entity, eid, exc, exc_info=True,
+                )
+                _job_registry.update(job_id, error=str(exc))
+            finally:
+                _job_registry.finish(job_id)
+
+        threading.Thread(
+            target=_run,
+            name=f"lib2-refresh-{entity}-{eid}",
+            daemon=True,
+        ).start()
+        return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/<entity>/<int:eid>/enrich", methods=["POST"])
     def lib2_enrich(entity, eid):

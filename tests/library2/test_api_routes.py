@@ -140,6 +140,17 @@ def _conn(db: FakeDB) -> sqlite3.Connection:
     return db._get_connection()
 
 
+def _wait_for_job(client, job_id: str):
+    for _ in range(300):
+        state = client.get(
+            "/api/library/v2/jobs/status", query_string={"job_id": job_id},
+        ).get_json()
+        if not state["running"]:
+            return state
+        time.sleep(0.01)
+    raise AssertionError(f"job {job_id} did not finish")
+
+
 def test_library_page_permission_guards_api_reads(api):
     client, db, _ids = api
     db.active_profile = 7
@@ -1494,6 +1505,7 @@ def test_artist_actions_include_linked_alias_releases(api, monkeypatch):
         f"/api/library/v2/artists/{ids['artist']}/refresh"
     ).get_json()
     assert refresh["success"] is True
+    assert _wait_for_job(client, refresh["job_id"])["error"] is None
     assert alias_album in scanned["album_ids"]
 
     response = client.post(
@@ -2528,10 +2540,14 @@ def test_refresh_artist_without_albums_scans_nothing(api):
         cur = conn.execute("INSERT INTO lib2_artists(name) VALUES('Empty Artist')")
         empty_artist = cur.lastrowid
         conn.commit()
-    resp = client.post(f"/api/library/v2/artists/{empty_artist}/refresh").get_json()
-    assert resp["success"] is True
-    assert resp["refreshed_albums"] == 0
-    assert resp["scan"].get("scanned") == 0
+    started = client.post(
+        f"/api/library/v2/artists/{empty_artist}/refresh"
+    ).get_json()
+    assert started["success"] is True and started["job_id"]
+    state = _wait_for_job(client, started["job_id"])
+    assert state["error"] is None
+    assert state["result"]["refreshed_albums"] == 0
+    assert state["result"]["scanned"] == 0
 
 
 def test_refresh_busts_full_artwork_and_thumbnails(api):
@@ -2547,10 +2563,32 @@ def test_refresh_busts_full_artwork_and_thumbnails(api):
     ]
     for f in files:
         f.write_bytes(b"jpg")
-    resp = client.post(f"/api/library/v2/artists/{ids['artist']}/refresh").get_json()
-    assert resp["success"] is True
+    started = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/refresh"
+    ).get_json()
+    assert started["success"] is True
+    assert _wait_for_job(client, started["job_id"])["error"] is None
     for f in files:
         assert not f.exists(), f"{f.name} must be invalidated by refresh"
+
+
+def test_refresh_reports_top_level_scan_failure_in_job(api, monkeypatch):
+    client, _db, ids = api
+
+    def fail_scan(*_args, **_kwargs):
+        raise RuntimeError("music root unavailable")
+
+    monkeypatch.setattr("core.library2.scan.rescan_files", fail_scan)
+
+    started = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/refresh"
+    ).get_json()
+    assert started["success"] is True and started["job_id"]
+
+    state = _wait_for_job(client, started["job_id"])
+    assert state["running"] is False
+    assert state["result"] is None
+    assert state["error"] == "music root unavailable"
 
 
 def test_artwork_route_serves_real_jpeg_with_matching_mime(api):
