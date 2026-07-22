@@ -2829,10 +2829,19 @@ class VideoDatabase:
         scan passes False for a clean reset."""
         conn = self._get_connection()
         try:
+            # musicagine's rename report: some servers (Jellyfin/Emby show
+            # metadata especially) report a PremiereDate but no ProductionYear,
+            # leaving shows.year NULL — movies carry year fine, so $year worked
+            # for films and vanished for series. The premiere year IS the show
+            # year, so derive it when the server omits it.
+            _year = item.get("year")
+            if _year is None:
+                _fad = str(item.get("first_air_date") or "")[:4]
+                _year = int(_fad) if _fad.isdigit() else None
             self._resilient_upsert(conn, "shows", {
                 "server_source": server_source, "server_id": item["server_id"],
                 "title": item.get("title"), "sort_title": _sort_title(item.get("title")),
-                "year": item.get("year"), "overview": item.get("overview"),
+                "year": _year, "overview": item.get("overview"),
                 "status": item.get("status"), "network": item.get("network"),
                 "runtime_minutes": item.get("runtime_minutes"), "content_rating": item.get("content_rating"),
                 "tagline": item.get("tagline"), "rating": item.get("rating"),
@@ -4872,7 +4881,12 @@ class VideoDatabase:
         try:
             rows = conn.execute(
                 "SELECT e.id AS episode_id, e.season_number, e.episode_number, "
-                "e.title AS episode_title, s.title AS show_title, s.year AS show_year, "
+                "e.title AS episode_title, s.title AS show_title, "
+                # $year for episode templates: stored year, else the premiere
+                # year from first_air_date (enrichment fills that even when the
+                # server omits ProductionYear) — heals existing NULL-year rows
+                # without waiting for a deep scan (musicagine).
+                "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS show_year, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
                 "f.video_codec, f.release_source "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
