@@ -108,7 +108,6 @@ class WishlistService:
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
         user_initiated: bool = False,
-        quality_profile_id: Optional[int] = None,
     ) -> bool:
         """
         Directly add a track to the wishlist.
@@ -136,7 +135,6 @@ class WishlistService:
             source_context=source_context,
             profile_id=profile_id,
             user_initiated=user_initiated,
-            quality_profile_id=quality_profile_id,
         )["created"]
 
     def add_track_to_wishlist_detailed(

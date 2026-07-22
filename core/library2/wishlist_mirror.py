@@ -99,7 +99,6 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     file_info = primary_file_row(conn, track_id)
     from core.library2.profile_lookup import effective_quality_profile
     resolved_profile = effective_quality_profile(conn, "tracks", track_id)
-    quality_conflict = bool(resolved_profile.get("conflict"))
     profile_row = conn.execute(
         """SELECT id, name, upgrade_policy, upgrade_cutoff_index, ranked_targets
              FROM quality_profiles WHERE id=?""",
@@ -117,7 +116,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     }
 
     from core.library2.quality_eval import is_upgrade_policy
-    should_queue = not bool(t["has_file"]) and not quality_conflict
+    should_queue = not bool(t["has_file"])
     quality_evaluation = "not_applicable"
     if t["has_file"] and is_upgrade_policy(profile_info["upgrade_policy"]):
         try:
@@ -156,8 +155,6 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         "duration_ms": t["duration"],
         "quality_profile_id": resolved_profile["id"],
         "quality_profile": profile_info,
-        "quality_profile_conflict": quality_conflict,
-        "quality_profile_conflicts": resolved_profile.get("playlist_profiles", []),
         "_album_type": t["album_type"],
         "_has_file": bool(t["has_file"]),
         "_should_queue": should_queue,
@@ -170,8 +167,6 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "quality_profile_name": profile_info["name"],
             "quality_profile_source": resolved_profile["source"],
             "quality_profile_source_id": resolved_profile["source_id"],
-            "quality_profile_conflict": quality_conflict,
-            "quality_profile_conflicts": resolved_profile.get("playlist_profiles", []),
             "upgrade_policy": profile_info["upgrade_policy"],
             "upgrade_check": bool(t["has_file"]),
             "quality_evaluation": quality_evaluation,
@@ -316,7 +311,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
              FROM lib2_tracks t
            JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
                 AND wt.profile_id=? AND wt.wanted=1
-           JOIN quality_profiles qp ON qp.id = wt.effective_profile_id
+           JOIN quality_profiles qp ON qp.id = t.quality_profile_id
           WHERE wt.projection_version=?
             AND qp.upgrade_policy IN ('until_top', 'until_cutoff')
             AND EXISTS (SELECT 1 FROM lib2_track_files f

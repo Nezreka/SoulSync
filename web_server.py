@@ -38102,30 +38102,6 @@ def delete_beatport_chart(chart_hash):
 
 # ── Mirrored Playlists ────────────────────────────────────────────────
 
-def _mirrored_playlist_quality_conflicts(database, playlist_id=None):
-    """Read unresolved playlist-profile conflicts through the shared resolver."""
-    conn = database._get_connection()
-    try:
-        from core.library2.profile_lookup import playlist_quality_conflicts
-
-        return playlist_quality_conflicts(conn, playlist_id=playlist_id)
-    finally:
-        conn.close()
-
-
-def _decorate_mirrored_playlist_quality(playlist, conflicts):
-    playlist_id = int(playlist.get('id') or 0)
-    relevant = [
-        conflict for conflict in conflicts
-        if any(
-            int(item.get('playlist_id') or 0) == playlist_id
-            for item in conflict.get('playlists') or ()
-        )
-    ]
-    playlist['quality_conflict_count'] = len(relevant)
-    playlist['quality_conflicts'] = relevant
-    return playlist
-
 @app.route('/api/mirror-playlist', methods=['POST'])
 def mirror_playlist_endpoint():
     """Save or update a mirrored playlist."""
@@ -38205,13 +38181,11 @@ def get_mirrored_playlists_endpoint():
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
-        quality_conflicts = _mirrored_playlist_quality_conflicts(database)
         # Single batched query instead of N per-playlist round-trips. Used to
         # take ~50ms per playlist (new connection + 4 sub-queries) — at 30
         # playlists that's 1.5s of modal load time just for status counts.
         batch_counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
         for pl in playlists:
-            _decorate_mirrored_playlist_quality(pl, quality_conflicts)
             counts = batch_counts.get(pl['id'], {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0})
             pl['discovered_count'] = counts['discovered']
             pl['total_count'] = counts['total']
@@ -38280,39 +38254,6 @@ def get_mirrored_playlist_endpoint(playlist_id):
         playlist['display_name'] = effective_mirrored_name(playlist)
         playlist['pipeline_state'] = _snapshot_playlist_pipeline_state(playlist_id)
         playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
-        conflicts = _mirrored_playlist_quality_conflicts(database, playlist_id)
-        _decorate_mirrored_playlist_quality(playlist, conflicts)
-        conflict_by_track = {
-            int(conflict['track_id']): conflict for conflict in conflicts
-        }
-        linked_ids = [
-            int(track['lib2_track_id']) for track in playlist['tracks']
-            if track.get('lib2_track_id') is not None
-        ]
-        effective_profiles = {}
-        if linked_ids:
-            conn = database._get_connection()
-            try:
-                from core.library2.profile_lookup import effective_quality_profiles
-
-                effective_profiles = effective_quality_profiles(conn, linked_ids)
-            finally:
-                conn.close()
-        for track in playlist['tracks']:
-            lib2_track_id = track.get('lib2_track_id')
-            state = (
-                effective_profiles.get(int(lib2_track_id))
-                if lib2_track_id is not None else None
-            )
-            track['quality_profile_id'] = state.get('id') if state else None
-            track['quality_profile_source'] = state.get('source') if state else None
-            track['quality_profile_conflict'] = bool(
-                lib2_track_id is not None and int(lib2_track_id) in conflict_by_track
-            )
-            track['quality_profile_conflicts'] = (
-                conflict_by_track.get(int(lib2_track_id), {}).get('playlists', [])
-                if lib2_track_id is not None else []
-            )
         return jsonify(playlist)
     except Exception as e:
         logger.error(f"Error getting mirrored playlist: {e}")
@@ -38399,7 +38340,7 @@ def update_mirrored_playlist_custom_name_endpoint(playlist_id):
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/preferences', methods=['PATCH'])
 def update_mirrored_playlist_preferences_endpoint(playlist_id):
-    """Update playlist-folder and app-wide Quality Profile preferences."""
+    """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
         if not ({'organize_by_playlist', 'quality_profile_id'} & set(data)):
@@ -38649,20 +38590,6 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
             return jsonify({"error": "Playlist pipeline is not available"}), 503
         if _automation_deps.state.is_pipeline_running():
             return jsonify({"error": "A playlist pipeline is already running"}), 409
-
-        from core.library2.materialize import materialize_mirrored_playlist_intents
-
-        materialized = materialize_mirrored_playlist_intents(
-            database,
-            playlist_id,
-            actor_profile_id=int(playlist.get('profile_id') or 1),
-        )
-        if materialized['conflicts']:
-            return jsonify({
-                "error": "Resolve playlist quality profile conflicts before running the pipeline",
-                "reason_code": "quality_profile_conflict",
-                "quality_conflicts": materialized['conflicts'],
-            }), 409
 
         data = request.get_json(silent=True) or {}
         state = _replace_playlist_pipeline_state(playlist_id, {

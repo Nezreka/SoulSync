@@ -65,8 +65,6 @@ import {
   retryLibraryV2Mirror,
   runRepairJob,
   runLibraryV2PlaylistPipeline,
-  setLibraryV2PlaylistQualityProfile,
-  setLibraryV2QualityProfile,
   setLibraryV2Monitored,
   startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
@@ -4068,7 +4066,6 @@ function pipelineLabel(state: LibraryV2PlaylistPipelineState | null): string | n
 export function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2PlaylistSummary }) {
   const queryClient = useQueryClient();
   const unsupported = playlist.source === 'file' || playlist.source === 'beatport';
-  const hasQualityConflicts = (playlist.quality_conflict_count ?? 0) > 0;
   const mutation = useMutation({
     mutationFn: () => runLibraryV2PlaylistPipeline(playlist.id),
     onSettled: async () => {
@@ -4087,13 +4084,11 @@ export function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2Playli
         icon="refresh"
         label={running ? 'Pipeline running…' : mutation.isError ? 'Retry pipeline' : 'Run pipeline'}
         busy={running}
-        disabled={unsupported || hasQualityConflicts}
+        disabled={unsupported}
         title={
           unsupported
             ? 'This source cannot be refreshed by the mirrored-playlist pipeline'
-            : hasQualityConflicts
-              ? 'Resolve playlist Quality Profile conflicts before running the pipeline'
-              : 'Refresh source, discover metadata, sync to the server, then process the wishlist'
+            : 'Refresh source, discover metadata, sync to the server, then process the wishlist'
         }
         onClick={() => mutation.mutate()}
       />
@@ -4103,111 +4098,6 @@ export function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2Playli
         </span>
       ) : null}
     </span>
-  );
-}
-
-export function PlaylistQualityProfileControl({
-  playlist,
-}: {
-  playlist: LibraryV2PlaylistSummary;
-}) {
-  const queryClient = useQueryClient();
-  const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
-  const mutation = useMutation({
-    mutationFn: (profileId: number | null) =>
-      setLibraryV2PlaylistQualityProfile(playlist.id, profileId),
-    onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-    },
-  });
-  return (
-    <div>
-      <label>
-        <span className={styles.muted}>Playlist quality default</span>
-        <select
-          className={styles.select}
-          aria-label="Playlist quality default"
-          value={playlist.quality_profile_id ?? ''}
-          disabled={mutation.isPending || profilesQuery.isLoading}
-          onChange={(event) =>
-            mutation.mutate(event.target.value ? Number(event.target.value) : null)
-          }
-        >
-          <option value="">App default</option>
-          {(profilesQuery.data ?? []).map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {(playlist.quality_conflict_count ?? 0) > 0 ? (
-        <div className={styles.statusWarn} role="alert">
-          {playlist.quality_conflict_count} track profile conflict
-          {playlist.quality_conflict_count === 1 ? '' : 's'} — choose an explicit Track profile
-          below.
-        </div>
-      ) : null}
-      {mutation.isError ? (
-        <div className={styles.mutationError} role="alert">
-          {mutation.error instanceof Error
-            ? mutation.error.message
-            : 'Playlist quality profile could not be saved'}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PlaylistTrackQualityCell({ track }: { track: LibraryV2PlaylistTrack }) {
-  const queryClient = useQueryClient();
-  const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
-  const profiles = profilesQuery.data ?? [];
-  const mutation = useMutation({
-    mutationFn: (profileId: number) =>
-      setLibraryV2QualityProfile('tracks', track.lib2_track_id as number, profileId, false, false),
-    onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-    },
-  });
-  if (!track.lib2_track_id) return <span className={styles.muted}>Not linked</span>;
-  if (!track.quality_profile_conflict) {
-    const profile = profiles.find((item) => item.id === track.quality_profile_id);
-    return <span>{profile?.name ?? 'App default'}</span>;
-  }
-  return (
-    <div>
-      <select
-        className={styles.select}
-        aria-label={`Resolve quality profile for ${track.track_name}`}
-        defaultValue=""
-        disabled={mutation.isPending || profilesQuery.isLoading}
-        onChange={(event) => {
-          if (event.target.value) mutation.mutate(Number(event.target.value));
-        }}
-      >
-        <option value="" disabled>
-          Resolve conflict…
-        </option>
-        {profiles.map((profile) => (
-          <option key={profile.id} value={profile.id}>
-            {profile.name}
-          </option>
-        ))}
-      </select>
-      <div className={styles.statusWarn}>
-        {(track.quality_profile_conflicts ?? [])
-          .map((item) => `${item.playlist_name}: ${item.profile_name}`)
-          .join(' · ')}
-      </div>
-      {mutation.isError ? (
-        <div className={styles.mutationError} role="alert">
-          {mutation.error instanceof Error
-            ? mutation.error.message
-            : 'Track quality profile could not be saved'}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -4585,7 +4475,6 @@ function PlaylistDetailView({ playlistId }: { playlistId: number }) {
                 </span>
               </div>
               <PlaylistPipelineButton playlist={summary} />
-              <PlaylistQualityProfileControl playlist={summary} />
             </div>
           </header>
           <PlaylistPipelineState state={playlist.pipeline_state} />
@@ -4597,7 +4486,6 @@ function PlaylistDetailView({ playlistId }: { playlistId: number }) {
                   <th>Title</th>
                   <th>Artist</th>
                   <th>Album</th>
-                  <th>Quality</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -4608,9 +4496,6 @@ function PlaylistDetailView({ playlistId }: { playlistId: number }) {
                     <td>{track.track_name}</td>
                     <td>{track.artist_name}</td>
                     <td>{track.album_name || <span className={styles.muted}>—</span>}</td>
-                    <td>
-                      <PlaylistTrackQualityCell track={track} />
-                    </td>
                     <td>
                       {playlistTrackDiscovered(track) ? (
                         <span className={styles.statusOk}>discovered</span>
