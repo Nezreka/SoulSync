@@ -25,7 +25,7 @@ contains the fix and its regression coverage.
 | 13 | Resolve alias groups for every artist-wide action | Done | `a95e5309` |
 | 14 | Rebuild album artist credits during re-import | Done | `bdc478a5` |
 | 15 | Poll queue status once per artist page | Done | `2e227c1b` |
-| 16 | Verify existing acquisition working copies by content | Pending | — |
+| 16 | Verify existing acquisition working copies by content | Done | `9592159f` |
 | 17 | Make Refresh & Scan reportable and asynchronous | Pending | — |
 
 Last updated: 2026-07-22 (implementation in progress).
