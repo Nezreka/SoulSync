@@ -20,7 +20,24 @@ from database.video_database import VideoDatabase
 
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
+    import time
+
     import api.video as videoapi
+    from core.video import download_events
+
+    # Hermetic against the rest of the suite (CI-only flake, July 2026):
+    # rss_pass returned 'skipped' in a full run while passing isolated. The
+    # pass takes a process-global run lock, and this file's own db writes
+    # publish video events — a forwarder leaked by an earlier test file can
+    # spawn engine emit threads that enter rss_pass concurrently and steal the
+    # lock. Drop leaked forwarders so nothing reacts to OUR writes, and wait
+    # out any already-in-flight pass before the test starts.
+    download_events._reset_for_tests()
+    deadline = time.monotonic() + 5.0
+    while rss.is_running() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not rss.is_running(), "a leaked background rss_pass never finished"
+
     d = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
     videoapi._video_db = d
     yield d
@@ -75,7 +92,7 @@ def test_matching_release_is_grabbed_instantly(db, seams):
     feed = [_feed_hit("Totally Unrelated Show S01E01 720p"),
             _feed_hit("Heat 1995 1080p BluRay x264-GRP")]
     out = rss.rss_pass(fetch=lambda: feed)
-    assert out["status"] == "completed"
+    assert out["status"] == "completed", out
     assert out["grabbed"] == 1 and out["matched_items"] == 1
     assert len(seams) == 1
     g = seams[0]
