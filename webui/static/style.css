@@ -71676,6 +71676,28 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     margin-left: auto; font-size: 9.5px; font-weight: 800; text-transform: uppercase;
     letter-spacing: 0.05em; color: rgba(255,255,255,0.35);
 }
+/* share browser: folders → files, checkbox picks */
+.chat-browse-modal { width: min(560px, 94vw); }
+.chat-browse-body {
+    margin-top: 10px; max-height: 50vh; overflow-y: auto; display: flex;
+    flex-direction: column; gap: 1px;
+}
+.chat-browse-row {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 7px 10px; border-radius: 9px; border: none; background: transparent;
+    color: rgba(255,255,255,0.8); font-size: 13px; cursor: pointer;
+}
+.chat-browse-row:hover { background: rgba(255,255,255,0.05); }
+.chat-browse-row--all {
+    position: sticky; top: 0; background: rgba(20,20,24,0.95); z-index: 1;
+    font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.07); border-radius: 0;
+}
+.chat-browse-icon { flex: none; }
+.chat-browse-name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-browse-meta { flex: none; font-size: 11.5px; color: rgba(255,255,255,0.4); }
+.chat-browse-row input[type="checkbox"] { flex: none; accent-color: #1db954; }
 
 .chat-main {
     position: relative;   /* containing block for the settings overlay */

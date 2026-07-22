@@ -557,3 +557,93 @@ class TestRooms:
         assert state["client"].sent_room[-1][0] == "indie"
         assert http.post("/api/chat/room/message",
                          json={"message": "hi", "room": "nope"}).status_code == 404
+
+
+# ── browse & grab (chat best-in-class P3) ────────────────────────────────────
+
+class _BrowsingClient(_FakeChatClient):
+    def __init__(self):
+        super().__init__()
+        self.downloads = []
+
+    def browse_user_shares(self, username):
+        if username == "ghost":
+            return None
+        return [{"name": "Music\\Meshuggah\\Chaosphere", "file_count": 8}]
+
+    def browse_user_directory(self, username, directory):
+        return [{"filename": directory + "\\01 - Concatenation.flac", "size": 31457280},
+                {"filename": directory + "\\cover.jpg", "size": 900000},
+                {"junk": True}]
+
+    def download(self, username, filename, file_size=0):
+        if "cover" in filename:
+            return None                       # peer refused one file
+        self.downloads.append((username, filename, file_size))
+        return "transfer-id"
+
+
+@pytest.fixture()
+def browse_app(chat_app):
+    http, state = chat_app
+    state["client"] = _BrowsingClient()
+    return http, state
+
+
+class TestBrowseAndGrab:
+    def test_shares_lists_directories(self, browse_app):
+        http, state = browse_app
+        res = http.get("/api/chat/user/pal/shares").get_json()
+        assert res["directories"] == [{"name": "Music\\Meshuggah\\Chaosphere",
+                                       "file_count": 8}]
+
+    def test_offline_peer_is_a_clean_error(self, browse_app):
+        http, state = browse_app
+        r = http.get("/api/chat/user/ghost/shares")
+        assert r.status_code == 502
+        assert "offline" in r.get_json()["error"]
+
+    def test_directory_files_normalized(self, browse_app):
+        http, state = browse_app
+        res = http.get("/api/chat/user/pal/shares/files?dir=Music").get_json()
+        assert len(res["files"]) == 2                       # junk row dropped
+        assert res["files"][0]["size"] == 31457280
+        assert http.get("/api/chat/user/pal/shares/files").status_code == 400
+
+    def test_download_queues_and_reports_failures(self, browse_app):
+        http, state = browse_app
+        res = http.post("/api/chat/user/pal/download", json={"files": [
+            {"filename": "a\\01.flac", "size": 5},
+            {"filename": "a\\cover.jpg", "size": 1},
+        ]})
+        body = res.get_json()
+        assert res.status_code == 200
+        assert body["queued"] == 1 and body["failed"] == 1
+        assert state["client"].downloads == [("pal", "a\\01.flac", 5)]
+
+    def test_download_respects_profile_permission(self):
+        # a fresh app whose profile hook mirrors web_server: non-admin with
+        # can_download=False must be refused; admin always allowed
+        client = _BrowsingClient()
+        perms = {"admin": False, "can_download": False}
+        chat_api.configure(
+            client_getter=lambda: client, run_async=lambda v: v,
+            config_get=lambda k, d=None: d)
+        app = Flask(__name__)
+
+        @app.before_request
+        def _profile():
+            g.is_admin = perms["admin"]
+            g.can_download = perms["can_download"]
+        app.register_blueprint(chat_api.create_blueprint())
+        http = app.test_client()
+        body = {"files": [{"filename": "a\\01.flac", "size": 5}]}
+        assert http.post("/api/chat/user/pal/download", json=body).status_code == 403
+        perms["can_download"] = True
+        assert http.post("/api/chat/user/pal/download", json=body).status_code == 200
+        perms.update(admin=True, can_download=False)   # admin overrides
+        assert http.post("/api/chat/user/pal/download", json=body).status_code == 200
+
+    def test_download_requires_files(self, browse_app):
+        http, state = browse_app
+        assert http.post("/api/chat/user/pal/download", json={}).status_code == 400

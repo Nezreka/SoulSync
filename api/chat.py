@@ -317,6 +317,81 @@ def create_blueprint() -> Blueprint:
             logger.debug("chat: user info failed", exc_info=True)
         return jsonify(out)
 
+    @bp.route("/api/chat/user/<path:username>/shares", methods=["GET"])
+    def chat_user_shares(username):
+        """Browse a peer's shares: their directory list (names + file counts).
+        Files are fetched per-directory — big shares are tens of thousands of
+        files and nobody needs them all at once."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        try:
+            dirs = _run_async(client.browse_user_shares(username))
+        except Exception as e:
+            logger.exception("chat: browse failed for %r", username)
+            return jsonify({"error": str(e)}), 502
+        if dirs is None:
+            return jsonify({"error": "%s is offline or not sharing right now" % username}), 502
+        return jsonify({"username": username, "directories": dirs})
+
+    @bp.route("/api/chat/user/<path:username>/shares/files", methods=["GET"])
+    def chat_user_share_files(username):
+        """One directory of a peer's share: [{filename, size}]."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        directory = str(request.args.get("dir") or "").strip()
+        if not directory:
+            return jsonify({"error": "dir required"}), 400
+        try:
+            files = _run_async(client.browse_user_directory(username, directory))
+        except Exception as e:
+            logger.exception("chat: directory browse failed for %r", username)
+            return jsonify({"error": str(e)}), 502
+        if files is None:
+            return jsonify({"error": "Could not read that folder"}), 502
+        out = []
+        for f in files:
+            if isinstance(f, dict) and f.get("filename"):
+                try:
+                    size = int(f.get("size") or 0)
+                except (TypeError, ValueError):
+                    size = 0
+                out.append({"filename": str(f["filename"]), "size": size})
+        return jsonify({"username": username, "directory": directory, "files": out})
+
+    @bp.route("/api/chat/user/<path:username>/download", methods=["POST"])
+    def chat_user_download(username):
+        """Queue files from a peer's share into the normal slskd download
+        pipeline (they land in the downloads folder and import like any other
+        grab). Gated on the profile's download permission."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        if not (bool(getattr(g, "is_admin", True)) or bool(getattr(g, "can_download", True))):
+            return jsonify({"error": "Your profile can't start downloads"}), 403
+        files = (request.get_json(silent=True) or {}).get("files")
+        if not isinstance(files, list) or not files:
+            return jsonify({"error": "files required"}), 400
+        files = files[:100]   # one click, one sane batch
+        queued = 0
+        for f in files:
+            if not (isinstance(f, dict) and f.get("filename")):
+                continue
+            try:
+                size = int(f.get("size") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            try:
+                if _run_async(client.download(username, str(f["filename"]), size)):
+                    queued += 1
+            except Exception:
+                logger.debug("chat: enqueue failed for %r from %r",
+                             f.get("filename"), username, exc_info=True)
+        if not queued:
+            return jsonify({"error": "slskd accepted none of the files"}), 502
+        return jsonify({"ok": True, "queued": queued, "failed": len(files) - queued})
+
     @bp.route("/api/chat/gifs", methods=["GET"])
     def chat_gifs():
         """GIF search (GIPHY — Tenor's API was shut down June 2026), proxied so

@@ -10029,7 +10029,22 @@
                                     <div class="chat-settings-actions">
                                         <button type="button" class="chat-fmt-btn" data-chat-card-close>Close</button>
                                         <button type="button" class="chat-fmt-btn" data-chat-card-ignore>Mute</button>
+                                        <button type="button" class="chat-fmt-btn" data-chat-card-browse>Browse files</button>
                                         <button type="button" class="chat-send-btn" data-chat-card-message>Message</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- share browser: a peer's files, downloadable in place -->
+                            <div class="chat-settings-overlay" data-chat-browse-modal hidden>
+                                <div class="chat-settings-modal chat-browse-modal">
+                                    <h3 class="chat-settings-title" data-chat-browse-title>Files</h3>
+                                    <input class="chat-input" data-chat-browse-search type="text"
+                                           placeholder="Filter folders…" autocomplete="off">
+                                    <div class="chat-browse-body" data-chat-browse-body></div>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="chat-fmt-btn" data-chat-browse-back hidden>&larr; Folders</button>
+                                        <button type="button" class="chat-fmt-btn" data-chat-browse-close>Close</button>
+                                        <button type="button" class="chat-send-btn" data-chat-browse-dl hidden>Download selected</button>
                                     </div>
                                 </div>
                             </div>

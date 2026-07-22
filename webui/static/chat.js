@@ -773,6 +773,162 @@
         if (overlay) overlay.hidden = true;
     }
 
+    // ── share browser: a peer's files, downloadable in place ─────────────────
+    var _browse = { user: null, dirs: [], dir: null, files: [] };
+
+    function _fmtSize(bytes) {
+        if (!bytes) return '';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+        return (bytes / 1073741824).toFixed(2) + ' GB';
+    }
+
+    function _baseName(path) {
+        var parts = String(path || '').split(/[\\/]/);
+        return parts[parts.length - 1] || path;
+    }
+
+    function openBrowse(name) {
+        if (!name) return;
+        closeUserCard();
+        var overlay = q('[data-chat-browse-modal]');
+        if (!overlay) return;
+        _browse = { user: name, dirs: [], dir: null, files: [] };
+        overlay.hidden = false;
+        var title = q('[data-chat-browse-title]');
+        if (title) title.textContent = name + '’s files';
+        var inp = q('[data-chat-browse-search]');
+        if (inp) { inp.value = ''; inp.placeholder = 'Filter folders…'; }
+        _browseChrome();
+        var body = q('[data-chat-browse-body]');
+        if (body) body.innerHTML = '<div class="chat-gif-hint">Browsing ' + esc(name) + '’s shares…</div>';
+        getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares').then(function (res) {
+            if (_browse.user !== name) return;
+            if (!res.ok) {
+                if (body) {
+                    body.innerHTML = '<div class="chat-gif-hint">' +
+                        esc(res.body && res.body.error || 'Could not browse') + '</div>';
+                }
+                return;
+            }
+            _browse.dirs = res.body.directories || [];
+            renderBrowseDirs('');
+        });
+    }
+
+    function _browseChrome() {
+        var back = q('[data-chat-browse-back]');
+        var dl = q('[data-chat-browse-dl]');
+        var inp = q('[data-chat-browse-search]');
+        var inFiles = _browse.dir != null;
+        if (back) back.hidden = !inFiles;
+        if (dl) dl.hidden = !inFiles;
+        if (inp) inp.placeholder = inFiles ? 'Filter files…' : 'Filter folders…';
+    }
+
+    function renderBrowseDirs(filter) {
+        var body = q('[data-chat-browse-body]');
+        if (!body) return;
+        _browse.dir = null; _browse.files = [];
+        _browseChrome();
+        var f = String(filter || '').toLowerCase();
+        var dirs = _browse.dirs.filter(function (d) {
+            return !f || d.name.toLowerCase().indexOf(f) > -1;
+        }).slice(0, 400);
+        if (!dirs.length) {
+            body.innerHTML = '<div class="chat-gif-hint">' +
+                (_browse.dirs.length ? 'No folders match' : 'Nothing shared') + '</div>';
+            return;
+        }
+        body.innerHTML = dirs.map(function (d) {
+            return '<button type="button" class="chat-browse-row" data-chat-browse-dir="' +
+                attr(d.name) + '" title="' + attr(d.name) + '">' +
+                '<span class="chat-browse-icon">📁</span>' +
+                '<span class="chat-browse-name">' + esc(_baseName(d.name)) + '</span>' +
+                '<span class="chat-browse-meta">' + d.file_count + ' file' +
+                    (d.file_count === 1 ? '' : 's') + '</span></button>';
+        }).join('');
+    }
+
+    function openBrowseDir(dirName) {
+        var body = q('[data-chat-browse-body]');
+        if (!body) return;
+        _browse.dir = dirName;
+        _browseChrome();
+        body.innerHTML = '<div class="chat-gif-hint">Loading files…</div>';
+        var name = _browse.user;
+        getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' +
+                encodeURIComponent(dirName)).then(function (res) {
+            if (_browse.user !== name || _browse.dir !== dirName) return;
+            if (!res.ok) {
+                body.innerHTML = '<div class="chat-gif-hint">' +
+                    esc(res.body && res.body.error || 'Could not read that folder') + '</div>';
+                return;
+            }
+            _browse.files = res.body.files || [];
+            renderBrowseFiles('');
+        });
+    }
+
+    function renderBrowseFiles(filter) {
+        var body = q('[data-chat-browse-body]');
+        if (!body) return;
+        var f = String(filter || '').toLowerCase();
+        var files = _browse.files.filter(function (x) {
+            return !f || x.filename.toLowerCase().indexOf(f) > -1;
+        }).slice(0, 500);
+        if (!files.length) {
+            body.innerHTML = '<div class="chat-gif-hint">No files here</div>';
+            return;
+        }
+        body.innerHTML =
+            '<label class="chat-browse-row chat-browse-row--all">' +
+                '<input type="checkbox" data-chat-browse-all checked>' +
+                '<span class="chat-browse-name">Select all (' + files.length + ')</span>' +
+            '</label>' +
+            files.map(function (x, i) {
+                return '<label class="chat-browse-row">' +
+                    '<input type="checkbox" data-chat-browse-file="' + i + '" checked>' +
+                    '<span class="chat-browse-name" title="' + attr(x.filename) + '">' +
+                        esc(_baseName(x.filename)) + '</span>' +
+                    '<span class="chat-browse-meta">' + _fmtSize(x.size) + '</span></label>';
+            }).join('');
+        body._files = files;
+    }
+
+    function browseDownloadSelected() {
+        var body = q('[data-chat-browse-body]');
+        var dl = q('[data-chat-browse-dl]');
+        if (!body || !body._files) return;
+        var picked = [];
+        body.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
+            if (cb.checked) {
+                var x = body._files[Number(cb.getAttribute('data-chat-browse-file'))];
+                if (x) picked.push({ filename: x.filename, size: x.size });
+            }
+        });
+        if (!picked.length) {
+            if (typeof showToast === 'function') showToast('Nothing selected', 'info');
+            return;
+        }
+        if (dl) { dl.disabled = true; dl.textContent = 'Queueing…'; }
+        postJSON('/api/chat/user/' + encodeURIComponent(_browse.user) + '/download',
+                 { files: picked }).then(function (res) {
+            if (dl) { dl.disabled = false; dl.textContent = 'Download selected'; }
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not queue downloads', 'error');
+                }
+                return;
+            }
+            var n = res.body.queued || 0;
+            if (typeof showToast === 'function') {
+                showToast('Queued ' + n + ' file' + (n === 1 ? '' : 's') + ' from ' +
+                          _browse.user + ' — check Downloads', 'success');
+            }
+        });
+    }
+
     // ── @mention autocomplete ────────────────────────────────────────────────
     function _mentionQuery(input) {
         var upto = input.value.slice(0, input.selectionStart || input.value.length);
@@ -1354,6 +1510,37 @@
                 if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
                 return;
             }
+            t = e.target.closest('[data-chat-card-browse]');
+            if (t) {
+                var bOv = q('[data-chat-user-card]');
+                openBrowse(bOv && bOv.getAttribute('data-chat-user-card-for'));
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-dir]');
+            if (t) { openBrowseDir(t.getAttribute('data-chat-browse-dir')); return; }
+            t = e.target.closest('[data-chat-browse-back]');
+            if (t) {
+                var bsIn = q('[data-chat-browse-search]');
+                if (bsIn) bsIn.value = '';
+                renderBrowseDirs('');
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-dl]');
+            if (t) { browseDownloadSelected(); return; }
+            t = e.target.closest('[data-chat-browse-close]');
+            if (t) { var bm = q('[data-chat-browse-modal]'); if (bm) bm.hidden = true; return; }
+            var bmo = e.target.closest('[data-chat-browse-modal]');
+            if (bmo && e.target === bmo) { bmo.hidden = true; return; }
+            t = e.target.closest('[data-chat-browse-all]');
+            if (t) {
+                var bBody = q('[data-chat-browse-body]');
+                if (bBody) {
+                    bBody.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
+                        cb.checked = t.checked;
+                    });
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-card-ignore]');
             if (t) {
                 var cardOv = q('[data-chat-user-card]');
@@ -1403,6 +1590,11 @@
             if (e.target && e.target.matches('[data-chat-user-search]')) {
                 state.userFilter = e.target.value.trim();
                 renderUsersList();
+            }
+            if (e.target && e.target.matches('[data-chat-browse-search]')) {
+                var v = e.target.value.trim();
+                if (_browse.dir != null) renderBrowseFiles(v);
+                else renderBrowseDirs(v);
             }
         });
 
