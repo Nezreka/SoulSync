@@ -165,10 +165,6 @@ This section contains details of the audit from 2026-07-21.
 * **Status:** Pending
 * **Detail:** Client navigates to V2 paths even if library page access is restricted. Fix: inherit legacy rights.
 
-### <a name="h-17"></a> H-17: Acquisition Review backend has no UI (LV2-014)
-* **Status:** Pending
-* **Detail:** Ambigious album grabs wait for manual assignments; backend supports it, but UI has no screen. Fix: add assignments UI.
-
 ### <a name="h-18"></a> H-18: features.library_v2=false disables repair silently
 * **Status:** Pending
 * **Detail:** If feature is disabled, repair suite produces empty scopes instead of running legacy. Fix: retain legacy jobs or block disable.
@@ -250,4 +246,181 @@ This section contains bugs from the branch reviews.
 
 ## 4. Quarantine Approve -> Orphan Bug (2026-07-20)
 * **Status:** Pending
-* **Detail:** Song quarantine approvals trigger legacy imports but fail to link V2 row (`lib2_track_files`), leaving files as orphans. Hypothesis: Autolink early returns on empty track info context. See [reproduction detail](quarantine-approve-orphan-bug-2026-07-20.md) (archived in history).
+* **Detail:** Song quarantine approvals trigger legacy imports but fail to link V2 row (`lib2_track_files`), leaving files as orphans.
+
+### Symptom
+1. A song is in quarantine (rejected earlier by Integrity/AcoustID/Bitdepth check).
+2. User clicks "Approve" (One-Click, `/api/quarantine/<id>/approve`).
+3. The song is successfully imported and appears correctly in the library.
+4. **Later**, the user runs an Orphan Scan (`orphan_file_detector` repair job) and the same successfully imported song is reported as "Orphan file: ...".
+
+This occurs with no rename step involved, no obvious relation to restart/crash, and has been experienced on older versions as well (meaning it is a generic re-import pipeline issue, not branch-local to library V2).
+
+### Already Ruled Out
+* **Sidecar JSON serialization does not lose `track_info`:** A realistic context survives `serialize_quarantine_context() -> json.dumps -> json.loads` losslessly.
+* **No stale `_final_processed_path` / `_final_path` on re-import:** All four `move_to_quarantine(...)` calls in `core/imports/pipeline.py` fire before the final move. The context in the sidecar never contains a pre-calculated destination path; the re-import calculates it fresh.
+
+### Difference from the Acquisition Journal Fix
+`core/acquisition/recovery.py` (`acquisition_quarantine_recoveries` journal) solves crash-atomicity for staging fallbacks with thin legacy sidecars. The bug here has no crash involved; the song imports completely but is still marked as an orphan.
+
+### Hypothesis
+`core/library2/autolink.py::link_download_into_library_v2()` early returns:
+```python
+if not direct_track_id and not direct_album_id and (not title or not artist_name):
+    return None
+```
+Without a direct V2 track/album ID AND without title+artist in `track_info`, no `lib2_track_files` row is created. The legacy registration runs independently and succeeds, so the song appears in the library, but without a V2 counterpart.
+Since `orphan_file_detector.py` builds its known paths only from `lib2_track_files` (via `active_file_subjects()`), the lack of a V2 row leads to it being identified as an orphan.
+This can happen for "Simple Downloads" (grabbed from search page without provider enrichment) where `track_info` is `{}`.
+
+### Existing Test Infrastructure
+`tests/imports/test_import_pipeline.py` contains a test harness for `post_process_matched_download_with_verification` without requiring the V2 schema.
+* `test_verification_wrapper_handles_simple_download` (pattern for simple download run).
+* `test_quarantine_failure_preserves_file_instead_of_deleting` (pattern for forcing quarantine trigger).
+
+A reproduction test should combine these to force quarantine, call `approve_quarantine_entry()`, run `post_process_matched_download` (bypassing quarantine check), and check if `link_download_into_library_v2` is called and creates the row.
+
+### Key Code Paths
+* `web_server.py:8563` — `/api/quarantine/<entry_id>/approve` (One-Click Approve)
+* `web_server.py:9177` — `/api/quarantine/<entry_id>/recover` (Recovery fallback)
+* `core/imports/quarantine.py:469` — `approve_quarantine_entry()`
+* `core/imports/quarantine.py:527` — `recover_to_staging()`
+* `core/imports/pipeline.py:490` — `post_process_matched_download()`
+* `core/imports/pipeline.py:610/682/802/984` — `move_to_quarantine(...)` calls
+* `core/imports/side_effects.py:281` — `record_download_provenance()`, calls `link_download_into_library_v2`
+* `core/library2/autolink.py:355` — `link_download_into_library_v2()` early return
+* `core/library2/maintenance_subjects.py:60` — `active_file_subjects()`
+* `core/repair_jobs/orphan_file_detector.py:123` — `orphan_file_detector` scan logic
+
+---
+
+## 5. Medium and Low Findings (2026-07-21 Regression Audit)
+
+### <a name="m-01"></a> M-01: Legacy-Hybrid-Fallback goes lost
+* **Status:** Pending
+* **Detail:** `core/downloads/source_policy.py:104-118` (Commit `2a8c5d2d`). Old/invalid primary/secondary values previously fell back to Soulseek. The new registry filtering can deliver an empty or shortened chain.
+* **Fix:** Add legacy configurations as regression tests; implement compatible normalization/fallback.
+
+### <a name="m-02"></a> M-02: Album-Grab can partially start and then report 503
+* **Status:** Pending
+* **Detail:** `web_server.py:7094-7160`. Tracks are prepared individually and immediately dispatched. If a later track fails in the strict gate, the route returns "download not started", even though earlier tracks are already running, which can lead to duplication on retry.
+* **Fix:** Two-phase dispatch: prepare all tracks first, then commit all at once.
+
+### <a name="m-03"></a> M-03: Gate-Fehler consumes candidate without download
+* **Status:** Pending
+* **Detail:** `core/downloads/candidates.py:252-280,406-430`. `used_sources` is set before acquisition preparation. A temporary gate error makes the candidate invisible for later retries.
+* **Fix:** Consume candidate only after successful preparation, or persist the state as retryable.
+
+### <a name="m-04"></a> M-04: Autolink does not save new disc number
+* **Status:** Pending
+* **Detail:** `core/library2/autolink.py:244-314`. `disc_number` is considered during matching but omitted in the INSERT statement, causing disc 2 tracks to land on disc 1.
+* **Fix:** Insert the disc number column/value; add a multi-disc test.
+
+### <a name="m-05"></a> M-05: Deleted explicit quality profile pins fallback profile
+* **Status:** Pending
+* **Detail:** `database/music_database.py:9525-9619`, `core/library2/profile_lookup.py:56-79` (Commits `ec64f83c`, `d08a98f1`). The profile ID is reset to default on deletion, but `quality_profile_explicit=1` remains. Future default/parent changes do not propagate.
+* **Fix:** Clear the explicit flag and recalculate inheritance.
+
+### <a name="m-06"></a> M-06: Dismissed quality finding never returns after profile change
+* **Status:** Pending
+* **Detail:** `core/repair_worker.py:952-962`. Deduplication covers pending/resolved/dismissed without using profile/target/file fingerprinting.
+* **Fix:** Restore configuration and primary file fingerprints like the old scanner.
+
+### <a name="m-07"></a> M-07: Loose/unindexed files lose repair functionality
+* **Status:** Pending
+* **Detail:** The opt-in orphan library scan can display quality, but does not replace fake-lossless, converter, track number, and full quality workflows.
+* **Fix:** Provide filesystem-based subjects or document/accept the functional reduction.
+
+### <a name="m-08"></a> M-08: Retired tools without equivalent replacements
+* **Status:** Pending
+* **Detail:** `expired_download_cleaner` has no 1:1 successor; `library_reorganize` no longer produces new review findings; old manual IDs are unusable.
+* **Fix:** Add fallback paths or show a migration warning.
+
+### <a name="m-09"></a> M-09: Playlist scope loses album identity
+* **Status:** Pending
+* **Detail:** `core/automation/handlers/_pipeline_shared.py:28-55`, `core/wishlist/processing.py:955-977` (Commit `9d9f8c7`). An album scope for Album A can accidentally dispatch `track::album-b`.
+* **Fix:** Use exact wishlist key or track+album ID; fallback only if unique.
+
+### <a name="m-10"></a> M-10: Partially migrated wishlist can cause reconcile loop churn
+* **Status:** Pending (Hypothesis)
+* **Detail:** `core/library2/monitor_sync.py:648-674`, `database/music_database.py:10176-10190`. Old bare IDs without album ID / `source_info` are not recognized as mirrored; reconciliation creates a composite row, duplicate cleanup deletes it, repeating every hour.
+* **Fix:** Build E2E reproduction test with reconcile runs to verify row counts.
+
+### <a name="m-11"></a> M-11: V2-native artists missing from global search (LV2-014)
+* **Status:** Pending (Tracked as LV2-014)
+* **Detail:** Global search only reads legacy artists.
+* **Fix:** Merge legacy and V2 results based on provider identity and deduplicate.
+
+### <a name="m-12"></a> M-12: UI mutations can fail silently
+* **Status:** Pending
+* **Detail:** Alias unlink has no visible error handling; `monitor_new_items` has an optimistic UI without rollbacks; album ReplayGain lacks error toasting.
+* **Fix:** Implement unified mutation error state, retries, and rollbacks.
+
+### <a name="m-13"></a> M-13: Feature flag type contract is inconsistent
+* **Status:** Pending
+* **Detail:** Defaults are scattered across inline fallbacks; settings UI has no toggle; string `"true"` or numeric `1` can fail strict `is True` checks.
+* **Fix:** Use unified central parsing and type normalization for `features.library_v2`.
+
+### <a name="m-14"></a> M-14: UI assumes terminal job state after 5 minutes
+* **Status:** Pending
+* **Detail:** `webui/src/routes/library-v2/-ui/library-v2-page.tsx:5033-5055`. After 300 poll iterations, the UI client-side sets `running: false` even if the server-side job is still executing.
+* **Fix:** Render running state correctly without assuming a timeout.
+
+### <a name="m-15"></a> M-15: Queue status can fail on malformed album ID
+* **Status:** Pending
+* **Detail:** `core/library2/queue_status.py`. Unprotected `int()` conversion of `album_id` in `_record` crashes if the ID is malformed.
+* **Fix:** Use a safe int parser helper.
+
+### <a name="l-01"></a> L-01: Tracked config backup in git
+* **Status:** Pending
+* **Detail:** `config/config.json.bak` was checked into git in `cc039249`. It contains placeholders, but sets a bad pattern.
+* **Fix:** Remove file from repository.
+
+### <a name="l-02"></a> L-02: 7.3 MB MP3 file in git branch
+* **Status:** Pending
+* **Detail:** `Stream/d8ea218dc2fa431a/Stream/Justin Bieber - YUKON.mp3` was checked into git in `cc039249`.
+* **Fix:** Remove the audio file asset before merge.
+
+---
+
+## 6. Additional Branch Review Findings (2026-07-19)
+
+### <a name="br-01"></a> BR-01: Discography refresh has lost content-type filters
+* **Status:** Pending
+* **Detail:** Filters for Live/Remix/Acoustic/Compilation/Instrumental were dropped during discography sync updates.
+
+### <a name="br-02"></a> BR-02: Quality upgrade scan skips loose files
+* **Status:** Pending
+* **Detail:** `quality_upgrade_scan` no longer scans loose, unimported files on disk.
+
+### <a name="br-03"></a> BR-03: Watchlist removal fallback matches by name only
+* **Status:** Pending
+* **Detail:** Case-insensitive artist name matching on watchlist removal fallbacks can cause namespace collisions, monitoring or demonitoring the wrong artist.
+
+### <a name="br-04"></a> BR-04: Retag and cover art save share the same mutex
+* **Status:** Pending
+* **Detail:** `api/library_v2.py:2073` and `:4080` share the `"retag"` mutex. Triggering cover art save followed immediately by "Write tags" returns a 409 error since both attempt to start the same background job name.
+
+### <a name="br-05"></a> BR-05: Fuzzy matching threshold and CJK normalization bugs
+* **Status:** Pending
+* **Detail:** `core/library2/native_enrich.py:280` uses a threshold of 0.72 instead of the system-wide 0.85 threshold. In addition, CJK names normalize to empty strings, matching anything.
+
+### <a name="br-06"></a> BR-06: Casing normalization and whitespace mismatch in watchlist sync
+* **Status:** Pending
+* **Detail:** `core/library2/monitor_sync.py:483` uses ad-hoc `strip().casefold()` instead of `normalize_name()`, preventing matching when double spaces are present in tags.
+
+### <a name="br-07"></a> BR-07: Duplicated quality ranking logic in frontend
+* **Status:** Pending
+* **Detail:** Quality ranking logic is duplicated between `interactive-search.tsx` and `library-v2.api.ts`, which can lead to divergent behavior in automatic vs. interactive search matches.
+
+### <a name="br-08"></a> BR-08: Defaulting artist monitoring setting bug in enrichment
+* **Status:** Pending
+* **Detail:** `core/library2/native_enrich.py:367` defaults `monitored=1` for component artists, bypassing the LV2-016 fix (default should be `monitored=0`).
+
+### <a name="br-09"></a> BR-09: DB Query Optimizations (Part B Cleanup)
+* **Status:** Pending
+* **Detail:** Optimization findings identified during code review:
+  * **Hourly reconcile job spam:** `monitoring_list_reconcile` builds a full wishlist payload for every wanted track, causing massive query overhead. (Partially addressed via delta-only reconcile check).
+  * **Wanted profiles N+1 query:** `core/library2/wanted.py:149` performs N+1 profile queries in a loop.
+  * **Artist rules hourly UPSERT:** `core/library2/monitor_sync.py:574` forces UPSERT of every artist rule hourly even if unchanged.
+  * **PRAGMA table_info caching:** `core/library2/schema.py:786` runs table info PRAGMAs per column rather than per table.

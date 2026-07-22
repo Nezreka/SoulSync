@@ -19,6 +19,7 @@ This document tracks the current status of all features, bugs, and tool migratio
 | [F-09](library-v2-features.md#feat-playlists) | Playlist Scoped Processing | Done | `f3abaf16` | Full |
 | [F-10](library-v2-features.md#feat-history) | Pipeline History/Timeline | Done | `abfa27a7` | Full |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Done | `f3abaf16` | Full |
+| [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Manual Grab Assignments UI | Pending | — | None |
 | [UI-01](library-v2-features.md#ui-icons) | Icons & Nomenklatur | Done | `f3abaf16` | Full |
 | [UI-02](library-v2-features.md#ui-columns) | Configurable Columns Options | Done | `f3abaf16` | Full |
 | [UI-03](library-v2-features.md#ui-bulk) | Track Table Bulk Operations | Done | `f3abaf16` | Full |
@@ -63,7 +64,6 @@ This document tracks the current status of all features, bugs, and tool migratio
 | [H-14](library-v2-issues.md#h-14) | V2-Track-ID interpreted as Legacy/Server ID | Pending | — | None |
 | [H-15](library-v2-issues.md#h-15) | Alias view and action scope contradict | Pending | — | None |
 | [H-16](library-v2-issues.md#h-16) | allowed_pages bypassed | Pending | — | None |
-| [H-17](library-v2-issues.md#h-17) | Acquisition Review backend has no UI | Pending | — | None |
 | [H-18](library-v2-issues.md#h-18) | features.library_v2=false disables repair | Pending | — | None |
 | [LV2-001](library-v2-issues.md#lv2-001) | Track Automatic Search wishlist row creation | Done | `f3abaf16` | Specific |
 | [LV2-002](library-v2-issues.md#lv2-002) | Stale terminal task queued status | Done | `f3abaf16` | Specific |
@@ -83,3 +83,30 @@ This document tracks the current status of all features, bugs, and tool migratio
 | [LV2-016](library-v2-issues.md#lv2-016) | Phantom artist monitoring defaults | Done | `f3abaf16` | Specific |
 | [LV2-017](library-v2-issues.md#lv2-017) | Reorganize rename desync | Pending | — | None |
 | [Orphan Bug](library-v2-issues.md#orphan-bug) | Quarantine approve -> orphan bug | Pending | — | None |
+| [M-01](library-v2-issues.md#m-01) | Legacy-Hybrid-Fallback goes lost | Pending | — | None |
+| [M-02](library-v2-issues.md#m-02) | Album-Grab can partially start and then report 503 | Pending | — | None |
+| [M-03](library-v2-issues.md#m-03) | Gate-Fehler consumes candidate without download | Pending | — | None |
+| [M-04](library-v2-issues.md#m-04) | Autolink does not save new disc number | Pending | — | None |
+| [M-05](library-v2-issues.md#m-05) | Deleted explicit quality profile pins fallback profile | Pending | — | None |
+| [M-06](library-v2-issues.md#m-06) | Dismissed quality finding never returns after profile change | Pending | — | None |
+| [M-07](library-v2-issues.md#m-07) | Loose/unindexed files lose repair functionality | Pending | — | None |
+| [M-08](library-v2-issues.md#m-08) | Retired tools without equivalent replacements | Pending | — | None |
+| [M-09](library-v2-issues.md#m-09) | Playlist scope loses album identity | Pending | — | None |
+| [M-10](library-v2-issues.md#m-10) | Partially migrated wishlist reconcile loop churn | Pending | — | None |
+| [M-11](library-v2-issues.md#m-11) | V2-native artists missing from global search | Pending | — | None |
+| [M-12](library-v2-issues.md#m-12) | UI mutations can fail silently | Pending | — | None |
+| [M-13](library-v2-issues.md#m-13) | Feature flag type contract is inconsistent | Pending | — | None |
+| [M-14](library-v2-issues.md#m-14) | UI assumes terminal job state after 5 minutes | Pending | — | None |
+| [M-15](library-v2-issues.md#m-15) | Queue status can fail on malformed album ID | Pending | — | None |
+| [L-01](library-v2-issues.md#l-01) | Tracked config backup in git | Pending | — | None |
+| [L-02](library-v2-issues.md#l-02) | 7.3 MB MP3 file in git branch | Pending | — | None |
+| [BR-01](library-v2-issues.md#br-01) | Discography refresh lost content-type filters | Pending | — | None |
+| [BR-02](library-v2-issues.md#br-02) | Quality upgrade scan skips loose files | Pending | — | None |
+| [BR-03](library-v2-issues.md#br-03) | Watchlist removal fallback matches by name only | Pending | — | None |
+| [BR-04](library-v2-issues.md#br-04) | Retag and cover art save share the same mutex | Pending | — | None |
+| [BR-05](library-v2-issues.md#br-05) | Fuzzy matching threshold and CJK normalization bugs | Pending | — | None |
+| [BR-06](library-v2-issues.md#br-06) | Casing normalization and whitespace mismatch in watchlist sync | Pending | — | None |
+| [BR-07](library-v2-issues.md#br-07) | Duplicated quality ranking logic in frontend | Pending | — | None |
+| [BR-08](library-v2-issues.md#br-08) | Defaulting artist monitoring setting bug in enrichment | Pending | — | None |
+| [BR-09](library-v2-issues.md#br-09) | DB Query Optimizations (Part B Cleanup) | Pending | — | None |
+
