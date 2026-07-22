@@ -19,6 +19,12 @@ from core.musicbrainz_service import MusicBrainzService
 VOL4 = "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.4"
 VOL45 = "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.4.5"
 
+# Sokhi #2: the sequel number is glued straight onto a CJK word ('…トラック2'),
+# with the SAME digit already present elsewhere ('第2期' = season 2). Stripping
+# to [a-z0-9] collapsed both titles to {'2'} and the wrong (cour-2) cover won.
+OST = "『無職転生 〜異世界行ったら本気だす〜』 第2期 オリジナル・サウンドトラック"
+OST2 = "『無職転生 〜異世界行ったら本気だす〜』 第2期 オリジナル・サウンドトラック2"
+
 
 def test_helper_volume_and_sequel_differ():
     assert numeric_tokens_differ(VOL4, VOL45)
@@ -26,11 +32,20 @@ def test_helper_volume_and_sequel_differ():
     assert numeric_tokens_differ("Now 99", "Now 100")
 
 
+def test_helper_cjk_trailing_sequel_digit_differs():
+    # The trailing '2' must register as a difference even though '第2期' already
+    # puts a '2' on both sides.
+    assert numeric_tokens_differ(OST, OST2)
+    assert numeric_tokens_differ(OST2, OST)
+
+
 def test_helper_shared_or_no_digits_match():
     assert not numeric_tokens_differ("1989", "1989 (Deluxe)")
     assert not numeric_tokens_differ(VOL4, VOL4)
     assert not numeric_tokens_differ("IGOR", "IGOR (Deluxe)")
     assert not numeric_tokens_differ("", "")
+    # Same CJK album on both sides (incl. the shared 第2期) still matches.
+    assert not numeric_tokens_differ(OST, OST)
 
 
 def _service_with_results(results):

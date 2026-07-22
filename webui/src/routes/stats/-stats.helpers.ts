@@ -60,13 +60,23 @@ export const STATS_ENRICHMENT_SERVICES = [
   { key: 'spotify', label: 'Spotify', color: '#1db954' },
   { key: 'musicbrainz', label: 'MusicBrainz', color: '#ba55d3' },
   { key: 'deezer', label: 'Deezer', color: '#a238ff' },
+  { key: 'jiosaavn', label: 'JioSaavn', color: '#2bc5b4' },
   { key: 'lastfm', label: 'Last.fm', color: '#d51007' },
   { key: 'itunes', label: 'iTunes', color: '#fc3c44' },
   { key: 'audiodb', label: 'AudioDB', color: '#1a9fff' },
   { key: 'genius', label: 'Genius', color: '#ffff64' },
   { key: 'tidal', label: 'Tidal', color: '#00ffff' },
   { key: 'qobuz', label: 'Qobuz', color: '#4285f4' },
+  { key: 'bandcamp', label: 'Bandcamp', color: '#1da0c3' },
 ] as const;
+
+export function visibleStatsEnrichmentServices(jiosaavnEnabled: boolean, bandcampEnabled: boolean) {
+  return STATS_ENRICHMENT_SERVICES.filter((service) => {
+    if (service.key === 'jiosaavn') return jiosaavnEnabled;
+    if (service.key === 'bandcamp') return bandcampEnabled;
+    return true;
+  });
+}
 
 export function getStatsRangeLabel(range: StatsRange): string {
   switch (range) {
@@ -89,7 +99,7 @@ export function formatCompactNumber(value: number | null | undefined): string {
   if (!value) return '0';
   if (value >= 1_000_000) return `${stripTrailingZero((value / 1_000_000).toFixed(1))}M`;
   if (value >= 1_000) return `${stripTrailingZero((value / 1_000).toFixed(1))}K`;
-  return value.toLocaleString();
+  return value.toLocaleString('en-US');
 }
 
 export function formatListeningTime(totalMs: number | null | undefined): string {
@@ -143,7 +153,7 @@ export function formatDbStorageValue(size: number, method: string | null | undef
     if (size > 1_048_576) return `${(size / 1_048_576).toFixed(1)} MB`;
     return `${Math.round(size / 1024)} KB`;
   }
-  return `${size.toLocaleString()} rows`;
+  return `${size.toLocaleString('en-US')} rows`;
 }
 
 export function getTopArtistBubbles(artists: StatsArtistRow[]) {

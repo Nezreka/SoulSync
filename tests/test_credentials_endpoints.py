@@ -154,9 +154,12 @@ def test_select_rejects_wrong_service_or_missing_set(client):
 # ── Quick-switch: active source/server/download (admin=global, non-admin read-only) ──
 
 def test_active_sources_read_shape(client):
+    from config.settings import config_manager
     a = client.get('/api/profiles/me/active-sources').get_json()
     assert a['success'] and a['editable'] is True   # default session = admin
-    assert a['metadata']['active'] and len(a['metadata']['options']) == 6
+    assert a['metadata']['active']
+    expected_options = 7 if config_manager.get('experimental.jiosaavn_enabled') else 6
+    assert len(a['metadata']['options']) == expected_options
     assert len(a['server']['options']) == 4
     assert 'mode' in a['download'] and isinstance(a['download']['hybrid_order'], list)
 
@@ -168,6 +171,70 @@ def test_admin_sets_global_active_sources(client):
     client.post('/api/profiles/active-sources', json={'download_mode': 'hybrid', 'hybrid_order': ['hifi', 'soulseek']})
     dl = client.get('/api/profiles/me/active-sources').get_json()['download']
     assert dl['mode'] == 'hybrid' and dl['hybrid_order'] == ['hifi', 'soulseek']
+
+
+def test_admin_can_set_jiosaavn_as_primary_metadata_source(client):
+    from config.settings import config_manager
+    config_manager.set('experimental.jiosaavn_enabled', True)
+    assert client.post('/api/profiles/active-sources', json={'metadata_source': 'jiosaavn'}).get_json()['success']
+    payload = client.get('/api/profiles/me/active-sources').get_json()
+    assert payload['metadata']['active'] == 'jiosaavn'
+    assert payload['metadata']['effective'] == 'jiosaavn'
+
+
+def test_jiosaavn_primary_rejected_when_experimental_disabled(client):
+    from config.settings import config_manager
+    config_manager.set('experimental.jiosaavn_enabled', False)
+    resp = client.post('/api/profiles/active-sources', json={'metadata_source': 'jiosaavn'})
+    assert resp.status_code == 400
+
+
+def test_settings_save_jiosaavn_primary_with_experimental_enabled(client):
+    """Settings and sidebar must agree: enable + primary in one save sticks."""
+    from config.settings import config_manager
+    resp = client.post('/api/settings', json={
+        'experimental': {'jiosaavn_enabled': True},
+        'metadata': {'fallback_source': 'jiosaavn', 'spotify_free': False},
+    })
+    assert resp.status_code == 200 and resp.get_json()['success']
+    assert config_manager.get('experimental.jiosaavn_enabled') is True
+    assert config_manager.get('metadata.fallback_source') == 'jiosaavn'
+    payload = client.get('/api/profiles/me/active-sources').get_json()
+    assert payload['metadata']['active'] == 'jiosaavn'
+    assert payload['metadata']['effective'] == 'jiosaavn'
+
+
+def test_settings_save_jiosaavn_primary_rejected_when_experimental_disabled(client):
+    from config.settings import config_manager
+    config_manager.set('experimental.jiosaavn_enabled', False)
+    config_manager.set('metadata.fallback_source', 'deezer')
+    resp = client.post('/api/settings', json={
+        'metadata': {'fallback_source': 'jiosaavn', 'spotify_free': False},
+    })
+    assert resp.status_code == 400
+    assert config_manager.get('metadata.fallback_source') == 'deezer'
+
+
+def test_settings_save_rejected_does_not_persist_other_changes(client):
+    from config.settings import config_manager
+    original_client_id = config_manager.get('spotify.client_id')
+    config_manager.set('experimental.jiosaavn_enabled', False)
+    resp = client.post('/api/settings', json={
+        'spotify': {'client_id': 'should-not-stick'},
+        'metadata': {'fallback_source': 'jiosaavn', 'spotify_free': False},
+    })
+    assert resp.status_code == 400
+    assert config_manager.get('spotify.client_id') == original_client_id
+
+
+def test_settings_disable_jiosaavn_resets_primary(client):
+    from config.settings import config_manager
+    config_manager.set('experimental.jiosaavn_enabled', True)
+    config_manager.set('metadata.fallback_source', 'jiosaavn')
+    resp = client.post('/api/settings', json={'experimental': {'jiosaavn_enabled': False}})
+    assert resp.status_code == 200
+    assert config_manager.get('experimental.jiosaavn_enabled') is False
+    assert config_manager.get('metadata.fallback_source') == 'deezer'
 
 
 def test_active_sources_rejects_bad_values(client):

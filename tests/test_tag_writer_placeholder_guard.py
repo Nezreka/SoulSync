@@ -16,10 +16,54 @@ from mutagen.flac import FLAC
 
 from core.tag_writer import (
     build_tag_diff,
+    diff_has_actionable_change,
     guard_placeholder_overwrite,
     is_placeholder_meta,
     write_tags_to_file,
 )
+
+
+# ---------------------------------------------------------------------------
+# #1052 — write only affected files: diff_has_actionable_change
+# ---------------------------------------------------------------------------
+
+def _diff(changed_field=None, cover_changed=False):
+    """Minimal diff list: one metadata row + the cover row."""
+    return [
+        {'file_key': 'title', 'field': 'Title', 'changed': changed_field == 'title'},
+        {'file_key': 'genre', 'field': 'Genre', 'changed': changed_field == 'genre'},
+        {'file_key': 'cover_art', 'field': 'Cover Art', 'changed': cover_changed},
+    ]
+
+
+def test_no_change_is_not_actionable():
+    assert diff_has_actionable_change(_diff()) is False
+    assert diff_has_actionable_change([]) is False
+
+
+def test_metadata_change_is_actionable():
+    assert diff_has_actionable_change(_diff(changed_field='genre')) is True
+    # ...regardless of the cover-embed setting
+    assert diff_has_actionable_change(_diff(changed_field='genre'), embed_cover=False) is True
+
+
+def test_cover_only_change_respects_embed_flag():
+    # cover missing + embedding ON → worth writing
+    assert diff_has_actionable_change(_diff(cover_changed=True), embed_cover=True) is True
+    # cover missing + embedding OFF → the writer wouldn't touch it, so skip
+    assert diff_has_actionable_change(_diff(cover_changed=True), embed_cover=False) is False
+
+
+def test_matches_preview_has_changes_via_build_tag_diff():
+    # An unchanged file (tags already match the DB) must be non-actionable, so the
+    # batch write skips exactly what the preview marks unchanged.
+    file_tags = {'title': 'Song', 'artist': 'Art', 'album': 'Alb',
+                 'album_artist': 'Art', 'has_cover_art': True}
+    db_data = {'title': 'Song', 'artist_name': 'Art', 'album_title': 'Alb',
+               'thumb_url': 'http://x/c.jpg'}
+    diff = build_tag_diff(file_tags, db_data)
+    assert any(d['changed'] for d in diff) is False
+    assert diff_has_actionable_change(diff, embed_cover=True) is False
 
 
 # ---------------------------------------------------------------------------

@@ -16,8 +16,21 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests can use assert, magic values, etc.
 "tests/**" = ["B", "F", "S110"]
+# The video subsystem predates the S110 (try/except/pass) rule being enforced;
+# its best-effort swallows in enrichment/import paths aren't held to it yet.
+# Scoped like tests/ above — revisit if we want to convert them to
+# contextlib.suppress and drop this exemption.
+"core/video/**" = ["S110"]
+"api/video/**" = ["S110"]
 
 [tool.pytest.ini_options]
+# Live/network integration tests are OPT-IN only. A `@pytest.mark.soundcloud_live`
+# does NOT auto-exclude a test — a bare `pytest` still runs it — so the default
+# run (and CI's `python -m pytest`) filters them out here. Run them explicitly
+# with `pytest -m soundcloud_live` (the command-line -m overrides this default).
+addopts = "-m 'not soundcloud_live'"
 markers = [
     "soundcloud_live: live SoundCloud integration test (network-dependent, run with -m soundcloud_live)",
+    "phase3_deployment: opt-in Roadmap-3 acquisition-contract Docker acceptance",
+    "phase5_deployment: opt-in real-client/container acceptance for Library-v2 Phase 5",
 ]

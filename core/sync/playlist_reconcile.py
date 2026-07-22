@@ -112,6 +112,7 @@ def reconcile_playlist(
                 'match_status': 'matched',
                 'confidence': 1.0,
                 'override': True,
+                'server_index': j,   # position in the server playlist (for order-status)
             })
             continue
 
@@ -134,6 +135,7 @@ def reconcile_playlist(
                 'server_track': server_tracks[best_idx],
                 'match_status': 'matched',
                 'confidence': 1.0,
+                'server_index': best_idx,
             })
         else:
             idx = len(combined)
@@ -142,22 +144,41 @@ def reconcile_playlist(
                 'server_track': None,
                 'match_status': 'missing',
                 'confidence': 0.0,
+                'server_index': None,
             })
             # Carry the canonical artist for the fuzzy pass.
             unmatched_source.append((idx, src_entry, _canon_artist or src_artist))
 
     # Pass 2: fuzzy match on remaining unmatched source tracks. Build the key
     # from the canonicalized title/artist so YouTube-shaped sources can pair.
+    #
+    # Perf (#1005): the old loop rebuilt every server key AND re-seeded a fresh
+    # SequenceMatcher for every (source × server) pair — a 2k-track playlist
+    # with a few hundred missing rows meant ~400k full ratio() calls and a
+    # multi-second load on every open. Same scores, three cuts:
+    #   * server keys + matchers built ONCE (seq2/b2j prep is the costly side;
+    #     set_seq1 is cheap and scoring stays identical to
+    #     SequenceMatcher(None, src_key, svr_key))
+    #   * real_quick_ratio/quick_ratio gates — documented UPPER BOUNDS on
+    #     ratio(), so a pair skipped here could never have reached the
+    #     threshold (no behavior change)
+    server_matchers: List[SequenceMatcher] = []
+    if unmatched_source:
+        for svr in server_tracks:
+            svr_key = f"{svr.get('artist', '')} {norm_title(svr.get('title', ''))}".strip().lower()
+            server_matchers.append(SequenceMatcher(None, '', svr_key))
     for combo_idx, src_entry, canon_artist in unmatched_source:
         canon_title, _ = canonical_source_track(src_entry['name'], src_entry['artist'])
         src_key = f"{canon_artist} {norm_title(canon_title)}".strip().lower()
         best_score = 0.0
         best_j = -1
-        for j, svr in enumerate(server_tracks):
+        for j, sm in enumerate(server_matchers):
             if j in used_server_indices:
                 continue
-            svr_key = f"{svr.get('artist', '')} {norm_title(svr.get('title', ''))}".strip().lower()
-            score = SequenceMatcher(None, src_key, svr_key).ratio()
+            sm.set_seq1(src_key)
+            if sm.real_quick_ratio() < _FUZZY_THRESHOLD or sm.quick_ratio() < _FUZZY_THRESHOLD:
+                continue
+            score = sm.ratio()
             if score > best_score and score >= _FUZZY_THRESHOLD:
                 best_score = score
                 best_j = j
@@ -168,6 +189,7 @@ def reconcile_playlist(
                 'server_track': server_tracks[best_j],
                 'match_status': 'matched',
                 'confidence': round(best_score, 3),
+                'server_index': best_j,
             }
 
     # Extra: server tracks no source claimed.
@@ -178,6 +200,7 @@ def reconcile_playlist(
                 'server_track': svr,
                 'match_status': 'extra',
                 'confidence': 0.0,
+                'server_index': j,
             })
 
     # #766: a source row with no art of its own (e.g. a YouTube source, which
@@ -194,4 +217,32 @@ def reconcile_playlist(
     return combined
 
 
-__all__ = ["reconcile_playlist", "norm_title"]
+def compute_order_status(combined: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Whether the server's MATCHED tracks sit in the same *relative* order as the
+    source. Pure.
+
+    Reads each matched entry's ``server_index`` (its position in the server
+    playlist) off the combined view — which is already in source order — and checks
+    that sequence is strictly ascending. Relative order is used on purpose: missing
+    and extra tracks shift absolute positions, so comparing positions directly would
+    false-flag any playlist that isn't a perfect 1:1. The model is one-way (source
+    order is truth; the server may have drifted), so we only ever report whether the
+    server is *behind* the source order — never the reverse.
+
+    Returns ``{matched, in_order, out_of_order}``. ``out_of_order`` is True only when
+    there are >= 2 matched tracks AND their server positions aren't ascending — so a
+    playlist with 0 or 1 matches (nothing to compare) is never flagged.
+    """
+    positions = [
+        e['server_index'] for e in combined
+        if e.get('match_status') == 'matched' and e.get('server_index') is not None
+    ]
+    in_order = all(a < b for a, b in zip(positions, positions[1:], strict=False))
+    return {
+        'matched': len(positions),
+        'in_order': in_order,
+        'out_of_order': len(positions) >= 2 and not in_order,
+    }
+
+
+__all__ = ["reconcile_playlist", "compute_order_status", "norm_title"]

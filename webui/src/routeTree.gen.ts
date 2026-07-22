@@ -11,10 +11,12 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
+import { Route as LibraryV2RouteRouteImport } from './routes/library-v2/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
+import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
 import { Route as ImportSinglesRouteImport } from './routes/import/singles'
 import { Route as ImportAutoRouteImport } from './routes/import/auto'
 import { Route as ImportAlbumRouteImport } from './routes/import/album'
@@ -28,6 +30,11 @@ const SplatRoute = SplatRouteImport.update({
 const StatsRouteRoute = StatsRouteRouteImport.update({
   id: '/stats',
   path: '/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LibraryV2RouteRoute = LibraryV2RouteRouteImport.update({
+  id: '/library-v2',
+  path: '/library-v2',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IssuesRouteRoute = IssuesRouteRouteImport.update({
@@ -49,6 +56,11 @@ const ImportIndexRoute = ImportIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ImportRouteRoute,
+} as any)
+const LabelDetailIdRoute = LabelDetailIdRouteImport.update({
+  id: '/label-detail/$id',
+  path: '/label-detail/$id',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ImportSinglesRoute = ImportSinglesRouteImport.update({
   id: '/singles',
@@ -75,22 +87,26 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
+  '/library-v2': typeof LibraryV2RouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
+  '/label-detail/$id': typeof LabelDetailIdRoute
   '/import/': typeof ImportIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
+  '/library-v2': typeof LibraryV2RouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
+  '/label-detail/$id': typeof LabelDetailIdRoute
   '/import': typeof ImportIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
@@ -99,11 +115,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
+  '/library-v2': typeof LibraryV2RouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
+  '/label-detail/$id': typeof LabelDetailIdRoute
   '/import/': typeof ImportIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
@@ -113,22 +131,26 @@ export interface FileRouteTypes {
     | '/'
     | '/import'
     | '/issues'
+    | '/library-v2'
     | '/stats'
     | '/$'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
+    | '/label-detail/$id'
     | '/import/'
     | '/artist-detail/$source/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/issues'
+    | '/library-v2'
     | '/stats'
     | '/$'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
+    | '/label-detail/$id'
     | '/import'
     | '/artist-detail/$source/$id'
   id:
@@ -136,11 +158,13 @@ export interface FileRouteTypes {
     | '/'
     | '/import'
     | '/issues'
+    | '/library-v2'
     | '/stats'
     | '/$'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
+    | '/label-detail/$id'
     | '/import/'
     | '/artist-detail/$source/$id'
   fileRoutesById: FileRoutesById
@@ -149,8 +173,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
+  LibraryV2RouteRoute: typeof LibraryV2RouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
   SplatRoute: typeof SplatRoute
+  LabelDetailIdRoute: typeof LabelDetailIdRoute
   ArtistDetailSourceIdRoute: typeof ArtistDetailSourceIdRoute
 }
 
@@ -168,6 +194,13 @@ declare module '@tanstack/react-router' {
       path: '/stats'
       fullPath: '/stats'
       preLoaderRoute: typeof StatsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/library-v2': {
+      id: '/library-v2'
+      path: '/library-v2'
+      fullPath: '/library-v2'
+      preLoaderRoute: typeof LibraryV2RouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/issues': {
@@ -197,6 +230,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/import/'
       preLoaderRoute: typeof ImportIndexRouteImport
       parentRoute: typeof ImportRouteRoute
+    }
+    '/label-detail/$id': {
+      id: '/label-detail/$id'
+      path: '/label-detail/$id'
+      fullPath: '/label-detail/$id'
+      preLoaderRoute: typeof LabelDetailIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/import/singles': {
       id: '/import/singles'
@@ -251,8 +291,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
+  LibraryV2RouteRoute: LibraryV2RouteRoute,
   StatsRouteRoute: StatsRouteRoute,
   SplatRoute: SplatRoute,
+  LabelDetailIdRoute: LabelDetailIdRoute,
   ArtistDetailSourceIdRoute: ArtistDetailSourceIdRoute,
 }
 export const routeTree = rootRouteImport

@@ -85,7 +85,7 @@ def test_get_artist_album_tracks_uses_primary_source_priority(monkeypatch):
     monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
 
-    def fake_get_album_for_source(source, album_id):
+    def fake_get_album_for_source(source, album_id, **kwargs):
         calls.append(("album", source, album_id))
         return _album("album-1", "Album One") if source == "deezer" and album_id == "album-1" else None
 
@@ -119,7 +119,7 @@ def test_get_artist_album_tracks_resolves_database_album_reference(monkeypatch):
     monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
 
-    def fake_get_album_for_source(source, album_id):
+    def fake_get_album_for_source(source, album_id, **kwargs):
         calls.append(("album", source, album_id))
         if source == "itunes" and album_id == "itunes-123":
             return _album("itunes-123", "Resolved Album")
@@ -247,3 +247,151 @@ def test_resolve_album_reference_searches_by_name_when_no_external_id_exists(mon
     assert resolved_id == "searched-123"
     assert resolved_source == "deezer"
     assert fake_client.calls == [("Artist One Album One", {"limit": 5})]
+
+
+def test_resolve_album_reference_prefers_stored_jiosaavn_id(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute(
+        """
+        CREATE TABLE albums (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            artist_id INTEGER,
+            jiosaavn_id TEXT
+        )
+        """
+    )
+    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Badshah')")
+    cursor.execute(
+        """
+        INSERT INTO albums (id, title, artist_id, jiosaavn_id)
+        VALUES (1, 'Jugnu', 1, '30471107')
+        """
+    )
+    conn.commit()
+
+    class _FakeDatabase:
+        def _get_connection(self):
+            return conn
+
+    monkeypatch.setattr("database.music_database.get_database", lambda: _FakeDatabase())
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "jiosaavn")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "deezer"])
+
+    resolved_id, resolved_source = metadata_album_tracks.resolve_album_reference(
+        "1",
+        preferred_source="jiosaavn",
+    )
+
+    assert resolved_id == "30471107"
+    assert resolved_source == "jiosaavn"
+
+
+def test_resolve_album_reference_skips_jiosaavn_client_when_disabled(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute(
+        """
+        CREATE TABLE albums (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            artist_id INTEGER
+        )
+        """
+    )
+    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Album One', 1)")
+    conn.commit()
+
+    class _FakeDatabase:
+        def _get_connection(self):
+            return conn
+
+    class _FakeSearchClient:
+        def search_albums(self, query, **kwargs):
+            return [types.SimpleNamespace(id="js-123", name="Album One")]
+
+    fake_client = _FakeSearchClient()
+    monkeypatch.setattr("database.music_database.get_database", lambda: _FakeDatabase())
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "jiosaavn")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "deezer"])
+    monkeypatch.setattr(metadata_registry, "is_source_enabled", lambda source: source != "jiosaavn")
+    monkeypatch.setattr(
+        metadata_registry,
+        "get_client_for_source",
+        lambda source, **kwargs: fake_client if source == "deezer" else None,
+    )
+
+    resolved_id, resolved_source = metadata_album_tracks.resolve_album_reference(
+        "1",
+        preferred_source="jiosaavn",
+    )
+
+    assert resolved_id == "js-123"
+    assert resolved_source == "deezer"
+
+
+class TestGetAlbumForSourceBandcamp:
+    """Bandcamp has no numeric-ID lookup API — get_album_for_source's
+    bandcamp branch must resolve by name and reshape the result into the
+    'Spotify-shaped' dict this module's extraction helpers expect (Bandcamp's
+    own field names — title/position — don't match the alias chains
+    _extract_lookup_value checks). Regression coverage for the artist-detail
+    discography-grid album click 404ing even after the release was found."""
+
+    def test_resolves_by_name_and_reshapes_tracks(self, monkeypatch):
+        class _FakeBandcampClient:
+            def search_album(self, artist_name, album_name):
+                assert artist_name == "Radiohead"
+                assert album_name == "Hail to the Thief (Live Recordings 2003-2009)"
+                return {
+                    "id": "365742988",
+                    "title": "Hail to the Thief (Live Recordings 2003-2009)",
+                    "artist": "Radiohead",
+                    "release_date": "2025-08-13",
+                    "image_url": "https://f4.bcbits.com/img/0454733928_3.jpg",
+                    "total_tracks": 1,
+                    "tracks": [
+                        {"position": 1, "title": "2 + 2 = 5 (Live)", "url": "https://x/1", "duration_ms": 216000},
+                    ],
+                }
+
+        monkeypatch.setattr(
+            metadata_registry, "get_client_for_source",
+            lambda source, **kwargs: _FakeBandcampClient() if source == "bandcamp" else None,
+        )
+
+        album_data = metadata_album_tracks.get_album_for_source(
+            "bandcamp", "album-365742988",
+            artist_name="Radiohead", album_name="Hail to the Thief (Live Recordings 2003-2009)",
+        )
+
+        assert album_data is not None
+        assert album_data["name"] == "Hail to the Thief (Live Recordings 2003-2009)"
+        assert album_data["tracks"][0]["name"] == "2 + 2 = 5 (Live)"
+        assert album_data["tracks"][0]["track_number"] == 1
+
+    def test_no_names_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            metadata_registry, "get_client_for_source",
+            lambda source, **kwargs: object() if source == "bandcamp" else None,
+        )
+        assert metadata_album_tracks.get_album_for_source("bandcamp", "album-1") is None
+
+    def test_no_match_returns_none(self, monkeypatch):
+        class _FakeBandcampClient:
+            def search_album(self, artist_name, album_name):
+                return None
+
+        monkeypatch.setattr(
+            metadata_registry, "get_client_for_source",
+            lambda source, **kwargs: _FakeBandcampClient() if source == "bandcamp" else None,
+        )
+        assert metadata_album_tracks.get_album_for_source(
+            "bandcamp", "album-1", artist_name="Nobody", album_name="Nothing",
+        ) is None

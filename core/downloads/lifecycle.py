@@ -26,6 +26,7 @@ Lifted verbatim from web_server.py. Dependencies injected via
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 import traceback
@@ -44,12 +45,97 @@ from core.runtime_state import (
 logger = logging.getLogger(__name__)
 
 
+# A task that has been in 'post_processing' longer than this is treated as stuck.
+# Post-processing (AcoustID + quality + import) is serialized, so a large batch
+# legitimately backs up — keep this generous so genuinely-slow imports aren't
+# cut off mid-flight (the old 5-min cutoff falsely "completed" queued tasks).
+_POST_PROCESSING_STUCK_TIMEOUT = 1800  # 30 minutes
+
+
+def _resolve_stuck_post_processing_status(task: dict) -> str:
+    """Decide the terminal status for a task stuck in post_processing.
+
+    Only call it 'completed' if the import actually produced a file on disk
+    (``final_file_path`` is set at the end of successful post-processing). Without
+    a real file, force-completing is a lie — the task shows as a downloaded track
+    that isn't anywhere. Mark those 'failed' so they're retryable and honest.
+    """
+    final_path = task.get('final_file_path')
+    if final_path and os.path.exists(final_path):
+        return 'completed'
+    return 'failed'
+
+
 def _safe_batch_dirname(batch_id: str) -> str:
     safe = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in str(batch_id or 'batch'))
     return safe or 'batch'
 
 
 _ALBUM_BUNDLE_CLEANED_SOURCES = ('soulseek', 'torrent', 'usenet')
+
+
+def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
+    """#999 atomic album publishing (opt-in): if this batch staged its tracks
+    (private mirror, so Plex never saw a partial album), move them into the live
+    library NOW — before the batch_complete/scan emit below — then repoint each
+    track's DB path and remap the consistency roster to the published paths.
+
+    No-op for every normal download: the batch is only ever marked ``_atomic_active``
+    by the pipeline redirect, which itself only fires when the opt-in flag is on
+    AND it's a fresh whole-album batch. Any failure leaves the staged files where
+    they are (quarantine) and is logged — never a partial library publish."""
+    if not batch.get('_atomic_active'):
+        return
+    staging_root = batch.get('_atomic_staging_root')
+    transfer_dir = batch.get('_atomic_transfer_dir')
+    if not staging_root or not transfer_dir or not os.path.isdir(staging_root):
+        return
+    try:
+        from core.downloads.atomic_album_publish import publish_album_batch
+        from core.imports.file_ops import safe_move_file
+        from database.music_database import MusicDatabase
+
+        db = MusicDatabase()
+
+        def _db_update(staged_path: str, final_path: str) -> None:
+            conn = db._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                            (final_path, staged_path))
+                conn.commit()
+            finally:
+                conn.close()
+
+        result = publish_album_batch(staging_root, transfer_dir, safe_move_file, _db_update)
+
+        # Remap the consistency roster (staged -> final) so the album-consistency
+        # pass later in this block operates on the now-published files.
+        pubmap = {s: f for s, f in result.get('published', [])}
+        for fi in (batch.get('_consistency_files') or []):
+            if fi.get('path') in pubmap:
+                fi['path'] = pubmap[fi['path']]
+
+        # Per-track work registered the STAGING album folder with the repair
+        # worker (now emptied by the publish above), so track-number repair would
+        # scan nothing. Re-register the PUBLISHED album folder(s) so the post-batch
+        # repair pass runs on the real files, same as a non-atomic album.
+        repair_worker = getattr(deps, 'repair_worker', None) if deps is not None else None
+        if repair_worker is not None and pubmap:
+            for _folder in {os.path.dirname(f) for f in pubmap.values()}:
+                try:
+                    repair_worker.register_folder(batch_id, _folder)
+                except Exception as _reg_err:
+                    logger.debug("[Atomic Publish] repair re-register failed for %s: %s",
+                                 _folder, _reg_err)
+
+        n_fail = len(result.get('failed', []))
+        logger.info("[Atomic Publish] Batch %s: published %d file(s)%s",
+                    batch_id, len(pubmap),
+                    (f"; {n_fail} kept in staging for retry" if n_fail else ""))
+    except Exception as e:
+        logger.error("[Atomic Publish] Batch %s publish failed (staged files kept): %s",
+                     batch_id, e, exc_info=True)
 
 
 def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
@@ -435,9 +521,15 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                         retrying_count += 1
                 elif task_status == 'post_processing':
                     task_age = current_time - task.get('status_change_time', current_time)
-                    if task_age > 300:  # 5 minutes (post-processing should be fast)
-                        logger.info(f"⏰ [Stuck Detection] Task {queue_task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
-                        task['status'] = 'completed'  # Assume it worked if file verification is taking too long
+                    if task_age > _POST_PROCESSING_STUCK_TIMEOUT:
+                        new_status = _resolve_stuck_post_processing_status(task)
+                        if new_status == 'completed':
+                            logger.info(f"⏰ [Stuck Detection] Task {queue_task_id} stuck in post_processing for {task_age:.0f}s but file exists — completing")
+                            task['status'] = 'completed'
+                        else:
+                            logger.warning(f"⏰ [Stuck Detection] Task {queue_task_id} stuck in post_processing for {task_age:.0f}s with no output file — marking failed")
+                            task['status'] = 'failed'
+                            task['error_message'] = 'Post-processing timed out without producing a file'
                         finished_count += 1
                     else:
                         retrying_count += 1
@@ -469,6 +561,11 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                 # Mark batch as complete and set completion timestamp for auto-cleanup
                 batch['phase'] = 'complete'
                 batch['completion_time'] = time.time()  # Track when batch completed
+
+                # #999 atomic album publish (opt-in, no-op unless staged): move
+                # the staged album into the live library BEFORE the scan/emit
+                # below, so Plex sees the whole album at once.
+                _publish_atomic_album(batch_id, batch, deps)
 
                 # Record sync history completion
                 from database.music_database import MusicDatabase
@@ -667,9 +764,15 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                             retrying_count += 1
                     elif task_status == 'post_processing':
                         task_age = current_time - task.get('status_change_time', current_time)
-                        if task_age > 300:  # 5 minutes (post-processing should be fast)
-                            logger.info(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
-                            task['status'] = 'completed'  # Assume it worked if file verification is taking too long
+                        if task_age > _POST_PROCESSING_STUCK_TIMEOUT:
+                            new_status = _resolve_stuck_post_processing_status(task)
+                            if new_status == 'completed':
+                                logger.info(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s but file exists — completing")
+                                task['status'] = 'completed'
+                            else:
+                                logger.warning(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s with no output file — marking failed")
+                                task['status'] = 'failed'
+                                task['error_message'] = 'Post-processing timed out without producing a file'
                             finished_count += 1
                         else:
                             retrying_count += 1
@@ -697,6 +800,11 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                     # Mark batch as complete and set completion timestamp for auto-cleanup
                     batch['phase'] = 'complete'
                     batch['completion_time'] = time.time()  # Track when batch completed
+
+                    # #999 atomic album publish (opt-in, no-op unless staged):
+                    # publish the staged album into the live library before the
+                    # scan/emit below.
+                    _publish_atomic_album(batch_id, batch, deps)
 
                     # Add activity for batch completion
                     playlist_name = batch.get('playlist_name', 'Unknown Playlist')

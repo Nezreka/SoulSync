@@ -520,8 +520,18 @@ class TidalClient:
         
         return True
     
-    def is_authenticated(self):
+    def is_authenticated(self) -> bool:
         """Check if client is authenticated, refreshing expired tokens if possible"""
+        from core.boot_phase import is_boot_phase
+
+        if is_boot_phase():
+            if self.access_token and time.time() < self.token_expires_at:
+                return True
+            return bool(self.access_token and self.refresh_token)
+
+        # Token still valid — no refresh needed. (Restored: #949 moved this short-circuit
+        # into the boot-phase branch only, so every post-boot call fell through to the
+        # refresh below — a constant silent-refresh loop on a perfectly valid token.)
         if self.access_token and time.time() < self.token_expires_at:
             return True
 
@@ -653,19 +663,49 @@ class TidalClient:
             headers = self.session.headers.copy()
             headers['accept'] = 'application/vnd.api+json'
 
-            response = requests.get(endpoint, params=params, headers=headers, timeout=15)
-
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch V2 playlists: {response.status_code} - {response.text}")
-                return []
-
-            data = response.json()
             playlists = []
 
-            # Step 3: Process the playlists from the main 'data' array.
-            # Only extract metadata — tracks are fetched on-demand when the user
-            # selects a playlist to sync/mirror, not during the listing step.
-            for playlist_data in data.get('data', []):
+            # Step 3: Walk EVERY page. The V2 API returns ~20 playlists per page
+            # with a links.next cursor; this used to read a single page, silently
+            # capping users at ~20 playlists (i-byrana: 21 shown, 20+ missing —
+            # deleting playlists in Tidal just rotated different ones into the
+            # one page we read). 50 pages = ~1000 playlists, a generous ceiling.
+            api_host = self.base_url.split('/v2')[0]
+            next_url, next_params = endpoint, params
+            for _page in range(50):
+                response = requests.get(next_url, params=next_params, headers=headers, timeout=15)
+
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch V2 playlists: {response.status_code} - {response.text}")
+                    break
+
+                data = response.json()
+                self._collect_v2_playlist_page(data, playlists)
+
+                nxt = str((data.get('links') or {}).get('next') or '').strip()
+                if not nxt:
+                    break
+                # links.next is relative to the API base ("/playlists?page[cursor]=…"
+                # or "/v2/playlists?…" depending on the deployment) — normalize both.
+                if nxt.startswith('http'):
+                    next_url = nxt
+                elif nxt.startswith('/v2/'):
+                    next_url = api_host + nxt
+                else:
+                    next_url = self.base_url + (nxt if nxt.startswith('/') else '/' + nxt)
+                next_params = None      # the cursor URL carries all query params
+
+            logger.info(f"Successfully retrieved {len(playlists)} playlists (metadata only) with the V2 filter method.")
+            return playlists
+
+        except Exception as e:
+            logger.error(f"A critical error occurred while fetching Tidal V2 playlists: {e}")
+            return []
+
+    def _collect_v2_playlist_page(self, data, playlists):
+        """Append one V2 /playlists page's rows to ``playlists`` (metadata only —
+        tracks are fetched on-demand when the user selects a playlist)."""
+        for playlist_data in data.get('data', []):
                 attributes = playlist_data.get('attributes', {})
                 playlist_id = playlist_data.get('id')
 
@@ -704,13 +744,6 @@ class TidalClient:
 
                 playlists.append(new_playlist)
 
-            logger.info(f"Successfully retrieved {len(playlists)} playlists (metadata only) with the V2 filter method.")
-            return playlists
-
-        except Exception as e:
-            logger.error(f"A critical error occurred while fetching Tidal V2 playlists: {e}")
-            return []
-    
     def _try_direct_playlist_endpoints(self):
         """Fallback method to try direct playlist endpoints without user ID"""
         playlists = []
@@ -1655,6 +1688,8 @@ class TidalClient:
 
         ids: List[str] = []
         next_path: Optional[str] = None
+        consecutive_429 = 0
+        MAX_PAGE_RETRIES = 4
 
         while True:
             if next_path:
@@ -1687,6 +1722,28 @@ class TidalClient:
                 logger.warning(f"Tidal collection page request failed: {e}")
                 break
 
+            # Rate limited mid-walk → retry the SAME cursor page with backoff
+            # rather than silently truncating the collection. Without this a 429
+            # on page ~5 capped a 513-track favorites list at ~98 (issue #880);
+            # the regular-playlist paginator already retries 429 the same way.
+            if resp.status_code == 429:
+                consecutive_429 += 1
+                if consecutive_429 <= MAX_PAGE_RETRIES:
+                    backoff = 5.0 * consecutive_429  # 5s, 10s, 15s, 20s
+                    logger.warning(
+                        f"Tidal collection {expected_type} rate limited (429) — "
+                        f"retry {consecutive_429}/{MAX_PAGE_RETRIES} in {backoff}s "
+                        f"({len(ids)} fetched so far)"
+                    )
+                    time.sleep(backoff)
+                    continue  # next_path/cursor unchanged → re-request same page
+                logger.error(
+                    f"Tidal collection {expected_type} still rate limited after "
+                    f"{MAX_PAGE_RETRIES} retries — returning {len(ids)} IDs "
+                    f"(PARTIAL: the collection may be larger)"
+                )
+                break
+
             if resp.status_code != 200:
                 # 401/403 = scope/permission issue. Token predates the
                 # `collection.read` scope expansion or the user revoked
@@ -1703,6 +1760,8 @@ class TidalClient:
                         f"Tidal collection page returned {resp.status_code}: {resp.text[:500]}"
                     )
                 break
+
+            consecutive_429 = 0  # a good page → reset the retry budget
 
             try:
                 data = resp.json()

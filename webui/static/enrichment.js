@@ -2,13 +2,42 @@
 // ============================================================================
 
 /**
+ * Bundled status hydrate: every per-service status reader below goes through
+ * this instead of its own /api/enrichment/<id>/status request — one
+ * /status-all response serves all ~13 of them (the load-time flood fix).
+ * Returns a Response-compatible object so the call sites stay untouched;
+ * unknown ids / a failed bundle fall back to the real per-service request.
+ */
+let _enrStatusBundle = null;   // { t, promise }
+function _enrichmentStatusFetch(id) {
+    const now = Date.now();
+    if (!_enrStatusBundle || now - _enrStatusBundle.t > 3000) {
+        _enrStatusBundle = {
+            t: now,
+            promise: fetch('/api/enrichment/status-all')
+                .then(r => (r.ok ? r.json() : null))
+                .catch(() => null),
+        };
+    }
+    return _enrStatusBundle.promise.then(bundle => {
+        const payload = bundle && bundle.services ? bundle.services[id] : null;
+        if (payload && !payload.error) {
+            return new Response(JSON.stringify(payload), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        }
+        return fetch(`/api/enrichment/${id}/status`);
+    });
+}
+
+/**
  * Poll MusicBrainz status every 2 seconds and update UI
  */
 async function updateMusicBrainzStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/musicbrainz/status');
+        const response = await _enrichmentStatusFetch('musicbrainz');
         if (!response.ok) { console.warn('MusicBrainz status endpoint unavailable'); return; }
         const data = await response.json();
         updateMusicBrainzStatusFromData(data);
@@ -120,7 +149,7 @@ if (document.readyState === 'loading') {
             button.addEventListener('click', toggleMusicBrainzEnrichment);
             // Start polling
             updateMusicBrainzStatus();
-            setInterval(updateMusicBrainzStatus, 2000); // Poll every 2 seconds
+            setInterval(updateMusicBrainzStatus, 10000); // fallback only — the websocket push owns live updates
             console.log('✅ MusicBrainz UI initialized');
         }
     });
@@ -130,7 +159,7 @@ if (document.readyState === 'loading') {
         button.addEventListener('click', toggleMusicBrainzEnrichment);
         // Start polling
         updateMusicBrainzStatus();
-        setInterval(updateMusicBrainzStatus, 2000); // Poll every 2 seconds
+        setInterval(updateMusicBrainzStatus, 10000); // fallback only — the websocket push owns live updates
         console.log('✅ MusicBrainz UI initialized');
     }
 }
@@ -146,7 +175,7 @@ async function updateAudioDBStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/audiodb/status');
+        const response = await _enrichmentStatusFetch('audiodb');
         if (!response.ok) { console.warn('AudioDB status endpoint unavailable'); return; }
         const data = await response.json();
         updateAudioDBStatusFromData(data);
@@ -301,7 +330,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleAudioDBEnrichment);
             updateAudioDBStatus();
-            setInterval(updateAudioDBStatus, 2000);
+            setInterval(updateAudioDBStatus, 10000); // fallback only — the websocket push owns live updates
             console.log('✅ AudioDB UI initialized');
         }
     });
@@ -310,7 +339,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleAudioDBEnrichment);
         updateAudioDBStatus();
-        setInterval(updateAudioDBStatus, 2000);
+        setInterval(updateAudioDBStatus, 10000); // fallback only — the websocket push owns live updates
         console.log('✅ AudioDB UI initialized');
     }
 }
@@ -323,7 +352,7 @@ async function updateDeezerStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/deezer/status');
+        const response = await _enrichmentStatusFetch('deezer');
         if (!response.ok) { console.warn('Deezer status endpoint unavailable'); return; }
         const data = await response.json();
         updateDeezerStatusFromData(data);
@@ -420,7 +449,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleDeezerEnrichment);
             updateDeezerStatus();
-            setInterval(updateDeezerStatus, 2000);
+            setInterval(updateDeezerStatus, 10000); // fallback only — the websocket push owns live updates
             console.log('✅ Deezer UI initialized');
         }
     });
@@ -429,9 +458,115 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleDeezerEnrichment);
         updateDeezerStatus();
-        setInterval(updateDeezerStatus, 2000);
+        setInterval(updateDeezerStatus, 10000); // fallback only — the websocket push owns live updates
         console.log('✅ Deezer UI initialized');
     }
+}
+
+// ===================================================================
+// JIOSAAVN ENRICHMENT STATUS
+// ===================================================================
+
+async function updateJioSaavnStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await _enrichmentStatusFetch('jiosaavn');
+        if (!response.ok) { console.warn('JioSaavn status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateJioSaavnStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating JioSaavn status:', error);
+    }
+}
+
+function updateJioSaavnStatusFromData(data) {
+    const button = document.getElementById('jiosaavn-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (!data.enabled) {
+        button.classList.add('paused');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('jiosaavn-tooltip-status');
+    const tooltipCurrent = document.getElementById('jiosaavn-tooltip-current');
+    const tooltipProgress = document.getElementById('jiosaavn-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (!data.enabled) { tooltipStatus.textContent = 'Disabled'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (!data.enabled) {
+            tooltipCurrent.textContent = 'Enable in Settings → Advanced → Experimental';
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+        const currentType = data.current_item?.type;
+        let progressText = '';
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        } else {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        }
+        tooltipProgress.textContent = progressText;
+    }
+}
+
+async function toggleJioSaavnEnrichment() {
+    try {
+        const button = document.getElementById('jiosaavn-button');
+        if (!button) return;
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/enrichment/jiosaavn/pause' : '/api/enrichment/jiosaavn/resume';
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} JioSaavn enrichment`);
+        }
+        await updateJioSaavnStatus();
+    } catch (error) {
+        console.error('Error toggling JioSaavn enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+function initJioSaavnEnrichmentUI() {
+    const button = document.getElementById('jiosaavn-button');
+    if (!button) return;
+    button.addEventListener('click', toggleJioSaavnEnrichment);
+    updateJioSaavnStatus();
+    setInterval(updateJioSaavnStatus, 10000); // fallback only — the websocket push owns live updates
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initJioSaavnEnrichmentUI);
+} else {
+    initJioSaavnEnrichmentUI();
 }
 
 // ===================================================================
@@ -442,7 +577,7 @@ async function updateSpotifyEnrichmentStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/spotify/status');
+        const response = await _enrichmentStatusFetch('spotify');
         if (!response.ok) { console.warn('Spotify enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateSpotifyEnrichmentStatusFromData(data);
@@ -455,11 +590,14 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     const button = document.getElementById('spotify-enrich-button');
     if (!button) return;
 
-    const notAuthenticated = data.authenticated === false;
     const isRateLimited = data.rate_limited === true;
-    // The real API is banned but the worker is still matching via the no-creds
-    // Spotify Free source — treat it as running, not stuck (#798 bridge).
+    // The real API is unauthed/banned but the worker is still matching via the
+    // no-creds Spotify Free source — treat it as running, not stuck (#798/#887).
     const bridgingFree = data.using_free === true;
+    // #887: a no-auth user whose enrichment runs on Spotify Free is NOT "not
+    // authenticated" for status purposes — the worker IS enriching. Only flag
+    // Not Authenticated when Free isn't carrying it.
+    const notAuthenticated = data.authenticated === false && !bridgingFree;
     const rateLimitedStuck = isRateLimited && !bridgingFree;
     // Budget is a real-API cap; when bridging to free it no longer applies, so
     // only treat the budget as a stop when we're NOT serving via free (#798).
@@ -585,7 +723,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleSpotifyEnrichment);
             updateSpotifyEnrichmentStatus();
-            setInterval(updateSpotifyEnrichmentStatus, 2000);
+            setInterval(updateSpotifyEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -593,7 +731,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleSpotifyEnrichment);
         updateSpotifyEnrichmentStatus();
-        setInterval(updateSpotifyEnrichmentStatus, 2000);
+        setInterval(updateSpotifyEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -605,7 +743,7 @@ async function updateiTunesEnrichmentStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/enrichment/itunes/status');
+        const response = await _enrichmentStatusFetch('itunes');
         if (!response.ok) { console.warn('iTunes enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateiTunesEnrichmentStatusFromData(data);
@@ -704,7 +842,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleiTunesEnrichment);
             updateiTunesEnrichmentStatus();
-            setInterval(updateiTunesEnrichmentStatus, 2000);
+            setInterval(updateiTunesEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -712,7 +850,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleiTunesEnrichment);
         updateiTunesEnrichmentStatus();
-        setInterval(updateiTunesEnrichmentStatus, 2000);
+        setInterval(updateiTunesEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -724,7 +862,7 @@ async function updateLastFMEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/lastfm/status');
+        const response = await _enrichmentStatusFetch('lastfm');
         if (!response.ok) { console.warn('Last.fm status endpoint unavailable'); return; }
         const data = await response.json();
         updateLastFMEnrichmentStatusFromData(data);
@@ -831,7 +969,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleLastFMEnrichment);
             updateLastFMEnrichmentStatus();
-            setInterval(updateLastFMEnrichmentStatus, 2000);
+            setInterval(updateLastFMEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -839,7 +977,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleLastFMEnrichment);
         updateLastFMEnrichmentStatus();
-        setInterval(updateLastFMEnrichmentStatus, 2000);
+        setInterval(updateLastFMEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -851,7 +989,7 @@ async function updateGeniusEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/genius/status');
+        const response = await _enrichmentStatusFetch('genius');
         if (!response.ok) { console.warn('Genius status endpoint unavailable'); return; }
         const data = await response.json();
         updateGeniusEnrichmentStatusFromData(data);
@@ -952,7 +1090,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleGeniusEnrichment);
             updateGeniusEnrichmentStatus();
-            setInterval(updateGeniusEnrichmentStatus, 2000);
+            setInterval(updateGeniusEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -960,7 +1098,134 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleGeniusEnrichment);
         updateGeniusEnrichmentStatus();
-        setInterval(updateGeniusEnrichmentStatus, 2000);
+        setInterval(updateGeniusEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
+    }
+}
+
+// ===================================================================
+// BANDCAMP ENRICHMENT WORKER
+// ===================================================================
+// Bandcamp is keyless (no access token) but opt-in experimental — the
+// worker always reports authenticated:true; data.enabled instead reflects
+// whether the user has turned it on in Settings > Advanced > Experimental
+// (see core.metadata.registry.is_source_enabled). Progress is keyed by
+// 'albums'/'tracks' (core/bandcamp_worker.py has no artist-level pass).
+
+async function updateBandcampEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await _enrichmentStatusFetch('bandcamp');
+        if (!response.ok) { console.warn('Bandcamp status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateBandcampEnrichmentStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating Bandcamp status:', error);
+    }
+}
+
+function updateBandcampEnrichmentStatusFromData(data) {
+    const button = document.getElementById('bandcamp-enrich-button');
+    if (!button) return;
+
+    const disabled = data.enabled === false;
+
+    button.classList.remove('active', 'paused', 'complete', 'no-auth');
+    if (disabled) {
+        button.classList.add('no-auth');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    }
+
+    const tooltipStatus = document.getElementById('bandcamp-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('bandcamp-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('bandcamp-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (disabled) { tooltipStatus.textContent = 'Disabled'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (disabled) {
+            tooltipCurrent.textContent = 'Enable in Settings → Advanced → Experimental';
+        } else if (data.paused) {
+            tooltipCurrent.textContent = 'Click to resume';
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        if (disabled) {
+            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
+        } else {
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'album' || (!albumsComplete && !currentType)) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
+    }
+}
+
+async function toggleBandcampEnrichment() {
+    try {
+        const button = document.getElementById('bandcamp-enrich-button');
+        if (!button) return;
+        if (button.classList.contains('no-auth')) return; // disabled — toggle via Settings instead
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/enrichment/bandcamp/pause' : '/api/enrichment/bandcamp/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Bandcamp enrichment`);
+        }
+
+        await updateBandcampEnrichmentStatus();
+        console.log(`Bandcamp enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Bandcamp enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('bandcamp-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleBandcampEnrichment);
+            updateBandcampEnrichmentStatus();
+            setInterval(updateBandcampEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
+        }
+    });
+} else {
+    const button = document.getElementById('bandcamp-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleBandcampEnrichment);
+        updateBandcampEnrichmentStatus();
+        setInterval(updateBandcampEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -972,7 +1237,7 @@ async function updateTidalEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/tidal/status');
+        const response = await _enrichmentStatusFetch('tidal');
         if (!response.ok) { console.warn('Tidal status endpoint unavailable'); return; }
         const data = await response.json();
         updateTidalEnrichmentStatusFromData(data);
@@ -1077,7 +1342,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleTidalEnrichment);
             updateTidalEnrichmentStatus();
-            setInterval(updateTidalEnrichmentStatus, 2000);
+            setInterval(updateTidalEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1085,7 +1350,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleTidalEnrichment);
         updateTidalEnrichmentStatus();
-        setInterval(updateTidalEnrichmentStatus, 2000);
+        setInterval(updateTidalEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1097,7 +1362,7 @@ async function updateQobuzEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/qobuz/status');
+        const response = await _enrichmentStatusFetch('qobuz');
         if (!response.ok) { console.warn('Qobuz status endpoint unavailable'); return; }
         const data = await response.json();
         updateQobuzEnrichmentStatusFromData(data);
@@ -1202,7 +1467,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleQobuzEnrichment);
             updateQobuzEnrichmentStatus();
-            setInterval(updateQobuzEnrichmentStatus, 2000);
+            setInterval(updateQobuzEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1210,7 +1475,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleQobuzEnrichment);
         updateQobuzEnrichmentStatus();
-        setInterval(updateQobuzEnrichmentStatus, 2000);
+        setInterval(updateQobuzEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1222,7 +1487,7 @@ async function updateAmazonEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/amazon/status');
+        const response = await _enrichmentStatusFetch('amazon');
         if (!response.ok) { console.warn('Amazon enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateAmazonEnrichmentStatusFromData(data);
@@ -1308,7 +1573,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleAmazonEnrichment);
             updateAmazonEnrichmentStatus();
-            setInterval(updateAmazonEnrichmentStatus, 2000);
+            setInterval(updateAmazonEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1316,7 +1581,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleAmazonEnrichment);
         updateAmazonEnrichmentStatus();
-        setInterval(updateAmazonEnrichmentStatus, 2000);
+        setInterval(updateAmazonEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1328,7 +1593,7 @@ async function updateSimilarArtistsEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/enrichment/similar_artists/status');
+        const response = await _enrichmentStatusFetch('similar_artists');
         if (!response.ok) return;
         updateSimilarArtistsEnrichmentStatusFromData(await response.json());
     } catch (error) {
@@ -1393,7 +1658,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleSimilarArtistsEnrichment);
             updateSimilarArtistsEnrichmentStatus();
-            setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+            setInterval(updateSimilarArtistsEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1401,7 +1666,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleSimilarArtistsEnrichment);
         updateSimilarArtistsEnrichmentStatus();
-        setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+        setInterval(updateSimilarArtistsEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1468,7 +1733,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleHydrabaseWorker);
             updateHydrabaseStatus();
-            setInterval(updateHydrabaseStatus, 2000);
+            setInterval(updateHydrabaseStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1476,7 +1741,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleHydrabaseWorker);
         updateHydrabaseStatus();
-        setInterval(updateHydrabaseStatus, 2000);
+        setInterval(updateHydrabaseStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1695,6 +1960,12 @@ function switchRepairTab(tab) {
 // Turn a snake_case setting key into a human label. Handles acronym fix-ups
 // (EP, ID, URL, MB, AC, OS) that the naive Title-Case would otherwise botch.
 function _prettifyRepairSettingKey(key) {
+    // Full-key label overrides — for settings whose plain prettified name
+    // doesn't convey an important cost/behaviour (e.g. that it runs ffmpeg).
+    const fullKeyLabels = {
+        'deep_audio_verify': 'Deep Audio Verify (ffmpeg decode — CPU heavy)',
+    };
+    if (fullKeyLabels[key]) return fullKeyLabels[key];
     const words = key.replace(/^_+/, '').split('_');
     const acronyms = { 'eps': 'EPs', 'id': 'ID', 'url': 'URL', 'mb': 'MB',
                        'ac': 'AC', 'os': 'OS', 'api': 'API', 'mp3': 'MP3',
@@ -1742,7 +2013,6 @@ async function loadRepairJobs() {
             const statusClass = job.is_running ? 'running' : (job.enabled ? 'idle' : 'disabled');
             const dotClass = job.is_running ? 'running' : (job.enabled ? 'enabled' : 'disabled');
             const cardClass = job.is_running ? 'running' : (!job.enabled ? 'disabled' : '');
-
             // Build flow badges
             const flowParts = [];
             flowParts.push(`<span class="repair-flow-badge scan">${job.is_running ? '&#9654; Running' : 'Scan'}</span>`);
@@ -1841,7 +2111,9 @@ async function loadRepairJobs() {
                 <div class="repair-job-main">
                     <div class="repair-job-status ${dotClass}"></div>
                     <div class="repair-job-info">
-                        <div class="repair-job-name">${job.display_name}</div>
+                        <div class="repair-job-name-row">
+                            <div class="repair-job-name">${job.display_name}</div>
+                        </div>
                         <div class="repair-job-desc">${job.description || ''}</div>
                         <div class="repair-job-flow">${flowParts.join('')}</div>
                         <div class="repair-job-meta">${metaParts.join(' &middot; ')}</div>
@@ -1852,8 +2124,11 @@ async function loadRepairJobs() {
                                    onchange="toggleRepairJob('${job.job_id}', this.checked)">
                             <span class="repair-toggle-slider small"></span>
                         </label>
-                        <button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
-                                title="Run now">&#9654;</button>
+                        ${job.is_running
+                    ? `<button class="repair-stop-btn" onclick="stopRepairJobNow('${job.job_id}')"
+                                title="Stop this run">&#9209;</button>`
+                    : `<button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
+                                title="Run now">&#9654;</button>`}
                         ${Object.keys(job.settings || {}).length > 0 ?
                     `<button class="repair-settings-btn" onclick="expandRepairJobSettings('${job.job_id}')"
                                      title="Settings">&#9881;</button>` : ''}
@@ -1979,7 +2254,10 @@ async function saveRepairJobSettings(jobId) {
             } else {
                 if (input.type === 'checkbox') settings[key] = input.checked;
                 else if (input.type === 'number') settings[key] = parseFloat(input.value);
-                else settings[key] = input.value;
+                else {
+                    const v = input.value;
+                    settings[key] = v === 'true' ? true : v === 'false' ? false : v;
+                }
             }
         });
 
@@ -2004,6 +2282,36 @@ async function runRepairJobNow(jobId) {
     } catch (error) {
         console.error('Error running job:', error);
         showToast('Error starting job', 'error');
+    }
+}
+
+async function stopRepairJobNow(jobId) {
+    // Instant feedback: the scan can't unwind until its current item (e.g. an
+    // in-flight LRClib lookup) returns and it loops back to check_stop(), so the
+    // stop is not truly instant. Show a disabled "Stopping…" button meanwhile —
+    // the live-progress poll flips it back to Run once the run reports finished.
+    const stopBtn = document.querySelector(`.repair-job-card[data-job-id="${jobId}"] .repair-stop-btn`);
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.classList.add('stopping');
+        stopBtn.title = 'Stopping…';
+    }
+    try {
+        const resp = await fetch(`/api/repair/jobs/${jobId}/stop`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        showToast(data.stopped ? 'Stopping job…' : 'Job is not running', data.stopped ? 'success' : 'info');
+        // Fallback reload in case the job was already idle (nothing to flip the
+        // button) or the poll is between ticks.
+        if (!data.stopped) setTimeout(() => loadRepairJobs(), 600);
+    } catch (error) {
+        console.error('Error stopping job:', error);
+        showToast('Error stopping job', 'error');
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.classList.remove('stopping');
+            stopBtn.title = 'Stop this run';
+        }
     }
 }
 
@@ -2093,6 +2401,16 @@ function updateRepairJobProgressFromData(data) {
                 logEl.scrollTop = logEl.scrollHeight;
             }
             _repairProgressLogCounts[jobId] = state.log.length;
+        }
+
+        // #970: the moment a run ends (finished OR stopped), flip the Stop button
+        // back to Run here — don't wait on the 30s auto-hide reload or the next
+        // poll tick, or a stopped job's button looks stuck on "Stopping…".
+        if (state.status === 'finished' || state.status === 'error') {
+            const stopBtn = card.querySelector('.repair-stop-btn');
+            if (stopBtn) {
+                stopBtn.outerHTML = `<button class="repair-run-btn" onclick="runRepairJobNow('${jobId}')" title="Run now">&#9654;</button>`;
+            }
         }
 
         // Auto-hide panel after completion
@@ -2736,7 +3054,8 @@ async function loadRepairFindings() {
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
             missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
-            missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag'
+            missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
+            quality_below_cutoff: 'Below Cutoff', short_preview_track: 'Preview Clip'
         };
 
         // Finding types that have an automated fix action
@@ -2754,8 +3073,9 @@ async function loadRepairFindings() {
             incomplete_album: 'Auto-Fill',
             missing_lossy_copy: 'Convert',
             acoustid_mismatch: 'Fix',
-            missing_discography_track: 'Add to Wishlist',
+            quality_below_cutoff: 'Queue Upgrade',
             library_retag: 'Apply Tags',
+            short_preview_track: 'Re-download',
         };
 
         container.innerHTML = items.map(f => {
@@ -3180,6 +3500,17 @@ function _renderFindingDetail(f) {
             tnHtml += _renderPlayButton(f);
             return tnHtml;
 
+        case 'short_preview_track':
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album) rows.push(['Album', d.album]);
+            if (d.title) rows.push(['Title', d.title]);
+            if (d.file_duration_s != null) rows.push(['File Length', `${d.file_duration_s}s`, 'warning']);
+            if (d.expected_duration_s != null) rows.push(['Real Length', `${d.expected_duration_s}s`, 'success']);
+            if (d.original_path) rows.push(['Path', d.original_path, 'path']);
+            // Play button lets the user hear the clip and confirm it's a busted ~30s preview
+            // before approving the delete + re-download.
+            return media + _gridRows(rows) + _renderPlayButton(f);
+
         default:
             // Generic: render all detail keys
             Object.entries(d).forEach(([k, v]) => {
@@ -3468,6 +3799,15 @@ async function fixRepairFinding(id, findingType) {
         fixAction = await _promptAcoustidAction();
         if (!fixAction) return;
     }
+    // Quality upgrade: redownload, delete, or ignore (dismiss)
+    if (findingType === 'quality_upgrade') {
+        fixAction = await _promptQualityUpgradeAction();
+        if (!fixAction) return;  // cancelled
+        if (fixAction === 'ignore') {
+            await dismissRepairFinding(id);
+            return;
+        }
+    }
     // Discography backfill: add to wishlist or just clear the finding
     if (findingType === 'missing_discography_track') {
         const choice = await _promptDiscographyBackfillAction(1);
@@ -3625,6 +3965,46 @@ function _promptAcoustidAction() {
     });
 }
 
+function _promptQualityUpgradeAction() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10000;';
+        overlay.innerHTML = `
+            <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px;max-width:460px;width:90%;text-align:center;">
+                <div style="font-size:1.1em;font-weight:600;color:#fff;margin-bottom:8px;">Low-Quality Track</div>
+                <div style="font-size:0.88em;color:rgba(255,255,255,0.6);margin-bottom:20px;">
+                    This file is below your quality profile. Choose what to do.
+                </div>
+                <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button id="_qual-redownload" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;">
+                        Re-download
+                    </button>
+                    <button id="_qual-delete" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.1);color:#ef4444;font-weight:500;cursor:pointer;font-family:inherit;">
+                        Delete
+                    </button>
+                    <button id="_qual-ignore" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.7);font-weight:500;cursor:pointer;font-family:inherit;">
+                        Ignore
+                    </button>
+                </div>
+                <div style="margin-top:12px;font-size:0.78em;color:rgba(255,255,255,0.35);line-height:1.4;">
+                    Re-download = add to wishlist for a better-quality copy &amp; delete this file &bull; Delete = remove file and DB entry &bull; Ignore = keep the file and dismiss this finding
+                </div>
+                <button id="_qual-cancel" style="margin-top:12px;padding:6px 16px;border:none;background:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:0.82em;font-family:inherit;">
+                    Cancel
+                </button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#_qual-redownload').onclick = () => { overlay.remove(); resolve('redownload'); };
+        overlay.querySelector('#_qual-delete').onclick = () => { overlay.remove(); resolve('delete'); };
+        overlay.querySelector('#_qual-ignore').onclick = () => { overlay.remove(); resolve('ignore'); };
+        overlay.querySelector('#_qual-cancel').onclick = () => { overlay.remove(); resolve(null); };
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+    });
+}
+
 function _promptDiscographyBackfillAction(count = 1) {
     const isSingle = count <= 1;
     const headerText = isSingle ? 'Missing Discography Track' : `Missing Discography Tracks (${count})`;
@@ -3762,6 +4142,17 @@ async function bulkFixFindings() {
         if (!backfillAction) return;
     }
 
+    // If any selected findings are quality upgrades, prompt once (redownload/delete/ignore)
+    const selectedQualityCards = ids.filter(id => {
+        const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+        return card && card.dataset.jobId === 'quality_upgrade_scanner';
+    });
+    let qualityFixAction = null;
+    if (selectedQualityCards.length > 0) {
+        qualityFixAction = await _promptQualityUpgradeAction();
+        if (!qualityFixAction) return;
+    }
+
     let fixed = 0, failed = 0, lastError = '';
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
@@ -3773,6 +4164,7 @@ async function bulkFixFindings() {
             const isDead = card && card.dataset.jobId === 'dead_file_cleaner';
             const isAcoustid = card && card.dataset.jobId === 'acoustid_scanner';
             const isBackfill = card && card.dataset.jobId === 'discography_backfill';
+            const isQuality = card && card.dataset.jobId === 'quality_upgrade_scanner';
 
             // Discography backfill "Just Clear" path uses the dismiss endpoint,
             // not the fix endpoint — so handle it inline before the fix call.
@@ -3787,10 +4179,23 @@ async function bulkFixFindings() {
                 continue;
             }
 
+            // Quality "Ignore" likewise dismisses rather than fixing.
+            if (isQuality && qualityFixAction === 'ignore') {
+                try {
+                    const resp = await fetch(`/api/repair/findings/${id}/dismiss`, { method: 'POST' });
+                    if (resp.ok) fixed++;
+                    else { failed++; lastError = 'dismiss failed'; }
+                } catch {
+                    failed++;
+                }
+                continue;
+            }
+
             let body = {};
             if (isOrphan && orphanFixAction) body = { fix_action: orphanFixAction };
             else if (isDead && deadFixAction) body = { fix_action: deadFixAction };
             else if (isAcoustid && acoustidFixAction) body = { fix_action: acoustidFixAction };
+            else if (isQuality && qualityFixAction) body = { fix_action: qualityFixAction };
             // Discography backfill "Add to Wishlist" falls through with empty body
             // — the fix handler already adds to wishlist by default.
 
@@ -3931,4 +4336,3 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
-

@@ -18,7 +18,7 @@ logger = get_logger("metadata.registry")
 
 MetadataClientFactory = Callable[[], Any]
 
-METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz")
+METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz", "jiosaavn", "bandcamp")
 METADATA_SOURCE_LABELS = {
     "spotify": "Spotify",
     "itunes": "iTunes",
@@ -26,6 +26,7 @@ METADATA_SOURCE_LABELS = {
     "discogs": "Discogs",
     "hydrabase": "Hydrabase",
     "musicbrainz": "MusicBrainz",
+    "jiosaavn": "JioSaavn",
 }
 
 _UNSET = object()
@@ -39,6 +40,121 @@ _runtime_clients: Dict[str, Any] = {
 }
 _dev_mode_enabled_provider: Callable[[], bool] = lambda: False
 _profile_spotify_credentials_provider: Callable[[int], Any] = lambda profile_id: None
+
+
+# Experimental metadata sources: source name -> its config flag key. Each is
+# opt-in (off by default) and individually toggleable. To add a new experimental
+# provider, register it here — the gating helpers below then cover it everywhere
+# (client routing, primary-source downgrade, search fan-out, quick-switch,
+# watchlist, config-status, and the UI `_experimental` payload) automatically.
+EXPERIMENTAL_SOURCES: Dict[str, str] = {
+    "jiosaavn": "experimental.jiosaavn_enabled",
+    "bandcamp": "experimental.bandcamp_enabled",
+}
+
+
+def is_experimental_source(source: Optional[str]) -> bool:
+    """True when ``source`` is an opt-in experimental metadata source."""
+    return (source or "").strip().lower() in EXPERIMENTAL_SOURCES
+
+
+def is_source_enabled(source: Optional[str]) -> bool:
+    """True unless ``source`` is an experimental source whose flag is off.
+
+    Non-experimental sources are always considered enabled.
+    """
+    flag_key = EXPERIMENTAL_SOURCES.get((source or "").strip().lower())
+    if flag_key is None:
+        return True
+    return bool(_get_config_value(flag_key, False))
+
+
+def experimental_source_rejected(source: Optional[str]) -> bool:
+    """True when ``source`` is experimental AND currently disabled.
+
+    The single gate callers use to reject an explicit request for a
+    disabled experimental source (returns False for every normal source).
+    """
+    return is_experimental_source(source) and not is_source_enabled(source)
+
+
+def primary_metadata_source_rejection_error(source: Optional[str]) -> Optional[str]:
+    """Return a user-facing error when ``source`` cannot be primary, else None."""
+    if not source or not experimental_source_rejected(source):
+        return None
+    label = METADATA_SOURCE_LABELS.get(source, source)
+    return (
+        f"{label} is not enabled — turn it on under Settings → Advanced → Experimental."
+    )
+
+
+def resolve_settings_metadata_primary(
+    experimental_in: Optional[dict],
+    metadata_in: Optional[dict],
+    get_config: Callable[[str], Any],
+) -> tuple[Optional[str], Optional[str]]:
+    """Validate prospective primary metadata source for a settings save.
+
+    Returns ``(error_message, fallback_source_override)``. When the user disables
+    an experimental source that remains the stored primary (without explicitly
+    re-selecting it in the same payload), returns ``(None, default)`` so the
+    save can reset primary without persisting other changes first.
+    """
+    jiosaavn_enabled = bool(get_config("experimental.jiosaavn_enabled"))
+    if isinstance(experimental_in, dict) and "jiosaavn_enabled" in experimental_in:
+        jiosaavn_enabled = bool(experimental_in["jiosaavn_enabled"])
+
+    prospective_primary = get_config("metadata.fallback_source")
+    if isinstance(metadata_in, dict) and "fallback_source" in metadata_in:
+        prospective_primary = metadata_in["fallback_source"]
+
+    if prospective_primary != "jiosaavn":
+        return None, None
+
+    if jiosaavn_enabled:
+        return None, None
+
+    explicitly_setting_primary = (
+        isinstance(metadata_in, dict)
+        and metadata_in.get("fallback_source") == "jiosaavn"
+    )
+    if explicitly_setting_primary:
+        return primary_metadata_source_rejection_error("jiosaavn"), None
+
+    return None, METADATA_SOURCE_PRIORITY[0]
+
+
+def apply_primary_metadata_source(
+    source: str,
+    set_config: Callable[[str, Any], None],
+) -> Optional[str]:
+    """Persist primary metadata source from a UI id (e.g. ``spotify_free``, ``jiosaavn``).
+
+    ``set_config`` receives dotted config keys such as ``metadata.fallback_source``.
+    Returns an error message when the source is rejected, else None.
+    """
+    if source == "spotify_free":
+        set_config("metadata.fallback_source", "spotify")
+        set_config("metadata.spotify_free", True)
+        return None
+
+    err = primary_metadata_source_rejection_error(source)
+    if err:
+        return err
+
+    set_config("metadata.fallback_source", source)
+    set_config("metadata.spotify_free", False)
+    return None
+
+
+def experimental_status() -> Dict[str, bool]:
+    """``{'<source>_enabled': bool}`` map for the UI ``_experimental`` payload."""
+    return {f"{name}_enabled": is_source_enabled(name) for name in EXPERIMENTAL_SOURCES}
+
+
+def is_jiosaavn_enabled() -> bool:
+    """Back-compat shim — prefer ``is_source_enabled('jiosaavn')``."""
+    return is_source_enabled("jiosaavn")
 
 
 def register_runtime_clients(
@@ -157,6 +273,22 @@ def _get_musicbrainz_factory(client_factory: Optional[MetadataClientFactory]) ->
     return MusicBrainzSearchClient
 
 
+def _get_jiosaavn_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.jiosaavn_client import JioSaavnClient
+
+    return JioSaavnClient
+
+
+def _get_bandcamp_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.bandcamp_client import BandcampClient
+
+    return BandcampClient
+
+
 def get_spotify_client(client_factory: Optional[MetadataClientFactory] = None):
     """Get shared Spotify client.
 
@@ -230,15 +362,20 @@ def get_spotify_client_for_profile(profile_id: Optional[int] = None):
             return client
 
     try:
-        from core.spotify_client import SpotifyClient
+        from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config, SPOTIFY_OAUTH_SCOPE
         from spotipy.oauth2 import SpotifyOAuth
         import spotipy
 
+        normalized_creds = normalize_spotify_oauth_config({
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+        })
         auth_manager = SpotifyOAuth(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri,
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+            client_id=normalized_creds.get("client_id", client_id),
+            client_secret=normalized_creds.get("client_secret", client_secret),
+            redirect_uri=normalized_creds.get("redirect_uri", redirect_uri),
+            scope=SPOTIFY_OAUTH_SCOPE,
             cache_path=cache_path,
             state=f"profile_{profile_id}",
         )
@@ -326,6 +463,31 @@ def get_musicbrainz_client(client_factory: Optional[MetadataClientFactory] = Non
         return client
 
 
+def get_jiosaavn_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached JioSaavn metadata client keyed by base URL."""
+    base_url = _get_config_value("jiosaavn.base_url", "https://saavn.sumit.co") or "https://saavn.sumit.co"
+    cache_key = f"jiosaavn::{base_url.rstrip('/')}"
+    factory = _get_jiosaavn_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
+def get_bandcamp_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached Bandcamp client. Keyless — no config-dependent cache key."""
+    cache_key = "bandcamp"
+    factory = _get_bandcamp_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
 def is_hydrabase_enabled() -> bool:
     """Return True when Hydrabase is connected and app-enabled."""
     try:
@@ -352,10 +514,45 @@ def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = Tr
     return None
 
 
+def get_configured_primary_source() -> str:
+    """Return metadata.fallback_source as stored in config, without runtime downgrade.
+
+    Unlike get_primary_source(), this never probes Spotify auth. Use at boot and
+    anywhere blocking network I/O must be avoided (gunicorn worker import, Docker
+    cold start when Spotify is unreachable).
+    """
+    _default = METADATA_SOURCE_PRIORITY[0]
+    return _get_config_value("metadata.fallback_source", _default) or _default
+
+
 def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] = None) -> str:
     """Return configured primary metadata source."""
+    from core.boot_phase import is_boot_phase
+
     _default = METADATA_SOURCE_PRIORITY[0]
-    source = _get_config_value("metadata.fallback_source", _default) or _default
+
+    if is_boot_phase():
+        source = get_configured_primary_source()
+        if experimental_source_rejected(source):
+            if source != _default:
+                logger.warning(
+                    "Primary metadata source %r is not enabled; using %r instead",
+                    source,
+                    _default,
+                )
+            return _default
+        return source
+
+    source = get_configured_primary_source()
+
+    if experimental_source_rejected(source):
+        if source != _default:
+            logger.warning(
+                "Primary metadata source %r is not enabled; using %r instead",
+                source,
+                _default,
+            )
+        return _default
 
     if source == "spotify":
         try:
@@ -366,6 +563,24 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
             return _default
 
     return source
+
+
+def get_primary_source_label() -> str:
+    """Configured primary source for UI that *names* "your primary source" (the
+    import-search fallback banner, etc.).
+
+    Identical to ``get_primary_source()`` except it does NOT downgrade a no-auth
+    Spotify Free user to the working fallback: Spotify Free (fallback_source=
+    'spotify' + metadata.spotify_free) is reported as 'spotify', because that IS
+    their configured source — even though free-text album search itself has no
+    free-path implementation and legitimately falls back to another provider.
+    ``get_primary_source()`` keeps the downgrade so client routing always yields a
+    usable client; labels want the user's actual intent, not the fallback."""
+    _default = METADATA_SOURCE_PRIORITY[0]
+    source = _get_config_value("metadata.fallback_source", _default) or _default
+    if source == "spotify" and _get_config_value("metadata.spotify_free", False):
+        return "spotify"
+    return get_primary_source()
 
 
 def get_spotify_disconnect_source(configured_source: Optional[str] = None) -> str:
@@ -401,6 +616,7 @@ def get_primary_client(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
     amazon_client_factory: Optional[MetadataClientFactory] = None,
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
+    jiosaavn_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return client for configured primary source."""
     return get_client_for_source(
@@ -411,6 +627,7 @@ def get_primary_client(
         discogs_client_factory=discogs_client_factory,
         amazon_client_factory=amazon_client_factory,
         musicbrainz_client_factory=musicbrainz_client_factory,
+        jiosaavn_client_factory=jiosaavn_client_factory,
     )
 
 
@@ -422,9 +639,22 @@ def get_primary_source_status(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
     amazon_client_factory: Optional[MetadataClientFactory] = None,
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
+    jiosaavn_client_factory: Optional[MetadataClientFactory] = None,
 ) -> Dict[str, Any]:
     """Return a generic status snapshot for the active primary metadata source."""
+    from core.boot_phase import is_boot_phase
+
     source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
+    if is_boot_phase():
+        display_source = source
+        if source == "spotify" and _get_config_value("metadata.spotify_free", False):
+            display_source = "spotify_free"
+        return {
+            "source": display_source,
+            "connected": False,
+            "response_time": 0,
+        }
+
     started = time.time()
     connected = False
 
@@ -437,6 +667,7 @@ def get_primary_source_status(
             discogs_client_factory=discogs_client_factory,
             amazon_client_factory=amazon_client_factory,
             musicbrainz_client_factory=musicbrainz_client_factory,
+            jiosaavn_client_factory=jiosaavn_client_factory,
         )
         if source == "spotify":
             connected = bool(client and client.is_spotify_authenticated())
@@ -490,11 +721,20 @@ def get_client_for_source(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
     amazon_client_factory: Optional[MetadataClientFactory] = None,
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
+    jiosaavn_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return exact client for a source, or None if unavailable."""
+    from core.boot_phase import is_boot_phase
+
+    # Disabled experimental source — never hand back a client.
+    if experimental_source_rejected(source):
+        return None
+
     if source == "spotify":
         try:
             client = get_spotify_client(client_factory=spotify_client_factory)
+            if is_boot_phase():
+                return client if client and getattr(client, "sp", None) else None
             if client and client.is_spotify_authenticated():
                 return client
         except Exception as e:
@@ -518,5 +758,11 @@ def get_client_for_source(
 
     if source == "musicbrainz":
         return get_musicbrainz_client(client_factory=musicbrainz_client_factory)
+
+    if source == "jiosaavn":
+        return get_jiosaavn_client(client_factory=jiosaavn_client_factory)
+
+    if source == "bandcamp":
+        return get_bandcamp_client()
 
     return None

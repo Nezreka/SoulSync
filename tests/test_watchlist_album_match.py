@@ -77,6 +77,7 @@ def _stub_imports():
 # Imports happen lazily so the stubs above are in place first.
 from core.watchlist_scanner import (  # noqa: E402
     _albums_likely_match,
+    _extid_match_is_owned,
     _normalize_album_for_match,
 )
 
@@ -156,6 +157,13 @@ def test_compilation_score_explanation() -> None:
         ("Inception (Music From The Motion Picture)", "Inception Soundtrack"),
         # Substring containment
         ("Random Access Memories", "Random Access Memories (Bonus Edition)"),
+        # Dash-suffixed qualifiers must still collapse — these are the SAME album, so
+        # treating them as different would re-wishlist/redownload forever (the failure the
+        # original blanket strip guarded against; the narrowed strip must keep covering it).
+        ("Album Name", "Album Name - Single"),
+        ("Album Name", "Album Name - Acoustic Version"),
+        ("Hotel California", "Hotel California - 2013 Remaster"),
+        ("Album", "Album - The Remixes"),
     ],
 )
 def test_likely_match_positive(spotify_name, lib_name) -> None:
@@ -176,10 +184,27 @@ def test_likely_match_positive(spotify_name, lib_name) -> None:
         ("Abbey Road", "Sgt. Pepper's Lonely Hearts Club Band"),
         # Same word in title but different album
         ("Greatest Hits Volume 1", "Greatest Hits Volume 2"),
+        # Sokhi: distinct editions of the same franchise — the OST vs a bonus edition
+        # with a real subtitle. USED to collapse to the same normalized name (the blanket
+        # trailing-dash strip removed "- Nos vies en Lumière"), so the watchlist marked
+        # unowned OST tracks as owned via the bonus edition. Must be DIFFERENT albums.
+        ("Clair Obscur: Expedition 33: Original Soundtrack",
+         "Clair Obscur: Expedition 33 - Nos vies en Lumière (Bonus Edition)"),
+        # A real subtitle after a dash must not be stripped down to the base name.
+        ("The Album", "The Album - A Whole Different Subtitle"),
     ],
 )
 def test_likely_match_negative(spotify_name, lib_name) -> None:
     assert not _albums_likely_match(spotify_name, lib_name)
+
+
+def test_real_subtitle_after_dash_is_preserved() -> None:
+    # the regression's root cause: a meaningful subtitle must survive normalization,
+    # while a recognized qualifier after a dash ("- Live", "- 2011") still collapses.
+    assert _normalize_album_for_match("Clair Obscur: Expedition 33 - Nos vies en Lumière") \
+        != _normalize_album_for_match("Clair Obscur: Expedition 33")
+    assert _normalize_album_for_match("Some Album - Live") == _normalize_album_for_match("Some Album")
+    assert _normalize_album_for_match("Some Album - 2011") == _normalize_album_for_match("Some Album")
 
 
 # ---------------------------------------------------------------------------
@@ -268,3 +293,37 @@ def test_decimal_volume_markers_block_match(spotify_name, lib_name) -> None:
 )
 def test_same_decimal_volume_still_matches(spotify_name, lib_name) -> None:
     assert _albums_likely_match(spotify_name, lib_name)
+
+
+# ── _extid_match_is_owned (Expedition 33 shared-recording-across-editions bug) ──
+# The external-ID (recording MBID) short-circuit in is_track_missing_from_library skipped any track
+# whose recording was in the library, ignoring allow_duplicates + album. Soundtrack editions reuse the
+# same recordings across releases, so the 'Original Soundtrack (original remix)' tracks were silently
+# skipped because their recordings exist on the 'Nos vies en Lumière (Bonus Edition)' the user owns.
+
+def test_extid_owned_allows_shared_recording_on_a_different_edition():
+    # the exact reported case: same recording, DIFFERENT edition, duplicates on -> NOT owned (wishlist it)
+    assert _extid_match_is_owned(
+        "Clair Obscur: Expedition 33: Original Soundtrack",
+        "Clair Obscur: Expedition 33 - Nos vies en Lumière (Bonus Edition)",
+        allow_duplicates=True,
+    ) is False
+
+
+def test_extid_owned_when_same_album():
+    assert _extid_match_is_owned(
+        "Clair Obscur: Expedition 33: Original Soundtrack",
+        "Clair Obscur: Expedition 33: Original Soundtrack",
+        allow_duplicates=True,
+    ) is True
+
+
+def test_extid_owned_when_duplicates_disabled_is_album_agnostic():
+    # duplicates off -> a recording-ID match is 'owned' no matter the album (prior behaviour preserved)
+    assert _extid_match_is_owned("Album A", "Totally Different Album B", allow_duplicates=False) is True
+
+
+def test_extid_owned_when_no_album_to_compare():
+    # missing album on either side -> conservative: treat as owned (don't change prior behaviour)
+    assert _extid_match_is_owned("", "Some Album", allow_duplicates=True) is True
+    assert _extid_match_is_owned("Some Album", "", allow_duplicates=True) is True

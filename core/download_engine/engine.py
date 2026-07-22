@@ -1,30 +1,18 @@
-"""DownloadEngine — central owner of cross-source download state.
+"""DownloadEngine — central owner of cross-source download operations.
 
-Phase B scope: skeleton only. The engine exposes a place for
-plugins to register, a single ``active_downloads`` dict keyed by
-``(source, download_id)``, and per-source RLocks that guard mutations
-without serializing workers across different sources.
+The engine owns the live source catalog (including aliases/unavailable
+sources), active-download state, background workers, throttling, aggregate
+status/cancel operations, hybrid search and final source dispatch. Individual
+plugins retain source-specific protocol/authentication and their atomic
+search/download implementations.
 
-Subsequent phases bolt more capability on top:
-- ``dispatch_download(plugin, target_id)`` (Phase C — replaces every
-  client's ``_download_thread_worker`` boilerplate).
-- ``search(query, source_chain)`` (Phase D — replaces every client's
-  retry ladder + quality filter).
-- ``rate_limit.acquire(source)`` (Phase E — replaces every client's
-  semaphore + last-download-timestamp dance).
-- ``search_with_fallback`` / ``download_with_fallback`` (Phase F —
-  unifies hybrid mode across search and download).
-
-The engine is constructed by ``DownloadOrchestrator.__init__`` and
-each plugin from the registry is registered with it. In Phase B
-nothing in the existing code paths goes through the engine yet —
-this commit is pure additive scaffolding so subsequent commits can
-introduce engine-driven behavior one piece at a time without a
-big-bang switchover.
+``DownloadOrchestrator`` remains the compatibility facade and policy layer; it
+delegates source resolution and operational dispatch to this class.
 """
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -95,7 +83,7 @@ class DownloadEngine:
     # Plugin registration
     # ------------------------------------------------------------------
 
-    def register_plugin(self, source_name: str, plugin: Any,
+    def register_plugin(self, source_name: str, plugin: Optional[Any],
                         aliases: Tuple[str, ...] = ()) -> None:
         """Register a plugin under its canonical source name. Called
         once per source by the orchestrator after the registry's
@@ -124,6 +112,13 @@ class DownloadEngine:
         self._plugins[source_name] = plugin
         for alias in aliases:
             self._aliases[alias] = source_name
+
+        # Keep failed/unavailable sources in the name+alias catalog. Dispatch
+        # can then fail loudly for an explicitly selected source instead of
+        # misclassifying its name as a Soulseek peer. Aggregate operations
+        # already skip ``None`` plugins.
+        if plugin is None:
+            return
 
         # Apply the plugin's rate-limit policy BEFORE set_engine so
         # set_engine callbacks can override per-source if they need
@@ -163,6 +158,39 @@ class DownloadEngine:
 
     def registered_sources(self) -> List[str]:
         return list(self._plugins.keys())
+
+    async def dispatch_download(
+        self,
+        username: str,
+        filename: str,
+        file_size: int = 0,
+        *,
+        default_source: str = "soulseek",
+    ) -> Optional[str]:
+        """Route one already-selected result to its owning plugin.
+
+        Streaming results encode their source (or a registered legacy alias)
+        in ``username``.  An unrecognized value is a real Soulseek peer name,
+        so it must fall back to ``default_source`` while remaining unchanged in
+        the plugin call.  Keeping this distinction at the registry-owning
+        engine boundary makes download dispatch, status and cancellation share
+        one source-resolution contract (Library-v2 roadmap P2-23).
+
+        This method deliberately does not perform source fallback: ``filename``
+        contains a source-specific target id.  Search/candidate selection has
+        already chosen the source, and trying that opaque id on a different
+        plugin would not be meaningful.
+        """
+        canonical = self._resolve_canonical(username) if username else None
+        source_name = canonical or default_source
+        plugin = self.get_plugin(source_name)
+        if plugin is None:
+            raise RuntimeError(
+                f"{source_name} download client not available (failed to initialize)"
+            )
+
+        logger.info("Dispatching download through %s: %s", source_name, filename)
+        return await plugin.download(username, filename, file_size)
 
     def _source_lock(self, source_name: str) -> threading.RLock:
         """Return the per-source RLock, lazy-creating it on first use.
@@ -391,6 +419,16 @@ class DownloadEngine:
         (tracks, albums) tuple, or ``([], [])`` when every source
         in the chain is exhausted.
 
+        Priority mode is deliberately quality-AGNOSTIC at search time — source
+        order is king and the first source that returns any tracks wins, exactly
+        matching pre-quality-system behaviour byte-for-byte (#896 review #3).
+        Quality-gating the priority path would deprioritise e.g. a soulseek
+        mp3 whose bitrate slskd omitted (``bitrate=None`` → "unsatisfied"),
+        changing which source wins and adding latency for users who never opted
+        in. Cross-source quality pooling is the job of best_quality mode
+        (``search_all_sources``); final per-result ranking still happens in the
+        orchestrator's match/quality filter. RAW tracks are returned.
+
         Replaces orchestrator's hand-rolled hybrid search loop. The
         chain is ordered (most-preferred first).
         """
@@ -406,9 +444,10 @@ class DownloadEngine:
             try:
                 logger.info(f"Trying {source_name} (priority {i+1}): {query}")
                 tracks, albums = await plugin.search(query, timeout, progress_callback)
-                if tracks:
-                    logger.info(f"{source_name} found {len(tracks)} tracks")
-                    return (tracks, albums)
+                if not tracks:
+                    continue
+                logger.info(f"{source_name} found {len(tracks)} tracks")
+                return (tracks, albums)
             except Exception as e:
                 logger.warning(f"{source_name} search failed: {e}")
 
@@ -417,6 +456,75 @@ class DownloadEngine:
             ', '.join(source_chain), query,
         )
         return ([], [])
+
+    async def search_all_sources(self, query: str, source_chain,
+                                 timeout=None, progress_callback=None,
+                                 exclude_sources=None):
+        """Best-quality mode: pool RAW tracks from EVERY configured source in
+        ``source_chain`` instead of stopping at the first satisfying one.
+
+        Unlike :meth:`search_with_fallback`, no source short-circuits the
+        search — the caller (orchestrator/worker) ranks the combined pool
+        best→worst by actual audio quality. ``exclude_sources`` drops sources
+        whose per-source retry budget is already spent (so their candidates
+        never re-enter the pool). Unconfigured / unregistered / raising sources
+        are skipped exactly like the fallback path. Returns
+        ``(combined_tracks, combined_albums)``.
+        """
+        excluded = {s.lower() for s in (exclude_sources or []) if s}
+        pooled_tracks = []
+        pooled_albums = []
+        # Per-source contribution for an honest pool log — e.g. a release-level
+        # source like usenet/torrent that returns nothing for a track-title
+        # query should read "usenet=0", not silently hide behind the chain name.
+        contributions = []
+
+        # Decide which sources to actually query, recording why the rest were
+        # skipped. Searches then run CONCURRENTLY so the pool waits only for the
+        # slowest source (e.g. usenet/Prowlarr, which can be slow) rather than
+        # the sum of every source's latency.
+        to_search = []  # (source_name, plugin)
+        for source_name in source_chain:
+            if source_name.lower() in excluded:
+                contributions.append(f"{source_name}=excluded")
+                continue
+            plugin = self._plugins.get(source_name)
+            if plugin is None:
+                logger.info(f"Skipping {source_name} (not available)")
+                contributions.append(f"{source_name}=unavailable")
+                continue
+            if hasattr(plugin, 'is_configured') and not plugin.is_configured():
+                logger.info(f"Skipping {source_name} (not configured)")
+                contributions.append(f"{source_name}=unconfigured")
+                continue
+            to_search.append((source_name, plugin))
+
+        async def _one(plugin):
+            return await plugin.search(query, timeout, progress_callback)
+
+        results = await asyncio.gather(
+            *[_one(plugin) for _, plugin in to_search],
+            return_exceptions=True,
+        )
+
+        for (source_name, _), result in zip(to_search, results, strict=True):
+            if isinstance(result, Exception):
+                logger.warning(f"{source_name} search failed: {result}")
+                contributions.append(f"{source_name}=error")
+                continue
+            tracks, albums = result
+            n = len(tracks) if tracks else 0
+            if tracks:
+                pooled_tracks.extend(tracks)
+            if albums:
+                pooled_albums.extend(albums)
+            contributions.append(f"{source_name}={n}")
+
+        logger.info(
+            "Best-quality pool: %d candidates [%s] for: %s",
+            len(pooled_tracks), ', '.join(contributions), query,
+        )
+        return (pooled_tracks, pooled_albums)
 
     async def download_with_fallback(self, username: str, filename: str,
                                      file_size: int, source_chain) -> Optional[str]:

@@ -251,11 +251,17 @@ function _renderWelcome(el) {
 // ---- Step 2: Metadata Source ----
 
 function _renderMetadata(el) {
-    const sources = [
+    const allSources = [
         { id: 'deezer', name: 'Deezer', badge: 'Recommended', desc: 'No authentication required. Rich metadata with album art.' },
+        { id: 'jiosaavn', name: 'JioSaavn', badge: 'Experimental', desc: 'No authentication required. Strong for Indian and Bollywood catalogs. Enable under Settings → Advanced → Experimental.' },
         { id: 'spotify', name: 'Spotify', badge: '', desc: 'Requires API credentials. Best for playlist sync.' },
         { id: 'itunes', name: 'iTunes', badge: '', desc: 'No authentication required. Apple Music catalog.' },
     ];
+    const jiosaavnEnabled = window._settingsPayload?.experimental?.jiosaavn_enabled === true;
+    const sources = allSources.filter((s) => s.id !== 'jiosaavn' || jiosaavnEnabled);
+    if (_wizardSettings.metadata_source === 'jiosaavn' && !jiosaavnEnabled) {
+        _wizardSettings.metadata_source = 'deezer';
+    }
 
     el.innerHTML = `
         <div class="setup-card">
@@ -504,7 +510,7 @@ function _renderPaths(el) {
             <h2>Paths & Media Server</h2>
             <p class="setup-subtitle">Where should downloaded music go?</p>
             <div class="setup-info-box">
-                <strong>Two-folder system:</strong> Music downloads to the <strong>Input Folder</strong> first as raw files. After post-processing (metadata tagging, file organization), finished tracks are moved to the <strong>Output Folder</strong> organized into Artist/Album subfolders. Point your media server at the output folder.
+                <strong>Two-folder system:</strong> Music downloads to the <strong>Download Folder</strong> first as raw files. After post-processing (metadata tagging, file organization), finished tracks are moved to the <strong>Music Library Folder</strong> organized into Artist/Album subfolders. Point your media server at the Music Library Folder.
             </div>
             <div class="setup-input-group">
                 <label>Input Folder (where raw downloads land)</label>

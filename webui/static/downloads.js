@@ -1186,6 +1186,9 @@ async function openWishlistOverviewModal() {
                         <button class="playlist-modal-btn playlist-modal-btn-warning" onclick="cleanupWishlistOverview()">
                             🧹 Cleanup Wishlist
                         </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="openWishlistIgnoreModal()" title="Tracks you removed or cancelled — auto-skipped until they expire">
+                            🚫 Ignored
+                        </button>
                     </div>
                     <div class="playlist-modal-footer-right">
                         <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWishlistOverviewModal()">Close</button>
@@ -1310,6 +1313,117 @@ function closeWishlistOverviewModal() {
     }
     window.selectedWishlistCategory = null;
     console.log('✅ Modal closed');
+}
+
+// ── #874: Wishlist ignore-list ("Ignored") modal ────────────────────────
+// Tracks the user removed from the wishlist or cancelled mid-download are
+// auto-skipped (not re-queued) until they expire. This modal lets the user
+// see what's currently ignored and lift the skip (un-ignore / clear all).
+
+async function openWishlistIgnoreModal() {
+    let modal = document.getElementById('wishlist-ignore-modal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'wishlist-ignore-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:10050;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);';
+    modal.innerHTML = `
+        <div class="playlist-modal-content" style="max-width:560px;width:90%;max-height:80vh;display:flex;flex-direction:column;">
+            <div class="playlist-modal-header">
+                <h2 style="margin:0;">🚫 Ignored Tracks</h2>
+                <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWishlistIgnoreModal()">Close</button>
+            </div>
+            <p style="opacity:0.7;font-size:13px;margin:8px 16px 0;">Removed or cancelled tracks are skipped by auto-download until they expire. Un-ignore to allow auto-download again (you can always download manually).</p>
+            <div id="wishlist-ignore-list" class="playlist-tracks-scroll" style="flex:1;overflow-y:auto;padding:12px 16px;">
+                <div class="loading-indicator">Loading...</div>
+            </div>
+            <div class="playlist-modal-footer">
+                <div class="playlist-modal-footer-left">
+                    <button id="wishlist-ignore-clear-btn" class="playlist-modal-btn playlist-modal-btn-danger" onclick="clearWishlistIgnoreList()" style="display:none;">Clear All</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeWishlistIgnoreModal(); });
+    await loadWishlistIgnoreList();
+}
+
+function closeWishlistIgnoreModal() {
+    const modal = document.getElementById('wishlist-ignore-modal');
+    if (modal) modal.remove();
+}
+
+async function loadWishlistIgnoreList() {
+    const list = document.getElementById('wishlist-ignore-list');
+    const clearBtn = document.getElementById('wishlist-ignore-clear-btn');
+    if (!list) return;
+    try {
+        const resp = await fetch('/api/wishlist/ignore-list');
+        const data = await resp.json();
+        const entries = (data && data.entries) || [];
+        if (clearBtn) clearBtn.style.display = entries.length ? '' : 'none';
+        if (!entries.length) {
+            list.innerHTML = '<div class="playlist-empty-state" style="text-align:center;opacity:0.6;padding:30px 0;">🎉<br><br>Nothing ignored.</div>';
+            return;
+        }
+        const ttl = (data && data.ttl_days) || 30;
+        list.innerHTML = entries.map(e => {
+            const title = escapeHtml(e.track_name || e.track_id || 'Unknown');
+            const artist = escapeHtml(e.artist_name || '');
+            const reason = e.reason === 'cancelled' ? 'Cancelled' : 'Removed';
+            const tid = escapeHtml(String(e.track_id || ''));
+            return `<div class="wishlist-ignore-row" style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+                    <div style="opacity:0.6;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${artist}${artist ? ' · ' : ''}${reason} · skips ${ttl}d</div>
+                </div>
+                <button class="playlist-modal-btn playlist-modal-btn-secondary" style="flex-shrink:0;" data-track-id="${tid}" onclick="unignoreWishlistTrack(this.dataset.trackId)">Un-ignore</button>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        list.innerHTML = '<div class="playlist-empty-state" style="text-align:center;opacity:0.6;padding:30px 0;">Error loading ignored tracks</div>';
+    }
+}
+
+async function unignoreWishlistTrack(trackId) {
+    if (!trackId) return;
+    try {
+        const resp = await fetch('/api/wishlist/ignore-list/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_id: trackId }),
+        });
+        const data = await resp.json();
+        if (data && data.success) {
+            showToast('Track un-ignored — it can be auto-downloaded again.', 'success');
+            await loadWishlistIgnoreList();
+        } else {
+            showToast(`Un-ignore failed: ${(data && data.error) || 'unknown'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`Un-ignore failed: ${err.message}`, 'error');
+    }
+}
+
+async function clearWishlistIgnoreList() {
+    if (!await showConfirmDialog({
+        title: 'Clear Ignored List',
+        message: 'Allow all currently-ignored tracks to be auto-downloaded again?',
+        confirmText: 'Clear All',
+        cancelText: 'Cancel',
+    })) return;
+    try {
+        const resp = await fetch('/api/wishlist/ignore-list/clear', { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.success) {
+            showToast(`Cleared ${data.cleared || 0} ignored track(s).`, 'success');
+            await loadWishlistIgnoreList();
+        } else {
+            showToast(`Clear failed: ${(data && data.error) || 'unknown'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`Clear failed: ${err.message}`, 'error');
+    }
 }
 
 async function cleanupWishlistOverview() {
@@ -2511,6 +2625,12 @@ async function startMissingTracksProcess(playlistId) {
             wing_it: isWingIt,
             skip_acoustid: skipAcoustid,
         };
+        if (typeof isConfirmedSearchIntentModal === 'function'
+            && isConfirmedSearchIntentModal(playlistId)
+            && Number.isInteger(process.qualityProfileId)
+            && process.qualityProfileId > 0) {
+            requestBody.quality_profile_id = process.qualityProfileId;
+        }
 
         // If this is an artist album download, use album name and include full context
         // Match 'artist_album_', 'enhanced_search_album_', 'discover_album_', and 'seasonal_album_' prefixes
@@ -3085,7 +3205,12 @@ function _renderCandidateRow(c, index, rowClass, showSourceBadge) {
         <td class="candidates-col-quality">${qBadge}${c.bitrate ? ` ${c.bitrate}kbps` : ''}</td>
         <td class="candidates-col-size">${_candidatesFmtSize(c.size)}</td>
         <td class="candidates-col-duration">${_candidatesFmtDur(c.duration)}</td>
-        <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${escapeHtml(c.username || '-')}</td>
+        <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${
+            // only SOULSEEK peers are messageable (torrent/youtube "usernames" aren't Soulseek users)
+            (c.username && (!c.source || /soulseek/i.test(String(c.source))))
+                ? `<button type="button" class="chat-user-link" data-chat-msg-user="${escapeHtml(c.username).replace(/"/g, '&quot;')}" title="Message this user on Soulseek">${escapeHtml(c.username)}</button>`
+                : escapeHtml(c.username || '-')
+        }</td>
         <td class="candidates-col-action"><button class="candidates-download-btn" data-index="${index}" title="Download this file">⬇</button></td>
     </tr>`;
 }
@@ -3711,7 +3836,7 @@ function processModalStatusUpdate(playlistId, data) {
                         // Distinguish quarantine outcomes from generic
                         // failures — the file is recoverable, not lost.
                         const _em = (task.error_message || '').toLowerCase();
-                        if (_em.includes('integrity check failed') || _em.includes('bit depth filter') || _em.includes('verification failed') || _em.includes('quarantin')) {
+                        if (_em.includes('integrity check failed') || _em.includes('bit depth filter') || _em.includes('verification failed') || _em.includes('quality filter') || _em.includes('audio guard') || _em.includes('silence guard') || _em.includes('quarantin')) {
                             isQuarantinedTask = true;
                             statusText = '🛡️ Quarantined';
                         } else {
@@ -5144,7 +5269,7 @@ function displayDownloadsResults(results) {
                             <div class="album-details">
                                 ${trackCount} tracks • ${totalSize} • ${escapeHtml(result.quality || 'Mixed')}
                             </div>
-                            <div class="album-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
+                            <div class="album-uploader">Shared by <button type="button" class="chat-user-link" data-chat-msg-user="${escapeHtml(result.username || '').replace(/"/g, '&quot;')}" title="Message this user on Soulseek">${escapeHtml(result.username || 'Unknown')}</button></div>
                         </div>
                         <div class="album-actions" onclick="event.stopPropagation()">
                             <button onclick="downloadAlbum(${index})" class="album-download-btn">⬇ Download Album</button>
@@ -5168,7 +5293,7 @@ function displayDownloadsResults(results) {
                         <div class="track-details">
                             ${sizeText} • ${escapeHtml(result.quality || 'Unknown')} ${bitrateText}
                         </div>
-                        <div class="track-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
+                        <div class="track-uploader">Shared by <button type="button" class="chat-user-link" data-chat-msg-user="${escapeHtml(result.username || '').replace(/"/g, '&quot;')}" title="Message this user on Soulseek">${escapeHtml(result.username || 'Unknown')}</button></div>
                     </div>
                     <div class="track-actions">
                         <button onclick="streamTrack(${index})" class="track-stream-btn" title="Stream Track">Stream ▶</button>
@@ -5496,10 +5621,272 @@ const _notifState = {
     currentToast: null,
     toastTimer: null,
     maxHistory: 50,
+    filter: 'all',       // panel type filter: all | success | error | warning | info
+    pending: [],         // toasts awaiting the fire-and-forget journal flush
+    flushTimer: null,
 };
+
+// Journal toasts to the server so a reflexive "Clear All" loses nothing —
+// batched, fire-and-forget, never blocks the UI.
+function _flushNotifJournal() {
+    if (!_notifState.pending.length) return;
+    const entries = _notifState.pending.splice(0, 50);
+    fetch('/api/notifications/log', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries }), keepalive: true,
+    }).catch(() => { /* journaling is best-effort */ });
+}
+
+function _queueNotifJournal(type, message) {
+    _notifState.pending.push({ type, message });
+    if (!_notifState.flushTimer) {
+        _notifState.flushTimer = setInterval(_flushNotifJournal, 8000);
+        window.addEventListener('beforeunload', _flushNotifJournal);
+    }
+    if (_notifState.pending.length >= 25) _flushNotifJournal();
+}
 const _recentToastKeys = new Map();
 
 const _notifIcons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+
+// ── Active overlay-apply task (live via the 'overlay:progress' socket event) ────
+// Surfaced two ways: a working indicator on the bell (visible without opening),
+// and a pinned "Active" card at the top of the notification panel. _JOB on the
+// server is the single source of truth for both manual + automation runs.
+let _overlayTask = null;        // latest job state, or null when idle
+let _overlayClearTimer = null;
+
+function updateOverlayTask(data) {
+    if (!data) return;
+    if (_overlayClearTimer) { clearTimeout(_overlayClearTimer); _overlayClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _overlayTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _overlayTask = data;    // keep the final result on screen briefly, then clear
+        _overlayClearTimer = setTimeout(() => { _overlayTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _overlayTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+// Pull current state on demand (panel open / page load) so we're accurate even if
+// a socket event was missed or a job was already running before we connected.
+function _seedOverlayTask() {
+    fetch('/api/video/overlays/apply/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateOverlayTask(s); })
+        .catch(() => {});
+}
+
+function _overlayTaskActive() {
+    return !!(_overlayTask && (_overlayTask.running || _overlayTask.phase === 'starting' || _overlayTask.phase === 'running'));
+}
+
+function _updateOverlayBell() {
+    const btn = document.getElementById('notif-bell-btn');
+    if (btn) btn.classList.toggle('notif-bell-working',
+        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive());
+    _ensureTaskPolling();
+}
+
+// Insurance while any task is active: re-seed from the status endpoints every
+// 12s so a missed final socket event (tab throttled, socket hiccup) can never
+// strand an Active card in its last "running" state. Stops itself when idle.
+let _taskPollTimer = null;
+function _ensureTaskPolling() {
+    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive();
+    if (active && !_taskPollTimer) {
+        _taskPollTimer = setInterval(() => {
+            _seedOverlayTask();
+            _seedCollectionSyncTask();
+            _seedCollectionArtTask();
+            _seedVideoBulkTask();
+        }, 12000);
+    } else if (!active && _taskPollTimer) {
+        clearInterval(_taskPollTimer);
+        _taskPollTimer = null;
+    }
+}
+
+// ── Active artwork-refresh task ('collections:artwork' socket event) ───────────
+let _colArtTask = null;
+let _colArtClearTimer = null;
+
+function updateCollectionArtTask(data) {
+    if (!data) return;
+    if (_colArtClearTimer) { clearTimeout(_colArtClearTimer); _colArtClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _colArtTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _colArtTask = data;    // keep the final result on screen briefly, then clear
+        _colArtClearTimer = setTimeout(() => { _colArtTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _colArtTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedCollectionArtTask() {
+    fetch('/api/video/collections/posters/regenerate/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateCollectionArtTask(s); })
+        .catch(() => {});
+}
+
+function _colArtTaskActive() {
+    return !!(_colArtTask && (_colArtTask.running || _colArtTask.phase === 'starting' || _colArtTask.phase === 'running'));
+}
+
+function _colArtActiveHTML() {
+    const t = _colArtTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.rendered || 0} rendered` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">Refreshing collection artwork</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+// ── Active bulk-metadata task ('video:bulk' socket event) ──────────────────────
+// The library grid's multi-select bar shows inline progress while you watch;
+// this card covers the job when you navigate away mid-run.
+let _videoBulkTask = null;
+let _videoBulkClearTimer = null;
+
+function updateVideoBulkTask(data) {
+    if (!data) return;
+    if (_videoBulkClearTimer) { clearTimeout(_videoBulkClearTimer); _videoBulkClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _videoBulkTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _videoBulkTask = data;    // keep the final result on screen briefly, then clear
+        _videoBulkClearTimer = setTimeout(() => { _videoBulkTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _videoBulkTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedVideoBulkTask() {
+    fetch('/api/video/bulk/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateVideoBulkTask(s); })
+        .catch(() => {});
+}
+
+function _videoBulkTaskActive() {
+    return !!(_videoBulkTask && (_videoBulkTask.running || _videoBulkTask.phase === 'starting' || _videoBulkTask.phase === 'running'));
+}
+
+function _videoBulkActiveHTML() {
+    const t = _videoBulkTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.ok || 0} updated` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}`;
+    const title = t.label ? _escToast(t.label) : 'Bulk metadata edit';
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">${title}</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+// ── Active collection-sync task ('collections:sync' socket event) ──────────────
+// Same treatment as the overlay job: bell working indicator + a pinned Active
+// card. Covers the studio's "Sync all" AND the nightly automation (one _JOB).
+let _colSyncTask = null;
+let _colSyncClearTimer = null;
+
+function updateCollectionSyncTask(data) {
+    if (!data) return;
+    if (_colSyncClearTimer) { clearTimeout(_colSyncClearTimer); _colSyncClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _colSyncTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _colSyncTask = data;    // keep the final result on screen briefly, then clear
+        _colSyncClearTimer = setTimeout(() => { _colSyncTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _colSyncTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedCollectionSyncTask() {
+    fetch('/api/video/collections/sync/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateCollectionSyncTask(s); })
+        .catch(() => {});
+}
+
+function _colSyncTaskActive() {
+    return !!(_colSyncTask && (_colSyncTask.running || _colSyncTask.phase === 'starting' || _colSyncTask.phase === 'running'));
+}
+
+function _colSyncActiveHTML() {
+    const t = _colSyncTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') {
+        line = `Done · ${t.synced || 0} synced` +
+            ((t.added || t.removed) ? ` (+${t.added || 0} / −${t.removed || 0})` : '') +
+            (t.wishlisted ? `, ${t.wishlisted} wishlisted` : '') +
+            (t.failed ? `, ${t.failed} failed` : '');
+        cls = 'done';
+    } else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">Syncing collections</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+function _overlayActiveHTML() {
+    const t = _overlayTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    const verb = t.mode === 'remove' ? 'Removing overlays' : t.mode === 'reset' ? 'Resetting posters' : 'Applying overlays';
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.applied || 0} updated, ${t.skipped || 0} unchanged` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done.toLocaleString()} / ${total ? total.toLocaleString() : '…'}` + (t.title ? ' · ' + _escToast(t.title) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">${verb}</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+function _patchOverlayActive() {
+    const host = document.querySelector('#notif-panel [data-notif-active-host]');
+    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
+}
 
 function showToast(message, type = 'success', helpSection = null) {
     const toastKey = `${type}:${message}`;
@@ -5516,6 +5903,7 @@ function showToast(message, type = 'success', helpSection = null) {
     if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
     _notifState.unreadCount++;
     _updateNotifBadge();
+    _queueNotifJournal(type, message);
 
     // Show compact toast — dismiss current if showing
     const container = document.getElementById('toast-container');
@@ -5591,29 +5979,19 @@ function _openNotifPanel() {
     panel.innerHTML = `
         <div class="notif-panel-header">
             <span class="notif-panel-title">Notifications</span>
+            <button class="notif-panel-clear" onclick="_openNotifHistory()">History</button>
             ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
         </div>
-        <div class="notif-panel-body">
-            ${entries.length === 0 ? '<div class="notif-panel-empty">No notifications yet</div>' :
-            entries.map(e => {
-                const icon = _notifIcons[e.type] || 'ℹ';
-                const ago = _notifTimeAgo(e.timestamp);
-                const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
-                const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
-                return `
-                    <div class="notif-entry notif-entry-${e.type}">
-                        ${unreadDot}
-                        <span class="notif-entry-icon notif-icon-${e.type}">${icon}</span>
-                        <div class="notif-entry-body">
-                            <div class="notif-entry-msg">${_escToast(e.message)}</div>
-                            <div class="notif-entry-meta">${ago}${learnMore}</div>
-                        </div>
-                    </div>`;
-            }).join('')}
-        </div>
+        <div class="notif-filter-row">${_notifFilterChipsHTML()}</div>
+        <div class="notif-active-host" data-notif-active-host>${_overlayActiveHTML()}</div>
+        <div class="notif-panel-body">${_notifEntriesHTML()}</div>
     `;
 
     document.body.appendChild(panel);
+    _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
+    _seedCollectionSyncTask();
+    _seedCollectionArtTask();
+    _seedVideoBulkTask();
 
     // Position above the bell button
     if (btn) {
@@ -5646,10 +6024,169 @@ function _closeNotifPanel() {
 }
 
 function _clearNotifHistory() {
+    // Panel-only: the server journal keeps everything (see History).
     _notifState.history = [];
     _notifState.unreadCount = 0;
     _updateNotifBadge();
     _closeNotifPanel();
+}
+
+// ── panel filter (Kazimir: "is there a place to filter notifications?") ─────
+const _NOTIF_FILTERS = [
+    ['all', 'All'], ['success', '✓'], ['error', '✕'], ['warning', '⚠'], ['info', 'ℹ'],
+];
+
+function _notifFilterChipsHTML() {
+    return _NOTIF_FILTERS.map(([key, label]) =>
+        `<button class="notif-filter-chip${_notifState.filter === key ? ' active' : ''}"
+                 onclick="_setNotifFilter('${key}')" title="${key}">${label}</button>`).join('');
+}
+
+function _notifEntriesHTML() {
+    const entries = _notifState.filter === 'all'
+        ? _notifState.history
+        : _notifState.history.filter(e => e.type === _notifState.filter);
+    if (entries.length === 0) {
+        return `<div class="notif-panel-empty">${_notifState.filter === 'all'
+            ? 'No notifications yet' : 'Nothing with this filter'}</div>`;
+    }
+    return entries.map(e => {
+        const icon = _notifIcons[e.type] || 'ℹ';
+        const ago = _notifTimeAgo(e.timestamp);
+        const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
+        const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
+        return `
+            <div class="notif-entry notif-entry-${e.type}">
+                ${unreadDot}
+                <span class="notif-entry-icon notif-icon-${e.type}">${icon}</span>
+                <div class="notif-entry-body">
+                    <div class="notif-entry-msg">${_escToast(e.message)}</div>
+                    <div class="notif-entry-meta">${ago}${learnMore}</div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function _setNotifFilter(key) {
+    _notifState.filter = key;
+    const panel = document.getElementById('notif-panel');
+    if (!panel) return;
+    const row = panel.querySelector('.notif-filter-row');
+    const body = panel.querySelector('.notif-panel-body');
+    if (row) row.innerHTML = _notifFilterChipsHTML();
+    if (body) body.innerHTML = _notifEntriesHTML();
+}
+
+// ── persistent history modal (server journal; survives Clear All) ───────────
+const _notifHistState = { type: '', q: '', offset: 0, pageSize: 100 };
+
+function _openNotifHistory() {
+    _closeNotifPanel();
+    _closeNotifHistory();
+    const overlay = document.createElement('div');
+    overlay.id = 'notif-history-overlay';
+    overlay.className = 'notif-history-overlay';
+    overlay.innerHTML = `
+        <div class="notif-history-modal">
+            <div class="notif-history-header">
+                <span class="notif-history-title">🔔 Notification History</span>
+                <button class="notif-history-close" onclick="_closeNotifHistory()">✕</button>
+            </div>
+            <div class="notif-history-controls">
+                <select class="notif-history-type" onchange="_notifHistFilterChanged()">
+                    <option value="">All types</option>
+                    <option value="success">Success</option>
+                    <option value="error">Error</option>
+                    <option value="warning">Warning</option>
+                    <option value="info">Info</option>
+                </select>
+                <input class="notif-history-search" type="text" placeholder="Search messages…"
+                       oninput="_notifHistSearchChanged(this.value)">
+                <button class="notif-panel-clear" onclick="_clearServerNotifHistory()">Clear history</button>
+            </div>
+            <div class="notif-history-body" data-notif-history-list>
+                <div class="notif-panel-empty">Loading…</div>
+            </div>
+            <div class="notif-history-footer">
+                <button class="notif-history-more hidden" data-notif-history-more
+                        onclick="_loadNotifHistory(false)">Load more</button>
+            </div>
+        </div>`;
+    overlay.addEventListener('click', e => { if (e.target === overlay) _closeNotifHistory(); });
+    document.body.appendChild(overlay);
+    _notifHistState.type = '';
+    _notifHistState.q = '';
+    _loadNotifHistory(true);
+}
+
+function _closeNotifHistory() {
+    const el = document.getElementById('notif-history-overlay');
+    if (el) el.remove();
+}
+
+let _notifHistSearchTimer = null;
+function _notifHistSearchChanged(value) {
+    _notifHistState.q = value.trim();
+    clearTimeout(_notifHistSearchTimer);
+    _notifHistSearchTimer = setTimeout(() => _loadNotifHistory(true), 300);
+}
+
+function _notifHistFilterChanged() {
+    const sel = document.querySelector('.notif-history-type');
+    _notifHistState.type = sel ? sel.value : '';
+    _loadNotifHistory(true);
+}
+
+async function _loadNotifHistory(reset) {
+    const list = document.querySelector('[data-notif-history-list]');
+    const more = document.querySelector('[data-notif-history-more]');
+    if (!list) return;
+    if (reset) _notifHistState.offset = 0;
+    const params = new URLSearchParams({
+        limit: String(_notifHistState.pageSize),
+        offset: String(_notifHistState.offset),
+    });
+    if (_notifHistState.type) params.set('type', _notifHistState.type);
+    if (_notifHistState.q) params.set('q', _notifHistState.q);
+    try {
+        const res = await fetch('/api/notifications/history?' + params.toString());
+        const data = res.ok ? await res.json() : null;
+        const rows = (data && data.notifications) || [];
+        const html = rows.map(r => {
+            const icon = _notifIcons[r.type] || 'ℹ';
+            const when = r.created_at ? String(r.created_at).replace('T', ' ').slice(0, 19) : '';
+            return `
+                <div class="notif-entry notif-entry-${r.type}">
+                    <span class="notif-entry-icon notif-icon-${r.type}">${icon}</span>
+                    <div class="notif-entry-body">
+                        <div class="notif-entry-msg">${_escToast(r.message)}</div>
+                        <div class="notif-entry-meta">${when}</div>
+                    </div>
+                </div>`;
+        }).join('');
+        if (reset) {
+            list.innerHTML = html || '<div class="notif-panel-empty">Nothing here yet</div>';
+        } else if (html) {
+            list.insertAdjacentHTML('beforeend', html);
+        }
+        _notifHistState.offset += rows.length;
+        if (more) more.classList.toggle('hidden', rows.length < _notifHistState.pageSize);
+    } catch (e) {
+        if (reset) list.innerHTML = "<div class=\"notif-panel-empty\">Couldn't load history</div>";
+    }
+}
+
+function _clearServerNotifHistory() {
+    const doClear = () => fetch('/api/notifications/history', { method: 'DELETE' })
+        .then(() => _loadNotifHistory(true))
+        .catch(() => { /* best-effort */ });
+    if (typeof showConfirmDialog === 'function') {
+        showConfirmDialog({
+            title: 'Clear notification history?',
+            message: 'This permanently removes your journaled notifications. The bell panel is unaffected.',
+            confirmText: 'Clear', destructive: true,
+        }).then(ok => { if (ok) doClear(); });
+    } else { doClear(); }
 }
 
 function _notifTimeAgo(ts) {
@@ -5832,8 +6369,9 @@ let _gsController = null;
             }
         });
 
-        // Keyboard shortcuts
+        // Keyboard shortcuts — never summon the (music-only) global search on the video side.
         document.addEventListener('keydown', e => {
+            if (document.body.getAttribute('data-side') === 'video') return;
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); input.focus(); return; }
             if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); }
         });
@@ -5880,13 +6418,29 @@ let _gsController = null;
     else run();
 })();
 
+// On load, seed the overlay-apply + collection-sync tasks so the bell reflects a
+// job that was already running before this page connected (the socket keeps them
+// live thereafter).
+(function _overlayTaskInit() {
+    const run = () => setTimeout(() => {
+        if (typeof _seedOverlayTask === 'function') _seedOverlayTask();
+        if (typeof _seedCollectionSyncTask === 'function') _seedCollectionSyncTask();
+        if (typeof _seedCollectionArtTask === 'function') _seedCollectionArtTask();
+        if (typeof _seedVideoBulkTask === 'function') _seedVideoBulkTask();
+    }, 1200);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+    else run();
+})();
+
 function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
     const aura = document.getElementById('gsearch-aura');
     if (!bar) return;
-    // Hide on pages where global search doesn't belong.
-    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
-    const onHidePage = typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage);
+    // Hide on pages where global search doesn't belong, and always on the
+    // video side (the global/music search is music-only).
+    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import', 'library-v2']);
+    const onVideoSide = document.body.getAttribute('data-side') === 'video';
+    const onHidePage = onVideoSide || (typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage));
     bar.style.display = onHidePage ? 'none' : '';
     if (aura) aura.classList.toggle('hidden', onHidePage);
     if (onHidePage && _gsState.active) _gsDeactivate();
@@ -6069,7 +6623,7 @@ function _gsRenderFromState(state) {
 
     if (dbArtists.length) {
         h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
-        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, null) : '#'}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
+        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.library_v2_id ? `/library-v2?artist=${encodeURIComponent(a.library_v2_id)}` : (a.id ? buildArtistDetailPath(a.id, null) : '#')}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
         h += '</div>';
     }
 
@@ -6429,28 +6983,46 @@ async function checkForUpdates() {
         const btn = document.querySelector('.version-button');
         if (!btn) return;
         if (data.update_available) {
+            // Kazimir's severity glow: green = routine release, yellow = major
+            // version, red = critical/security. Dismissal is per-version — a
+            // NEW release glows again — and a critical release never stays
+            // dismissed.
+            const updateKey = data.latest_version || data.latest_sha;
+            const severity = data.severity || 'update';
             const dismissed = localStorage.getItem('soulsync-update-dismissed');
-            if (dismissed !== data.latest_sha) {
-                // Add glow class
-                btn.classList.add('update-available');
-                // Add UPDATE badge if not already present
-                if (!btn.querySelector('.update-badge')) {
-                    const badge = document.createElement('span');
+            if (dismissed !== updateKey || severity === 'critical') {
+                btn.classList.remove('update-available--update', 'update-available--major',
+                                     'update-available--critical');
+                btn.classList.add('update-available', 'update-available--' + severity);
+                btn.title = data.latest_version
+                    ? ('v' + data.latest_version + ' is available'
+                        + (severity === 'critical' ? ' — critical update'
+                            : severity === 'major' ? ' — major release' : ''))
+                    : 'A new update is available';
+                let badge = btn.querySelector('.update-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
                     badge.className = 'update-badge';
-                    badge.textContent = 'UPDATE';
                     btn.appendChild(badge);
                 }
+                badge.textContent = severity === 'critical' ? 'CRITICAL'
+                    : severity === 'major' ? 'MAJOR' : 'UPDATE';
                 // Show toast on first detection (not if already notified this session)
                 const notified = sessionStorage.getItem('soulsync-update-notified');
-                if (notified !== data.latest_sha) {
-                    sessionStorage.setItem('soulsync-update-notified', data.latest_sha);
+                if (notified !== updateKey) {
+                    sessionStorage.setItem('soulsync-update-notified', updateKey);
+                    const what = data.latest_version
+                        ? `SoulSync v${data.latest_version} is available!`
+                        : 'A new SoulSync update is available!';
                     showToast(data.is_docker
-                        ? 'A new SoulSync update has been pushed to the repo — Docker image will be updated soon!'
-                        : 'A new SoulSync update is available!', 'info');
+                        ? what + ' The Docker image will be updated soon.'
+                        : what, severity === 'critical' ? 'error' : 'info');
                 }
             }
         } else {
-            btn.classList.remove('update-available');
+            btn.classList.remove('update-available', 'update-available--update',
+                                 'update-available--major', 'update-available--critical');
+            btn.removeAttribute('title');
             const badge = btn.querySelector('.update-badge');
             if (badge) badge.remove();
         }
@@ -6465,17 +7037,20 @@ async function showVersionInfo() {
     const btn = document.querySelector('.version-button');
     const hadUpdate = btn && btn.classList.contains('update-available');
 
-    // Dismiss update glow when user opens the modal
+    // Dismiss update glow when user opens the modal (per-version — a newer
+    // release glows again; a critical one re-glows on the next check).
     if (hadUpdate) {
-        btn.classList.remove('update-available');
+        btn.classList.remove('update-available', 'update-available--update',
+                             'update-available--major', 'update-available--critical');
         const badge = btn.querySelector('.update-badge');
         if (badge) badge.remove();
         try {
             const updateRes = await fetch('/api/update-check');
             if (updateRes.ok) {
                 updateInfo = await updateRes.json();
-                if (updateInfo.latest_sha) {
-                    localStorage.setItem('soulsync-update-dismissed', updateInfo.latest_sha);
+                const key = updateInfo.latest_version || updateInfo.latest_sha;
+                if (key) {
+                    localStorage.setItem('soulsync-update-dismissed', key);
                 }
             }
         } catch (e) { /* ignore */ }
@@ -6496,6 +7071,16 @@ async function showVersionInfo() {
         subtitle: version ? `Version ${version} — Latest Changes` : 'Latest Changes',
         sections,
     };
+
+    // The version modal shows the same What's New content the helper's badge
+    // points at — mark it seen here too, or the helper button's red dot never
+    // clears for users who read release notes this way (Kazimir's stuck dot).
+    try {
+        if (typeof _getLatestWhatsNewVersion === 'function') {
+            localStorage.setItem('soulsync_helper_version_seen', _getLatestWhatsNewVersion());
+            if (typeof _updateHelperBadge === 'function') _updateHelperBadge();
+        }
+    } catch (e) { /* badge sync is cosmetic */ }
 
     try {
         populateVersionModal(versionData, hadUpdate ? updateInfo : null);
@@ -6535,13 +7120,23 @@ function populateVersionModal(versionData, updateInfo) {
         const banner = document.createElement('div');
         banner.className = 'version-update-banner';
         const isDocker = updateInfo.is_docker;
+        const sev = updateInfo.severity;
+        const heading = sev === 'critical' ? 'Critical update available'
+            : sev === 'major' ? 'Major release available'
+            : (isDocker ? 'Update detected' : 'New update available');
+        const detail = updateInfo.latest_version
+            ? `You're on v${updateInfo.current_version || '?'} &mdash; v${updateInfo.latest_version} is out.`
+                + (isDocker ? ' The Docker image updates shortly after each release.' : '')
+                + (updateInfo.release_url
+                    ? ` <a href="${updateInfo.release_url}" target="_blank" rel="noopener">Release notes</a>` : '')
+            : (isDocker
+                ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
+                : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`);
         banner.innerHTML = `
             <div class="version-update-banner-icon">&#x2B06;</div>
             <div class="version-update-banner-text">
-                <strong>${isDocker ? 'Repo update detected' : 'New update available'}</strong>
-                <span>${isDocker
-                ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
-                : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`}</span>
+                <strong>${heading}</strong>
+                <span>${detail}</span>
             </div>
         `;
         container.appendChild(banner);

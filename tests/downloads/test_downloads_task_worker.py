@@ -123,9 +123,21 @@ def _seed_task(task_id='t1', status='pending', track_info=None, **extra):
 # Early-return guards
 # ---------------------------------------------------------------------------
 
-def test_missing_task_returns_silently():
+def test_missing_task_frees_batch_slot():
+    # A worker dispatched for a task that was deleted before it ran (cleanup /
+    # dedup / atomic cancel) must FREE the reserved batch slot via
+    # on_download_completed, not just return. Otherwise active_count leaks: the
+    # slot was reserved at dispatch and never released, the next queued task never
+    # starts, and the batch wedges in 'downloading' forever (the reported jam).
     deps, rec = _build_deps()
     tw.download_track_worker('absent', 'b1', deps)
+    assert ('on_download_completed', ('b1', 'absent', False), {}) in rec.calls
+
+
+def test_missing_task_without_batch_returns_silently():
+    # No batch → no reserved slot to free → nothing to call.
+    deps, rec = _build_deps()
+    tw.download_track_worker('absent', None, deps)
     assert rec.calls == []
 
 
@@ -152,6 +164,31 @@ def test_cancelled_no_batch_id_just_returns():
     tw.download_track_worker('t1', None, deps)
     # Nothing called — no batch to notify
     assert rec.calls == []
+
+
+def test_legacy_cancel_completion_runs_outside_tasks_lock():
+    """Regression: the legacy-cancel completion callback MUST run outside
+    tasks_lock. tasks_lock is non-reentrant, and on_download_completed re-acquires
+    it — calling it in-lock deadlocked the worker WHILE HOLDING the global lock,
+    freezing all downloads. We prove the lock is free when the callback fires by
+    having the callback try to acquire it: on the buggy (in-lock) version the
+    worker still holds it, so this times out to False; with the fix it's free."""
+    from core.runtime_state import tasks_lock
+
+    _seed_task(status='cancelled')  # no playlist_id → legacy path
+
+    acquired = []
+
+    def _cb(batch_id, task_id, success):
+        got = tasks_lock.acquire(timeout=2)
+        acquired.append(got)
+        if got:
+            tasks_lock.release()
+
+    deps, _ = _build_deps(on_download_completed=_cb)
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert acquired == [True]   # callback ran AND the lock was not held by the worker
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +389,7 @@ def test_first_query_success_returns_after_storing_source():
     _seed_task()
     rec = _Recorder()
 
-    def _attempt_success(task_id, candidates, track, batch_id):
+    def _attempt_success(task_id, candidates, track, batch_id, **kwargs):
         download_tasks[task_id]['filename'] = 'song.flac'
         download_tasks[task_id]['username'] = 'u1'
         return True
@@ -400,6 +437,33 @@ def test_no_results_marks_not_found_and_calls_completion():
     assert download_tasks['t1']['status'] == 'not_found'
     assert 'No match found' in download_tasks['t1']['error_message']
     assert ('done', ('b1', 't1', False), {}) in rec.calls
+
+
+def test_no_results_reports_acquisition_retry_exhaustion(monkeypatch):
+    track_info = {
+        'id': 'lib2-track:42',
+        'name': 'Money',
+        'artists': ['Pink Floyd'],
+        'album': 'DSOTM',
+        'duration_ms': 383000,
+        '_acquisition_import_id': 'aim1-test',
+    }
+    _seed_task(track_info=track_info)
+    exhausted = []
+    monkeypatch.setattr(
+        tw,
+        '_notify_acquisition_retry_exhausted',
+        lambda context, error: exhausted.append((context, error)) or True,
+    )
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=[]),
+        matching=_FakeMatchEngine(queries=['q1']),
+    )
+
+    tw.download_track_worker('t1', None, deps)
+
+    assert download_tasks['t1']['status'] == 'not_found'
+    assert exhausted == [(track_info, 'No match found after 3 shared-pipeline queries')]
 
 
 def test_results_but_no_valid_candidates_stores_raw_for_review():
@@ -478,7 +542,7 @@ def test_hybrid_fallback_tries_secondary_sources():
         },
     )
 
-    def _attempt_yt_success(task_id, candidates, track, batch_id):
+    def _attempt_yt_success(task_id, candidates, track, batch_id, **kwargs):
         return True
 
     deps, _ = _build_deps(
@@ -528,7 +592,7 @@ def test_quarantine_retry_tries_cached_candidates_without_searching():
     )
     attempted = []
 
-    def _attempt(task_id, candidates, track, batch_id):
+    def _attempt(task_id, candidates, track, batch_id, **kwargs):
         attempted.append([getattr(c, 'filename', None) for c in candidates])
         return True
 
@@ -555,7 +619,7 @@ def test_quarantine_retry_skips_cached_from_exhausted_source():
     )
     attempted = []
 
-    def _attempt(task_id, candidates, track, batch_id):
+    def _attempt(task_id, candidates, track, batch_id, **kwargs):
         attempted.append([getattr(c, 'username', None) for c in candidates])
         return True
 

@@ -29,7 +29,6 @@ let isSortReversed = false;
 let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
-let qualityScannerStatusInterval = null;
 let duplicateCleanerStatusInterval = null;
 let wishlistCountInterval = null;
 let wishlistCountdownInterval = null;  // Countdown timer for wishlist overview modal
@@ -413,6 +412,10 @@ function initializeWebSocket() {
         if (currentProfile) {
             socket.emit('profile:join', { profile_id: currentProfile.id });
         }
+        // Re-subscribe the Server Activity drawer if it's live (survives reconnects)
+        if (window.ServerActivity && window.ServerActivity._wantsLive && window.ServerActivity._wantsLive()) {
+            socket.emit('activity:subscribe');
+        }
     });
 
     socket.on('disconnect', (reason) => {
@@ -444,6 +447,15 @@ function initializeWebSocket() {
     socket.on('watchlist:count', handleWatchlistCountUpdate);
     socket.on('downloads:batch_update', handleDownloadBatchUpdate);
 
+    // Soulseek chat push (badges + PM toasts live in chat.js; guard: the
+    // module owns all chat state, core.js only routes the events)
+    socket.on('chat:room_message', function (d) {
+        if (window.ChatPage && ChatPage.onRoomMessages) ChatPage.onRoomMessages(d);
+    });
+    socket.on('chat:unread', function (d) {
+        if (window.ChatPage && ChatPage.onUnread) ChatPage.onUnread(d);
+    });
+
     // Phase 2 event listeners (dashboard pollers)
     socket.on('rate-monitor:update', _handleRateMonitorUpdate);
     socket.on('dashboard:stats', handleDashboardStats);
@@ -457,6 +469,7 @@ function initializeWebSocket() {
     socket.on('enrichment:audiodb', (data) => updateAudioDBStatusFromData(data));
     socket.on('enrichment:discogs', (data) => updateDiscogsStatusFromData(data));
     socket.on('enrichment:deezer', (data) => updateDeezerStatusFromData(data));
+    socket.on('enrichment:jiosaavn', (data) => updateJioSaavnStatusFromData(data));
     socket.on('enrichment:spotify-enrichment', (data) => updateSpotifyEnrichmentStatusFromData(data));
     socket.on('enrichment:itunes-enrichment', (data) => updateiTunesEnrichmentStatusFromData(data));
     socket.on('enrichment:lastfm-enrichment', (data) => updateLastFMEnrichmentStatusFromData(data));
@@ -464,19 +477,31 @@ function initializeWebSocket() {
     socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
     socket.on('enrichment:amazon-enrichment', (data) => updateAmazonEnrichmentStatusFromData(data));
+    socket.on('enrichment:bandcamp-enrichment', (data) => updateBandcampEnrichmentStatusFromData(data));
     socket.on('enrichment:similar_artists', (data) => updateSimilarArtistsEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
     socket.on('repair:progress', (data) => { qaSignal('tools'); updateRepairJobProgressFromData(data); });
+    // Server Activity live push — feed the open drawer (Tautulli replacement)
+    socket.on('activity:update', (data) => {
+        if (window.ServerActivity && window.ServerActivity._onSocket) window.ServerActivity._onSocket(data);
+    });
+    // Bridge so server-activity.js can join/leave the live room without owning the
+    // socket. isConnected() lets it fall back to HTTP polling when there's no WS.
+    window.SoulSyncActivitySocket = {
+        subscribe: () => { if (socket && socketConnected) socket.emit('activity:subscribe'); },
+        unsubscribe: () => { if (socket && socketConnected) socket.emit('activity:unsubscribe'); },
+        isConnected: () => !!socketConnected
+    };
 
     // Forward enrichment status to the dashboard worker-orbs so the hub fires
     // a pulse on each real item matched / error (additional listener — does not
     // disturb the UI handlers above).
-    ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'spotify-enrichment',
+    ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'jiosaavn', 'spotify-enrichment',
      'itunes-enrichment', 'lastfm-enrichment', 'genius-enrichment', 'tidal-enrichment',
-     'qobuz-enrichment', 'amazon-enrichment', 'similar_artists', 'hydrabase',
+     'qobuz-enrichment', 'amazon-enrichment', 'bandcamp-enrichment', 'similar_artists', 'hydrabase',
      'soulid', 'repair'].forEach((ch) => {
         socket.on('enrichment:' + ch, (data) => {
             if (window.workerOrbs && window.workerOrbs.onStatus) window.workerOrbs.onStatus(ch, data);
@@ -487,7 +512,6 @@ function initializeWebSocket() {
     // 'tool:stream' is intentionally NOT wired: stream state is per-listener
     // (session cookie), so the global broadcast could only carry the DEFAULT
     // session's eternal "stopped" — the player polls /api/stream/status instead.
-    socket.on('tool:quality-scanner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateQualityScanProgressFromData(data); });
     socket.on('tool:duplicate-cleaner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDuplicateCleanProgressFromData(data); });
     socket.on('tool:db-update', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDbProgressFromData(data); });
     socket.on('tool:metadata', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMetadataStatusFromData(data); });
@@ -512,6 +536,11 @@ function initializeWebSocket() {
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => { qaSignal('auto'); updateAutomationProgressFromData(data); });
+    socket.on('overlay:progress', (data) => { if (typeof updateOverlayTask === 'function') updateOverlayTask(data); });
+    socket.on('collections:sync', (data) => { if (typeof updateCollectionSyncTask === 'function') updateCollectionSyncTask(data); });
+    socket.on('collections:artwork', (data) => { if (typeof updateCollectionArtTask === 'function') updateCollectionArtTask(data); });
+    socket.on('video:bulk', (data) => { if (typeof updateVideoBulkTask === 'function') updateVideoBulkTask(data); });
+    socket.on('video:repair:progress', (data) => { if (typeof updateVideoRepairProgressFromData === 'function') updateVideoRepairProgressFromData(data); });
 }
 
 // ── Quick Actions tiles: animation == gauge ──
@@ -689,7 +718,10 @@ function handleDashboardStats(data) {
     updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
     updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
     updateStatCard('uptime-card', data.uptime, 'Application runtime');
-    updateStatCard('memory-card', data.memory_usage, 'Current usage');
+    // Headline is system memory %; subtitle shows SoulSync's own RSS so users can see the
+    // app's actual footprint (falls back to the generic label on older backends).
+    updateStatCard('memory-card', data.memory_usage,
+        data.process_memory ? `SoulSync · ${data.process_memory}` : 'Current usage');
 }
 
 function handleDashboardActivity(data) {
@@ -753,6 +785,7 @@ const TIDAL_LOGO_URL = 'https://www.svgrepo.com/show/519734/tidal.svg';
 const QOBUZ_LOGO_URL = 'https://www.svgrepo.com/show/504778/qobuz.svg';
 const DISCOGS_LOGO_URL = 'https://www.svgrepo.com/show/305957/discogs.svg';
 const AMAZON_LOGO_URL = '/static/amazon.svg';
+const BANDCAMP_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---

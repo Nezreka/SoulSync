@@ -7,7 +7,7 @@ Album art is fetched from Cover Art Archive (free, linked by release MBID).
 """
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -63,6 +63,7 @@ class Album:
     label: Optional[str] = None
     disambiguation: Optional[str] = None
     release_group_id: Optional[str] = None
+    secondary_types: List[str] = field(default_factory=list)  # MB release-group qualifiers (Live, Compilation, ...)
 
 
 def _cover_art_url(mbid: str, scope: str = 'release') -> Optional[str]:
@@ -189,9 +190,18 @@ class MusicBrainzSearchClient:
             # Jackson" — the singer + poet + photographer + didgeridoo
             # player + ...), all scoring 80+ on exact-name match. Rendered
             # as identical cards since the fallback image lookup hits the
-            # same fallback-source result for each. Keep the highest-
-            # scoring entry per normalized name so the user sees one card
-            # per distinct artist.
+            # same fallback-source result for each. Keep ONE entry per
+            # normalized name — but pick it by (score, TAG WEIGHT), not
+            # score alone: every same-named artist ties at 100 on an exact
+            # match, and MB's ordering among ties is arbitrary, so "Korn"
+            # was surfacing a Thai pop duo and silently dropping the metal
+            # band (#1036). Community tag counts are a reliable fame proxy:
+            # the artist people actually search for has hundreds, the
+            # namesakes have none.
+            def _tag_weight(entry) -> int:
+                return sum(int(t.get('count') or 0) for t in (entry.get('tags') or [])
+                           if isinstance(t, dict))
+
             seen = {}
             for a in raw:
                 score = a.get('score', 0) or 0
@@ -202,12 +212,15 @@ class MusicBrainzSearchClient:
                 if not mbid or not name:
                     continue
                 key = name.lower().strip()
-                if key not in seen or (seen[key].get('score', 0) or 0) < score:
+                if key not in seen or \
+                        (score, _tag_weight(a)) > ((seen[key].get('score', 0) or 0), _tag_weight(seen[key])):
                     seen[key] = a
 
-            # Sort the survivors score-descending and cap at the caller's
-            # limit. `seen` only holds top-per-name, so ordering is stable.
-            top = sorted(seen.values(), key=lambda r: -(r.get('score', 0) or 0))[:limit]
+            # Sort the survivors by the same (score, tag weight) key and cap
+            # at the caller's limit. `seen` only holds top-per-name, so
+            # ordering is stable.
+            top = sorted(seen.values(),
+                         key=lambda r: (-(r.get('score', 0) or 0), -_tag_weight(r)))[:limit]
 
             artists = []
             for a in top:
@@ -324,6 +337,7 @@ class MusicBrainzSearchClient:
             external_urls={'musicbrainz': f'https://musicbrainz.org/release-group/{rg_mbid}'} if rg_mbid else {},
             disambiguation=rg.get('disambiguation') or None,
             release_group_id=rg_mbid or None,
+            secondary_types=[str(value) for value in secondary_types if value],
         )
 
     def _release_total_tracks(self, release: Dict[str, Any]) -> int:
@@ -1119,6 +1133,7 @@ class MusicBrainzSearchClient:
             'release_date': release_date,
             'total_tracks': total_tracks,
             'album_type': album_type,
+            'secondary_types': [str(value) for value in secondary_types if value],
             'images': images,
             'tracks': tracks,
             'external_urls': {'musicbrainz': f'https://musicbrainz.org/release/{release_mbid}'},

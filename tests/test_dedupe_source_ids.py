@@ -137,8 +137,9 @@ def test_clean_library_is_a_noop(db):
 # ---------------------------------------------------------------------------
 
 def test_startup_migration_clears_shared_source_ids(tmp_path):
-    """The _source_id_dedupe_v1 migration in MusicDatabase init must clear
-    differently-named shared ids and leave same-name cross-server dups."""
+    """The _source_id_dedupe_v2 migration in MusicDatabase init must clear
+    differently-named shared ids and leave same-name cross-server dups.
+    v2 re-runs the sweep to heal smears that slipped through after v1 (#988)."""
     path = str(tmp_path / "music.db")
     db = MusicDatabase(path)  # first init creates the marker on an empty db
 
@@ -152,7 +153,7 @@ def test_startup_migration_clears_shared_source_ids(tmp_path):
                      "VALUES ('3','Radiohead','plex','rh')")
         conn.execute("INSERT INTO artists (id,name,server_source,spotify_artist_id) "
                      "VALUES ('4','Radiohead','jellyfin','rh')")
-        conn.execute("DROP TABLE _source_id_dedupe_v1")
+        conn.execute("DROP TABLE _source_id_dedupe_v2")
         conn.commit()
 
     # Force the one-time migration to run again.
@@ -165,4 +166,4 @@ def test_startup_migration_clears_shared_source_ids(tmp_path):
         assert conn.execute("SELECT deezer_id FROM artists WHERE id='2'").fetchone()[0] is None
         rh = conn.execute("SELECT spotify_artist_id FROM artists WHERE id IN ('3','4')").fetchall()
         assert all(r[0] == 'rh' for r in rh)
-        assert conn.execute("SELECT name FROM sqlite_master WHERE name='_source_id_dedupe_v1'").fetchone()
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='_source_id_dedupe_v2'").fetchone()

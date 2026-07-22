@@ -53,7 +53,8 @@ SPLIT_MODULES = [
 # Other JS files that exist in static/ but are NOT part of the split
 NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js",
                 "enrichment-manager.js", "origin-history.js", "blocklist.js",
-                "watchlist-history.js", "service-switch.js", "my-accounts.js"}
+                "watchlist-history.js", "service-switch.js", "my-accounts.js",
+                "config-migration.js", "video/video-service-status.js"}
 
 # Pre-existing duplicate helper functions that lived in the original monolith.
 # In a plain <script> context the last-loaded declaration wins.  These are NOT
@@ -90,7 +91,17 @@ _WINDOW_ASSIGN_RE = re.compile(
     r"^window\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*;",
     re.MULTILINE,
 )
+# `window.foo = function (…) {` — a global handler exposed by an IIFE-wrapped module
+# (e.g. the video status bar). Just as reachable from an onclick as a top-level `function`.
+_WINDOW_FN_ASSIGN_RE = re.compile(
+    r"window\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s+)?function\b")
 _SCRIPT_SRC_RE = re.compile(r"filename='([^']+\.js)'")
+
+
+def _all_onclick_targets(js_text: str) -> set[str]:
+    """Names an onclick can legitimately call: top-level `function X()` declarations
+    plus `window.X = function(){}` global assignments (IIFE-wrapped modules)."""
+    return set(_FUNC_DECL_RE.findall(js_text)) | set(_WINDOW_FN_ASSIGN_RE.findall(js_text))
 
 
 def _read(path: Path) -> str:
@@ -211,11 +222,12 @@ class TestOnclickCoverage:
 
     @pytest.fixture(autouse=True)
     def _scan(self):
-        # Collect all function declarations from split modules
+        # Collect every onclick-callable name from split modules (top-level
+        # `function X()` decls + `window.X = function(){}` globals).
         self.all_fns: set[str] = set()
         for module in SPLIT_MODULES:
             text = _read(_STATIC / module)
-            self.all_fns.update(_all_function_decls(text))
+            self.all_fns.update(_all_onclick_targets(text))
 
         # Also include non-split JS files that are loaded — driven by the
         # NON_SPLIT_JS registry so a newly added standalone module can't be
@@ -223,7 +235,7 @@ class TestOnclickCoverage:
         for extra in sorted(NON_SPLIT_JS):
             path = _STATIC / extra
             if path.exists():
-                self.all_fns.update(_all_function_decls(_read(path)))
+                self.all_fns.update(_all_onclick_targets(_read(path)))
 
         # Extract all onclick function references from HTML
         html = _read(_INDEX)

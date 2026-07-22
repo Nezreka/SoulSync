@@ -68,6 +68,27 @@ def _reject_non_audio_found_file(found_file: Optional[str], file_location: Optio
     return found_file, file_location
 
 
+def _found_file_matches_expected(found_file: Optional[str],
+                                 expected_final_filename: Optional[str]) -> bool:
+    """True iff a file found in the TRANSFER folder is the file this task's
+    context describes — same name stem as the context-derived expected final
+    filename. Extension is ignored because ``expected_final_filename`` is
+    generated with a hardcoded ``.flac``.
+
+    jadux's wrong-metadata report: under heavy concurrency the finder (fuzzy
+    basename search) or the context lookup (fuzzy fallback) can pair THIS
+    task's context with ANOTHER track's already-imported file; writing tags
+    then stamps the wrong track's metadata into a correct file. The name the
+    tagging context itself predicts is the identity check: if the found file
+    isn't named what this context would have named it, it isn't ours to write.
+    """
+    if not found_file or not expected_final_filename:
+        return False
+    found_stem = os.path.splitext(os.path.basename(found_file))[0]
+    expected_stem = os.path.splitext(expected_final_filename)[0]
+    return found_stem.casefold() == expected_stem.casefold()
+
+
 def _normalize_match_text(value: str) -> str:
     return ''.join(ch.lower() for ch in str(value or '') if ch.isalnum())
 
@@ -171,6 +192,21 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             logger.info(f"[Post-Processing] Task {task_id} already completed by stream processor, skipping verification")
             return
 
+        # RACE GUARD: the monitor sets status -> 'post_processing' immediately
+        # before submitting this worker. If the status is now anything else, the
+        # browser-poll post-processor already took ownership of this task — e.g.
+        # it quarantined the file and requeued the next-best candidate (status
+        # -> 'searching', source identity cleared). Bail WITHOUT marking failed
+        # or notifying batch completion: otherwise we clobber that in-flight
+        # retry with a bogus "missing file or source information" failure while a
+        # parallel attempt is importing the song.
+        if task['status'] != 'post_processing':
+            logger.info(
+                f"[Post-Processing] Task {task_id} no longer in 'post_processing' "
+                f"(now '{task['status']}') — another path took over, skipping"
+            )
+            return
+
         # Extract file information for verification
         track_info = task.get('track_info', {})
         task_filename = task.get('filename') or track_info.get('filename')
@@ -232,8 +268,18 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             with matched_context_lock:
                 similar_keys = [k for k in matched_downloads_context.keys()
                                 if k.startswith(f"{task_username}::") and task_basename in k]
+            if len(similar_keys) > 1:
+                # jadux's wrong-metadata report: with 49 wishlist album batches
+                # in flight, guessing `similar_keys[0]` can hand this task ANOTHER
+                # track's context — whose metadata then gets written into a file.
+                # Ambiguity → refuse; a no-context completion never writes tags.
+                logger.warning(
+                    f"[Post-Processing] {len(similar_keys)} candidate contexts for "
+                    f"'{task_basename}' from {task_username} — ambiguous, refusing to guess"
+                )
+                similar_keys = []
             if similar_keys:
-                # Use the first similar key found
+                # Exactly one candidate from the same uploader — safe to use
                 fuzzy_key = similar_keys[0]
                 context = matched_downloads_context.get(fuzzy_key)
                 logger.info(f"[Post-Processing] Found context using fuzzy key matching: {fuzzy_key}")
@@ -438,7 +484,19 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         logger.error(f"[Post-Processing] Task {task_id} was completed by stream processor - not marking as failed")
                         return
                     download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = f'File not found on disk after {_file_search_max_retries} search attempts. Expected: {os.path.basename(task_filename)}'
+                    # slskd reported the transfer complete, but the finder never located
+                    # the file under the configured download folder. Name the folder we
+                    # searched and the two real causes — "still being written" (timing)
+                    # or "SoulSync's download path doesn't match slskd's" (the classic
+                    # standalone config mismatch) — so the user can self-diagnose instead
+                    # of getting an opaque "not found". (Discord: Shdjfgatdif.)
+                    _searched_name = os.path.basename((task_filename or '').replace('\\', '/')) or task_filename
+                    download_tasks[task_id]['error_message'] = (
+                        f"slskd reported '{_searched_name}' downloaded, but it never appeared "
+                        f"under the download folder ({download_dir}) after {_file_search_max_retries} "
+                        f"checks. Either it's still being written, or SoulSync's download path "
+                        f"doesn't match slskd's download directory — they must point at the same folder."
+                    )
             deps.on_download_completed(batch_id, task_id, False)
             return
 
@@ -455,7 +513,20 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             if not metadata_enhanced:
                 logger.warning("[Post-Processing] File in transfer folder missing metadata enhancement - completing now")
                 # Attempt to complete metadata enhancement using context
-                if context and expected_final_filename:
+                if context and expected_final_filename and \
+                        not _found_file_matches_expected(found_file, expected_final_filename):
+                    # jadux #wrong-metadata: the found transfer file is NOT the
+                    # file this context describes (fuzzy file finder / fuzzy
+                    # context under heavy concurrency). Writing here stamped
+                    # another track's metadata into a correctly-imported
+                    # neighbor. Never write to a transfer file whose name
+                    # doesn't match what this context would have named it.
+                    logger.warning(
+                        f"[Post-Processing] Transfer file '{os.path.basename(found_file)}' does not "
+                        f"match this task's expected '{expected_final_filename}' — refusing to write "
+                        f"tags to a file that isn't provably this track's"
+                    )
+                elif context and expected_final_filename:
                     try:
                         context = normalize_import_context(context)
                         # Extract required data from context
@@ -549,9 +620,13 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         if found_file and os.path.exists(found_file):
                             deps.wipe_source_tags(found_file)
                 else:
-                    logger.warning("[Post-Processing] Cannot complete metadata enhancement - missing context or expected filename")
-                    if found_file and os.path.exists(found_file):
-                        deps.wipe_source_tags(found_file)
+                    # No context / expected name → the found file's identity is
+                    # unverifiable. A transfer-folder file has already been
+                    # through the import pipeline, so even a "harmless" tag wipe
+                    # here can hit a NEIGHBORING track's finished file (jadux).
+                    # No identity, no writes.
+                    logger.warning("[Post-Processing] Cannot verify transfer file identity "
+                                   "(missing context or expected filename) - skipping all tag writes")
             else:
                 logger.info("[Post-Processing] File already has metadata enhancement completed")
 

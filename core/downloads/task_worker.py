@@ -35,6 +35,21 @@ from utils.logging_config import get_logger
 logger = get_logger("downloads.task_worker")
 
 
+def _notify_acquisition_retry_exhausted(track_info: Any, error: str) -> bool:
+    """Notify persistent Acquisition state; ordinary tasks are a no-op."""
+    if not isinstance(track_info, dict):
+        return False
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_pipeline_retry_exhausted,
+        )
+        return notify_pipeline_retry_exhausted(track_info, error=error)
+    except Exception:
+        logger.exception(
+            "[Modal Worker] Could not persist Acquisition retry exhaustion")
+        return False
+
+
 def _resolve_worker_source(username):
     """Logical source bucket for a candidate's username (Soulseek peers all
     collapse to 'soulseek'; streaming sources keep their name). Mirrors the
@@ -52,6 +67,43 @@ def _cand_user_file(candidate):
     if isinstance(candidate, dict):
         return candidate.get('username'), candidate.get('filename')
     return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
+
+
+def _candidate_ordering(track_info: Optional[dict] = None):
+    """Return ``(quality_first, targets)`` for the active search mode + toggle.
+
+    The candidate walk is ordered by the user's profile quality rank
+    (best→worst) instead of confidence-first when EITHER:
+      - best-quality search mode is active (always quality-first), OR
+      - priority mode and the ``rank_candidates_by_quality`` toggle is on
+        (opt-in; default off keeps the byte-for-byte confidence-first walk).
+
+    When ``track_info`` carries its own ``quality_profile_id`` (a wishlist row
+    — see ``add_to_wishlist``/``core/downloads/master.py``), THAT profile's
+    search_mode/rank_candidates_by_quality/ranked_targets are used instead of
+    the global default, so per-item profile assignment actually changes
+    download-time candidate ordering. Falls back to the global profile when
+    absent (manual downloads, staging imports — unaffected).
+
+    Quality-first ordering also makes the version-mismatch force-import pick
+    the highest-quality candidate, because that fallback accepts the
+    first-tried (= best-ordered) quarantined entry.
+
+    Fails closed to confidence-first ordering on any error so a profile/DB
+    hiccup never blocks a download. See
+    docs/superpowers/specs/2026-06-14-best-quality-search-mode-design.md.
+    """
+    try:
+        from core.quality.selection import targets_from_profile, load_profile_by_id
+
+        profile_id = track_info.get('quality_profile_id') if track_info else None
+        profile = load_profile_by_id(profile_id)
+        if profile.get('search_mode') == 'best_quality' or profile.get('rank_candidates_by_quality'):
+            targets, _ = targets_from_profile(profile)
+            return True, targets
+    except Exception as exc:
+        logger.debug("[Modal Worker] quality ordering unavailable: %s", exc)
+    return False, None
 
 
 def _try_cached_candidates(task_id, batch_id, track, deps):
@@ -72,6 +124,7 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         cached = list(task.get('cached_candidates') or [])
         used = set(task.get('used_sources') or ())
         exhausted = {str(s).lower() for s in (task.get('exhausted_download_sources') or ())}
+        task_track_info = task.get('track_info')
 
     remaining = []
     for c in cached:
@@ -91,7 +144,10 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         f"[Modal Worker] Quarantine retry: trying {len(remaining)} cached "
         f"candidate(s) before re-searching (task {task_id})"
     )
-    return deps.attempt_download_with_candidates(task_id, remaining, track, batch_id)
+    _qf, _qt = _candidate_ordering(task_track_info)
+    return deps.attempt_download_with_candidates(
+        task_id, remaining, track, batch_id, quality_first=_qf, quality_targets=_qt,
+    )
 
 
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
@@ -167,29 +223,54 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
     try:
         # Retrieve task details from global state
         with tasks_lock:
-            if task_id not in download_tasks:
-                logger.warning(f"[Modal Worker] Task {task_id} not found in download_tasks")
-                return
-            task = download_tasks[task_id].copy()
+            _task_missing = task_id not in download_tasks
+            if not _task_missing:
+                task = download_tasks[task_id].copy()
+        if _task_missing:
+            logger.warning(f"[Modal Worker] Task {task_id} not found in download_tasks")
+            # The task was deleted between dispatch and this worker running (cleanup,
+            # dedup, or an atomic cancel). Every OTHER worker exit frees the batch
+            # slot via on_download_completed; this path must too, or the reserved
+            # slot leaks — active_count stays inflated, the next queued task never
+            # starts, and the batch can never reach active_count==0 to complete, so
+            # it wedges in 'downloading' forever (healing loops every 30s without
+            # progress; enough leaks exhaust the shared worker pool). Call it OUTSIDE
+            # tasks_lock: the callback re-acquires it and tasks_lock is non-reentrant.
+            # on_download_completed is idempotent (_completed_task_ids dedup), so this
+            # is a no-op if the slot was already freed.
+            if batch_id:
+                deps.on_download_completed(batch_id, task_id, False)
+            return
 
         # Cancellation Checkpoint 1: Before doing anything
+        _cancelled_before_start = False
+        _free_legacy_slot = False
         with tasks_lock:
             if task_id not in download_tasks:
                 logger.info(f"[Modal Worker] Task {task_id} was deleted before starting")
                 return
             if download_tasks[task_id]['status'] == 'cancelled':
+                _cancelled_before_start = True
                 logger.warning(f"[Modal Worker] Task {task_id} cancelled before starting")
                 # V2 FIX: Don't call _on_download_completed for cancelled V2 tasks
                 # V2 system handles worker slot freeing in atomic cancel function
                 task_playlist_id = download_tasks[task_id].get('playlist_id')
                 if task_playlist_id:
                     logger.warning(f"[Modal Worker] V2 task {task_id} cancelled - worker slot already freed by V2 system")
-                    return  # V2 system already handled worker slot management
                 elif batch_id:
-                    # Legacy system - use old completion callback
+                    # Legacy system - use old completion callback (fired OUTSIDE the
+                    # lock below).
                     logger.warning(f"[Modal Worker] Legacy task {task_id} cancelled - using legacy completion callback")
-                    deps.on_download_completed(batch_id, task_id, False)
-                return
+                    _free_legacy_slot = True
+        if _cancelled_before_start:
+            # Free the legacy slot OUTSIDE tasks_lock: on_download_completed
+            # re-acquires it, and tasks_lock is a plain non-reentrant Lock — calling
+            # it in-lock deadlocked the worker WHILE HOLDING the global lock, which
+            # freezes the entire download subsystem. Idempotent (_completed_task_ids
+            # dedup), so it's a no-op if the slot was already freed by atomic cancel.
+            if _free_legacy_slot:
+                deps.on_download_completed(batch_id, task_id, False)
+            return
 
         track_data = task['track_info']
         track_name = track_data.get('name', 'Unknown Track')
@@ -369,6 +450,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         logger.info(f"[Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
         logger.info(f"[Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
+        # Best-quality search mode: the orchestrator already pooled candidates
+        # across every source for each query, so order the candidate walk by the
+        # user's profile quality rank (best→worst). Computed once per task.
+        _best_quality, _quality_targets = _candidate_ordering(track_data)
+
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
         all_raw_results = []  # Collect raw results across queries for candidate review modal
@@ -495,7 +581,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             download_tasks[task_id]['cached_candidates'] = candidates
 
                         # Try to download with these candidates
-                        success = deps.attempt_download_with_candidates(task_id, candidates, track, batch_id)
+                        success = deps.attempt_download_with_candidates(
+                            task_id, candidates, track, batch_id,
+                            quality_first=_best_quality, quality_targets=_quality_targets,
+                        )
                         if success:
                             # Download initiated successfully - let the download monitoring system handle completion
                             if batch_id:
@@ -529,7 +618,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # === HYBRID FALLBACK: If primary source failed, try remaining sources directly ===
         # The orchestrator's hybrid search stops at the first source with results, even if
         # those results all fail quality filtering. Try remaining sources individually.
-        if getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
+        #
+        # Best-quality mode already searched EVERY source per query (the pool), so this
+        # block would only re-search the same sources — skip it there.
+        if not _best_quality and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
             try:
                 orch = deps.download_orchestrator
                 hybrid_order = getattr(orch, 'hybrid_order', None) or []
@@ -612,6 +704,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 if all_raw_results and not download_tasks[task_id].get('cached_candidates'):
                     download_tasks[task_id]['cached_candidates'] = all_raw_results
 
+        _notify_acquisition_retry_exhausted(
+            track_data,
+            f'No match found after {len(search_queries)} shared-pipeline queries',
+        )
+
         # Notify batch manager that this task completed (failed) - THREAD SAFE
         if batch_id:
             try:
@@ -639,6 +736,12 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 logger.error(f"[Exception Recovery] Could not acquire lock to update task {task_id} status")
         except Exception as status_error:
             logger.error(f"Error updating task status in exception handler: {status_error}")
+
+        task_info = locals().get('track_data')
+        _notify_acquisition_retry_exhausted(
+            task_info,
+            f'Unexpected shared-pipeline retry error: {type(e).__name__}',
+        )
 
         # Notify batch manager that this task completed (failed) - THREAD SAFE with RECOVERY
         if batch_id:

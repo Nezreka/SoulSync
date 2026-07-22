@@ -24,6 +24,23 @@ def _cm(config_data):
     return cm
 
 
+# ── #879: the GET /api/settings handler calls config_manager.redacted_config().
+# If that method is ever renamed/removed the endpoint 500s, the web UI treats the
+# error body as settings, blanks the form to defaults, and autosaves over the
+# user's real config. Pin the method's presence on the class so that can't ship.
+
+def test_redacted_config_is_a_method_on_the_class():
+    assert callable(getattr(ConfigManager, 'redacted_config', None)), (
+        "GET /api/settings depends on ConfigManager.redacted_config(); removing or "
+        "renaming it 500s the settings endpoint and the UI then wipes the config (#879)")
+
+
+def test_redacted_config_callable_on_instance_returns_dict():
+    cm = _cm({'spotify': {'client_secret': 'REAL'}})
+    out = cm.redacted_config()
+    assert isinstance(out, dict) and out.get('spotify', {}).get('client_secret') == S
+
+
 # ── redacted_config: secrets out, everything else intact ────────────────────
 
 def test_configured_secrets_are_masked():
@@ -96,11 +113,29 @@ def test_real_value_overwrites():
     assert cm.config_data['spotify']['client_secret'] == 'NEW'
 
 
-def test_empty_value_clears_secret():
-    # Deliberately clearing a secret must still work (empty != sentinel).
+def test_empty_value_does_not_clear_secret():
+    # A bulk/settings save must NEVER blank a stored secret. The settings
+    # auto-save could fire mid-edit while a masked field was momentarily cleared
+    # to '' on focus, wiping the real value and breaking Spotify auth with
+    # "invalid_client" (#992). Empty means "keep existing"; clearing is done via
+    # the explicit disconnect action.
     cm = _cm({'spotify': {'client_secret': 'REAL'}})
     cm.set('spotify.client_secret', '')
-    assert cm.config_data['spotify']['client_secret'] == ''
+    assert cm.config_data['spotify']['client_secret'] == 'REAL'
+
+
+def test_none_value_does_not_clear_secret():
+    cm = _cm({'spotify': {'client_secret': 'REAL'}})
+    cm.set('spotify.client_secret', None)
+    assert cm.config_data['spotify']['client_secret'] == 'REAL'
+
+
+def test_empty_value_on_non_secret_path_writes_normally():
+    # The empty-guard is scoped to sensitive paths — a normal field can still be
+    # cleared to '' (e.g. clearing a URL).
+    cm = _cm({'plex': {'base_url': 'http://old'}})
+    cm.set('plex.base_url', '')
+    assert cm.config_data['plex']['base_url'] == ''
 
 
 def test_sentinel_on_non_secret_path_writes_normally():

@@ -14,6 +14,8 @@
         { container: '.mb-button-container',              color: [186, 85, 211], id: 'musicbrainz' },
         { container: '.audiodb-button-container',          color: [0, 188, 212],  id: 'audiodb' },
         { container: '.deezer-button-container',           color: [162, 56, 255], id: 'deezer' },
+        { container: '.jiosaavn-button-container',         color: [43, 197, 180], id: 'jiosaavn' },
+        { container: '.bandcamp-enrich-button-container',  color: [29, 160, 195], id: 'bandcamp-enrichment' },
         { container: '.spotify-enrich-button-container',   color: [30, 215, 96],  id: 'spotify-enrichment' },
         { container: '.itunes-enrich-button-container',    color: [251, 91, 137], id: 'itunes-enrichment' },
         { container: '.lastfm-enrich-button-container',    color: [213, 16, 7],   id: 'lastfm-enrichment' },
@@ -68,6 +70,13 @@
     let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
+    let intervalId = null;
+    // Firefox throttles requestAnimationFrame to ~1fps for a canvas it heuristically deems
+    // occluded — the dashboard orb canvas falls into this after the page settles (the keepalive
+    // only delays it). A setInterval-driven loop is NOT subject to that canvas-occlusion rAF
+    // throttle, so on Firefox we drive the render with a timer. Chrome keeps rAF untouched
+    // (works fine + vsync-aligned). Background tabs are still parked via onVisibility→stopLoop.
+    const _isFirefox = !!(window.CSS && CSS.supports && CSS.supports('-moz-appearance', 'none'));
     let onDashboard = false;
     let expandProgress = 0;
     let staggerTimers = [];
@@ -96,6 +105,24 @@
         canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;';
         dashboardHeader.appendChild(canvas);
         ctx = canvas.getContext('2d');
+
+        // #935: on Firefox, a header hover re-layerizes the dashboard and the engine then
+        // throttles THIS canvas's compositing to ~1fps (Chrome never does this). The old
+        // always-on dash-card blob animation incidentally kept the compositor on the fast
+        // path; once that was removed for the Chrome GPU win, the throttle showed up. Re-add
+        // that "keep-alive" cheaply: a 2px, ~invisible element running an infinite transform-
+        // only animation (compositor work, zero paint). Firefox-only via the same feature
+        // gate the CSS uses — Chrome doesn't throttle and never gets this.
+        if (window.CSS && CSS.supports && CSS.supports('-moz-appearance', 'none')) {
+            const keepAlive = document.createElement('div');
+            keepAlive.className = 'worker-orb-ff-keepalive';
+            keepAlive.setAttribute('aria-hidden', 'true');
+            keepAlive.style.cssText = 'position:absolute;top:0;left:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:0;';
+            keepAlive.animate(
+                [{ transform: 'translateX(0)' }, { transform: 'translateX(1px)' }],
+                { duration: 1500, iterations: Infinity, direction: 'alternate' });
+            dashboardHeader.appendChild(keepAlive);
+        }
 
         WORKER_DEFS.forEach((def, i) => {
             const el = headerActions.querySelector(def.container);
@@ -142,6 +169,29 @@
         dashboardHeader.addEventListener('mouseleave', onMouseLeave);
         window.addEventListener('resize', onResize);
         document.addEventListener('visibilitychange', onVisibility);
+
+        // The Music↔Video side toggle hides the whole music page with
+        // `display:none` (body[data-side="video"] .page:not(.video-page)). On a
+        // fresh load *from* the video side, the dashboard is already the active
+        // music page but sits at 0x0, so init/bootstrap measured every orb home
+        // at the (0,0) top-left origin. Switching back to music is just an
+        // attribute flip — it fires neither `resize` nor `visibilitychange` and
+        // doesn't re-run setPage() — so nothing recomputed the geometry and the
+        // cluster stayed pinned to the top-left corner (blooming, and shooting
+        // there on hover). Re-measure the instant the header regains real size.
+        if (typeof ResizeObserver !== 'undefined') {
+            let hadSize = dashboardHeader.getBoundingClientRect().width > 0;
+            const ro = new ResizeObserver(() => {
+                const hasSize = dashboardHeader.getBoundingClientRect().width > 0;
+                if (hasSize && !hadSize && onDashboard) {
+                    computeHomes();
+                    resizeCanvas();
+                    if (state === 'orbs') centerOrbs();
+                }
+                hadSize = hasSize;
+            });
+            ro.observe(dashboardHeader);
+        }
     }
 
     function computeHomes() {
@@ -548,6 +598,12 @@
     })();
 
     function startLoop() {
+        if (_isFirefox) {
+            if (intervalId) return;
+            // ~60fps timer — immune to Firefox's canvas-occlusion rAF throttle.
+            intervalId = setInterval(tick, 1000 / 60);
+            return;
+        }
         if (animFrame) return;
         tick();
     }
@@ -557,20 +613,35 @@
             cancelAnimationFrame(animFrame);
             animFrame = null;
         }
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
     }
 
     function tick() {
-        animFrame = requestAnimationFrame(tick);
+        // Chrome self-schedules via rAF; Firefox is driven by the setInterval above.
+        if (!_isFirefox) {
+            animFrame = requestAnimationFrame(tick);
+        }
         if (!canvas || !ctx) return;
 
         // Yield the frame to active scrolling (orbs freeze, resume on idle).
         if (performance.now() < _scrollPauseUntil) return;
 
         frameCount++;
-        // Fully asleep: render at ~20fps. The drift is at crawl speed so the
-        // difference is invisible, and the canvas GPU cost drops by two thirds
-        // for the hours the dashboard sits idle. Wakes re-run every frame.
-        if (sleepLevel > 0.95 && frameCount % 3 !== 0) return;
+        // Frame-skip throttles. The canvas ticks at 60fps; we drop renders to cut cost.
+        // frameCount still increments every tick, so `time` below stays real-time and the
+        // drift speed is unchanged — we just draw it less often.
+        if (sleepLevel > 0.95) {
+            // Fully asleep → ~20fps: drift is at crawl speed so it's invisible, and the
+            // GPU cost drops two-thirds for the hours the dashboard sits idle.
+            if (frameCount % 3 !== 0) return;
+        } else if (window._reduceEffectsActive) {
+            // Reduce-effects on (user asked for performance) → ~30fps: the slow drift and
+            // sparks look the same, the per-frame cost roughly halves.
+            if (frameCount % 2 !== 0) return;
+        }
         const time = frameCount / 60;
         const w = canvas.width;
         const h = canvas.height;
@@ -1019,7 +1090,13 @@
     // ── Page awareness ──
 
     function isEnabled() {
-        return window._workerOrbsEnabled !== false && !window._reduceEffectsActive;
+        // Reduce-effects does NOT gate the orbs — they have their own toggle, so that
+        // setting controls them on its own. The orbs ARE killed by Max Performance: in a
+        // Docker / headless / remote-desktop container there is no GPU, so the per-frame
+        // radial-gradient canvas fill rasterizes on the CPU and can saturate a core,
+        // freezing the whole UI. Max Performance is the nuclear low-power switch for
+        // exactly those software-rendered setups, so the canvas loop must stay off there.
+        return window._workerOrbsEnabled !== false && !window._maxPerfActive;
     }
 
     // ── Real telemetry → pulses ──

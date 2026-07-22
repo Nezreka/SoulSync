@@ -43,7 +43,9 @@ function initializeLibraryPage() {
 
     } catch (error) {
         console.error("❌ Error initializing Library page:", error);
-        showToast("Failed to initialize Library page", "error");
+        // Name the real error so bug reports carry the cause, not just the symptom
+        const why = error && error.message ? `: ${error.message}` : "";
+        showToast(`Failed to initialize Library page${why}`, "error");
     }
 }
 
@@ -509,7 +511,7 @@ function _renderWatchAllModalContent(overlay, eligible, ineligible, sourceName) 
 
     // Search filter
     if (eligible.length > 10) {
-        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Search artists..." oninput="_filterWatchAllList(this.value)"></div>';
+        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Filter artists…" oninput="_filterWatchAllList(this.value)"></div>';
     }
 
     // Eligible grid
@@ -736,9 +738,19 @@ if (typeof window !== 'undefined') {
 // Discography filter state
 let discographyFilterState = {
     categories: { albums: true, eps: true, singles: true },
+    // Content defaults to show-all. The declutter (hide non-studio by default)
+    // is applied ONLY for MusicBrainz discographies, in populateDiscographySections
+    // once the discography's true source is known. Other sources are already clean
+    // commercial catalogues, so their default is unchanged.
     content: { live: true, compilations: true, featured: true },
     ownership: 'all'  // 'all', 'owned', 'missing'
 };
+
+// Non-studio MusicBrainz release-group secondary types (EXCLUDING Compilation,
+// which has its own toggle). Mirrors core/musicbrainz_search _NON_STUDIO_SECONDARY_TYPES
+// so backend + UI agree. Only used to declutter MusicBrainz artist pages by default.
+const _NON_STUDIO_SECONDARY = new Set(['live', 'soundtrack', 'remix', 'demo',
+    'mixtape/street', 'interview', 'audiobook', 'audio drama']);
 
 // Maximum visible characters of an artist name in the sidebar Library
 // breadcrumb. Names longer than this get truncated with an ellipsis so the
@@ -1153,6 +1165,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
         if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
         if (artist.amazon_id) badges.push(_hb(AMAZON_LOGO_URL, 'AMZ', 'Amazon Music', null));
+        if (artist.bandcamp_url) badges.push(_hb(BANDCAMP_LOGO_URL, 'BC', 'Bandcamp', artist.bandcamp_url));
         if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
@@ -1168,10 +1181,11 @@ function renderArtistEnrichmentCoverage(enrichment) {
         return;
     }
 
-    const services = [
+    const services = filterJiosaavnServiceEntries([
         { name: 'Spotify', key: 'spotify', color: '#1db954' },
         { name: 'MusicBrainz', key: 'musicbrainz', color: '#ba55d3' },
         { name: 'Deezer', key: 'deezer', color: '#a238ff' },
+        { name: 'JioSaavn', key: 'jiosaavn', color: '#2bc5b4' },
         { name: 'Last.fm', key: 'lastfm', color: '#d51007' },
         { name: 'iTunes', key: 'itunes', color: '#fc3c44' },
         { name: 'AudioDB', key: 'audiodb', color: '#1a9fff' },
@@ -1179,7 +1193,8 @@ function renderArtistEnrichmentCoverage(enrichment) {
         { name: 'Genius', key: 'genius', color: '#ffff64' },
         { name: 'Tidal', key: 'tidal', color: '#00ffff' },
         { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
-    ];
+        { name: 'Bandcamp', key: 'bandcamp', color: '#1da0c3' },
+    ], 'key');
 
     const r = 20, circ = 2 * Math.PI * r;
 
@@ -1827,6 +1842,42 @@ function populateDiscographySections(discography) {
     // Populate singles
     populateReleaseSection('singles', discography.singles);
 
+    // MusicBrainz lists an artist's WHOLE catalogue (live, soundtracks, remixes,
+    // etc.), which buries the studio albums. ONLY for a MusicBrainz discography,
+    // hide non-studio content by default (compilations stay shown; owned releases
+    // are never hidden; the user can toggle it back on). Other sources are already
+    // clean commercial catalogues, so this leaves their default untouched. Gated
+    // on the discography's real source, which is known now that data has loaded.
+    if ((discography && String(discography.source || '').toLowerCase()) === 'musicbrainz') {
+        discographyFilterState.content.live = false;
+        discographyFilterState._mbDeclutter = true;
+
+        // MusicBrainz tags live/non-studio authoritatively, so recompute each
+        // card's data-is-live from its secondary_types instead of the title guess.
+        // This fixes the false positive where a studio album titled "Live Through
+        // This" would be hidden, and covers soundtrack/remix/demo too. MB cards only.
+        ['albums', 'eps', 'singles'].forEach(cat => {
+            const grid = document.getElementById(`${cat}-grid`);
+            if (!grid) return;
+            grid.querySelectorAll('.release-card').forEach(card => {
+                const rd = card._releaseData;
+                const secs = (rd && Array.isArray(rd.secondary_types))
+                    ? rd.secondary_types.map(s => String(s).trim().toLowerCase()) : [];
+                const nonStudio = secs.some(s => _NON_STUDIO_SECONDARY.has(s));
+                card.setAttribute('data-is-live', nonStudio ? 'true' : 'false');
+            });
+        });
+
+        // The toggle governs the broader non-studio set on MB, so label it honestly.
+        const container = document.getElementById('discography-filters');
+        const liveBtn = container && container.querySelector(
+            '.discography-filter-btn[data-filter="content"][data-value="live"]');
+        if (liveBtn) {
+            liveBtn.classList.remove('active');
+            liveBtn.textContent = 'Non-Studio';
+        }
+    }
+
     // Apply any active filters after populating
     applyDiscographyFilters();
 }
@@ -1891,16 +1942,12 @@ function createReleaseCard(release) {
     // Store mutable reference so stream updates propagate to click handler
     card._releaseData = release;
 
-    // Tag card for content-type filtering
-    const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^]]*\]/i;
-    const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
-    const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
-    const isLive = livePattern.test(release.title || '') || (release.album_type === 'compilation' && livePattern.test(release.title || ''));
-    const isCompilation = (release.album_type === 'compilation') || compilationPattern.test(release.title || '');
-    const isFeatured = featuredPattern.test(release.title || '');
-    card.setAttribute("data-is-live", isLive ? "true" : "false");
-    card.setAttribute("data-is-compilation", isCompilation ? "true" : "false");
-    card.setAttribute("data-is-featured", isFeatured ? "true" : "false");
+    // Tag card for content-type filtering (shared classifier — #877, so Artist
+    // Detail and the Download Discography modal never drift apart).
+    const cc = _classifyReleaseContent(release);
+    card.setAttribute("data-is-live", cc.isLive ? "true" : "false");
+    card.setAttribute("data-is-compilation", cc.isCompilation ? "true" : "false");
+    card.setAttribute("data-is-featured", cc.isFeatured ? "true" : "false");
 
     // Background image — use data-bg-src for IntersectionObserver lazy loading
     // (observeLazyBackgrounds is called by the caller after appending the grid).
@@ -2394,8 +2441,11 @@ function initializeDiscographyFilters() {
 
 function resetDiscographyFilters() {
     discographyFilterState.categories = { albums: true, eps: true, singles: true };
+    // Neutral show-all. The MusicBrainz-only declutter is applied later, in
+    // populateDiscographySections, once the discography's real source is known.
     discographyFilterState.content = { live: true, compilations: true, featured: true };
     discographyFilterState.ownership = 'all';
+    discographyFilterState._mbDeclutter = false;
 
     // Reset button visual states
     const container = document.getElementById('discography-filters');
@@ -2409,6 +2459,9 @@ function resetDiscographyFilters() {
             btn.classList.add('active');
         }
     });
+    // Restore the default "Live" label; the MB path relabels it to "Non-Studio".
+    const liveBtn = container.querySelector('.discography-filter-btn[data-filter="content"][data-value="live"]');
+    if (liveBtn) liveBtn.textContent = 'Live';
 }
 
 function applyDiscographyFilters() {
@@ -2436,15 +2489,24 @@ function applyDiscographyFilters() {
         grid.querySelectorAll('.release-card').forEach(card => {
             let hidden = false;
 
-            // Content filters
-            if (!discographyFilterState.content.live && card.getAttribute('data-is-live') === 'true') {
-                hidden = true;
-            }
-            if (!discographyFilterState.content.compilations && card.getAttribute('data-is-compilation') === 'true') {
-                hidden = true;
-            }
-            if (!discographyFilterState.content.featured && card.getAttribute('data-is-featured') === 'true') {
-                hidden = true;
+            // Content filters. On MusicBrainz pages (where non-studio is hidden by
+            // an automatic default the user didn't set) never hide something the
+            // user OWNS. Elsewhere the toggles are entirely user-driven, so they are
+            // respected as-is (no owned exemption) — keeps non-MB behaviour identical
+            // to before. (owned is null while its completion check is pending; the
+            // filter re-runs once checks resolve, so an owned card reappears then.)
+            const _ownedExempt = discographyFilterState._mbDeclutter
+                && card._releaseData && card._releaseData.owned === true;
+            if (!_ownedExempt) {
+                if (!discographyFilterState.content.live && card.getAttribute('data-is-live') === 'true') {
+                    hidden = true;
+                }
+                if (!discographyFilterState.content.compilations && card.getAttribute('data-is-compilation') === 'true') {
+                    hidden = true;
+                }
+                if (!discographyFilterState.content.featured && card.getAttribute('data-is-featured') === 'true') {
+                    hidden = true;
+                }
             }
 
             // Ownership filter (only apply if card is not still checking)
@@ -2518,8 +2580,8 @@ async function openDiscographyModal() {
             const data = await res.json();
 
             if (!data.error) {
-                discography = { albums: data.albums || [], singles: data.singles || [] };
-                if (discography.albums.length > 0 || discography.singles.length > 0) {
+                discography = { albums: data.albums || [], eps: data.eps || [], singles: data.singles || [] };
+                if (discography.albums.length > 0 || discography.eps.length > 0 || discography.singles.length > 0) {
                     artistsPageState.artistDiscography = discography;
                     artistsPageState.sourceOverride = data.source || artistsPageState.sourceOverride || null;
                     // Use metadata source ID for the modal (needed for download API calls)
@@ -2569,6 +2631,9 @@ async function openDiscographyModal() {
                     <button class="discog-filter active" data-type="album" onclick="toggleDiscogFilter(this)">Albums</button>
                     <button class="discog-filter active" data-type="ep" onclick="toggleDiscogFilter(this)">EPs</button>
                     <button class="discog-filter active" data-type="single" onclick="toggleDiscogFilter(this)">Singles</button>
+                    <button class="discog-filter active" data-content="live" onclick="toggleDiscogFilter(this)">Live</button>
+                    <button class="discog-filter active" data-content="compilations" onclick="toggleDiscogFilter(this)">Compilations</button>
+                    <button class="discog-filter active" data-content="featured" onclick="toggleDiscogFilter(this)">Featured</button>
                 </div>
                 <div class="discog-select-actions">
                     <button class="discog-select-btn" onclick="discogSelectAll(true)">Select All</button>
@@ -2605,21 +2670,40 @@ async function openDiscographyModal() {
 
 function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+// #877: single source of truth for content-type classification, shared by the
+// Artist Detail cards and the Download Discography modal so they can't drift.
+function _classifyReleaseContent(release) {
+    const t = (release && (release.title || release.name)) || '';
+    // Title-based classification, shared by all sources and the download modal.
+    // On MusicBrainz artist pages the data-is-live attribute is recomputed
+    // authoritatively from secondary_types in populateDiscographySections (MB tags
+    // live/non-studio reliably), so this title heuristic only governs non-MB here.
+    const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
+    const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
+    const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
+    return {
+        isLive: livePattern.test(t),
+        isCompilation: (release && release.album_type === 'compilation') || compilationPattern.test(t),
+        isFeatured: featuredPattern.test(t),
+    };
+}
+
 function _renderDiscogCard(release, index, completionData) {
     const comp = completionData?.albums?.find(c => c.id === release.id) || completionData?.singles?.find(c => c.id === release.id);
     const status = comp?.status || 'unknown';
     const isOwned = status === 'completed';
     const isPartial = status === 'partial' || status === 'nearly_complete';
     const year = release.release_date ? release.release_date.substring(0, 4) : '';
-    const tracks = release.total_tracks || 0;
+    const tracks = release.total_tracks || release.track_count || 0;
     const img = release.image_url || '';
+    const cc = _classifyReleaseContent(release);
     const checked = !isOwned;
     const statusClass = isOwned ? 'owned' : isPartial ? 'partial' : '';
     const statusIcon = isOwned ? '✓' : isPartial ? '◐' : '';
 
     const albumName = release.name || release.title || '';
     return `
-        <label class="discog-card ${statusClass}" data-type="${release._type}" style="animation-delay:${index * 0.03}s">
+        <label class="discog-card ${statusClass}" data-type="${release._type}" data-is-live="${cc.isLive}" data-is-compilation="${cc.isCompilation}" data-is-featured="${cc.isFeatured}" style="animation-delay:${index * 0.03}s">
             <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
@@ -2636,9 +2720,29 @@ function _renderDiscogCard(release, index, completionData) {
 
 function toggleDiscogFilter(btn) {
     btn.classList.toggle('active');
-    const type = btn.dataset.type;
-    document.querySelectorAll(`.discog-card[data-type="${type}"]`).forEach(card => {
-        card.style.display = btn.classList.contains('active') ? '' : 'none';
+    _applyDiscogFilters();
+}
+
+// #877: combined category (Albums/EPs/Singles) + content (Live/Compilations/
+// Featured) filtering, mirroring the Artist Detail filter logic. A card is
+// hidden if its category is off OR any active content exclusion applies — and
+// because the download payload is built from VISIBLE checked cards, every
+// toggle now actually changes what gets downloaded.
+function _applyDiscogFilters() {
+    const typeActive = {};
+    document.querySelectorAll('.discog-filter[data-type]').forEach(b => {
+        typeActive[b.dataset.type] = b.classList.contains('active');
+    });
+    const contentActive = {};
+    document.querySelectorAll('.discog-filter[data-content]').forEach(b => {
+        contentActive[b.dataset.content] = b.classList.contains('active');
+    });
+    document.querySelectorAll('.discog-card').forEach(card => {
+        let hidden = typeActive[card.getAttribute('data-type')] === false;
+        if (!hidden && contentActive.live === false && card.getAttribute('data-is-live') === 'true') hidden = true;
+        if (!hidden && contentActive.compilations === false && card.getAttribute('data-is-compilation') === 'true') hidden = true;
+        if (!hidden && contentActive.featured === false && card.getAttribute('data-is-featured') === 'true') hidden = true;
+        card.style.display = hidden ? 'none' : '';
     });
     _updateDiscogFooterCount();
 }
@@ -3096,10 +3200,11 @@ function renderArtistMetaPanel(artist) {
     // ID badges row (clickable links)
     const idBadges = document.createElement('div');
     idBadges.className = 'enhanced-artist-id-badges';
-    const idSources = [
+    const idSources = filterJiosaavnServiceEntries([
         { key: 'spotify_artist_id', label: 'Spotify', svc: 'spotify' },
         { key: 'musicbrainz_id', label: 'MusicBrainz', svc: 'musicbrainz' },
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
+        { key: 'jiosaavn_id', label: 'JioSaavn', svc: 'jiosaavn' },
         { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
         { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
         { key: 'itunes_artist_id', label: 'iTunes', svc: 'itunes' },
@@ -3108,7 +3213,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'tidal_id', label: 'Tidal', svc: 'tidal' },
         { key: 'qobuz_id', label: 'Qobuz', svc: 'qobuz' },
         { key: 'amazon_id', label: 'Amazon Music', svc: 'amazon' },
-    ];
+    ], 'svc');
     idSources.forEach(src => {
         if (artist[src.key]) {
             idBadges.appendChild(makeClickableBadge(src.svc, 'artist', artist[src.key], src.label));
@@ -3155,10 +3260,11 @@ function renderArtistMetaPanel(artist) {
 
         const enrichMenu = document.createElement('div');
         enrichMenu.className = 'enhanced-enrich-menu';
-        const services = [
+        const services = filterJiosaavnServiceEntries([
             { id: 'spotify', label: 'Spotify', icon: '🟢' },
             { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
             { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
             { id: 'discogs', label: 'Discogs', icon: '🟤' },
             { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
             { id: 'itunes', label: 'iTunes', icon: '🔴' },
@@ -3166,7 +3272,10 @@ function renderArtistMetaPanel(artist) {
             { id: 'genius', label: 'Genius', icon: '🟡' },
             { id: 'tidal', label: 'Tidal', icon: '⬛' },
             { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
-        ];
+            // Bandcamp intentionally omitted: this is the artist-level enrich
+            // menu and Bandcamp has no artist pass (album/track only). The
+            // album-level menu below still offers it.
+        ], 'id');
         services.forEach(svc => {
             const item = document.createElement('div');
             item.className = 'enhanced-enrich-menu-item';
@@ -3242,10 +3351,11 @@ function renderArtistMetaPanel(artist) {
     // Match status row (clickable to rematch)
     const statusRow = document.createElement('div');
     statusRow.className = 'enhanced-match-status-row';
-    const statusServices = [
+    const statusServices = filterJiosaavnServiceEntries([
         { key: 'spotify_match_status', label: 'Spotify', attempted: 'spotify_last_attempted', svc: 'spotify' },
         { key: 'musicbrainz_match_status', label: 'MusicBrainz', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
+        { key: 'jiosaavn_match_status', label: 'JioSaavn', attempted: 'jiosaavn_last_attempted', svc: 'jiosaavn' },
         { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
         { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
@@ -3254,7 +3364,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'tidal_match_status', label: 'Tidal', attempted: 'tidal_last_attempted', svc: 'tidal' },
         { key: 'qobuz_match_status', label: 'Qobuz', attempted: 'qobuz_last_attempted', svc: 'qobuz' },
         { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
-    ];
+    ], 'svc');
     statusServices.forEach(s => {
         const status = artist[s.key];
         const attempted = artist[s.attempted];
@@ -3553,19 +3663,346 @@ function _rebuildAlbumMap() {
     artistDetailPageState._albumMap = map;
 }
 
+function openAlbumArtPicker(album) {
+    if (!album || !album.id) return;
+    const artist = (typeof artistDetailPageState !== 'undefined' && artistDetailPageState.currentArtistName) || '';
+    const albumTitle = album.title || '';
+
+    const _closeSvg = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    const _checkSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+    const old = document.getElementById('art-picker-overlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'art-picker-overlay';
+    overlay.className = 'art-picker-overlay';
+    let skeleton = '';
+    for (let i = 0; i < 10; i++) skeleton += '<div class="art-picker-skel"></div>';
+    overlay.innerHTML =
+        '<div class="art-picker-modal" role="dialog" aria-modal="true">' +
+          '<div class="art-picker-header">' +
+            '<div class="art-picker-titles">' +
+              '<div class="art-picker-title">Choose cover art</div>' +
+              '<div class="art-picker-subtitle">' + _esc(albumTitle) + (artist ? ' · ' + _esc(artist) : '') + '</div>' +
+            '</div>' +
+            '<button class="art-picker-close" aria-label="Close">' + _closeSvg + '</button>' +
+          '</div>' +
+          '<div class="art-picker-body"><div class="art-picker-grid loading">' + skeleton + '</div></div>' +
+          '<div class="art-picker-footer">' +
+            '<div class="art-picker-count"></div>' +
+            '<div class="art-picker-actions">' +
+              '<button class="art-picker-btn art-picker-cancel">Cancel</button>' +
+              '<button class="art-picker-btn art-picker-apply" disabled>Apply</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 200); };
+    const onEsc = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+    document.addEventListener('keydown', onEsc);
+    overlay.querySelector('.art-picker-close').onclick = close;
+    overlay.querySelector('.art-picker-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    const body = overlay.querySelector('.art-picker-body');
+    const applyBtn = overlay.querySelector('.art-picker-apply');
+    const countEl = overlay.querySelector('.art-picker-count');
+    let selectedUrl = null;
+
+    const q = '?artist=' + encodeURIComponent(artist) + '&album=' + encodeURIComponent(albumTitle);
+    fetch('/api/album/' + encodeURIComponent(album.id) + '/art-options' + q)
+        .then(r => r.json())
+        .then(data => {
+            const cands = (data && data.candidates) || [];
+            if (!cands.length) {
+                body.innerHTML = '<div class="art-picker-empty">No alternative covers found for this album.</div>';
+                return;
+            }
+            countEl.textContent = cands.length + ' option' + (cands.length === 1 ? '' : 's');
+            const grid = document.createElement('div');
+            grid.className = 'art-picker-grid';
+            cands.forEach(c => {
+                const tile = document.createElement('button');
+                tile.className = 'art-picker-tile';
+                tile.innerHTML =
+                    '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
+                    '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
+                    '<span class="art-picker-check">' + _checkSvg + '</span>';
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
+                tile.onclick = () => {
+                    grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                    tile.classList.add('selected');
+                    selectedUrl = c.url;
+                    applyBtn.disabled = false;
+                };
+                grid.appendChild(tile);
+            });
+            body.innerHTML = '';
+            body.appendChild(grid);
+            // custom-URL row BELOW the grid (and after the innerHTML reset,
+            // which would otherwise wipe it)
+            _artPickerCustomRow(body, grid, tileUrl => {
+                grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                selectedUrl = tileUrl;
+                applyBtn.disabled = false;
+            });
+        })
+        .catch(() => { body.innerHTML = '<div class="art-picker-empty">Couldn\'t load cover options.</div>'; });
+
+    applyBtn.onclick = () => {
+        if (!selectedUrl) return;
+        applyBtn.disabled = true;
+        applyBtn.classList.add('loading');
+        applyBtn.textContent = 'Applying…';
+        fetch('/api/album/' + encodeURIComponent(album.id) + '/art', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: selectedUrl })
+        }).then(r => r.json()).then(res => {
+            if (res && res.success) {
+                album.thumb_url = selectedUrl;
+                const headerImg = document.querySelector('.enhanced-expanded-art');
+                if (headerImg) { headerImg.src = selectedUrl; headerImg.style.visibility = 'visible'; }
+                if (typeof showToast === 'function') showToast('Cover art updated', 'success');
+                close();
+            } else {
+                applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+                if (typeof showToast === 'function') showToast((res && res.error) || 'Failed to update art', 'error');
+            }
+        }).catch(() => {
+            applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+            if (typeof showToast === 'function') showToast('Failed to update art', 'error');
+        });
+    };
+}
+
+// Custom-URL row for the artist photo picker: paste a link → instant preview
+// tile → click it → Apply. The preview <img> is the validation (a bad link
+// shows its own error); the backend re-validates bytes before applying.
+// NB: module scope — the pickers' _checkSvg consts are function-LOCAL, so
+// this needs its own (referencing theirs was a silent ReferenceError).
+const _ART_CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+function _artPickerCustomRow(body, grid, onSelect) {
+    const row = document.createElement('div');
+    row.className = 'art-picker-custom';
+    row.innerHTML =
+        '<input type="url" class="art-picker-url" placeholder="…or paste an image URL" autocomplete="off">' +
+        '<div class="art-picker-custom-slot"></div>';
+    const input = row.querySelector('.art-picker-url');
+    const slot = row.querySelector('.art-picker-custom-slot');
+    let timer = null;
+    input.addEventListener('input', () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            const url = input.value.trim();
+            slot.innerHTML = '';
+            if (!/^https?:\/\//i.test(url)) return;
+            const tile = document.createElement('button');
+            tile.className = 'art-picker-tile art-picker-tile--custom';
+            tile.innerHTML =
+                '<img loading="lazy" src="' + _esc(url) + '" alt="">' +
+                '<span class="art-picker-badge">custom</span>' +
+                '<span class="art-picker-check">' + _ART_CHECK_SVG + '</span>';
+            tile.querySelector('img').onerror = () => {
+                slot.innerHTML = '<div class="art-picker-custom-err">Couldn\'t load that image.</div>';
+            };
+            tile.onclick = () => {
+                document.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                tile.classList.add('selected');
+                onSelect(url);
+            };
+            slot.appendChild(tile);
+        }, 350);
+    });
+    body.appendChild(row);
+}
+
+function openArtistArtPicker() {
+    // Artist twin of openAlbumArtPicker: candidates from every CONNECTED
+    // metadata source; applying writes the pick to the SoulSync DB, the
+    // active media server, and artist.jpg on disk (what Navidrome reads) —
+    // so a wrong photo from an old mis-match gets corrected everywhere.
+    const artistId = artistDetailPageState.currentArtistId;
+    const artistName = artistDetailPageState.currentArtistName || '';
+    if (!artistId) {
+        if (typeof showToast === 'function') showToast('No artist selected', 'error');
+        return;
+    }
+
+    const _closeSvg = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    const _checkSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+    const old = document.getElementById('art-picker-overlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'art-picker-overlay';
+    overlay.className = 'art-picker-overlay';
+    let skeleton = '';
+    for (let i = 0; i < 8; i++) skeleton += '<div class="art-picker-skel"></div>';
+    overlay.innerHTML =
+        '<div class="art-picker-modal" role="dialog" aria-modal="true">' +
+          '<div class="art-picker-header">' +
+            '<div class="art-picker-titles">' +
+              '<div class="art-picker-title">Choose artist photo</div>' +
+              '<div class="art-picker-subtitle">' + _esc(artistName) + ' · applies to SoulSync, your server, and artist.jpg on disk</div>' +
+            '</div>' +
+            '<button class="art-picker-close" aria-label="Close">' + _closeSvg + '</button>' +
+          '</div>' +
+          '<div class="art-picker-body"><div class="art-picker-grid loading">' + skeleton + '</div></div>' +
+          '<div class="art-picker-footer">' +
+            '<div class="art-picker-count"></div>' +
+            '<div class="art-picker-actions">' +
+              '<button class="art-picker-btn art-picker-cancel">Cancel</button>' +
+              '<button class="art-picker-btn art-picker-apply" disabled>Apply</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 200); };
+    const onEsc = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+    document.addEventListener('keydown', onEsc);
+    overlay.querySelector('.art-picker-close').onclick = close;
+    overlay.querySelector('.art-picker-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    const body = overlay.querySelector('.art-picker-body');
+    const applyBtn = overlay.querySelector('.art-picker-apply');
+    const countEl = overlay.querySelector('.art-picker-count');
+    let selectedUrl = null;
+
+    fetch('/api/artist/' + encodeURIComponent(artistId) + '/art-options')
+        .then(r => r.json())
+        .then(data => {
+            const cands = (data && data.candidates) || [];
+            if (!cands.length) {
+                body.innerHTML = '<div class="art-picker-empty">No photos found on your connected sources for this artist.</div>';
+                _artPickerCustomRow(body, null, tileUrl => {
+                    selectedUrl = tileUrl;
+                    applyBtn.disabled = false;
+                });
+                return;
+            }
+            countEl.textContent = cands.length + ' source' + (cands.length === 1 ? '' : 's');
+            const grid = document.createElement('div');
+            grid.className = 'art-picker-grid';
+            // the CURRENT photo leads the grid as a reference tile — read from
+            // the page (the DB often stores a local cache path, which must
+            // never be re-applied as if it were a source URL). Display-only.
+            const curImg = document.getElementById('artist-detail-image');
+            if (curImg && curImg.src && curImg.style.display !== 'none') {
+                const cur = document.createElement('div');
+                cur.className = 'art-picker-tile art-picker-tile--current';
+                cur.innerHTML =
+                    '<img loading="lazy" src="' + _esc(curImg.src) + '" alt="">' +
+                    '<span class="art-picker-badge art-picker-badge--current">current</span>';
+                cur.querySelector('img').onerror = () => cur.remove();
+                grid.appendChild(cur);
+            }
+            cands.forEach(c => {
+                const tile = document.createElement('button');
+                tile.className = 'art-picker-tile';
+                tile.innerHTML =
+                    '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
+                    '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
+                    '<span class="art-picker-check">' + _checkSvg + '</span>';
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
+                tile.onclick = () => {
+                    grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                    tile.classList.add('selected');
+                    selectedUrl = c.url;
+                    applyBtn.disabled = false;
+                };
+                grid.appendChild(tile);
+            });
+            body.innerHTML = '';
+            body.appendChild(grid);
+            // custom-URL row BELOW the grid (and after the innerHTML reset,
+            // which would otherwise wipe it)
+            _artPickerCustomRow(body, grid, tileUrl => {
+                grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                selectedUrl = tileUrl;
+                applyBtn.disabled = false;
+            });
+        })
+        .catch(() => { body.innerHTML = '<div class="art-picker-empty">Couldn\'t load photo options.</div>'; });
+
+    applyBtn.onclick = () => {
+        if (!selectedUrl) return;
+        applyBtn.disabled = true;
+        applyBtn.classList.add('loading');
+        applyBtn.textContent = 'Applying…';
+        fetch('/api/artist/' + encodeURIComponent(artistId) + '/art', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: selectedUrl })
+        }).then(r => r.json()).then(res => {
+            if (res && res.success) {
+                const heroImg = document.getElementById('artist-detail-image');
+                if (heroImg) { heroImg.src = selectedUrl; heroImg.style.display = ''; }
+                const fallback = document.getElementById('artist-detail-image-fallback');
+                if (fallback) fallback.style.display = 'none';
+                const parts = [];
+                if (res.server_updated) parts.push('server');
+                if (res.disk_written) parts.push('artist.jpg');
+                const extra = parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '';
+                if (typeof showToast === 'function') showToast('Artist photo updated' + extra, 'success');
+                close();
+            } else {
+                applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+                if (typeof showToast === 'function') showToast((res && res.error) || 'Failed to update photo', 'error');
+            }
+        }).catch(() => {
+            applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+            if (typeof showToast === 'function') showToast('Failed to update photo', 'error');
+        });
+    };
+}
+
 function renderExpandedAlbumHeader(album) {
     const header = document.createElement('div');
     header.className = 'enhanced-expanded-header';
 
-    // Large album art
-    if (album.thumb_url) {
-        const img = document.createElement('img');
-        img.className = 'enhanced-expanded-art';
-        img.src = album.thumb_url;
-        img.alt = album.title || '';
-        img.onerror = function () { this.style.display = 'none'; };
-        header.appendChild(img);
-    }
+    // Large album art — click to open the cover-art picker.
+    const artWrap = document.createElement('div');
+    artWrap.className = 'enhanced-expanded-art-wrap';
+    artWrap.title = 'Change cover art';
+    const img = document.createElement('img');
+    img.className = 'enhanced-expanded-art';
+    if (album.thumb_url) img.src = album.thumb_url;
+    img.alt = album.title || '';
+    img.onerror = function () { this.style.visibility = 'hidden'; };
+    artWrap.appendChild(img);
+    const editOverlay = document.createElement('div');
+    editOverlay.className = 'enhanced-art-edit-overlay';
+    editOverlay.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>Change cover</span>';
+    artWrap.appendChild(editOverlay);
+    artWrap.addEventListener('click', () => openAlbumArtPicker(album));
+    header.appendChild(artWrap);
 
     const info = document.createElement('div');
     info.className = 'enhanced-expanded-info';
@@ -3621,15 +4058,17 @@ function renderExpandedAlbumHeader(album) {
     // External ID badges (clickable links)
     const ids = document.createElement('div');
     ids.className = 'enhanced-expanded-ids';
-    const idFields = [
+    const idFields = filterJiosaavnServiceEntries([
         { key: 'spotify_album_id', label: 'Spotify', svc: 'spotify' },
         { key: 'musicbrainz_release_id', label: 'MusicBrainz', svc: 'musicbrainz' },
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
+        { key: 'jiosaavn_id', label: 'JioSaavn', svc: 'jiosaavn' },
         { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
         { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
         { key: 'itunes_album_id', label: 'iTunes', svc: 'itunes' },
         { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
-    ];
+        { key: 'bandcamp_url', label: 'Bandcamp', svc: 'bandcamp' },
+    ], 'svc');
     idFields.forEach(f => {
         if (album[f.key]) {
             ids.appendChild(makeClickableBadge(f.svc, 'album', album[f.key], f.label));
@@ -3643,16 +4082,18 @@ function renderExpandedAlbumHeader(album) {
     // Match status chips (clickable to rematch)
     const statusRow = document.createElement('div');
     statusRow.className = 'enhanced-match-status-row compact';
-    const statusSvcs = [
+    const statusSvcs = filterJiosaavnServiceEntries([
         { key: 'spotify_match_status', label: 'Spotify', attempted: 'spotify_last_attempted', svc: 'spotify' },
         { key: 'musicbrainz_match_status', label: 'MB', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
+        { key: 'jiosaavn_match_status', label: 'JioSaavn', attempted: 'jiosaavn_last_attempted', svc: 'jiosaavn' },
         { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
         { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
         { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
-    ];
+        { key: 'bandcamp_match_status', label: 'Bandcamp', attempted: 'bandcamp_last_attempted', svc: 'bandcamp' },
+    ], 'svc');
     statusSvcs.forEach(s => {
         const status = album[s.key];
         const attempted = album[s.attempted];
@@ -3686,16 +4127,18 @@ function renderExpandedAlbumHeader(album) {
         albumEnrichWrap.appendChild(albumEnrichBtn);
         const albumEnrichMenu = document.createElement('div');
         albumEnrichMenu.className = 'enhanced-enrich-menu';
-        [
+        filterJiosaavnServiceEntries([
             { id: 'spotify', label: 'Spotify', icon: '🟢' },
             { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
             { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
             { id: 'discogs', label: 'Discogs', icon: '🟤' },
             { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
             { id: 'itunes', label: 'iTunes', icon: '🔴' },
             { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
             { id: 'genius', label: 'Genius', icon: '🟡' },
-        ].forEach(svc => {
+            { id: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
+        ], 'id').forEach(svc => {
             const item = document.createElement('div');
             item.className = 'enhanced-enrich-menu-item';
             item.textContent = `${svc.icon} ${svc.label}`;
@@ -3930,38 +4373,85 @@ async function ensureEnhancedAlbumCanonicalTracks(album) {
     }
 }
 
+// Loose title key for owned<->canonical matching. Mirrors the Reorganize
+// matcher (core.library_reorganize._normalize_title), which already maps these
+// same multi-disc tracks correctly: drop only the featured-artist credit, then
+// treat every other separator (brackets, dashes, slashes, punctuation) as
+// whitespace — so "X (Main Theme)" and "X - Main Theme" collapse to the same key
+// while "(feat. Y)" is removed. Keeping bracket CONTENT (not deleting it) is what
+// makes editions line up.
+function _normTitleForMatch(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[([]\s*(?:feat|ft|featuring)\b[^)\]]*[)\]]/g, ' ')  // (feat. Y) / [ft Y]
+        .replace(/\s+(?:feat|ft|featuring)\b\.?\s.*$/g, ' ')          // trailing  feat. Y …
+        .replace(/[^a-z0-9]+/g, ' ')                                  // all other separators -> space (KEEP content)
+        .trim();
+}
+
 function _deriveEnhancedMissingTracks(album, canonicalTracks) {
-    const occupiedSlots = new Set();
-    (album.tracks || []).forEach(track => {
+    // #916: multi-disc albums store disc_number = 1 for EVERY track in the library
+    // (the scanner doesn't split discs), so a strict disc:track slot match flags every
+    // canonical disc-2+ track as missing. Match each canonical track to an owned track
+    // by slot FIRST, then fall back to title — consuming each owned track once so genuine
+    // missings and duplicate titles still count correctly.
+    const owned = (album.tracks || []).map(t => ({
+        slot: _trackSlotKey(t),
+        title: _normTitleForMatch(t.title || t.name),
+        used: false,
+    }));
+    const slotIndex = new Map();
+    owned.forEach((o, i) => { if (o.slot !== '1:0' && !slotIndex.has(o.slot)) slotIndex.set(o.slot, i); });
+
+    const missing = [];
+    (canonicalTracks || []).forEach(track => {
         const key = _trackSlotKey(track);
-        if (key !== '1:0') occupiedSlots.add(key);
-    });
-    return (canonicalTracks || [])
-        .map(track => ({
+        const normalized = _normalizeExpectedMissingTrack(track, album);
+        if (key === '1:0' || !normalized._hasActionableContext) return;
+
+        // 1) exact disc:track slot
+        const si = slotIndex.get(key);
+        if (si != null && !owned[si].used) { owned[si].used = true; return; }
+
+        // 2) fallback: title vs any UNUSED owned track (handles the disc_number=1 collapse)
+        const nt = _normTitleForMatch(track.name || track.title);
+        if (nt) {
+            const m = owned.find(o => !o.used && o.title === nt);
+            if (m) { m.used = true; return; }
+        }
+
+        missing.push({
             ...track,
             name: track.name || track.title,
             duration_ms: track.duration_ms || track.duration || 0,
-        }))
-        .filter(track => {
-            const key = _trackSlotKey(track);
-            const normalized = _normalizeExpectedMissingTrack(track, album);
-            return key !== '1:0' && normalized._hasActionableContext && !occupiedSlots.has(key);
         });
+    });
+    return missing;
 }
 
 function _getEnhancedAlbumTrackRows(album) {
     const ownedTracks = Array.isArray(album.tracks) ? album.tracks : [];
     const rowsBySlot = new Map();
+    const ownedSlots = new Set();
     ownedTracks.forEach(track => {
-        const key = _trackSlotKey(track);
-        rowsBySlot.set(key === '1:0' ? `owned:${track.id}` : key, track);
+        // #1051: every owned track is a real physical file — key by its unique id,
+        // NEVER by disc:track slot. Multi-disc albums whose tags all claim disc 1
+        // (or the scanner's #916 disc collapse) make disc1-trackN and disc2-trackN
+        // share a slot; keying the render Map by slot silently overwrote one with
+        // the other, so a disc-2 track rendered in a disc-1 row (some tracks vanished).
+        // Keying by id renders every owned file; ownedSlots still drives the
+        // "is this slot already owned?" check for the missing-track merge below.
+        rowsBySlot.set(`owned:${track.id}`, track);
+        ownedSlots.add(_trackSlotKey(track));
     });
 
     const explicitMissing = Array.isArray(album.missing_tracks) ? album.missing_tracks : [];
     explicitMissing.forEach(missing => {
         const row = _normalizeExpectedMissingTrack(missing, album);
         const key = _trackSlotKey(row);
-        if (row._hasActionableContext && !rowsBySlot.has(key)) rowsBySlot.set(key, row);
+        if (row._hasActionableContext && !ownedSlots.has(key) && !rowsBySlot.has(`missing:${key}`)) {
+            rowsBySlot.set(`missing:${key}`, row);
+        }
     });
 
     return Array.from(rowsBySlot.values()).sort((a, b) => {
@@ -4014,8 +4504,11 @@ function _buildTrackRow(track, album, admin) {
 
     // Disc number
     const discTd = document.createElement('td');
-    discTd.className = 'col-disc';
+    discTd.className = 'col-disc' + (admin ? ' editable' : '');
     discTd.textContent = track.disc_number || '-';
+    // Disc # describes a real file's tags — like the title cell (and unlike a
+    // phantom "Missing" row), it's only editable for owned tracks. #1051
+    if (track._missingExpected) discTd.classList.remove('editable');
     tr.appendChild(discTd);
 
     // Title
@@ -4084,15 +4577,17 @@ function _buildTrackRow(track, album, admin) {
     matchTd.className = 'col-match';
     const matchCell = document.createElement('div');
     matchCell.className = 'enhanced-track-match-cell';
-    const trackServices = [
+    const trackServices = filterJiosaavnServiceEntries([
         { svc: 'spotify', col: 'spotify_track_id', label: 'SP' },
         { svc: 'musicbrainz', col: 'musicbrainz_recording_id', label: 'MB' },
         { svc: 'deezer', col: 'deezer_id', label: 'Dz' },
+        { svc: 'jiosaavn', col: 'jiosaavn_id', label: 'JS' },
         { svc: 'audiodb', col: 'audiodb_id', label: 'ADB' },
         { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
         { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
         { svc: 'genius', col: 'genius_id', label: 'Gen' },
-    ];
+        { svc: 'bandcamp', col: 'bandcamp_url', label: 'BC' },
+    ], 'svc');
     trackServices.forEach(s => {
         const hasId = !!track[s.col];
         const chip = document.createElement('span');
@@ -4156,6 +4651,7 @@ function _buildTrackRow(track, album, admin) {
             actionsTd.innerHTML = `
                 <div class="enhanced-track-actions-group">
                     <button class="enhanced-source-info-btn" title="View download source info">ℹ</button>
+                    <button class="enhanced-reidentify-btn" title="Re-identify — file this track under a different release">&#8644;</button>
                     <button class="enhanced-redownload-btn" title="Redownload this track">&#8635;</button>
                     <button class="enhanced-delete-btn" title="Delete track from library">&#10005;</button>
                 </div>
@@ -4280,6 +4776,8 @@ function _attachTableDelegation(table, album) {
                 e.stopPropagation();
                 if (cell.classList.contains('col-num')) {
                     startInlineEdit(cell, 'track', track.id, 'track_number', track.track_number || '');
+                } else if (cell.classList.contains('col-disc')) {
+                    startInlineEdit(cell, 'track', track.id, 'disc_number', track.disc_number || '');
                 } else if (cell.classList.contains('col-title')) {
                     startInlineEdit(cell, 'track', track.id, 'title', track.title || '');
                 } else if (cell.classList.contains('col-bpm')) {
@@ -4296,7 +4794,15 @@ function _attachTableDelegation(table, album) {
                 e.stopPropagation();
                 const svc = chip.dataset.service;
                 const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
-                openManualMatchModal('track', track.id, svc, track.title || '', aId);
+                // Bandcamp only: include the album name alongside the track title
+                // so its release-page search has more to narrow down on (a bare
+                // track title is ambiguous — compilations, remixes, covers share
+                // titles across releases). Other services take a track ID directly
+                // and searched better with just the bare title, so leave them be.
+                const trackDefaultQuery = svc === 'bandcamp'
+                    ? [album.title, track.title].filter(Boolean).join(' ')
+                    : (track.title || '');
+                openManualMatchModal('track', track.id, svc, trackDefaultQuery, aId);
                 return;
             }
         }
@@ -4350,6 +4856,15 @@ function _attachTableDelegation(table, album) {
         if (target.closest('.enhanced-source-info-btn')) {
             e.stopPropagation();
             showTrackSourceInfo(track, target.closest('.enhanced-source-info-btn'));
+            return;
+        }
+
+        // Re-identify button (admin) — #889
+        if (target.closest('.enhanced-reidentify-btn')) {
+            e.stopPropagation();
+            const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            openReidentifyModal(track.id, track.title || 'Unknown', artistName,
+                                album.title || '', album.thumb_url || '');
             return;
         }
 
@@ -5372,43 +5887,80 @@ function _pollRedownloadProgress(taskId, overlay) {
 async function redownloadLibraryAlbum(album, artistName, btn) {
     const albumName = album.title || '';
     const spotifyAlbumId = album.spotify_album_id || '';
+    const itunesAlbumId = album.itunes_album_id || '';
+    // #911 — the album's CANONICAL source (the same one the Enhanced view tags + displays it as)
+    // wins. Redownload must pull THAT exact edition, not a fresh search that can resolve to a
+    // different one (issue: matched the 66-track 'Original Soundtrack Collection', a search got
+    // the 19-track 'Volume 1'). _getEnhancedAlbumCanonicalSource is the single source of truth
+    // for which source identifies this album, across spotify/deezer/itunes/musicbrainz/…
+    const canonical = _getEnhancedAlbumCanonicalSource(album);
 
-    if (!spotifyAlbumId && !albumName) {
+    if (!canonical && !spotifyAlbumId && !itunesAlbumId && !albumName) {
         showToast('No album ID or name available for redownload', 'warning');
         return;
     }
+
+    // Fetch a specific album edition by its source id (the Spotify/iTunes endpoints both return
+    // a Spotify-shaped payload, so downstream handling is identical).
+    const fetchAlbumBySource = (source, id, name, artist) => {
+        const params = new URLSearchParams({ name: name || albumName, artist: artist || artistName || '' });
+        const base = source === 'itunes' ? '/api/itunes/album/' : '/api/spotify/album/';
+        return fetch(`${base}${encodeURIComponent(id)}?${params}`);
+    };
 
     const origText = btn ? btn.innerHTML : '';
     try {
         if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
 
-        let response;
-        if (spotifyAlbumId) {
-            const params = new URLSearchParams({ name: albumName, artist: artistName || '' });
-            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${params}`);
-        }
+        let albumData = null;
 
-        if (!response || !response.ok) {
-            const query = `${artistName || ''} ${albumName}`.trim();
-            const searchResp = await fetch('/api/enhanced-search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query })
-            });
-            if (!searchResp.ok) throw new Error('Album search failed');
-            const searchData = await searchResp.json();
-            const found = searchData.spotify_albums?.[0] || searchData.itunes_albums?.[0];
-            if (!found || !found.id) {
-                showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
-                return;
+        // 1) Primary: the canonical tagged source (any source), via the SAME
+        //    /api/album/<id>/tracks endpoint the Enhanced view uses for its canonical tracklist —
+        //    so a redownload is always the album the user is actually looking at.
+        if (canonical) {
+            const params = new URLSearchParams({ name: albumName, artist: artistName || '', source: canonical.source });
+            const r = await fetch(`/api/album/${encodeURIComponent(canonical.id)}/tracks?${params}`);
+            if (r.ok) {
+                const data = await r.json();
+                if (data && data.success && Array.isArray(data.tracks) && data.tracks.length) {
+                    albumData = { ...data.album, tracks: data.tracks };   // normalize to {…, tracks:[]}
+                }
             }
-            const params = new URLSearchParams({ name: found.name || albumName, artist: found.artist || artistName || '' });
-            response = await fetch(`/api/spotify/album/${encodeURIComponent(found.id)}?${params}`);
         }
 
-        if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+        // 2) Fallback: the stored spotify/iTunes id, then a last-resort search.
+        if (!albumData) {
+            let response;
+            if (spotifyAlbumId) {
+                response = await fetchAlbumBySource('spotify', spotifyAlbumId);
+            } else if (itunesAlbumId) {
+                response = await fetchAlbumBySource('itunes', itunesAlbumId);
+            }
 
-        const albumData = await response.json();
+            if (!response || !response.ok) {
+                const query = `${artistName || ''} ${albumName}`.trim();
+                const searchResp = await fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                if (!searchResp.ok) throw new Error('Album search failed');
+                const searchData = await searchResp.json();
+                const spotHit = searchData.spotify_albums?.[0];
+                const found = spotHit || searchData.itunes_albums?.[0];
+                if (!found || !found.id) {
+                    showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
+                    return;
+                }
+                // Fetch from the MATCHING source endpoint — the old fallback always hit Spotify,
+                // which is wrong for an iTunes search hit.
+                response = await fetchAlbumBySource(spotHit ? 'spotify' : 'itunes', found.id, found.name, found.artist);
+            }
+
+            if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+            albumData = await response.json();
+        }
+
         if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
             showToast(`No tracks found for "${albumName}"`, 'warning');
             return;
@@ -5620,6 +6172,11 @@ function getServiceUrl(service, entityType, id) {
             album: `https://music.amazon.com/albums/${id}`,
             track: `https://music.amazon.com/tracks/${id}`,
         },
+        bandcamp: {
+            artist: id,  // derived artist page origin, already a full URL
+            album: id,   // bandcamp_url is already a full URL
+            track: id,
+        },
     };
     return urls[service] && urls[service][entityType] || null;
 }
@@ -5650,7 +6207,7 @@ function startInlineEdit(cell, type, id, field, currentValue) {
     if (cell.querySelector('.enhanced-inline-input')) return;
     cancelInlineEdit();
 
-    const isNumeric = ['track_number', 'bpm'].includes(field);
+    const isNumeric = ['track_number', 'disc_number', 'bpm'].includes(field);
     const originalContent = cell.innerHTML;
     cell.dataset.originalContent = originalContent;
 
@@ -5659,7 +6216,7 @@ function startInlineEdit(cell, type, id, field, currentValue) {
     input.className = 'enhanced-inline-input' + (isNumeric ? ' num' : '');
     input.value = currentValue || '';
     if (field === 'bpm') input.step = '0.1';
-    if (field === 'track_number') { input.min = '1'; input.step = '1'; }
+    if (field === 'track_number' || field === 'disc_number') { input.min = '1'; input.step = '1'; }
 
     cell.innerHTML = '';
     cell.appendChild(input);
@@ -5693,7 +6250,7 @@ async function saveInlineEdit(type, id, field, newValue) {
     artistDetailPageState.editingCell = null;
 
     let parsedValue = newValue;
-    if (field === 'track_number') parsedValue = parseInt(newValue) || null;
+    if (field === 'track_number' || field === 'disc_number') parsedValue = parseInt(newValue) || null;
     else if (field === 'bpm') parsedValue = parseFloat(newValue) || null;
     else if (field === 'explicit') parsedValue = parseInt(newValue) || 0;
 
@@ -6070,7 +6627,7 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
     const serviceLabels = {
         spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
         audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius',
-        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music'
+        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music', bandcamp: 'Bandcamp'
     };
 
     const overlay = document.createElement('div');
@@ -6691,6 +7248,7 @@ async function runEnrichment(entityType, entityId, service, name, artistName, ar
         'itunes': ['itunes', 'it'],
         'lastfm': ['last.fm', 'lfm'],
         'genius': ['genius', 'gen'],
+        'bandcamp': ['bandcamp', 'bc'],
     };
     const prefixes = chipPrefixes[service] || [service];
     document.querySelectorAll('.enhanced-match-chip').forEach(chip => {
@@ -7108,7 +7666,9 @@ function _pollBatchWriteTagsStatus() {
                 }
                 _batchWriteTagsPollTimer = setTimeout(poll, 1000);
             } else if (state.status === 'done') {
-                let msg = `Tags written: ${state.written} succeeded, ${state.failed} failed`;
+                let msg = `Tags written: ${state.written} updated`;
+                if ((state.skipped || 0) > 0) msg += `, ${state.skipped} unchanged`;
+                if (state.failed > 0) msg += `, ${state.failed} failed`;
                 if (state.sync_phase === 'done') {
                     const serverName = state.sync_server === 'plex' ? 'Plex' : state.sync_server === 'jellyfin' ? 'Jellyfin' : state.sync_server;
                     if (state.sync_synced > 0 && state.sync_failed === 0) {
@@ -7342,6 +7902,16 @@ async function showReorganizeModal(albumId) {
     html += '</select>';
     html += '</div>';
 
+    // Action: full pipeline vs rename-only (#875).
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Action</label>';
+    html += '<div class="reorganize-template-hint">"Full reorganize" re-tags and re-checks every track through the import pipeline — thorough, but slow and it re-touches every file. "Rename only" just moves files to your current naming scheme: no re-tagging, no quality/AcoustID checks, and only files whose name actually changes are touched. Tip: renaming can reset play counts / date-added on your media server.</div>';
+    html += '<select id="reorganize-action-select" class="reorganize-template-input">';
+    html += '<option value="full">Full reorganize (default)</option>';
+    html += '<option value="rename">Rename only (skip post-processing)</option>';
+    html += '</select>';
+    html += '</div>';
+
     // Preview area
     html += '<div class="reorganize-preview-section">';
     html += '<div class="reorganize-preview-header">';
@@ -7526,10 +8096,11 @@ async function executeReorganize() {
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
         const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
+        const renameOnly = document.getElementById('reorganize-action-select')?.value === 'rename';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode, rename_only: renameOnly })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
@@ -8221,7 +8792,8 @@ async function playLibraryTrack(track, albumTitle, artistName) {
     // resolve-track and overwrite the caller-supplied fields with the
     // DB values. Falls back silently to the caller-supplied values on
     // any error so we never lose the play action over a metadata fetch.
-    if (track.id && (track.title || track.name) && (artistName || track.artist_name)) {
+    if ((track.legacy_track_id || (track.id && !track.lib2_track_id)) &&
+            (track.title || track.name) && (artistName || track.artist_name)) {
         try {
             const _dbResp = await fetch('/api/stats/resolve-track', {
                 method: 'POST',
@@ -8281,6 +8853,9 @@ async function playLibraryTrack(track, albumTitle, artistName) {
             is_library: true,
             image_url: albumArt,
             id: track.id,
+            lib2_track_id: track.lib2_track_id || null,
+            legacy_track_id: track.legacy_track_id || null,
+            server_track_id: track.server_track_id || null,
             artist_id: track.artist_id,
             album_id: track.album_id,
             bitrate: track.bitrate,
@@ -8305,7 +8880,11 @@ async function playLibraryTrack(track, albumTitle, artistName) {
                 album: albumTitle || '',
                 // Server song id so playback can stream via the media server
                 // when the file isn't on SoulSync's disk (#809).
-                track_id: track.id || null
+                track_id: track.server_track_id || track.legacy_track_id ||
+                    (track.lib2_track_id ? null : (track.id || null)),
+                lib2_track_id: track.lib2_track_id || null,
+                legacy_track_id: track.legacy_track_id || null,
+                server_track_id: track.server_track_id || null,
             })
         });
 
@@ -9052,6 +9631,7 @@ async function openArtistExportModal(initialScope) {
                 '<div class="arec-actions">' +
                     '<button class="arec-btn" id="wlx-copy">Copy</button>' +
                     '<button class="arec-btn" id="wlx-download">Download</button>' +
+                    '<button class="arec-btn arec-btn-m3u" id="wlx-m3u" style="display:none;">Download M3U</button>' +
                 '</div>' +
             '</div>' +
             '<div class="arec-body" id="wlx-body"><div class="arec-loading">Building export…</div></div>' +
@@ -9065,6 +9645,9 @@ async function openArtistExportModal(initialScope) {
     const applyScopeUI = () => {
         // "library counts" only applies to the library roster.
         document.getElementById('wlx-contents-wrap').style.display = (scope === 'library') ? '' : 'none';
+        // The library M3U (a track-level export) only makes sense for the library, not the watchlist.
+        const m3uBtn = document.getElementById('wlx-m3u');
+        if (m3uBtn) m3uBtn.style.display = (scope === 'library') ? '' : 'none';
         if (scope !== 'library') {
             contents = false;
             const cb = document.getElementById('wlx-contents');
@@ -9126,6 +9709,16 @@ async function openArtistExportModal(initialScope) {
     document.getElementById('wlx-links').addEventListener('change', (e) => { links = e.target.checked; refresh(); });
     document.getElementById('wlx-contents').addEventListener('change', (e) => { contents = e.target.checked; refresh(); });
     document.getElementById('wlx-copy').onclick = () => _arecCopy(content, 'Export copied');
+    document.getElementById('wlx-m3u').onclick = () => {
+        // A whole-library track playlist — built fresh by the server, independent of the roster export.
+        const a = document.createElement('a');
+        a.href = '/api/library/export/m3u';
+        a.download = 'soulsync_library.m3u';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        if (typeof showToast === 'function') showToast('Building library M3U…', 'info');
+    };
     document.getElementById('wlx-download').onclick = () => {
         const ext = fmt;
         const mime = fmt === 'json' ? 'application/json' : (fmt === 'csv' ? 'text/csv' : 'text/plain');
@@ -9139,4 +9732,199 @@ async function openArtistExportModal(initialScope) {
     };
 
     refresh();
+}
+
+
+// ==================== Re-identify Track Modal (#889) ====================
+// Lets an admin re-file an already-imported track under a different release
+// (single / EP / album). Searches any configured metadata source (tabs, default
+// active), and on confirm stages the file + writes a single-use hint the
+// auto-import worker consumes (see core/imports/rematch_*.py).
+
+const reidState = { trackId: null, source: null, sources: [], rows: [], selected: null };
+
+function openReidentifyModal(trackId, title, artist, albumTitle, imageUrl) {
+    reidState.trackId = trackId;
+    reidState.source = null;
+    reidState.rows = [];
+    reidState.selected = null;
+
+    const overlay = document.getElementById('reid-modal-overlay');
+    if (!overlay) return;
+
+    // Hero
+    document.getElementById('reid-hero-title').textContent = title || 'Track';
+    const sub = document.getElementById('reid-hero-sub');
+    sub.textContent = (artist || '') + (albumTitle ? ` · currently in “${albumTitle}”` : '');
+    const art = document.getElementById('reid-hero-art');
+    const bg = document.getElementById('reid-hero-bg');
+    if (imageUrl) {
+        art.style.backgroundImage = `url('${imageUrl}')`;
+        art.classList.remove('empty');
+        bg.style.backgroundImage = `url('${imageUrl}')`;
+    } else {
+        art.style.backgroundImage = '';
+        art.classList.add('empty');
+        bg.style.backgroundImage = '';
+    }
+
+    document.getElementById('reid-search-input').value = `${title || ''} ${artist || ''}`.trim();
+    document.getElementById('reid-replace').checked = true;
+    _reidUpdateConfirm();
+    _reidRenderState('idle');
+
+    overlay.classList.remove('hidden');
+    _reidLoadTabs();
+}
+
+function closeReidentifyModal() {
+    const overlay = document.getElementById('reid-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+async function _reidLoadTabs() {
+    const tabsEl = document.getElementById('reid-tabs');
+    tabsEl.innerHTML = '';
+    try {
+        const resp = await fetch('/api/reidentify/sources');
+        const data = await resp.json();
+        reidState.sources = (data && data.sources) || [];
+    } catch (_) {
+        reidState.sources = [];
+    }
+    if (!reidState.sources.length) {
+        tabsEl.innerHTML = '<span class="reid-tab active">No metadata sources available</span>';
+        _reidRenderState('empty', 'No configured metadata source to search.');
+        return;
+    }
+    const active = reidState.sources.find(s => s.active) || reidState.sources[0];
+    reidState.source = active.source;
+    reidState.sources.forEach(s => {
+        const tab = document.createElement('div');
+        tab.className = 'reid-tab' + (s.source === reidState.source ? ' active' : '');
+        tab.textContent = s.label || s.source;
+        tab.onclick = () => _reidSelectTab(s.source);
+        tabsEl.appendChild(tab);
+    });
+    runReidentifySearch();   // auto-search the active source on open
+}
+
+function _reidSelectTab(source) {
+    if (source === reidState.source) return;
+    reidState.source = source;
+    document.querySelectorAll('#reid-tabs .reid-tab').forEach(t => {
+        t.classList.toggle('active', t.textContent ===
+            (reidState.sources.find(s => s.source === source) || {}).label);
+    });
+    runReidentifySearch();
+}
+
+async function runReidentifySearch() {
+    const query = (document.getElementById('reid-search-input').value || '').trim();
+    if (!query || !reidState.source) return;
+    reidState.selected = null;
+    _reidUpdateConfirm();
+    _reidRenderState('loading');
+    try {
+        const url = `/api/reidentify/search?source=${encodeURIComponent(reidState.source)}&q=${encodeURIComponent(query)}`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        reidState.rows = (data && data.results) || [];
+        _reidRenderResults();
+    } catch (e) {
+        _reidRenderState('empty', 'Search failed. Try another source.');
+    }
+}
+
+function _reidRenderResults() {
+    const el = document.getElementById('reid-results');
+    if (!reidState.rows.length) {
+        _reidRenderState('empty', 'No releases found. Try refining the search or another source tab.');
+        return;
+    }
+    // ISRC-bearing rows first (provably the same recording), then the rest.
+    const ranked = reidState.rows
+        .map((r, i) => ({ r, i }))
+        .sort((a, b) => (b.r.isrc ? 1 : 0) - (a.r.isrc ? 1 : 0));
+
+    el.innerHTML = '';
+    ranked.forEach(({ r }, n) => {
+        const badge = (r.album_type || 'album').toLowerCase();
+        const bits = [];
+        if (r.year) bits.push(r.year);
+        if (r.total_tracks) bits.push(`${r.total_tracks} track${r.total_tracks === 1 ? '' : 's'}`);
+        const row = document.createElement('div');
+        row.className = 'reid-result';
+        row.style.animationDelay = `${Math.min(n * 0.03, 0.3)}s`;
+        row.onclick = () => _reidSelectResult(r, row);
+        row.innerHTML = `
+            <div class="reid-result-art" ${r.image_url ? `style="background-image:url('${encodeURI(r.image_url)}')"` : ''}>
+                ${r.image_url ? '' : '<span>♪</span>'}
+            </div>
+            <div class="reid-result-info">
+                <div class="reid-result-title">${escapeHtml(r.track_title || '')}</div>
+                <div class="reid-result-release">${escapeHtml(r.album_name || 'Unknown release')}${r.artist_name ? ' · ' + escapeHtml(r.artist_name) : ''}</div>
+            </div>
+            <div class="reid-result-meta">
+                <span class="reid-badge ${badge}">${escapeHtml(badge)}</span>
+                ${bits.length ? `<span class="reid-result-detail">${escapeHtml(bits.join(' · '))}</span>` : ''}
+                <span class="reid-result-check"></span>
+            </div>`;
+        el.appendChild(row);
+    });
+}
+
+function _reidSelectResult(r, rowEl) {
+    reidState.selected = r;
+    document.querySelectorAll('#reid-results .reid-result').forEach(x => x.classList.remove('selected'));
+    rowEl.classList.add('selected');
+    _reidUpdateConfirm();
+}
+
+function _reidUpdateConfirm() {
+    const btn = document.getElementById('reid-confirm-btn');
+    if (btn) btn.disabled = !reidState.selected;
+}
+
+function _reidRenderState(kind, msg) {
+    const el = document.getElementById('reid-results');
+    if (!el) return;
+    if (kind === 'loading') {
+        el.innerHTML = '<div class="reid-state"><div class="reid-spinner"></div><p>Searching…</p></div>'
+            + '<div class="reid-skel"></div><div class="reid-skel"></div><div class="reid-skel"></div>';
+    } else if (kind === 'empty') {
+        el.innerHTML = `<div class="reid-state"><div class="reid-state-icon">🔍</div><p>${escapeHtml(msg || 'No results.')}</p></div>`;
+    } else { // idle
+        el.innerHTML = '<div class="reid-state"><div class="reid-state-icon">💿</div>'
+            + '<p>Pick the release this track should be filed under — the same song may appear on a single, an EP, and an album.</p></div>';
+    }
+}
+
+async function confirmReidentify() {
+    if (!reidState.selected || !reidState.trackId) return;
+    const btn = document.getElementById('reid-confirm-btn');
+    const replace = document.getElementById('reid-replace').checked;
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = 'Staging…';
+    try {
+        const resp = await fetch('/api/reidentify/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                library_track_id: reidState.trackId,
+                source: reidState.selected.source,
+                track_id: reidState.selected.track_id,
+                replace: replace,
+            }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Re-identify failed');
+        showToast(`Re-filing under “${data.album_name || 'the chosen release'}” — it'll update after the next import pass.`, 'success');
+        closeReidentifyModal();
+    } catch (e) {
+        showToast(e.message || 'Re-identify failed', 'error');
+        btn.disabled = false;
+        btn.textContent = prev;
+    }
 }

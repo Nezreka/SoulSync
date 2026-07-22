@@ -65,8 +65,19 @@ class TorrentStatus:
     peers: int = 0
     eta: Optional[int] = None        # seconds, None if unknown
     save_path: Optional[str] = None
+    # Absolute path to THIS torrent's own content (the single file, or the
+    # multi-file root folder). Unlike save_path — the shared download DIR — this
+    # points straight at the torrent's files, so a consumer never has to guess
+    # which file in a shared folder belongs to this torrent. Optional: only
+    # clients that expose it (qBittorrent) populate it; others leave it None.
+    content_path: Optional[str] = None
     files: Optional[List[str]] = None
     error: Optional[str] = None
+    # Seeding lifecycle (video P5): share ratio + seconds spent seeding. Only
+    # clients that expose them populate these (qBittorrent); consumers fall
+    # back to their own clock when None.
+    ratio: Optional[float] = None
+    seeding_time: Optional[int] = None
 
 
 @runtime_checkable
@@ -126,3 +137,79 @@ class TorrentClientAdapter(Protocol):
     async def pause(self, torrent_id: str) -> bool: ...
 
     async def resume(self, torrent_id: str) -> bool: ...
+
+
+# ── server-side .torrent fetch (Sonarr-style handoff) ─────────────────────────
+
+def _strip_query(url: str) -> str:
+    """Log-safe form of a download URL — Prowlarr links carry the API key in
+    the query string."""
+    return url.split('?', 1)[0]
+
+
+def fetch_torrent_payload(url: str, timeout: int = 30):
+    """Fetch a .torrent from Prowlarr/the indexer HERE, so the torrent client
+    never needs network reachability to them (split-container setups: the
+    client often can't resolve the Prowlarr hostname, and a URL handoff then
+    dies silently inside the client). Follows redirects manually because
+    Prowlarr /download links redirect to ``magnet:`` for magnet-only indexers.
+
+    Returns ``(file_bytes, None)`` for a .torrent, ``(None, magnet_uri)`` for
+    a magnet redirect, ``(None, None)`` when the fetch failed.
+    """
+    import requests
+
+    current = url
+    try:
+        for _ in range(5):                      # bounded redirect walk
+            resp = requests.get(current, timeout=timeout, allow_redirects=False)
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get('Location') or ''
+                if location.lower().startswith('magnet:'):
+                    return None, location
+                if not location:
+                    return None, None
+                from urllib.parse import urljoin
+                current = urljoin(current, location)
+                continue
+            if resp.ok and resp.content[:1] == b'd':   # bencoded dict = .torrent
+                return resp.content, None
+            return None, None
+        return None, None
+    except Exception:
+        return None, None
+
+
+async def add_torrent_smart(
+    adapter: "TorrentClientAdapter",
+    url_or_magnet: str,
+    category: str = "soulsync",
+    save_path: Optional[str] = None,
+) -> Optional[str]:
+    """Add a release the way Sonarr/Radarr do: magnets go straight to the
+    client; HTTP download links are fetched server-side and handed over as
+    file bytes via ``add_torrent_file``. Falls back to the legacy URL handoff
+    only when the server-side fetch fails, so setups where the client CAN
+    reach the indexer keep working."""
+    from utils.logging_config import get_logger
+    logger = get_logger('torrent.add')
+
+    if not str(url_or_magnet or '').lower().startswith(('http://', 'https://')):
+        return await adapter.add_torrent(url_or_magnet, category=category, save_path=save_path)
+
+    import asyncio
+    loop = asyncio.get_event_loop()
+    file_bytes, magnet = await loop.run_in_executor(
+        None, fetch_torrent_payload, url_or_magnet
+    )
+    if magnet:
+        return await adapter.add_torrent(magnet, category=category, save_path=save_path)
+    if file_bytes is not None:
+        return await adapter.add_torrent_file(file_bytes, category=category, save_path=save_path)
+
+    logger.warning(
+        "Could not fetch the .torrent server-side from %s — handing the URL to the "
+        "torrent client instead (the client must be able to reach that host itself)",
+        _strip_query(url_or_magnet),
+    )
+    return await adapter.add_torrent(url_or_magnet, category=category, save_path=save_path)

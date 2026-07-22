@@ -111,7 +111,10 @@ class PersonalizedPlaylistsService:
         Either value can be None to skip that filter for that source.
 
         - Spotify: 60 / 40 (the existing 0-100 popularity scale)
-        - Deezer:  500000 / 100000 (rank values — ballpark from real data)
+        - Deezer:  60 / 50 (ALSO 0-100 — the discovery pool SYNTHESIZES deezer popularity to a
+          0-100 score at scan time, capped at 100; it is NOT Deezer's raw rank. The old
+          500000/100000 rank thresholds matched nothing, so Popular Picks came back empty for
+          deezer users while Hidden Gems' < 100000 caught the whole pool.)
         - iTunes / others: None / None (no popularity data; fall back to no
           threshold filter, just diversity-on-random)
 
@@ -121,7 +124,7 @@ class PersonalizedPlaylistsService:
         if normalized == 'spotify':
             return 60, 40
         if normalized == 'deezer':
-            return 500_000, 100_000
+            return 60, 50
         # iTunes, hydrabase, anything else — no usable popularity data
         return None, None
 

@@ -9,6 +9,10 @@ import threading
 import time
 
 from config.settings import config_manager
+from core.downloads.source_policy import (
+    RELEASE_SOURCE_NAMES as _RELEASE_SOURCE_NAMES,
+    STREAMING_SOURCE_NAMES as _STREAMING_SOURCE_NAMES,
+)
 from core.runtime_state import (
     download_batches,
     download_tasks,
@@ -35,7 +39,6 @@ _start_next_batch_of_downloads = None
 _orphaned_download_keys = None
 missing_download_executor = None
 download_orchestrator = None
-_RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 
 # Hard ceiling on automatic next-candidate retries after a download was
 # quarantined (AcoustID mismatch / integrity / duration). The natural
@@ -55,15 +58,6 @@ MAX_QUARANTINE_RETRIES = 5
 # one 'soulseek' bucket), but this ceiling caps the TOTAL retries across every
 # source so a misbehaving source-resolution can never loop forever.
 MAX_TOTAL_QUARANTINE_RETRIES = 100
-
-# Streaming plugins report their source name as the download's "username"
-# (see download_orchestrator._streaming_sources). Soulseek uses the peer name
-# instead, so anything not in this set is bucketed under 'soulseek' for the
-# per-source retry budget.
-_STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
-))
-
 
 def _resolve_download_source(username):
     """Map a download's username to its logical source for per-source budgeting.
@@ -99,6 +93,45 @@ def _download_id_key(download_id):
     return f"download_id::{download_id}" if download_id else None
 
 
+def _acquisition_task_ref(task):
+    """(import_id, track_id) for acquisition-dispatched tasks, else None."""
+    try:
+        from core.acquisition.retry_state import acquisition_task_ref
+        return acquisition_task_ref(task.get('track_info'))
+    except Exception:
+        return None
+
+
+def _write_acquisition_retry_journal(action):
+    """Persist a retry-journal action captured under tasks_lock.
+
+    Runs strictly OUTSIDE tasks_lock (SQLite I/O must never happen while the
+    global task lock is held) and fails open — journaling must never break or
+    delay the retry itself. ``action`` is ``('snapshot'|'close', kwargs)`` or
+    None for ordinary (non-acquisition) tasks.
+    """
+    if not action:
+        return
+    try:
+        from core.acquisition import retry_state
+        from database.music_database import get_database
+        conn = get_database()._get_connection()
+        try:
+            kind, kwargs = action
+            if kind == 'snapshot':
+                retry_state.journal_retry_snapshot(conn, **kwargs)
+            else:
+                retry_state.close_retry_state(conn, **kwargs)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning(f"[Retry] Acquisition retry journal update failed: {exc}")
+
+
 def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
     """Re-queue a task whose download was just quarantined so the worker tries
     the NEXT best candidate instead of failing outright.
@@ -127,17 +160,42 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
     if missing_download_executor is None or _download_track_worker is None:
         return False
 
+    queued, attempt_desc, journal_action = _requeue_decide_and_mark(
+        task_id, trigger)
+    _write_acquisition_retry_journal(journal_action)
+    if not queued:
+        return False
+
+    logger.info(
+        f"[Retry:{trigger}] Re-queuing task {task_id} for next-best candidate "
+        f"(attempt {attempt_desc})"
+    )
+    missing_download_executor.submit(_download_track_worker, task_id, batch_id)
+    return True
+
+
+def _requeue_decide_and_mark(task_id, trigger):
+    """The locked half of ``requeue_quarantined_task_for_retry``.
+
+    Decides whether a retry is allowed and mutates the task under tasks_lock
+    exactly as before. Returns ``(queued, attempt_desc, journal_action)``; the
+    journal action is deferred to the caller so persistent-journal I/O for
+    acquisition tasks happens outside the lock. Deny reasons that terminate an
+    acquisition walk (cancelled, budget exhausted) close its journal row; a
+    queued retry snapshots the walk state so a restart can resume it.
+    """
     with tasks_lock:
         task = download_tasks.get(task_id)
         if not task:
-            return False
+            return False, None, None
+        acq_ref = _acquisition_task_ref(task)
         # The user explicitly picked this candidate via the candidates modal —
         # honour their choice rather than silently swapping in another file.
         # (Matches the monitor's transfer-retry guards.)
         if task.get('_user_manual_pick'):
-            return False
+            return False, None, None
         if task.get('status') == 'cancelled':
-            return False
+            return False, None, _close_action(acq_ref, task_id, 'cancelled')
 
         username = task.get('username')
         filename = task.get('filename')
@@ -146,7 +204,7 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
         # bad source as used, so a re-run could re-pick the same file and loop.
         # Bail and let the caller fail it normally.
         if not username or not filename:
-            return False
+            return False, None, None
 
         total_count = task.get('quarantine_retry_count', 0)
 
@@ -193,14 +251,21 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
                         f"budget for source '{source}' ({source_count}/{budget}) "
                         f"and no fallback source remains — giving up, marking failed"
                     )
-                    return False
+                    return False, None, _close_action(
+                        acq_ref, task_id, 'failed',
+                        error=f"retry budget exhausted for source '{source}' "
+                              f"with no fallback remaining",
+                    )
                 if total_count >= MAX_TOTAL_QUARANTINE_RETRIES:
                     logger.warning(
                         f"[Retry:{trigger}] Task {task_id} hit the absolute retry "
                         f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, "
                         f"marking failed"
                     )
-                    return False
+                    return False, None, _close_action(
+                        acq_ref, task_id, 'failed',
+                        error='absolute quarantine-retry ceiling reached',
+                    )
                 task['exhausted_download_sources'] = exhausted
                 # Don't push this source's counter past its budget — it's done.
                 # The next source starts spending its own fresh budget when its
@@ -216,7 +281,10 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
                         f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, "
                         f"marking failed"
                     )
-                    return False
+                    return False, None, _close_action(
+                        acq_ref, task_id, 'failed',
+                        error='absolute quarantine-retry ceiling reached',
+                    )
                 counts[source] = source_count + 1
                 task['quarantine_retry_counts_by_source'] = counts
                 attempt_desc = f"source '{source}' {source_count + 1}/{budget}"
@@ -227,7 +295,10 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
                     f"[Retry:{trigger}] Task {task_id} hit the quarantine-retry cap "
                     f"({MAX_QUARANTINE_RETRIES}) — giving up, marking failed"
                 )
-                return False
+                return False, None, _close_action(
+                    acq_ref, task_id, 'failed',
+                    error='quarantine-retry cap reached',
+                )
             attempt_desc = f"{total_count + 1}/{MAX_QUARANTINE_RETRIES}"
 
         # Mark the quarantined source as used so the re-run won't pick it again.
@@ -256,12 +327,42 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
         task['retry_info'] = attempt_desc
         task['retry_trigger'] = trigger
 
-    logger.info(
-        f"[Retry:{trigger}] Re-queuing task {task_id} for next-best candidate "
-        f"(attempt {attempt_desc})"
-    )
-    missing_download_executor.submit(_download_track_worker, task_id, batch_id)
-    return True
+        journal_action = None
+        if acq_ref:
+            # Copy the walk state under the lock; the redaction and DB write
+            # happen outside it. This snapshot (taken BEFORE the worker is
+            # resubmitted) is what lets a restart continue with the next
+            # candidate instead of re-downloading the quarantined source.
+            journal_action = ('snapshot', {
+                'task_id': str(task_id),
+                'import_id': acq_ref[0],
+                'track_id': acq_ref[1],
+                'candidates': list(task.get('cached_candidates') or ()),
+                'used_sources': set(task.get('used_sources') or ()),
+                'exhausted_sources': set(
+                    task.get('exhausted_download_sources') or ()),
+                'retry_counts': dict(
+                    task.get('quarantine_retry_counts_by_source') or {}),
+                'retry_count': int(task.get('quarantine_retry_count') or 0),
+                'query_count': int(task.get('query_count') or 0),
+                'last_progress': (
+                    f"requeued after {trigger} quarantine "
+                    f"(attempt {attempt_desc})"
+                ),
+            })
+
+    return True, attempt_desc, journal_action
+
+
+def _close_action(acq_ref, task_id, status, error=None):
+    """Journal close action for a denied retry; None for ordinary tasks."""
+    if not acq_ref:
+        return None
+    return ('close', {
+        'task_id': str(task_id),
+        'status': status,
+        'error': error,
+    })
 
 
 def _is_release_task(task):
@@ -760,7 +861,8 @@ class WebUIDownloadMonitor:
                 # used_sources keys are formatted as "{username}_{filename}", so startswith is exact.
                 is_tidal = any(s.startswith('tidal_') for s in tried_sources)
                 if is_tidal:
-                    tidal_quality = config_manager.get('tidal_download.quality', 'lossless')
+                    from core.quality.source_map import quality_tier_for_source
+                    tidal_quality = quality_tier_for_source('tidal', default='lossless')
                     allow_fb = config_manager.get('tidal_download.allow_fallback', True)
                     if tidal_quality == 'hires' and not allow_fb:
                         task['error_message'] = (
@@ -970,6 +1072,30 @@ class WebUIDownloadMonitor:
             else:
                 # Unknown state with no progress (e.g., "Requested", "Initializing")
                 # Treat like 0% stuck — start/keep the downloading timer running
+                #
+                # EXCEPT for streaming-engine downloads: the engine SERIALIZES
+                # downloads per source (semaphore + rate-limit gap), so
+                # 'Initializing' there means QUEUED behind the worker — a big
+                # wishlist batch legitimately queues for many minutes. As long
+                # as some download from the same source is actively running,
+                # the queue is moving and this one is just waiting its turn.
+                # Cancelling it here churned variants forever: a YouTube cancel
+                # can't interrupt yt-dlp, so the "cancelled" file still landed
+                # in downloads/ with no record to claim it (the 10GB bleed).
+                _ti_src = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+                _src_name = str(task.get('username') or _ti_src.get('username') or '').lower()
+                if (_src_name in _STREAMING_SOURCE_NAMES
+                        and str(state_str).strip().lower() in ('initializing', 'queued', 'requested')):
+                    _queue_moving = any(
+                        isinstance(row, dict)
+                        and str(row.get('username') or '').lower() == _src_name
+                        and 'InProgress' in str(row.get('state') or '')
+                        for row in live_transfers_lookup.values()
+                    )
+                    if _queue_moving:
+                        task.pop('downloading_start_time', None)
+                        task.pop('stuck_retry_count', None)
+                        return False
                 if 'downloading_start_time' not in task:
                     task['downloading_start_time'] = current_time
                 download_time = current_time - task['downloading_start_time']

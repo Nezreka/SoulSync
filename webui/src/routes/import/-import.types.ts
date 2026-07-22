@@ -23,11 +23,21 @@ export interface ImportStagingFile {
   manual_match?: ImportTrackResult;
 }
 
+/** While a large staging folder is still being scanned in the background (#947), the
+ * staging endpoints return `scanning: true` + progress instead of files/groups; the query
+ * polls until the scan completes and real data arrives. */
+export interface ImportScanProgress {
+  scanned: number;
+  total: number;
+}
+
 export interface ImportStagingFilesPayload {
   success: boolean;
   files?: ImportStagingFile[];
   staging_path?: string;
   error?: string;
+  scanning?: boolean;
+  progress?: ImportScanProgress;
 }
 
 export interface ImportStagingGroup {
@@ -47,6 +57,8 @@ export interface ImportStagingGroupsPayload {
   success: boolean;
   groups?: ImportStagingGroup[];
   error?: string;
+  scanning?: boolean;
+  progress?: ImportScanProgress;
 }
 
 export interface ImportAlbumResult {
@@ -71,7 +83,21 @@ export interface ImportAlbumSearchPayload {
   suggestions?: ImportAlbumResult[];
   /** Provider used to seed the lookup chain for this response. */
   primary_source?: string | null;
+  /** Explicit source the caller picked, if any (echoed back). */
+  source_override?: string | null;
   ready?: boolean;
+  error?: string;
+}
+
+export interface ImportSearchSource {
+  source: string;
+  label: string;
+  active: boolean;
+}
+
+export interface ImportSearchSourcesPayload {
+  success: boolean;
+  sources?: ImportSearchSource[];
   error?: string;
 }
 
@@ -172,6 +198,23 @@ export interface ImportAutoImportSettingsPayload {
   scan_interval?: number;
   confidence_threshold?: number;
   auto_process?: boolean;
+  // Per-context quality-profile override — null/undefined means "use the
+  // app-wide default profile" (Settings -> Quality), same as every other
+  // context that doesn't specify its own.
+  quality_profile_id?: number | null;
+  error?: string;
+}
+
+// Minimal shape from GET /api/quality-profile/custom.
+export interface AutoImportQualityProfile {
+  id: number;
+  name: string;
+  is_default: boolean;
+}
+
+export interface QualityProfilesPayload {
+  success: boolean;
+  profiles?: AutoImportQualityProfile[];
   error?: string;
 }
 
@@ -221,6 +264,10 @@ export interface ImportQueueEntry {
   processed: number;
   total: number;
   errors: string[];
+  /** Set when the backend refused to process because the active media server
+   * isn't connected (see `is_active_media_server_ready` in core/imports/side_effects.py).
+   * The queue item renders a Settings link instead of the plain error list. */
+  blockedByMediaServer?: boolean;
 }
 
 export interface ImportAlbumQueueJob {

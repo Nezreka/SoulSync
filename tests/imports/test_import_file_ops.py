@@ -169,3 +169,136 @@ def test_read_staging_file_metadata_uses_filename_fallbacks_when_tags_are_invali
         "track_number": 2,
         "disc_number": 1,
     }
+
+
+# ── atomic cross-filesystem move (Jellyfin null-disc mitigation) ──────────────
+import errno  # noqa: E402
+import os  # noqa: E402
+
+import pytest  # noqa: E402
+
+from core.imports import file_ops as _fo  # noqa: E402
+from core.imports.file_ops import _atomic_cross_device_move  # noqa: E402
+
+
+def test_same_fs_move_moves_and_removes_source(tmp_path):
+    src = tmp_path / "s.flac"
+    src.write_text("hello")
+    dst = tmp_path / "lib" / "t.flac"          # parent created by safe_move_file
+    safe_move_file(src, dst)
+    assert dst.read_text() == "hello"
+    assert not src.exists()
+
+
+def test_cross_device_move_routes_to_atomic_and_completes(tmp_path, monkeypatch):
+    # Simulate a cross-filesystem move: the same-fs os.replace raises EXDEV, and the
+    # atomic helper's temp->dst replace (same fs) succeeds. The file must complete and
+    # no partial temp file may be left at the final name's directory.
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    dstdir = tmp_path / "lib"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+
+    real_replace = os.replace
+
+    def fake_replace(a, b):
+        if str(a) == str(src):                  # the cross-fs move attempt
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real_replace(a, b)               # the temp -> dst rename (same fs)
+
+    monkeypatch.setattr(_fo.os, "replace", fake_replace)
+    safe_move_file(src, dst)
+
+    assert dst.read_text() == "payload"
+    assert not src.exists()
+    assert not list(dstdir.glob(".*ssync-tmp"))   # complete file only, no leftover temp
+
+
+def test_atomic_helper_completes_and_cleans_temp(tmp_path):
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+    _atomic_cross_device_move(src, dst)
+    assert dst.read_text() == "payload"
+    assert not src.exists()
+    assert not list(dstdir.glob(".*ssync-tmp"))
+
+
+def test_atomic_helper_cleans_temp_and_keeps_source_on_failure(tmp_path, monkeypatch):
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+
+    def boom(_a, _b):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(_fo.os, "replace", boom)
+    with pytest.raises(OSError):
+        _atomic_cross_device_move(src, dst)
+
+    assert src.exists()                           # source preserved on failure
+    assert not dst.exists()                       # no partial final file
+    assert not list(dstdir.glob(".*ssync-tmp"))   # temp cleaned up
+
+
+# ── #941: create_lossy_copy now accepts all lossless sources + never overwrites them ──
+
+import core.imports.file_ops as _fo
+
+
+def _enable_lossy(monkeypatch, codec="mp3", bitrate="320"):
+    cfg = {"lossy_copy.enabled": True, "lossy_copy.codec": codec,
+           "lossy_copy.bitrate": bitrate, "lossy_copy.delete_original": False}
+    monkeypatch.setattr(_fo.config_manager, "get", lambda k, d=None: cfg.get(k, d))
+    monkeypatch.setattr(_fo, "get_audio_quality_string", lambda _p: None)
+
+
+def test_create_lossy_copy_rejects_non_lossless(monkeypatch, tmp_path):
+    _enable_lossy(monkeypatch)
+    src = tmp_path / "song.mp3"
+    src.write_bytes(b"id3")
+    assert _fo.create_lossy_copy(str(src)) is None   # lossy input → nothing to do
+
+
+def test_create_lossy_copy_now_accepts_wav(monkeypatch, tmp_path):
+    """Was FLAC-only; a WAV must now pass the gate and convert (#941)."""
+    _enable_lossy(monkeypatch, codec="mp3")
+    monkeypatch.setattr(_fo.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: None)  # skip tag write
+
+    seen = {}
+
+    def _fake_run(cmd, **_kw):
+        seen["cmd"] = cmd
+        open(cmd[-1], "wb").write(b"fake-mp3")   # ffmpeg "writes" the output
+        return types.SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(_fo.subprocess, "run", _fake_run)
+
+    src = tmp_path / "song.wav"
+    src.write_bytes(b"RIFF....WAVE")
+    out = _fo.create_lossy_copy(str(src))
+    assert out and out.endswith(".mp3")          # WAV passed the gate + converted
+    assert str(src) in seen["cmd"]               # ffmpeg got the .wav input
+
+
+def test_create_lossy_copy_skips_when_output_would_overwrite_source(monkeypatch, tmp_path):
+    """REGRESSION: .m4a ALAC source + AAC codec → output is the same .m4a path.
+    ffmpeg (-y) must NEVER run, or it would destroy the original lossless file."""
+    _enable_lossy(monkeypatch, codec="aac", bitrate="256")
+    monkeypatch.setattr(_fo, "m4a_codec", lambda _p: "alac")   # source IS ALAC (lossless)
+
+    ran = {"called": False}
+    monkeypatch.setattr(_fo.subprocess, "run",
+                        lambda *_a, **_k: ran.__setitem__("called", True))
+
+    src = tmp_path / "track.m4a"
+    src.write_bytes(b"....ALAC....")
+    out = _fo.create_lossy_copy(str(src))
+    assert out is None                 # skipped — output would overwrite source
+    assert ran["called"] is False      # the original was never touched

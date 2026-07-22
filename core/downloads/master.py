@@ -1174,6 +1174,17 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 if batch_skip_acoustid:
                     track_info['_skip_acoustid'] = True
 
+                # The wishlist row's `quality_profile_id` rides along on
+                # track_info into the download/import context. Everything
+                # profile-specific (candidate ranking, quality gate, AcoustID
+                # strictness, downsample/lossy-copy) is resolved LIVE from it
+                # at each pipeline stage — see core/quality/selection.py::
+                # load_profile_by_id and core/imports/pipeline.py::
+                # _resolve_context_quality_profile. Nothing to do here:
+                # deliberately NO per-item AcoustID skip — the profile's
+                # acoustid_required is a strictness dial enforced inside the
+                # pipeline, not an on/off switch for running the check.
+
                 # Add playlist folder mode flag for sync page playlists and wishlist
                 # tracks tied to a mirrored playlist with organize_by_playlist enabled.
                 task_pl_folder_mode = batch_playlist_folder_mode
@@ -1244,6 +1255,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
+                    'profile_id': batch_profile_id,
                     'playlist_id': playlist_id, 'batch_id': batch_id,
                     'track_index': res['track_index'], 'retry_count': 0,
                     'cached_candidates': [], 'used_sources': set(),

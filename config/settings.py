@@ -484,6 +484,10 @@ class ConfigManager:
                 # searches even when the window cap isn't hit. 0 = disabled
                 # (preserves prior behavior).
                 "search_min_delay_seconds": 0,
+                # Refuse new downloads when the download disk has less than
+                # this many GB free (0 = off). A fresh LXC install left on the
+                # default paths otherwise fills its 8GB root until it hangs.
+                "min_free_disk_gb": 5.0,
             },
             "download_source": {
                 "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid", "torrent", "usenet"
@@ -598,6 +602,20 @@ class ConfigManager:
                 "password": "",
                 "category": "soulsync",
                 "save_path": "",
+                # Seeding lifecycle (mirror of the video side): seed a completed
+                # music torrent grab until the ratio/time goal is met, then remove
+                # it from the client. BOTH goals default 0 = sweep OFF = grabs seed
+                # forever (unchanged behavior). seed_remove_data also deletes the
+                # client's own copy on removal — the imported library file is a
+                # separate copy and is never touched.
+                "seed_ratio_goal": 0,
+                "seed_time_goal_hours": 0,
+                "seed_remove_data": True,
+                # Who enforces the seed goal above: "soulsync" (default) = the
+                # seeding sweep polls the client and removes when the goal is met;
+                # "client" = write the ratio/time limit straight into the torrent
+                # client (arr-style) and let it enforce, shown in its share-limit UI.
+                "seed_mode": "soulsync",
             },
             # Usenet client — receives .nzb URLs / payloads. ``type``
             # picks the adapter (sabnzbd | nzbget). SABnzbd uses an
@@ -609,6 +627,7 @@ class ConfigManager:
                 "username": "",
                 "password": "",
                 "category": "soulsync",
+                "acquisition_monitor_interval_seconds": 15,
             },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be
@@ -662,10 +681,23 @@ class ConfigManager:
                 # source whose art is smaller is skipped so the next source is
                 # tried — stops a low-res Cover Art Archive upload from winning.
                 # 0 disables the size gate.
-                "min_art_size": 1000
+                "min_art_size": 1000,
+                # When a track matches a SINGLE release, look up the parent ALBUM
+                # that contains it and tag it as that album, so it groups with its
+                # album-mates and gets the album cover (not the single's). Off by
+                # default — it's an extra per-import metadata lookup.
+                "single_to_album": False
             },
             "musicbrainz": {
                 "embed_tags": True
+            },
+            "jiosaavn": {
+                "embed_tags": True,
+                "tags": {
+                    "track_id": True,
+                    "artist_id": True,
+                    "album_id": True,
+                },
             },
             "playlist_sync": {
                 "create_backup": True,
@@ -686,6 +718,16 @@ class ConfigManager:
                 "delete_original": False,
                 "downsample_hires": False
             },
+            "album_downloads": {
+                # Atomic album publishing (#999): when ON, an album / wishlist-album
+                # batch's tracks are staged privately and only moved into the
+                # media-library path once the WHOLE batch completes, so Plex /
+                # Jellyfin / Navidrome never sees a partial album mid-download.
+                # OFF by default — behavior is byte-for-byte today's (each track
+                # publishes to the library as it finishes). Strictly opt-in; only
+                # ever affects whole-album batches (never singles / completeness-fill).
+                "atomic_publish": False,
+            },
             "listening_stats": {
                 "enabled": True,
                 "poll_interval": 30
@@ -700,17 +742,25 @@ class ConfigManager:
             },
             "import": {
                 "staging_path": "./Staging",
+                # `replace_lower_quality` mirrors the Settings -> Quality page's
+                # checkbox. The pipeline enforces the PROFILE row (per item,
+                # live), not this key — it exists as the page's storage and is
+                # kept in sync with the active default profile in both
+                # directions (`apply_quality_profile_to_settings` pushes
+                # profile -> config on Apply; `sync_default_quality_profile_from_config`
+                # pushes config -> default profile on every settings save).
                 "replace_lower_quality": False,
-                # Use the top Staging folder as the artist (Artist/Album layouts,
-                # mixtapes). On by default to preserve the long-standing import
-                # behaviour for existing users. Turn OFF if you stage a mixed pile
-                # of songs under one container folder, otherwise that folder's name
-                # overrides every metadata-identified artist (the "soulsync" case).
+                # `folder_artist_override` is a plain global Auto-Import
+                # setting, read directly by `core/auto_import_worker.py` — a
+                # Staging folder-layout quirk, not a quality preference, so it
+                # deliberately does NOT live on a quality profile.
                 "folder_artist_override": True
             },
             "m3u_export": {
                 "enabled": False,
-                "entry_base_path": ""
+                "entry_base_path": "",
+                "library_enabled": False,
+                "library_path": ""
             },
             "playlists": {
                 # Where "Organize by playlist" materializes playlist folders.
@@ -735,7 +785,11 @@ class ConfigManager:
             },
             "content_filter": {
                 "allow_explicit": True
-            }
+            },
+            "experimental": {
+                # JioSaavn is opt-in only — see Settings → Advanced → Experimental.
+                "jiosaavn_enabled": False,
+            },
         }
 
     def _load_config(self):
@@ -831,6 +885,34 @@ class ConfigManager:
 
         return value
 
+    def get_full_config(self) -> Dict[str, Any]:
+        """Deep copy of the live, DECRYPTED config — including secrets. Used by
+        the config export ONLY when the user opts into embedding credentials;
+        never sent to the browser on the normal settings fetch (that's
+        ``redacted_config``)."""
+        return copy.deepcopy(self.config_data)
+
+    def apply_config_dict(self, incoming: Dict[str, Any]) -> int:
+        """Merge an imported config dict (config migration). Walks to LEAVES and
+        routes each through ``set()`` so its guards apply — a round-tripped
+        REDACTED_SENTINEL (a secrets-redacted export) is skipped instead of
+        blanking an existing secret. Returns the number of leaves written."""
+        count = 0
+
+        def _walk(node, prefix):
+            nonlocal count
+            for k, v in (node or {}).items():
+                path = f"{prefix}.{k}" if prefix else str(k)
+                if isinstance(v, dict) and v:
+                    _walk(v, path)
+                else:
+                    self.set(path, v)
+                    count += 1
+
+        if isinstance(incoming, dict):
+            _walk(incoming, "")
+        return count
+
     def redacted_config(self) -> Dict[str, Any]:
         """Deep copy of the live config with every sensitive value masked.
 
@@ -860,9 +942,21 @@ class ConfigManager:
         return data
 
     def set(self, key: str, value: Any):
-        # The UI round-trips REDACTED_SENTINEL for any secret the user didn't
-        # touch — never let the mask overwrite the real value (#832 follow-up).
-        if value == self.REDACTED_SENTINEL and key in self._SENSITIVE_PATHS:
+        # Never let a bulk/settings save blank out a stored secret. Two ways it
+        # tried to:
+        #   1. The UI round-trips REDACTED_SENTINEL for an untouched masked field
+        #      (#832) — that mask must not overwrite the real value.
+        #   2. The settings auto-save fires 2s after any input; a masked secret
+        #      field is cleared to '' on focus, so a timer landing in that window
+        #      posted '' and WIPED the real secret. That surfaced as Spotify
+        #      "invalid_client" (an empty secret was being sent) even after the
+        #      user re-entered it (#992).
+        # So an empty ('' / None) value for a sensitive path means "keep the
+        # existing one"; clearing a credential is done via its explicit
+        # disconnect action, never by saving an empty settings form.
+        if key in self._SENSITIVE_PATHS and (
+            value == self.REDACTED_SENTINEL or value is None or value == ''
+        ):
             return
 
         keys = key.split('.')
@@ -875,6 +969,20 @@ class ConfigManager:
 
         config[keys[-1]] = value
         self._save_config()
+
+    def resolve_secret(self, key: str, posted: Any) -> str:
+        """Resolve a secret value coming back from the settings UI.
+
+        The UI renders a saved-but-untouched secret as the REDACTED_SENTINEL (shown
+        masked); empty or that sentinel means "use the stored value", while a real
+        string is a genuine new secret. A connection-test endpoint should test the
+        EFFECTIVE secret, not the mask — otherwise testing a saved-but-untouched
+        token sends the sentinel and the source rejects it (#870)."""
+        if isinstance(posted, str):
+            posted = posted.strip()
+        if not posted or posted == self.REDACTED_SENTINEL:
+            return self.get(key, '') or ''
+        return posted
 
     def get_spotify_config(self) -> Dict[str, str]:
         return self.get('spotify', {})

@@ -477,6 +477,33 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error fetching playlist '{name}': {e}")
             return None
     
+    # A single createPlaylist/addItems call with ~1000 ratingKeys builds an
+    # oversized request that Plex (or a reverse proxy) can reject outright or
+    # silently truncate — the sync then reports success while the playlist is
+    # short (#1047). All playlist writes go through bounded chunks instead.
+    _PLAYLIST_ADD_CHUNK = 200
+
+    def _add_items_chunked(self, playlist, tracks) -> None:
+        """addItems in bounded chunks; raises on a failed chunk so callers
+        can't mistake a partial write for success."""
+        for i in range(0, len(tracks), self._PLAYLIST_ADD_CHUNK):
+            playlist.addItems(tracks[i:i + self._PLAYLIST_ADD_CHUNK])
+
+    def _verify_playlist_count(self, name: str, expected: int) -> None:
+        """Read the playlist back and say honestly when Plex stored fewer
+        tracks than were sent (a silent partial add). Log-only — the write
+        already happened; this makes the discrepancy visible instead of
+        letting 'synced N' over-report."""
+        try:
+            pl = self.server.playlist(name)
+            actual = len([i for i in pl.items() if hasattr(i, 'ratingKey')])
+            if actual < expected:
+                logger.warning(f"Plex playlist '{name}': sent {expected} tracks but the server holds {actual} — partial add")
+            else:
+                logger.info(f"Plex playlist '{name}': verified {actual} tracks on server")
+        except Exception as e:
+            logger.debug(f"Playlist verify failed for '{name}': {e}")
+
     def create_playlist(self, name: str, tracks) -> bool:
         if not self.ensure_connection():
             logger.error("Not connected to Plex server")
@@ -517,40 +544,47 @@ class PlexClient(MediaServerClient):
                     logger.debug("About to create playlist with tracks:")
                     for i, track in enumerate(valid_tracks):
                         logger.debug(f"  Track {i+1}: {track.title} (type: {type(track)}, ratingKey: {track.ratingKey})")
-                    
+
+                    # Create with the FIRST chunk only, then append the rest in
+                    # bounded chunks (#1047) — the compatibility cascade below
+                    # stays, it just never sends an oversized single request.
+                    first = valid_tracks[:self._PLAYLIST_ADD_CHUNK]
+                    rest = valid_tracks[self._PLAYLIST_ADD_CHUNK:]
+                    playlist = None
                     try:
-                        playlist = self.server.createPlaylist(name, valid_tracks)
-                        logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks")
-                        return True
+                        playlist = self.server.createPlaylist(name, first)
                     except Exception as create_error:
                         logger.error(f"CreatePlaylist failed: {create_error}")
                         # Try alternative approach - pass items as list
                         try:
-                            playlist = self.server.createPlaylist(name, items=valid_tracks)
-                            logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks (using items parameter)")
-                            return True
+                            playlist = self.server.createPlaylist(name, items=first)
+                            logger.debug("createPlaylist succeeded using items parameter")
                         except Exception as alt_error:
                             logger.error(f"Alternative createPlaylist also failed: {alt_error}")
                             # Try creating empty playlist first, then adding tracks
                             try:
                                 logger.debug("Trying to create empty playlist first, then add tracks...")
                                 playlist = self.server.createPlaylist(name, [])
-                                playlist.addItems(valid_tracks)
-                                logger.info(f"Created empty playlist and added {len(valid_tracks)} tracks")
-                                return True
+                                self._add_items_chunked(playlist, first)
                             except Exception as empty_error:
                                 logger.error(f"Empty playlist approach also failed: {empty_error}")
                                 # Final attempt: Create with first item, then add the rest
                                 try:
                                     logger.debug("Trying to create playlist with first track, then add remaining...")
-                                    playlist = self.server.createPlaylist(name, valid_tracks[0])
-                                    if len(valid_tracks) > 1:
-                                        playlist.addItems(valid_tracks[1:])
-                                    logger.info(f"Created playlist with first track and added {len(valid_tracks)-1} more tracks")
-                                    return True
+                                    playlist = self.server.createPlaylist(name, first[0])
+                                    if len(first) > 1:
+                                        self._add_items_chunked(playlist, first[1:])
                                 except Exception as final_error:
                                     logger.error(f"Final playlist creation attempt failed: {final_error}")
                                     raise create_error from final_error
+                    if playlist is not None:
+                        if rest:
+                            self._add_items_chunked(playlist, rest)
+                        logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks "
+                                    f"({(len(rest) // self._PLAYLIST_ADD_CHUNK) + 1 if rest else 1} chunk(s))")
+                        self._verify_playlist_count(name, len(valid_tracks))
+                        return True
+                    return False
                 else:
                     logger.error(f"No valid tracks with ratingKeys for playlist '{name}'")
                     return False
@@ -657,11 +691,12 @@ class PlexClient(MediaServerClient):
                 )
                 return True
 
-            existing_playlist.addItems(new_tracks)
+            self._add_items_chunked(existing_playlist, new_tracks)
             logger.info(
                 f"Plex append: added {len(new_tracks)} new tracks to '{playlist_name}' "
                 f"(skipped {len(tracks) - len(new_tracks)} already present)"
             )
+            self._verify_playlist_count(playlist_name, len(existing_keys) + len(new_tracks))
             return True
         except Exception as e:
             logger.error(f"Error appending to Plex playlist '{playlist_name}': {e}")
@@ -694,7 +729,7 @@ class PlexClient(MediaServerClient):
             to_remove = [i for i in current_items if str(i.ratingKey) in remove_set]
 
             if to_add:
-                existing.addItems(to_add)
+                self._add_items_chunked(existing, to_add)
             if to_remove:
                 try:
                     existing.removeItems(to_remove)
@@ -709,9 +744,92 @@ class PlexClient(MediaServerClient):
                 f"Plex reconcile '{playlist_name}': +{len(to_add)} / -{len(to_remove)} "
                 f"(playlist preserved)"
             )
+            self._verify_playlist_count(playlist_name, len(desired_ids))
             return True
         except Exception as e:
             logger.error(f"Error reconciling Plex playlist '{playlist_name}': {e}")
+            return False
+
+    def get_playlist_track_ids(self, playlist_id, playlist_name: str = "") -> List[str]:
+        """The playlist's current track ratingKeys, in current order. [] if missing."""
+        if not self.ensure_connection():
+            return []
+        try:
+            playlist = None
+            try:
+                playlist = self.server.fetchItem(int(playlist_id))
+            except Exception:
+                playlist = None
+            if playlist is None and playlist_name:
+                try:
+                    playlist = self.server.playlist(playlist_name)
+                except Exception:
+                    playlist = None
+            if playlist is None:
+                return []
+            return [str(i.ratingKey) for i in playlist.items() if hasattr(i, 'ratingKey')]
+        except Exception as e:
+            logger.error(f"Error getting Plex playlist track ids '{playlist_name}': {e}")
+            return []
+
+    def reorder_playlist(self, playlist_id, playlist_name: str, ordered_ids) -> bool:
+        """In-place reorder a playlist to an exact ordered ratingKey list ('Align
+        playlists'). Moves items into sequence and removes any current item NOT in
+        ``ordered_ids`` (so 'Mirror source' drops extras; 'Keep extras' includes
+        them in the list). Uses moveItem/removeItems so the playlist's poster,
+        summary and ratingKey survive — never deletes/recreates. Order-only: every
+        id in ``ordered_ids`` is already in the playlist (the caller validated)."""
+        if not self.ensure_connection():
+            return False
+        try:
+            playlist = None
+            try:
+                playlist = self.server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("Plex reorder fetchItem failed: %s", e)
+            if playlist is None and playlist_name:
+                try:
+                    playlist = self.server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("Plex reorder by-name failed: %s", e)
+            if playlist is None:
+                logger.error(f"Plex reorder: playlist not found (id={playlist_id}, name='{playlist_name}')")
+                return False
+
+            ordered = [str(i) for i in (ordered_ids or []) if str(i)]
+            ordered_set = set(ordered)
+            items = [i for i in playlist.items() if hasattr(i, 'ratingKey')]
+            by_rk = {str(i.ratingKey): i for i in items}
+
+            # Drop items not in the desired list (extras, for Mirror source).
+            to_remove = [i for i in items if str(i.ratingKey) not in ordered_set]
+            if to_remove:
+                try:
+                    playlist.removeItems(to_remove)
+                except (AttributeError, TypeError):
+                    for it in to_remove:
+                        try:
+                            playlist.removeItem(it)
+                        except Exception as one_err:
+                            logger.debug("Plex reorder: removeItem failed: %s", one_err)
+
+            # Move each desired item into place: first to the front (after=None),
+            # then each subsequent one after its predecessor.
+            prev = None
+            for sid in ordered:
+                it = by_rk.get(sid)
+                if it is None:
+                    continue
+                try:
+                    playlist.moveItem(it, after=prev)
+                except Exception as mv_err:
+                    logger.warning(f"Plex reorder moveItem failed for {sid}: {mv_err}")
+                    return False
+                prev = it
+            logger.info(f"Aligned Plex playlist '{playlist_name}' order ({len(ordered)} tracks)")
+            return True
+        except Exception as e:
+            logger.error(f"Error reordering Plex playlist '{playlist_name}': {e}")
             return False
 
     def update_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
@@ -1041,6 +1159,9 @@ class PlexClient(MediaServerClient):
         doesn't show "Drake" twice when Drake is in two sections.
         Single-library mode is unaffected — dedup helper is a no-op.
         """
+        # last_fetch_failed lets callers tell "library is genuinely empty"
+        # from "the fetch failed" — both come back as [] (#stale-artists).
+        self.last_fetch_failed = True
         if not self.ensure_connection() or not self._can_query():
             logger.error("Not connected to Plex server or no music library")
             return []
@@ -1055,6 +1176,7 @@ class PlexClient(MediaServerClient):
                 )
             else:
                 logger.info(f"Found {len(artists)} artists in Plex library")
+            self.last_fetch_failed = False
             return artists
         except Exception as e:
             logger.error(f"Error getting all artists: {e}")

@@ -62,7 +62,9 @@ class NZBGetAdapter:
         self._url = (config_manager.get('usenet_client.url', '') or '').rstrip('/')
         self._username = config_manager.get('usenet_client.username', '') or ''
         self._password = config_manager.get('usenet_client.password', '') or ''
-        self._category = config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
 
     def reload_settings(self) -> None:
         self._load_config()
@@ -198,7 +200,15 @@ class NZBGetAdapter:
             size=size_bytes,
             downloaded=downloaded_bytes,
             download_speed=speed,
-            save_path=group.get('DestDir'),
+            # A QUEUED group's DestDir is the in-progress intermediate dir
+            # (NZBGet names it '<NZBName>.#<NZBID>' and empties/renames it once
+            # the move completes). Never offer it as a final save_path — finalize
+            # only from the HISTORY entry (real FinalDir/DestDir). Otherwise a
+            # PP_FINISHED group (which maps to 'completed') would finalize on the
+            # incomplete '....#2141' dir, which is then gone -> "No audio files
+            # found in /…/incomplete/….#2141" (Swigs). Mirrors the SAB adapter
+            # ignoring its incomplete_path.
+            save_path=None,
             category=group.get('Category'),
         )
 
@@ -217,7 +227,15 @@ class NZBGetAdapter:
             size=size_bytes,
             downloaded=size_bytes if not is_failed else 0,
             download_speed=0,
-            save_path=entry.get('DestDir'),
+            # Prefer FinalDir — the location after a post-processing script (or
+            # NZBGet's own move) relocated the files; DestDir can still point at
+            # the intermediate '….#NZBID' dir. Swigs: files landed in
+            # /data/soulseek/… (FinalDir) while DestDir stayed /…/incomplete/….#2141.
+            # Fall back to DestDir when FinalDir is empty (no PP move). Empty/
+            # whitespace -> None so the plugin waits for a real path.
+            save_path=(str(entry.get('FinalDir') or '').strip()
+                       or str(entry.get('DestDir') or '').strip()
+                       or None),
             category=entry.get('Category'),
             error=status_field if is_failed else None,
         )

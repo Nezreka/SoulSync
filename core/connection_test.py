@@ -342,9 +342,19 @@ def run_service_test(service, test_config):
                     if client_type == "sabnzbd":
                         return False, "SABnzbd needs both URL and API key."
                     return False, "NZBGet needs URL, username, and password."
-                if run_async(adapter.check_connection()):
-                    return True, f"Connected to {client_type}"
-                return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+                if not run_async(adapter.check_connection()):
+                    return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+                if client_type == "sabnzbd":
+                    category = str(config_manager.get(
+                        'usenet_client.category', 'soulsync') or 'soulsync'
+                    ).strip() or 'soulsync'
+                    if not run_async(adapter.category_exists(category)):
+                        return False, (
+                            f"Connected to SABnzbd, but category '{category}' "
+                            "is not configured there. Add the same category "
+                            "in SABnzbd before enabling acquisition."
+                        )
+                return True, f"Connected to {client_type}"
             except Exception as e:
                 return False, f"Usenet client connection error: {str(e)}"
         elif service == "torrent_client":
@@ -423,6 +433,18 @@ def run_service_test(service, test_config):
                 return False, f"Deezer returned HTTP {resp.status_code}"
             except Exception as e:
                 return False, f"Deezer connection error: {str(e)}"
+        elif service == "jiosaavn":
+            from core.metadata.registry import get_jiosaavn_client, is_jiosaavn_enabled
+            if not is_jiosaavn_enabled():
+                return False, "JioSaavn is disabled (experimental feature off)"
+            try:
+                client = get_jiosaavn_client()
+                results = client.search_artists("beatles", limit=1)
+                if results:
+                    return True, "JioSaavn API reachable"
+                return False, "JioSaavn API returned no results"
+            except Exception as e:
+                return False, f"JioSaavn connection error: {str(e)}"
         elif service == "discogs":
             token = test_config.get('token', '') or config_manager.get('discogs.token', '')
             if not token:

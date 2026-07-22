@@ -15,6 +15,7 @@ import {
 
 import type { ShellBridge } from '@/platform/shell/bridge';
 
+import { PageHeader } from '@/components/page-header';
 import { useReactPageShell, useShellStatus } from '@/platform/shell/route-controllers';
 
 import type {
@@ -51,8 +52,8 @@ import {
   groupDbStorageTables,
   hasStatsData,
   STATS_DB_STORAGE_COLORS,
-  STATS_ENRICHMENT_SERVICES,
   STATS_GENRE_COLORS,
+  visibleStatsEnrichmentServices,
 } from '../-stats.helpers';
 import { Route } from '../route';
 import styles from './stats-page.module.css';
@@ -140,61 +141,61 @@ export function StatsPage() {
 
   return (
     <div id="stats-container" className={styles.statsContainer} data-testid="stats-page">
-      <header className={styles.statsHeader}>
-        <div className={styles.statsHeaderTitle}>
-          <img src="/static/trans2.png" alt="Stats" className={styles.headerIcon} />
-          <h1 className={styles.headerTitle}>Listening Stats</h1>
-        </div>
-        <div className={styles.statsHeaderControls}>
-          <div
-            id="stats-time-range"
-            className={styles.statsTimeRange}
-            role="tablist"
-            aria-label="Listening stats range"
-          >
-            {(['7d', '30d', '12m', 'all'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={`${styles.statsRangeButton} ${
-                  range === option ? styles.statsRangeButtonActive : ''
-                }`}
-                onClick={() => onRangeChange(option)}
-              >
-                {getStatsRangeLabel(option)}
-              </button>
-            ))}
-          </div>
-          <div className={styles.statsSyncControls}>
-            {isStandalone ? (
-              <span
-                className={styles.statsStandaloneNotice}
-                role="note"
-                title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
-              >
-                Standalone mode: manual sync unavailable
-              </span>
-            ) : (
-              <>
-                <span className={styles.statsLastSynced}>
-                  {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
-                </span>
+      <PageHeader
+        icon={<img src="/static/trans2.png" alt="" />}
+        title="Listening Stats"
+        actions={
+          <>
+            <div
+              id="stats-time-range"
+              className={styles.statsTimeRange}
+              role="tablist"
+              aria-label="Listening stats range"
+            >
+              {(['7d', '30d', '12m', 'all'] as const).map((option) => (
                 <button
-                  id="stats-sync-btn"
+                  key={option}
                   type="button"
-                  className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
-                  onClick={() => syncMutation.mutate()}
-                  disabled={syncing}
-                  aria-label="Sync listening stats"
-                  title="Sync now"
+                  className={`${styles.statsRangeButton} ${
+                    range === option ? styles.statsRangeButtonActive : ''
+                  }`}
+                  onClick={() => onRangeChange(option)}
                 >
-                  <span aria-hidden="true">↻</span>
+                  {getStatsRangeLabel(option)}
                 </button>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
+              ))}
+            </div>
+            <div className={styles.statsSyncControls}>
+              {isStandalone ? (
+                <span
+                  className={styles.statsStandaloneNotice}
+                  role="note"
+                  title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
+                >
+                  Standalone mode: manual sync unavailable
+                </span>
+              ) : (
+                <>
+                  <span className={styles.statsLastSynced}>
+                    {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
+                  </span>
+                  <button
+                    id="stats-sync-btn"
+                    type="button"
+                    className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
+                    onClick={() => syncMutation.mutate()}
+                    disabled={syncing}
+                    aria-label="Sync listening stats"
+                    title="Sync now"
+                  >
+                    <span aria-hidden="true">↻</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </>
+        }
+      />
 
       {cachedStatsQuery.isPending ? (
         <SectionLoadingState />
@@ -626,6 +627,10 @@ function StatsRecentPlays({
 }
 
 function StatsLibraryHealth({ health }: { health: StatsHealth }) {
+  const shellStatus = useShellStatus();
+  const jiosaavnEnabled = shellStatus?._experimental?.jiosaavn_enabled === true;
+  const bandcampEnabled = shellStatus?._experimental?.bandcamp_enabled === true;
+  const enrichmentServices = visibleStatsEnrichmentServices(jiosaavnEnabled, bandcampEnabled);
   const totalTracks = health.total_tracks ?? 0;
   const formatEntries = Object.entries(health.format_breakdown ?? {});
   const formatTotal = formatEntries.reduce((sum, [, count]) => sum + count, 0) || 1;
@@ -681,7 +686,7 @@ function StatsLibraryHealth({ health }: { health: StatsHealth }) {
         </div>
       </div>
       <div id="stats-enrichment-coverage" className={styles.statsEnrichment}>
-        {STATS_ENRICHMENT_SERVICES.map((service) => {
+        {enrichmentServices.map((service) => {
           const percent = health.enrichment_coverage?.[service.key] || 0;
           return (
             <div key={service.key} className={styles.statsEnrichItem}>

@@ -82,6 +82,7 @@ class MissingCoverArtJob(RepairJob):
 
         # Fetch albums with missing artwork
         albums = []
+        column_index = {}
         conn = None
         try:
             conn = context.db._get_connection()
@@ -126,12 +127,36 @@ class MissingCoverArtJob(RepairJob):
             """)
             albums = cursor.fetchall()
         except Exception as e:
+            # A failed legacy query must not abort native Library-v2 coverage.
             logger.error("Error fetching albums without artwork: %s", e, exc_info=True)
             result.errors += 1
-            return result
+            albums = []
         finally:
             if conn:
                 conn.close()
+
+        # Native Library-v2 coverage: albums without a legacy backref never
+        # appear in the ``albums`` query above. Rows are padded to the legacy
+        # SELECT's width so the per-source ID lookups below stay index-safe.
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_subjects import active_album_subjects
+
+            albums = list(albums)
+            pad = [None] * len(column_index)
+            for subject in active_album_subjects(
+                context.db, context.config_manager,
+            ):
+                entity = f"lib2:{subject['album_id']}"
+                native_subjects[entity] = subject
+                albums.append((
+                    entity, subject["title"], subject["artist_name"],
+                    subject.get("spotify_album_id"), subject.get("album_image"),
+                    subject.get("artist_image"), subject.get("rep_path"), *pad,
+                ))
+        except Exception as e:
+            logger.warning("V2 album subject enumeration failed: %s", e)
+            result.errors += 1
 
         total = len(albums)
         if context.update_progress:
@@ -179,12 +204,20 @@ class MissingCoverArtJob(RepairJob):
             # reads as "missing", and EVERY album gets flagged while the apply
             # (which resolves) then finds the art already present. Unresolvable →
             # treat as no-local-file (don't claim disk-missing).
-            resolved_rep = resolve_library_file_path(
-                rep_path,
-                transfer_folder=getattr(context, 'transfer_folder', None),
-                download_folder=download_folder,
-                config_manager=context.config_manager,
-            ) if rep_path else None
+            subject = native_subjects.get(str(album_id))
+            if subject:
+                from core.library2.paths import resolve_lib2_path
+
+                resolved_rep = resolve_lib2_path(
+                    rep_path, config_manager=context.config_manager,
+                ) if rep_path else None
+            else:
+                resolved_rep = resolve_library_file_path(
+                    rep_path,
+                    transfer_folder=getattr(context, 'transfer_folder', None),
+                    download_folder=download_folder,
+                    config_manager=context.config_manager,
+                ) if rep_path else None
             # Match the apply (_fix_missing_cover_art line ~1376: `... or p`): if
             # the path-mapping layer returns nothing but the raw DB path is
             # already a real file (the common Docker case where the container
@@ -296,6 +329,21 @@ class MissingCoverArtJob(RepairJob):
                         _desc = (f'Album "{title}" by {artist_name or "Unknown"} has no cover art. '
                                  + ('Found artwork from API.' if artwork_url
                                     else 'Will write cover.jpg from the existing embedded art.'))
+                        native_details = {}
+                        if subject:
+                            native_details = {
+                                'library_v2_native': True,
+                                'library_v2': {
+                                    'artist_id': subject.get('artist_id'),
+                                    'album_id': subject['album_id'],
+                                    'track_id': None,
+                                    'file_id': None,
+                                    'artist_ids': [subject['artist_id']] if subject.get('artist_id') else [],
+                                    'album_ids': [subject['album_id']],
+                                    'track_ids': [],
+                                    'file_ids': [],
+                                },
+                            }
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='missing_cover_art',
@@ -326,6 +374,7 @@ class MissingCoverArtJob(RepairJob):
                                 'embed_missing': embed_missing,
                                 'sidecar_from_embedded': sidecar_from_embedded,
                                 'musicbrainz_release_id': None,
+                                **native_details,
                             }
                         )
                         if inserted:
@@ -514,7 +563,11 @@ class MissingCoverArtJob(RepairJob):
                 WHERE title IS NOT NULL AND title != ''
             """)
             row = cursor.fetchone()
-            return row[0] if row else 0
+            count = row[0] if row else 0
+            from core.library2.maintenance_subjects import active_album_subjects
+            return count + len(active_album_subjects(
+                context.db, context.config_manager,
+            ))
         except Exception:
             return 0
         finally:

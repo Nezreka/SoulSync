@@ -252,7 +252,7 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         origin, origin_context = derive_download_origin(context)
 
         db = get_database()
-        db.add_library_history_entry(
+        _history_id = db.add_library_history_entry(
             event_type="download",
             title=title,
             artist_name=artist_name,
@@ -270,6 +270,10 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             origin_context=origin_context,
             verification_status=context.get("_verification_status"),
         )
+        # Stash the row id so the live download task can link to its
+        # library_history row (the Unverified review queue needs it).
+        if isinstance(_history_id, int) and _history_id > 0:
+            context["_history_id"] = _history_id
     except Exception as e:
         logger.debug("library history record failed: %s", e)
 
@@ -386,6 +390,61 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         )
     except Exception as e:
         logger.debug("record_download_provenance failed: %s", e)
+
+    # Library v2 auto-link (opt-in, best-effort): make the imported file appear
+    # in the v2 library immediately instead of waiting for a full re-import.
+    try:
+        from core.library2.autolink import link_download_into_library_v2
+        link_download_into_library_v2(context)
+    except Exception as e:
+        logger.debug("library v2 autolink skipped: %s", e)
+
+    # Persistent acquisition completion is intentionally downstream of every
+    # shared pipeline guard and the Library-v2 autolink. Quarantined files never
+    # reach this point; a later manual approval re-enters the same pipeline and
+    # carries these markers in its serialized context.
+    try:
+        from core.acquisition.pipeline_callback import notify_pipeline_import_success
+        notify_pipeline_import_success(context)
+    except Exception as e:
+        logger.debug("acquisition pipeline callback skipped: %s", e)
+
+    # Correlated legacy manual grabs close their request/grab here too; the
+    # callback is a no-op for downloads without the manual-grab marker.
+    try:
+        from core.acquisition.pipeline_callback import notify_manual_grab_import_success
+        notify_manual_grab_import_success(context)
+    except Exception as e:
+        logger.debug("manual grab callback skipped: %s", e)
+
+
+def is_active_media_server_ready() -> tuple[bool, str]:
+    """Standalone ('soulsync') is always ready — no external connection needed.
+
+    Otherwise the active media server must actually be connected, or an
+    import copies files into place fully tagged but never registers them:
+    record_soulsync_library_entry() below only writes the local DB when
+    active_media_server == 'soulsync', and the alternative path (a
+    Plex/Jellyfin/Navidrome library scan syncing into the DB) silently
+    no-ops without a live connection too. Files land on disk; the Library
+    view never learns about them. Shared by the HTTP import routes
+    (core.imports.routes) and the auto-import background worker
+    (core.auto_import_worker) so neither path can leave files stranded."""
+    active = _get_config_manager().get_active_media_server()
+    if active == "soulsync":
+        return True, ""
+
+    from core.media_server.engine import get_media_server_engine
+
+    if get_media_server_engine().is_connected():
+        return True, ""
+
+    label = active.replace("_", " ").title() if active else "Your media server"
+    return False, (
+        f"{label} isn't connected, so importing now would copy files into "
+        f"place without adding them to your Library. Connect {label} in "
+        f"Settings, or switch to Standalone mode, then try again."
+    )
 
 
 def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[str, Any], album_info: Dict[str, Any]) -> None:
@@ -565,19 +624,22 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # ── Album row: same insert-or-fill-empty-fields shape ──
             album_source_col = source_columns.get("album")
 
-            cursor.execute(
-                "SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'",
-                (album_id,),
+            # Group by CANONICAL release id when we have one (not just the name
+            # string), so differently-named imports of the SAME release land in
+            # one album row instead of splitting — which left the repair jobs
+            # dressing each split row in its own cover art (Sokhi). Precedence:
+            # name-hash id -> source release id -> (title, artist). Falls back to
+            # the legacy name match, so nothing that grouped before stops now.
+            from core.imports.album_grouping import find_existing_soulsync_album_id
+            existing_album_id = find_existing_soulsync_album_id(
+                cursor, name_key_id=album_id, artist_id=artist_id, album_name=album_name,
+                album_source_col=album_source_col, album_source_id=album_source_id,
             )
-            row = cursor.fetchone()
-            if not row:
-                cursor.execute(
-                    "SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? AND server_source = 'soulsync' LIMIT 1",
-                    (album_name, artist_id),
-                )
-                row = cursor.fetchone()
-                if row:
-                    album_id = row[0]
+            if existing_album_id is not None:
+                album_id = existing_album_id
+                row = (album_id,)
+            else:
+                row = None
 
             if row:
                 _fill_empty_columns(
@@ -638,6 +700,13 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # to a watchlist.
             track_mbid = (track_info.get("musicbrainz_recording_id") or "").strip().lower() or None
             track_isrc = (track_info.get("isrc") or "").strip().upper() or None
+            # Carries whatever the pipeline resolved for this item (a wishlist
+            # row's or Auto-Import's own override, or None for "follow the
+            # app-wide default") — see `_resolve_context_quality_profile` in
+            # core/imports/pipeline.py. Without this, later Quality Check /
+            # Quality Upgrade Finder passes re-resolve the track against the
+            # default profile instead of the one it was actually imported under.
+            track_quality_profile_id = track_info.get("quality_profile_id")
 
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
             if not cursor.fetchone():
@@ -645,9 +714,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     """
                     INSERT INTO tracks (id, album_id, artist_id, title, track_number,
                                         duration, file_path, bitrate, file_size, track_artist,
-                                        musicbrainz_recording_id, isrc, server_source,
+                                        musicbrainz_recording_id, isrc, quality_profile_id, server_source,
                                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         track_id,
@@ -662,6 +731,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         track_artist,
                         track_mbid,
                         track_isrc,
+                        track_quality_profile_id,
                     ),
                 )
                 track_source_col = source_columns.get("track")

@@ -40,11 +40,58 @@ async function copyAddress(address, cryptoName) {
 
 let settingsAutoSaveTimer = null;
 
+// The "Only allow AcoustID-verified tracks" toggle lives in Audio Verification
+// and is always shown (its help notes it needs AcoustID enabled), so users can
+// always find it. Kept as a no-op for any existing callers.
+function syncAcoustidRequireVerifiedVisibility() {
+    const group = document.getElementById('acoustid-require-verified-group');
+    if (group) group.style.display = '';
+}
+window.syncAcoustidRequireVerifiedVisibility = syncAcoustidRequireVerifiedVisibility;
+
+// #923: "Prefer explicit versions" only makes sense while explicit content is
+// allowed at all — grey the sub-checkbox out (keeping its saved value) when
+// the parent filter is off. Called on settings load + the parent's onchange.
+function syncPreferExplicitState() {
+    const parent = document.getElementById('allow-explicit');
+    const child = document.getElementById('prefer-explicit');
+    if (!parent || !child) return;
+    child.disabled = !parent.checked;
+    const label = child.closest('.checkbox-label');
+    if (label) label.style.opacity = parent.checked ? '' : '0.45';
+}
+window.syncPreferExplicitState = syncPreferExplicitState;
+
+// Retry Logic: the two numeric rows are only meaningful when their parent toggle
+// is on — hide them otherwise. "Retries per query" needs Exhaustive retry;
+// "Minimum matching mismatches" needs the version-mismatch fallback.
+function syncRetryConditionalRows() {
+    const pairs = [
+        ['retry-exhaustive', 'retries-per-query-row'],
+        ['accept-version-mismatch-fallback', 'version-mismatch-min-count-row'],
+    ];
+    for (const [toggleId, rowId] of pairs) {
+        const toggle = document.getElementById(toggleId);
+        const row = document.getElementById(rowId);
+        if (row) row.style.display = (toggle && toggle.checked) ? '' : 'none';
+    }
+}
+window.syncRetryConditionalRows = syncRetryConditionalRows;
+
 function debouncedAutoSaveSettings() {
     // Ignore changes made while the page is programmatically populating its
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    // ISOLATION: the video side reuses this shared settings page, so editing a
+    // VIDEO field (TMDB key, region, autoplay…) would otherwise fire this MUSIC
+    // auto-save — which reads the server toggle from the DOM and would persist
+    // active_media_server, letting the video side change the music server. Video
+    // settings save themselves via /api/video/*; never auto-save music here.
+    if (document.body.getAttribute('data-side') === 'video') return;
+    // #879: never auto-save while the last settings load failed — the form is
+    // showing defaults, not the real config, so saving would wipe it.
+    if (window._settingsLoadFailed) return;
     // #827: the Logs tab has no savable settings — its live-viewer controls
     // (source picker, filters, auto-scroll) were tripping the auto-save and
     // flooding app.log with "Settings saved" lines, drowning out the logs the
@@ -81,7 +128,150 @@ function _isMetadataSourceSelectable(source) {
         const token = document.getElementById('discogs-token');
         return !!token?.value?.trim();
     }
+    if (source === 'jiosaavn') {
+        return document.getElementById('experimental-jiosaavn-enabled')?.checked === true;
+    }
     return true;
+}
+
+function syncJiosaavnMetadataSourceOption(enabled) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select) return;
+
+    let option = select.querySelector('option[value="jiosaavn"]');
+    if (enabled) {
+        if (!option) {
+            option = document.createElement('option');
+            option.value = 'jiosaavn';
+            option.textContent = 'JioSaavn';
+            const anchor = select.querySelector('option[value="musicbrainz"]');
+            if (anchor?.nextSibling) {
+                select.insertBefore(option, anchor.nextSibling);
+            } else {
+                select.appendChild(option);
+            }
+        }
+        return;
+    }
+
+    if (select.value === 'jiosaavn') {
+        select.value = 'deezer';
+        select.dataset.lastValidSource = 'deezer';
+    }
+    option?.remove();
+}
+
+let _experimentalEnableResolver = null;
+
+function showExperimentalEnableDialog({ title, message }) {
+    if (_experimentalEnableResolver) {
+        _experimentalEnableResolver(false);
+        _experimentalEnableResolver = null;
+    }
+
+    const overlay = document.getElementById('experimental-enable-modal-overlay');
+    const titleEl = document.getElementById('experimental-enable-modal-title');
+    const messageEl = document.getElementById('experimental-enable-modal-message');
+    const ack = document.getElementById('experimental-enable-ack-checkbox');
+    const confirmBtn = document.getElementById('experimental-enable-confirm-btn');
+    if (!overlay || !titleEl || !messageEl || !ack || !confirmBtn) {
+        return Promise.resolve(false);
+    }
+
+    titleEl.textContent = title || 'Enable experimental feature';
+    messageEl.textContent = message || '';
+    ack.checked = false;
+    confirmBtn.disabled = true;
+
+    const onAckChange = () => {
+        confirmBtn.disabled = !ack.checked;
+    };
+    ack.onchange = onAckChange;
+
+    overlay.classList.remove('hidden');
+
+    return new Promise((resolve) => {
+        _experimentalEnableResolver = (result) => {
+            ack.onchange = null;
+            resolve(result);
+        };
+    });
+}
+
+function resolveExperimentalEnableDialog(confirmed) {
+    const overlay = document.getElementById('experimental-enable-modal-overlay');
+    const ack = document.getElementById('experimental-enable-ack-checkbox');
+    const confirmBtn = document.getElementById('experimental-enable-confirm-btn');
+    const ok = confirmed && ack?.checked;
+
+    if (overlay) overlay.classList.add('hidden');
+    if (ack) ack.checked = false;
+    if (confirmBtn) confirmBtn.disabled = true;
+
+    if (_experimentalEnableResolver) {
+        _experimentalEnableResolver(ok);
+        _experimentalEnableResolver = null;
+    }
+}
+
+function syncJiosaavnEnrichmentBubble(enabled) {
+    const container = document.querySelector('.jiosaavn-button-container');
+    if (container) container.style.display = enabled ? '' : 'none';
+    if (typeof refreshRateMonitorExperimentalVisibility === 'function') {
+        refreshRateMonitorExperimentalVisibility();
+    }
+    if (enabled && typeof renderEnrichmentRail === 'function') {
+        renderEnrichmentRail();
+    }
+    if (window._lastStatusPayload?.enrichment && typeof renderEnrichmentCards === 'function') {
+        renderEnrichmentCards(window._lastStatusPayload.enrichment);
+    }
+}
+
+async function onExperimentalJiosaavnToggle(checkbox) {
+    if (!checkbox) return;
+
+    if (!checkbox.checked) {
+        syncJiosaavnMetadataSourceOption(false);
+        syncJiosaavnEnrichmentBubble(false);
+        debouncedAutoSaveSettings();
+        return;
+    }
+
+    checkbox.checked = false;
+
+    const acknowledged = await showExperimentalEnableDialog({
+        title: 'Enable JioSaavn',
+        message: 'JioSaavn uses a third-party public API proxy. Coverage and availability may change without notice. Once enabled, JioSaavn will appear as a metadata source on the Connections tab and in search.',
+    });
+
+    if (!acknowledged) return;
+
+    checkbox.checked = true;
+    syncJiosaavnMetadataSourceOption(true);
+    syncJiosaavnEnrichmentBubble(true);
+    debouncedAutoSaveSettings();
+}
+
+async function onExperimentalBandcampToggle(checkbox) {
+    if (!checkbox) return;
+
+    if (!checkbox.checked) {
+        debouncedAutoSaveSettings();
+        return;
+    }
+
+    checkbox.checked = false;
+
+    const acknowledged = await showExperimentalEnableDialog({
+        title: 'Enable Bandcamp',
+        message: 'Bandcamp has no official public search/metadata API — this uses Bandcamp\'s own public search and release-page endpoints. Coverage and availability may change without notice. Once enabled, Bandcamp will appear as a search source in Discover and as a metadata enrichment source for downloaded tracks.',
+    });
+
+    if (!acknowledged) return;
+
+    checkbox.checked = true;
+    debouncedAutoSaveSettings();
 }
 
 function _metadataSourceFallback(source) {
@@ -405,6 +595,11 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
+    // First time the Downloads tab is shown, auto-probe source status so the
+    // dots reflect real connection state without a manual "Test all sources".
+    if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
+        autoTestSourcesOnce();
+    }
     // Initialize live log viewer when switching to Logs tab
     if (tab === 'logs') {
         _logViewerInit();
@@ -647,6 +842,128 @@ const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 let _hybridSourceOrder = ['soulseek', 'youtube'];
 let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
+// In hybrid mode, only one source's config panel is shown at a time (clicked
+// open from its row), so the long per-source config blocks don't all stack up.
+let _expandedHybridSource = null;
+
+function toggleHybridSourceConfig(srcId) {
+    _expandedHybridSource = (_expandedHybridSource === srcId) ? null : srcId;
+    buildHybridSourceList();
+    updateDownloadSourceUI();
+    // Bring the freshly opened config panel into view.
+    if (_expandedHybridSource) {
+        const map = {
+            soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
+            tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
+            hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
+            amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+            soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
+            usenet: 'prowlarr-source-redirect',
+        };
+        const el = document.getElementById(map[_expandedHybridSource]);
+        if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
+    }
+}
+
+// ── Per-source live connection status (shown as a dot in the hybrid list and
+// driven by the "Test all sources" button). srcId -> 'unknown'|'testing'|'ok'|'fail'|'na'
+let _hybridSourceStatus = {};
+
+async function _ssJson(url, opts) {
+    const r = await fetch(url, opts);
+    return await r.json();
+}
+function _ssTestConn(service) {
+    return _ssJson(API.testConnection || '/api/test-connection', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service })
+    }).then(j => !!j.success);
+}
+// Each probe returns a boolean (connected/ok). Endpoints mirror the per-source
+// "Test Connection" buttons so the results match what those buttons would show.
+const HYBRID_SOURCE_PROBE = {
+    soulseek:   () => _ssTestConn('soulseek'),
+    tidal:      () => _ssTestConn('tidal'),
+    qobuz:      () => _ssJson('/api/qobuz/auth/status').then(j => j.authenticated === true),
+    hifi:       () => _ssJson('/api/hifi/status').then(j => j.available === true),
+    // POST (the endpoint is POST-only) with an empty body so it tests the SAVED ARL; a GET here
+    // 405s and the probe throws -> the dot goes red even though Deezer downloads fine.
+    deezer_dl:  () => _ssJson('/api/deezer-download/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(j => j.success === true),
+    amazon:     () => _ssJson('/api/amazon/test-connection').then(j => j.connected === true),
+    lidarr:     () => _ssTestConn('lidarr'),
+    soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
+    torrent:    () => _ssTestConn('torrent_client'),
+    usenet:     () => _ssTestConn('usenet_client'),
+    youtube:    () => Promise.resolve(true),  // no auth required
+};
+// Configured metadata / server connections that support a generic test.
+const CONNECTION_TEST_SERVICES = ['spotify', 'server', 'tidal', 'qobuz', 'lastfm', 'genius', 'listenbrainz', 'acoustid', 'discogs'];
+
+async function testAllSources(opts = {}) {
+    const silent = opts.silent === true;          // no toast / no connection sweep (used for auto-run on load)
+    const btn = document.getElementById('test-all-sources-btn');
+    if (btn && !silent) { btn.disabled = true; btn.dataset._label = btn.textContent; btn.textContent = 'Testing…'; }
+
+    // Which download sources to test: the enabled hybrid sources, or the single
+    // selected source in non-hybrid mode.
+    const mode = document.getElementById('download-source-mode')?.value;
+    const sources = new Set();
+    if (mode === 'hybrid') {
+        (typeof getHybridOrder === 'function' ? getHybridOrder() : []).forEach(s => sources.add(s));
+    } else if (mode) {
+        sources.add(mode);
+    }
+    if (sources.size === 0) sources.add('soulseek');
+
+    // Torrent/Usenet downloads go through Prowlarr — its connection must be
+    // established first or those source tests fail. Probe Prowlarr up front.
+    if (sources.has('torrent') || sources.has('usenet')) {
+        try { await _ssTestConn('prowlarr'); } catch (e) { /* surfaced via the per-source test below */ }
+    }
+
+    for (const id of sources) _hybridSourceStatus[id] = 'testing';
+    buildHybridSourceList();
+
+    let ok = 0, fail = 0;
+    for (const id of sources) {
+        const probe = HYBRID_SOURCE_PROBE[id];
+        if (!probe) { _hybridSourceStatus[id] = 'na'; continue; }
+        try { const good = await probe(); _hybridSourceStatus[id] = good ? 'ok' : 'fail'; good ? ok++ : fail++; }
+        catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; }
+        buildHybridSourceList();
+    }
+
+    // Also test the metadata / server connections the user has configured
+    // (skipped on the silent auto-run to keep page load light).
+    let connOk = 0, connFail = 0;
+    if (!silent) {
+        try {
+            const cfg = await _ssJson('/api/settings/config-status');
+            for (const svc of CONNECTION_TEST_SERVICES) {
+                const configured = svc === 'server' ? true : (cfg && cfg[svc] && cfg[svc].configured);
+                if (!configured) continue;
+                try { const good = await _ssTestConn(svc); good ? connOk++ : connFail++; } catch (e) { connFail++; }
+            }
+        } catch (e) { /* config-status unavailable — skip connection sweep */ }
+    }
+
+    if (btn && !silent) { btn.disabled = false; btn.textContent = btn.dataset._label || 'Test all sources'; }
+    if (!silent) {
+        const parts = [`sources ${ok}✓${fail ? ' / ' + fail + '✗' : ''}`];
+        if (connOk || connFail) parts.push(`connections ${connOk}✓${connFail ? ' / ' + connFail + '✗' : ''}`);
+        showToast('Tested ' + parts.join(', '), (fail || connFail) ? 'error' : 'success');
+    }
+}
+window.testAllSources = testAllSources;
+
+// Auto-populate the source status dots once after the page settles, so they
+// reflect real state after a restart without the user having to click Test.
+let _sourcesAutoTested = false;
+function autoTestSourcesOnce() {
+    if (_sourcesAutoTested) return;
+    _sourcesAutoTested = true;
+    setTimeout(() => { try { testAllSources({ silent: true }); } catch (e) { } }, 1200);
+}
 
 function buildHybridSourceList() {
     const container = document.getElementById('hybrid-source-list');
@@ -677,11 +994,16 @@ function buildHybridSourceList() {
         const sourceLevelBadge = `<span class="hybrid-source-badge hybrid-source-badge-${sourceLevelClass}" title="${sourceLevelTitle}">${sourceLevel}</span>`;
 
         const item = document.createElement('div');
-        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}`;
+        const isExpanded = enabled && _expandedHybridSource === srcId;
+        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}${isExpanded ? ' config-open' : ''}`;
         item.draggable = true;
         item.dataset.sourceId = srcId;
 
+        // The name + a config chevron open this source's settings panel inline
+        // (only one at a time), so the long config blocks don't all stack up.
+        const clickConfig = enabled ? `onclick="toggleHybridSourceConfig('${srcId}')"` : '';
         item.innerHTML = `
+            <span class="hybrid-source-handle" title="Drag to reorder">⠿</span>
             <span class="hybrid-source-arrows">
                 <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', -1)" title="Move up">▲</button>
                 <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', 1)" title="Move down">▼</button>
@@ -690,9 +1012,11 @@ function buildHybridSourceList() {
                 ? `<img class="hybrid-source-icon" src="${src.icon}" alt="${src.name}" onerror="this.outerHTML='<span class=\\'hybrid-source-icon emoji-icon\\'>${src.emoji}</span>'">`
                 : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
             }
-            <span class="hybrid-source-name">${src.name}</span>
+            <span class="hybrid-source-name" ${clickConfig} style="${enabled ? 'cursor:pointer;' : ''}">${src.name}</span>
             ${sourceLevelBadge}
             <span class="hybrid-source-priority">${priorityNum}</span>
+            <span class="hybrid-source-status hss-${_hybridSourceStatus[srcId] || 'unknown'}" title="${({ unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected', fail: 'Connection failed', na: 'No connection test for this source' })[_hybridSourceStatus[srcId] || 'unknown']}"></span>
+            ${enabled ? `<button class="hybrid-source-config-btn" ${clickConfig} title="Configure ${src.name}">⚙</button>` : ''}
             <label class="hybrid-source-toggle">
                 <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleHybridSource('${srcId}', this.checked)">
                 <span class="toggle-track"></span>
@@ -706,10 +1030,15 @@ function buildHybridSourceList() {
             e.dataTransfer.setData('text/plain', srcId);
             item.classList.add('dragging');
         });
-        item.addEventListener('dragend', () => item.classList.remove('dragging'));
-        item.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            container.querySelectorAll('.hybrid-source-item').forEach(el => el.classList.remove('drag-over'));
+        });
+        item.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; item.classList.add('drag-over'); });
+        item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
         item.addEventListener('drop', (e) => {
             e.preventDefault();
+            item.classList.remove('drag-over');
             const draggedId = e.dataTransfer.getData('text/plain');
             if (draggedId && draggedId !== srcId) _reorderHybridSource(draggedId, srcId);
         });
@@ -756,6 +1085,8 @@ function _reorderHybridSource(draggedId, targetId) {
 
 function toggleHybridSource(srcId, enabled) {
     _hybridSourceEnabled[srcId] = enabled;
+    // If the source we just disabled had its config panel open, close it.
+    if (!enabled && _expandedHybridSource === srcId) _expandedHybridSource = null;
     // Rebuild enabled order from visual order so priority matches position
     if (_hybridVisualOrder) {
         _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
@@ -976,6 +1307,19 @@ async function loadSettingsData() {
         const response = await fetch(API.settings);
         const settings = await response.json();
 
+        // #879: a failed GET /api/settings returns an error body (e.g. {"error":
+        // "..."} on a 500), NOT real settings. Populating from it blanks every
+        // field to its default ('settings.spotify?.x || ""'), and the next
+        // (auto)save then overwrites the user's real config. Abort BEFORE
+        // touching any field and flag it so saves stay blocked until a good load.
+        if (!response.ok || !settings || typeof settings !== 'object' || settings.error) {
+            window._settingsLoadFailed = true;
+            throw new Error('settings load failed (HTTP ' + response.status + '): ' +
+                ((settings && settings.error) || 'unexpected response'));
+        }
+        window._settingsLoadFailed = false;  // good load → saving is safe again
+        window._settingsPayload = settings;
+
         // Populate Spotify settings
         document.getElementById('spotify-client-id').value = settings.spotify?.client_id || '';
         document.getElementById('spotify-client-secret').value = settings.spotify?.client_secret || '';
@@ -1028,6 +1372,10 @@ async function loadSettingsData() {
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
+        // Remember the persisted music server so a save from the VIDEO side keeps
+        // it unchanged (the toggle there is for opening a config panel, not picking
+        // the music server).
+        window._persistedActiveServer = activeServer;
         toggleServer(activeServer);
 
         // Load Plex music libraries if Plex is the active server
@@ -1063,6 +1411,10 @@ async function loadSettingsData() {
         // Populate AcoustID settings
         document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
         document.getElementById('acoustid-enabled').checked = settings.acoustid?.enabled || false;
+        const _acoustidRequireVerified = document.getElementById('acoustid-require-verified');
+        if (_acoustidRequireVerified) _acoustidRequireVerified.checked = settings.acoustid?.require_verified === true;
+        // Show the "require verified" toggle (under Quality Profile) only when AcoustID is on.
+        if (typeof syncAcoustidRequireVerifiedVisibility === 'function') syncAcoustidRequireVerifiedVisibility();
 
         // Populate Last.fm settings
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
@@ -1097,6 +1449,18 @@ async function loadSettingsData() {
         // config default (metadata.spotify_free_enrichment defaults True).
         if (_efEl) _efEl.checked = settings.metadata?.spotify_free_enrichment !== false;
 
+        const _jiosaavnExp = document.getElementById('experimental-jiosaavn-enabled');
+        const jiosaavnEnabled = settings.experimental?.jiosaavn_enabled === true;
+        if (_jiosaavnExp) _jiosaavnExp.checked = jiosaavnEnabled;
+        syncJiosaavnMetadataSourceOption(jiosaavnEnabled);
+        syncJiosaavnEnrichmentBubble(jiosaavnEnabled);
+        if (jiosaavnEnabled && _metaSel === 'jiosaavn') {
+            document.getElementById('metadata-fallback-source').value = 'jiosaavn';
+        }
+
+        const _bandcampExp = document.getElementById('experimental-bandcamp-enabled');
+        if (_bandcampExp) _bandcampExp.checked = settings.experimental?.bandcamp_enabled === true;
+
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
         document.getElementById('hydrabase-url').value = hbConfig.url || '';
@@ -1127,6 +1491,9 @@ async function loadSettingsData() {
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
+        const minFree = document.getElementById('min-free-disk-gb');
+        if (minFree) minFree.value = settings.soulseek?.min_free_disk_gb ?? 5;
+        applyPathsEnvironment(settings);
         document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
         document.getElementById('music-videos-path').value = settings.library?.music_videos_path || './MusicVideos';
         document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
@@ -1138,18 +1505,10 @@ async function loadSettingsData() {
         document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
         loadHybridSourceOrder(settings);
         loadArtSourceOrder(settings);
-        document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
-        document.getElementById('tidal-allow-fallback').checked = settings.tidal_download?.allow_fallback !== false;
-        document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
-        document.getElementById('qobuz-allow-fallback').checked = settings.qobuz?.allow_fallback !== false;
-        document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
-        document.getElementById('hifi-allow-fallback').checked = settings.hifi_download?.allow_fallback !== false;
+        // Per-source download quality is now derived from the global Quality
+        // Profile (ranked targets) — the per-source quality selects were removed.
         loadHiFiInstances();
-        document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
-        document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
-        document.getElementById('amazon-quality').value = settings.amazon_download?.quality || 'flac';
-        document.getElementById('amazon-allow-fallback').checked = settings.amazon_download?.allow_fallback !== false;
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
         const _prowUrl = document.getElementById('prowlarr-url');
@@ -1170,6 +1529,15 @@ async function loadSettingsData() {
         if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
         if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
         if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
+        // Seeding goals (torrent grabs) — off (0) by default, mirrors the video side.
+        const _tcRatio = document.getElementById('music-seed-ratio');
+        const _tcHours = document.getElementById('music-seed-hours');
+        const _tcRemove = document.getElementById('music-seed-remove-data');
+        if (_tcRatio) _tcRatio.value = settings.torrent_client?.seed_ratio_goal != null ? settings.torrent_client.seed_ratio_goal : 0;
+        if (_tcHours) _tcHours.value = settings.torrent_client?.seed_time_goal_hours != null ? settings.torrent_client.seed_time_goal_hours : 0;
+        if (_tcRemove) _tcRemove.checked = settings.torrent_client?.seed_remove_data !== false;
+        const _tcSeedMode = document.getElementById('music-seed-mode');
+        if (_tcSeedMode) _tcSeedMode.value = settings.torrent_client?.seed_mode || 'soulsync';
         // Stalled-torrent knobs live under download_source but render in the
         // torrent client section. Timeout is stored in SECONDS, shown in MINUTES.
         const _tcStall = document.getElementById('torrent-stall-timeout');
@@ -1208,6 +1576,25 @@ async function loadSettingsData() {
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+        // Show the cookies.txt paste box only in "custom" mode. We never echo the
+        // stored cookie back to the UI (it's secret + lives in a file, not config);
+        // if one is already saved, say so via placeholder so a blank save won't wipe it.
+        const _ytCookieSel = document.getElementById('youtube-cookies-browser');
+        const _ytPasteBox = document.getElementById('youtube-cookies-paste');
+        const _ytPasteGroup = document.getElementById('youtube-cookies-paste-group');
+        if (_ytCookieSel && _ytPasteGroup) {
+            const _toggleYtPaste = () => {
+                _ytPasteGroup.style.display = _ytCookieSel.value === 'custom' ? '' : 'none';
+            };
+            if (_ytPasteBox && settings.youtube?.cookies_file) {
+                _ytPasteBox.placeholder = 'A cookies.txt is saved. Paste again to replace it, or leave blank to keep it.';
+            }
+            _toggleYtPaste();
+            if (!_ytCookieSel.dataset.pasteToggleBound) {
+                _ytCookieSel.addEventListener('change', _toggleYtPaste);
+                _ytCookieSel.dataset.pasteToggleBound = '1';
+            }
+        }
 
         // Update UI based on download source mode
         updateDownloadSourceUI();
@@ -1220,14 +1607,17 @@ async function loadSettingsData() {
         document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
         document.getElementById('cover-art-download').checked = settings.metadata_enhancement?.cover_art_download !== false;
         document.getElementById('prefer-caa-art').checked = settings.metadata_enhancement?.prefer_caa_art === true;
+        document.getElementById('single-to-album-enabled').checked = settings.metadata_enhancement?.single_to_album === true;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
+        document.getElementById('audio-completeness-check').checked = settings.post_processing?.audio_completeness_check === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
         document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
         document.getElementById('retries-per-query').value = settings.post_processing?.retries_per_query ?? 5;
         document.getElementById('accept-version-mismatch-fallback').checked = settings.post_processing?.accept_version_mismatch_fallback === true;
         document.getElementById('version-mismatch-min-count').value = settings.post_processing?.version_mismatch_min_count ?? 2;
+        if (typeof syncRetryConditionalRows === 'function') syncRetryConditionalRows();
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -1256,8 +1646,17 @@ async function loadSettingsData() {
         // Populate File Organization settings
         document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
-        document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
+        // $albumartist honors the Collaborative Album Artist mode; the old
+        // $artist default filed multi-artist singles under "A, B & C". A
+        // stored old-default upgrades server-side too (core/imports/paths.py).
+        {
+            const _sp = settings.file_organization?.templates?.single_path;
+            document.getElementById('template-single-path').value =
+                (!_sp || _sp === '$artist/$artist - $title/$title')
+                    ? '$albumartist/$albumartist - $title/$title' : _sp;
+        }
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
+        document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
@@ -1279,9 +1678,20 @@ async function loadSettingsData() {
         updateLossyBitrateOptions();
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
 
+        // Album Publishing (#999) — atomic album publish, opt-in, default off.
+        const _atomicPub = document.getElementById('album-atomic-publish');
+        if (_atomicPub) _atomicPub.checked = settings.album_downloads?.atomic_publish === true;
+
         // Populate Listening Stats settings
         document.getElementById('listening-stats-enabled').checked = settings.listening_stats?.enabled === true;
         document.getElementById('listening-stats-interval').value = settings.listening_stats?.poll_interval || 30;
+        const _advEl = document.getElementById('discover-adventurousness');
+        if (_advEl) {
+            const _adv = settings.discover?.adventurousness;
+            _advEl.value = (typeof _adv === 'number') ? _adv : 0.3;
+            const _advVal = document.getElementById('discover-adventurousness-val');
+            if (_advVal) _advVal.textContent = parseFloat(_advEl.value).toFixed(2);
+        }
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
@@ -1291,6 +1701,8 @@ async function loadSettingsData() {
 
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
+        document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
+        syncPreferExplicitState();
 
         // Populate Genre Whitelist
         const gwEnabled = settings.genre_whitelist?.enabled === true;
@@ -1303,12 +1715,19 @@ async function loadSettingsData() {
 
         // Populate Import settings
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
+        // Default ON (legacy Artist/Album staging behavior) when the key is absent.
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
-        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
+        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override !== false;
+        const _transferPermEl = document.getElementById('import-transfer-permanent');
+        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
+        const _libM3uEn = document.getElementById('library-m3u-enabled');
+        if (_libM3uEn) _libM3uEn.checked = settings.m3u_export?.library_enabled === true;
+        const _libM3uPath = document.getElementById('library-m3u-path');
+        if (_libM3uPath) _libM3uPath.value = settings.m3u_export?.library_path || '';
 
         // Populate UI Appearance settings
         const accentPreset = settings.ui_appearance?.accent_preset || '#1db954';
@@ -1341,22 +1760,44 @@ async function loadSettingsData() {
         sidebarVisualizerType = vizType;
 
         // Background particles toggle
-        const particlesEnabled = settings.ui_appearance?.particles_enabled !== false; // default true
+        const particlesEnabled = settings.ui_appearance?.particles_enabled === true; // default OFF (GPU cost)
         const particlesCheckbox = document.getElementById('particles-enabled');
         if (particlesCheckbox) particlesCheckbox.checked = particlesEnabled;
         applyParticlesSetting(particlesEnabled);
 
-        // Worker orbs toggle
-        const workerOrbsEnabled = settings.ui_appearance?.worker_orbs_enabled !== false; // default true
+        // Worker orbs toggle. When the user hasn't saved a preference, reflect the
+        // server-decided browser-aware default (window._workerOrbsEnabled — OFF on
+        // Firefox for perf) so saving settings doesn't silently flip a first-time
+        // Firefox user's orbs back on. An explicit saved config value always wins.
+        const _orbsCfg = settings.ui_appearance?.worker_orbs_enabled;
+        const workerOrbsEnabled = (_orbsCfg === undefined || _orbsCfg === null)
+            ? (window._workerOrbsEnabled !== false)
+            : (_orbsCfg !== false);
         const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
         if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
         applyWorkerOrbsSetting(workerOrbsEnabled);
 
-        // Reduce effects toggle
-        const reduceEffects = settings.ui_appearance?.reduce_effects === true; // default false
+        // Reduce effects toggle. This flag is device-scoped: localStorage (set by the
+        // live toggle and by weak-hardware auto-detect) is the source of truth for THIS
+        // machine; the server value is only the cross-device default used when this
+        // device has never chosen. Prefer localStorage when present so opening Settings
+        // doesn't clobber an auto-enabled (or manually-set) per-device choice.
+        const serverReduce = settings.ui_appearance?.reduce_effects === true; // default false
+        const localReduce = localStorage.getItem('soulsync-reduce-effects'); // '1' | '0' | null
+        const reduceEffects = localReduce !== null ? (localReduce === '1') : serverReduce;
         const reduceCheckbox = document.getElementById('reduce-effects-enabled');
         if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
         applyReduceEffects(reduceEffects);
+
+        // Max Performance — same device-scoped resolution as reduce-effects:
+        // localStorage is the per-device truth, server value the cross-device default.
+        // Applied last so it can lock/override the dependent toggles above when on.
+        const serverMaxPerf = settings.ui_appearance?.max_performance === true; // default false
+        const localMaxPerf = localStorage.getItem('soulsync-max-performance'); // '1' | '0' | null
+        const maxPerf = localMaxPerf !== null ? (localMaxPerf === '1') : serverMaxPerf;
+        const maxPerfCheckbox = document.getElementById('max-performance-enabled');
+        if (maxPerfCheckbox) maxPerfCheckbox.checked = maxPerf;
+        applyMaxPerformance(maxPerf);
 
         // Populate Logging information
         const logLevelSelect = document.getElementById('log-level-select');
@@ -1461,7 +1902,10 @@ async function loadSettingsData() {
 
     } catch (error) {
         console.error('Error loading settings:', error);
-        showToast('Failed to load settings', 'error');
+        // #879: any load failure → block saves so a blank/partial form can't be
+        // written over the real config. Cleared on the next successful load.
+        window._settingsLoadFailed = true;
+        showToast('Failed to load settings — reload the page before saving (your saved config is untouched)', 'error');
     }
 }
 
@@ -1806,46 +2250,69 @@ function updateDownloadSourceUI() {
         activeSources.add(mode);
     }
 
-    soulseekContainer.style.display = activeSources.has('soulseek') ? 'block' : 'none';
-    tidalContainer.style.display = activeSources.has('tidal') ? 'block' : 'none';
-    qobuzContainer.style.display = activeSources.has('qobuz') ? 'block' : 'none';
-    youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
-    hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
-    if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
-    if (amazonContainer) amazonContainer.style.display = activeSources.has('amazon') ? 'block' : 'none';
-    if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
-    if (soundcloudContainer) soundcloudContainer.style.display = activeSources.has('soundcloud') ? 'block' : 'none';
+    // In single-source mode the one config block is shown directly. In hybrid
+    // mode there can be many active sources, so we only reveal the one the user
+    // clicked open in the priority list (accordion-style) — no endless stack.
+    const isHybrid = mode === 'hybrid';
+    const showCfg = (src) => activeSources.has(src) && (!isHybrid || _expandedHybridSource === src);
+
+    soulseekContainer.style.display = showCfg('soulseek') ? 'block' : 'none';
+    tidalContainer.style.display = showCfg('tidal') ? 'block' : 'none';
+    qobuzContainer.style.display = showCfg('qobuz') ? 'block' : 'none';
+    youtubeContainer.style.display = showCfg('youtube') ? 'block' : 'none';
+    hifiContainer.style.display = showCfg('hifi') ? 'block' : 'none';
+    if (deezerDlContainer) deezerDlContainer.style.display = showCfg('deezer_dl') ? 'block' : 'none';
+    if (amazonContainer) amazonContainer.style.display = showCfg('amazon') ? 'block' : 'none';
+    if (lidarrContainer) lidarrContainer.style.display = showCfg('lidarr') ? 'block' : 'none';
+    if (soundcloudContainer) soundcloudContainer.style.display = showCfg('soundcloud') ? 'block' : 'none';
     const prowlarrRedirect = document.getElementById('prowlarr-source-redirect');
     if (prowlarrRedirect) {
-        const showProwlarr = activeSources.has('torrent') || activeSources.has('usenet');
+        const showProwlarr = showCfg('torrent') || showCfg('usenet');
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Quality profile is Soulseek-only (it only affects Soulseek downloads) and
-    // downloads-tab-only. Gate the WHOLE collapsible tile (#quality-profile-tile
-    // = header + body) as a unit, so it either fully shows (Soulseek active) or
-    // fully hides — never an empty expandable shell (the earlier bug came from
-    // gating only the inner #quality-profile-section).
+    // Indexers & Downloaders: torrent/usenet setup (Prowlarr + the Torrent and
+    // Usenet client tiles) is shared config — keep it always reachable on the
+    // Downloads tab for BOTH the music and video sides, like the Advanced /
+    // Appearance tabs. (It used to be gated on an active torrent/usenet source,
+    // which hid it from anyone whose source was something else — and from the video
+    // side entirely, whose source lives on a separate dropdown.) Only tab-gated so
+    // it never leaks onto another tab.
+    const onDownloadsTab = document.querySelector('.stg-tab.active')?.dataset.tab === 'downloads';
+    const indSection = document.getElementById('indexers-downloaders-section');
+    if (indSection) indSection.style.display = onDownloadsTab ? '' : 'none';
+    const torrentTile = document.getElementById('torrent-tile');
+    if (torrentTile) torrentTile.style.display = '';
+    const usenetTile = document.getElementById('usenet-tile');
+    if (usenetTile) usenetTile.style.display = '';
+
+    // Quality profile is now a GLOBAL system — the same ranked-target list
+    // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is
+    // no longer Soulseek-gated. Show the whole collapsible tile whenever the
+    // downloads tab is active (gated as a unit so there's never an empty
+    // expandable shell).
     const qualityProfileTile = document.getElementById('quality-profile-tile');
     if (qualityProfileTile) {
         const activeTab = document.querySelector('.stg-tab.active');
-        const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
-        qualityProfileTile.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
+        const onQualityTab = activeTab && activeTab.dataset.tab === 'quality';
+        qualityProfileTile.style.display = onQualityTab ? '' : 'none';
     }
 
-    if (activeSources.has('tidal')) {
+    // Only auto-probe a source's live status when its config panel is visible
+    // (always in single-source mode; only the opened one in hybrid mode).
+    if (showCfg('tidal')) {
         checkTidalDownloadAuthStatus();
     }
-    if (activeSources.has('qobuz')) {
+    if (showCfg('qobuz')) {
         checkQobuzAuthStatus();
     }
-    if (activeSources.has('hifi')) {
+    if (showCfg('hifi')) {
         testHiFiConnection();
     }
-    if (activeSources.has('amazon')) {
+    if (showCfg('amazon')) {
         testAmazonConnection();
     }
-    if (activeSources.has('soundcloud')) {
+    if (showCfg('soundcloud')) {
         testSoundcloudConnection();
     }
 }
@@ -1889,6 +2356,39 @@ function updateHybridSecondaryOptions() {
 // ===============================
 
 let currentQualityProfile = null;
+let qualityProfileAutoSaveTimer = null;
+
+// Which profile the tiles currently show. null = "the live default", the
+// only state that existed before profiles were previewable — autosave keeps
+// writing straight into the active default/global config exactly as always.
+// Set to a specific id by previewQualityProfile() when the user clicks a
+// DIFFERENT (non-default) profile's row to look at/edit it; in that state
+// autosave must NOT touch the live default — see debouncedSaveQualityProfile.
+let _qpEditingProfileId = null;
+
+function _qpDefaultProfileId() {
+    const def = _qpProfileRows.find(p => p.is_default);
+    return def ? def.id : null;
+}
+
+// Save just the quality profile (not the whole settings page). Used for quality
+// target edits so reordering a target doesn't re-init every backend client.
+function debouncedSaveQualityProfile() {
+    if (window._suppressSettingsAutoSave) return;
+    if (window._settingsLoadFailed) return;
+    // Previewing a specific NON-default profile: the legacy save endpoint
+    // below always writes the LIVE default row + pushes into global config —
+    // autosaving here would silently overwrite the active profile (and
+    // anything downloading right now under it) while the user is just
+    // looking at/tweaking a different one. Edits only persist once the user
+    // explicitly clicks that profile row's Update (✎) button.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        qpShowEditingBanner();
+        return;
+    }
+    if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
+    qualityProfileAutoSaveTimer = setTimeout(() => saveQualityProfile(), 800);
+}
 
 async function loadQualityProfile() {
     try {
@@ -1902,248 +2402,400 @@ async function loadQualityProfile() {
     } catch (error) {
         console.error('Error loading quality profile:', error);
     }
+    await loadCustomQualityProfiles();
+}
+
+// v3: the working copy of the ordered target list. Mirrors the DOM rows
+// and is the single source of truth that collectQualityProfileFromUI reads.
+let currentRankedTargets = [];
+
+function rtLabel(t) {
+    const fmt = (t.format || 'any').toUpperCase();
+    if (RT_LOSSLESS_FORMATS.includes(t.format)) {
+        const bd = t.bit_depth ? `${t.bit_depth}-bit` : '';
+        const sr = t.min_sample_rate ? `≥${t.min_sample_rate / 1000}kHz` : '';
+        const detail = [bd, sr].filter(Boolean).join('/');
+        return detail ? `${fmt} ${detail}` : fmt;
+    }
+    return t.min_bitrate ? `${fmt} ≥${t.min_bitrate}kbps` : fmt;
 }
 
 function populateQualityProfileUI(profile) {
     // Update preset buttons
-    document.querySelectorAll('.preset-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
+    document.querySelectorAll('.preset-button').forEach(btn => btn.classList.remove('active'));
     const activePresetBtn = document.querySelector(`.preset-button[onclick*="${profile.preset}"]`);
-    if (activePresetBtn) {
-        activePresetBtn.classList.add('active');
-    }
+    if (activePresetBtn) activePresetBtn.classList.add('active');
 
-    // Populate each quality tier
-    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
-    qualities.forEach(quality => {
-        const config = profile.qualities[quality];
-        if (config) {
-            // Set enabled checkbox
-            const enabledCheckbox = document.getElementById(`quality-${quality}-enabled`);
-            if (enabledCheckbox) {
-                enabledCheckbox.checked = config.enabled;
-            }
+    // The API migrates v2 → v3, so ranked_targets is always present.
+    currentRankedTargets = Array.isArray(profile.ranked_targets)
+        ? profile.ranked_targets.map(t => ({ ...t }))
+        : [];
+    renderRankedTargets();
 
-            // Set min/max sliders
-            const minSlider = document.getElementById(`${quality}-min`);
-            const maxSlider = document.getElementById(`${quality}-max`);
-            if (minSlider && maxSlider) {
-                minSlider.value = config.min_kbps;
-                maxSlider.value = config.max_kbps;
-                updateQualityRange(quality);
-            }
-
-            // Set priority display
-            const prioritySpan = document.getElementById(`priority-${quality}`);
-            if (prioritySpan) {
-                prioritySpan.textContent = `Priority: ${config.priority}`;
-            }
-
-            // Toggle sliders visibility
-            const sliders = document.getElementById(`sliders-${quality}`);
-            if (sliders) {
-                if (config.enabled) {
-                    sliders.classList.remove('disabled');
-                } else {
-                    sliders.classList.add('disabled');
-                }
-            }
-
-            // FLAC-specific: restore bit depth selector and fallback toggle
-            if (quality === 'flac') {
-                const bitDepthValue = config.bit_depth || 'any';
-                document.querySelectorAll('.bit-depth-btn').forEach(btn => {
-                    btn.classList.toggle('active', btn.getAttribute('data-value') === bitDepthValue);
-                });
-                const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
-                if (bitDepthSelector) {
-                    if (config.enabled) {
-                        bitDepthSelector.classList.remove('disabled');
-                    } else {
-                        bitDepthSelector.classList.add('disabled');
-                    }
-                }
-                // Show/hide and restore fallback toggle
-                const fallbackToggle = document.getElementById('flac-fallback-toggle');
-                if (fallbackToggle) {
-                    fallbackToggle.style.display = bitDepthValue === 'any' ? 'none' : 'block';
-                }
-                const fallbackCb = document.getElementById('flac-bit-depth-fallback');
-                if (fallbackCb) {
-                    fallbackCb.checked = config.bit_depth_fallback !== false;
-                }
-            }
-        }
-    });
-
-    // Set fallback checkbox
     const fallbackCheckbox = document.getElementById('quality-fallback-enabled');
-    if (fallbackCheckbox) {
-        fallbackCheckbox.checked = profile.fallback_enabled;
+    if (fallbackCheckbox) fallbackCheckbox.checked = profile.fallback_enabled !== false;
+
+    const searchModeSelect = document.getElementById('quality-search-mode');
+    if (searchModeSelect) searchModeSelect.value = profile.search_mode === 'best_quality' ? 'best_quality' : 'priority';
+
+    const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
+    if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
+
+    const upgradePolicySelect = document.getElementById('quality-upgrade-policy');
+    if (upgradePolicySelect) {
+        upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
+            ? 'until_cutoff'
+            : 'acceptable';
+    }
+    renderUpgradeCutoffOptions(profile.upgrade_cutoff_index);
+
+    onSearchModeChange();
+    onUpgradePolicyChange();
+}
+
+// Hide the "rank-based download order" toggle when Best quality is active —
+// that mode always ranks by quality, so the toggle would be meaningless there.
+function onSearchModeChange() {
+    const mode = document.getElementById('quality-search-mode')?.value;
+    const group = document.getElementById('quality-rank-candidates-group');
+    if (group) group.style.display = mode === 'best_quality' ? 'none' : '';
+}
+
+function renderUpgradeCutoffOptions(selectedIndex = null) {
+    const select = document.getElementById('quality-upgrade-cutoff');
+    if (!select) return;
+    const current = selectedIndex ?? parseInt(select.value || '0', 10);
+    const maxIdx = Math.max(0, currentRankedTargets.length - 1);
+    const clamped = Number.isFinite(current) ? Math.min(Math.max(current, 0), maxIdx) : 0;
+    if (!currentRankedTargets.length) {
+        select.innerHTML = '<option value="0">Top ranked target</option>';
+        select.value = '0';
+        return;
+    }
+    select.innerHTML = currentRankedTargets.map((target, index) => (
+        `<option value="${index}">${index + 1}. ${escapeHtml(rtLabel(target))}</option>`
+    )).join('');
+    select.value = String(clamped);
+}
+
+function onUpgradePolicyChange() {
+    const policy = document.getElementById('quality-upgrade-policy')?.value || 'acceptable';
+    const cutoffGroup = document.getElementById('quality-upgrade-cutoff-group');
+    if (cutoffGroup) cutoffGroup.style.display = policy === 'until_cutoff' ? '' : 'none';
+    renderUpgradeCutoffOptions();
+}
+
+// Toggle the collapsible help text below a setting's ⓘ icon. Walks forward from
+// the icon's row to the next .setting-help-body sibling, so it works whether the
+// body is the immediate next element or sits after a control (e.g. a <select>),
+// and regardless of any wrapping container.
+function toggleSettingHelp(iconEl) {
+    // Locate the help body to toggle. Search order:
+    //  1) the next .setting-help-body sibling after the icon's row (icon + body
+    //     both inside the same .form-group / .setting-row),
+    //  2) the element right after the enclosing .form-group (help wall that sits
+    //     as a sibling just below the group — the common always-visible case).
+    const row = iconEl.closest('.setting-row') || iconEl;
+    let el = row.nextElementSibling;
+    while (el && !el.classList.contains('setting-help-body')) {
+        el = el.nextElementSibling;
+    }
+    if (!el) {
+        const fg = iconEl.closest('.form-group');
+        let sib = fg ? fg.nextElementSibling : null;
+        // Only accept an immediately-following help body — never reach across
+        // into the next setting/group.
+        if (sib && sib.classList.contains('setting-help-body')) el = sib;
+    }
+    if (el) {
+        el.hidden = !el.hidden;
+        // Reflect open state on the icon itself (filled badge) so it's clear
+        // which help panel is currently revealed.
+        const icon = iconEl.classList.contains('info-icon') ? iconEl : row.querySelector('.info-icon');
+        if (icon) icon.classList.toggle('open', !el.hidden);
     }
 }
 
-function updateQualityRange(quality) {
-    const minSlider = document.getElementById(`${quality}-min`);
-    const maxSlider = document.getElementById(`${quality}-max`);
-    const minValue = document.getElementById(`${quality}-min-value`);
-    const maxValue = document.getElementById(`${quality}-max-value`);
+function renderRankedTargets() {
+    const list = document.getElementById('ranked-targets-list');
+    if (!list) return;
+    list.innerHTML = '';
 
-    if (!minSlider || !maxSlider || !minValue || !maxValue) return;
-
-    let min = parseInt(minSlider.value);
-    let max = parseInt(maxSlider.value);
-
-    // Ensure min doesn't exceed max
-    if (min > max) {
-        min = max;
-        minSlider.value = min;
+    if (currentRankedTargets.length === 0) {
+        list.innerHTML = '<div class="ranked-targets-empty">No targets yet — add one below. '
+            + 'With fallback off this would reject every download.</div>';
+        renderUpgradeCutoffOptions();
+        return;
     }
 
-    // Ensure max doesn't go below min
-    if (max < min) {
-        max = min;
-        maxSlider.value = max;
-    }
-
-    minValue.textContent = `${min} kbps`;
-    maxValue.textContent = `${max} kbps`;
-}
-
-function toggleQuality(quality) {
-    const checkbox = document.getElementById(`quality-${quality}-enabled`);
-    const sliders = document.getElementById(`sliders-${quality}`);
-
-    if (checkbox && sliders) {
-        if (checkbox.checked) {
-            sliders.classList.remove('disabled');
-        } else {
-            sliders.classList.add('disabled');
-        }
-    }
-
-    // Also toggle FLAC bit depth selector
-    if (quality === 'flac') {
-        const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
-        if (bitDepthSelector && checkbox) {
-            if (checkbox.checked) {
-                bitDepthSelector.classList.remove('disabled');
-            } else {
-                bitDepthSelector.classList.add('disabled');
-            }
-        }
-    }
-
-    // Mark preset as custom when manually changing
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
+    currentRankedTargets.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = 'ranked-target-row';
+        row.draggable = true;
+        row.dataset.index = String(i);
+        row.innerHTML = `
+            <span class="rt-handle" title="Drag to reorder">⠿</span>
+            <span class="rt-rank">${i + 1}</span>
+            <span class="rt-label">${rtLabel(t)}</span>
+            <span class="rt-spacer"></span>
+            <button type="button" class="rt-move" title="Move up" onclick="moveRankedTarget(${i}, -1)">▲</button>
+            <button type="button" class="rt-move" title="Move down" onclick="moveRankedTarget(${i}, 1)">▼</button>
+            <button type="button" class="rt-del" title="Remove" onclick="deleteRankedTarget(${i})">🗑</button>
+        `;
+        row.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('text/plain', String(i));
+            row.classList.add('rt-dragging');
         });
-    }
-}
-
-function setFlacBitDepth(value) {
-    document.querySelectorAll('.bit-depth-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-value') === value);
+        row.addEventListener('dragend', () => row.classList.remove('rt-dragging'));
+        row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('rt-dragover'); });
+        row.addEventListener('dragleave', () => row.classList.remove('rt-dragover'));
+        row.addEventListener('drop', e => {
+            e.preventDefault();
+            row.classList.remove('rt-dragover');
+            const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            if (!Number.isNaN(from) && from !== i) reorderRankedTarget(from, i);
+        });
+        list.appendChild(row);
     });
-
-    // Show/hide fallback toggle — only relevant when a specific bit depth is selected
-    const fallbackToggle = document.getElementById('flac-fallback-toggle');
-    if (fallbackToggle) {
-        fallbackToggle.style.display = value === 'any' ? 'none' : 'block';
-    }
-
-    // Mark preset as custom when manually changing
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-    }
-
-    debouncedAutoSaveSettings();
+    renderUpgradeCutoffOptions();
 }
 
-function setFlacBitDepthFallback(enabled) {
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-    }
-    debouncedAutoSaveSettings();
+function reorderRankedTarget(from, to) {
+    const [moved] = currentRankedTargets.splice(from, 1);
+    currentRankedTargets.splice(to, 0, moved);
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
 }
 
+function moveRankedTarget(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= currentRankedTargets.length) return;
+    [currentRankedTargets[i], currentRankedTargets[j]] = [currentRankedTargets[j], currentRankedTargets[i]];
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
+}
+
+function deleteRankedTarget(i) {
+    currentRankedTargets.splice(i, 1);
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
+}
+
+// Lossless formats take bit-depth + sample-rate constraints; lossy take a
+// minimum bitrate. Single source of truth for the add-target field toggle.
+const RT_LOSSLESS_FORMATS = ['flac', 'alac', 'wav', 'dsf'];
+const RT_LOSSY_FORMATS = ['mp3', 'aac', 'ogg', 'opus', 'wma'];
+// "group:" selections are a UI convenience: picking one + constraints expands
+// into individual per-format targets at that slot (the backend still works
+// purely on concrete per-format targets). The user reorders/prunes after.
+const RT_GROUPS = { 'group:lossless': RT_LOSSLESS_FORMATS, 'group:lossy': RT_LOSSY_FORMATS };
+
+function rtSelectionIsLossless(val) {
+    return val === 'group:lossless' || RT_LOSSLESS_FORMATS.includes(val);
+}
+
+function onRtAddFormatChange() {
+    const lossless = rtSelectionIsLossless(document.getElementById('rt-add-format')?.value);
+    const llFields = document.querySelector('.rt-lossless-fields');
+    const lyFields = document.querySelector('.rt-lossy-fields');
+    if (llFields) llFields.style.display = lossless ? '' : 'none';
+    if (lyFields) lyFields.style.display = lossless ? 'none' : '';
+    onRtBitrateChange();   // keep the custom-bitrate field in sync
+}
+
+// Reveal the manual bitrate input only when the dropdown is on "Custom…".
+function onRtBitrateChange() {
+    const wrap = document.getElementById('rt-add-bitrate-custom-wrap');
+    if (!wrap) return;
+    const isCustom = document.getElementById('rt-add-bitrate')?.value === 'custom';
+    wrap.style.display = isCustom ? '' : 'none';
+}
+
+function addRankedTarget() {
+    const val = document.getElementById('rt-add-format')?.value || 'flac';
+
+    // Collect the constraints once; they apply to every format we add.
+    const constraints = {};
+    if (rtSelectionIsLossless(val)) {
+        const bd = document.getElementById('rt-add-bitdepth')?.value;
+        const sr = document.getElementById('rt-add-samplerate')?.value;
+        if (bd) constraints.bit_depth = parseInt(bd, 10);
+        if (sr) constraints.min_sample_rate = parseInt(sr, 10);
+    } else {
+        let br = document.getElementById('rt-add-bitrate')?.value;
+        if (br === 'custom') br = document.getElementById('rt-add-bitrate-custom')?.value;
+        if (br) constraints.min_bitrate = parseInt(br, 10);
+    }
+
+    // A group expands into one concrete target per format; a single format is
+    // just a one-element list. Skip a format that already has an identical
+    // target so re-adding a group doesn't pile up duplicates.
+    const formats = RT_GROUPS[val] || [val];
+    const sig = (t) => `${t.format}|${t.bit_depth || ''}|${t.min_sample_rate || ''}|${t.min_bitrate || ''}`;
+    const existing = new Set(currentRankedTargets.map(sig));
+    formats.forEach(fmt => {
+        const t = { format: fmt, ...constraints };
+        if (existing.has(sig(t))) return;
+        t.label = rtLabel(t);
+        currentRankedTargets.push(t);
+        existing.add(sig(t));
+    });
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
+}
+
+const PRESET_LABELS = { audiophile: 'Audiophile', balanced: 'Balanced', space_saver: 'Space Saver' };
+
+// Switch to a preset. The backend restores the preset's saved edits (or factory
+// defaults if untouched) and persists it as the active profile, so there is no
+// follow-up save here and no full-page loading overlay (which caused the flicker).
 async function applyQualityPreset(presetName) {
+    // Drop any queued auto-save so a stale-target write can't land after the switch.
+    if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
+    if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
+
+    // Previewing a specific NON-default profile: POST /preset/<name> below
+    // always overwrites the LIVE default row, no matter what's on screen —
+    // clicking a Quick-Set button while just looking at a different profile
+    // would silently destroy the real default's settings and then swap the
+    // tiles to show it instead (looks like the preview "jumps" to a random
+    // profile). Load the preset's values locally instead — read-only, never
+    // touches the server — same as previewQualityProfile; it only persists
+    // once the user explicitly clicks that profile row's Update (✎).
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        try {
+            const response = await fetch('/api/quality-profile/presets');
+            const data = await response.json();
+            const preset = data.success ? data.presets?.[presetName] : null;
+            if (!preset) {
+                showToast(`Failed to load '${presetName}' preset`, 'error');
+                return;
+            }
+            // Same carry-forward as the live-default path below: the search
+            // strategy is a global choice, not part of the preset itself.
+            const uiState = collectQualityProfileFromUI();
+            const merged = {
+                ...preset,
+                search_mode: uiState.search_mode,
+                rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+            };
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(merged);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Previewing '${PRESET_LABELS[presetName] || presetName}' — click ✎ on the profile row to save it here`, 'success');
+        } catch (error) {
+            console.error('Error loading quality preset:', error);
+            showToast('Failed to load preset', 'error');
+        }
+        return;
+    }
+
     try {
-        showLoadingOverlay(`Applying ${presetName} preset...`);
-
-        const response = await fetch(`/api/quality-profile/preset/${presetName}`, {
-            method: 'POST'
-        });
-
+        const response = await fetch(`/api/quality-profile/preset/${presetName}`, { method: 'POST' });
         const data = await response.json();
 
         if (data.success) {
             currentQualityProfile = data.profile;
-            populateQualityProfileUI(currentQualityProfile);
-            showToast(`Applied '${presetName}' preset`, 'success');
+            // Suppress the global change→auto-save listener while we programmatically
+            // set checkbox + select values — these aren't user edits.
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            renderCustomQualityProfiles(_qpProfileRows);
+            showToast(`Switched to '${PRESET_LABELS[presetName] || presetName}'`, 'success');
         } else {
             showToast(`Failed to apply preset: ${data.error}`, 'error');
         }
     } catch (error) {
         console.error('Error applying quality preset:', error);
         showToast('Failed to apply preset', 'error');
-    } finally {
-        hideLoadingOverlay();
+    }
+}
+
+// Discard the active preset's saved edits and restore its factory defaults.
+async function resetActiveQualityPreset() {
+    // "Reset to factory" is a concept the 3 built-in presets have (a
+    // separate stash of saved customizations per preset name) — a named
+    // custom profile (Test/Main/whatever) has no factory counterpart to
+    // reset to. The backend call below would ALSO always write into the
+    // live default row regardless of what's being previewed, same class of
+    // bug as applyQualityPreset — refuse instead of doing that silently.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        showToast("Reset to defaults only applies to the live default profile — this one has no factory preset to reset to", 'info');
+        return;
+    }
+    const presetName = currentQualityProfile?.preset;
+    if (!presetName || !(presetName in PRESET_LABELS)) {
+        showToast('No preset selected to reset', 'info');
+        return;
+    }
+    if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
+    if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
+
+    try {
+        const response = await fetch(`/api/quality-profile/preset/${presetName}/reset`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Reset '${PRESET_LABELS[presetName] || presetName}' to defaults`, 'success');
+        } else {
+            showToast(`Failed to reset preset: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error resetting quality preset:', error);
+        showToast('Failed to reset preset', 'error');
     }
 }
 
 function collectQualityProfileFromUI() {
-    const profile = {
-        version: 2,
-        preset: 'custom', // Will be overridden if a preset is active
-        qualities: {},
-        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true
-    };
-
-    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
-
-    qualities.forEach((quality, index) => {
-        const enabled = document.getElementById(`quality-${quality}-enabled`)?.checked || false;
-        const minSlider = document.getElementById(`${quality}-min`);
-        const maxSlider = document.getElementById(`${quality}-max`);
-
-        // Preserve priority from the currently loaded profile instead of using array order
-        const existingPriority = currentQualityProfile?.qualities?.[quality]?.priority ?? (index + 1);
-
-        profile.qualities[quality] = {
-            enabled: enabled,
-            min_kbps: parseInt(minSlider?.value || 0),
-            max_kbps: parseInt(maxSlider?.value || 99999),
-            priority: existingPriority
-        };
-
-        // Add FLAC-specific bit_depth and fallback settings
-        if (quality === 'flac') {
-            const activeBtn = document.querySelector('.bit-depth-btn.active');
-            profile.qualities[quality].bit_depth = activeBtn ? activeBtn.getAttribute('data-value') : 'any';
-            const fallbackCb = document.getElementById('flac-bit-depth-fallback');
-            profile.qualities[quality].bit_depth_fallback = fallbackCb ? fallbackCb.checked : true;
-        }
+    // v3: ordered target list. Drop empty/None fields so each target stays
+    // minimal (matches QualityTarget.to_dict on the backend).
+    const ranked_targets = currentRankedTargets.map(t => {
+        const out = { format: t.format };
+        if (t.label) out.label = t.label;
+        if (t.bit_depth) out.bit_depth = t.bit_depth;
+        if (t.min_sample_rate) out.min_sample_rate = t.min_sample_rate;
+        if (t.min_bitrate) out.min_bitrate = t.min_bitrate;
+        return out;
     });
 
-    // Check if current profile matches a preset
-    if (currentQualityProfile && currentQualityProfile.preset !== 'custom') {
-        profile.preset = currentQualityProfile.preset;
-    }
-
-    return profile;
+    return {
+        version: 3,
+        preset: (currentQualityProfile && currentQualityProfile.preset) || 'custom',
+        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
+        search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
+        rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
+        upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
+        upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
+        ranked_targets,
+    };
 }
 
 async function saveQualityProfile() {
+    // Same guard as debouncedSaveQualityProfile, enforced here too — this is
+    // also called directly by the page-wide "Save Settings" button
+    // (saveSettings), which bypasses the debounce path entirely. Without
+    // this, clicking Save Settings for some unrelated setting while merely
+    // PREVIEWING a different profile would still silently push what's on
+    // screen into the live default. Returns true (not false/"failed") —
+    // the banner already explains the skip; saveSettings() would otherwise
+    // report it as an error toast, which it isn't.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        qpShowEditingBanner();
+        return true;
+    }
     try {
         const profile = collectQualityProfileFromUI();
 
@@ -2169,6 +2821,733 @@ async function saveQualityProfile() {
         console.error('Error saving quality profile:', error);
         return false;
     }
+}
+
+// ── Named global profiles (assignable to Wishlist items / per-context
+// overrides like Auto-Import, not just the single active default) ───────
+//
+// Rendered as a detached, sticky side panel (.qp-side-panel — see the
+// Downloads page's .adl-batch-panel for the same pattern), not a control
+// strip above the tiles it governs. Every action here is inline (a row
+// switching into an edit-in-place `<input>`) or the app's own themed
+// showConfirmDialog() — never a native prompt()/confirm() popup.
+
+let _qpAutoImportProfileId = null; // cached so re-renders don't re-fetch
+let _qpProfileRows = [];
+
+function normalizeQualityProfileId(profileId) {
+    if (profileId === null || profileId === undefined || profileId === '' || profileId === 0 || profileId === '0') {
+        return null;
+    }
+    const numericId = parseInt(profileId, 10);
+    return Number.isFinite(numericId) && numericId > 0 ? numericId : null;
+}
+
+async function loadCustomQualityProfiles() {
+    try {
+        const [profilesRes, autoImportRes] = await Promise.all([
+            fetch('/api/quality-profile/custom'),
+            fetch('/api/auto-import/settings').catch(() => null),
+        ]);
+        const data = await profilesRes.json();
+        if (autoImportRes && autoImportRes.ok) {
+            const aiData = await autoImportRes.json();
+            _qpAutoImportProfileId = normalizeQualityProfileId(aiData.quality_profile_id);
+        }
+        if (data.success) {
+            _qpProfileRows = data.profiles || [];
+            renderCustomQualityProfiles(_qpProfileRows);
+        }
+    } catch (error) {
+        console.error('Error loading custom quality profiles:', error);
+    }
+}
+
+// One-line what's-in-it summary under each profile row (Lidarr shows the
+// allowed qualities on its profile cards for the same reason: a name alone
+// says nothing about what the profile actually does).
+function qpProfileSummary(profile) {
+    let targets = [];
+    try { targets = JSON.parse(profile.ranked_targets || '[]'); } catch (e) { /* unreadable → treat as empty */ }
+    const parts = [];
+    if (targets.length) {
+        const first = targets[0]?.label || 'Top target';
+        parts.push(targets.length === 1 ? first : `${first} +${targets.length - 1} more`);
+    } else {
+        parts.push('Accepts anything');
+    }
+    if (profile.acoustid_required) parts.push('strict AcoustID');
+    if (profile.deep_audio_verify) parts.push('deep verify');
+    if (profile.downsample_enabled) parts.push('downsample');
+    if (profile.lossy_copy_enabled) parts.push(`lossy copy ${(profile.lossy_copy_codec || 'mp3').toUpperCase()}`);
+    if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
+        const cutoffIndex = Math.min(Math.max(parseInt(profile.upgrade_cutoff_index || '0', 10) || 0, 0), Math.max(targets.length - 1, 0));
+        const cutoff = targets[cutoffIndex]?.label || 'top target';
+        parts.push(`upgrade until ${cutoff}`);
+    }
+    return parts.join(' · ');
+}
+
+function renderCustomQualityProfiles(profiles) {
+    const wrap = document.getElementById('qp-profile-list');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    if (!profiles.length) {
+        wrap.innerHTML = '<span class="qp-profile-list-empty">No profiles yet.</span>';
+        return;
+    }
+
+    // Only tag Auto-Import when the Import page has an explicit override.
+    // Falling back to the default profile is not a real assignment.
+    const autoImportTarget = _qpAutoImportProfileId;
+
+    profiles.forEach(profile => {
+        const row = document.createElement('div');
+        const isEditing = profile.id === _qpEditingProfileId && !profile.is_default;
+        row.className = 'qp-profile-row' + (profile.is_default ? ' active' : '') + (isEditing ? ' editing' : '');
+
+        // The dot is the ONLY control that actually flips the live default —
+        // deliberately separate from clicking the name/summary below, which
+        // just previews the profile's settings. Conflating the two was the
+        // bug: opening a profile to look at it was silently making it live
+        // for every in-flight download.
+        const dot = document.createElement('span');
+        dot.className = 'qp-profile-dot';
+        dot.title = profile.is_default
+            ? 'Currently the active default'
+            : `Set '${profile.name}' as the active default (applies immediately, incl. anything downloading right now)`;
+        dot.onclick = () => confirmSetDefaultQualityProfile(profile.id, profile.name);
+        row.appendChild(dot);
+
+        const text = document.createElement('span');
+        text.className = 'qp-profile-text';
+        text.title = profile.is_default
+            ? "View this profile's settings (it's already the active default)"
+            : `View/edit '${profile.name}'s settings — does not activate it`;
+        text.onclick = () => previewQualityProfile(profile.id);
+
+        const name = document.createElement('span');
+        name.className = 'qp-profile-name';
+        name.textContent = profile.name;
+        text.appendChild(name);
+
+        const sub = document.createElement('span');
+        sub.className = 'qp-profile-sub';
+        sub.textContent = qpProfileSummary(profile);
+        text.appendChild(sub);
+
+        row.appendChild(text);
+
+        if (profile.is_default || profile.id === autoImportTarget) {
+            const tags = document.createElement('span');
+            tags.className = 'qp-profile-tags';
+            // Mirrors the Auto-Import tag below: at-a-glance visibility of
+            // what's actually governing normal downloads right now, without
+            // needing to open Manage.
+            if (profile.is_default) {
+                const dtag = document.createElement('span');
+                dtag.className = 'qp-profile-tag qp-tag-default';
+                dtag.textContent = 'Downloads';
+                dtag.title = 'Used by normal downloads and Wishlist items right now';
+                tags.appendChild(dtag);
+            }
+            if (profile.id === autoImportTarget) {
+                const tag = document.createElement('span');
+                tag.className = 'qp-profile-tag qp-tag-autoimport';
+                tag.textContent = 'Auto-Import';
+                tag.title = 'Also used by Auto-Import (Settings → Import)';
+                tags.appendChild(tag);
+            }
+            row.appendChild(tags);
+        }
+
+        const actions = document.createElement('span');
+        actions.className = 'qp-profile-actions';
+
+        // Assign this profile to Auto-Import (Settings → Import), independent
+        // of the app-wide default used by normal downloads/Wishlist items.
+        // Toggle: click again on the currently-assigned profile to clear it
+        // back to "use the default".
+        const isAutoImport = profile.id === autoImportTarget;
+        const ai = document.createElement('button');
+        ai.type = 'button';
+        ai.className = 'qp-profile-action qp-action-autoimport' + (isAutoImport ? ' active' : '');
+        ai.textContent = '⇩';
+        ai.title = isAutoImport
+            ? `Stop using '${profile.name}' for Auto-Import (revert to the default profile)`
+            : `Use '${profile.name}' for Auto-Import`;
+        ai.onclick = (e) => {
+            e.stopPropagation();
+            toggleAutoImportQualityProfile(profile.id);
+        };
+        actions.appendChild(ai);
+
+        const ren = document.createElement('button');
+        ren.type = 'button';
+        ren.className = 'qp-profile-action qp-action-rename';
+        ren.textContent = '✏';
+        ren.title = `Rename '${profile.name}'`;
+        ren.onclick = (e) => {
+            e.stopPropagation();
+            qpStartRename(row, profile);
+        };
+        actions.appendChild(ren);
+
+        // Update: overwrite this profile's stored settings with whatever is
+        // currently on the page (edit-in-place, keeps the name). Allowed on
+        // every profile, including the starter ones — it's an overwrite,
+        // not a delete.
+        const upd = document.createElement('button');
+        upd.type = 'button';
+        upd.className = 'qp-profile-action qp-action-update';
+        upd.textContent = '✎';
+        upd.title = `Update '${profile.name}' with the current page settings`;
+        upd.onclick = (e) => {
+            e.stopPropagation();
+            updateCustomQualityProfile(profile.id, profile.name);
+        };
+        actions.appendChild(upd);
+
+        // Any profile can be deleted (including the starter ones) as long as
+        // it isn't the very last one left — mirrors the backend guard in
+        // MusicDatabase.delete_quality_profile.
+        if (profiles.length > 1) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'qp-profile-action qp-action-delete';
+            del.textContent = '×';
+            del.title = `Delete '${profile.name}'`;
+            del.onclick = (e) => {
+                e.stopPropagation();
+                deleteCustomQualityProfile(profile.id, profile.name);
+            };
+            actions.appendChild(del);
+        }
+
+        row.appendChild(actions);
+        wrap.appendChild(row);
+    });
+}
+
+// Turns a profile row's name into an inline, in-place text input — no
+// native prompt(). Enter/blur commits via the PUT rename endpoint, Escape
+// cancels back to the plain label.
+function qpStartRename(row, profile) {
+    if (row.querySelector('.qp-profile-name-input')) return; // already editing
+
+    const nameEl = row.querySelector('.qp-profile-name');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'qp-profile-name-input';
+    input.value = profile.name;
+    // The name sits inside the clickable row text — typing/clicking in the
+    // input must not bubble up and apply the profile.
+    input.onclick = (e) => e.stopPropagation();
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let settled = false;
+    const commit = async () => {
+        if (settled) return;
+        settled = true;
+        const newName = input.value.trim();
+        if (!newName || newName === profile.name) {
+            await loadCustomQualityProfiles();
+            return;
+        }
+        try {
+            const response = await fetch(`/api/quality-profile/custom/${profile.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+                renderCustomQualityProfiles(_qpProfileRows);
+                renderQualityProfileManager();
+                showToast(`Renamed to '${newName}'`, 'success');
+            } else {
+                showToast(`Failed to rename: ${data.error}`, 'error');
+                await loadCustomQualityProfiles();
+            }
+        } catch (error) {
+            console.error('Error renaming quality profile:', error);
+            showToast('Failed to rename profile', 'error');
+            await loadCustomQualityProfiles();
+        }
+    };
+    const cancel = () => {
+        if (settled) return;
+        settled = true;
+        loadCustomQualityProfiles();
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+}
+
+// Inline "+ New profile" control — swaps the button for a text input, no
+// native prompt().
+function qpShowNewProfileInput() {
+    const wrap = document.getElementById('qp-profile-new');
+    if (!wrap || wrap.querySelector('.qp-profile-new-input')) return;
+    wrap.innerHTML = `
+        <div class="qp-profile-new-row">
+            <input type="text" class="qp-profile-new-input" id="qp-profile-new-input" placeholder="Profile name" autocomplete="off" spellcheck="false">
+        </div>
+    `;
+    const input = document.getElementById('qp-profile-new-input');
+    input.focus();
+
+    let settled = false;
+    const commit = async () => {
+        if (settled) return;
+        const name = input.value.trim();
+        if (!name) { qpResetNewProfileControl(); return; }
+        settled = true;
+        await saveCurrentAsQualityProfile(name);
+    };
+    const cancel = () => {
+        if (settled) return;
+        settled = true;
+        qpResetNewProfileControl();
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', () => { if (!settled) cancel(); });
+}
+
+function qpResetNewProfileControl() {
+    const wrap = document.getElementById('qp-profile-new');
+    if (!wrap) return;
+    wrap.innerHTML = '<button type="button" class="qp-profile-new-btn" id="qp-profile-new-btn" onclick="qpShowNewProfileInput()">+ New profile</button>';
+}
+
+// Everything a "Global Quality Profile" now captures: the ranked-target
+// ladder (collectQualityProfileFromUI) PLUS every other toggle scattered
+// across Quality on Import / Post-Download Conversion / Audio Verification
+// that conceptually belongs to "what quality means to me" — see
+// core/quality/schema.py's QUALITY_PROFILES_DDL docstring for the same list.
+function collectFullQualityBundleFromUI() {
+    const base = collectQualityProfileFromUI();
+    return {
+        ...base,
+        acoustid_required: document.getElementById('acoustid-require-verified')?.checked === true,
+        downsample_enabled: document.getElementById('downsample-hires')?.checked === true,
+        deep_audio_verify: document.getElementById('audio-completeness-check')?.checked === true,
+        replace_lower_quality: document.getElementById('import-replace-lower-quality')?.checked === true,
+        lossy_copy_enabled: document.getElementById('lossy-copy-enabled')?.checked === true,
+        lossy_copy_codec: document.getElementById('lossy-copy-codec')?.value || 'mp3',
+        lossy_copy_bitrate: document.getElementById('lossy-copy-bitrate')?.value || '320',
+        lossy_copy_delete_original: document.getElementById('lossy-copy-delete-original')?.checked === true,
+    };
+}
+
+// The inverse of collectFullQualityBundleFromUI: reflect an applied profile's
+// full bundle back onto every toggle it captures, so the page never shows
+// stale state after switching profiles (which would otherwise get written
+// back over the just-applied config on the next autosave tick).
+function applyFullQualityBundleToDom(profile) {
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === 'checkbox') el.checked = value === true;
+        else el.value = value;
+    };
+    set('acoustid-require-verified', profile.acoustid_required);
+    set('downsample-hires', profile.downsample_enabled);
+    set('audio-completeness-check', profile.deep_audio_verify);
+    set('import-replace-lower-quality', profile.replace_lower_quality);
+    set('lossy-copy-enabled', profile.lossy_copy_enabled);
+    set('lossy-copy-codec', profile.lossy_copy_codec);
+    set('lossy-copy-bitrate', profile.lossy_copy_bitrate);
+    set('lossy-copy-delete-original', profile.lossy_copy_delete_original);
+    const lossyOptions = document.getElementById('lossy-copy-options');
+    if (lossyOptions) lossyOptions.style.display = profile.lossy_copy_enabled ? 'block' : 'none';
+}
+
+async function saveCurrentAsQualityProfile(name) {
+    name = (name || '').trim();
+    if (!name) return;
+
+    try {
+        const profile = collectFullQualityBundleFromUI();
+        const response = await fetch('/api/quality-profile/custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...profile, name }),
+        });
+        const data = await response.json();
+        if (data.success) {
+            // Bug: this only ever re-rendered with the response's list
+            // without updating the cached _qpProfileRows — every OTHER
+            // function that reads that cache (previewQualityProfile's
+            // default-id check, the Manage modal, the editing banner) kept
+            // seeing the list from before this profile existed, which is
+            // exactly what made a freshly created profile look like it
+            // "vanished" / previewed as an unresolvable "this profile".
+            _qpProfileRows = data.profiles || [];
+            // The tiles already show exactly what was just saved — treat the
+            // new profile as the one now being previewed, same as clicking
+            // its row would.
+            _qpEditingProfileId = data.id ?? null;
+            renderCustomQualityProfiles(_qpProfileRows);
+            qpResetNewProfileControl();
+            if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+                qpShowEditingBanner();
+            } else {
+                qpHideEditingBanner();
+            }
+            showToast(`Saved profile '${name}'`, 'success');
+        } else {
+            showToast(`Failed to save profile: ${data.error}`, 'error');
+            qpResetNewProfileControl();
+        }
+    } catch (error) {
+        console.error('Error saving custom quality profile:', error);
+        showToast('Failed to save profile', 'error');
+        qpResetNewProfileControl();
+    }
+}
+
+async function updateCustomQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Update Profile',
+        message: `Update '${name}' with the current page settings? This overwrites what was saved before.`,
+        confirmText: 'Update',
+    })) return;
+
+    try {
+        const profile = collectFullQualityBundleFromUI();
+        const response = await fetch(`/api/quality-profile/custom/${profileId}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(profile),
+        });
+        const data = await response.json();
+        if (data.success) {
+            _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+            renderCustomQualityProfiles(_qpProfileRows);
+            renderQualityProfileManager();
+            showToast(`Updated '${name}'`, 'success');
+        } else {
+            showToast(`Failed to update profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error updating custom quality profile:', error);
+        showToast('Failed to update profile', 'error');
+    }
+}
+
+async function applyCustomQualityProfile(profileId, name) {
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}/apply`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            _qpEditingProfileId = null; // tiles now show the (new) live default again
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+                applyFullQualityBundleToDom(data.profile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            await loadCustomQualityProfiles();
+            qpHideEditingBanner();
+            showToast(`Now using '${name}' (all Quality-page settings updated)`, 'success');
+        } else {
+            showToast(`Failed to apply profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error applying custom quality profile:', error);
+        showToast('Failed to apply profile', 'error');
+    }
+}
+
+// The ONLY path that makes a profile the live default. Anything with no
+// profile of its own (a brand-new download, or a library track whose
+// `quality_profile_id` is still NULL) resolves to this default immediately.
+// Existing Wishlist rows do NOT switch: `add_to_wishlist` pins a concrete,
+// resolved profile id on the row at insert time (see
+// `MusicDatabase._resolve_quality_profile_id`), so they keep following
+// whichever profile was default when they were queued — only NEW Wishlist
+// adds pick up this change. Deliberately gated behind a confirmation: the
+// side panel's row-text click below only PREVIEWS a profile's settings and
+// must never have this side effect (that conflation was the bug — clicking
+// a profile to look at/edit it was silently making it live).
+async function confirmSetDefaultQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Set Active Profile',
+        message: `Make '${name}' the active default profile? New downloads and anything without its own profile follow it immediately — existing Wishlist items keep the profile they were queued with.`,
+        confirmText: 'Set Active',
+    })) return;
+    await applyCustomQualityProfile(profileId, name);
+    renderQualityProfileManager();
+}
+
+// onclick-safe wrapper for the Manage modal's rows (numeric id only —
+// avoids embedding a profile name, which may contain quotes, into an inline
+// HTML attribute).
+function confirmSetDefaultQualityProfileById(profileId) {
+    const profile = _qpProfileRows.find(p => p.id === profileId);
+    if (profile) confirmSetDefaultQualityProfile(profileId, profile.name);
+}
+
+// Load a profile's settings into the tile editor for viewing/editing —
+// purely read-only against the DB (a dedicated GET, not the mutating
+// /apply endpoint) so it can never make the previewed profile the live
+// default or touch anything mid-download. Edits made while previewing are
+// local until the row's Update (✎) button explicitly saves them into THIS
+// profile — see debouncedSaveQualityProfile.
+async function previewQualityProfile(profileId) {
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}`);
+        const data = await response.json();
+        if (!data.success) {
+            showToast(`Failed to load profile: ${data.error}`, 'error');
+            return;
+        }
+        // Keep this in sync with what's actually on screen — collectQualityProfileFromUI
+        // reads currentQualityProfile.preset, and resetActiveQualityPreset reads it to
+        // decide what "reset" even means; leaving it pointed at whatever was loaded
+        // before previewing this profile was exactly the kind of drift that made
+        // preset actions apply to the wrong thing.
+        currentQualityProfile = data.profile;
+        _qpEditingProfileId = profileId;
+        window._suppressSettingsAutoSave = true;
+        try {
+            populateQualityProfileUI(data.profile);
+            applyFullQualityBundleToDom(data.profile);
+        } finally {
+            window._suppressSettingsAutoSave = false;
+        }
+        renderCustomQualityProfiles(_qpProfileRows);
+        qpShowEditingBanner();
+    } catch (error) {
+        console.error('Error previewing quality profile:', error);
+        showToast('Failed to load profile', 'error');
+    }
+}
+
+// Persistent notice (not a toast — it needs to stay visible for as long as
+// the state holds) telling the user the tiles show a profile that ISN'T the
+// active default, so edits need an explicit Update click. Directly answers
+// "how do I know what's actually live right now" without needing the
+// Manage overview open.
+function qpShowEditingBanner() {
+    const banner = document.getElementById('qp-editing-banner');
+    if (!banner) return;
+    const profile = _qpProfileRows.find(p => p.id === _qpEditingProfileId);
+    // The id not resolving means the cache is stale or the profile is gone —
+    // showing a nameless "viewing this profile" is just confusing; hide
+    // instead of guessing.
+    if (!profile) {
+        banner.style.display = 'none';
+        return;
+    }
+    banner.querySelector('.qp-editing-banner-name').textContent = profile.name;
+    banner.style.display = '';
+}
+
+function qpHideEditingBanner() {
+    const banner = document.getElementById('qp-editing-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+async function deleteCustomQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Delete Profile',
+        message: `Delete '${name}'? This cannot be undone. Anything still assigned to it (Wishlist items, Auto-Import) automatically falls back to your active profile.`,
+        confirmText: 'Delete',
+        destructive: true,
+    })) return;
+
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            // Deleting the profile currently being previewed would otherwise
+            // leave _qpEditingProfileId pointing at a row that no longer
+            // exists — fall back to "showing the live default" like a fresh
+            // page load.
+            if (_qpEditingProfileId === profileId) {
+                _qpEditingProfileId = null;
+                qpHideEditingBanner();
+            }
+            // Full reload (not just re-render): deleting may have cleared the
+            // Auto-Import override and/or promoted a new default — both feed
+            // the row tags, so refresh them from the server.
+            await loadCustomQualityProfiles();
+            showToast(`Deleted '${name}'`, 'success');
+        } else {
+            showToast(`Failed to delete profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting custom quality profile:', error);
+        showToast('Failed to delete profile', 'error');
+    }
+}
+
+// Quick inline toggle in the row list (see the qp-action-autoimport button
+// in renderCustomQualityProfiles). The Manage modal below shows the same
+// assignment plus the app-wide default side by side, as the one place that
+// answers "what governs what right now" — this stays for one-click access
+// from the row a user is already looking at.
+async function toggleAutoImportQualityProfile(profileId) {
+    const nowAssigned = _qpAutoImportProfileId === profileId;
+    try {
+        const response = await fetch('/api/auto-import/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quality_profile_id: nowAssigned ? null : profileId }),
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Failed to update Auto-Import');
+        _qpAutoImportProfileId = nowAssigned ? null : profileId;
+        renderCustomQualityProfiles(_qpProfileRows);
+        renderQualityProfileManager();
+        showToast(nowAssigned
+            ? 'Auto-Import now uses the default profile'
+            : 'Auto-Import profile updated', 'success');
+    } catch (error) {
+        console.error('Error updating Auto-Import quality profile:', error);
+        showToast('Failed to update Auto-Import profile', 'error');
+    }
+}
+
+// ── Manage overview modal ────────────────────────────────────────────────
+// The single place that answers "which profile does what right now": the
+// app-wide Default (new downloads and anything with no profile of its own —
+// existing Wishlist rows keep whichever profile was default when they were
+// queued, see confirmSetDefaultQualityProfile) and the Auto-Import override
+// (Settings → Import, falls back to Default when unset). Both assignments
+// are also reachable
+// inline from the row list (the dot / the ⇩ button); this is the overview +
+// explanation surface, not a second way to edit a profile's own settings —
+// that only ever happens via previewQualityProfile + a row's Update (✎).
+function qpManagerOverlay() {
+    let overlay = document.getElementById('qp-manager-overlay');
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'qp-manager-overlay';
+    overlay.className = 'modal-overlay hidden';
+    overlay.onclick = (event) => { if (event.target === overlay) closeQualityProfileManager(); };
+    overlay.innerHTML = `
+        <div class="enhanced-bulk-modal qp-manager-modal" onclick="event.stopPropagation()">
+            <div class="enhanced-bulk-modal-header">
+                <h3>Quality Profiles — Manage</h3>
+                <button class="enhanced-bulk-modal-close" onclick="closeQualityProfileManager()">&times;</button>
+            </div>
+            <div class="enhanced-bulk-modal-body qp-manager-body">
+                <div class="qp-manager-info-row setting-row">
+                    <span class="qp-manager-info-label">What does this manage?</span>
+                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                        onclick="toggleSettingHelp(this)"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                </div>
+                <div class="help-text setting-help-body qp-manager-info" hidden>
+                    Two things read a profile today: normal downloads/Wishlist
+                    items always follow the <strong>Default</strong> below,
+                    and Auto-Import can optionally use a different one instead
+                    (falls back to Default when unset). A profile's
+                    "Upgrade until" setting controls exactly how far below
+                    it counts as needing an upgrade — the Quality Upgrade
+                    Finder then actively searches for and proposes a
+                    replacement, while Quality Check only flags (you choose
+                    re-download/delete/ignore per finding); both read the
+                    cutoff live, same as the download pipeline. Per-artist/
+                    album/track assignment is planned for the Library
+                    Manager; it will plug into this exact mechanism.
+                </div>
+                <div id="qp-manager-rows" class="qp-manager-rows"></div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+// Renders two clearly SEPARATE things — mixing them into one flat list of
+// identical-looking rows was exactly what confused a user into thinking
+// "Auto-Import" was itself a saved profile:
+//   1. "Active now" — the CONTEXTS that consume a profile (Downloads/
+//      Wishlist always via the Default; Auto-Import optionally via its own
+//      override). Read-only status here; changed from the Profiles rows
+//      below, never from here.
+//   2. "Profiles" — the actual named, selectable quality_profiles rows,
+//      with the Set default / Use for import actions.
+function renderQualityProfileManager() {
+    const rows = document.getElementById('qp-manager-rows');
+    if (!rows) return; // modal not open — nothing to refresh
+    if (!_qpProfileRows.length) {
+        rows.innerHTML = '<div class="qp-profile-list-empty">No profiles yet.</div>';
+        return;
+    }
+    const explicitAutoImport = _qpAutoImportProfileId || null;
+    const defaultProfile = _qpProfileRows.find(p => p.is_default);
+    const defaultName = defaultProfile ? defaultProfile.name : '—';
+    const autoImportName = explicitAutoImport
+        ? (_qpProfileRows.find(profile => profile.id === explicitAutoImport)?.name || 'Unknown profile')
+        : `Uses Default (${defaultName})`;
+
+    rows.innerHTML = `
+        <div class="qp-manager-section-title">Active now</div>
+        <div class="qp-manager-status-row">
+            <span class="qp-manager-status-label">Downloads &amp; Wishlist</span>
+            <span class="qp-manager-status-value">${escapeHtml(defaultName)}</span>
+        </div>
+        <div class="qp-manager-status-row">
+            <span class="qp-manager-status-label">Auto-Import</span>
+            <span class="qp-manager-status-value">${escapeHtml(autoImportName)}</span>
+            ${explicitAutoImport ? '<button type="button" class="qp-manager-action clear" onclick="clearAutoImportQualityProfileFromManager()">Use default</button>' : ''}
+        </div>
+
+        <div class="qp-manager-section-title">Profiles</div>
+        ${_qpProfileRows.map(profile => `
+            <div class="qp-manager-row">
+                <div class="qp-manager-row-main">
+                    <span class="qp-manager-row-name">${escapeHtml(profile.name)}</span>
+                    <span class="qp-manager-row-sub">${escapeHtml(qpProfileSummary(profile))}</span>
+                </div>
+                <button type="button" class="qp-manager-action ${profile.is_default ? 'active' : ''}" onclick="confirmSetDefaultQualityProfileById(${profile.id})">
+                    ${profile.is_default ? 'Default' : 'Set default'}
+                </button>
+                <button type="button" class="qp-manager-action ${explicitAutoImport === profile.id ? 'active' : ''}" onclick="toggleAutoImportQualityProfile(${profile.id})">
+                    ${explicitAutoImport === profile.id ? 'Auto-Import' : 'Use for import'}
+                </button>
+            </div>
+        `).join('')}
+    `;
+}
+
+async function clearAutoImportQualityProfileFromManager() {
+    if (_qpAutoImportProfileId != null) await toggleAutoImportQualityProfile(_qpAutoImportProfileId);
+}
+
+async function openQualityProfileManager() {
+    const overlay = qpManagerOverlay();
+    try {
+        await loadCustomQualityProfiles();
+        renderQualityProfileManager();
+        overlay.classList.remove('hidden');
+    } catch (error) {
+        console.error('Error opening quality profile manager:', error);
+        showToast('Failed to open profile manager', 'error');
+    }
+}
+
+function closeQualityProfileManager() {
+    document.getElementById('qp-manager-overlay')?.classList.add('hidden');
 }
 
 // ===============================
@@ -2861,6 +4240,16 @@ function _getTagConfig(path) {
 }
 
 async function saveSettings(quiet = false) {
+    // #879: refuse to save if the settings never loaded successfully — the form
+    // is showing defaults, not the user's real config, so saving would wipe it.
+    // Cleared automatically on the next successful load (reload the page).
+    if (window._settingsLoadFailed) {
+        if (!quiet && typeof showToast === 'function') {
+            showToast("Settings didn't load — reload the page before saving (your config is untouched)", 'error');
+        }
+        return;
+    }
+
     // Validate file organization templates before saving
     const validationErrors = validateFileOrganizationTemplates();
     if (validationErrors.length > 0) {
@@ -2876,6 +4265,14 @@ async function saveSettings(quiet = false) {
         activeServer = 'navidrome';
     } else if (document.getElementById('soulsync-toggle')?.classList.contains('active')) {
         activeServer = 'soulsync';
+    }
+    // ISOLATION: this page is reused on the video side. Connection details (Plex/
+    // Jellyfin creds) ARE shared and save fine — but the video side must NEVER
+    // change the MUSIC active server. So when saving from the video side, keep
+    // active_media_server exactly as it was persisted (the toggle there only opens
+    // a config panel; it does not pick the music server).
+    if (document.body.getAttribute('data-side') === 'video' && window._persistedActiveServer) {
+        activeServer = window._persistedActiveServer;
     }
 
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
@@ -2901,6 +4298,27 @@ async function saveSettings(quiet = false) {
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
             showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');
+        }
+    } else if (metadataSource === 'jiosaavn' && !document.getElementById('experimental-jiosaavn-enabled')?.checked) {
+        metadataSource = 'deezer';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('JioSaavn is not enabled — turn it on under Advanced → Experimental.', 'warning');
+        }
+    }
+
+    // Validate the optional "Playlist File Naming" template before saving: it's a
+    // filename (no path separator) and must include $title — mirrors the server-side
+    // rule so a broken value can't be stored. Empty = feature off (allowed).
+    const _plItemTpl = (document.getElementById('template-playlist-item')?.value || '').trim();
+    if (_plItemTpl) {
+        if (_plItemTpl.includes('/') || _plItemTpl.includes('\\')) {
+            showToast('Playlist File Naming can\'t contain a folder separator ( / or \\ ) — it names the file, not a path.', 'error');
+            return;
+        }
+        if (!_plItemTpl.includes('$title')) {
+            showToast('Playlist File Naming must include $title so every file has a name.', 'error');
+            return;
         }
     }
 
@@ -2939,6 +4357,7 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('soulseek-api-key').value,
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value,
+            min_free_disk_gb: Math.max(0, parseFloat(document.getElementById('min-free-disk-gb')?.value) || 0),
             search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
             search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
             search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
@@ -2954,7 +4373,8 @@ async function saveSettings(quiet = false) {
         },
         acoustid: {
             api_key: document.getElementById('acoustid-api-key').value,
-            enabled: document.getElementById('acoustid-enabled').checked
+            enabled: document.getElementById('acoustid-enabled').checked,
+            require_verified: document.getElementById('acoustid-require-verified')?.checked === true
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,
@@ -2985,6 +4405,10 @@ async function saveSettings(quiet = false) {
             // when an official account is connected (spares the official quota).
             spotify_free_enrichment: document.getElementById('metadata-spotify-free-enrichment')?.checked || false
         },
+        experimental: {
+            jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
+            bandcamp_enabled: document.getElementById('experimental-bandcamp-enabled')?.checked === true,
+        },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
             api_key: document.getElementById('hydrabase-api-key').value,
@@ -3011,25 +4435,20 @@ async function saveSettings(quiet = false) {
             usenet_download_path: document.getElementById('usenet-download-path')?.value || '',
         },
         tidal_download: {
-            quality: document.getElementById('tidal-download-quality').value || 'lossless',
-            allow_fallback: document.getElementById('tidal-allow-fallback').checked,
+            // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
         hifi_download: {
-            quality: document.getElementById('hifi-download-quality').value || 'lossless',
-            allow_fallback: document.getElementById('hifi-allow-fallback').checked,
+            // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
         hifi: {
             embed_tags: document.getElementById('embed-hifi').checked,
             tags: _collectServiceTags('hifi')
         },
         deezer_download: {
-            quality: document.getElementById('deezer-download-quality').value || 'flac',
             arl: document.getElementById('deezer-download-arl').value || '',
-            allow_fallback: document.getElementById('deezer-allow-fallback').checked,
         },
         amazon_download: {
-            quality: document.getElementById('amazon-quality').value || 'flac',
-            allow_fallback: document.getElementById('amazon-allow-fallback').checked,
+            // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
         lidarr_download: {
             url: document.getElementById('lidarr-url').value || '',
@@ -3047,6 +4466,10 @@ async function saveSettings(quiet = false) {
             password: document.getElementById('torrent-client-password')?.value || '',
             category: document.getElementById('torrent-client-category')?.value || 'soulsync',
             save_path: document.getElementById('torrent-client-save-path')?.value || '',
+            seed_ratio_goal: parseFloat(document.getElementById('music-seed-ratio')?.value) || 0,
+            seed_time_goal_hours: parseInt(document.getElementById('music-seed-hours')?.value, 10) || 0,
+            seed_remove_data: !!(document.getElementById('music-seed-remove-data') || {}).checked,
+            seed_mode: document.getElementById('music-seed-mode')?.value || 'soulsync',
         },
         usenet_client: {
             type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
@@ -3062,10 +4485,8 @@ async function saveSettings(quiet = false) {
             // to migrate existing configs.
         },
         qobuz: {
-            quality: document.getElementById('qobuz-quality').value || 'lossless',
             embed_tags: document.getElementById('embed-qobuz').checked,
             tags: _collectServiceTags('qobuz'),
-            allow_fallback: document.getElementById('qobuz-allow-fallback').checked,
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
@@ -3076,6 +4497,7 @@ async function saveSettings(quiet = false) {
             cover_art_download: document.getElementById('cover-art-download').checked,
             prefer_caa_art: document.getElementById('prefer-caa-art').checked,
             album_art_order: getArtOrder(),
+            single_to_album: document.getElementById('single-to-album-enabled').checked,
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
             tags: {
                 quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),
@@ -3108,6 +4530,7 @@ async function saveSettings(quiet = false) {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value,
+                playlist_item: document.getElementById('template-playlist-item').value,
                 video_path: document.getElementById('template-video-path').value
             }
         },
@@ -3119,7 +4542,8 @@ async function saveSettings(quiet = false) {
             mode: document.getElementById('playlist-sync-mode')?.value || 'replace'
         },
         content_filter: {
-            allow_explicit: document.getElementById('allow-explicit').checked
+            allow_explicit: document.getElementById('allow-explicit').checked,
+            prefer_explicit: document.getElementById('prefer-explicit').checked
         },
         genre_whitelist: {
             enabled: document.getElementById('genre-whitelist-enabled').checked,
@@ -3127,6 +4551,7 @@ async function saveSettings(quiet = false) {
         },
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
+            audio_completeness_check: document.getElementById('audio-completeness-check').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
             retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
             retry_exhaustive: document.getElementById('retry-exhaustive').checked,
@@ -3140,7 +4565,8 @@ async function saveSettings(quiet = false) {
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
-            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
+            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked !== false,
+            transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         playlists: {
@@ -3154,25 +4580,45 @@ async function saveSettings(quiet = false) {
             delete_original: document.getElementById('lossy-copy-delete-original').checked,
             downsample_hires: document.getElementById('downsample-hires').checked
         },
+        album_downloads: {
+            // Atomic album publishing (#999) — opt-in, default off.
+            atomic_publish: document.getElementById('album-atomic-publish')?.checked === true
+        },
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,
             poll_interval: parseInt(document.getElementById('listening-stats-interval').value) || 30,
         },
+        discover: {
+            // Adventurousness dial (0 safe .. 1 obscure) — drives the Discover popularity penalty.
+            // Use the slider's value directly (0 is valid; don't `|| 0.3` it away).
+            adventurousness: document.getElementById('discover-adventurousness')
+                ? parseFloat(document.getElementById('discover-adventurousness').value)
+                : 0.3,
+        },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
-            entry_base_path: document.getElementById('m3u-entry-base-path').value || ''
+            entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
+            library_enabled: document.getElementById('library-m3u-enabled')?.checked === true,
+            library_path: document.getElementById('library-m3u-path')?.value || ''
         },
         ui_appearance: {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
             accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
             sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars',
-            particles_enabled: document.getElementById('particles-enabled')?.checked !== false,
-            worker_orbs_enabled: document.getElementById('worker-orbs-enabled')?.checked !== false,
-            reduce_effects: document.getElementById('reduce-effects-enabled')?.checked === true
+            // Read the runtime flags / localStorage, not the checkboxes: while Max
+            // Performance is on it locks those boxes visually-off, but the user's real
+            // saved prefs live in the flags — so saving must not clobber them.
+            particles_enabled: window._particlesEnabled !== false,
+            worker_orbs_enabled: window._workerOrbsEnabled !== false,
+            reduce_effects: window._reduceEffectsActive === true,
+            max_performance: window._maxPerfActive === true
         },
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
+            // Raw cookies.txt blob — backend validates, writes it to a file, and stores
+            // only the path (never echoed back). Blank = keep any already-saved file.
+            cookies_paste: document.getElementById('youtube-cookies-paste')?.value || '',
         },
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
@@ -3202,6 +4648,30 @@ async function saveSettings(quiet = false) {
                 `Allowed Origins: ${invalid.length} entr${invalid.length === 1 ? 'y looks' : 'ies look'} malformed (need full URL like https://soulsync.example.com, no trailing slash). Saving anyway — they\'ll be ignored.`,
                 'warning'
             );
+        }
+    }
+
+    // Previewing a non-default profile shows ITS acoustid/lossy-copy/deep-verify/
+    // replace-lower-quality values in the same DOM fields this whole-page save
+    // reads (collectFullQualityBundleFromUI's fields, above). The server mirrors
+    // whatever comes through in these sections straight into the ACTIVE default
+    // profile (see web_server.py's settings handler calling
+    // sync_default_quality_profile_from_config) — so without this, just clicking
+    // Save Settings while previewing another profile would silently overwrite the
+    // live default with the previewed profile's values. Substitute the real
+    // default's stored values back in before sending, so this save is a no-op for
+    // those keys regardless of what's currently on screen.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        const def = _qpProfileRows.find(p => p.is_default);
+        if (def) {
+            settings.acoustid.require_verified = !!def.acoustid_required;
+            settings.lossy_copy.downsample_hires = !!def.downsample_enabled;
+            settings.lossy_copy.enabled = !!def.lossy_copy_enabled;
+            settings.lossy_copy.codec = def.lossy_copy_codec || 'mp3';
+            settings.lossy_copy.bitrate = def.lossy_copy_bitrate || '320';
+            settings.lossy_copy.delete_original = !!def.lossy_copy_delete_original;
+            settings.post_processing.audio_completeness_check = !!def.deep_audio_verify;
+            settings.import.replace_lower_quality = !!def.replace_lower_quality;
         }
     }
 
@@ -4305,13 +5775,11 @@ async function testDeezerDownloadConnection() {
     statusEl.textContent = 'Checking...';
     statusEl.style.color = '#aaa';
     try {
-        // Save the ARL first so the backend can use it
-        const arl = document.getElementById('deezer-download-arl')?.value || '';
-        if (!arl) {
-            statusEl.textContent = 'No ARL token provided';
-            statusEl.style.color = '#ff9800';
-            return;
-        }
+        let arl = document.getElementById('deezer-download-arl')?.value || '';
+        // An untouched field holds the redaction sentinel (a token IS saved) —
+        // send empty so the backend tests the SAVED token instead of the mask,
+        // which the source would reject (#870).
+        if (arl === REDACTED_SECRET_SENTINEL) arl = '';
         const resp = await fetch('/api/deezer-download/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4669,6 +6137,24 @@ const PATH_INPUT_IDS = {
     'playlists-materialize': 'playlists-materialize-path',
     'm3u-entry-base': 'm3u-entry-base-path'
 };
+
+// Deployment-aware folder-paths guidance (+ the fresh-install disk landmine).
+// Docker installs must NOT touch the container paths; bare-metal/LXC installs
+// MUST edit them. A non-Docker install still on the ./Transfer default is
+// silently filling the install disk (a Proxmox LXC root is typically 8GB and
+// hangs when full — reported live on Discord), so that state warns loudly.
+function applyPathsEnvironment(settings) {
+    const docker = !!(settings._environment && settings._environment.docker);
+    document.querySelectorAll('[data-paths-guide]').forEach(el => {
+        el.classList.toggle('hidden', (el.getAttribute('data-paths-guide') === 'docker') !== docker);
+    });
+    const warn = document.querySelector('[data-paths-default-warning]');
+    if (warn) {
+        const out = (settings.soulseek?.transfer_path || './Transfer').trim();
+        const isDefault = out === '' || out === '.' || out.startsWith('./') || out.startsWith('.\\');
+        warn.classList.toggle('hidden', docker || !isDefault);
+    }
+}
 
 function togglePathLock(pathType, btn) {
     const input = document.getElementById(PATH_INPUT_IDS[pathType]);

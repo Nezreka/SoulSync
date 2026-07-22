@@ -155,6 +155,10 @@ class DatabaseUpdateWorker:
                         self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
                         logger.info("Connected Navidrome progress callback")
 
+                # A full refresh re-reads the whole server — stale listings
+                # cached by earlier runs must not survive into it.
+                self._clear_media_cache("before full refresh (full server re-read)")
+
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
@@ -177,6 +181,11 @@ class DatabaseUpdateWorker:
                                 logger.info(f"Merged {merged} duplicate artists")
                         except Exception as e:
                             logger.warning(f"Could not merge duplicate artists: {e}")
+                    # This early exit used to skip the end-of-run cache clear:
+                    # the "nothing new" probe itself caches album/track listings
+                    # on the singleton client, and that pre-import view then
+                    # poisoned the NEXT deep scan (#torrent-album-missing).
+                    self._clear_media_cache("after incremental (no new content)")
                     self._emit_finished(0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
@@ -200,8 +209,12 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Could not record full refresh completion: {e}")
             
-            # Clear cache after full refresh to free memory
-            if self.full_refresh and self.server_type in ["jellyfin", "navidrome"]:
+            # Clear cache after EVERY run (was full-refresh-only): the client
+            # is a process-wide singleton, so an incremental run's cached
+            # album/track listings used to outlive it and poison the next
+            # deep scan / full refresh with a pre-import view of the library
+            # (#torrent-album-missing).
+            if self.server_type in ["jellyfin", "navidrome"]:
                 try:
                     if hasattr(self.media_client, 'get_cache_stats'):
                         cache_stats = self.media_client.get_cache_stats()
@@ -209,7 +222,7 @@ class DatabaseUpdateWorker:
                     else:
                         freed_items = "cache data"
                     self.media_client.clear_cache()
-                    logger.info(f"Cleared {self.server_type} cache after full refresh - freed ~{freed_items} items from memory")
+                    logger.info(f"Cleared {self.server_type} cache after scan - freed ~{freed_items} items from memory")
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
@@ -297,13 +310,48 @@ class DatabaseUpdateWorker:
                 if hasattr(self.media_client, 'set_progress_callback'):
                     self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
 
+            # A deep scan is a full re-read of the server — it must not trust
+            # album/track listings cached by earlier (incremental) runs, or a
+            # newly imported album is invisible to it (#torrent-album-missing).
+            self._clear_media_cache("before deep scan (full server re-read)")
+
             # Fetch ALL artists from server (does NOT clear server data)
             artists = self._get_all_artists()
             if not artists:
-                self._emit_signal('error', f"Deep scan: No artists found in {self.server_type} library")
-                return
+                # A failed fetch must never look like an empty library — abort
+                # exactly as before.
+                if not getattr(self, '_artists_fetch_verified', False):
+                    # the abort reason must reach app.log — 5BILLION's failing
+                    # runs were invisible (only the UI toast carried the error)
+                    logger.error(
+                        "Deep scan aborted: artists fetch UNVERIFIED for %s "
+                        "(connection/API failure, last API error: %r) — stale "
+                        "removal skipped as a safety measure",
+                        self.server_type,
+                        getattr(self.media_client, 'last_api_error', None))
+                    self._emit_signal('error', f"Deep scan: No artists found in {self.server_type} library")
+                    return
+                # The server ANSWERED with zero artists — e.g. the user switched
+                # the library selection to an empty library (#stale-artists).
+                # Confirm with a second fetch so a transient empty response
+                # can't wipe a library, then fall through with an empty seen-set:
+                # stale removal clears out what the old selection left behind.
+                self._emit_signal('phase_changed', "Deep scan: Library returned no artists — verifying...")
+                artists = self._get_all_artists()
+                if not artists and not getattr(self, '_artists_fetch_verified', False):
+                    logger.error(
+                        "Deep scan aborted on re-verify: artists fetch UNVERIFIED for %s "
+                        "(last API error: %r)", self.server_type,
+                        getattr(self.media_client, 'last_api_error', None))
+                    self._emit_signal('error', f"Deep scan: No artists found in {self.server_type} library")
+                    return
+                if not artists:
+                    logger.info(f"Deep scan: {self.server_type} library verified empty (two answers) — "
+                                f"existing {self.server_type} data will be removed as stale")
+                    self._emit_signal('phase_changed', "Deep scan: Library is empty — removing stale data...")
 
-            logger.info(f"Deep scan: Found {len(artists)} artists in {self.server_type} library")
+            if artists:
+                logger.info(f"Deep scan: Found {len(artists)} artists in {self.server_type} library")
 
             # Phase 2: Process all artists — skip existing tracks, collect seen IDs
             self._emit_signal('phase_changed', "Deep scan: Processing library content...")
@@ -317,11 +365,23 @@ class DatabaseUpdateWorker:
             stale_removed = 0
 
             if stale:
+                # A fully-trusted scan may exceed the 50% threshold: the server
+                # answered (verified fetch), every artist processed cleanly, and
+                # the scan wasn't stopped mid-run. That's the "switched the
+                # library selection to a smaller/empty library" case — the mass
+                # staleness is real, not an API failure (#stale-artists).
+                scan_trusted = (getattr(self, '_artists_fetch_verified', False)
+                                and self.failed_operations == 0
+                                and not self.should_stop)
                 # Safety: if stale > 50% of DB count AND DB has >100 tracks, likely API failure
-                if len(stale) > len(db_track_ids) * 0.5 and len(db_track_ids) > 100:
+                if (len(stale) > len(db_track_ids) * 0.5 and len(db_track_ids) > 100
+                        and not scan_trusted):
                     logger.warning(f"Deep scan safety: {len(stale)} stale tracks ({len(stale)}/{len(db_track_ids)} = "
                                    f"{len(stale)/len(db_track_ids)*100:.0f}%) exceeds 50% threshold — skipping removal")
                 else:
+                    if len(stale) > len(db_track_ids) * 0.5 and len(db_track_ids) > 100:
+                        logger.info(f"Deep scan: removing {len(stale)}/{len(db_track_ids)} tracks — allowed because "
+                                    f"the scan is fully trusted (server answered, no per-artist failures, not stopped)")
                     logger.info(f"Deep scan: Removing {len(stale)} stale tracks from database")
                     stale_removed = self.database.delete_stale_tracks(stale, self.server_type)
 
@@ -415,8 +475,33 @@ class DatabaseUpdateWorker:
                 logger.error(f"Deep scan: Error processing artist {artist_name}: {e}")
                 self._emit_signal('artist_processed', artist_name, False, f"Error: {str(e)}", 0, 0)
 
+    def _clear_media_cache(self, when: str) -> None:
+        """Drop the media client's cached per-artist album / per-album track
+        listings (jellyfin + navidrome keep them on a process-wide singleton).
+
+        Scans that promise a full server re-read (deep scan, full refresh)
+        MUST clear BEFORE fetching: the caches survive across scans, so an
+        earlier incremental run leaves a pre-import view behind and a newly
+        imported album silently never reaches the database — it then shows
+        as MISSING even though the server has it (#torrent-album-missing)."""
+        if self.server_type not in ("jellyfin", "navidrome"):
+            return
+        try:
+            self.media_client.clear_cache()
+            logger.info(f"Cleared {self.server_type} cache {when}")
+        except Exception as e:
+            logger.warning(f"Could not clear {self.server_type} cache {when}: {e}")
+
     def _get_all_artists(self) -> List:
-        """Get all artists from media server library"""
+        """Get all artists from media server library.
+
+        Sets ``self._artists_fetch_verified``: True only when the server
+        ANSWERED — connection up and the client call returned an actual list.
+        That lets callers tell "the library is genuinely empty" (verified
+        empty, e.g. after switching the library selection to an empty one)
+        apart from "the fetch failed" (unverified), which must never trigger
+        stale removal."""
+        self._artists_fetch_verified = False
         try:
             if not self.media_client.ensure_connection():
                 logger.error(f"Could not connect to {self.server_type} server — check URL, credentials, and network (Docker users: use container name or host.docker.internal instead of host IP)")
@@ -425,7 +510,15 @@ class DatabaseUpdateWorker:
             logger.info(f"_get_all_artists: Calling media_client.get_all_artists() for {self.server_type}")
             artists = self.media_client.get_all_artists()
             logger.info(f"_get_all_artists: Received {len(artists) if artists else 0} artists from {self.server_type}")
-            return artists
+            # Only an actual list counts as a verified answer — a client that
+            # swallowed an error into None must stay untrusted. The real
+            # clients additionally mark last_fetch_failed when they swallowed
+            # an API failure into [] (they all do), so a failing artists
+            # endpoint on a reachable server can never read as "empty library".
+            self._artists_fetch_verified = (
+                isinstance(artists, list)
+                and not getattr(self.media_client, 'last_fetch_failed', False))
+            return artists or []
 
         except Exception as e:
             logger.error(f"Error getting artists from {self.server_type}: {e}")

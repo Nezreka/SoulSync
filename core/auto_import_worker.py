@@ -18,8 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
-from difflib import SequenceMatcher
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
 from utils.logging_config import get_logger
@@ -105,6 +104,7 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         'title': '', 'artist': '', 'album': '',
         'track_number': 0, 'disc_number': 1, 'year': '',
         'genres': [], 'isrc': '', 'mbid': '', 'duration_ms': 0,
+        'spotify_track_id': '',
     }
     try:
         from mutagen import File as MutagenFile
@@ -162,6 +162,15 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
                 # `MUSICBRAINZ_TRACKID` for Vorbis comments. Mutagen's easy
                 # mode normalizes the key.
                 result['mbid'] = (tags.get('musicbrainz_trackid', [''])[0] or '').strip().lower()
+
+        # Spotify track link in the COMMENT tag (spotiflac and friends write the
+        # source URL there) — an exact 1:1 identity for the file. Read separately
+        # because ID3 COMM frames aren't exposed by mutagen's easy mode.
+        try:
+            from core.imports.exact_id_discovery import extract_spotify_track_id, read_comment_text
+            result['spotify_track_id'] = extract_spotify_track_id(read_comment_text(file_path)) or ''
+        except Exception:
+            result['spotify_track_id'] = ''
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
     return result
@@ -175,76 +184,6 @@ def _parse_folder_name(folder_name: str):
         return parts[0].strip(), parts[1].strip()
     # Pattern: just the folder name as album
     return None, folder_name.strip()
-
-
-def _normalize(text: str) -> str:
-    if not text:
-        return ''
-    t = text.lower().strip()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^\w\s]', '', t)
-    return ' '.join(t.split())
-
-
-def _similarity(a: str, b: str) -> float:
-    if not a or not b:
-        return 0.0
-    return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
-
-
-def _quality_rank(ext: str) -> int:
-    """Higher = better quality."""
-    ranks = {'.flac': 10, '.wav': 9, '.aiff': 9, '.aif': 9, '.ape': 8,
-             '.m4a': 7, '.ogg': 6, '.opus': 6, '.mp3': 5, '.wma': 3, '.aac': 5}
-    return ranks.get(ext.lower(), 1)
-
-
-# Weight constants for `_score_album_search_result` — exposed at module
-# level so they're greppable + bumpable in one place. Pre-fix these were
-# magic numbers inline.
-_ALBUM_NAME_WEIGHT = 0.5    # title fuzzy similarity
-_ARTIST_NAME_WEIGHT = 0.2   # primary artist fuzzy similarity (skipped when target is empty)
-_TRACK_COUNT_WEIGHT = 0.3   # how close the source's track count is to the file count
-
-
-def _score_album_search_result(album_result, target_album: str,
-                               target_artist: Optional[str],
-                               file_count: int) -> float:
-    """Pure scoring helper for `_search_metadata_source`.
-
-    Weights how well an `album_result` from a metadata source's
-    `search_albums` matches the search inputs. Returns float in [0.0, 1.0].
-    Pre-extraction this lived inline in the loop body; lifting it out
-    lets the weight math be pinned independently of the orchestrator
-    (per-source iteration, exception containment, threshold check).
-
-    `album_result` is expected to expose:
-      - `.name` (str)
-      - `.artists` (list of dict-like with 'name', optional 'id') or list[str]
-      - `.total_tracks` (int, optional)
-    """
-    score = 0.0
-
-    # Album name similarity (default 50%)
-    name = getattr(album_result, 'name', '') or ''
-    score += _similarity(target_album, name) * _ALBUM_NAME_WEIGHT
-
-    # Artist similarity (default 20%) — only when target_artist provided
-    if target_artist:
-        artists = getattr(album_result, 'artists', None) or []
-        r_artist = artists[0] if artists else ''
-        if isinstance(r_artist, dict):
-            r_artist = r_artist.get('name', '')
-        score += _similarity(target_artist, str(r_artist)) * _ARTIST_NAME_WEIGHT
-
-    # Track count match (default 30%) — only when both sides have a count
-    r_tracks = getattr(album_result, 'total_tracks', 0) or 0
-    if r_tracks > 0 and file_count > 0:
-        count_ratio = 1.0 - abs(r_tracks - file_count) / max(r_tracks, file_count)
-        score += max(0.0, count_ratio) * _TRACK_COUNT_WEIGHT
-
-    return score
 
 
 class AutoImportWorker:
@@ -582,8 +521,23 @@ class AutoImportWorker:
         runs `_process_one_candidate` in parallel up to `max_workers`.
         """
         staging = self._resolve_staging_path()
-        if not staging or not os.path.isdir(staging):
-            logger.warning(f"[Auto-Import] Staging path not found or invalid: {self.staging_path}")
+        if not staging:
+            logger.warning(f"[Auto-Import] Staging path not configured: {self.staging_path}")
+            return
+        if not os.path.isdir(staging):
+            # #976: self-heal a missing staging folder instead of erroring the
+            # whole import feature (an earlier empty-folder cleanup could delete it).
+            try:
+                os.makedirs(staging, exist_ok=True)
+                logger.warning(f"[Auto-Import] Staging folder was missing — recreated: {staging}")
+            except Exception as e:
+                logger.warning(f"[Auto-Import] Staging path not found and could not be recreated ({staging}): {e}")
+                return
+
+        from core.imports.side_effects import is_active_media_server_ready
+        ready, reason = is_active_media_server_ready()
+        if not ready:
+            logger.warning(f"[Auto-Import] Skipping scan cycle — {reason}")
             return
 
         candidates = self._enumerate_folders(staging)
@@ -660,8 +614,13 @@ class AutoImportWorker:
             auto_process = self._config_manager.get('auto_import.auto_process', True)
 
         try:
-            # Phase 3: Identify
-            identification = self._identify_folder(candidate)
+            # Phase 3: Identify.
+            # Re-identify (#889): if the user designated this exact file's release in
+            # the Re-identify modal, a hint short-circuits the guessing — we match
+            # straight against the chosen album. No hint → byte-identical to before.
+            rematch_hint, identification = self._resolve_rematch_hint(candidate)
+            if identification is None:
+                identification = self._identify_folder(candidate)
             if not identification:
                 self._record_result(candidate, 'needs_identification', 0.0,
                                     error_message='Could not identify album from tags, folder name, or fingerprint')
@@ -690,7 +649,10 @@ class AutoImportWorker:
             high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
             has_strong_individual_matches = len(high_conf_matches) > 0
 
-            if (confidence >= threshold or has_strong_individual_matches) and auto_process:
+            # A re-identify is an explicit user choice — let it auto-process like a
+            # strong match (still gated on the global auto_process preference).
+            if (confidence >= threshold or has_strong_individual_matches
+                    or rematch_hint is not None) and auto_process:
                 # Phase 5: Auto-process — insert an in-progress row
                 # so the UI sees the import the moment it starts,
                 # then update it with the final status when done.
@@ -709,6 +671,13 @@ class AutoImportWorker:
                 confidence = max(confidence, effective_conf)
                 if success:
                     self._bump_stat('auto_processed')
+                    # Re-identify (#889): only NOW that the new home exists do we
+                    # consume the hint and (if replace was chosen) delete the old
+                    # row + file — so a failed import never loses the original. Pass
+                    # the landing paths so we never delete a file the re-import landed
+                    # at the SAME place (picking the release it's already in).
+                    if rematch_hint is not None:
+                        self._finalize_rematch_hint(rematch_hint, getattr(candidate, '_reid_final_paths', None))
                 else:
                     self._bump_stat('failed')
 
@@ -1003,6 +972,75 @@ class AutoImportWorker:
         except Exception:
             return False
 
+    # ── Re-identify hints (#889) ──
+
+    def _resolve_rematch_hint(self, candidate: 'FolderCandidate'):
+        """If this staged file carries a user-designated re-identify hint, return
+        ``(hint, identification)`` so matching skips the guessing tiers; otherwise
+        ``(None, None)`` and the caller falls back to normal identification.
+
+        Fail-safe: ANY error (no table, DB hiccup) returns ``(None, None)`` so a
+        re-identify problem can never break ordinary auto-import. Only single-file
+        candidates are eligible — a re-identify always stages exactly one track."""
+        try:
+            files = candidate.audio_files or []
+            if len(files) != 1:
+                return None, None
+            from core.imports.rematch_hints import (
+                build_identification_from_hint,
+                find_hint_for_file,
+                quick_file_signature,
+            )
+            file_path = files[0]
+            sig = quick_file_signature(file_path)
+            conn = self.database._get_connection()
+            try:
+                cursor = conn.cursor()
+                hint = find_hint_for_file(cursor, file_path, sig)
+            finally:
+                conn.close()
+            if hint is None:
+                return None, None
+            logger.info("[Auto-Import] Re-identify hint for %s → %s '%s' (%s)",
+                        candidate.name, hint.album_type or 'release',
+                        hint.album_name or '?', hint.source)
+            return hint, build_identification_from_hint(hint)
+        except Exception as e:
+            logger.debug("[Auto-Import] rematch-hint lookup skipped: %s", e)
+            return None, None
+
+    def _finalize_rematch_hint(self, hint, new_paths=None) -> None:
+        """Post-success: delete the replaced library row + file (if the user chose
+        replace) and consume the hint so it's single-use. ``new_paths`` are where the
+        re-import landed — passed through so the same-home guard never deletes a file
+        the import wrote at the old location. Best-effort — a cleanup failure is
+        logged, never raised, since the re-import already succeeded."""
+        try:
+            from core.imports.rematch_hints import consume_hint, delete_replaced_track
+
+            def _resolve_old(stored):
+                # The old row's path is a STORED path (Docker/media-server view) — map
+                # it to a file this process can actually unlink, same as everywhere else.
+                try:
+                    from core.library.path_resolver import resolve_library_file_path
+                    return resolve_library_file_path(stored, config_manager=getattr(self, '_config_manager', None))
+                except Exception:
+                    return None
+
+            conn = self.database._get_connection()
+            try:
+                cursor = conn.cursor()
+                removed = delete_replaced_track(cursor, hint.replace_track_id,
+                                                resolve_fn=_resolve_old, new_paths=new_paths)
+                consume_hint(cursor, hint.id)
+                conn.commit()
+            finally:
+                conn.close()
+            if removed:
+                logger.info("[Auto-Import] Re-identify replaced old track — removed %s", removed)
+        except Exception as e:
+            logger.warning("[Auto-Import] rematch-hint finalize failed (import still OK): %s", e)
+
     # ── Identification ──
 
     def _identify_folder(self, candidate: FolderCandidate) -> Optional[Dict]:
@@ -1010,6 +1048,13 @@ class AutoImportWorker:
 
         if candidate.is_single:
             return self._identify_single(candidate)
+
+        # Strategy 0: exact identifiers — a Spotify link in the comment tag or
+        # ISRC codes resolve the album with no text matching at all (Sokhi:
+        # Japanese releases fail the text search while their tags carry both).
+        exact_result = self._identify_from_exact_ids(candidate)
+        if exact_result:
+            return exact_result
 
         # Strategy 1: Read tags
         tag_result = self._identify_from_tags(candidate)
@@ -1041,6 +1086,24 @@ class AutoImportWorker:
         artist = tags.get('artist', '')
         title = tags.get('title', '')
         album = tags.get('album', '')
+
+        # Exact identifiers first (Sokhi): a Spotify comment-link or ISRC gives
+        # canonical names, fixing text-search failures (JP releases). Refines
+        # the search terms only — the normal single-track search still decides.
+        if tags.get('spotify_track_id') or tags.get('isrc'):
+            try:
+                from core.imports.exact_id_discovery import default_resolvers, discover_album_from_ids
+                resolve_spotify, resolve_isrc = default_resolvers()
+                found = discover_album_from_ids([tags], resolve_spotify_track=resolve_spotify,
+                                                resolve_isrc=resolve_isrc)
+                if found:
+                    logger.info(f"[Auto-Import] Exact-ID identity for single '{candidate.name}': "
+                                f"'{found['artist']}' - '{found.get('title') or title}' (via {found['via']})")
+                    artist = found['artist'] or artist
+                    album = found['album'] or album
+                    title = found.get('title') or title
+            except Exception as e:
+                logger.debug(f"[Auto-Import] exact-id single identity skipped: {e}")
 
         # Fallback: parse filename (Artist - Title.ext)
         if not artist or not title:
@@ -1148,6 +1211,8 @@ class AutoImportWorker:
                 return None
 
             # Score results
+            from core.imports.text_matching import artist_similarity, title_similarity
+
             best_result = None
             best_score = 0
 
@@ -1159,9 +1224,9 @@ class AutoImportWorker:
                     a = r_artists[0]
                     r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
 
-                score = _similarity(title, r_title) * 0.6
+                score = title_similarity(title, r_title) * 0.6
                 if artist:
-                    score += _similarity(artist, r_artist) * 0.4
+                    score += artist_similarity(artist, r_artist) * 0.4
 
                 if score > best_score:
                     best_score = score
@@ -1220,6 +1285,35 @@ class AutoImportWorker:
 
         except Exception as e:
             logger.debug(f"Single track search failed for '{artist} - {title}': {e}")
+            return None
+
+    def _identify_from_exact_ids(self, candidate: FolderCandidate) -> Optional[Dict]:
+        """Strategy 0: resolve the album from exact identifiers in the files'
+        tags — Spotify comment-links (1:1) first, then ISRC consensus across
+        the folder (one recording lives on many releases; the album that
+        contains MOST of the folder's codes is the album). On a hit the
+        canonical artist+album feed the normal source search, so everything
+        downstream (track pairing, which is already ISRC-aware) is unchanged.
+        Fail-safe: any error falls through to the text strategies."""
+        try:
+            from core.imports.exact_id_discovery import default_resolvers, discover_album_from_ids
+            tags_list = [_read_file_tags(f) for f in candidate.audio_files[:10]]
+            if not any(t.get('spotify_track_id') or t.get('isrc') for t in tags_list):
+                return None
+            resolve_spotify, resolve_isrc = default_resolvers()
+            found = discover_album_from_ids(
+                tags_list,
+                resolve_spotify_track=resolve_spotify,
+                resolve_isrc=resolve_isrc,
+            )
+            if not found:
+                return None
+            logger.info(f"[Auto-Import] Exact-ID identification for '{candidate.name}': "
+                        f"'{found['artist']}' - '{found['album']}' (via {found['via']})")
+            return self._search_metadata_source(found['artist'], found['album'],
+                                                f"exact-ids ({found['via']})", candidate)
+        except Exception as e:
+            logger.debug(f"[Auto-Import] exact-id identification skipped: {e}")
             return None
 
     def _identify_from_tags(self, candidate: FolderCandidate) -> Optional[Dict]:
@@ -1356,23 +1450,83 @@ class AutoImportWorker:
                 # `tests/imports/test_album_search_scoring.py` so the
                 # weight math is pinned at the function boundary, not
                 # through the orchestrator path.
-                file_count = len(candidate.audio_files)
-                best_result = None
-                best_score = 0.0
-                for r in results:
-                    score = _score_album_search_result(r, album, artist, file_count)
-                    if score > best_score:
-                        best_score = score
-                        best_result = r
+                from core.imports.album_matching import (
+                    ALBUM_SEARCH_THRESHOLD,
+                    albums_within_name_margin,
+                    default_quality_rank,
+                    extract_tracks_from_album_data,
+                    pick_album_by_duration_fit,
+                    score_album_search_result,
+                )
 
-                if not best_result or best_score < 0.4:
-                    # Primary returned weak/no match — fall through to next source
+                file_count = len(candidate.audio_files)
+                scored_results: List[Tuple[float, Any]] = []
+                for r in results:
+                    score = score_album_search_result(r, album, artist, file_count)
+                    if score >= ALBUM_SEARCH_THRESHOLD:
+                        scored_results.append((score, r))
+                scored_results.sort(key=lambda item: item[0], reverse=True)
+
+                if not scored_results:
                     if source != primary_source:
                         logger.debug(
-                            f"Auto-import: {source} best score {best_score:.2f} "
-                            f"below threshold for '{album}', trying next source"
+                            f"Auto-import: {source} best score below threshold "
+                            f"for '{album}', trying next source"
                         )
                     continue
+
+                best_score = scored_results[0][0]
+                best_result = scored_results[0][1]
+
+                # Near-duplicate album hits (e.g. "3 Nights 4 Days" vs
+                # "3 Nights And 4 Days") often score within a few points.
+                # Fetch tracklists and prefer the release whose durations
+                # match the staged files.
+                if len(scored_results) > 1 and hasattr(client, 'get_album'):
+                    file_tags = {
+                        f: _read_file_tags(f) for f in candidate.audio_files
+                    }
+                    if any(int(t.get('duration_ms') or 0) > 0 for t in file_tags.values()):
+                        similar = albums_within_name_margin(scored_results)
+                        tracks_by_album_id: Dict[str, List] = {}
+                        for _s, result in similar:
+                            album_id = str(getattr(result, 'id', '') or '')
+                            if not album_id or album_id in tracks_by_album_id:
+                                continue
+                            try:
+                                album_data = client.get_album(album_id)
+                                if album_data:
+                                    tracks_by_album_id[album_id] = (
+                                        extract_tracks_from_album_data(album_data)
+                                    )
+                            except Exception as exc:
+                                logger.debug(
+                                    "Auto-import: get_album failed for %s "
+                                    "during duration disambiguation: %s",
+                                    album_id, exc,
+                                )
+                        if tracks_by_album_id:
+                            picked, duration_fit, used_tiebreak = (
+                                pick_album_by_duration_fit(
+                                    scored_results,
+                                    file_tags,
+                                    tracks_by_album_id,
+                                )
+                            )
+                            if used_tiebreak:
+                                logger.info(
+                                    "[Auto-Import] Duration tiebreak for '%s' "
+                                    "on %s: chose %r (id %s, fit %.0f%%) over "
+                                    "%r (id %s) — near-identical name scores",
+                                    album,
+                                    source,
+                                    picked.name,
+                                    getattr(picked, 'id', ''),
+                                    duration_fit * 100,
+                                    best_result.name,
+                                    getattr(best_result, 'id', ''),
+                                )
+                                best_result = picked
 
                 # Get image
                 image_url = ''
@@ -1431,8 +1585,11 @@ class AutoImportWorker:
 
     def _match_tracks(self, candidate: FolderCandidate, identification: Dict) -> Optional[Dict]:
         """Match staging files to the identified album's tracklist."""
-        # Singles: no album tracklist to match against — the file IS the match
-        if candidate.is_single or identification.get('is_single'):
+        # Singles: no album tracklist to match against — the file IS the match.
+        # force_album_match (set by a re-identify hint) overrides this: even a lone
+        # staged file is matched INTO the chosen album, so it inherits the album's
+        # year / track number / art instead of the bare singles stub (#889).
+        if not identification.get('force_album_match') and (candidate.is_single or identification.get('is_single')):
             conf = identification.get('identification_confidence', 0.7)
             track_data = {
                 'name': identification.get('track_name', identification.get('album_name', '')),
@@ -1524,15 +1681,14 @@ class AutoImportWorker:
             # (no worker instantiation, no metadata-client mocking, no
             # _read_file_tags monkeypatch). Worker still owns I/O +
             # metadata fetch; the helper is a pure function over dicts.
-            from core.imports.album_matching import match_files_to_tracks
+            from core.imports.album_matching import default_quality_rank, match_files_to_tracks
             target_album = identification.get('album_name', '')
             match_result = match_files_to_tracks(
                 candidate.audio_files,
                 file_tags,
                 tracks,
                 target_album=target_album,
-                similarity=_similarity,
-                quality_rank=_quality_rank,
+                quality_rank=default_quality_rank,
             )
             matches = match_result['matches']
             unmatched_files = match_result['unmatched_files']
@@ -1577,10 +1733,18 @@ class AutoImportWorker:
         album_name = identification.get('album_name', 'Unknown')
         image_url = identification.get('image_url', '')
 
-        # Parent folder artist override via import.folder_artist_override.
-        # Default on to preserve the legacy Artist/Album staging behavior.
-        # Users who stage mixed piles under one container folder can turn it off
-        # to keep the metadata-identified artist.
+        # Auto-Import's assigned quality profile (Settings -> Import ->
+        # Auto-Import), independent of the app-wide default used by normal
+        # downloads/Wishlist items. Resolved once per batch (`None`/0 means
+        # "use the app-wide default" via `load_profile_by_id`'s own fallback).
+        auto_import_profile_id = self._config_manager.get('auto_import.quality_profile_id') or None
+
+        # Parent folder artist override — a plain global Auto-Import setting
+        # (`import.folder_artist_override`), not a quality preference, so it
+        # doesn't belong on a quality profile. Default on to preserve the
+        # legacy Artist/Album staging behavior. Users who stage mixed piles
+        # under one container folder can turn it off to keep the
+        # metadata-identified artist.
         try:
             if self._config_manager.get('import.folder_artist_override', True):
                 staging_root = self._resolve_staging_path() or self.staging_path
@@ -1600,6 +1764,7 @@ class AutoImportWorker:
 
         processed = 0
         errors = []
+        reid_final_paths = []   # #889: where the pipeline landed each file (same-home guard)
         all_matches = list(match_result.get('matches', []))
 
         # Album total duration — sum of every matched track's duration.
@@ -1777,9 +1942,22 @@ class AutoImportWorker:
                     'has_clean_spotify_data': True,
                     'has_full_spotify_metadata': True,
                 }
+                # Thread the assigned profile into the import pipeline —
+                # everything profile-specific (quality gate, AcoustID
+                # strictness, downsample/lossy-copy) is resolved LIVE from
+                # this id at each pipeline stage (see core/imports/pipeline.py
+                # ::_resolve_context_quality_profile). Unset means "app-wide
+                # default", which the pipeline resolves on its own.
+                if auto_import_profile_id:
+                    context['track_info']['quality_profile_id'] = auto_import_profile_id
 
                 self._process_callback(context_key, context, file_path)
                 processed += 1
+                # Capture where the pipeline actually landed the file (#889 same-home
+                # guard) — the pipeline writes it back into the mutable context.
+                _landed = context.get('_final_processed_path')
+                if _landed:
+                    reid_final_paths.append(_landed)
                 logger.info(f"[Auto-Import] Processed: {track_number}. {track_name}")
 
             except Exception as e:
@@ -1802,6 +1980,13 @@ class AutoImportWorker:
                 })
             except Exception as e:
                 logger.debug("automation emit failed: %s", e)
+
+        # Stash landing paths on the candidate so _finalize_rematch_hint can avoid
+        # deleting a file the re-import landed at the SAME place (#889).
+        try:
+            candidate._reid_final_paths = reid_final_paths
+        except Exception as e:
+            logger.debug("could not stash reid final paths: %s", e)
 
         return processed > 0
 

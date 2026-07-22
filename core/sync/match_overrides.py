@@ -44,9 +44,15 @@ def resolve_match_overrides(
         - cache_lookup returns a server_track_id
         - that server_track_id exists in server_tracks (no stale cache
           entries pointing at deleted tracks)
-        - the server_track hasn't already been claimed by an earlier
-          override (defensive — UNIQUE on the cache table prevents this
-          in practice)
+
+    TWO source rows MAY share one server track. The cache's UNIQUE
+    constraint is per (source_track_id, server_source) — it stops one
+    source having two servers, NOT two sources (a playlist carrying the
+    same song twice under different provider ids, both hand-matched to
+    the user's single library copy) sharing one server track. The old
+    first-wins rule silently dropped the second pairing, so that row
+    stayed "missing" forever no matter how many times the user re-ran
+    Find & Add (wolf39us). Both pairings are user-confirmed — honor both.
 
     Caller uses the returned dict to short-circuit the per-source
     matching loop: indices in the dict skip the exact/fuzzy passes.
@@ -63,7 +69,6 @@ def resolve_match_overrides(
                 server_id_to_idx[key] = j
 
     overrides: Dict[int, int] = {}
-    used_server: set[int] = set()
 
     for i, src in enumerate(source_tracks):
         if not isinstance(src, dict):
@@ -78,10 +83,9 @@ def resolve_match_overrides(
         if not cached_server_id:
             continue
         j = server_id_to_idx.get(str(cached_server_id))
-        if j is None or j in used_server:
+        if j is None:
             continue
         overrides[i] = j
-        used_server.add(j)
 
     return overrides
 
@@ -121,6 +125,125 @@ def record_manual_match(
         ))
     except Exception:
         return False
+
+
+def resolve_override_server_id(
+    db: Any,
+    profile_id: int,
+    source_track_id: str,
+    server_source: str,
+    valid_server_ids: set,
+    read_cache: Callable[[str, str], Optional[Dict[str, Any]]],
+) -> Optional[Any]:
+    """Resolve a source track's user-confirmed server track id for the compare view.
+
+    Prefers the fast ``sync_match_cache`` hit, then the durable manual library match
+    (#787). THE CACHE HIT IS ONLY TRUSTED WHEN IT STILL POINTS AT A TRACK IN THIS
+    PLAYLIST (``valid_server_ids``).
+
+    Why (wolf39us / Plex): a cache hit was previously returned unconditionally, so a
+    STALE entry — Plex reassigned the library ratingKey without a SoulSync rescan to
+    wipe the cache — short-circuited the durable path and the manual match silently
+    never applied (resolve_match_overrides drops a server id that isn't in the
+    playlist). Falling through to the durable match lets it self-heal the stale id
+    via the stored file path. Returns the server track id, or None. Never raises.
+    """
+    try:
+        cached = read_cache(source_track_id, server_source) or {}
+    except Exception:
+        cached = {}
+    cached_id = cached.get("server_track_id")
+    if cached_id is not None:
+        if str(cached_id) in valid_server_ids:
+            return cached_id
+        logger.warning(
+            "Stale match-cache for source %s (%s): cached server track %s is no "
+            "longer in this playlist — falling back to the durable manual match.",
+            source_track_id, server_source, cached_id,
+        )
+    return resolve_durable_match_server_id(
+        db, profile_id, source_track_id, server_source, valid_server_ids
+    )
+
+
+def build_bulk_override_lookup(
+    db: Any,
+    profile_id: int,
+    server_source: str,
+    valid_server_ids: set,
+    source_tracks: List[Dict[str, Any]],
+) -> Callable[[str], Optional[Any]]:
+    """A ``cache_lookup`` callable for :func:`resolve_match_overrides` backed by
+    TWO bulk reads instead of 2-3 fresh-connection queries (plus a COMMIT per
+    cache hit) for every source track — #1005: pass 0 alone took ~15s on a
+    1500-track playlist before the columns could even render.
+
+    Per-id semantics are IDENTICAL to :func:`resolve_override_server_id`:
+    a cache hit is only trusted while it points into THIS playlist, else the
+    durable manual match applies, with the per-row file-path self-heal kept
+    for the (rare) stale rows. Falls back to the per-row resolver when the DB
+    doesn't offer the bulk readers (stub DBs)."""
+    if not (hasattr(db, "read_sync_match_cache_bulk")
+            and hasattr(db, "find_manual_library_matches_bulk")):
+        def _per_row(src_id):
+            return resolve_override_server_id(
+                db, profile_id, src_id, server_source, valid_server_ids,
+                getattr(db, "read_sync_match_cache", lambda *_a: None))
+        return _per_row
+
+    ids = [str(s.get("source_track_id")) for s in (source_tracks or [])
+           if isinstance(s, dict) and s.get("source_track_id")]
+    try:
+        cache_map = db.read_sync_match_cache_bulk(ids, server_source) or {}
+    except Exception:
+        cache_map = {}
+    try:
+        durable_map = db.find_manual_library_matches_bulk(profile_id, ids, server_source) or {}
+    except Exception:
+        durable_map = {}
+
+    def _lookup(source_track_id):
+        sid = str(source_track_id)
+        cached = cache_map.get(sid) or {}
+        cached_id = cached.get("server_track_id")
+        if cached_id is not None:
+            if str(cached_id) in valid_server_ids:
+                return cached_id
+            logger.warning(
+                "Stale match-cache for source %s (%s): cached server track %s is no "
+                "longer in this playlist — falling back to the durable manual match.",
+                sid, server_source, cached_id,
+            )
+        match = durable_map.get(sid)
+        if not match:
+            return None
+        lib_id = match.get("library_track_id")
+        if lib_id is not None and str(lib_id) in valid_server_ids:
+            return str(lib_id)
+        # Stale pointer — re-resolve via the stored file path and self-heal.
+        file_path = match.get("library_file_path")
+        resolver = getattr(db, "find_track_id_by_file_path", None)
+        if file_path and resolver is not None:
+            try:
+                new_id = resolver(file_path)
+            except Exception:
+                new_id = None
+            if new_id and str(new_id) in valid_server_ids:
+                _self_heal_match_id(db, match, str(new_id))
+                return str(new_id)
+        # Every path exhausted — the user's confirmed match CANNOT apply. Say
+        # exactly why, or this renders as a bare "missing" row and looks like
+        # the match was never saved (the wolf39us report shape).
+        logger.warning(
+            "Manual match for source %s (%s) cannot apply: library track %s is not "
+            "in this playlist and the file-path fallback %s. The track likely needs "
+            "re-adding to the playlist (Find & Add), or the library row was re-keyed.",
+            sid, server_source, lib_id,
+            ("resolved nothing for %r" % (file_path,)) if file_path else "is empty (no stored path)",
+        )
+        return None
+
+    return _lookup
 
 
 def resolve_durable_match_server_id(
@@ -171,6 +294,13 @@ def resolve_durable_match_server_id(
         if new_id and str(new_id) in valid_server_ids:
             _self_heal_match_id(db, match, str(new_id))
             return str(new_id)
+    logger.warning(
+        "Manual match for source %s (%s) cannot apply: library track %s is not "
+        "in this playlist and the file-path fallback %s. The track likely needs "
+        "re-adding to the playlist (Find & Add), or the library row was re-keyed.",
+        source_track_id, server_source, lib_id,
+        ("resolved nothing for %r" % (file_path,)) if file_path else "is empty (no stored path)",
+    )
     return None
 
 

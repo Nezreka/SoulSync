@@ -79,8 +79,22 @@ def register_routes(bp):
         try:
             from database.music_database import get_database
             db = get_database()
+            descriptors = [
+                row for row in db.get_wishlist_tracks(profile_id=profile_id)
+                if (
+                    str(row.get("spotify_track_id") or "") == str(track_id)
+                    if "::" in str(track_id)
+                    else str(row.get("spotify_track_id") or "").split("::", 1)[0]
+                    == str(track_id).split("::", 1)[0]
+                )
+            ]
             ok = db.remove_from_wishlist(track_id, profile_id=profile_id)
             if ok:
+                from config.settings import config_manager
+                from core.library2.monitor_sync import sync_wishlist_removal
+                sync_wishlist_removal(
+                    db, config_manager, descriptors, profile_id=profile_id,
+                )
                 return api_success({"message": "Track removed from wishlist."})
             return api_error("NOT_FOUND", "Track not found in wishlist.", 404)
         except Exception as e:

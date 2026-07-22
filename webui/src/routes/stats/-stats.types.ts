@@ -58,12 +58,14 @@ export interface StatsEnrichmentCoverage {
   spotify?: number;
   musicbrainz?: number;
   deezer?: number;
+  jiosaavn?: number;
   lastfm?: number;
   itunes?: number;
   audiodb?: number;
   genius?: number;
   tidal?: number;
   qobuz?: number;
+  bandcamp?: number;
 }
 
 export interface StatsHealth {

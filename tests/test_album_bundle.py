@@ -571,6 +571,64 @@ def test_resolve_uses_custom_usenet_download_path(tmp_path: Path) -> None:
     assert resolved == str(nzb_mount / "MyAlbum")
 
 
+def test_resolve_rejects_an_existing_but_contentless_verbatim_dir(tmp_path: Path) -> None:
+    """TheHomeGuy's bug: the torrent client reports ITS OWN container's
+    '/downloads'; a directory by that name exists in SoulSync's namespace
+    too but doesn't hold this torrent. With the expected content name
+    given, the verbatim short-circuit must NOT win — the configured root
+    that actually contains the release does."""
+    wrong = tmp_path / "wrong-downloads"
+    wrong.mkdir()                                  # exists, but empty
+    right = tmp_path / "real-mount"
+    (right / "My Release").mkdir(parents=True)
+    cfg = _cfg({'soulseek.download_path': str(right)})
+    resolved = resolve_reported_save_path(str(wrong), config_get=cfg,
+                                          expect_name='My Release')
+    assert resolved == str(right)                  # the root ITSELF (save-dir semantics)
+
+
+def test_resolve_verbatim_wins_when_it_actually_contains_the_content(tmp_path: Path) -> None:
+    save_dir = tmp_path / "downloads"
+    (save_dir / "My Release").mkdir(parents=True)
+    resolved = resolve_reported_save_path(str(save_dir), config_get=_cfg({}),
+                                          expect_name='My Release')
+    assert resolved == str(save_dir)
+
+
+def test_resolve_without_expect_name_keeps_the_old_verbatim_behavior(tmp_path: Path) -> None:
+    # Back-compat pin: existing callers pass no expected name and must see
+    # the pre-change acceptance of any readable directory.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert resolve_reported_save_path(str(empty), config_get=_cfg({})) == str(empty)
+
+
+def test_resolve_basename_candidates_are_content_checked(tmp_path: Path) -> None:
+    """Two roots hold a same-named folder; only one actually contains the
+    torrent's content. The content-bearing one must win regardless of
+    config order."""
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    (a / "MyAlbum").mkdir(parents=True)            # empty shell
+    (b / "MyAlbum" / "My Release").mkdir(parents=True)
+    cfg = _cfg({'download_source.torrent_download_path': str(a),
+                'soulseek.download_path': str(b)})
+    resolved = resolve_reported_save_path('/data/x/MyAlbum', config_get=cfg,
+                                          expect_name='My Release')
+    assert resolved == str(b / "MyAlbum")
+
+
+def test_resolve_protocol_neutral_path_mappings_key(tmp_path: Path) -> None:
+    """'download_source.path_mappings' works for torrents — the historical
+    usenet-named key kept nobody with a torrent problem from finding it."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({'download_source.path_mappings': [
+        {'from': '/downloads', 'to': str(tmp_path)},
+    ]})
+    resolved = resolve_reported_save_path('/downloads/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
+
+
 # ---------------------------------------------------------------------------
 # poll_album_download — lifted poll loop for both torrent + usenet plugins.
 # ---------------------------------------------------------------------------
@@ -581,6 +639,7 @@ from core.download_plugins.album_bundle import (
     TransientMissCounter,
     get_transient_miss_threshold,
     poll_album_download,
+    snapshot_incomplete_path,
 )
 
 
@@ -956,13 +1015,14 @@ def test_poll_completed_no_path_window_is_longer_than_miss_window() -> None:
     assert 'failed' not in [c[0] for c in calls]
 
 
-def test_poll_falls_back_to_incomplete_path_after_window_exhausted() -> None:
+def test_poll_falls_back_to_incomplete_path_after_window_exhausted_and_stable() -> None:
     """When SAB reports the job completed but the final save_path NEVER
     lands (some SAB versions / no post-process move), the files are
     still physically on disk in the in-progress dir. Rather than failing
     a download that actually succeeded, the poll falls back to the
     adapter's ``incomplete_path`` as a last resort once the window is
-    exhausted — no terminal 'failed' emit."""
+    exhausted AND its on-disk fingerprint has stopped changing (P2-21) —
+    no terminal 'failed' emit."""
     clock = _ScriptedClock()
     emit, calls = _make_emit_recorder()
     result = poll_album_download(
@@ -976,9 +1036,134 @@ def test_poll_falls_back_to_incomplete_path_after_window_exhausted() -> None:
         completed_no_path_threshold=3,
         sleep=clock.sleep, monotonic=clock.monotonic,
         poll_interval=2.0, timeout=600.0,
+        snapshot_path=lambda path: ('fixed-size', 3, 100.0),
     )
     assert result == '/sab/incomplete/album'
     assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_waits_for_incomplete_path_to_stop_changing_before_falling_back() -> None:
+    """P2-21: a fixed wait window elapsing does NOT mean the client's
+    post-processing has stopped writing into ``incomplete_path`` — it
+    could still be mid-unrar/mid-move. The poll must keep waiting past
+    the completed-no-path window while the fingerprint keeps changing,
+    and only fall back once two consecutive snapshots match."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    # Fingerprint keeps growing (still being written) for a while, then
+    # settles on a final value that repeats.
+    growing_sizes = iter([100, 200, 300, 400, 400, 400])
+
+    def _snapshot(path):
+        return (next(growing_sizes, 400), 1, 0.0)
+
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/sab/incomplete/album', progress=1.0,
+        ),
+        title='Still Writing',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=2,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+        snapshot_path=_snapshot,
+    )
+    assert result == '/sab/incomplete/album'
+    assert 'failed' not in [c[0] for c in calls]
+    # Had to poll well past the raw completed_no_path_threshold (2) while
+    # the fingerprint kept changing before it stabilized.
+    assert clock.sleep_calls > 2
+
+
+def test_poll_gives_up_if_incomplete_path_never_stabilizes_before_deadline() -> None:
+    """If the in-progress path never stops changing (or is never
+    readable), the poll must NOT silently promote it — it should run out
+    the outer deadline and fail loudly instead of importing a possibly
+    partial/corrupt directory."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    counter = {'n': 0}
+
+    def _always_changing(path):
+        counter['n'] += 1
+        return (counter['n'], 1, 0.0)  # never equal to the previous snapshot
+
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/sab/incomplete/album', progress=1.0,
+        ),
+        title='Never Settles',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=2,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=20.0,
+        snapshot_path=_always_changing,
+    )
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    assert 'timed out' in failed_calls[0][1].get('error', '').lower()
+
+
+def test_poll_resolves_incomplete_path_before_stability_check() -> None:
+    """P2-21 follow-up: the client-reported incomplete_path can live inside
+    the client's OWN container/mount, unreadable from here directly. If the
+    stability check snapshots the raw path, it always reads None (path
+    doesn't exist locally) and can never stabilize — the download would
+    hang until the outer deadline instead of falling back within the
+    completed-no-path window. ``resolve_path`` is applied before
+    snapshotting so both the stability check and the returned path operate
+    on the locally-readable, remapped location."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/client-container/incomplete/album', progress=1.0,
+        ),
+        title='Remote Mount Album',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=2,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+        resolve_path=lambda p: '/local/incomplete/album',
+        snapshot_path=lambda p: (100, 3, 1.0) if p == '/local/incomplete/album' else None,
+    )
+    assert result == '/local/incomplete/album'
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_does_not_treat_empty_incomplete_path_as_stable() -> None:
+    """An incomplete_path that exists but is currently empty (the client
+    just created the directory and hasn't started writing into it) must
+    not satisfy the stability gate just because two empty snapshots
+    match — zero files means writes haven't started, not that they've
+    stopped. The poll should keep waiting (and eventually time out here,
+    since it never gains content) rather than hand back an empty dir."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/sab/incomplete/album', progress=1.0,
+        ),
+        title='Empty Then Never Fills',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=2,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=20.0,
+        snapshot_path=lambda path: (0, 0, 0.0),
+    )
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    assert 'timed out' in failed_calls[0][1].get('error', '').lower()
 
 
 def test_poll_fails_when_no_path_and_no_incomplete_path() -> None:
@@ -1002,6 +1187,40 @@ def test_poll_fails_when_no_path_and_no_incomplete_path() -> None:
     assert len(failed_calls) == 1
     err = failed_calls[0][1].get('error', '').lower()
     assert 'save_path' in err or 'success but never' in err
+
+
+# ---------------------------------------------------------------------------
+# snapshot_incomplete_path — real on-disk fingerprint used by the stability
+# gate above (P2-21).
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_incomplete_path_missing_path_is_none(tmp_path: Path) -> None:
+    assert snapshot_incomplete_path(str(tmp_path / 'does-not-exist')) is None
+
+
+def test_snapshot_incomplete_path_single_file(tmp_path: Path) -> None:
+    f = tmp_path / 'track.flac'
+    f.write_bytes(b'abcd')
+    snap = snapshot_incomplete_path(str(f))
+    assert snap == (4, 1, f.stat().st_mtime)
+
+
+def test_snapshot_incomplete_path_directory_sums_all_files(tmp_path: Path) -> None:
+    (tmp_path / 'a.flac').write_bytes(b'12345')
+    (tmp_path / 'b.flac').write_bytes(b'1234567890')
+    total_size, count, _mtime = snapshot_incomplete_path(str(tmp_path))
+    assert total_size == 15
+    assert count == 2
+
+
+def test_snapshot_incomplete_path_changes_when_a_file_grows(tmp_path: Path) -> None:
+    f = tmp_path / 'a.flac'
+    f.write_bytes(b'12345')
+    before = snapshot_incomplete_path(str(tmp_path))
+    f.write_bytes(b'1234567890')
+    after = snapshot_incomplete_path(str(tmp_path))
+    assert before != after
 
 
 def test_poll_uses_save_path_from_earlier_downloading_emit_if_completed_lacks_one() -> None:

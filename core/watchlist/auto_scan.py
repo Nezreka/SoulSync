@@ -55,6 +55,7 @@ class WatchlistAutoScanDeps:
     _set_auto_scanning_timestamp: Callable[[float], None]
     _get_watchlist_scan_state: Callable[[], dict]
     _set_watchlist_scan_state: Callable[[dict], None]
+    get_deezer_client: Any = None  # () -> DeezerClient | None (label-phase cover/track resolution)
 
     @property
     def watchlist_auto_scanning(self) -> bool:
@@ -185,7 +186,11 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                 'results': [],
                 'summary': {},
                 'error': None,
-                'cancel_requested': False
+                'cancel_requested': False,
+                # #933: stamp these so this scan lands in the History modal too —
+                # the scanner fills scan_track_events; persist_scan_run reads both.
+                'scan_run_id': datetime.now().strftime('%Y%m%d-%H%M%S'),
+                'scan_track_events': [],
             }
 
             scan_results = []
@@ -267,6 +272,20 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                 cancel_check=lambda: deps.watchlist_scan_state.get('cancel_requested'),
             )
 
+            # Label phase — SAME shared helper as the manual scan, so the
+            # scheduled automation ALSO grabs new label releases (additive, no
+            # split path) and shows them in the same live state.
+            _lbl_tracks = 0
+            if not deps.watchlist_scan_state.get('cancel_requested', False):
+                try:
+                    from core.automation.handlers.scan_watchlist_labels import run_label_scan_phase
+                    _lbl_prof = profile_id or (scan_profiles[0]['id'] if scan_profiles else 1)
+                    _lbl_tracks = run_label_scan_phase(
+                        deps.watchlist_scan_state, database=database,
+                        get_deezer=getattr(deps, 'get_deezer_client', None), profile_id=_lbl_prof)
+                except Exception as _lbl_err:
+                    logger.error(f"[Auto-Watchlist] label phase failed: {_lbl_err}")
+
             # Update state with results (skip if cancelled — already set by cancel handler)
             was_cancelled = deps.watchlist_scan_state.get('cancel_requested', False)
             if not was_cancelled:
@@ -277,11 +296,20 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                 deps.watchlist_scan_state['status'] = 'completed'
                 deps.watchlist_scan_state['results'] = scan_results
                 deps.watchlist_scan_state['completed_at'] = datetime.now()
+                try:
+                    _labels_scanned = len(database.get_watchlist_labels() or [])
+                except Exception:
+                    # a label COUNT for the summary must never abort an otherwise
+                    # successful artist scan — labels are additive (mirrors the
+                    # defensive label phase above).
+                    _labels_scanned = 0
                 deps.watchlist_scan_state['summary'] = {
                     'total_artists': len(scan_results),
                     'successful_scans': len(successful_scans),
-                    'new_tracks_found': total_new_tracks,
-                    'tracks_added_to_wishlist': total_added_to_wishlist
+                    'new_tracks_found': total_new_tracks + _lbl_tracks,
+                    'tracks_added_to_wishlist': total_added_to_wishlist + _lbl_tracks,
+                    'labels_scanned': _labels_scanned,
+                    'label_tracks_added': _lbl_tracks,
                 }
 
                 logger.info(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
@@ -293,6 +321,17 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                 total_new_tracks = deps.watchlist_scan_state.get('summary', {}).get('new_tracks_found', 0)
                 total_added_to_wishlist = deps.watchlist_scan_state.get('summary', {}).get('tracks_added_to_wishlist', 0)
                 logger.warning("Automatic watchlist scan cancelled — skipping post-scan steps")
+
+            # #933: record this run in the History ledger — same helper the manual
+            # scan uses, so scheduled scans show up alongside manual ones.
+            try:
+                from core.watchlist.scan_history import persist_scan_run
+                persist_scan_run(
+                    database, deps.watchlist_scan_state,
+                    profile_id=profile_id, was_cancelled=was_cancelled,
+                )
+            except Exception as _hist_err:
+                logger.error(f"Failed to persist watchlist scan run: {_hist_err}")
 
             # Post-scan steps — skip if cancelled
             if not was_cancelled:

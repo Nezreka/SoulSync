@@ -132,6 +132,7 @@ def extract_external_ids(track: Any, source_hint: Optional[str] = None) -> Dict[
             'musicbrainz': 'mbid',
             'audiodb': 'audiodb_id',
             'hydrabase': 'soul_id',
+            'jiosaavn': 'jiosaavn_id',
         }
         key = provider_to_key.get(provider)
         if key and key not in ids:

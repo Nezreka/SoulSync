@@ -287,10 +287,15 @@
 }
 
 
-/* — Results area: glass surface for cards. */
+/* — Results area: glass surface for cards.
+ *   min-height matters: everything above (source tabs, search bar, status,
+ *   filters) is rigid, and the page is height-bound — on a short viewport
+ *   flex:1 collapsed this to a few px and the results were invisible until
+ *   the user zoomed OUT (#1024). The floor keeps results usable and lets the
+ *   page scroll instead when vertical space runs out. */
 .bs-results-wrap {
     flex: 1;
-    min-height: 0;
+    min-height: 280px;
     overflow-y: auto;
     padding: 4px 2px;
     display: flex;

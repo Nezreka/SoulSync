@@ -16,6 +16,13 @@ endpoints and event handlers without importing the full web_server.py
 # that call get_database() with no path → the real DB. Running those writers
 # against the live DB over a WSL-mounted Windows drive corrupted a user's
 # library. This guarantees it can't recur — tests get their own disposable DB.
+#
+# The VIDEO side has the SAME hazard: VideoDatabase()/get_video_db() with no
+# path resolves from os.environ['VIDEO_DATABASE_PATH'] (see
+# database/video_database.py) → the real database/video_library.db, and its
+# enrichment threads WRITE. A blueprint/handler test that opened the default
+# VideoDatabase corrupted the real video library once — same WSL/NTFS + WAL
+# trap. So redirect VIDEO_DATABASE_PATH to /tmp here too, before any import.
 import os as _os
 import tempfile as _tempfile
 import atexit as _atexit
@@ -24,15 +31,46 @@ import shutil as _shutil
 if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
     _TEST_DB_DIR = _tempfile.mkdtemp(prefix='soulsync-testdb-')
     _os.environ['DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_music_library.db')
+    _os.environ['VIDEO_DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_video_library.db')
+    # The REAL config/config.json has the same hazard as the real DBs: with the
+    # test music DB empty, config_manager "migrates" from config.json — so the
+    # developer's live Plex/Jellyfin/slskd credentials leak into the suite and
+    # tests that resolve the active video server CONNECT TO THE REAL PLEX
+    # (caught live: collections sync ran against it; it also makes local runs
+    # diverge from CI, which has no config.json). Point config resolution at a
+    # path that doesn't exist → pure defaults, exactly like CI.
+    _os.environ['SOULSYNC_CONFIG_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_config.json')
     _os.environ['SOULSYNC_TEST_DB_READY'] = '1'
     _atexit.register(lambda: _shutil.rmtree(_TEST_DB_DIR, ignore_errors=True))
 
 import copy
+import os as _os
 import pytest
+import tempfile as _tempfile2
 import threading
 import time
 from flask import Flask, jsonify
 from flask_socketio import SocketIO, join_room, leave_room
+
+
+def symlinks_supported() -> bool:
+    """True when the host can create symlinks (often false on Windows without Developer Mode)."""
+    try:
+        with _tempfile2.TemporaryDirectory() as d:
+            target = _os.path.join(d, "target")
+            link = _os.path.join(d, "link")
+            with open(target, "w", encoding="utf-8"):
+                pass
+            _os.symlink("target", link)
+            return _os.path.islink(link) and _os.readlink(link) == "target"
+    except (OSError, NotImplementedError):
+        return False
+
+
+requires_symlinks = pytest.mark.skipif(
+    not symlinks_supported(),
+    reason="host OS cannot create symlinks (common on Windows without Developer Mode)",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +128,7 @@ _DEFAULT_ENRICHMENT_STATUS = {
     'musicbrainz': copy.deepcopy(_ENRICHMENT_COMMON),
     'audiodb': copy.deepcopy(_ENRICHMENT_COMMON),
     'deezer': copy.deepcopy(_ENRICHMENT_COMMON),
+    'jiosaavn': copy.deepcopy(_ENRICHMENT_COMMON),
     'spotify-enrichment': {**copy.deepcopy(_ENRICHMENT_COMMON), 'authenticated': True},
     'itunes-enrichment': copy.deepcopy(_ENRICHMENT_COMMON),
     'hydrabase': {
@@ -111,12 +150,6 @@ _DEFAULT_STREAM_STATE = {
     "status": "loading", "progress": 45,
     "track_info": {"artist": "Pink Floyd", "title": "Comfortably Numb"},
     "error_message": None,
-}
-
-_DEFAULT_QUALITY_SCANNER_STATE = {
-    "status": "running", "phase": "Scanning...", "progress": 35,
-    "processed": 35, "total": 100, "quality_met": 30,
-    "low_quality": 5, "matched": 2, "error_message": "", "results": [],
 }
 
 _DEFAULT_DUPLICATE_CLEANER_STATE = {
@@ -257,7 +290,6 @@ enrichment_status = copy.deepcopy(_DEFAULT_ENRICHMENT_STATUS)
 
 # Phase 4: Tool progress state
 stream_state = copy.deepcopy(_DEFAULT_STREAM_STATE)
-quality_scanner_state = copy.deepcopy(_DEFAULT_QUALITY_SCANNER_STATE)
 duplicate_cleaner_state = copy.deepcopy(_DEFAULT_DUPLICATE_CLEANER_STATE)
 retag_state = copy.deepcopy(_DEFAULT_RETAG_STATE)
 db_update_state = copy.deepcopy(_DEFAULT_DB_UPDATE_STATE)
@@ -332,7 +364,7 @@ def _build_enrichment_status(worker_name):
     return copy.deepcopy(enrichment_status.get(worker_name, {}))
 
 ENRICHMENT_WORKERS = [
-    'musicbrainz', 'audiodb', 'deezer',
+    'musicbrainz', 'audiodb', 'deezer', 'jiosaavn',
     'spotify-enrichment', 'itunes-enrichment',
     'hydrabase', 'repair',
 ]
@@ -341,6 +373,7 @@ ENRICHMENT_ENDPOINTS = {
     'musicbrainz': '/api/enrichment/musicbrainz/status',
     'audiodb': '/api/enrichment/audiodb/status',
     'deezer': '/api/enrichment/deezer/status',
+    'jiosaavn': '/api/enrichment/jiosaavn/status',
     'spotify-enrichment': '/api/enrichment/spotify/status',
     'itunes-enrichment': '/api/enrichment/itunes/status',
     'hydrabase': '/api/hydrabase-worker/status',
@@ -350,13 +383,12 @@ ENRICHMENT_ENDPOINTS = {
 # Phase 4 helpers
 
 TOOL_NAMES = [
-    'stream', 'quality-scanner', 'duplicate-cleaner',
+    'stream', 'duplicate-cleaner',
     'retag', 'db-update', 'metadata', 'logs',
 ]
 
 TOOL_ENDPOINTS = {
     'stream': '/api/stream/status',
-    'quality-scanner': '/api/quality-scanner/status',
     'duplicate-cleaner': '/api/duplicate-cleaner/status',
     'retag': '/api/retag/status',
     'db-update': '/api/database/update/status',
@@ -372,10 +404,6 @@ def _build_stream_status():
         "track_info": stream_state["track_info"],
         "error_message": stream_state["error_message"],
     }
-
-
-def _build_quality_scanner_status():
-    return dict(quality_scanner_state)
 
 
 def _build_duplicate_cleaner_status():
@@ -419,7 +447,6 @@ def _build_tool_status(tool_name):
     """Dispatcher that returns the correct status payload for any tool."""
     builders = {
         'stream': _build_stream_status,
-        'quality-scanner': _build_quality_scanner_status,
         'duplicate-cleaner': _build_duplicate_cleaner_status,
         'retag': _build_retag_status,
         'db-update': _build_db_update_status,
@@ -517,7 +544,7 @@ def add_activity_item(icon, title, subtitle, time_ago="Now", show_toast=True):
 # Fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def test_app():
     """Create a minimal Flask + SocketIO app that mirrors Phase 1+2 endpoints."""
     global _test_socketio
@@ -634,10 +661,6 @@ def test_app():
     @app.route('/api/stream/status')
     def stream_status_endpoint():
         return jsonify(_build_stream_status())
-
-    @app.route('/api/quality-scanner/status')
-    def quality_scanner_status_endpoint():
-        return jsonify(_build_quality_scanner_status())
 
     @app.route('/api/duplicate-cleaner/status')
     def duplicate_cleaner_status_endpoint():
@@ -961,7 +984,6 @@ def shared_state():
         'enrichment_endpoints': ENRICHMENT_ENDPOINTS,
         # Phase 4 state
         'stream_state': stream_state,
-        'quality_scanner_state': quality_scanner_state,
         'duplicate_cleaner_state': duplicate_cleaner_state,
         'retag_state': retag_state,
         'db_update_state': db_update_state,
@@ -969,7 +991,6 @@ def shared_state():
         'logs_activities': logs_activities,
         'build_tool_status': _build_tool_status,
         'build_stream_status': _build_stream_status,
-        'build_quality_scanner_status': _build_quality_scanner_status,
         'build_duplicate_cleaner_status': _build_duplicate_cleaner_status,
         'build_retag_status': _build_retag_status,
         'build_db_update_status': _build_db_update_status,
@@ -995,9 +1016,199 @@ def shared_state():
     }
 
 
+@pytest.fixture(autouse=True, scope='session')
+def _inert_youtube_date_enricher():
+    """Neuter the YouTube date-enricher SINGLETON for the whole suite.
+
+    Several video endpoints fire-and-forget `get_youtube_date_enricher().enqueue(...)`
+    on every channel/follow request. Any endpoint test that doesn't stub it spawns
+    the REAL background thread, which then makes LIVE yt-dlp/InnerTube requests to
+    YouTube for the test's fake channel ids and writes to the shared default video
+    DB — concurrently with whatever test runs next (caught live: CI stderr full of
+    'ERROR: [youtube:tab] UC1/videos', and order-dependent KeyError failures in
+    tests/video/test_youtube_tracking.py). Tests are not allowed to reach the
+    network or share background writers — same rule as the DB/config isolation
+    above.
+
+    The singleton becomes a real enricher whose enqueue is a no-op (never spawns
+    the thread), so pause()/resume()/stats() keep their real shapes for the
+    status endpoints. Tests that exercise real enrichment construct
+    YoutubeDateEnricher(db_factory=...) directly and are unaffected.
+    """
+    import core.video.youtube_enrichment as yt_enrich
+
+    class _InertYoutubeEnricher(yt_enrich.YoutubeDateEnricher):
+        def enqueue(self, channel_id, title=None):
+            return None
+
+    with yt_enrich._enricher_lock:
+        yt_enrich._enricher = _InertYoutubeEnricher()
+    yield
+
+
+@pytest.fixture(autouse=True, scope='session')
+def _inert_video_enrichment_engine():
+    """Pre-build the video enrichment engine singleton WITHOUT starting its
+    worker threads.
+
+    get_video_enrichment_engine() lazily constructs the engine AND
+    start_all()s its whole daemon fleet (TMDB/TVDB matcher workers + the
+    RYD/SponsorBlock/fanart/OpenSubtitles/... backfill workers) on first use.
+    The first test to touch any enrichment-adjacent endpoint therefore spawned
+    background threads that ran for the REST of the suite: real network
+    calls, writes to the shared default video DB, and stray time.sleep calls
+    + ERROR logs that failed completely unrelated tests (CI: 'video backfill
+    opensubtitles loop error' erupting inside test_config_save_retry).
+    Same hermeticity rule as the YouTube date enricher above.
+
+    The singleton becomes a REAL engine bound to the isolated session temp DB
+    — every status/breakdown endpoint keeps working — just never started.
+    Tests that want a specific engine still monkeypatch the getter or set
+    engine._engine themselves; reset_state below re-installs this one between
+    tests so a test-local engine can't leak forward.
+    """
+    import core.video.enrichment.engine as eng_mod
+    from core.video.enrichment.clients import build_clients
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase()          # env-redirected isolated session temp DB
+    engine = eng_mod.VideoEnrichmentEngine(db, build_clients(db))
+    with eng_mod._lock:
+        eng_mod._engine = engine
+    yield engine
+
+
+@pytest.fixture(autouse=True, scope='session')
+def _inert_video_download_monitor():
+    """Pre-mark the video download monitor as started so no test can spawn it.
+
+    ensure_started() launches a daemon thread on the first grab-shaped call
+    (the /youtube/download endpoint, manual grabs, ...). In the suite that
+    thread then lives FOREVER, and its loop calls the LIVE db_provider —
+    get_video_db() — which resolves to whichever per-test database happens to
+    be installed at that moment: it re-queues orphans, pumps youtube workers,
+    and mutates rows in other tests' databases. Caught on camera by the
+    self-describing assert in test_youtube_episode_parity: 'youtube recovery:
+    re-queued 0 orphan(s), started 3 worker(s)' fired mid-test and called the
+    test's stubbed start_next_queued three extra times. Same hermeticity rule
+    as the enrichment fleet above; production is untouched (the flag is only
+    pre-set inside pytest).
+    """
+    import core.video.download_monitor as monitor
+    with monitor._lock:
+        monitor._started = True
+    yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _inert_music_disk_guard():
+    """Pin the music min-free-disk guard OFF for the whole suite.
+
+    music_has_room() probes the REAL filesystem's free space (rule 3b: CI
+    runner fill varies run to run) on every DownloadOrchestrator.download().
+    Tests of the guard itself monkeypatch the probe and reset the override.
+    """
+    import core.disk_guard as dg
+    dg._floor_override = 0.0
+    yield
+    dg._floor_override = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _video_db_lazy_create_tripwire():
+    """Name the poisoner: log a full stack whenever get_video_db() LAZILY
+    CREATES the module-global VideoDatabase during the suite.
+
+    Tests that want a DB install their own (`videoapi._video_db = db`); the
+    lazy-create branch firing mid-suite means some code path — usually a
+    daemon thread outliving its test — reached for the global after a test's
+    teardown set it to None. That freshly-created instance then shadows the
+    NEXT test's install (the split-brain phantom: a setting written on the
+    test's handle reads back empty through the endpoint). The stack printed
+    here is the culprit, thread name included. Diagnostic only: behavior is
+    unchanged, and the env redirects above make the created DB a temp one.
+    """
+    import io
+    import threading
+    import traceback
+
+    import api.video as videoapi
+
+    orig = videoapi.get_video_db
+
+    def traced():
+        if videoapi._video_db is None:
+            buf = io.StringIO()
+            traceback.print_stack(file=buf)
+            print("\n[video-db tripwire] get_video_db() LAZY-CREATE on thread %r:\n%s"
+                  % (threading.current_thread().name, buf.getvalue()), flush=True)
+        return orig()
+
+    videoapi.get_video_db = traced
+    try:
+        yield
+    finally:
+        videoapi.get_video_db = orig
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _video_db_assignment_tripwire():
+    """Log EVERY assignment to api.video._video_db — one compact line with the
+    currently-running test, the assigning caller, and the thread.
+
+    The split-brain phantom's smoking gun (caught by the parity test's
+    diagnostic assert) is _video_db pointing at a DIFFERENT VideoDatabase than
+    the one the test's own fixture just installed, with the lazy-create path
+    proven silent — so some test-side code ASSIGNS the global out of turn.
+    Modules accept a __class__ swap to a ModuleType subclass, which lets us
+    hook attribute assignment without touching production code."""
+    import os
+    import threading
+    import traceback
+
+    import api.video as videoapi
+
+    base = type(videoapi)
+
+    class _TracedModule(base):
+        def __setattr__(self, name, value):
+            if name == "_video_db":
+                frames = traceback.extract_stack(limit=4)[:-1]
+                caller = " <- ".join("%s:%s" % (os.path.basename(f.filename), f.lineno)
+                                     for f in reversed(frames))
+                print("[assign tripwire] _video_db=%s thread=%r test=%r via %s"
+                      % ("None" if value is None else hex(id(value)),
+                         threading.current_thread().name,
+                         os.environ.get("PYTEST_CURRENT_TEST", "?"), caller),
+                      flush=True)
+            super().__setattr__(name, value)
+
+    videoapi.__class__ = _TracedModule
+    try:
+        yield
+    finally:
+        videoapi.__class__ = base
+
+
 @pytest.fixture(autouse=True)
-def reset_state():
+def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     """Reset all mutable state between tests."""
+    # Video enrichment engine: re-install the inert (never-started) singleton
+    # so an engine a previous test set never leaks into the next one.
+    import core.video.enrichment.engine as _eng_mod
+    _eng_mod._engine = _inert_video_enrichment_engine
+    # slskd search throttle: ONE process-wide reservation window shared by the
+    # music + video sides (core.slskd_throttle). Left alone, reservations
+    # accumulate across the whole pytest session — once 35 pile up, every
+    # later test that touches a search path sleeps REAL minutes waiting for
+    # its slot (the suite appears to hang around the test_v* files). Wipe it
+    # between tests like any other module-global.
+    from core.slskd_throttle import _reset_for_tests
+    _reset_for_tests()
+    # Enrichment status TTL cache (core.enrichment.api): a cached stats dict
+    # must never leak into the next test's registry (same service id, new fake).
+    from core.enrichment.api import _invalidate_status_cache
+    _invalidate_status_cache()
     # Reset to defaults
     _status_cache.clear()
     _status_cache.update(copy.deepcopy(_DEFAULT_STATUS_CACHE))
@@ -1019,8 +1230,6 @@ def reset_state():
     # Phase 4 resets
     stream_state.clear()
     stream_state.update(copy.deepcopy(_DEFAULT_STREAM_STATE))
-    quality_scanner_state.clear()
-    quality_scanner_state.update(copy.deepcopy(_DEFAULT_QUALITY_SCANNER_STATE))
     duplicate_cleaner_state.clear()
     duplicate_cleaner_state.update(copy.deepcopy(_DEFAULT_DUPLICATE_CLEANER_STATE))
     retag_state.clear()
@@ -1061,8 +1270,6 @@ def reset_state():
     enrichment_status.update(copy.deepcopy(_DEFAULT_ENRICHMENT_STATUS))
     stream_state.clear()
     stream_state.update(copy.deepcopy(_DEFAULT_STREAM_STATE))
-    quality_scanner_state.clear()
-    quality_scanner_state.update(copy.deepcopy(_DEFAULT_QUALITY_SCANNER_STATE))
     duplicate_cleaner_state.clear()
     duplicate_cleaner_state.update(copy.deepcopy(_DEFAULT_DUPLICATE_CLEANER_STATE))
     retag_state.clear()

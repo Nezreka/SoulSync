@@ -13,6 +13,61 @@ from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("spotify_client")
 
+
+# Single source of truth for the Spotify OAuth scope. Used by EVERY SpotifyOAuth
+# construction (the client, the per-profile registry, and all web_server callbacks) so
+# the authorize URL and token exchange can never request different scopes — a mismatch
+# silently re-prompts or denies.
+#
+# IMPORTANT — do NOT add scopes here lightly. Spotipy's validate_token treats a cached
+# token as invalid the moment the requested scope is no longer a subset of the token's
+# granted scope, so GROWING this string invalidates EVERY existing user's token and forces
+# a re-auth on upgrade. `playlist-modify-*` (for exporting a playlist back to Spotify, #945)
+# was pulled back out for exactly that reason — it broke all Spotify users on upgrade. The
+# Spotify export must request write access on-demand (incremental auth) instead.
+SPOTIFY_OAUTH_SCOPE = (
+    "user-library-read user-read-private playlist-read-private "
+    "playlist-read-collaborative user-read-email user-follow-read"
+)
+
+# The export scope = the normal login scope PLUS playlist write. Requested ONLY by the
+# on-demand export-auth route (/auth/spotify/export) when a user chooses to export a playlist
+# to Spotify — NEVER by the normal login. That's the whole safety property: the global scope
+# above is unchanged, so no existing token is invalidated. The token Spotify returns from the
+# export flow is a SUPERSET of the read scope, so it still passes the normal auth check
+# (read ⊆ read+write) — one account, one token, just with write added for the opt-in user.
+SPOTIFY_EXPORT_SCOPE = (
+    SPOTIFY_OAUTH_SCOPE + " playlist-modify-public playlist-modify-private"
+)
+
+
+def normalize_spotify_oauth_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Normalize Spotify OAuth config before building an auth manager.
+
+    Spotify rejects values that include surrounding whitespace or quotes, and the
+    settings UI can paste values carrying such formatting, so we trim those — they
+    can never be part of a real credential.
+
+    We deliberately do NOT strip a trailing slash from ``redirect_uri``: Spotify
+    matches the redirect URI EXACTLY against the app's dashboard registration, and
+    a trailing slash is a legitimate part of a URI. Stripping it would silently
+    break anyone who registered ``…/callback/`` (we'd send ``…/callback`` →
+    "INVALID_CLIENT: Invalid redirect URI"). So the value is preserved verbatim
+    apart from the unambiguous whitespace/quote garbage (#942 follow-up).
+    """
+    if not isinstance(config, dict):
+        return {}
+
+    normalized = {}
+    for key in ("client_id", "client_secret", "redirect_uri"):
+        value = config.get(key, "")
+        if isinstance(value, str):
+            normalized[key] = value.strip().strip('"').strip("'")
+        else:
+            normalized[key] = value
+    return normalized
+
+
 def _upgrade_spotify_image_url(url: str) -> str:
     """Upgrade a Spotify CDN image URL to the highest available resolution.
 
@@ -697,7 +752,7 @@ class SpotifyClient:
         self._setup_client()
     
     def _setup_client(self):
-        config = config_manager.get_spotify_config()
+        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
         
         if not config.get('client_id') or not config.get('client_secret'):
             logger.warning("Spotify credentials not configured")
@@ -716,7 +771,7 @@ class SpotifyClient:
                 client_id=config['client_id'],
                 client_secret=config['client_secret'],
                 redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
-                scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+                scope=SPOTIFY_OAUTH_SCOPE,
                 cache_handler=DatabaseTokenCache(config_manager)
             )
             
@@ -750,6 +805,16 @@ class SpotifyClient:
         with self._auth_cache_lock:
             self._auth_cached_result = None
             self._auth_cache_time = 0
+
+    def _has_cached_oauth_token(self) -> bool:
+        """Return True when a persisted OAuth token exists (no network I/O)."""
+        if self.sp is None:
+            return False
+        try:
+            cache_handler = getattr(self.sp.auth_manager, 'cache_handler', None)
+            return bool(cache_handler and cache_handler.get_cached_token() is not None)
+        except Exception:
+            return False
 
     def is_spotify_authenticated(self) -> bool:
         """Check if Spotify client is specifically authenticated (not just iTunes fallback).
@@ -826,6 +891,26 @@ class SpotifyClient:
                     logger.debug("publish_spotify_status cache hit: %s", e)
                 return self._auth_cached_result
 
+        from core.boot_phase import is_boot_phase
+        if is_boot_phase():
+            result = self._has_cached_oauth_token()
+            with self._auth_cache_lock:
+                self._auth_cached_result = result
+                self._auth_cache_time = time.time()
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=result,
+                    authenticated=result,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=None,
+                )
+            except Exception as e:
+                logger.debug("publish_spotify_status boot-phase: %s", e)
+            return result
+
         # Cache miss — make API call outside the lock.
         # Safety: if there's no cached token, return False immediately.
         # Without this guard, spotipy's auth_manager will try to start an interactive
@@ -857,7 +942,8 @@ class SpotifyClient:
         # Use a dedicated probe client (retries=0) so a 429 here propagates
         # immediately and we can detect long Retry-After bans.
         try:
-            probe = spotipy.Spotify(auth_manager=self.sp.auth_manager, retries=0)
+            probe = spotipy.Spotify(
+                auth_manager=self.sp.auth_manager, retries=0, requests_timeout=15)
             probe.current_user()
             result = True
         except Exception as e:
@@ -1107,6 +1193,69 @@ class SpotifyClient:
                  logger.info(f"Returning {len(playlists)} playlists fetched before error.")
                  return playlists
             return []
+
+    def has_write_scope(self) -> bool:
+        """True when the cached Spotify token carries playlist-modify (the export write scope).
+        The export endpoint uses this to decide whether to run, or to first send the user
+        through the on-demand export-auth flow. Fail-safe: any error → False (not authorized)."""
+        if self.sp is None:
+            return False
+        try:
+            cache_handler = getattr(self.sp.auth_manager, "cache_handler", None)
+            token = cache_handler.get_cached_token() if cache_handler else None
+            return "playlist-modify" in ((token or {}).get("scope") or "")
+        except Exception:
+            return False
+
+    def create_or_update_playlist(self, name, track_ids, *, existing_id=None,
+                                  public=False, description=""):
+        """Create a Spotify playlist owned by the authed user (or replace an existing
+        one's tracks in place), for exporting a mirrored playlist back to Spotify (#945).
+
+        ``track_ids`` are Spotify track IDs (the stored ``spotify_track_id`` per library
+        track). ``existing_id`` set → replace that playlist's contents (idempotent
+        re-export); unset → create a new playlist. Requires the ``playlist-modify-*``
+        scope — a token issued before that scope was added gets a clear "reconnect"
+        error rather than a raw 403. Returns
+        ``{success, playlist_id, url, added, error}``.
+        """
+        if not self.is_spotify_authenticated():
+            return {"success": False, "error": "Spotify is not connected"}
+        uris = [f"spotify:track:{t}" for t in (track_ids or []) if t]
+        if not uris:
+            return {"success": False, "error": "No matching Spotify tracks to export"}
+        try:
+            playlist_id = existing_id
+            if playlist_id:
+                # Replace contents (re-export). replace_items caps at 100 — seed with the
+                # first 100, then append the rest in 100-track chunks.
+                self.sp.playlist_replace_items(playlist_id, uris[:100])
+                for i in range(100, len(uris), 100):
+                    self.sp.playlist_add_items(playlist_id, uris[i:i + 100])
+            else:
+                user_id = (self.sp.current_user() or {}).get("id")
+                created = self.sp.user_playlist_create(
+                    user_id, name, public=public, description=description,
+                )
+                playlist_id = (created or {}).get("id")
+                if not playlist_id:
+                    return {"success": False, "error": "Spotify did not return a playlist id"}
+                for i in range(0, len(uris), 100):
+                    self.sp.playlist_add_items(playlist_id, uris[i:i + 100])
+            return {
+                "success": True,
+                "playlist_id": playlist_id,
+                "url": f"https://open.spotify.com/playlist/{playlist_id}",
+                "added": len(uris),
+            }
+        except Exception as e:
+            msg = str(e)
+            if "403" in msg or "scope" in msg.lower() or "insufficient" in msg.lower():
+                return {"success": False,
+                        "error": "Reconnect Spotify to grant playlist write access "
+                                 "(Settings → reconnect Spotify)."}
+            _detect_and_set_rate_limit(e, "create_or_update_playlist")
+            return {"success": False, "error": msg}
 
     @rate_limited
     def get_saved_tracks_count(self) -> int:
@@ -1420,11 +1569,17 @@ class SpotifyClient:
             return []
 
     @rate_limited
-    def search_tracks(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Track]:
+    def search_tracks(self, query: str, limit: int = 10, allow_fallback: bool = True,
+                      prefer_free: bool = False) -> List[Track]:
         """Search for tracks.
 
         When allow_fallback is True, falls back to the configured metadata source
         if Spotify is unavailable or returns an error.
+
+        ``prefer_free`` forces the no-creds SpotipyFree path when the package is
+        installed, even without auth or the 'Spotify Free' source opt-in. The
+        orchestrator sets it only for an EXPLICIT per-search Spotify pick (a
+        deliberate user action = consent), so background flows are unaffected.
         """
         cache = get_metadata_cache()
         effective_limit = min(limit, 50)  # Spotify API max is 50
@@ -1446,7 +1601,7 @@ class SpotifyClient:
         # (no-auth / rate-limited — where auth is already False — plus the
         # budget-bridge and the worker's prefer-free opt-in, where auth is True
         # but we deliberately defer to free). The free branch below then runs.
-        use_spotify = self.is_spotify_authenticated() and not self._free_active()
+        use_spotify = self.is_spotify_authenticated() and not self._free_active() and not prefer_free
 
         if use_spotify:
             try:
@@ -1465,16 +1620,23 @@ class SpotifyClient:
                     cache.store_search_results('spotify', 'track', query, effective_limit,
                                                [td.get('id') for td in raw_items if td.get('id')])
 
-                return tracks
+                if tracks:
+                    return tracks
+                # Official returned NOTHING (empty, not an error) — fall through to
+                # Free/fallback. #(spotify-free) an authed user whose official API is
+                # dead but who opted into Free would otherwise get a blank page.
 
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'search_tracks')
                 logger.error(f"Error searching tracks via Spotify: {e}")
                 # Fall through to fallback
 
-        # No-creds Spotify (SpotipyFree) before the iTunes/Deezer fallback —
-        # only when official Spotify is unavailable (no auth / rate-limited).
-        if allow_fallback and self._free_active():
+        # No-creds Spotify (SpotipyFree) before the iTunes/Deezer fallback. Runs when
+        # Free should serve (no-auth / rate-limited / budget / worker prefer-free) OR
+        # when it's simply available (opted-in) and official above returned nothing —
+        # so an authed-but-broken official Spotify falls back to Free instead of empty.
+        if allow_fallback and (self._free_active() or self._free_available()
+                               or (prefer_free and self._free_installed())):
             try:
                 objs = [Track.from_spotify_track(t)
                         for t in self._free_meta.search_tracks(query, effective_limit)]
@@ -1490,11 +1652,14 @@ class SpotifyClient:
         return []
 
     @rate_limited
-    def search_artists(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Artist]:
+    def search_artists(self, query: str, limit: int = 10, allow_fallback: bool = True,
+                       prefer_free: bool = False) -> List[Artist]:
         """Search for artists.
 
         When allow_fallback is True, falls back to the configured metadata source
         if Spotify is unavailable or returns an error.
+
+        ``prefer_free`` forces the no-creds SpotipyFree path (see search_tracks).
         """
         cache = get_metadata_cache()
         # Check Spotify cache first so cached data remains usable even when
@@ -1516,7 +1681,7 @@ class SpotifyClient:
         # (no-auth / rate-limited — where auth is already False — plus the
         # budget-bridge and the worker's prefer-free opt-in, where auth is True
         # but we deliberately defer to free). The free branch below then runs.
-        use_spotify = self.is_spotify_authenticated() and not self._free_active()
+        use_spotify = self.is_spotify_authenticated() and not self._free_active() and not prefer_free
 
         if use_spotify:
             try:
@@ -1540,18 +1705,21 @@ class SpotifyClient:
                 query_lower = query.lower().strip()
                 artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
 
-                return artists
+                if artists:
+                    return artists
+                # Empty official result → fall through to Free/fallback (an authed-but-
+                # broken official Spotify with the Free opt-in shouldn't get a blank page).
 
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'search_artists')
                 logger.error(f"Error searching artists via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when
-        # official Spotify can't serve us (no auth / rate-limited), before the
-        # iTunes/Deezer fallback. Gated by _free_active() so it never runs while
-        # auth is healthy.
-        if allow_fallback and self._free_active():
+        # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when official
+        # can't serve (no auth / rate-limited / worker prefer-free) OR when it's opted-in
+        # and official above returned nothing — before the iTunes/Deezer fallback.
+        if allow_fallback and (self._free_active() or self._free_available()
+                               or (prefer_free and self._free_installed())):
             try:
                 objs = [Artist.from_spotify_artist(a)
                         for a in self._free_meta.search_artists(query, limit)]
@@ -1573,7 +1741,8 @@ class SpotifyClient:
 
     @rate_limited
     def search_albums(self, query: str, limit: int = 10, allow_fallback: bool = True,
-                      artist: str = None, album: str = None) -> List[Album]:
+                      artist: str = None, album: str = None,
+                      prefer_free: bool = False) -> List[Album]:
         """Search for albums.
 
         When allow_fallback is True, falls back to the configured metadata source
@@ -1602,7 +1771,7 @@ class SpotifyClient:
         # (no-auth / rate-limited — where auth is already False — plus the
         # budget-bridge and the worker's prefer-free opt-in, where auth is True
         # but we deliberately defer to free). The free branch below then runs.
-        use_spotify = self.is_spotify_authenticated() and not self._free_active()
+        use_spotify = self.is_spotify_authenticated() and not self._free_active() and not prefer_free
 
         if use_spotify:
             try:
@@ -1621,19 +1790,22 @@ class SpotifyClient:
                     cache.store_search_results('spotify', 'album', query, min(limit, 10),
                                                [ad.get('id') for ad in raw_items if ad.get('id')])
 
-                return albums
+                if albums:
+                    return albums
+                # Empty official result → fall through to Free/fallback.
 
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'search_albums')
                 logger.error(f"Error searching albums via Spotify: {e}")
                 # Fall through to free / iTunes fallback
 
-        # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when
-        # official Spotify can't serve us (no auth / rate-limited / budget spent),
-        # before the iTunes/Deezer fallback. Albums have no name-search upstream,
-        # so resolve via the artist's discography — needs artist + album names.
-        # Gated by _free_active() so it never runs while auth is healthy.
-        if allow_fallback and self._free_active() and artist and album:
+        # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when official
+        # can't serve (no auth / rate-limited / budget / worker prefer-free) OR when it's
+        # opted-in and official above returned nothing — before the iTunes/Deezer fallback.
+        # Albums have no name-search upstream, so resolve via the artist's discography —
+        # needs artist + album names.
+        if allow_fallback and (self._free_active() or self._free_available()
+                               or (prefer_free and self._free_installed())) and artist and album:
             try:
                 objs = [Album.from_spotify_album(a)
                         for a in self._free_meta.search_albums_via_artist(artist, album, min(limit, 10))]

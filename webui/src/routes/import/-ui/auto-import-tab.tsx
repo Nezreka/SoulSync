@@ -26,6 +26,7 @@ import {
   autoImportStatusQueryOptions,
   clearCompletedAutoImportResults,
   invalidateAutoImportQueries,
+  qualityProfilesQueryOptions,
   rejectAutoImportResult,
   saveAutoImportSettings,
   toggleAutoImport,
@@ -55,6 +56,7 @@ export function AutoImportPanel({
   const queryClient = useQueryClient();
   const [confidence, setConfidence] = useState(90);
   const [interval, setInterval] = useState(60);
+  const [qualityProfileId, setQualityProfileId] = useState<number | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
 
   const statusQuery = useQuery({
@@ -68,12 +70,16 @@ export function AutoImportPanel({
     ...autoImportResultsQueryOptions(),
     refetchInterval: 5000,
   });
+  const qualityProfilesQuery = useQuery({
+    ...qualityProfilesQueryOptions(),
+  });
 
   useEffect(() => {
     const settings = settingsQuery.data;
     if (!settings) return;
     setConfidence(Math.round((settings.confidence_threshold ?? 0.9) * 100));
     setInterval(settings.scan_interval ?? 60);
+    setQualityProfileId(settings.quality_profile_id ?? null);
   }, [settingsQuery.data]);
 
   const invalidateAutoImport = () => {
@@ -155,6 +161,7 @@ export function AutoImportPanel({
     statusQuery.error && !statusQuery.data ? getErrorMessage(statusQuery.error) : '';
   const resultsError =
     resultsQuery.error && !resultsQuery.data ? getErrorMessage(resultsQuery.error) : '';
+  const settingsReady = Boolean(settingsQuery.data);
 
   return (
     <>
@@ -221,14 +228,38 @@ export function AutoImportPanel({
                 <option value="300">5m</option>
               </Select>
             </div>
+            <div
+              className={styles.autoImportSetting}
+              title="Which quality profile Auto-Import checks new files against. Leave on the app-wide default unless you specifically want different rules (e.g. AcoustID, quality targets) for Auto-Import than for normal downloads."
+            >
+              <span>Quality profile:</span>
+              <Select
+                id="auto-import-quality-profile"
+                size="sm"
+                disabled={!settingsReady}
+                value={qualityProfileId ?? ''}
+                onChange={(event) =>
+                  setQualityProfileId(event.target.value ? Number(event.target.value) : null)
+                }
+              >
+                <option value="">App-wide default</option>
+                {(qualityProfilesQuery.data ?? []).map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                    {profile.is_default ? ' (current default)' : ''}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <Button
               variant="primary"
               size="sm"
-              disabled={saveSettingsMutation.isPending}
+              disabled={saveSettingsMutation.isPending || !settingsReady}
               onClick={() =>
                 saveSettingsMutation.mutate({
                   confidenceThreshold: confidence / 100,
                   scanInterval: interval,
+                  qualityProfileId,
                 })
               }
             >

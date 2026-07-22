@@ -28,6 +28,8 @@ from config.settings import config_manager
 from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.selection import load_search_mode
+from core.downloads.source_policy import resolve_source_policy
 
 logger = get_logger("download_orchestrator")
 
@@ -48,20 +50,19 @@ class DownloadOrchestrator:
         exists so tests can inject a registry with mock plugins; in
         production callers leave it None and get the default.
 
-        ``engine`` is the cross-source state owner. Phase B introduces
-        it as a held reference; it isn't on any code path yet — Phase
-        C/D/E/F migrate behavior into it incrementally.
+        ``engine`` is the cross-source operation/state owner. The orchestrator
+        keeps source-mode policy and compatibility methods, while search,
+        download dispatch, status and cancellation cross the engine boundary.
         """
         self.registry = registry if registry is not None else build_default_registry()
         self.registry.initialize()
         self._init_failures = self.registry.init_failures
 
-        # Engine — owns cross-source state, threading, search retry,
-        # rate-limits, fallback. Built in subsequent phases. For Phase
-        # B it's just an empty registry of plugins so future phases
-        # can route through it without further orchestrator changes.
+        # Engine — owns source resolution, cross-source state, threading,
+        # rate-limits and operational dispatch.
         self.engine = engine if engine is not None else DownloadEngine()
-        for source_name, plugin in self.registry.all_plugins():
+        for source_name in self.registry.names():
+            plugin = self.registry.get(source_name)
             spec = self.registry.get_spec(source_name)
             aliases = spec.aliases if spec else ()
             self.engine.register_plugin(source_name, plugin, aliases=aliases)
@@ -102,12 +103,14 @@ class DownloadOrchestrator:
         deezer_dl = self.client('deezer_dl')
         if deezer_arl and deezer_dl:
             deezer_dl.reconnect(deezer_arl)
-            deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
+            from core.quality.source_map import quality_tier_for_source
+            deezer_dl._quality = quality_tier_for_source('deezer', default='flac')
 
         # Reload Amazon quality preference (T2Tunes needs no reconnect — public proxy)
         amazon = self.client('amazon')
         if amazon:
-            quality = config_manager.get('amazon_download.quality', 'flac')
+            from core.quality.source_map import quality_tier_for_source
+            quality = quality_tier_for_source('amazon', default='flac')
             amazon._quality = quality
             amazon._allow_fallback = config_manager.get('amazon_download.allow_fallback', True)
             if hasattr(amazon, '_client') and amazon._client:
@@ -140,7 +143,10 @@ class DownloadOrchestrator:
                 continue
             if hasattr(client, 'download_path') and client.download_path != new_path:
                 client.download_path = new_path
-                client.download_path.mkdir(parents=True, exist_ok=True)
+                try:
+                    client.download_path.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    logger.warning(f"Could not verify download path {new_path}: {e}")
                 # YouTube also caches path in yt-dlp opts
                 if hasattr(client, 'download_opts') and 'outtmpl' in client.download_opts:
                     client.download_opts['outtmpl'] = str(new_path / '%(title)s.%(ext)s')
@@ -281,26 +287,15 @@ class DownloadOrchestrator:
         primary/secondary pair when no order set. Normalizes alias
         names through the registry so legacy ``deezer_dl`` config
         values resolve correctly to the canonical ``deezer`` plugin."""
-        if self.hybrid_order:
-            chain = []
-            seen = set()
-            for raw in self.hybrid_order:
-                canonical = self._normalize_source_name(raw)
-                if canonical and canonical not in seen:
-                    chain.append(canonical)
-                    seen.add(canonical)
-            return chain
-        primary = self._normalize_source_name(self.hybrid_primary) or 'soulseek'
-        secondary = self._normalize_source_name(self.hybrid_secondary) or 'soulseek'
-        if secondary == primary:
-            secondary = next(
-                (name for name in self.registry.names() if name != primary),
-                'soulseek',
-            )
-        chain = [primary, secondary]
-        if not chain:
-            chain = ['soulseek']
-        return chain
+        policy = resolve_source_policy(
+            mode="hybrid",
+            hybrid_order=self.hybrid_order,
+            hybrid_primary=self.hybrid_primary,
+            hybrid_secondary=self.hybrid_secondary,
+            normalize=self._normalize_source_name,
+            available_sources=self.registry.names(),
+        )
+        return list(policy.source_chain)
 
     async def search(self, query: str, timeout: int = None, progress_callback=None,
                      exclude_sources=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
@@ -342,6 +337,16 @@ class DownloadOrchestrator:
         if not chain:
             logger.warning("Hybrid search exhausted: no eligible sources after exclusion filter")
             return [], []
+        policy = resolve_source_policy(
+            mode="hybrid",
+            hybrid_order=chain,
+            search_mode=load_search_mode(),
+        )
+        if policy.search_all_sources:
+            logger.info(f"Best-quality search ({' → '.join(chain)}): {query}")
+            return await self.engine.search_all_sources(
+                query, chain, timeout, progress_callback,
+            )
         logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
         return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
 
@@ -412,9 +417,17 @@ class DownloadOrchestrator:
 
             if scored:
                 scored.sort(key=lambda x: x._match_confidence, reverse=True)
-                filtered_results = scored
+                # Match filter done (right track); now prefer the best quality
+                # among the confidence-passing survivors so streaming isn't
+                # quality-blind like Soulseek already isn't. Stable ranking
+                # keeps confidence order within an equal quality tier; the
+                # `or scored` fail-safe never leaves us with nothing to try.
+                from core.quality.selection import rank_for_profile
+                ranked, _ = rank_for_profile(scored)
+                filtered_results = ranked or scored
                 logger.info(f"Streaming validation: {len(scored)}/{len(tracks)} passed "
-                            f"(best: {scored[0]._match_confidence:.2f})")
+                            f"(best: {scored[0]._match_confidence:.2f}, "
+                            f"quality pick: {filtered_results[0].audio_quality.label()})")
             else:
                 logger.warning(f"No streaming results passed validation for: {query}")
                 return None
@@ -454,21 +467,19 @@ class DownloadOrchestrator:
         Returns:
             download_id: Unique download ID for tracking
         """
-        # Streaming sources are dispatched by name match; anything
-        # unrecognized falls through to Soulseek (peer username case).
-        spec = self.registry.get_spec(username) if username else None
-        if spec is not None and spec.name != 'soulseek':
-            client = self.registry.get(spec.name)
-            if not client:
-                raise RuntimeError(f"{spec.display_name} download client not available (failed to initialize)")
-            logger.info(f"Downloading from {spec.display_name}: {filename}")
-            return await client.download(username, filename, file_size)
+        # Minimum-free-disk guard (every music download — Soulseek AND
+        # streaming — funnels through here). A full disk mid-download is far
+        # worse than a refused grab: on a Proxmox LXC the 8GB root fills until
+        # the whole container hangs.
+        from core.disk_guard import music_has_room
+        ok_room, free, floor = music_has_room()
+        if not ok_room:
+            raise RuntimeError(
+                f"Download refused: only {free:.1f} GB free on the download disk "
+                f"(minimum {floor:.0f} GB). Free up space, or change the floor in "
+                f"Settings → Soulseek (min_free_disk_gb).")
 
-        soulseek = self.registry.get('soulseek')
-        if not soulseek:
-            raise RuntimeError("Soulseek client not available (failed to initialize)")
-        logger.info(f"Downloading from Soulseek: {filename}")
-        return await soulseek.download(username, filename, file_size)
+        return await self.engine.dispatch_download(username, filename, file_size)
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
         """Aggregated view across every source. Delegates to the

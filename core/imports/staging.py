@@ -56,6 +56,12 @@ def get_primary_source() -> str:
     return _get_primary_source()
 
 
+def get_primary_source_label() -> str:
+    from core.metadata_service import get_primary_source_label as _get_primary_source_label
+
+    return _get_primary_source_label()
+
+
 def get_source_priority(preferred_source: str):
     from core.metadata_service import get_source_priority as _get_source_priority
 
@@ -66,6 +72,43 @@ def get_client_for_source(source: str):
     from core.metadata_service import get_client_for_source as _get_client_for_source
 
     return _get_client_for_source(source)
+
+
+def available_import_sources() -> List[Dict[str, Any]]:
+    """Source picker options for Import Search — every metadata source with a
+    live client, the user's primary source flagged 'active' so the UI selects
+    it by default.
+
+    Needed because search_import_albums()'s default (no source_override) walk
+    of the priority chain stops at the first source that returns ANY non-empty
+    result — a noisy, broad-catalog source ahead of a niche one in the chain
+    (e.g. Discogs ahead of Bandcamp) can permanently shadow it for ordinary
+    queries. Explicitly picking a source here bypasses that entirely."""
+    from core.metadata.registry import METADATA_SOURCE_PRIORITY
+
+    try:
+        primary = get_primary_source()
+    except Exception:
+        primary = None
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for src in METADATA_SOURCE_PRIORITY:
+        if src in seen:
+            continue
+        seen.add(src)
+        try:
+            client = get_client_for_source(src)
+        except Exception:
+            client = None
+        if client is None or not hasattr(client, "search_albums"):
+            continue
+        out.append({
+            "source": src,
+            "label": src.replace("_", " ").title(),
+            "active": src == primary,
+        })
+    return out
 
 
 def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]:
@@ -416,15 +459,22 @@ def _collect_import_suggestion_queries(staging_path: str) -> List[str]:
     return queries[:5]
 
 
-def search_import_albums(query: str, limit: int = 12) -> List[Dict[str, Any]]:
-    """Search albums using the configured metadata provider first."""
+def search_import_albums(query: str, limit: int = 12, source_override: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Search albums using the configured metadata provider first.
+
+    ``source_override`` searches exactly that one source instead — the
+    default priority-chain walk below stops at the first source that
+    returns ANY non-empty result, so a source late in the chain (Bandcamp,
+    JioSaavn) is effectively unreachable via the default path whenever an
+    earlier, broader-catalog source (Discogs) returns something for the
+    query, however irrelevant. Explicit selection bypasses that entirely."""
     query = (query or "").strip()
     if not query:
         return []
 
     results: List[Dict[str, Any]] = []
     seen = set()
-    source_chain = get_source_priority(get_primary_source())
+    source_chain = [source_override] if source_override else get_source_priority(get_primary_source())
 
     for source in source_chain:
         client = get_client_for_source(source)

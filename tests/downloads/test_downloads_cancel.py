@@ -176,15 +176,30 @@ def test_clear_completed_drops_empty_batches():
     assert download_batches['b3']['queue'] == ['t3']
 
 
-def test_clear_completed_prunes_terminal_task_ids_from_batch_queues():
-    """Batch with mix of terminal + active tasks gets queue trimmed, not deleted."""
+def test_clear_completed_keeps_terminal_tasks_in_active_batch():
+    """A completed/failed task in a batch that still has active work is KEPT, so
+    the Downloads page shows it for the whole run (the 5-min Clean Completed
+    automation must not yank terminal tasks out from under a live batch)."""
     download_tasks['t1'] = {'status': 'completed'}
-    download_tasks['t2'] = {'status': 'downloading'}
+    download_tasks['t2'] = {'status': 'downloading'}  # batch still active
     download_batches['b1'] = {'queue': ['t1', 't2']}
 
-    cancel.clear_completed_local()
+    cleared = cancel.clear_completed_local()
+    assert cleared == 0  # nothing removed — batch is live
     assert 'b1' in download_batches
-    assert download_batches['b1']['queue'] == ['t2']
+    assert download_batches['b1']['queue'] == ['t1', 't2']  # queue intact
+
+
+def test_clear_completed_clears_terminal_tasks_once_batch_is_finished():
+    """When every task in a batch is terminal, the batch is done — its tasks are
+    cleared and the empty batch dropped."""
+    download_tasks['t1'] = {'status': 'completed'}
+    download_tasks['t2'] = {'status': 'failed'}
+    download_batches['b1'] = {'queue': ['t1', 't2']}
+
+    cleared = cancel.clear_completed_local()
+    assert cleared == 2
+    assert 'b1' not in download_batches
 
 
 def test_clear_completed_drops_batch_locks_for_deleted_batches():

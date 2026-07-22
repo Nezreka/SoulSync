@@ -1341,6 +1341,121 @@ def test_preview_marks_unmatched_tracks(monkeypatch, tmpdirs):
     assert by_title['Completely Unrelated Side Quest']['new_path'] == ''
 
 
+def test_preview_plans_move_out_of_old_template_folder(monkeypatch, tmpdirs):
+    """TheHomeGuy's report: after changing the album template (dropping the
+    '$albumartist - ' prefix from the album folder), both the Tools-page job
+    and Reorganize All did nothing — every track came back `unchanged`.
+
+    Root cause: the preview computes destinations through the REAL
+    `build_final_path_for_track`, whose #829 existing-folder reuse resolves
+    the folder the album ALREADY lives in — the old-template folder it's
+    supposed to move out of — so destination == current location. This wires
+    the real builder with a poisoned resolver and pins that a reorganize
+    context never consults it."""
+    import core.imports.paths as import_paths
+    import core.library.existing_album_folder as eaf
+    import database.music_database as mdb
+
+    library, _staging, transfer = tmpdirs
+
+    class _Cfg:
+        def __init__(self, values):
+            self._values = values
+
+        def get(self, key, default=None):
+            return self._values.get(key, default)
+
+        def get_active_media_server(self):
+            return None
+
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Cfg({
+        "soulseek.transfer_path": str(transfer),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            # The NEW template — no artist prefix on the album folder.
+            "album_path": "$albumartist/$album/$track - $title",
+            "single_path": "$artist/$title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    }))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    # The file sits where the OLD template put it: Artist/Artist - Album/.
+    old_home = transfer / "Aerosmith" / "Aerosmith - Rocks"
+    old_home.mkdir(parents=True)
+    current = old_home / "01 - Back in the Saddle.flac"
+    current.write_bytes(b"fakeflacdata")
+
+    # Poisoned resolver: if the builder consults folder reuse at all, it gets
+    # the old folder back and the preview would report `unchanged` (the bug).
+    monkeypatch.setattr(mdb, "get_database", lambda: object(), raising=False)
+    resolver_calls = []
+    monkeypatch.setattr(eaf, "resolve_existing_album_folder",
+                        lambda **kw: resolver_calls.append(kw) or str(old_home))
+
+    db = _FakeDB()
+    _setup_album(db, deezer_id='dz-1', tracks=[
+        ('t1', 1, 'Back in the Saddle', str(current)),
+    ])
+    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'deezer')
+    monkeypatch.setattr(library_reorganize, 'get_source_priority', lambda p: [p])
+    monkeypatch.setattr(library_reorganize, 'get_album_for_source',
+                        lambda *a: {'id': 'dz-1', 'name': 'Rocks'})
+    monkeypatch.setattr(
+        library_reorganize, 'get_album_tracks_for_source',
+        lambda *a: {'items': [
+            {'id': 'a1', 'name': 'Back in the Saddle', 'track_number': 1, 'disc_number': 1},
+        ]},
+    )
+
+    result = library_reorganize.preview_album_reorganize(
+        album_id='alb-1', db=db, transfer_dir=str(transfer),
+        resolve_file_path_fn=lambda p: p,
+        build_final_path_fn=import_paths.build_final_path_for_track,
+    )
+
+    assert result['success'] is True
+    (track,) = result['tracks']
+    assert track['matched'] is True
+    assert resolver_calls == []          # reuse never consulted for reorganize
+    assert track['unchanged'] is False   # the bug reported True here
+    assert track['new_path_abs'] == str(
+        transfer / "Aerosmith" / "Rocks" / "01 - Back in the Saddle.flac")
+
+
+def test_reorganize_context_disables_folder_reuse():
+    """The contract the preview test above relies on: every reorganize
+    pipeline context (preview, rename-only apply, full apply — all built by
+    `_build_post_process_context`) carries the no-reuse flag."""
+    context = library_reorganize._build_post_process_context(
+        {'id': 'dz-1', 'name': 'Rocks'},
+        {'id': 'a1', 'name': 'Back in the Saddle', 'track_number': 1},
+        'Aerosmith', 'Rocks', 1,
+    )
+    assert context['_no_album_folder_reuse'] is True
+
+
+def test_reorganize_context_is_a_local_import():
+    """Reorganize handles the user's OWN library files — the integrity check's
+    duration-agreement leg must not apply (#804 semantics). Without this flag,
+    a file whose duration drifts from the re-resolved API tracklist (a
+    different master / long version) got a copy QUARANTINED during reorganize
+    (TheHomeGuy: 'Through Glass' 283s vs Discogs' 241s → quarantine + failed)."""
+    context = library_reorganize._build_post_process_context(
+        {'id': 'dz-1', 'name': 'Come What(ever) May'},
+        {'id': 'a1', 'name': 'Through Glass', 'track_number': 8, 'duration_ms': 241000},
+        'Stone Sour', 'Come What(ever) May', 1,
+    )
+    assert context['is_local_import'] is True
+
+    # And the pipeline seam this flag drives: a local import never carries an
+    # expected duration into the integrity check.
+    from core.imports.file_integrity import expected_duration_for_check
+    assert expected_duration_for_check(241000, True) is None
+    assert expected_duration_for_check(241000, False) == 241000
+
+
 def test_preview_uses_same_logic_as_apply(monkeypatch, tmpdirs):
     """Sanity check: a multi-disc album previewed and then applied
     should show the same destinations. If preview drift creeps in

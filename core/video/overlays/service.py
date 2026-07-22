@@ -1,0 +1,442 @@
+"""Overlay apply — live service glue.
+
+Wires the tested OverlayApplier to the real world: fetching an item's current
+poster (as the clean base) and pushing the composited result back to Plex/
+Jellyfin, plus a single background job with progress. The applier + batch runner
+are unit-tested; this module is the thin, live-only seam (proven against a real
+server, like the Poster Manager push).
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+
+from utils.logging_config import get_logger
+
+from .apply import OverlayApplier, run_apply
+from .assets import AssetStore
+
+logger = get_logger("video.overlays.service")
+
+
+def fetch_poster_bytes(db, kind: str, item_id: int) -> bytes | None:
+    """The item's current poster bytes — direct for an http art URL, else via the
+    Plex/Jellyfin token (mirrors the poster proxy's fetch)."""
+    ref = db.get_art_ref(kind, item_id, "poster")
+    if not ref or not ref.get("poster_url"):
+        return None
+    import requests
+    path = ref["poster_url"]
+    try:
+        if path.startswith("http://") or path.startswith("https://"):
+            r = requests.get(path, timeout=20)
+            return r.content if r.status_code == 200 else None
+        from core.video.sources import video_jellyfin_config, video_plex_config
+        source = ref.get("server_source")
+        if source == "plex":
+            cfg = video_plex_config()
+            base, token = cfg.get("base_url"), cfg.get("token")
+            if not base or not token:
+                return None
+            r = requests.get(base.rstrip("/") + path, params={"X-Plex-Token": token}, timeout=20)
+        elif source == "jellyfin":
+            cfg = video_jellyfin_config()
+            base, key = cfg.get("base_url"), cfg.get("api_key")
+            if not base:
+                return None
+            url = base.rstrip("/") + f"/Items/{ref['server_id']}/Images/Primary"
+            r = requests.get(url, params=({"api_key": key} if key else {}), timeout=20)
+        else:
+            return None
+        return r.content if r.status_code == 200 else None
+    except Exception:
+        logger.warning("fetch_poster_bytes failed for %s %s", kind, item_id, exc_info=True)
+        return None
+
+
+def _fetch_external(url):
+    """Fetch an http(s) image → bytes (used for clean external/TMDB posters)."""
+    if not url:
+        return None
+    import requests
+    try:
+        r = requests.get(url, timeout=20)
+        return r.content if r.status_code == 200 else None
+    except Exception:
+        logger.warning("fetch external poster failed: %s", url, exc_info=True)
+        return None
+
+
+def _fetch_tmdb_poster(db, kind: str, tmdb_id) -> bytes | None:
+    """The clean TMDB poster for a title — the canonical 'original', untouched by
+    whatever a media-server tool (e.g. Kometa) burned onto the local copy."""
+    try:
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        posters = get_video_enrichment_engine().poster_options(kind, tmdb_id) or []
+    except Exception:
+        logger.warning("tmdb poster lookup failed for %s %s", kind, tmdb_id, exc_info=True)
+        return None
+    return _fetch_external(posters[0].get("full")) if posters else None
+
+
+def fetch_clean_base(db, kind: str, item_id: int, *, external=None, tmdb=None, server=None) -> bytes | None:
+    """Resolve a CLEAN base poster to composite overlays onto, preferring sources
+    that can't carry another tool's burned-in overlays:
+
+      1. an external poster URL on the item — a deliberate choice (Poster Manager /
+         enrichment), and clean by construction,
+      2. the TMDB original by tmdb_id — bypasses a media-server tool's local burn-in,
+      3. the current server poster — last resort (may carry foreign overlays).
+    """
+    external = external or _fetch_external
+    tmdb = tmdb or (lambda t: _fetch_tmdb_poster(db, kind, t))
+    server = server or (lambda: fetch_poster_bytes(db, kind, item_id))
+    ref = db.get_art_ref(kind, item_id, "poster")
+    url = (ref or {}).get("poster_url")
+    if url and (str(url).startswith("http://") or str(url).startswith("https://")):
+        b = external(url)
+        if b:
+            return b
+    tid = db.item_tmdb_id(kind, item_id)
+    if tid:
+        b = tmdb(tid)
+        if b:
+            return b
+    return server()
+
+
+def _render_for_item(db, definition: dict, pick: dict) -> bytes | None:
+    """Render a template onto one real title's clean TMDB poster with that title's
+    real data (representative fallbacks fill gaps). None if the title has no art."""
+    from .compositor import _THUMB_SAMPLE, render_overlay
+    if not pick or not pick.get("tmdb_id"):
+        return None
+    try:
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        posters = get_video_enrichment_engine().poster_options(pick["kind"], pick["tmdb_id"]) or []
+    except Exception:
+        posters = []
+    if not posters:
+        return None
+    base = _fetch_external(posters[0].get("thumb") or posters[0].get("full"))
+    if not base:
+        return None
+    sample = dict(_THUMB_SAMPLE)
+    for k, v in (db.overlay_sample_data(pick["kind"], pick["id"]) or {}).items():
+        if v not in (None, ""):
+            sample[k] = v          # real values win; representative defaults fill gaps
+    try:
+        return render_overlay(base, definition or {}, sample)
+    except Exception:
+        logger.warning("overlay preview render failed", exc_info=True)
+        return None
+
+
+def preview_thumbnail(db, definition: dict) -> bytes | None:
+    """Render a template onto a RANDOM real library title's clean poster, so a
+    gallery card shows the overlay accurately. None → caller falls back to neutral."""
+    return _render_for_item(db, definition, db.random_overlay_preview_item())
+
+
+def preview_filmstrip(db, definition: dict, n: int = 4) -> list:
+    """Render a template onto N distinct real titles (base64 data URIs + titles) so
+    the editor can show it holds across varying real data — a 4K blockbuster with
+    every badge, an SD show with almost none. Skips titles that fail to render."""
+    import base64
+    frames = []
+    for pick in (db.random_overlay_preview_items(n) or []):
+        data = _render_for_item(db, definition, pick)
+        if data:
+            frames.append({"title": pick.get("title"), "kind": pick.get("kind"),
+                           "data_uri": "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")})
+    return frames
+
+
+def _def_hash(definition: dict) -> str:
+    import hashlib
+    import json
+    return hashlib.sha1(json.dumps(definition or {}, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:12]
+
+
+def render_and_cache_thumb(db, template_id, definition, store=None) -> bytes | None:
+    """Render a template's gallery thumbnail (random real title → neutral fallback)
+    and cache it to disk keyed by the definition hash."""
+    from .compositor import render_template_thumbnail
+    store = store or AssetStore.default()
+    data = preview_thumbnail(db, definition)
+    if data is None:
+        try:
+            data = render_template_thumbnail(definition or {})
+        except Exception:
+            logger.warning("thumbnail render failed for template %s", template_id, exc_info=True)
+            return None
+    try:
+        store.write_thumb(template_id, _def_hash(definition), data)
+    except Exception:
+        logger.warning("thumbnail cache write failed for template %s", template_id, exc_info=True)
+    return data
+
+
+def get_or_render_thumb(db, template_id, definition, store=None) -> bytes | None:
+    """Serve the cached thumbnail for this definition, else render + cache it. The
+    gallery view path hits the cache (instant) once a save has pre-rendered it."""
+    store = store or AssetStore.default()
+    cached = store.read_thumb(template_id, _def_hash(definition))
+    if cached is not None:
+        return cached
+    return render_and_cache_thumb(db, template_id, definition, store)
+
+
+def prerender_thumb_async(db, template_id) -> None:
+    """Kick a background render+cache of a template's thumbnail (off the request
+    thread) so the gallery serves it instantly next view."""
+    def _work():
+        try:
+            t = db.get_overlay_template(template_id)
+            if t:
+                render_and_cache_thumb(db, template_id, t.get("definition") or {})
+        except Exception:
+            logger.warning("prerender thumb failed for %s", template_id, exc_info=True)
+    threading.Thread(target=_work, daemon=True).start()
+
+
+def push_poster_bytes(db, kind: str, item_id: int, jpeg: bytes, delete_key=None):
+    """Push composited art to the server for an item (best-effort). ``delete_key`` (an overlay
+    re-apply) drops the previous Plex overlay upload first. Returns the new poster key (str)
+    on success — a Plex ratingKey, or the sentinel 'ok' for Jellyfin (no key needed) — or None
+    on failure, so the caller can store it and treat it as the pushed flag."""
+    from core.video.sources import set_video_poster
+    tgt = db.poster_set_target(kind, item_id)
+    if not tgt or not tgt.get("server_id"):
+        return None
+    try:
+        res = set_video_poster(tgt["server_id"], image_bytes=jpeg, kind=kind, delete_key=delete_key)
+        if not res.get("ok"):
+            return None
+        return res.get("poster_key") or "ok"   # always truthy on success (Jellyfin has no key)
+    except Exception:
+        logger.warning("push_poster_bytes failed for %s %s", kind, item_id, exc_info=True)
+        return None
+
+
+class OverlayApplyService:
+    def __init__(self, db):
+        self.db = db
+        self.store = AssetStore.default()
+
+    def applier(self) -> OverlayApplier:
+        return OverlayApplier(
+            self.db, self.store,
+            fetch_base=lambda k, i: fetch_clean_base(self.db, k, i),
+            push_poster=lambda k, i, b, dk=None: push_poster_bytes(self.db, k, i, b, dk))
+
+    def build_jobs(self, scopes, force=False) -> list:
+        assigns = self.db.get_overlay_assignments()
+        jobs = []
+        for scope in scopes:
+            a = assigns.get(scope) or {}
+            if not a.get("enabled") or not a.get("template_id"):
+                continue
+            tpl = self.db.get_overlay_template(a["template_id"])
+            if not tpl:
+                continue
+            try:
+                items = self.db.overlay_scope_items(scope, filter_definition=a.get("filter"))
+            except Exception:   # noqa: BLE001 - a bad filter must never mis-apply; skip the scope
+                logger.warning("overlay filter for scope %r failed to compile — scope skipped",
+                               scope, exc_info=True)
+                continue
+            for it in items:
+                jobs.append({"kind": scope, "item_id": it["id"], "template": tpl,
+                             "values": self.db.overlay_sample_data(scope, it["id"]) or {},
+                             "title": it.get("title"), "force": force})
+        return jobs
+
+    def build_restore_jobs(self, scopes) -> list:
+        """Items whose overlay should come OFF because the scope's filter no
+        longer matches them (their clean art gets restored) — the counterpart
+        that keeps a tightened filter honest instead of leaving stale overlays.
+        Only computed for filtered scopes; without a filter, every scope item is
+        a target so nothing can go stale this way."""
+        assigns = self.db.get_overlay_assignments()
+        jobs = []
+        for scope in scopes:
+            a = assigns.get(scope) or {}
+            if not a.get("enabled") or not a.get("template_id") or not a.get("filter"):
+                continue
+            try:
+                targets = {it["id"] for it in
+                           self.db.overlay_scope_items(scope, filter_definition=a.get("filter"))}
+            except Exception:   # noqa: BLE001 - bad filter → scope skipped in build_jobs too
+                continue
+            for item_id in sorted(self.db.overlay_applied_ids(scope) - targets):
+                jobs.append({"kind": scope, "item_id": item_id})
+        return jobs
+
+    def build_remove_jobs(self, scopes) -> list:
+        jobs = []
+        for scope in scopes:
+            for it in self.db.overlay_scope_items(scope):
+                jobs.append({"kind": scope, "item_id": it["id"], "title": it.get("title")})
+        return jobs
+
+
+# ── single background job with progress ───────────────────────────────────────
+_JOB = {"running": False, "phase": "idle", "mode": None,
+        "done": 0, "total": 0, "applied": 0, "skipped": 0, "failed": 0, "title": None, "error": None}
+_lock = threading.Lock()
+
+# Live progress over socketio (wired at startup via set_overlay_progress_emitter).
+# Throttled to ~1/s so a 100k-item run doesn't flood the socket; phase changes
+# (start / done / error) always emit so the UI flips state instantly.
+_emit = None
+_last_emit = [0.0]
+
+
+def set_overlay_progress_emitter(fn) -> None:
+    global _emit
+    _emit = fn
+
+
+def _emit_progress(force=False) -> None:
+    if _emit is None:
+        return
+    now = time.monotonic()
+    if not force and (now - _last_emit[0]) < 1.0:
+        return
+    _last_emit[0] = now
+    try:
+        _emit("overlay:progress", dict(_JOB))
+    except Exception:
+        logger.debug("overlay progress emit failed", exc_info=True)
+
+
+def _reset(mode):
+    _JOB.update(running=True, phase="starting", mode=mode, done=0, total=0,
+                applied=0, skipped=0, failed=0, title=None, error=None)
+    _emit_progress(force=True)
+
+
+def reset_item_poster(db, kind, item_id, store=None) -> dict:
+    """Restore a title's CLEAN poster (TMDB original / the item's chosen art),
+    push it to the server — wiping another tool's burned-in overlays (Kometa) —
+    and drop our own overlay ledger + base so a later apply starts fresh."""
+    store = store or AssetStore.default()
+    clean = fetch_clean_base(db, kind, item_id)
+    pushed = bool(clean) and bool(push_poster_bytes(db, kind, item_id, clean))
+    db.delete_overlay_apply(kind, item_id)
+    store.clear(kind, item_id)
+    return {"ok": bool(clean), "pushed": pushed}
+
+
+def start(db, scopes, *, force=False, remove=False, reset=False) -> bool:
+    with _lock:
+        if _JOB["running"]:
+            return False
+        _reset("reset" if reset else ("remove" if remove else "apply"))
+    threading.Thread(target=_run, args=(db, scopes, force, remove, reset), daemon=True).start()
+    return True
+
+
+def apply_scopes_sync(db, scopes, *, force=False, on_progress=None) -> dict:
+    """Apply overlays over the given scopes SYNCHRONOUSLY (for the daily automation),
+    sharing the singleton job lock so it can never overlap a manual run. The applier
+    skips items whose template + base art + consumed values are unchanged since the
+    last run, so a nightly pass only re-renders what actually changed. Returns
+    {ok, total, applied, skipped, failed} (ok False if a run is already in progress)."""
+    with _lock:
+        if _JOB["running"]:
+            return {"ok": False, "error": "an overlay run is already in progress"}
+        _reset("apply")
+    try:
+        svc = OverlayApplyService(db)
+        jobs = svc.build_jobs(scopes, force=force)   # build_jobs already drops disabled/unassigned scopes
+        _JOB.update(total=len(jobs), phase="running")
+
+        def _prog(p):
+            _JOB.update(p)
+            _emit_progress()
+            if on_progress:
+                on_progress(p)
+
+        res = run_apply(svc.applier(), jobs, on_progress=_prog)
+        restores = svc.build_restore_jobs(scopes)
+        if restores:
+            _JOB["total"] = len(jobs) + len(restores)
+            res["restored"] = _apply_restores(db, svc, restores, offset=len(jobs))
+        _JOB["phase"] = "done"
+        return {"ok": True, **res}
+    except Exception as e:
+        logger.exception("overlay apply (sync) failed")
+        _JOB.update(phase="error", error=str(e))
+        return {"ok": False, "error": str(e)}
+    finally:
+        _JOB["running"] = False
+        _emit_progress(force=True)
+
+
+def _run(db, scopes, force, remove, reset=False):
+    try:
+        svc = OverlayApplyService(db)
+        if reset:
+            items = [(scope, it) for scope in scopes for it in db.overlay_scope_items(scope)]
+            _JOB.update(total=len(items), phase="running")
+            applied = failed = 0
+            for idx, (scope, it) in enumerate(items):
+                try:
+                    ok = reset_item_poster(db, scope, it["id"], svc.store).get("ok")
+                except Exception:
+                    logger.exception("overlay reset failed for %s %s", scope, it.get("id"))
+                    ok = False
+                applied += 1 if ok else 0
+                failed += 0 if ok else 1
+                _JOB.update(done=idx + 1, applied=applied, failed=failed, title=it.get("title"))
+                _emit_progress()
+            _JOB["phase"] = "done"
+            return
+        jobs = svc.build_remove_jobs(scopes) if remove else svc.build_jobs(scopes, force=force)
+        restores = [] if remove else svc.build_restore_jobs(scopes)
+        _JOB.update(total=len(jobs) + len(restores), phase="running")
+
+        def _prog(p):
+            _JOB.update(p)
+            _emit_progress()
+
+        run_apply(svc.applier(), jobs, on_progress=_prog, remove=remove)
+        _apply_restores(db, svc, restores, offset=len(jobs))
+        _JOB["phase"] = "done"
+        try:      # 'Overlays Applied' automation trigger
+            from core.video.download_events import publish
+            publish("video_overlays_applied",
+                    {"applied": _JOB.get("applied", 0), "errors": _JOB.get("failed", 0)})
+        except Exception:   # noqa: BLE001 - events never disturb the run
+            logger.exception("overlay apply event publish failed")
+    except Exception as e:
+        logger.exception("overlay apply run failed")
+        _JOB.update(phase="error", error=str(e))
+    finally:
+        _JOB["running"] = False
+        _emit_progress(force=True)
+
+
+def _apply_restores(db, svc, restores, offset=0) -> int:
+    """Restore clean art for items a tightened filter released. Counts into the
+    running job's progress; failures never abort the run."""
+    restored = 0
+    for i, j in enumerate(restores or []):
+        try:
+            ok = reset_item_poster(db, j["kind"], j["item_id"], svc.store).get("ok")
+        except Exception:   # noqa: BLE001
+            logger.exception("overlay restore failed for %s %s", j.get("kind"), j.get("item_id"))
+            ok = False
+        restored += 1 if ok else 0
+        _JOB.update(done=offset + i + 1,
+                    applied=_JOB.get("applied", 0) + (1 if ok else 0),
+                    failed=_JOB.get("failed", 0) + (0 if ok else 1))
+        _emit_progress()
+    return restored
+
+
+def status() -> dict:
+    return dict(_JOB)

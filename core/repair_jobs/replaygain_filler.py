@@ -41,11 +41,22 @@ def needs_replaygain(rg_tags: Optional[Dict[str, Any]]) -> bool:
     return val is None or str(val).strip() == ''
 
 
-def _resolve(file_path: str) -> Optional[str]:
-    """Resolve a stored library path to one this process can read (Docker/host
-    prefix mapping), falling back to the raw path if it's already a real file."""
-    resolved = resolve_library_file_path(file_path) if file_path else None
-    if not resolved and file_path and os.path.isfile(file_path):
+def _resolve(file_path: str, context: JobContext) -> Optional[str]:
+    """Resolve a stored library path to one this process can read.
+
+    MUST pass the context's transfer folder + config_manager — a bare
+    ``resolve_library_file_path(path)`` has no base directories to suffix-walk,
+    so for Docker/NAS users (whose DB paths are the MEDIA SERVER's view) every
+    file silently resolved to None and the scan skipped the whole library
+    (the same hole the Corrupt File Detector shipped with; #1000 follow-up)."""
+    if not file_path:
+        return None
+    resolved = resolve_library_file_path(
+        file_path,
+        transfer_folder=context.transfer_folder,
+        config_manager=context.config_manager,
+    )
+    if not resolved and os.path.isfile(file_path):
         resolved = file_path
     return resolved
 
@@ -85,24 +96,28 @@ class ReplayGainFillerJob(RepairJob):
             return result
 
         rows = []
-        conn = None
+        native_subjects = {}
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name, t.file_path
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-            """)
-            rows = cursor.fetchall()
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            for subject in active_file_subjects(
+                context.db, context.config_manager,
+            ):
+                file_path = str(subject["path"])
+                native_subjects[file_path] = subject
+                rows.append((
+                    f"lib2:{subject['track_id']}", subject["title"],
+                    subject["artist_name"], file_path,
+                ))
         except Exception as e:
-            logger.error("[ReplayGain Filler] Error reading tracks: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
+            logger.warning("[ReplayGain Filler] V2 subject enumeration failed: %s", e)
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for file_path in filesystem_audio_files(context):
+            rows.append((
+                None, os.path.splitext(os.path.basename(file_path))[0],
+                None, file_path,
+            ))
 
         total = len(rows)
         if context.update_progress:
@@ -119,7 +134,8 @@ class ReplayGainFillerJob(RepairJob):
             track_id, title, artist_name, file_path = row[:4]
             result.scanned += 1
 
-            resolved = _resolve(file_path)
+            subject = native_subjects.get(str(file_path))
+            resolved = _resolve(file_path, context)
             if not resolved:
                 # Can't read the file from here → can't analyze it on apply either.
                 result.skipped += 1
@@ -146,22 +162,27 @@ class ReplayGainFillerJob(RepairJob):
 
             if context.create_finding:
                 try:
+                    details = {
+                        'track_id': track_id,
+                        'track_title': title,
+                        'artist': artist_name,
+                        'file_path': resolved,
+                    }
+                    if subject:
+                        from core.library2.maintenance_subjects import subject_details
+
+                        details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_replaygain',
                         severity='info',
-                        entity_type='track',
-                        entity_id=str(track_id),
+                        entity_type='track' if subject else 'file',
+                        entity_id=str(track_id) if track_id is not None else None,
                         file_path=file_path,
                         title=f'No ReplayGain: {title or "Unknown"}',
                         description=(f'"{title}" by {artist_name or "Unknown"} has no '
                                      'ReplayGain tag — loudness can be analyzed + written.'),
-                        details={
-                            'track_id': track_id,
-                            'track_title': title,
-                            'artist': artist_name,
-                            'file_path': file_path,
-                        })
+                        details=details)
                     if inserted:
                         result.findings_created += 1
                     else:
@@ -180,18 +201,17 @@ class ReplayGainFillerJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
+        count = 0
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            from core.library2.maintenance_subjects import count_active_files
+
+            count += count_active_files(context.db, context.config_manager)
         except Exception:
-            return 0
-        finally:
-            if conn:
-                conn.close()
+            pass
+        try:
+            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+            count += len(filesystem_audio_files(context))
+        except Exception:
+            pass
+        return count

@@ -24,7 +24,7 @@ import-light (the pure resolver + its tests never pull a network client).
 from __future__ import annotations
 
 import re
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -41,14 +41,28 @@ _FREE_SOURCES = ("caa", "deezer", "itunes", "audiodb")
 # ---------------------------------------------------------------------------
 
 
-def _spotify_available() -> bool:
-    """Spotify art is only usable when the user is connected. Reuse the
-    canonical accessor, which returns a client only when authenticated."""
+def _spotify_art_client():
+    """Spotify client usable for cover art: a CONNECTED account, or the free
+    metadata client when it's active. Free-mode users were losing Spotify as
+    an art source entirely (Sokhi: Spotify has the best JP covers and matches
+    MusicBrainz better than Apple/Deezer there) because the canonical registry
+    accessor only hands Spotify out when authenticated."""
     try:
-        from core.metadata.registry import get_client_for_source
-        return get_client_for_source("spotify") is not None
-    except Exception:
-        return False
+        from core.metadata.registry import get_client_for_source, get_spotify_client
+        client = get_client_for_source("spotify")
+        if client:
+            return client
+        client = get_spotify_client()
+        if client and getattr(client, "_free_active", lambda: False)():
+            return client
+    except Exception as exc:
+        logger.debug("spotify art client resolve failed: %s", exc)
+    return None
+
+
+def _spotify_available() -> bool:
+    """Spotify art is usable when connected OR when the free source is active."""
+    return _spotify_art_client() is not None
 
 
 _AVAILABILITY: Dict[str, Callable[[], bool]] = {
@@ -218,11 +232,15 @@ def _audiodb_art(artist: str, album: str, metadata: dict) -> Optional[str]:
 
 
 def _spotify_art(artist: str, album: str, metadata: dict) -> Optional[str]:
-    from core.metadata.registry import get_client_for_source
-    client = get_client_for_source("spotify")
+    client = _spotify_art_client()
     if not client:
         return None
-    for alb in (client.search_albums(f"{artist} {album}") or []):
+    # allow_fallback=False: this is a SOURCE-SPECIFIC lookup — cross-source
+    # fallback here would return another source's art labeled 'spotify' (the
+    # picker itself falls through to the next source on a miss). artist/album
+    # passed separately enable the free client's no-creds album path.
+    for alb in (client.search_albums(f"{artist} {album}", allow_fallback=False,
+                                     artist=artist, album=album) or []):
         url = getattr(alb, "image_url", None)
         if not url:
             continue
@@ -262,15 +280,37 @@ def select_preferred_art_url(
     upload) is skipped and the next source is tried instead of winning by
     priority alone.
     """
+    url, _source = select_preferred_art(
+        artist,
+        album,
+        metadata,
+        configured_order,
+        validate=validate,
+    )
+    return url
+
+
+def select_preferred_art(
+    artist: Optional[str],
+    album: Optional[str],
+    metadata: Optional[dict],
+    configured_order,
+    validate: Optional[Callable[[str, str], bool]] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return the preferred URL and its source through the shared resolver.
+
+    ``select_preferred_art_url`` remains the compatibility entry point. Typed
+    consumers can use this result without rebuilding the source-priority
+    decision outside the existing art pipeline.
+    """
     if not isinstance(configured_order, (list, tuple)) or not configured_order:
-        return None
+        return None, None
     from core.metadata.art_sources import effective_art_order, resolve_cover_art
     order = [s for s in effective_art_order(configured_order) if is_art_source_available(s)]
     if not order:
-        return None
+        return None, None
     lookup = build_art_lookup(artist or "", album or "", metadata or {})
-    url, _src = resolve_cover_art(order, lookup, validate=validate)
-    return url
+    return resolve_cover_art(order, lookup, validate=validate)
 
 
 def build_art_lookup(
@@ -301,3 +341,282 @@ def build_art_lookup(
         return url
 
     return lookup
+
+
+# ---------------------------------------------------------------------------
+# Candidate gathering for the cover-art PICKER. Unlike the resolver above
+# (which picks ONE url by priority), the picker wants EVERY option so the user
+# can choose. Cover Art Archive contributes all images for the release; the
+# other sources contribute their single validated best.
+# ---------------------------------------------------------------------------
+
+_COVER_ART_ARCHIVE = "https://coverartarchive.org"
+
+# Order the picker offers single-cover sources in (CAA images come first).
+_PICKER_SINGLE_SOURCES = ("deezer", "itunes", "spotify", "audiodb")
+
+
+def _parse_caa_images(data: Optional[dict]) -> List[dict]:
+    """Pure: a Cover Art Archive ``/release/{mbid}`` JSON payload -> candidate dicts.
+
+    Prefers the 1200px thumbnail (matching the resolver's ``front-1200``), falls back to the
+    full-size image. Front covers are listed before back/other art."""
+    out: List[dict] = []
+    for img in (data or {}).get("images", []) or []:
+        if not isinstance(img, dict):
+            continue
+        thumbs = img.get("thumbnails") or {}
+        url = thumbs.get("1200") or thumbs.get("large") or img.get("image") or thumbs.get("500")
+        if not url:
+            continue
+        types = img.get("types") or []
+        is_front = bool(img.get("front"))
+        kind = types[0] if types else ("Front" if is_front else "Other")
+        out.append({"url": url, "source": "caa", "type": kind, "front": is_front})
+    out.sort(key=lambda c: not c.get("front"))   # front images first, stable otherwise
+    return out
+
+
+def _fetch_caa_release(mbid: str) -> Optional[dict]:
+    import json
+    import urllib.request
+    req = urllib.request.Request(
+        f"{_COVER_ART_ARCHIVE}/release/{mbid}",
+        headers={"User-Agent": "SoulSync/1.0 (cover-art picker)"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:   # noqa: S310 (trusted host)
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _caa_art_candidates(metadata: Optional[dict], *, fetch=None) -> List[dict]:
+    """All Cover Art Archive images for the album's MusicBrainz release, or [] (never raises)."""
+    mbid = (metadata or {}).get("musicbrainz_release_id")
+    if not mbid:
+        return []
+    fetch = fetch or _fetch_caa_release
+    try:
+        return _parse_caa_images(fetch(mbid))
+    except Exception as exc:
+        logger.debug("[art] CAA candidates fetch failed: %s", exc)
+        return []
+
+
+def _mb_raw_client():
+    """The low-level MusicBrainzClient (has ``get_release`` / ``browse_release_group_releases``).
+
+    ``registry.get_musicbrainz_client()`` returns the higher-level ``MusicBrainzSearchClient``, which
+    wraps the raw client at ``._client`` — those browse/lookup methods aren't on the wrapper. Return
+    the raw client, tolerating either shape."""
+    from core.metadata.registry import get_musicbrainz_client
+    c = get_musicbrainz_client()
+    return getattr(c, "_client", c)
+
+
+def _resolve_release_group_mbid(release_mbid, *, get_release=None) -> Optional[str]:
+    """The MusicBrainz release-GROUP id for a release, or None. ``get_release`` injectable. The group
+    is the logical album; enumerating its releases is what surfaces every edition's cover art. Never
+    raises."""
+    if not release_mbid:
+        return None
+    if get_release is None:
+        def get_release(mbid):
+            client = _mb_raw_client()
+            return client.get_release(mbid, includes=["release-groups"]) if client else None
+    try:
+        rel = get_release(release_mbid) or {}
+        return (rel.get("release-group") or {}).get("id")
+    except Exception as exc:
+        logger.debug("[art] release-group resolve failed: %s", exc)
+        return None
+
+
+def _caa_release_group_candidates(release_group_mbid, *, browse=None, limit=40) -> List[dict]:
+    """One Cover Art Archive front cover per RELEASE (edition) in the release-group that actually has
+    art — the "loads of covers across editions" source. A single MusicBrainz browse call; the front
+    URL is built from the deterministic CAA path (no per-release CAA fetch). ``browse`` injectable.
+    Never raises."""
+    if not release_group_mbid:
+        return []
+    if browse is None:
+        def browse(rg):
+            client = _mb_raw_client()
+            return client.browse_release_group_releases(rg) if client else []
+    try:
+        releases = browse(release_group_mbid) or []
+    except Exception as exc:
+        logger.debug("[art] release-group browse failed: %s", exc)
+        return []
+    out: List[dict] = []
+    seen: set = set()
+    for rel in releases:
+        if not isinstance(rel, dict):
+            continue
+        mbid = rel.get("id")
+        caa = rel.get("cover-art-archive") or {}
+        if not mbid or mbid in seen or not caa.get("front"):
+            continue
+        seen.add(mbid)
+        out.append({
+            "url": f"{_COVER_ART_ARCHIVE}/release/{mbid}/front-1200",
+            "source": "caa", "type": "Front", "front": True,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _caa_candidates_for(metadata: Optional[dict]) -> List[dict]:
+    """CAA candidates for an album — every edition's front across the release-group when it can be
+    resolved (the rich path), else just the one known release's images. Never raises."""
+    meta = metadata or {}
+    rg = meta.get("musicbrainz_release_group") or _resolve_release_group_mbid(
+        meta.get("musicbrainz_release_id"))
+    if rg:
+        group = _caa_release_group_candidates(rg)
+        if group:
+            return group
+    return _caa_art_candidates(meta)
+
+
+def gather_album_art_candidates(
+    artist: Optional[str],
+    album: Optional[str],
+    metadata: Optional[dict] = None,
+    *,
+    lookup: Optional[Callable[[str], Optional[str]]] = None,
+    caa_candidates: Optional[List[dict]] = None,
+) -> List[dict]:
+    """Every cover-art option for one album, de-duplicated by URL, for the picker UI.
+
+    Cover Art Archive contributes all of the release's images; each available single-cover source
+    (Deezer/iTunes/Spotify/AudioDB) contributes its one validated best. ``lookup``/``caa_candidates``
+    are injectable for tests; in production they default to the live clients. Never raises — a failing
+    source is simply absent from the list.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    meta = metadata or {}
+    if lookup is None:
+        lookup = build_art_lookup(artist or "", album or "", meta)
+    srcs = [s for s in _PICKER_SINGLE_SOURCES if is_art_source_available(s)]
+
+    def _safe(fn, *a):
+        try:
+            return fn(*a)
+        except Exception as exc:
+            logger.debug("[art] picker task failed: %s", exc)
+            return None
+
+    # Fan out the CAA/MusicBrainz path and every single-cover source concurrently — a picker click
+    # shouldn't wait for them in series (that was ~15s of sequential network). Total ≈ slowest call.
+    with ThreadPoolExecutor(max_workers=len(srcs) + 1) as ex:
+        caa_future = None if caa_candidates is not None else ex.submit(_safe, _caa_candidates_for, meta)
+        single_futures = [(s, ex.submit(_safe, lookup, s)) for s in srcs]
+        caa = caa_candidates if caa_candidates is not None else (caa_future.result() or [])
+        singles = [(s, f.result()) for s, f in single_futures]
+
+    candidates: List[dict] = []
+    seen: set = set()
+
+    def _add(url, source, kind="cover", front=False):
+        if not url or url in seen:
+            return
+        seen.add(url)
+        candidates.append({"url": url, "source": source, "type": kind, "front": front})
+
+    for c in caa or []:
+        _add(c.get("url"), "caa", c.get("type", "Front"), c.get("front", False))
+    for s, url in singles:
+        _add(url, s)
+
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Artist-photo candidates (deep-dive A9) — same one-candidate-per-source shape
+# as the album picker above, but each source contributes its own artist
+# search's best name-matched result's photo (no album to anchor a match on).
+# ---------------------------------------------------------------------------
+
+_ARTIST_IMAGE_SOURCES: Tuple[str, ...] = ("spotify", "deezer", "itunes", "discogs")
+
+
+def _artist_name_matches(requested: str, got: str) -> bool:
+    """Significant-token-subset tolerance, same as album matching — but this
+    is the ONLY guard here (no album to anchor on), so a same-named different
+    artist can still slip through; worst case is a wrong-but-plausible photo,
+    never worse than the "no picker at all" status quo."""
+    tr, tg = _significant_tokens(requested), _significant_tokens(got)
+    if not tr or not tg:
+        return False
+    return tr <= tg or tg <= tr
+
+
+def _best_artist_match(name: str, results):
+    for r in results or []:
+        got_name = getattr(r, "name", None)
+        if got_name is None and isinstance(r, dict):
+            got_name = r.get("name")
+        if got_name and _artist_name_matches(name, got_name):
+            return r
+    return None
+
+
+def _source_artist_image(source: str, artist_name: str) -> Optional[str]:
+    from core.library.artist_image import pick_artist_image_url
+
+    if source == "spotify":
+        from core.metadata.registry import get_client_for_source
+        client = get_client_for_source("spotify")
+    elif source == "deezer":
+        from core.metadata.registry import get_deezer_client
+        client = get_deezer_client()
+    elif source == "itunes":
+        from core.metadata.registry import get_itunes_client
+        client = get_itunes_client()
+    elif source == "discogs":
+        from core.metadata.registry import get_discogs_client
+        client = get_discogs_client()
+    else:
+        return None
+    if not client:
+        return None
+    results = client.search_artists(artist_name, limit=5)
+    match = _best_artist_match(artist_name, results)
+    return pick_artist_image_url(match) if match else None
+
+
+def gather_artist_image_candidates(
+    artist_name: Optional[str],
+    *,
+    lookup: Optional[Callable[[str, str], Optional[str]]] = None,
+) -> List[dict]:
+    """One candidate photo per configured source, for the artist image picker
+    (deep-dive A9, mirrors ``gather_album_art_candidates``). A source with no
+    client configured, no match, or a lookup error simply contributes
+    nothing — never raises. ``lookup(source, name) -> url|None`` is
+    injectable for tests; production defaults to the live clients."""
+    if not artist_name:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    do_lookup = lookup or _source_artist_image
+
+    def _safe(source):
+        try:
+            return source, do_lookup(source, artist_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[artist-art] picker task failed (%s): %s", source, exc)
+            return source, None
+
+    with ThreadPoolExecutor(max_workers=len(_ARTIST_IMAGE_SOURCES)) as ex:
+        results = list(ex.map(_safe, _ARTIST_IMAGE_SOURCES))
+
+    candidates: List[dict] = []
+    seen: set = set()
+    for source, url in results:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        candidates.append({"url": url, "source": source})
+    return candidates

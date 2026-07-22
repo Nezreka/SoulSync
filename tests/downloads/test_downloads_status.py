@@ -667,15 +667,44 @@ def test_unified_response_includes_batch_summaries():
     assert bs['queued'] == 1
 
 
-def test_unified_response_respects_limit():
+def test_unified_response_returns_all_live_tasks_even_past_limit():
+    """`limit` bounds the persistent-history tail, NOT live in-memory tasks.
+
+    Live tasks are already bounded by the 5-min cleanup, and the Downloads page
+    filters them client-side per tab — truncating them (active-first) starved
+    completed/failed/unverified rows out of the response during a busy batch so
+    they never showed until the batch drained.
+    """
     deps, _ = _build_deps()
     for i in range(20):
         download_tasks[f't{i}'] = {
             'track_index': i, 'status': 'completed', 'track_info': {},
         }
     out = st.build_unified_downloads_response(5, deps)
-    assert len(out['downloads']) == 5
-    assert out['total'] == 20  # total still reflects all
+    assert len(out['downloads']) == 20  # all live tasks returned
+    assert out['total'] == 20
+
+
+def test_unified_response_does_not_truncate_terminal_tasks_behind_active():
+    """A busy batch (many queued/active tasks) must not push completed/failed
+    rows off the end of the response — they're what the Completed/Failed tabs
+    show during the run."""
+    deps, _ = _build_deps()
+    for i in range(120):
+        download_tasks[f'q{i}'] = {
+            'track_index': i, 'status': 'queued',
+            'track_info': {'name': f'Q{i}'}, 'status_change_time': i,
+        }
+    download_tasks['done'] = {
+        'status': 'completed', 'track_info': {'name': 'DONE'}, 'status_change_time': 999,
+    }
+    download_tasks['fail'] = {
+        'status': 'failed', 'track_info': {'name': 'FAIL'}, 'status_change_time': 999,
+    }
+    out = st.build_unified_downloads_response(100, deps)
+    titles = {d['title'] for d in out['downloads']}
+    assert 'DONE' in titles
+    assert 'FAIL' in titles
 
 
 def test_unified_response_includes_persistent_download_history():
@@ -761,6 +790,68 @@ def test_unified_response_caps_persistent_history_tail():
     assert requested_limits == [50]
     assert len(out['downloads']) == 50
     assert out['total'] == 50
+
+
+def test_unverified_history_always_loaded_even_when_at_limit():
+    """Unverified entries must appear even during a large batch that fills the limit."""
+    for i in range(200):
+        download_tasks[f'live-{i}'] = {
+            'track_index': i,
+            'status': 'completed',
+            'track_info': {'name': f'Track {i}', 'artist': f'Artist {i}', 'album': 'Album'},
+            'verification_status': 'verified',
+        }
+
+    deps, _ = _build_deps(
+        persistent_history=lambda limit: [],
+    )
+    deps.get_unverified_download_history = lambda: [
+        {
+            'id': 999,
+            'title': 'Old Unverified',
+            'artist_name': 'Forgotten Artist',
+            'album_name': 'Old Album',
+            'created_at': '2026-01-01 00:00:00',
+            'verification_status': 'unverified',
+        }
+    ]
+
+    out = st.build_unified_downloads_response(200, deps)
+
+    titles = {d['title'] for d in out['downloads']}
+    assert 'Old Unverified' in titles, "historical unverified entry must appear regardless of limit"
+
+    unverified = [d for d in out['downloads'] if d.get('verification_status') == 'unverified']
+    assert len(unverified) == 1
+    assert unverified[0]['task_id'] == 'history-999'
+    assert unverified[0]['is_persistent_history'] is True
+
+
+def test_unverified_history_deduped_against_live_task():
+    """A live task that's still unverified must not appear twice."""
+    download_tasks['live-unv'] = {
+        'track_index': 0,
+        'status': 'completed',
+        'track_info': {'name': 'Live Unverified', 'artist': 'Artsy', 'album': 'Alb'},
+        'verification_status': 'unverified',
+    }
+
+    deps, _ = _build_deps()
+    deps.get_unverified_download_history = lambda: [
+        {
+            'id': 77,
+            'title': 'Live Unverified',
+            'artist_name': 'Artsy',
+            'album_name': 'Alb',
+            'created_at': '2026-06-15 10:00:00',
+            'verification_status': 'unverified',
+        }
+    ]
+
+    out = st.build_unified_downloads_response(200, deps)
+    matches = [d for d in out['downloads'] if d['title'] == 'Live Unverified']
+    assert len(matches) == 1, "same track must not be duplicated"
+    assert matches[0]['is_persistent_history'] is False
 
 
 # ---------------------------------------------------------------------------

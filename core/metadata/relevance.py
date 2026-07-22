@@ -52,6 +52,27 @@ from typing import List, Optional, Sequence
 from core.metadata.types import Track
 
 
+def build_combined_search_query(track: str = '', artist: str = '',
+                                legacy: str = '') -> str:
+    """Combine a track + artist into a PLAIN, source-agnostic search query.
+
+    Deliberately NOT field-scoped (``track:"X" artist:"Y"``). That Spotify/Lucene
+    filter syntax leaks to non-Spotify sources when a search falls back: Deezer
+    closed the connection on it outright (``RemoteDisconnected``), and even sources
+    that parse it over-constrain and miss the canonical cut (the iTunes/Deezer search
+    endpoints already dropped it for that reason). The matching ``/search_tracks``
+    endpoints rerank by expected title/artist afterward, so precision is recovered
+    without the brittle field syntax.
+
+    Falls back to ``legacy`` when neither track nor artist is given. Returns ``''``
+    when there's nothing to search (caller decides how to handle empty).
+    """
+    parts = [p.strip() for p in (track, artist) if p and p.strip()]
+    if parts:
+        return ' '.join(parts)
+    return (legacy or '').strip()
+
+
 # ---------------------------------------------------------------------------
 # Pattern tables — public so tests can introspect, callers can extend
 # ---------------------------------------------------------------------------

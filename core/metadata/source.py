@@ -130,6 +130,9 @@ SOURCE_TAG_CONFIG = {
     "ASIN": "musicbrainz.tags.asin",
     "DEEZER_TRACK_ID": "deezer.tags.track_id",
     "DEEZER_ARTIST_ID": "deezer.tags.artist_id",
+    "JIOSAAVN_TRACK_ID": "jiosaavn.tags.track_id",
+    "JIOSAAVN_ARTIST_ID": "jiosaavn.tags.artist_id",
+    "JIOSAAVN_ALBUM_ID": "jiosaavn.tags.album_id",
     "AUDIODB_TRACK_ID": "audiodb.tags.track_id",
     "TIDAL_TRACK_ID": "tidal.tags.track_id",
     "TIDAL_ARTIST_ID": "tidal.tags.artist_id",
@@ -140,7 +143,7 @@ SOURCE_TAG_CONFIG = {
     "GENIUS_TRACK_ID": "genius.tags.track_id",
 }
 
-DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "tidal", "hifi", "qobuz", "lastfm", "genius"]
+DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "jiosaavn", "tidal", "hifi", "qobuz", "lastfm", "genius", "bandcamp"]
 
 ID3_TAG_MAP = {
     "MUSICBRAINZ_RECORDING_ID": ("UFID", "http://musicbrainz.org"),
@@ -462,6 +465,53 @@ def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
                 pp["release_year"] = dz_release[:4]
 
 
+def _process_jiosaavn_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+    from core.metadata.registry import get_jiosaavn_client, is_jiosaavn_enabled
+    if not is_jiosaavn_enabled():
+        return
+    if cfg.get("jiosaavn.embed_tags", True) is False:
+        return
+    if not track_title or not artist_name:
+        return
+
+    jiosaavn_worker = getattr(runtime, "jiosaavn_worker", None)
+    js_client = jiosaavn_worker.client if jiosaavn_worker else None
+    if not js_client:
+        js_client = get_jiosaavn_client()
+    if not js_client:
+        return
+
+    query = f"{artist_name} {track_title}".strip()
+    results = _call_source_lookup("JioSaavn track", js_client.search_tracks, query, 5) or []
+    js_result = None
+    for candidate in results:
+        cand_name = getattr(candidate, 'name', '') or ''
+        cand_artists = getattr(candidate, 'artists', []) or []
+        if _names_match(cand_name, track_title) and any(
+            _names_match(artist_name, a) for a in cand_artists
+        ):
+            js_result = candidate
+            break
+
+    if js_result:
+        pp["id_tags"]["JIOSAAVN_TRACK_ID"] = str(js_result.id)
+        details = _call_source_lookup(
+            "JioSaavn track details", js_client.get_track_details, str(js_result.id),
+        )
+        if details:
+            album_id = details.get("album_id")
+            if album_id:
+                pp["id_tags"]["JIOSAAVN_ALBUM_ID"] = str(album_id)
+            if cfg.get("jiosaavn.tags.artist_id", True):
+                artist_id = details.get("artist_id")
+                if artist_id:
+                    pp["id_tags"]["JIOSAAVN_ARTIST_ID"] = str(artist_id)
+        if not pp["release_year"]:
+            release = (getattr(js_result, 'release_date', None) or '') or ''
+            if len(str(release)) >= 4 and str(release)[:4].isdigit():
+                pp["release_year"] = str(release)[:4]
+
+
 def _process_audiodb_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
     if cfg.get("audiodb.embed_tags", True) is False:
         return
@@ -666,6 +716,42 @@ def _process_genius_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
             pp["genius_url"] = g_url
 
 
+def _process_bandcamp_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+    from core.metadata.registry import is_source_enabled
+    if not is_source_enabled("bandcamp"):
+        return
+    if cfg.get("bandcamp.embed_tags", True) is False:
+        return
+    if not track_title or not artist_name:
+        return
+
+    bandcamp_worker = getattr(runtime, "bandcamp_worker", None)
+    bc_client = bandcamp_worker.client if bandcamp_worker else None
+    if not bc_client:
+        return
+
+    bc_result = _call_source_lookup("Bandcamp track", bc_client.search_track, artist_name, track_title)
+    if not bc_result:
+        # Fall back to the containing album — a release's JSON-LD is the
+        # richer object (full tracklist + tags/label/credits in one fetch),
+        # so a track that doesn't independently surface in track search
+        # often still resolves via its album.
+        album_name = metadata.get("album", "")
+        if album_name:
+            bc_result = _call_source_lookup("Bandcamp album", bc_client.search_album, artist_name, album_name)
+
+    if bc_result:
+        bc_url = bc_result.get("url")
+        if bc_url:
+            pp["bandcamp_url"] = bc_url
+        bc_tags = bc_result.get("tags")
+        if bc_tags:
+            pp["bandcamp_tags"] = list(bc_tags)
+        bc_label = bc_result.get("label")
+        if bc_label:
+            pp["bandcamp_label"] = bc_label
+
+
 def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
     if source_name == "musicbrainz":
         _process_musicbrainz_source(pp, metadata, cfg, runtime, track_title, artist_name)
@@ -673,6 +759,8 @@ def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, 
         _process_deezer_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "audiodb":
         _process_audiodb_source(pp, metadata, cfg, runtime, track_title, artist_name)
+    elif source_name == "jiosaavn":
+        _process_jiosaavn_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "tidal":
         _process_tidal_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "hifi":
@@ -683,6 +771,8 @@ def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, 
         _process_lastfm_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "genius":
         _process_genius_source(pp, metadata, cfg, runtime, track_title, artist_name)
+    elif source_name == "bandcamp":
+        _process_bandcamp_source(pp, metadata, cfg, runtime, track_title, artist_name)
 
 
 def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols):
@@ -781,6 +871,8 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             enrichment_genres.append(pp["audiodb_genre"])
         if _tag_enabled(cfg, "lastfm.tags.genres"):
             enrichment_genres += pp["lastfm_tags"]
+        if pp["bandcamp_tags"] and _tag_enabled(cfg, "bandcamp.tags.genre_merge"):
+            enrichment_genres += pp["bandcamp_tags"]
         if enrichment_genres:
             from core.genre_filter import filter_genres as _filter_genres
 
@@ -843,13 +935,20 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             audio_file["cprt"] = [final_copyright]
         logger.info("Copyright (%s): %s", copyright_source, final_copyright[:60])
 
-    if _tag_enabled(cfg, "qobuz.tags.label") and pp["qobuz_label"]:
+    label_candidates = []
+    if pp["qobuz_label"] and _tag_enabled(cfg, "qobuz.tags.label"):
+        label_candidates.append(("Qobuz", pp["qobuz_label"]))
+    if pp["bandcamp_label"] and _tag_enabled(cfg, "bandcamp.tags.label"):
+        label_candidates.append(("Bandcamp", pp["bandcamp_label"]))
+    if label_candidates:
+        label_source, final_label = label_candidates[0]
         if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TPUB(encoding=3, text=[pp["qobuz_label"]]))
+            audio_file.tags.add(symbols.TPUB(encoding=3, text=[final_label]))
         elif is_vorbis_like(audio_file, symbols):
-            audio_file["LABEL"] = [pp["qobuz_label"]]
+            audio_file["LABEL"] = [final_label]
         elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(pp["qobuz_label"].encode("utf-8"))]
+            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(final_label.encode("utf-8"))]
+        logger.info("Label (%s): %s", label_source, final_label)
 
     if _tag_enabled(cfg, "lastfm.tags.url") and pp["lastfm_url"]:
         if isinstance(audio_file.tags, symbols.ID3):
@@ -866,6 +965,14 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             audio_file["GENIUS_URL"] = [pp["genius_url"]]
         elif isinstance(audio_file, symbols.MP4):
             audio_file["----:com.apple.iTunes:GENIUS_URL"] = [symbols.MP4FreeForm(pp["genius_url"].encode("utf-8"))]
+
+    if _tag_enabled(cfg, "bandcamp.tags.url") and pp["bandcamp_url"]:
+        if isinstance(audio_file.tags, symbols.ID3):
+            audio_file.tags.add(symbols.TXXX(encoding=3, desc="BANDCAMP_URL", text=[pp["bandcamp_url"]]))
+        elif is_vorbis_like(audio_file, symbols):
+            audio_file["BANDCAMP_URL"] = [pp["bandcamp_url"]]
+        elif isinstance(audio_file, symbols.MP4):
+            audio_file["----:com.apple.iTunes:BANDCAMP_URL"] = [symbols.MP4FreeForm(pp["bandcamp_url"].encode("utf-8"))]
 
     return release_year
 
@@ -1089,10 +1196,12 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             metadata["track_number"] = 1
             metadata["total_tracks"] = 1
 
-    disc_num = original_search.get("disc_number")
-    if disc_num is None and album_info:
-        disc_num = album_info.get("disc_number")
-    metadata["disc_number"] = disc_num if disc_num is not None else 1
+    # Resolve via the SHARED resolver so the embedded tag and the "Disc N" folder
+    # (computed in the import pipeline from album_info) can never disagree — same
+    # function, same inputs. Floors to >=1 (a 0/''/non-numeric disc must not read
+    # as disc-less and ungroup the track in Jellyfin/Plex).
+    from core.imports.track_number import resolve_disc_for_track
+    metadata["disc_number"] = resolve_disc_for_track(original_search, album_info)
 
     if album_ctx and album_ctx.get("release_date"):
         release_date = _normalize_release_date_tag(album_ctx.get("release_date"))
@@ -1181,6 +1290,7 @@ def _blank_post_process_state() -> dict:
         "tidal_copyright": None, "hifi_isrc": None, "qobuz_isrc": None,
         "qobuz_copyright": None, "qobuz_label": None, "lastfm_tags": [],
         "lastfm_url": None, "genius_url": None, "release_year": None,
+        "bandcamp_url": None, "bandcamp_tags": [], "bandcamp_label": None,
     }
 
 
@@ -1233,6 +1343,9 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             "lastfm_url": None,
             "genius_url": None,
             "release_year": None,
+            "bandcamp_url": None,
+            "bandcamp_tags": [],
+            "bandcamp_label": None,
         }
 
         source_order = cfg.get("metadata_enhancement.post_process_order", None)
@@ -1273,12 +1386,18 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                     pp["tidal_copyright"] = cached_meta["copyright"]
             source_order = [s for s in source_order if s != "tidal"]
 
+        from core.metadata.registry import is_jiosaavn_enabled, is_source_enabled
+        if not is_jiosaavn_enabled():
+            source_order = [s for s in source_order if s != "jiosaavn"]
+        if not is_source_enabled("bandcamp"):
+            source_order = [s for s in source_order if s != "bandcamp"]
+
         db = get_database()
 
         for source_name in source_order:
             _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name)
 
-        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"]:
+        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
             return
 
         release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)

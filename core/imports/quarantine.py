@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -153,6 +154,76 @@ def get_quarantined_source_keys(quarantine_dir: str) -> set:
     return keys
 
 
+def quarantine_group_key(
+    expected_artist: Any, expected_track: Any, context: Any = None
+) -> Optional[str]:
+    """Grouping key for "the same intended download target".
+
+    #876: when several sources are downloaded for one wishlist/queue
+    track they each fail verification and land in quarantine as separate
+    entries. They are *alternatives for the same song*, so they should
+    group together — and once the user accepts one, the rest are
+    redundant failed attempts at a song they now own.
+
+    The key identifies the *intended* target — what SoulSync was trying to
+    fetch — NOT the downloaded file's own tags. That matters: the file's
+    metadata is frequently *wrong* (that's why it failed acoustid /
+    integrity), whereas the target is fixed and identical across every
+    alternative for one song.
+
+    Uses ISRC when available (truly universal across sources and batches).
+    Falls back to normalized artist|track name, which is stable across
+    different batches and sources.
+
+    Source-specific IDs (Spotify track id, Qobuz id, uri) are intentionally
+    NOT used: the same song imported from different playlists or sources gets
+    different source IDs, so id-based keys break cross-batch sibling matching.
+
+    Returns ``None`` when nothing identifies the target (no usable id and
+    both name fields empty). Callers treat a ``None`` key as "its own
+    singleton group" — ungroupable entries must never collapse together.
+    """
+    ti = {}
+    if isinstance(context, dict):
+        maybe_ti = context.get("track_info")
+        if isinstance(maybe_ti, dict):
+            ti = maybe_ti
+    isrc = str(ti.get("isrc") or "").strip().lower()
+    if isrc:
+        return f"isrc:{isrc}"
+    artist = " ".join(str(expected_artist or "").split()).lower()
+    track = " ".join(str(expected_track or "").split()).lower()
+    if not artist and not track:
+        return None
+    return f"nm:{artist}|{track}"
+
+
+def find_quarantine_siblings(quarantine_dir: str, entry_id: str) -> List[str]:
+    """Other entry ids that share ``entry_id``'s intended-target group key.
+
+    Returns the ids of every *other* quarantine entry whose
+    `expected_artist`/`expected_track` normalize to the same key as
+    ``entry_id`` (see :func:`quarantine_group_key`). Excludes ``entry_id``
+    itself. Returns ``[]`` when the entry is missing, has an ungroupable
+    (``None``) key, or has no siblings. Never raises.
+    """
+    if not entry_id:
+        return []
+    entries = list_quarantine_entries(quarantine_dir)
+    target_key = None
+    for e in entries:
+        if e.get("id") == entry_id:
+            target_key = e.get("group_key")
+            break
+    if target_key is None:
+        return []
+    return [
+        e["id"]
+        for e in entries
+        if e.get("id") != entry_id and e.get("group_key") == target_key
+    ]
+
+
 def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
     """Enumerate quarantined files paired with their sidecars.
 
@@ -213,6 +284,11 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
                 "reason": sidecar.get("quarantine_reason", "Unknown reason"),
                 "expected_track": sidecar.get("expected_track", ""),
                 "expected_artist": sidecar.get("expected_artist", ""),
+                "group_key": quarantine_group_key(
+                    sidecar.get("expected_artist", ""),
+                    sidecar.get("expected_track", ""),
+                    ctx,
+                ),
                 "timestamp": sidecar.get("timestamp", ""),
                 "size_bytes": size_bytes,
                 "has_full_context": isinstance(sidecar.get("context"), dict),
@@ -220,6 +296,10 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
                 "source_username": source_username,
                 "source_filename": source_filename,
                 "thumb_url": _extract_context_thumb(ctx),
+                # Real probed audio quality (recorded on the context before the
+                # quality/AcoustID gates) so the review UI shows what the file
+                # actually is when deciding to approve/delete.
+                "quality": ctx.get("_audio_quality", "") if isinstance(ctx, dict) else "",
             }
         )
 
@@ -484,6 +564,71 @@ def recover_to_staging(
             logger.warning("recover: failed to remove sidecar %s: %s", sidecar_path, exc)
 
     return target
+
+
+@dataclass(frozen=True)
+class StagingRecoveryPlan:
+    """Resolved filesystem half of a journaled quarantine recovery."""
+
+    entry_id: str
+    source_path: str
+    sidecar_path: Optional[str]
+    target_path: str
+    context: Dict[str, Any]
+
+
+def plan_recover_to_staging(
+    quarantine_dir: str,
+    staging_dir: str,
+    entry_id: str,
+) -> Optional[StagingRecoveryPlan]:
+    """Resolve source, target and correlation context without moving a file."""
+    file_path, sidecar_path = _resolve_entry_paths(quarantine_dir, entry_id)
+    if not file_path:
+        return None
+    sidecar: Dict[str, Any] = {}
+    if sidecar_path:
+        try:
+            with open(sidecar_path, encoding="utf-8") as handle:
+                loaded = json.load(handle)
+            if isinstance(loaded, dict):
+                sidecar = loaded
+        except Exception as exc:
+            logger.debug("recover plan: sidecar read failed for %s: %s", entry_id, exc)
+    original = sidecar.get("original_filename")
+    restored_name = _restore_filename(os.path.basename(file_path), original)
+    os.makedirs(staging_dir, exist_ok=True)
+    target = _ensure_unique_path(os.path.join(staging_dir, restored_name))
+    context = sidecar.get("context")
+    return StagingRecoveryPlan(
+        entry_id=str(entry_id),
+        source_path=str(file_path),
+        sidecar_path=str(sidecar_path) if sidecar_path else None,
+        target_path=str(target),
+        context=dict(context) if isinstance(context, dict) else {},
+    )
+
+
+def execute_staging_recovery(plan: StagingRecoveryPlan) -> bool:
+    """Move the planned file while deliberately retaining its sidecar."""
+    if os.path.isfile(plan.target_path) and not os.path.exists(plan.source_path):
+        return True
+    if not os.path.isfile(plan.source_path):
+        return False
+    return _move_with_retry(plan.source_path, plan.target_path)
+
+
+def finalize_staging_recovery_sidecar(plan: StagingRecoveryPlan) -> None:
+    """Remove the sidecar only after the durable lifecycle commit succeeds."""
+    if plan.sidecar_path and os.path.isfile(plan.sidecar_path):
+        try:
+            os.remove(plan.sidecar_path)
+        except OSError as exc:
+            logger.warning(
+                "recover: failed to remove committed sidecar %s: %s",
+                plan.sidecar_path,
+                exc,
+            )
 
 
 def _ensure_unique_path(target: str) -> str:

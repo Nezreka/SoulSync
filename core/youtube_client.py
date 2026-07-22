@@ -38,6 +38,20 @@ from core.download_plugins.types import SearchResult, TrackResult, AlbumResult, 
 logger = get_logger("youtube_client")
 
 
+def _resolve_cookie_opts() -> dict:
+    """yt-dlp cookie options from Settings → YouTube: either a browser store OR a
+    pasted cookies.txt. The 'Paste cookies.txt' dropdown value is the sentinel
+    'custom' — which must become a yt-dlp ``cookiefile`` pointing at the saved file,
+    NOT be passed through as a browser name (yt-dlp rejects: 'unsupported browser:
+    custom'). Delegates to the shared, tested precedence in core.youtube_cookies."""
+    from config.settings import config_manager
+    from core.youtube_cookies import build_youtube_cookie_opts
+    mode = config_manager.get('youtube.cookies_browser', '')
+    cookiefile = config_manager.get('youtube.cookies_file', '')
+    exists = bool(cookiefile) and os.path.exists(cookiefile)
+    return build_youtube_cookie_opts(mode, cookiefile, cookiefile_exists=exists)
+
+
 @dataclass
 class YouTubeSearchResult:
     """YouTube search result with metadata parsing"""
@@ -220,11 +234,9 @@ class YouTubeClient(DownloadSourcePlugin):
             'age_limit': None,  # Don't skip age-restricted
         }
 
-        # Cookie support — use browser cookies for YouTube auth
-        from config.settings import config_manager
-        cookies_browser = config_manager.get('youtube.cookies_browser', '')
-        if cookies_browser:
-            self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
+        # Cookie support — a logged-in browser store OR a pasted cookies.txt
+        # (the 'custom' paste mode resolves to a cookiefile, not a browser name).
+        self.download_opts.update(_resolve_cookie_opts())
 
         # Track current download progress (mirrors Soulseek transfer tracking)
         self.current_download_id: Optional[str] = None
@@ -309,11 +321,12 @@ class YouTubeClient(DownloadSourcePlugin):
         """Reload YouTube settings from config (called when settings are saved)."""
         from config.settings import config_manager
         self._download_delay = config_manager.get('youtube.download_delay', 3)
-        cookies_browser = config_manager.get('youtube.cookies_browser', '')
-        if cookies_browser:
-            self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
-        elif 'cookiesfrombrowser' in self.download_opts:
-            del self.download_opts['cookiesfrombrowser']
+        # Clear both cookie sources, then re-apply from current settings (browser
+        # store or pasted cookies.txt) so a mode switch doesn't leave a stale arg.
+        self.download_opts.pop('cookiesfrombrowser', None)
+        self.download_opts.pop('cookiefile', None)
+        _cookie_opts = _resolve_cookie_opts()
+        self.download_opts.update(_cookie_opts)
 
         # Reload download path
         new_path = Path(config_manager.get('soulseek.download_path', './downloads'))
@@ -323,7 +336,7 @@ class YouTubeClient(DownloadSourcePlugin):
             self.download_opts['outtmpl'] = str(self.download_path / '%(title)s.%(ext)s')
             logger.info(f"YouTube download path updated to: {self.download_path}")
 
-        logger.info(f"YouTube settings reloaded (delay={self._download_delay}s, cookies={'enabled' if cookies_browser else 'disabled'})")
+        logger.info(f"YouTube settings reloaded (delay={self._download_delay}s, cookies={'enabled' if _cookie_opts else 'disabled'})")
 
     async def check_connection(self) -> bool:
         """
@@ -728,7 +741,6 @@ class YouTubeClient(DownloadSourcePlugin):
             loop = asyncio.get_event_loop()
 
             def _search():
-                from config.settings import config_manager
                 ydl_opts = {
                     'quiet': True,
                     'no_warnings': True,
@@ -736,9 +748,7 @@ class YouTubeClient(DownloadSourcePlugin):
                     'default_search': 'ytsearch',
                     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 }
-                cookies_browser = config_manager.get('youtube.cookies_browser', '')
-                if cookies_browser:
-                    ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
+                ydl_opts.update(_resolve_cookie_opts())
 
                 search_query = self._escape_ytsearch_query(query)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -806,7 +816,6 @@ class YouTubeClient(DownloadSourcePlugin):
             loop = asyncio.get_event_loop()
 
             def _search():
-                from config.settings import config_manager
                 ydl_opts = {
                     'quiet': True,
                     'no_warnings': True,
@@ -816,9 +825,7 @@ class YouTubeClient(DownloadSourcePlugin):
                 }
 
                 # Add cookie support for search (avoids bot detection)
-                cookies_browser = config_manager.get('youtube.cookies_browser', '')
-                if cookies_browser:
-                    ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
+                ydl_opts.update(_resolve_cookie_opts())
 
                 search_query = self._escape_ytsearch_query(query)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1087,10 +1094,12 @@ class YouTubeClient(DownloadSourcePlugin):
 
                     # On retry, try different strategies
                     if attempt == 1:
-                        # Drop browser cookies — authenticated sessions sometimes get restricted formats
-                        if 'cookiesfrombrowser' in download_opts:
-                            logger.info(f"Retry {attempt + 1}/{max_retries} without browser cookies")
+                        # Drop cookies — authenticated sessions (browser store OR a
+                        # pasted cookies.txt) sometimes get restricted formats.
+                        if 'cookiesfrombrowser' in download_opts or 'cookiefile' in download_opts:
+                            logger.info(f"Retry {attempt + 1}/{max_retries} without cookies")
                             download_opts.pop('cookiesfrombrowser', None)
+                            download_opts.pop('cookiefile', None)
                         else:
                             logger.info(f"Retry {attempt + 1}/{max_retries} with web_creator client")
                             download_opts['extractor_args'] = {
@@ -1100,6 +1109,7 @@ class YouTubeClient(DownloadSourcePlugin):
                         logger.info(f"Retry {attempt + 1}/{max_retries} with 'best' format (video fallback)")
                         download_opts['format'] = 'best'
                         download_opts.pop('cookiesfrombrowser', None)
+                        download_opts.pop('cookiefile', None)
                         download_opts.pop('extractor_args', None)
 
 
@@ -1160,8 +1170,6 @@ class YouTubeClient(DownloadSourcePlugin):
             Final file path if successful, None otherwise
         """
         try:
-            from config.settings import config_manager
-
             def _progress_hook(d):
                 if progress_callback and d.get('status') == 'downloading':
                     total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
@@ -1180,9 +1188,7 @@ class YouTubeClient(DownloadSourcePlugin):
                 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             }
 
-            cookies_browser = config_manager.get('youtube.cookies_browser', '')
-            if cookies_browser:
-                download_opts['cookiesfrombrowser'] = (cookies_browser,)
+            download_opts.update(_resolve_cookie_opts())
 
             with yt_dlp.YoutubeDL(download_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)

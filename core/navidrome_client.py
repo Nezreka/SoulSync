@@ -110,6 +110,7 @@ class NavidromeTrack:
         self.title = navidrome_data.get('title', 'Unknown Track')
         self.duration = navidrome_data.get('duration', 0) * 1000  # Convert to milliseconds
         self.trackNumber = navidrome_data.get('track')
+        self.discNumber = navidrome_data.get('discNumber')  # multi-disc: disc number
         self.year = navidrome_data.get('year')
         self.userRating = navidrome_data.get('userRating')
         self.addedAt = self._parse_date(navidrome_data.get('created'))
@@ -469,8 +470,12 @@ class NavidromeClient(MediaServerClient):
                 error = subsonic_response.get('error', {})
                 error_message = error.get('message', 'Unknown error')
                 logger.error(f"Navidrome API error: {error_message}")
+                # callers can inspect WHY (e.g. get_all_artists tells an
+                # empty library apart from a broken one — #stale-artists)
+                self.last_api_error = error_message
                 return None
 
+            self.last_api_error = None
             return subsonic_response
 
         except requests.exceptions.RequestException as e:
@@ -492,6 +497,9 @@ class NavidromeClient(MediaServerClient):
 
     def get_all_artists(self) -> List[NavidromeArtist]:
         """Get all artists from the music library"""
+        # last_fetch_failed lets callers tell "library is genuinely empty"
+        # from "the fetch failed" — both come back as [] (#stale-artists).
+        self.last_fetch_failed = True
         if not self.ensure_connection():
             logger.error("Not connected to Navidrome server")
             return []
@@ -505,6 +513,24 @@ class NavidromeClient(MediaServerClient):
                 params['musicFolderId'] = self.music_folder_id
             response = self._make_request('getArtists', params if params else None)
             if not response:
+                # Navidrome answers getArtists on an EMPTY library with a hard
+                # API error ('Library not found or empty') instead of an empty
+                # envelope (5BILLION's report). 'not found' and 'empty' share
+                # one message, so confirm the selected folder actually EXISTS
+                # before believing 'empty' — a wrong folder id must stay a
+                # failure (never wipe a library on a misconfig).
+                err = str(getattr(self, 'last_api_error', '') or '').lower()
+                if 'empty' in err and self.music_folder_id:
+                    folders = self._fetch_music_folders()
+                    known = {str(f.get('id')) for f in folders if isinstance(f, dict)}
+                    if str(self.music_folder_id) in known:
+                        logger.info(
+                            "Navidrome: selected library %s exists but is empty "
+                            "(API said %r) — verified empty, not a failure",
+                            self.music_folder_id, err)
+                        self.last_fetch_failed = False
+                        return []
+                # anything else is a FAILURE, not an empty library
                 return []
 
             if self._progress_callback:
@@ -529,6 +555,7 @@ class NavidromeClient(MediaServerClient):
                 self._progress_callback(f"Retrieved {len(artists)} artists from Navidrome")
 
             logger.info(f"Retrieved {len(artists)} artists from Navidrome")
+            self.last_fetch_failed = False
             return artists
 
         except Exception as e:
@@ -979,6 +1006,69 @@ class NavidromeClient(MediaServerClient):
                 return playlist
         return None
 
+    def set_playlist_image(self, playlist_name: str, image_url: str) -> bool:
+        """Upload a cover image to a Navidrome playlist from a URL.
+
+        Subsonic (the API the rest of this client uses) has no playlist-cover
+        field, so the mirrored Spotify/Tidal/Deezer cover can't be pushed via
+        createPlaylist. Navidrome's NATIVE API can: log in with the same
+        username/password for a short-lived JWT and POST the image as multipart
+        to ``/api/playlist/{id}/image``. Matches the Plex/Jellyfin
+        ``set_playlist_image`` signature so the sync layer calls every server
+        the same way. Best-effort — returns False (never raises) on any failure.
+
+        Note: the native update PUT ``/api/playlist/{id}`` is deliberately NOT
+        used — a partial body there blanks the playlist name and silently drops
+        externalImageUrl, so the multipart image POST is the only safe path.
+        """
+        if not self.ensure_connection() or not image_url:
+            return False
+        if not self.username or not self.password:
+            return False
+        try:
+            playlist = self.get_playlist_by_name(playlist_name)
+            playlist_id = getattr(playlist, 'id', '') if playlist else ''
+            if not playlist_id:
+                logger.debug(f"Navidrome playlist '{playlist_name}' not found for cover upload")
+                return False
+
+            # Native login is separate from the Subsonic token auth this client
+            # normally uses, but it's the SAME credentials already in config.
+            login_resp = requests.post(
+                f"{self.base_url}/auth/login",
+                json={'username': self.username, 'password': self.password},
+                timeout=15,
+            )
+            if not login_resp.ok:
+                logger.debug(f"Navidrome native login failed: {login_resp.status_code}")
+                return False
+            token = login_resp.json().get('token')
+            if not token:
+                logger.debug("Navidrome native login returned no token")
+                return False
+
+            img_resp = requests.get(image_url, timeout=15)
+            if not (img_resp.ok and img_resp.content):
+                logger.debug(f"Could not fetch playlist cover for '{playlist_name}'")
+                return False
+            content_type = img_resp.headers.get('Content-Type', 'image/jpeg')
+
+            upload_resp = requests.post(
+                f"{self.base_url}/api/playlist/{playlist_id}/image",
+                headers={'x-nd-authorization': f'Bearer {token}'},
+                files={'image': ('cover.jpg', img_resp.content, content_type)},
+                timeout=15,
+            )
+            if upload_resp.ok:
+                logger.info(f"Set Navidrome playlist poster for '{playlist_name}'")
+                return True
+            logger.debug(f"Navidrome playlist image upload returned {upload_resp.status_code}")
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"Could not set Navidrome playlist poster for '{playlist_name}': {e}")
+        except Exception as e:
+            logger.debug(f"Could not set Navidrome playlist poster for '{playlist_name}': {e}")
+        return False
+
     def create_playlist(self, name: str, tracks, playlist_id: str = None) -> bool:
         """Create a new playlist or update existing one if playlist_id provided"""
         if not self.ensure_connection():
@@ -1020,6 +1110,34 @@ class NavidromeClient(MediaServerClient):
 
         except Exception as e:
             logger.error(f"Error {'updating' if playlist_id else 'creating'} Navidrome playlist '{name}': {e}")
+            return False
+
+    def rewrite_playlist_order(self, playlist_id: str, name: str, ordered_song_ids) -> bool:
+        """Rewrite a playlist's tracks to an exact ordered id list (Subsonic has no
+        per-track move — the only reorder primitive is overwriting the whole song
+        list). Overwrites in place via createPlaylist + playlistId, so the playlist
+        identity (id/name) survives. Used ONLY by the 'Align playlists' path with
+        ids already present in the playlist — never adds a new track.
+
+        NOTE: like every createPlaylist+playlistId overwrite (same as replace-mode
+        sync), Navidrome may not carry the playlist's comment forward — the caller
+        re-applies it if needed."""
+        if not self.ensure_connection():
+            return False
+        ids = [str(i) for i in (ordered_song_ids or []) if str(i)]
+        if not ids:
+            logger.warning(f"rewrite_playlist_order: no song ids for '{name}'")
+            return False
+        try:
+            params = {'name': name, 'songId': ids, 'playlistId': playlist_id}
+            response = self._make_request('createPlaylist', params)
+            if response and response.get('status') == 'ok':
+                logger.info(f"Aligned Navidrome playlist '{name}' order ({len(ids)} tracks)")
+                return True
+            logger.error(f"rewrite_playlist_order failed for '{name}'")
+            return False
+        except Exception as e:
+            logger.error(f"Error rewriting Navidrome playlist order '{name}': {e}")
             return False
 
     def copy_playlist(self, source_name: str, target_name: str) -> bool:
@@ -1192,7 +1310,11 @@ class NavidromeClient(MediaServerClient):
 
             primary = existing_playlists[0]
             existing_tracks = self.get_playlist_tracks(primary.id)
-            current_ids = [str(t.id) for t in existing_tracks if getattr(t, 'id', None)]
+            # #905: NavidromeTrack exposes the Subsonic song id as `ratingKey` (NOT `.id`,
+            # which doesn't exist) — same as append_to_playlist reads it. Reading `t.id` here
+            # made current_ids ALWAYS empty, so reconcile thought the playlist was empty and
+            # re-added every track each sync (playlists doubling) while removing nothing.
+            current_ids = [str(t.ratingKey) for t in existing_tracks if getattr(t, 'ratingKey', None)]
             desired_ids = []
             for t in tracks:
                 tid = (str(t.ratingKey) if hasattr(t, 'ratingKey')

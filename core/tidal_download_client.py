@@ -16,6 +16,9 @@ import uuid
 import time
 import shutil
 import subprocess
+import threading
+import contextlib
+from collections import deque
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 from datetime import datetime, timezone
@@ -33,8 +36,95 @@ from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_source
 
 logger = get_logger("tidal_download_client")
+
+
+# --- Download-path Tidal request-rate instrumentation -------------------------
+# The download path (tidalapi search + the raw trackManifests GET) talks to Tidal
+# WITHOUT going through core.tidal_client's global @rate_limited gate that paces
+# the enrichment worker to ~2 req/s. When a download batch fans out across
+# workers these requests can burst, and Tidal's anti-bot may answer with a
+# 401/403 + captcha ("bot-like behavior") that deauths the *download* session —
+# a failure mode users hit on downloads but never on enrichment (which stays
+# throttled). This meter records outbound download requests so that, when
+# pushback (429/401/403) lands, we can log the request rate that immediately
+# preceded it — turning "probably a burst" into evidence, and distinguishing it
+# from a deauth at low volume (which points at IP/account, not our request rate).
+# Diagnostic ONLY: it records and logs, it does NOT throttle anything (a
+# proactive limiter is a separate, deliberate change).
+_dl_req_lock = threading.Lock()
+_dl_req_times: "deque[float]" = deque(maxlen=2048)
+
+
+def _record_download_request() -> None:
+    """Timestamp one outbound Tidal download request (search or manifest)."""
+    with _dl_req_lock:
+        _dl_req_times.append(time.time())
+
+
+def _download_request_rate(window_seconds: float = 10.0) -> int:
+    """Count download requests recorded in the last ``window_seconds``."""
+    now = time.time()
+    with _dl_req_lock:
+        return sum(1 for t in _dl_req_times if now - t <= window_seconds)
+
+
+def _safe_response_body(response, limit: int = 300) -> str:
+    """Read a short slice of a response body for diagnostics — never raises, so
+    a weird/undecodable error body can't propagate into the download path."""
+    with contextlib.suppress(Exception):
+        return (response.text or '')[:limit]
+    return ''
+
+
+def _classify_tidal_pushback(text: str) -> Optional[str]:
+    """Tag a response body / error string as Tidal anti-abuse pushback:
+    ``'bot_challenge'`` | ``'rate_limit'`` | ``'deauth'``, else ``None``.
+    Used only to label diagnostic logs — never affects control flow."""
+    if not text:
+        return None
+    low = text.lower()
+    if 'captcha' in low or 'bot-like' in low or 'bot like' in low or 'challenge' in low:
+        return 'bot_challenge'
+    if '429' in low or 'too many requests' in low or 'rate limit' in low:
+        return 'rate_limit'
+    if ('401' in low or '403' in low or 'unauthorized' in low
+            or 'forbidden' in low or 'invalid_token' in low):
+        return 'deauth'
+    return None
+
+
+def _log_tidal_download_pushback(context: str, *, status=None, body: str = '',
+                                 exc: Exception = None) -> None:
+    """Emit a prominent, greppable log line when Tidal pushes back on a download
+    request, stamped with the request rate that preceded it — the evidence that
+    tells "we burst and got flagged" apart from "flagged at low volume". Also
+    records an event into api_call_tracker so it surfaces in Copy Debug Info.
+    Best-effort: never raises into the download path."""
+    with contextlib.suppress(Exception):
+        rate10 = _download_request_rate(10.0)
+        rate60 = _download_request_rate(60.0)
+        snippet = (body or (str(exc) if exc else '') or '').strip().replace('\n', ' ')[:300]
+        reason = _classify_tidal_pushback(f"{status or ''} {snippet}") or 'unknown'
+        logger.error(
+            "TIDAL DOWNLOAD PUSHBACK [%s] reason=%s status=%s — %d download req in last 10s, "
+            "%d in last 60s. The download path is NOT globally rate-limited; this is the request "
+            "rate that preceded the pushback. body=%r",
+            context, reason, status, rate10, rate60, snippet,
+        )
+        with contextlib.suppress(Exception):
+            from core.api_call_tracker import api_call_tracker
+            api_call_tracker.record_event(
+                'tidal', reason, endpoint=f'download:{context}',
+                detail=f'{rate10}/10s {rate60}/60s status={status} {snippet}'[:200],
+            )
+
+# How long a live check_login() result is trusted before re-verifying. Keeps the download-source
+# status poll from hitting Tidal on every call and prevents a single transient failure from flipping
+# a working source to "unconfigured" (which the UI auto-deselects).
+_STATUS_LOGIN_CHECK_TTL_S = 60
 
 
 # Quality tiers definitions (used for display in search results)
@@ -119,17 +209,33 @@ class TidalDownloadClient(DownloadSourcePlugin):
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
         logger.info(f"Tidal download client using download path: {self.download_path}")
 
         self.shutdown_check = None
 
         self.session: Optional['tidalapi.Session'] = None
+        # THE Netti93 restart bug: these MUST be initialized BEFORE
+        # _init_session() — during a boot-phase construction _init_session
+        # stashes the saved tokens in _boot_session_tokens for deferred
+        # verification, and this initializer used to run AFTER it, silently
+        # wiping the stash. Every Docker/gunicorn restart then came up
+        # unauthenticated with no error anywhere, while the config still held
+        # perfectly valid tokens.
+        self._boot_session_tokens: Optional[dict] = None
+        self._next_restore_retry_at: float = 0.0
         self._init_session()
 
         self._device_auth_future = None
         self._device_auth_link = None
+        # Cache for the live check_login() so is_authenticated() (polled for the download-source
+        # status) doesn't hit Tidal on every call.
+        self._last_login_check_at: float = 0.0
+        self._last_login_check_ok: bool = False
 
         # Engine reference is populated by set_engine() at registration
         # time. Until then dispatch returns None — orchestrator wires
@@ -159,23 +265,132 @@ class TidalDownloadClient(DownloadSourcePlugin):
         expiry_time = saved.get('expiry_time', 0)
 
         if token_type and access_token:
-            try:
-                expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
-
-                restored = self.session.load_oauth_session(
-                    token_type=token_type,
-                    access_token=access_token,
-                    refresh_token=refresh_token,
-                    expiry_time=expiry_dt,
+            from core.boot_phase import is_boot_phase
+            self._boot_session_tokens = saved
+            if is_boot_phase():
+                logger.info(
+                    "Loaded Tidal download session from config (verification deferred until after boot)"
                 )
-                if restored and self.session.check_login():
-                    logger.info("Restored Tidal download session from saved tokens")
-                    self._save_session()
-                    return
-                else:
-                    logger.warning("Saved Tidal session tokens are invalid/expired")
-            except Exception as e:
-                logger.warning(f"Could not restore Tidal session: {e}")
+                return
+
+            # Not booting — restore eagerly, through the same pending/retry
+            # mechanism so a transient failure here is retried too instead of
+            # silently dropping a valid saved session.
+            self._complete_deferred_session()
+
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        """Failures that say nothing about token VALIDITY (network down, DNS,
+        Tidal 5xx/429) — the saved tokens may be perfectly good, so they must
+        be kept and retried, never dropped. Unknown errors count as transient:
+        wrongly retrying a dead session costs a poll; wrongly dropping a good
+        one costs the user their login (the Netti93 restart loop)."""
+        name = type(exc).__name__.lower()
+        if 'authenticationerror' in name:
+            return False
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+        if isinstance(status, int):
+            return status >= 500 or status == 429
+        if any(t in name for t in ('connectionerror', 'connecttimeout', 'readtimeout',
+                                   'timeout', 'sslerror', 'maxretryerror')):
+            return True
+        text = str(exc).lower()
+        if any(t in text for t in ('401', 'unauthorized', 'invalid_grant')):
+            return False
+        return True
+
+    def _restore_and_verify(self, token_type, access_token, refresh_token, expiry_time) -> Optional[bool]:
+        """Load saved OAuth tokens into the session and confirm they work.
+
+        After a restart the saved access token is almost always EXPIRED, and
+        ``check_login()`` verifies the current token but does NOT refresh it — so
+        an expired-but-refreshable session was being dropped on every restart,
+        which the UI then read as "disconnected" (#1002). When the loaded token
+        is stale, explicitly refresh it with the stored refresh token before
+        giving up.
+
+        Tri-state result: ``True`` = restored; ``False`` = the tokens are
+        DEFINITIVELY invalid (Tidal rejected them); ``None`` = the attempt was
+        TRANSIENT (network/DNS/5xx — common right after a container boot) and
+        says nothing about the tokens, so the caller must keep them and retry.
+        Collapsing that third state into False was the Netti93 restart loop:
+        one bad moment at boot dropped a valid session for the container's
+        whole life, the UI read it as unauthenticated, and the hybrid list
+        deselected Tidal persistently.
+
+        Safe by construction: it saves the (refreshed) session ONLY on confirmed
+        success; on any failure the saved config tokens are left untouched so the
+        next attempt can retry. Never raises."""
+        try:
+            expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
+            restored = self.session.load_oauth_session(
+                token_type=token_type,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expiry_time=expiry_dt,
+            )
+            if not restored:
+                logger.warning("Saved Tidal session tokens are invalid/expired")
+                return False
+            if self.session.check_login():
+                logger.info("Restored Tidal download session from saved tokens")
+                self._save_session()
+                return True
+            # Access token is stale — check_login won't refresh it, so refresh it
+            # explicitly with the stored refresh token before declaring it dead.
+            if refresh_token:
+                try:
+                    if self.session.token_refresh(refresh_token) and self.session.check_login():
+                        logger.info("Refreshed expired Tidal download token on restore")
+                        self._save_session()
+                        return True
+                except Exception as e:
+                    if self._is_transient_error(e):
+                        logger.warning(f"Tidal download token refresh hit a transient error, will retry: {e}")
+                        return None
+                    logger.warning(f"Tidal download token refresh failed: {e}")
+            logger.warning("Saved Tidal session tokens are invalid/expired")
+            return False
+        except Exception as e:
+            if self._is_transient_error(e):
+                logger.warning(f"Could not reach Tidal to restore the session, will retry: {e}")
+                return None
+            logger.warning(f"Could not restore Tidal session: {e}")
+            return False
+
+    def _complete_deferred_session(self) -> bool:
+        """Finish restoring a session that was deferred during boot.
+
+        A TRANSIENT failure (network/DNS not up yet, Tidal 5xx) keeps the
+        pending tokens and reports authenticated=True optimistically — the
+        config still holds a session that was valid when saved, and the next
+        call retries (throttled). Only a DEFINITIVE rejection from Tidal drops
+        the pending tokens. Without this, one bad moment right after a
+        container boot un-authenticated the source for the container's whole
+        life and the hybrid list deselected it persistently."""
+        pending = getattr(self, '_boot_session_tokens', None)
+        if not pending or tidalapi is None:
+            self._boot_session_tokens = None
+            return False
+
+        now = time.time()
+        if now < getattr(self, '_next_restore_retry_at', 0.0):
+            return True                     # throttled — optimistic until the retry
+
+        if not self.session:
+            self.session = tidalapi.Session()
+
+        token_type = pending.get('token_type', '')
+        access_token = pending.get('access_token', '')
+        refresh_token = pending.get('refresh_token', '')
+        expiry_time = pending.get('expiry_time', 0)
+
+        result = self._restore_and_verify(token_type, access_token, refresh_token, expiry_time)
+        if result is None:                  # transient — keep tokens, retry later
+            self._next_restore_retry_at = now + 60.0
+            return True
+        self._boot_session_tokens = None
+        return result
 
     def _save_session(self):
         if not self.session:
@@ -187,13 +402,50 @@ class TidalDownloadClient(DownloadSourcePlugin):
             'expiry_time': self.session.expiry_time.timestamp() if self.session.expiry_time else 0,
         })
 
-    def is_authenticated(self) -> bool:
-        if not self.session:
-            return False
+    def _has_unexpired_token(self) -> bool:
+        """True when the session holds an access token that hasn't expired — a local, network-free
+        check using the same fields ``_save_session`` persists. Missing expiry -> treat as unknown."""
         try:
-            return self.session.check_login()
+            exp = self.session.expiry_time
+            return bool(self.session.access_token and exp and exp.timestamp() > time.time())
         except Exception:
             return False
+
+    def is_authenticated(self) -> bool:
+        from core.boot_phase import is_boot_phase
+        if is_boot_phase():
+            pending = getattr(self, '_boot_session_tokens', None)
+            return bool(pending and pending.get('access_token'))
+
+        if getattr(self, '_boot_session_tokens', None):
+            return self._complete_deferred_session()
+
+        if not self.session:
+            return False
+
+        # A loaded session whose token hasn't expired is authenticated — a cheap LOCAL check. This
+        # avoids a live Tidal API call (check_login) on every download-source status poll: a transient
+        # failure there (rate-limit from frequent polling, a network blip, a refresh hiccup) was
+        # flipping a perfectly-good Tidal source to "unconfigured", which the UI then auto-deselected
+        # (same class of bug as the Deezer drop). tidalapi refreshes the token itself on real use.
+        if self._has_unexpired_token():
+            return True
+
+        # Token missing/expired -> verify live. A recent POSITIVE result is trusted for the TTL so a
+        # burst of status polls doesn't hammer Tidal. Only positives are cached: a transient failure
+        # must not linger and keep a working source deselected — the next poll simply re-checks.
+        now = time.time()
+        if getattr(self, '_last_login_check_ok', False) and \
+                (now - getattr(self, '_last_login_check_at', 0.0)) < _STATUS_LOGIN_CHECK_TTL_S:
+            return True
+        try:
+            ok = bool(self.session.check_login())
+        except Exception:
+            ok = False
+        if ok:
+            self._last_login_check_at = now
+            self._last_login_check_ok = True
+        return ok
 
     def start_device_auth(self) -> Optional[Dict[str, str]]:
         if tidalapi is None:
@@ -382,6 +634,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
                     q_copy = attempt_query
 
                     def _search(q=q_copy):
+                        _record_download_request()
                         results = self.session.search(q, models=[tidalapi.media.Track], limit=50)
                         return results.get('tracks', []) if isinstance(results, dict) else []
 
@@ -433,6 +686,8 @@ class TidalDownloadClient(DownloadSourcePlugin):
                 except Exception as e:
                     last_error = e
                     logger.debug(f"Tidal search attempt {attempt_idx + 1} failed: {e}")
+                    if _classify_tidal_pushback(str(e)):
+                        _log_tidal_download_pushback('search', exc=e)
 
             if not tidal_tracks:
                 if last_error is not None:
@@ -455,13 +710,17 @@ class TidalDownloadClient(DownloadSourcePlugin):
             if successful_query and successful_query != query:
                 logger.info(f"Tidal fallback query succeeded: '{successful_query}' (original: '{query}')")
 
-            quality_key = config_manager.get('tidal_download.quality', 'lossless')
+            quality_key = quality_tier_for_source('tidal', default='lossless')
             quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP['lossless'])
+            # Stamp the configured tier (what will actually be downloaded) so
+            # the global ranker sees real sample_rate/bit_depth.
+            tier_quality = quality_from_tidal_tier(quality_key)
 
             track_results = []
             for track in tidal_tracks:
                 try:
                     track_result = self._tidal_to_track_result(track, quality_info)
+                    track_result.set_quality(tier_quality)
                     track_results.append(track_result)
                 except Exception as e:
                     logger.debug(f"Skipping track conversion error: {e}")
@@ -605,15 +864,29 @@ class TidalDownloadClient(DownloadSourcePlugin):
         returns the last 429 response so existing error handling applies."""
         response = None
         for attempt in range(self._MANIFEST_MAX_RETRIES + 1):
+            _record_download_request()
             response = http_requests.get(url, params=params, headers=headers, timeout=timeout)
+            # 401/403 is Tidal deauthing / anti-bot-challenging the download
+            # session — the "bot-like behavior" + captcha users report. Log it
+            # loudly with the request-rate snapshot, then return unchanged so the
+            # caller's raise_for_status path behaves exactly as before.
+            if response.status_code in (401, 403):
+                _log_tidal_download_pushback('manifest', status=response.status_code,
+                                             body=_safe_response_body(response))
+                return response
             if response.status_code != 429 and response.status_code < 500:
                 return response
             if attempt >= self._MANIFEST_MAX_RETRIES:
+                if response.status_code == 429:
+                    _log_tidal_download_pushback('manifest', status=429,
+                                                 body=_safe_response_body(response))
                 return response
             delay = self._retry_after_seconds(response, attempt)
             logger.warning(
                 f"Tidal returned {response.status_code} on manifest fetch — backing off "
-                f"{delay:.1f}s (attempt {attempt + 1}/{self._MANIFEST_MAX_RETRIES})")
+                f"{delay:.1f}s (attempt {attempt + 1}/{self._MANIFEST_MAX_RETRIES}); "
+                f"{_download_request_rate(10.0)} download req in last 10s, "
+                f"{_download_request_rate(60.0)} in last 60s")
             if self._sleep_with_shutdown(delay):
                 return response
         return response
@@ -774,7 +1047,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
             logger.error("Tidal session not authenticated")
             return None
 
-        quality_key = config_manager.get('tidal_download.quality', 'lossless')
+        quality_key = quality_tier_for_source('tidal', default='lossless')
         chain = ['hires', 'lossless', 'high', 'low']
         start = chain.index(quality_key) if quality_key in chain else 1
         allow_fallback = config_manager.get('tidal_download.allow_fallback', True)

@@ -12,6 +12,7 @@ pipelines stay consistent + DRY.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -22,6 +23,112 @@ from core.automation.deps import AutomationDeps
 _SYNC_PER_PLAYLIST_TIMEOUT_SECONDS = 600
 # Sync-status final-state markers.
 _SYNC_TERMINAL_STATUSES = ('finished', 'complete', 'error', 'failed')
+
+
+def _bare_track_id(value: Any) -> str:
+    """Return the provider track id without Wishlist's album suffix."""
+    return str(value or '').split('::', 1)[0].strip()
+
+
+def _track_ids_from_mirror_row(track: Dict[str, Any]) -> set[str]:
+    """Collect every usable identity for one mirrored playlist row.
+
+    Sync prefers discovered metadata, then a Spotify hint, then the native
+    source id. Keeping the aliases in the scope is intentional: all represent
+    the same playlist row, while Wishlist rows may have been written before or
+    after discovery replaced the preferred id.
+    """
+    identities: list[tuple[str, str]] = []
+
+    def _remember(payload: Any, *, fallback_id: Any = None, fallback_album: Any = None):
+        if isinstance(payload, dict):
+            track_id = _bare_track_id(payload.get('id') or fallback_id)
+            album = payload.get('album') or {}
+            album_id = (
+                album.get('id') if isinstance(album, dict) else None
+            ) or payload.get('album_id') or fallback_album
+        else:
+            track_id = _bare_track_id(fallback_id)
+            album_id = fallback_album
+        if track_id:
+            identities.append((track_id, str(album_id or '').strip()))
+
+    _remember(
+        track if isinstance(track.get('id'), dict) else None,
+        fallback_id=track.get('id') or track.get('source_track_id'),
+        fallback_album=track.get('source_album_id') or track.get('album_id'),
+    )
+    extra = track.get('extra_data') or {}
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except (TypeError, ValueError):
+            extra = {}
+    if isinstance(extra, dict):
+        matched = extra.get('matched_data') or {}
+        hint = extra.get('spotify_hint') or {}
+        if isinstance(matched, dict):
+            _remember(matched)
+        if isinstance(hint, dict):
+            _remember(hint)
+
+    # Prefer exact album-qualified keys whenever the mirror carries one.
+    # A bare alias remains only when that identity has no album fact at all;
+    # the Wishlist boundary will accept it only if it resolves uniquely.
+    exact_bases = {track_id for track_id, album_id in identities if album_id}
+    return {
+        f'{track_id}::{album_id}' if album_id else track_id
+        for track_id, album_id in identities
+        if album_id or track_id not in exact_bases
+    }
+
+
+def _playlist_wishlist_scope(
+    deps: AutomationDeps,
+    playlists: List[Dict[str, Any]],
+) -> tuple[List[str], List[int]]:
+    """Resolve the exact track/profile scope owned by this pipeline run.
+
+    Organize-by-playlist entries use their own direct download path and are
+    excluded. The helper is fail closed: a DB/read error yields no ids, never a
+    signal to fall back to the global Wishlist processor.
+    """
+    track_ids: set[str] = set()
+    profile_ids: set[int] = set()
+    db = None
+    for playlist in playlists:
+        if playlist.get('organize_by_playlist'):
+            continue
+        try:
+            profile_ids.add(int(
+                playlist.get('profile_id') or deps.get_current_profile_id()
+            ))
+        except (TypeError, ValueError):
+            pass
+
+        inline_tracks = playlist.get('tracks_json')
+        if isinstance(inline_tracks, list):
+            for track in inline_tracks:
+                if isinstance(track, dict):
+                    track_ids.update(_track_ids_from_mirror_row(track))
+            continue
+
+        playlist_id = playlist.get('id')
+        if not playlist_id:
+            continue
+        try:
+            db = db or deps.get_database()
+            rows = db.get_mirrored_playlist_tracks(int(playlist_id)) or []
+            for track in rows:
+                if isinstance(track, dict):
+                    track_ids.update(_track_ids_from_mirror_row(track))
+        except Exception as exc:  # noqa: BLE001 - wishlist scope must fail closed
+            deps.logger.warning(
+                'Could not resolve Wishlist scope for playlist %s: %s',
+                playlist_id,
+                exc,
+            )
+    return sorted(track_ids), sorted(profile_ids)
 
 
 def run_sync_and_wishlist(
@@ -183,10 +290,15 @@ def run_sync_and_wishlist(
 
     all_organize = bool(playlists) and len(organize_playlists) == len(playlists)
     effective_skip_wishlist = skip_wishlist or all_organize
+    wishlist_track_ids, wishlist_profile_ids = _playlist_wishlist_scope(
+        deps, playlists,
+    )
 
     wishlist_queued = run_wishlist_phase(
         deps, automation_id,
         skip=effective_skip_wishlist,
+        track_ids=wishlist_track_ids,
+        profile_ids=wishlist_profile_ids,
         progress_pct=progress_end + 1,
         wishlist_phase_label=wishlist_phase_label,
         wishlist_phase_start_log=wishlist_phase_start_log,
@@ -206,20 +318,32 @@ def run_wishlist_phase(
     automation_id: Optional[str],
     *,
     skip: bool,
+    track_ids: List[str],
+    profile_ids: List[int],
     progress_pct: int,
     wishlist_phase_label: str = 'Phase: Processing wishlist...',
     wishlist_phase_start_log: str = 'Wishlist',
 ) -> int:
-    """Trigger the wishlist processor unless skipped or already running.
+    """Trigger the playlist-scoped Wishlist processor.
 
     Returns 1 when the processor was triggered, 0 otherwise. Errors are
-    logged but never raised — wishlist failure should not abort the
-    pipeline."""
+    logged but never raised — wishlist failure should not abort the pipeline.
+    An empty scope is skipped deliberately; it must never become a global run.
+    """
     if skip:
         deps.update_progress(
             automation_id,
             progress=progress_pct,
             log_line=f'{wishlist_phase_start_log}: skipped (disabled)',
+            log_type='skip',
+        )
+        return 0
+
+    if not track_ids:
+        deps.update_progress(
+            automation_id,
+            progress=progress_pct,
+            log_line=f'{wishlist_phase_start_log}: skipped (no scoped playlist tracks)',
             log_type='skip',
         )
         return 0
@@ -234,10 +358,14 @@ def run_wishlist_phase(
 
     try:
         if not deps.is_wishlist_actually_processing():
-            deps.process_wishlist_automatically(automation_id=None)
+            deps.process_wishlist_automatically(
+                automation_id=None,
+                track_ids=track_ids,
+                profile_ids=profile_ids,
+            )
             deps.update_progress(
                 automation_id,
-                log_line='Wishlist processing triggered',
+                log_line=f'Wishlist processing triggered for {len(track_ids)} playlist track(s)',
                 log_type='success',
             )
             return 1

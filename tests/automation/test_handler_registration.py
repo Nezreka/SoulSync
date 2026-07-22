@@ -53,6 +53,36 @@ EXPECTED_ACTION_NAMES = frozenset({
     'full_cleanup',
     'run_script',
     'search_and_download',
+    # Video side (isolated app, shared engine).
+    'video_scan_library',
+    'video_deep_scan_movies',
+    'video_deep_scan_tv',
+    'video_scan_server',
+    'video_update_database',
+    'video_update_database_hourly',
+    'video_add_airing_episodes',
+    'video_refresh_airing_schedules',
+    'video_reenrich_stale',
+    'video_scan_watchlist_people',
+    'video_scan_watchlist_studios',
+    'video_scan_watchlist_channels',
+    'video_scan_watchlist_playlists',
+    'seeding_sweep',
+    'video_process_movie_wishlist',
+    'video_process_episode_wishlist',
+    'video_process_youtube_wishlist',
+    'video_rss_sync',
+    'video_seeding_sweep',
+    'video_import_lists',
+    'video_clean_youtube_episodes',
+    'video_clean_search_history',
+    'video_clean_completed_downloads',
+    'video_full_cleanup',
+    'video_backup_database',
+    'video_apply_overlays',
+    'video_clean_plex_images',
+    'video_sync_collections',
+    'video_run_repair_job',
 })
 
 # Action names that MUST register a guard (duplicate-run prevention).
@@ -66,6 +96,14 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'deep_scan_library',
     'run_duplicate_cleaner',
     'start_quality_scan',
+    'seeding_sweep',
+    'video_process_movie_wishlist',
+    'video_process_episode_wishlist',
+    'video_rss_sync',
+    'video_seeding_sweep',
+    'video_import_lists',
+    'video_apply_overlays',
+    'video_clean_plex_images',
 })
 
 
@@ -142,10 +180,7 @@ def _build_deps(engine, scan_mgr=None) -> AutomationDeps:
         duplicate_cleaner_lock=threading.Lock(),
         duplicate_cleaner_executor=None,
         run_duplicate_cleaner=lambda: None,
-        get_quality_scanner_state=lambda: {},
-        quality_scanner_lock=threading.Lock(),
-        quality_scanner_executor=None,
-        run_quality_scanner=lambda *a, **k: None,
+        run_repair_job_now=lambda *a, **k: True,
         download_orchestrator=None,
         run_async=lambda coro: None,
         tasks_lock=threading.Lock(),
@@ -176,6 +211,25 @@ class TestActionHandlerRegistration:
         extra = registered - EXPECTED_ACTION_NAMES
         assert not missing, f"register_all dropped: {missing}"
         assert not extra, f"register_all added unexpected: {extra}"
+
+    def test_deep_scans_route_to_readonly_update_in_deep_mode(self, monkeypatch):
+        """A deep scan is a full READ + reconcile (music's full-refresh equivalent) —
+        it must NOT nudge Plex to rescan its disk. So the deep-scan action types route
+        to the read-only update-database handler in 'deep' mode, scoped per library,
+        never to the nudge+read scan-library handler."""
+        import core.automation.handlers.registration as reg
+        seen = []
+        monkeypatch.setattr(reg, 'auto_video_update_database',
+                            lambda config, deps: seen.append(config) or {'status': 'completed'})
+        monkeypatch.setattr(reg, 'auto_video_scan_library',
+                            lambda *a, **k: pytest.fail('deep scan must not nudge the server'))
+        engine = _RecordingEngine()
+        register_all(_build_deps(engine))
+
+        engine.action_handlers['video_deep_scan_tv']['handler']({'_automation_id': 'x'})
+        engine.action_handlers['video_deep_scan_movies']['handler']({})
+        assert seen[0]['media_type'] == 'show' and seen[0]['mode'] == 'deep'
+        assert seen[1]['media_type'] == 'movie' and seen[1]['mode'] == 'deep'
 
     def test_guarded_actions_have_a_guard(self):
         engine = _RecordingEngine()
@@ -360,7 +414,6 @@ class TestHandlerInvocation:
             **{f.name: getattr(deps, f.name) for f in deps.__dataclass_fields__.values()},
             'get_db_update_state': lambda: running_state,
             'get_duplicate_cleaner_state': lambda: running_state,
-            'get_quality_scanner_state': lambda: running_state,
             'get_download_batches': lambda: active_batches,  # forces clean_completed_downloads to skip
             'get_database': lambda: _StubDB(),
             'get_app': lambda: _StubApp(),

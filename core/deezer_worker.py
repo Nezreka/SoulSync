@@ -8,7 +8,16 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.deezer_client import DeezerClient
-from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
+from core.worker_utils import (
+    _names_equivalent,
+    accept_artist_match,
+    artist_name_matches,
+    interruptible_sleep,
+    owned_album_titles,
+    pick_artist_by_catalog,
+    release_titles,
+    set_album_api_track_count,
+)
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("deezer_worker")
@@ -300,16 +309,19 @@ class DeezerWorker:
 
         if str(result_artist_id) != str(parent_deezer_id):
             # Guard: only correct when the album/track's primary artist is the
-            # SAME artist by name. A mismatch means it's a collab/compilation,
-            # not a stale-id correction.
+            # SAME artist by name — a POSITIVE match. A missing result name
+            # (#988: compilation/collab Deezer payloads often omit it) or a
+            # mismatch means we can't confirm it's the same artist, so we must
+            # NOT rewrite the parent's id — that's how a wrong Deezer id
+            # (The Beatles' id 1) got smeared onto The Outfield.
             parent_name = item.get('artist') or ''
-            if (result_artist_name and parent_name
-                    and not self._name_matches(parent_name, result_artist_name)):
+            if not (result_artist_name and parent_name
+                    and self._name_matches(parent_name, result_artist_name)):
                 logger.info(
                     f"Skipping artist-ID correction from {item['type']} "
-                    f"'{item['name']}': result artist '{result_artist_name}' "
-                    f"≠ parent '{parent_name}' (collab/compilation, not a "
-                    f"correction)"
+                    f"'{item['name']}': cannot verify result artist "
+                    f"'{result_artist_name}' == parent '{parent_name}' "
+                    f"(collab/compilation or missing name, not a correction)"
                 )
                 return True
 
@@ -335,6 +347,23 @@ class DeezerWorker:
                 return
 
             artist_id = row[0]
+            # #988: never overwrite with a Deezer id already owned by a
+            # DIFFERENTLY-named artist — that's the exact smear (Beatles' id 1
+            # onto The Outfield). Same-named holders legitimately share an id.
+            cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
+            _self_row = cursor.fetchone()
+            this_name = (_self_row[0] if _self_row else '') or (item.get('artist') or '')
+            cursor.execute(
+                "SELECT name FROM artists WHERE deezer_id = ? AND id != ?",
+                (str(correct_deezer_id), artist_id))
+            for (other_name,) in cursor.fetchall():
+                if not _names_equivalent(this_name, other_name):
+                    logger.warning(
+                        f"Refusing Deezer-ID correction: id {correct_deezer_id} is "
+                        f"already held by '{other_name}' (≠ '{this_name}') — avoiding a "
+                        f"shared/duplicate id (artist #{artist_id})")
+                    return
+
             cursor.execute("""
                 UPDATE artists SET
                     deezer_id = ?,
@@ -401,7 +430,20 @@ class DeezerWorker:
             logger.debug(f"Preserving existing Deezer ID for artist '{artist_name}': {existing_id}")
             return
 
-        result = self.client.search_artist(artist_name)
+        # Multi-candidate search (was single search_artist) so same-name artists
+        # can be disambiguated: gate by name, then pick the one whose catalog
+        # overlaps the albums this library owns.
+        results = self.client.search_artists(artist_name, limit=5)
+        gated = [a for a in (results or []) if artist_name_matches(artist_name, getattr(a, 'name', ''))]
+        chosen, _overlap = pick_artist_by_catalog(
+            gated,
+            owned_album_titles(self.db, artist_id),
+            lambda a: release_titles(self.client.get_artist_albums_list(a.id)),
+        )
+
+        # search_artists returns lean Artist objects; fetch the full dict (same
+        # shape the old search_artist returned) for storage.
+        result = self.client.get_artist_info(chosen.id) if chosen else None
         if result:
             result_name = result.get('name', '')
             ok, reason = accept_artist_match(

@@ -18,7 +18,6 @@ from core.imports.context import (
     normalize_import_context,
 )
 from core.imports.file_ops import safe_move_file
-from database.music_database import MusicDatabase
 from utils.logging_config import get_logger
 
 
@@ -80,6 +79,30 @@ def move_to_quarantine(file_path: str, context: dict, reason: str, automation_en
     except Exception as exc:
         logger.warning("Failed to write quarantine metadata: %s", exc)
 
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_pipeline_import_quarantined,
+        )
+        notify_pipeline_import_quarantined(
+            context,
+            trigger=trigger,
+            reason=reason,
+        )
+    except Exception:
+        logger.exception("Failed to journal acquisition quarantine state")
+
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_manual_grab_quarantined,
+        )
+        notify_manual_grab_quarantined(
+            context,
+            trigger=trigger,
+            reason=reason,
+        )
+    except Exception:
+        logger.exception("Failed to journal manual grab quarantine state")
+
     logger.warning("File quarantined: %s - Reason: %s", quarantine_path, reason)
 
     if automation_engine:
@@ -105,30 +128,78 @@ def move_to_quarantine(file_path: str, context: dict, reason: str, automation_en
 
 
 def check_flac_bit_depth(file_path: str, context: dict) -> Optional[str]:
-    """Return a rejection message if a FLAC file violates the configured bit depth."""
-    if not context.get("_audio_quality", "").startswith("FLAC"):
+    """Legacy wrapper — delegates to check_quality_target.
+
+    Kept for callers that still pass trigger='bit_depth'; the new guard
+    covers bit_depth as part of the full quality target check.
+    """
+    return check_quality_target(file_path, context)
+
+
+def check_quality_target(file_path: str, context: dict) -> Optional[str]:
+    """Return a rejection message when the downloaded file does not satisfy
+    the user's quality priority list.
+
+    Probes the actual file with mutagen (ground-truth sample_rate,
+    bit_depth, bitrate) and checks it against the profile's
+    ``ranked_targets``.  Falls back gracefully when fallback_enabled=True.
+
+    There is deliberately no separate "run this check at all" master toggle:
+    an empty ``ranked_targets`` list (or ``fallback_enabled=True``) already
+    means "accept anything" via the `if not targets` / fallback branches
+    below, so a redundant on/off switch would just be a second way to say the
+    same thing — compose "accept everything" through the profile instead.
+
+    When ``context['track_info']`` carries its own ``quality_profile_id`` (a
+    wishlist row — see ``add_to_wishlist``/``core/downloads/master.py``), THAT
+    profile's targets/fallback/downsample settings are used instead of the
+    global default, so per-item profile assignment actually changes import
+    acceptance. Falls back to the global profile when absent (manual
+    downloads, staging imports — unaffected).
+
+    Works for all formats and all download sources — no Soulseek-specific
+    logic here.
+    """
+    from core.imports.file_ops import probe_audio_quality
+    from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
+
+    aq = probe_audio_quality(file_path)
+    if aq is None:
+        logger.debug("[QualityGuard] Could not probe %s — skipping check", os.path.basename(file_path))
         return None
 
-    quality_profile = MusicDatabase().get_quality_profile()
-    flac_config = quality_profile.get("qualities", {}).get("flac", {})
-    flac_pref = flac_config.get("bit_depth", "any")
-    if flac_pref == "any":
+    track_info = context.get("track_info")
+    if not isinstance(track_info, dict):
+        track_info = {}
+    profile = load_profile_by_id(track_info.get("quality_profile_id"))
+    targets, fallback_enabled = targets_from_profile(profile)
+
+    if not targets:
         return None
 
-    actual_bits = context["_audio_quality"].replace("FLAC ", "").replace("bit", "")
-    if actual_bits == flac_pref:
-        return None
+    downsample_enabled = bool(profile.get(
+        "downsample_enabled", _get_config_manager().get("lossy_copy.downsample_hires", False)
+    ))
 
-    flac_fallback = flac_config.get("bit_depth_fallback", True)
-    downsample_enabled = _get_config_manager().get("lossy_copy.downsample_hires", False)
-    track_info = context.get("track_info", {})
+    matched = quality_meets_profile(aq, targets)
+
     track_name = track_info.get("name", os.path.basename(file_path))
+    actual_label = aq.label()
 
-    if flac_fallback or downsample_enabled:
-        if downsample_enabled:
-            logger.info("[FLAC Downsample] Accepted %s-bit FLAC (will be downsampled to %s-bit): %s", actual_bits, flac_pref, track_name)
-        else:
-            logger.warning("[FLAC Fallback] Accepted %s-bit FLAC (preferred %s-bit): %s", actual_bits, flac_pref, track_name)
+    if matched:
+        logger.info("[QualityGuard] %s meets profile: %s", track_name, actual_label)
         return None
 
-    return f"FLAC bit depth mismatch: file is {actual_bits}-bit, preference is {flac_pref}-bit"
+    # No target matched
+    best_label = targets[0].label if targets else "?"
+    if fallback_enabled or downsample_enabled:
+        logger.warning(
+            "[QualityGuard] %s did not match any target (got %s, wanted %s) — accepting via fallback",
+            track_name, actual_label, best_label,
+        )
+        return None
+
+    return (
+        f"Quality mismatch: file is {actual_label}, "
+        f"does not satisfy any configured target (best wanted: {best_label})"
+    )

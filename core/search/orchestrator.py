@@ -31,7 +31,7 @@ from . import sources
 logger = logging.getLogger(__name__)
 
 VALID_SOURCES = (
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon', 'jiosaavn', 'bandcamp',
 )
 
 VALID_STREAM_SOURCES = VALID_SOURCES + ('youtube_videos',)
@@ -64,6 +64,10 @@ class SearchDeps:
 
 def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
     """Return (client, is_available) for an explicit metadata source request."""
+    from core.metadata.registry import experimental_source_rejected
+    if experimental_source_rejected(source_name):
+        return None, False
+
     if source_name == 'spotify':
         # Available when real auth OR the no-creds SpotipyFree fallback can serve
         # (the client routes to free internally when auth is missing/limited).
@@ -97,6 +101,20 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
         except Exception as e:
             logger.warning(f"Amazon Music client init failed: {e}")
             return None, False
+    if source_name == 'jiosaavn':
+        try:
+            from core.metadata.registry import get_jiosaavn_client
+            return get_jiosaavn_client(), True
+        except Exception as e:
+            logger.warning(f"JioSaavn client init failed: {e}")
+            return None, False
+    if source_name == 'bandcamp':
+        try:
+            from core.metadata.registry import get_bandcamp_client
+            return get_bandcamp_client(), True
+        except Exception as e:
+            logger.warning(f"Bandcamp client init failed: {e}")
+            return None, False
     return None, False
 
 
@@ -113,6 +131,107 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
             'name': artist.name,
             'image_url': image_url,
         })
+
+    # Library-v2 can contain provider-native artists with no legacy ``artists``
+    # row at all. Merge them into the global-search library bucket, annotating
+    # the V2 id so clients can route to the correct detail page. Prefer the
+    # explicit legacy back-reference, then provider-qualified identity; names
+    # alone are deliberately not a dedup key.
+    conn = None
+    try:
+        conn = deps.database._get_connection()
+        legacy_by_id = {int(item['id']): item for item in out}
+        legacy_by_provider: dict[tuple[str, str], dict] = {}
+        artist_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(artists)").fetchall()
+        }
+        provider_columns = {
+            'spotify': 'spotify_artist_id',
+            'itunes': 'itunes_artist_id',
+            'deezer': 'deezer_id',
+            'musicbrainz': 'musicbrainz_id',
+            'amazon': 'amazon_id',
+            'tidal': 'tidal_id',
+            'qobuz': 'qobuz_id',
+        }
+        selected_provider_columns = [
+            column for column in provider_columns.values() if column in artist_columns
+        ]
+        if legacy_by_id and selected_provider_columns:
+            marks = ','.join('?' for _ in legacy_by_id)
+            fields = ', '.join(['id', *selected_provider_columns])
+            for row in conn.execute(
+                f"SELECT {fields} FROM artists WHERE id IN ({marks})",
+                tuple(legacy_by_id),
+            ).fetchall():
+                target = legacy_by_id.get(int(row['id']))
+                if target is None:
+                    continue
+                for source, column in provider_columns.items():
+                    if column in selected_provider_columns and row[column]:
+                        legacy_by_provider[(source, str(row[column]))] = target
+
+        needle = f"%{query.strip().lower()}%"
+        v2_rows = conn.execute(
+            """SELECT a.id AS matched_id,
+                      COALESCE(c.id, a.id) AS id,
+                      COALESCE(c.name, a.name) AS name,
+                      COALESCE(c.image_url, a.image_url) AS image_url,
+                      COALESCE(c.legacy_artist_id, a.legacy_artist_id) AS legacy_artist_id,
+                      a.spotify_id, a.musicbrainz_id, a.external_ids
+                 FROM lib2_artists a
+                 LEFT JOIN lib2_artists c ON c.id=a.canonical_artist_id
+                WHERE LOWER(a.name) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?
+                ORDER BY COALESCE(c.name, a.name) COLLATE NOCASE, a.id
+                LIMIT 10""",
+            (needle, needle),
+        ).fetchall()
+        seen_v2: set[int] = set()
+        for row in v2_rows:
+            v2_id = int(row['id'])
+            if v2_id in seen_v2:
+                continue
+            seen_v2.add(v2_id)
+            target = None
+            if row['legacy_artist_id'] is not None:
+                target = legacy_by_id.get(int(row['legacy_artist_id']))
+
+            provider_ids: dict[str, str] = {}
+            if row['spotify_id']:
+                provider_ids['spotify'] = str(row['spotify_id'])
+            if row['musicbrainz_id']:
+                provider_ids['musicbrainz'] = str(row['musicbrainz_id'])
+            try:
+                provider_ids.update({
+                    str(source).strip().lower(): str(provider_id).strip()
+                    for source, provider_id in json.loads(row['external_ids'] or '{}').items()
+                    if str(source).strip() and str(provider_id).strip()
+                })
+            except (AttributeError, TypeError, ValueError):
+                pass
+            if target is None:
+                target = next((
+                    legacy_by_provider[(source, provider_id)]
+                    for source, provider_id in provider_ids.items()
+                    if (source, provider_id) in legacy_by_provider
+                ), None)
+
+            if target is not None:
+                target['library_v2_id'] = v2_id
+                if not target.get('image_url') and row['image_url']:
+                    target['image_url'] = deps.fix_artist_image_url(row['image_url'])
+                continue
+            out.append({
+                'id': v2_id,
+                'library_v2_id': v2_id,
+                'name': row['name'],
+                'image_url': deps.fix_artist_image_url(row['image_url']),
+            })
+    except Exception as exc:  # fresh/partially migrated DB: legacy search still works
+        logger.debug("Library-v2 global artist search unavailable: %s", exc)
+    finally:
+        if conn is not None:
+            conn.close()
     return out
 
 
@@ -139,6 +258,21 @@ def _single_source_response(
 ) -> dict:
     """Run a single-source search — bypasses the fan-out."""
     client, available = resolve_client(requested_source, deps)
+
+    # Explicit Spotify pick that the normal gate rejected (no auth, and 'Spotify
+    # Free' isn't the chosen metadata source). If the no-creds SpotipyFree package
+    # is installed, honor the deliberate selection via the free source instead of
+    # returning nothing — the explicit per-search pick is the user's consent, and
+    # this stays out of every background/fan-out path (which never reaches here).
+    prefer_free = False
+    if not client and requested_source == 'spotify' and deps.spotify_client:
+        try:
+            if deps.spotify_client._free_installed():
+                client = deps.spotify_client
+                prefer_free = True
+        except Exception as e:
+            logger.debug(f"Spotify free-fallback availability check failed: {e}")
+
     if not client:
         return {
             'db_artists': db_artists,
@@ -152,7 +286,7 @@ def _single_source_response(
         }
 
     try:
-        source_results = sources.search_source(query, client, requested_source)
+        source_results = sources.search_source(query, client, requested_source, prefer_free=prefer_free)
     except Exception as e:
         logger.warning(f"Single-source search ({requested_source}) failed: {e}")
         source_results = {'artists': [], 'albums': [], 'tracks': [], 'available': False}
@@ -194,6 +328,11 @@ def _alternate_sources(primary_source: str, deps: SearchDeps) -> list[str]:
         alts.append('hydrabase')
     if primary_source != 'amazon':
         alts.append('amazon')       # always available (T2Tunes, no auth)
+    # Experimental sources surface as alternates only when individually enabled.
+    from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+    for name in EXPERIMENTAL_SOURCES:
+        if primary_source != name and is_source_enabled(name):
+            alts.append(name)
     alts.append('youtube_videos')   # always available (yt-dlp, no auth)
     alts.append('musicbrainz')      # always available (public API)
     return alts

@@ -20,7 +20,11 @@ function showLegacyPage(pageId) {
 }
 
 function setActivePageChrome(pageId) {
-    document.querySelectorAll('.nav-button').forEach(btn => {
+    // Only manage MUSIC nav buttons (they carry data-page). The video sidebar owns
+    // its own highlight via .nav-button[data-video-page]; clearing those here wiped
+    // the video selection on the first nav — it only re-stuck on a second click,
+    // which hits navigateToPage's same-page early-return so this never ran. (#sidebar)
+    document.querySelectorAll('.nav-button[data-page]').forEach(btn => {
         btn.classList.remove('active');
         btn.removeAttribute('aria-current');
     });
@@ -190,6 +194,9 @@ window.SoulSyncWebShellBridge = {
     navigateToArtistDetail(artistId, artistName, sourceOverride, options) {
         return navigateToArtistDetail(artistId, artistName, sourceOverride, options);
     },
+    navigateToLabelDetail(labelId, labelName, options) {
+        return navigateToLabelDetail(labelId, labelName, options);
+    },
     playLibraryTrack(track, albumTitle, artistName) {
         return playLibraryTrack(track, albumTitle, artistName);
     },
@@ -211,6 +218,11 @@ function _handleShellLinkClick(event) {
     if (!anchor || (anchor.target && anchor.target !== '_self')) return;
     if (anchor.hasAttribute('download')) return;
 
+    // In-card controls (source/watchlist badges, etc.) handle their OWN click — don't let
+    // this capture-phase handler hijack it into the surrounding card's navigation. Their
+    // bubble-phase handlers preventDefault, but that runs after capture, so we opt out here.
+    if (event.target?.closest?.('.source-card-icon, [data-no-card-nav]')) return;
+
     const href = anchor.getAttribute('href');
     if (!href || href === '#' || href.startsWith('javascript:')) return;
 
@@ -223,12 +235,12 @@ function _handleShellLinkClick(event) {
     }
 
     if (pathname.startsWith('/artist-detail/')) {
-        _handleArtistDetailLinkClick(event, pathname);
+        _handleArtistDetailLinkClick(event, pathname, anchor);
         return;
     }
 }
 
-function _handleArtistDetailLinkClick(event, pathname) {
+function _handleArtistDetailLinkClick(event, pathname, anchor) {
     const parts = pathname.split('/').filter(Boolean);
     if (parts.length < 3) return;
 
@@ -238,10 +250,20 @@ function _handleArtistDetailLinkClick(event, pathname) {
     const artistId = decodeURIComponent(parts.slice(2).join('/'));
     if (!source || !artistId) return;
 
+    // Some sources (Bandcamp) have no numeric-ID lookup API — the artist's
+    // display name has to travel with the click, or the destination page
+    // has nothing to resolve against. The card already stashes it as a data
+    // attribute (renderCompactSection); the href's own ?name= query (set by
+    // buildArtistDetailPath) is the fallback for anchors that don't.
+    const artistName = anchor?.dataset?.artistName
+        || new URLSearchParams(anchor?.search || '').get('name')
+        || '';
+
     event.preventDefault();
     void navigateToPage('artist-detail', {
         artistId,
         artistSource: source,
+        artistName,
         forceReload: true,
     });
 }

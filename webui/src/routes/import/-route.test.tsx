@@ -2,9 +2,9 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { HttpResponse, http, server } from '@/test/msw';
+import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 import type { ImportStagingFile } from './-import.types';
@@ -13,7 +13,7 @@ import { autoImportResultsQueryOptions, autoImportStatusQueryOptions } from './-
 import { resetImportWorkflowStore } from './-import.store';
 
 function renderImportRoute(initialEntries = ['/import']) {
-  const queryClient = createAppQueryClient();
+  const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries });
   const router = createAppRouter({ history, queryClient });
 
@@ -247,7 +247,24 @@ describe('import route', () => {
 
     expect(await screen.findByTestId('import-page')).toBeInTheDocument();
     expect(await screen.findByText('Import Music')).toBeInTheDocument();
-    expect(await screen.findByText('Import folder: error')).toBeInTheDocument();
+    // The app query client retries once with a ~1s backoff before surfacing
+    // the error, which races findByText's default 1s timeout — wait it out.
+    expect(
+      await screen.findByText('Import folder: error', undefined, { timeout: 5000 }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows scan progress while a large staging folder is still scanning (#947)', async () => {
+    server.use(
+      http.get('/api/import/staging/files', () =>
+        HttpResponse.json({ success: true, scanning: true, progress: { scanned: 5, total: 20 } }),
+      ),
+    );
+
+    renderImportRoute();
+
+    expect(await screen.findByTestId('import-page')).toBeInTheDocument();
+    expect(await screen.findByText(/Scanning 5 of 20 files/)).toBeInTheDocument();
   });
 
   it('stores the active tab in nested route paths', async () => {
@@ -346,6 +363,39 @@ describe('import route', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText('via MusicBrainz')).toBeInTheDocument();
+  });
+
+  it('shows a Settings link and stops the batch when the media server is not connected', async () => {
+    let processCalls = 0;
+    server.use(
+      http.post('/api/import/singles/process', () => {
+        processCalls += 1;
+        return HttpResponse.json(
+          {
+            success: false,
+            error:
+              "Plex isn't connected, so importing now would copy files into place without adding them to your Library. Connect Plex in Settings, or switch to Standalone mode, then try again.",
+            error_code: 'media_server_not_connected',
+          },
+          { status: 503 },
+        );
+      }),
+    );
+
+    renderImportRoute(['/import/singles']);
+
+    fireEvent.click(await screen.findByLabelText('Select 01-track.flac'));
+    fireEvent.click(screen.getByLabelText('Select 02-track.flac'));
+    fireEvent.click(screen.getByRole('button', { name: /Process Selected/ }));
+
+    expect(await screen.findByRole('link', { name: 'Go to Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByText(/Plex isn't connected/)).toBeInTheDocument();
+    // The gate rejects the whole batch identically — stop after the first file
+    // instead of repeating the same request (and error) once per selected file.
+    expect(processCalls).toBe(1);
   });
 
   it('renders auto-import results from route search state', async () => {

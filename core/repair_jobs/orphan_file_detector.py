@@ -1,16 +1,96 @@
-"""Orphan File Detector Job — finds files in the transfer folder not tracked in the DB."""
+"""Orphan File Detector Job — finds files not tracked in the DB.
+
+Always scans the transfer/staging folder. Optionally (opt-in setting
+``scan_library_folder``, default off so existing installations keep their
+current scan cost) also scans every root the admin has explicitly configured
+in ``library.music_paths`` (Settings → Music Library Paths) — closing review A4:
+the retired legacy ``quality_upgrade_scanner`` used to walk the whole music
+library and quality-check files with no DB match (failed imports, files
+placed outside SoulSync); its native replacement only reads already-imported
+rows via SQL and never touches the disk, so those files stopped getting
+checked at all.
+
+``library.music_paths`` — not ``soulseek.download_path``/``transfer_path`` —
+is deliberately the ONLY source used for "the real library folder(s)" here:
+those two are download-pipeline staging areas, and which folder a given
+installation actually treats as its finished library varies (some point
+media servers straight at the transfer or staging folder). This mirrors the
+existing convention other Library-v2 modules already use for the same
+question (``core.library2.file_delete._library_roots``,
+``core.library.path_resolver``, ``core.library2.paths
+.missing_path_root_is_healthy``) — an explicit, user-declared list, never
+guessed from an unrelated download-pipeline path. Empty by default, so this
+opt-in setting is a genuine no-op until the admin configures at least one
+root.
+
+Rather than add a second job for the same "audio file with no DB match"
+concept, every orphan finding (either source) now also carries the file's
+real measured quality (mutagen — format/bitrate/sample_rate/bit_depth), so
+you can judge what you have before deciding to import or remove it.
+"""
 
 import os
 import re
 import time
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, skip_deleted_quarantine
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.orphan_files")
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
+
+
+def _library_folder_setting(context: JobContext) -> bool:
+    try:
+        settings = context.config_manager.get(
+            'repair.jobs.orphan_file_detector.settings', {}) or {}
+        return bool(settings.get('scan_library_folder', False)) if isinstance(settings, dict) else False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _drop_nested_roots(roots: list) -> list:
+    """Drop any root that IS, or sits inside, another root in the list.
+
+    Some installs point ``library.music_paths`` at a directory that is an
+    ancestor of (or identical to) the transfer/staging folder (module
+    docstring above). Without this, both would get walked and every file
+    under the overlap would be probed/found twice — wasted work, since
+    walking the outer root already covers everything beneath it.
+    """
+    def _contains(outer: str, inner: str) -> bool:
+        if outer == inner:
+            return True
+        try:
+            return os.path.commonpath([outer, inner]) == outer
+        except ValueError:
+            return False  # e.g. different drives — never nested
+    return [
+        root for root in roots
+        if not any(other != root and _contains(other, root) for other in roots)
+    ]
+
+
+def _scan_roots(context: JobContext) -> list:
+    """Folders to walk: transfer always, every configured library.music_paths
+    root too when the opt-in setting is on. De-duplicated (including nested
+    roots — see ``_drop_nested_roots``)."""
+    roots = []
+    transfer = context.transfer_folder
+    if transfer and os.path.isdir(transfer):
+        roots.append(os.path.realpath(transfer))
+    else:
+        logger.warning("Transfer folder does not exist: %s", transfer)
+
+    if _library_folder_setting(context) and context.config_manager is not None:
+        from core.library2.file_delete import _library_roots
+        for resolved in _library_roots(context.config_manager):
+            if resolved not in roots:
+                roots.append(resolved)
+
+    return _drop_nested_roots(roots)
 
 
 @register_job
@@ -20,7 +100,14 @@ class OrphanFileDetectorJob(RepairJob):
     description = 'Finds audio files not tracked in the database'
     help_text = (
         'Walks your transfer folder looking for audio files (FLAC, MP3, M4A, OGG, WAV, etc.) '
-        'that exist on disk but have no matching entry in the SoulSync database.\n\n'
+        'that exist on disk but have no matching entry in the SoulSync database. Each finding '
+        "also carries the file's real measured quality (format/bitrate/sample rate/bit depth), "
+        'so you know what you have before deciding.\n\n'
+        "Optional setting 'scan_library_folder' (off by default) also walks every folder "
+        'configured under Settings → Music Library Paths (library.music_paths), not just the '
+        'transfer/staging area — catches a failed or partial import, or a file placed there '
+        'outside SoulSync entirely. A no-op until at least one library path is configured '
+        'there.\n\n'
         'Orphan files can appear after manual folder edits, interrupted downloads, or database '
         'issues. Each orphan is reported as a finding so you can decide whether to import it '
         'into your library or remove it.\n\n'
@@ -29,15 +116,16 @@ class OrphanFileDetectorJob(RepairJob):
     icon = 'repair-icon-orphan'
     default_enabled = True
     default_interval_hours = 24
-    default_settings = {}
+    default_settings = {'scan_library_folder': False}
     auto_fix = False
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(context.config_manager)
 
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            logger.warning("Transfer folder does not exist: %s", transfer)
+        roots = _scan_roots(context)
+        if not roots:
             return result
 
         # Build set of known file-path suffixes from DB.
@@ -49,63 +137,60 @@ class OrphanFileDetectorJob(RepairJob):
         known_suffixes = set()
         known_titles = set()       # (title_lower, artist_lower) for exact match
         known_titles_clean = set()  # (clean_title, clean_artist) for normalized match
-        conn = None
-
         def _strip_extras(s):
             """Strip parentheticals/brackets for normalized comparison."""
             return re.sub(r'\s*[\(\[][^)\]]*[\)\]]', '', s).strip()
 
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ''")
-            for row in cursor.fetchall():
-                parts = row[0].replace('\\', '/').split('/')
-                # Store last 1-4 path components as lowercase suffixes.
-                # Depth 4 covers Genre/Artist/Album/track.flac scenarios.
-                for depth in range(1, min(5, len(parts) + 1)):
-                    suffix = '/'.join(parts[-depth:]).lower()
-                    known_suffixes.add(suffix)
+            from core.library2.maintenance_subjects import active_file_subjects
 
-            # Build title+artist sets for fallback matching. Include both
-            # track artist and album artist so Picard-style albumartist paths
-            # don't look orphaned when tracks have featured/guest artists.
-            cursor.execute("""
-                SELECT t.title, track_ar.name, album_ar.name FROM tracks t
-                LEFT JOIN artists track_ar ON track_ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists album_ar ON album_ar.id = al.artist_id
-                WHERE t.title IS NOT NULL AND t.title != ''
-            """)
-            for row in cursor.fetchall():
-                title = (row[0] or '').lower().strip()
-                if title:
-                    for artist_value in (row[1], row[2]):
-                        artist = (artist_value or '').lower().strip()
-                        known_titles.add((title, artist))
-                        # Also store normalized version (stripped of feat.,
-                        # parentheticals, etc.)
-                        clean_t = _strip_extras(title)
-                        clean_a = _strip_extras(artist)
-                        if clean_t:
-                            known_titles_clean.add((clean_t, clean_a))
+            for subject in active_file_subjects(
+                context.db, context.config_manager, include_missing=True,
+            ):
+                parts = str(subject["path"]).replace('\\', '/').split('/')
+                for depth in range(1, min(5, len(parts) + 1)):
+                    known_suffixes.add('/'.join(parts[-depth:]).lower())
+
+            conn = context.db._get_connection()
+            try:
+                rows = conn.execute(
+                    """SELECT t.title, credit.name, primary_artist.name
+                         FROM lib2_tracks t
+                         JOIN lib2_albums al ON al.id=t.album_id
+                    LEFT JOIN lib2_artists primary_artist
+                           ON primary_artist.id=al.primary_artist_id
+                    LEFT JOIN lib2_track_artists ta ON ta.track_id=t.id
+                    LEFT JOIN lib2_artists credit ON credit.id=ta.artist_id
+                        WHERE t.title IS NOT NULL AND t.title<>''"""
+                ).fetchall()
+            finally:
+                conn.close()
+            for title_value, credit_name, primary_name in rows:
+                title = (title_value or '').lower().strip()
+                if not title:
+                    continue
+                for artist_value in (credit_name, primary_name):
+                    artist = (artist_value or '').lower().strip()
+                    known_titles.add((title, artist))
+                    clean_t = _strip_extras(title)
+                    if clean_t:
+                        known_titles_clean.add((clean_t, _strip_extras(artist)))
         except Exception as e:
             logger.error("Error reading known file paths from DB: %s", e, exc_info=True)
             result.errors += 1
             return result
-        finally:
-            if conn:
-                conn.close()
 
-        # Walk transfer folder and find orphans
+        # Walk every scan root and find orphans
         audio_files = []
-        for root, _dirs, files in os.walk(transfer):
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    audio_files.append(os.path.join(root, fname))
+        for root_dir in roots:
+            for root, dirs, files in os.walk(root_dir):
+                skip_deleted_quarantine(root, dirs, root_dir)
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        audio_files.append(os.path.join(root, fname))
 
         total = len(audio_files)
         if context.update_progress:
@@ -246,6 +331,9 @@ class OrphanFileDetectorJob(RepairJob):
                         "(0 findings)", result.scanned)
             return result
 
+        from core.imports.file_ops import probe_audio_quality
+        from core.library2.status import quality_tier
+
         for fpath in orphan_files:
             if context.report_progress:
                 context.report_progress(
@@ -255,6 +343,12 @@ class OrphanFileDetectorJob(RepairJob):
             try:
                 stat = os.stat(fpath)
                 ext = os.path.splitext(fpath)[1].lower().lstrip('.')
+                quality = probe_audio_quality(fpath)
+                q_format = quality.format if quality else None
+                q_bitrate = quality.bitrate if quality else None
+                q_sample_rate = quality.sample_rate if quality else None
+                q_bit_depth = quality.bit_depth if quality else None
+                tier = quality_tier(q_format, q_bitrate, q_bit_depth)
                 if context.create_finding:
                     inserted = context.create_finding(
                         job_id=self.job_id,
@@ -265,11 +359,16 @@ class OrphanFileDetectorJob(RepairJob):
                         file_path=fpath,
                         title=f'Orphan file: {os.path.basename(fpath)}',
                         description=(
-                            'Audio file in transfer folder is not tracked in the database'
+                            'Audio file is not tracked in the database. '
+                            f'Measured quality: {tier.replace("_", " ")}.'
                         ),
                         details={
                             'file_size': stat.st_size,
-                            'format': ext,
+                            'format': q_format or ext,
+                            'bitrate': q_bitrate,
+                            'sample_rate': q_sample_rate,
+                            'bit_depth': q_bit_depth,
+                            'quality_tier': tier,
                             'modified': time.strftime('%Y-%m-%d %H:%M:%S',
                                                       time.localtime(stat.st_mtime)),
                             'folder': os.path.dirname(fpath),
@@ -291,12 +390,12 @@ class OrphanFileDetectorJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
+        roots = _scan_roots(context)
         count = 0
-        for _root, _dirs, files in os.walk(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
+        for root_dir in roots:
+            for root, dirs, files in os.walk(root_dir):
+                skip_deleted_quarantine(root, dirs, root_dir)
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                        count += 1
         return count

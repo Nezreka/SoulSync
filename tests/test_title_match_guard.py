@@ -17,8 +17,9 @@ Two layers tested:
 from __future__ import annotations
 
 import types
+from difflib import SequenceMatcher
 
-from core.text.title_match import titles_plausibly_same
+from core.text.title_match import choose_best_title_candidate, titles_plausibly_same
 
 
 # ── the pure guard ────────────────────────────────────────────────────────
@@ -63,6 +64,34 @@ def test_single_word_titles_defer_to_char_floor():
     assert titles_plausibly_same("tonite", "tonight", 0.77) is True
     # ...even when the char score is low — the floor, not the gate, rejects it.
     assert titles_plausibly_same("numb", "creep", 0.2) is True
+
+
+def test_best_title_candidate_prefers_exact_title_over_cleaned_remix():
+    candidates = [
+        ("ratata (afro bros remix)", "ratata", "remix-path"),
+        ("ratata", "ratata", "base-path"),
+    ]
+
+    assert choose_best_title_candidate(
+        "ratata",
+        "ratata",
+        candidates,
+        lambda left, right: SequenceMatcher(None, left, right).ratio(),
+    ) == "base-path"
+
+
+def test_best_title_candidate_keeps_requested_remix_when_exact():
+    candidates = [
+        ("ratata", "ratata", "base-path"),
+        ("ratata (afro bros remix)", "ratata", "remix-path"),
+    ]
+
+    assert choose_best_title_candidate(
+        "ratata (afro bros remix)",
+        "ratata",
+        candidates,
+        lambda left, right: SequenceMatcher(None, left, right).ratio(),
+    ) == "remix-path"
 
 
 def test_all_stopword_side_defers():

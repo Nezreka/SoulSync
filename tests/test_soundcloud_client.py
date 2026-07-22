@@ -146,7 +146,18 @@ def test_set_shutdown_check_assigns_callable(tmp_dl: Path) -> None:
 
 def _run(coro):
     """Tiny helper — we have async methods to exercise but no async test runner."""
-    return asyncio.run(coro)
+    loop = asyncio.new_event_loop()
+
+    async def _drain_with_heartbeat():
+        task = loop.create_task(coro)
+        while not task.done():
+            await asyncio.sleep(0.01)
+        return task.result()
+
+    try:
+        return loop.run_until_complete(_drain_with_heartbeat())
+    finally:
+        loop.close()
 
 
 def test_search_returns_empty_when_unavailable(tmp_dl: Path, monkeypatch) -> None:
@@ -846,3 +857,80 @@ def test_live_download_a_known_public_track(tmp_dl: Path) -> None:
     assert final_path is not None
     assert os.path.exists(final_path)
     assert os.path.getsize(final_path) > 100 * 1024
+
+
+# ── construction robustness: an uncreatable download path must not crash init ──
+# Regression: the download path is read from config (often a Docker /app path). If
+# mkdir fails (unmounted/misconfigured volume, or running outside the container),
+# the client must warn and continue — NOT raise. An unguarded mkdir made the
+# registry null the whole client, dropping SoundCloud as a source entirely (and
+# failing every orchestrator-soundcloud test outside Docker).
+def test_init_survives_uncreatable_download_path(tmp_path):
+    from core.soundcloud_client import SoundcloudClient
+    blocker = tmp_path / "iam_a_file"
+    blocker.write_text("x")
+    bad_path = str(blocker / "subdir")  # mkdir under a file -> NotADirectoryError (OSError)
+    client = SoundcloudClient(download_path=bad_path)   # must not raise
+    assert client is not None
+    assert str(client.download_path) == bad_path
+
+
+class TestPasteAnywhere:
+    """#865 follow-up (Lenochxd): the fix landed on manual search, but users
+    paste links into the other two boxes. Both now route/answer correctly."""
+
+    def test_basic_search_forces_the_soundcloud_source_for_links(self):
+        from core.search.basic import run_basic_search
+
+        class _SC:
+            def __init__(self):
+                self.searched = []
+
+            async def search(self, query, timeout=None, progress_callback=None):
+                self.searched.append(query)
+                return ([], [])
+
+        sc = _SC()
+
+        class _Orch:
+            def client(self, name):
+                assert name == 'soundcloud', f"routed to {name!r}, not soundcloud"
+                return sc
+
+        def run_async(coro):
+            import asyncio
+            return asyncio.new_event_loop().run_until_complete(coro)
+
+        url = "https://soundcloud.com/artist/track/s-AbCdEf123"
+        # source explicitly OTHER than soundcloud — the URL must override it
+        run_basic_search(url, _Orch(), run_async, source='soulseek')
+        assert sc.searched == [url]
+
+    def test_link_id_box_gives_the_soundcloud_hint(self):
+        from core.search import by_id
+        res = by_id.resolve_identifier(
+            "https://soundcloud.com/artist/track", deps=None,
+            client_resolver=lambda s: None)
+        assert res['available'] is False
+        assert 'search bar' in res['message']
+        # ordinary junk keeps the generic message
+        res = by_id.resolve_identifier("not a link at all", deps=None,
+                                       client_resolver=lambda s: None)
+        assert 'bare ID is ambiguous' in res['message']
+
+    def test_disabled_soundcloud_gets_a_clear_error_not_silence(self):
+        """Audit catch: with SoundCloud disabled, the force-route used to fall
+        back to searching the raw URL as text — guaranteed-empty, silent."""
+        import pytest as _pytest
+        from core.search.basic import run_basic_search
+
+        class _Orch:
+            def client(self, name):
+                return None                      # soundcloud not enabled
+
+            async def search(self, query):
+                raise AssertionError("must not fall back to text search")
+
+        with _pytest.raises(ValueError, match="enable it in Settings"):
+            run_basic_search("https://soundcloud.com/a/t/s-Xy12", _Orch(),
+                             lambda c: c, source=None)

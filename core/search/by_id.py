@@ -345,6 +345,18 @@ def resolve_identifier(
 
     targets = parse_metadata_identifier(raw)
     if not targets:
+        # A SoundCloud link is real, just not a METADATA link — it resolves in
+        # the search bar (any source; the route is forced), not here. Say so
+        # instead of the generic 'not a link' scold (#865 follow-up).
+        try:
+            from core.soundcloud_client import is_soundcloud_url
+            if is_soundcloud_url(raw):
+                return _empty_result(raw, message=(
+                    'SoundCloud links resolve in the main search bar — paste it '
+                    'there and SoulSync fetches the track directly (works for '
+                    'unlisted/private share links too).'))
+        except Exception as exc:   # noqa: BLE001 - hint only, never break the resolver
+            logger.debug("soundcloud hint skipped: %s", exc)
         logger.info(f"Link/ID resolve: not a recognized link {raw!r}")
         return _empty_result(raw, message=_MSG_NOT_A_LINK)
 

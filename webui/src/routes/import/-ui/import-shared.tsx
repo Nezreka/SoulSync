@@ -1,4 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { HTTPError } from 'ky';
+import { useEffect } from 'react';
 
 import type { ImportQueueJob, ImportStagingFile } from '../-import.types';
 
@@ -20,6 +22,22 @@ export function useImportStaging() {
     ...importStagingFilesQueryOptions(),
   });
 
+  // A large staging folder (whole-library migration, #947) is scanned in the background; the
+  // endpoints return `scanning: true` until it's done. While scanning, poll so the page fills
+  // in automatically once the scan completes. Invalidate ALL staging queries (files, groups,
+  // suggestions) — not just files — so the album tab's separate groups query refetches too,
+  // otherwise it would stay stuck on its initial {scanning} response. A plain setInterval (NOT
+  // react-query's refetchInterval) that only runs while scanning leaves normal/error states
+  // untouched; only currently-mounted queries actually refetch.
+  const scanning = stagingQuery.data?.scanning === true;
+  useEffect(() => {
+    if (!scanning) return undefined;
+    const id = window.setInterval(() => {
+      void invalidateImportStagingQueries(queryClient);
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, [scanning, queryClient]);
+
   return {
     refreshStaging: async () => {
       clearFinishedJobs();
@@ -28,6 +46,8 @@ export function useImportStaging() {
     // Keep the empty fallback stable so staging-driven effects do not loop while loading.
     stagingFiles: stagingQuery.data?.files ?? EMPTY_STAGING_FILES,
     stagingPath: stagingQuery.data?.staging_path || 'Not configured',
+    scanning,
+    scanProgress: stagingQuery.data?.progress ?? null,
     stagingQuery,
   };
 }
@@ -66,6 +86,18 @@ export function useImportQueueActions() {
           errors.push(...payload.errors);
         }
       } catch (error) {
+        if (isMediaServerNotConnectedError(error)) {
+          // The whole batch would fail the same gate check on every remaining item —
+          // stop instead of repeating the same error once per file.
+          updateQueueEntry(entryId, {
+            status: 'error',
+            processed,
+            errors: [getErrorMessage(error)],
+            blockedByMediaServer: true,
+          });
+          void invalidateImportStagingQueries(queryClient);
+          return;
+        }
         errors.push(`${itemName}: ${getErrorMessage(error)}`);
       }
 
@@ -106,4 +138,14 @@ export function fallbackImage(event: { currentTarget: HTMLImageElement }) {
 
 export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
+}
+
+export function isMediaServerNotConnectedError(error: unknown): boolean {
+  if (!(error instanceof HTTPError)) return false;
+  const data = error.data;
+  return Boolean(
+    data &&
+    typeof data === 'object' &&
+    (data as { error_code?: unknown }).error_code === 'media_server_not_connected',
+  );
 }

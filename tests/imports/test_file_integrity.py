@@ -201,6 +201,60 @@ def test_rejects_truncated_file(tmp_path: Path) -> None:
     assert result.checks["length_drift_s"] > 3.0
 
 
+# ── #937: a file that runs LONGER than expected is a version/master difference, not
+#    truncation — it gets more leeway, while SHORTER files stay tight. ──
+
+def test_accepts_longer_master_beyond_short_tolerance(tmp_path: Path) -> None:
+    """The reported case (A-Ha remaster): file runs ~3.5s LONGER than the metadata.
+    Past the 3s short-tolerance but a remaster, not a bad download — must pass."""
+    f = tmp_path / "remaster.wav"
+    _write_minimal_wav(f, duration_s=9.0)   # 9.0s file vs 5.5s expected → +3.5s longer
+
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=5500)
+
+    assert result.ok is True
+    assert result.checks["length_check"] == "passed"
+    assert result.checks["effective_tolerance_s"] == pytest.approx(15.0)
+
+
+def test_shorter_file_still_tight_after_longer_loosening(tmp_path: Path) -> None:
+    """Loosening the LONGER direction must not loosen truncation detection — a file
+    3.5s SHORTER than expected is still rejected at the 3s tolerance."""
+    f = tmp_path / "short.wav"
+    _write_minimal_wav(f, duration_s=5.5)   # 5.5s vs 9.0s expected → -3.5s shorter
+
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=9000)
+
+    assert result.ok is False
+    assert "truncated" in result.reason.lower()
+    assert result.checks["effective_tolerance_s"] == pytest.approx(3.0)
+
+
+def test_wildly_longer_file_still_rejected(tmp_path: Path) -> None:
+    """A different/wrong song that happens to run long is still caught — +25s blows
+    past even the 15s longer-tolerance."""
+    f = tmp_path / "wronglong.wav"
+    _write_minimal_wav(f, duration_s=30.0)  # 30s vs 5s expected → +25s
+
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=5000)
+
+    assert result.ok is False
+    assert "longer than expected" in result.reason.lower()
+
+
+def test_user_pinned_tolerance_is_symmetric(tmp_path: Path) -> None:
+    """An explicit user tolerance is honoured in BOTH directions — the longer-direction
+    loosening only applies to the auto default, not a value the user pinned."""
+    f = tmp_path / "long.wav"
+    _write_minimal_wav(f, duration_s=9.0)   # +4s longer
+
+    result = file_integrity.check_audio_integrity(
+        str(f), expected_duration_ms=5000, length_tolerance_s=2.0)
+
+    assert result.ok is False
+    assert result.checks["effective_tolerance_s"] == pytest.approx(2.0)
+
+
 def test_rejects_wrong_file_substituted(tmp_path: Path) -> None:
     """A 10-second clip masquerading as a 3-minute album track. slskd
     matched on a similar filename but the actual content is a snippet."""
@@ -298,3 +352,78 @@ def test_check_never_raises(tmp_path: Path, monkeypatch) -> None:
 
     assert result.ok is True
     assert result.checks.get("mutagen_parse") == "unavailable"
+
+
+# ---------------------------------------------------------------------------
+# HiFi 30s-preview escape (sella's incident): a zero-length header must be
+# DECODED, not blindly trusted, when we have an expected duration.
+# ---------------------------------------------------------------------------
+
+
+def _zero_length_flac(tmp_path: Path) -> Path:
+    """A file mutagen parses to length 0 — the HiFi fragmented-FLAC shape.
+    We fake it by pointing the parse at a real WAV but forcing info.length 0
+    via monkeypatch in the tests that need the branch."""
+    f = tmp_path / "hifi.flac"
+    _write_minimal_wav(f, duration_s=1.0)
+    return f
+
+
+def test_zero_length_with_expected_duration_decodes_and_rejects_a_preview(tmp_path, monkeypatch):
+    f = _zero_length_flac(tmp_path)
+    # force the mutagen length to 0 (fragmented-FLAC shape) …
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", lambda *_a, **_k: 30.0)
+    monkeypatch.setattr(file_integrity, "MutagenFile", None, raising=False)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f), expected_duration_ms=220_000)
+    assert res.ok is False
+    assert "30s" in res.reason and "220s" in res.reason
+    assert res.checks["mutagen_parse"] == "zero_length_decoded_short"
+
+
+def test_zero_length_that_decodes_to_full_length_is_accepted(tmp_path, monkeypatch):
+    f = _zero_length_flac(tmp_path)
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", lambda *_a, **_k: 218.0)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f), expected_duration_ms=220_000)
+    assert res.ok is True
+    assert res.checks["mutagen_parse"] == "zero_length_decoded_ok"
+
+
+def test_zero_length_without_ffmpeg_still_accepts_streamed_flac(tmp_path, monkeypatch):
+    # #756 must still hold: no decode possible → don't quarantine good FLAC
+    f = _zero_length_flac(tmp_path)
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", lambda *_a, **_k: 0.0)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f), expected_duration_ms=220_000)
+    assert res.ok is True
+    assert res.checks["mutagen_parse"] == "zero_length_unknown"
+
+
+def test_zero_length_with_no_expected_duration_is_unchanged(tmp_path, monkeypatch):
+    # no expected duration → nothing to decode against, old accept path
+    f = _zero_length_flac(tmp_path)
+    called = {"n": 0}
+    def _probe(*_a, **_k):
+        called["n"] += 1
+        return 30.0
+    monkeypatch.setattr(file_integrity, "probe_decoded_duration", _probe)
+
+    class _Info:
+        length = 0
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: SimpleNamespace(info=_Info(), tags={}))
+
+    res = file_integrity.check_audio_integrity(str(f))
+    assert res.ok is True and called["n"] == 0    # never even decoded

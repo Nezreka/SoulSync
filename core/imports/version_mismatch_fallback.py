@@ -103,9 +103,12 @@ def select_version_mismatch_fallback(
         # don't guess which the user wants.
         return None
 
-    # First tried = oldest = highest-confidence (the retry walks candidates
-    # best-first). The id is a "<date>_<time>_<name>" timestamp prefix, so the
-    # lexicographically smallest id is the earliest attempt.
+    # First tried = oldest = best (the retry walks candidates best-first; what
+    # "best" means follows the active ordering — confidence-first by default, or
+    # ranked-target quality when best_quality mode / the rank_candidates_by_quality
+    # toggle is on, so this naturally accepts the highest-quality candidate then).
+    # The id is a "<date>_<time>_<name>" timestamp prefix, so the lexicographically
+    # smallest id is the earliest attempt.
     return min((e for _, e in candidates), key=lambda e: e["id"])
 
 

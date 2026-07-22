@@ -161,19 +161,25 @@ def test_torrent_project_results_drops_releases_without_download_url() -> None:
 
 
 def test_torrent_project_results_prefers_magnet_when_available() -> None:
+    from core.download_plugins.candidate_store import get_candidate_store
     plugin = TorrentDownloadPlugin()
     magnet = 'magnet:?xt=urn:btih:abc'
     results = [_make_torrent_result(magnet_uri=magnet, download_url='https://x/y.torrent')]
     tracks, _ = plugin._project_results(results)
-    url, _ = _decode_filename(tracks[0].filename)
-    assert url == magnet
+    token, _ = _decode_filename(tracks[0].filename)
+    assert get_candidate_store().resolve(token) == magnet
 
 
-def test_torrent_project_results_encodes_url_and_title_in_filename() -> None:
+def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
+    """P0-03: the filename that reaches the browser carries an opaque
+    candidate token — never the indexer download URL (may embed API keys)."""
+    from core.download_plugins.candidate_store import get_candidate_store
     plugin = TorrentDownloadPlugin()
     tracks, _ = plugin._project_results([_make_torrent_result()])
-    url, display = _decode_filename(tracks[0].filename)
-    assert url == 'https://x/y.torrent'
+    token, display = _decode_filename(tracks[0].filename)
+    assert 'https://x/y.torrent' not in tracks[0].filename
+    assert get_candidate_store().is_token(token)
+    assert get_candidate_store().resolve(token) == 'https://x/y.torrent'
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
 
@@ -246,6 +252,67 @@ def test_torrent_finalize_picks_first_audio_file(tmp_path: Path) -> None:
     assert row['progress'] == 100.0
     # Walker sorts → 'a.mp3' wins as first.
     assert row['file_path'].endswith('a.mp3')
+
+
+def _inflight_row():
+    return {
+        'id': 'dl-1', 'filename': 'x', 'username': 'torrent',
+        'display_name': 'X', 'state': 'InProgress, Downloading',
+        'progress': 50.0, 'size': 0, 'transferred': 0, 'speed': 0,
+        'file_path': None, 'torrent_hash': 'h1', 'error': None,
+    }
+
+
+def test_torrent_finalize_walks_only_this_torrents_release_folder(tmp_path: Path) -> None:
+    """save_path is the client's save DIRECTORY — on a shared root, walking
+    it whole donated the 'first audio file' of some OTHER torrent. With the
+    torrent's name known, only <save_path>/<name> is walked."""
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    other = tmp_path / 'Another Album [FLAC]'
+    other.mkdir()
+    (other / 'aaa-other.mp3').write_bytes(b'ID3')          # sorts first in a full walk
+    mine = tmp_path / 'My Release'
+    mine.mkdir()
+    (mine / 'track.mp3').write_bytes(b'ID3')
+    plugin._finalize_download('dl-1', str(tmp_path), torrent_name='My Release')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'].endswith('track.mp3')          # never the other torrent's file
+
+
+def test_torrent_finalize_single_file_torrent_still_walks_the_save_dir(tmp_path: Path) -> None:
+    # A single-FILE torrent's name points at the file itself; the audio
+    # walker only walks directories, so the narrowing must not apply.
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    (tmp_path / 'Artist - Song.mp3').write_bytes(b'ID3')
+    plugin._finalize_download('dl-1', str(tmp_path), torrent_name='Artist - Song.mp3')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'].endswith('Artist - Song.mp3')
+
+
+def test_torrent_finalize_rescues_a_wrong_reported_mount(tmp_path: Path, monkeypatch) -> None:
+    """TheHomeGuy: qBittorrent reports '/downloads' (its container view); a
+    same-named dir exists here but is empty, while the release actually
+    landed under the configured download root."""
+    from core.download_plugins import album_bundle as ab
+    wrong = tmp_path / 'downloads'
+    wrong.mkdir()
+    real_root = tmp_path / 'real'
+    release = real_root / 'My Release'
+    release.mkdir(parents=True)
+    (release / 'track.mp3').write_bytes(b'ID3')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'soulseek.download_path' else default)})())
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    plugin._finalize_download('dl-1', str(wrong), torrent_name='My Release')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'] == str(release / 'track.mp3')
 
 
 def test_torrent_finalize_marks_error_when_no_audio(tmp_path: Path) -> None:
@@ -334,11 +401,14 @@ def test_usenet_project_drops_results_without_download_url() -> None:
     assert tracks == []
 
 
-def test_usenet_project_encodes_url_in_filename() -> None:
+def test_usenet_project_encodes_token_in_filename() -> None:
+    """P0-03: the browser sees an opaque candidate token, never the NZB URL."""
+    from core.download_plugins.candidate_store import get_candidate_store
     plugin = UsenetDownloadPlugin()
     tracks, _ = plugin._project_results([_make_usenet_result()])
-    url, display = _decode_filename(tracks[0].filename)
-    assert url == 'https://x/y.nzb'
+    token, display = _decode_filename(tracks[0].filename)
+    assert 'https://x/y.nzb' not in tracks[0].filename
+    assert get_candidate_store().resolve(token) == 'https://x/y.nzb'
     assert display == 'Some Artist - Some Album'
     # Artist + title should be parsed out, not auto-extracted from filename.
     assert tracks[0].artist == 'Some Artist'
@@ -375,11 +445,18 @@ class _FakeClock:
         self.now += seconds
 
 
-def _drive_download_thread(plugin, statuses, *, window_seconds=10.0):
+def _drive_download_thread(plugin, statuses, *, window_seconds=10.0, snapshot=None):
     """Run ``_download_thread`` end-to-end against a scripted adapter.
 
     ``statuses`` is the sequence of ``UsenetStatus`` reads the poll loop
-    will see (one per poll). Returns the finished active_downloads row."""
+    will see (one per poll). Returns the finished active_downloads row.
+
+    ``snapshot`` stubs the P2-21 incomplete_path stability check
+    (``snapshot_incomplete_path``) — a real filesystem probe that would
+    otherwise return ``None`` for the fake ``/sab/...`` test paths and
+    make the fallback branch un-testable. Defaults to a fixed value so
+    two consecutive polls always look "stable" once reached; pass a
+    ``side_effect`` list/callable to simulate a still-changing path."""
     download_id = 'u-poll'
     plugin.active_downloads[download_id] = {
         'id': download_id, 'filename': 'x', 'username': 'usenet',
@@ -392,11 +469,14 @@ def _drive_download_thread(plugin, statuses, *, window_seconds=10.0):
     adapter.add_nzb.return_value = 'job1'
     adapter.get_status.side_effect = list(statuses)
     clock = _FakeClock()
+    snapshot_patch_kwargs = {'return_value': ('fixed', 1, 0.0)} if snapshot is None else snapshot
     with patch('core.download_plugins.usenet.get_active_usenet_adapter', return_value=adapter), \
          patch('core.download_plugins.usenet.run_async', side_effect=lambda x: x), \
          patch('core.download_plugins.usenet.get_completed_no_path_window_seconds',
                return_value=window_seconds), \
          patch('core.download_plugins.usenet.time', clock), \
+         patch('core.download_plugins.usenet.snapshot_incomplete_path',
+               **snapshot_patch_kwargs), \
          patch('core.download_plugins.usenet.collect_audio_after_extraction',
                return_value=[Path('/done/track1.flac')]):
         plugin._download_thread(download_id, 'http://x/y.nzb')
@@ -428,8 +508,9 @@ def test_usenet_thread_waits_out_completed_no_path_then_finalizes(tmp_path: Path
 
 def test_usenet_thread_falls_back_to_incomplete_path_when_storage_never_lands() -> None:
     """If ``storage`` never lands but SAB exposed an ``incomplete_path``
-    (files physically on disk), the thread recovers via the in-progress
-    dir as a last resort rather than erroring a completed download."""
+    (files physically on disk) whose fingerprint has stopped changing
+    (P2-21), the thread recovers via the in-progress dir as a last resort
+    rather than erroring a completed download."""
     plugin = UsenetDownloadPlugin()
     completed_no_path = UsenetStatus(
         id='job1', name='A', state='completed', progress=1.0,
@@ -437,8 +518,59 @@ def test_usenet_thread_falls_back_to_incomplete_path_when_storage_never_lands() 
         save_path=None, incomplete_path='/sab/incomplete/A',
     )
     # Window of 10s / 2s interval = 5 polls, floored at the miss
-    # threshold; supply plenty so the fallback fires.
+    # threshold; supply plenty so the fallback (plus one extra
+    # stability-confirmation poll) fires.
     row = _drive_download_thread(plugin, [completed_no_path] * 12)
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['audio_files'] == [str(Path('/done/track1.flac'))]
+
+
+def test_usenet_thread_waits_for_incomplete_path_to_stop_changing() -> None:
+    """P2-21: the window elapsing alone must not trigger the fallback —
+    while the client is still writing into ``incomplete_path`` (fingerprint
+    keeps changing), the thread keeps polling instead of finalizing a
+    possibly-partial directory. Once it stabilizes, it recovers."""
+    plugin = UsenetDownloadPlugin()
+    completed_no_path = UsenetStatus(
+        id='job1', name='A', state='completed', progress=1.0,
+        size=100, downloaded=100, download_speed=0,
+        save_path=None, incomplete_path='/sab/incomplete/A',
+    )
+    growing = iter([1, 2, 3, 4, 4, 4, 4, 4])
+    row = _drive_download_thread(
+        plugin, [completed_no_path] * 20,
+        snapshot={'side_effect': lambda path: (next(growing, 4), 1, 0.0)},
+    )
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['audio_files'] == [str(Path('/done/track1.flac'))]
+
+
+def test_usenet_thread_resolves_incomplete_path_before_stability_check() -> None:
+    """P2-21 follow-up: a client-container incomplete_path unreadable from
+    here must be remapped via resolve_reported_save_path BEFORE the
+    stability snapshot — the same fix applied to poll_album_download's
+    stability gate — otherwise a split-container SAB/NZBGet mount can
+    never stabilize and the download hangs until the outer deadline."""
+    plugin = UsenetDownloadPlugin()
+    completed_no_path = UsenetStatus(
+        id='job1', name='A', state='completed', progress=1.0,
+        size=100, downloaded=100, download_speed=0,
+        save_path=None, incomplete_path='/client-container/incomplete/A',
+    )
+    with patch(
+        'core.download_plugins.usenet.resolve_reported_save_path',
+        side_effect=lambda p, *a, **kw: (
+            '/local/incomplete/A' if p == '/client-container/incomplete/A' else p
+        ),
+    ):
+        row = _drive_download_thread(
+            plugin, [completed_no_path] * 12,
+            snapshot={
+                'side_effect': lambda path: (
+                    (100, 3, 1.0) if path == '/local/incomplete/A' else None
+                ),
+            },
+        )
     assert row['state'] == 'Completed, Succeeded'
     assert row['audio_files'] == [str(Path('/done/track1.flac'))]
 

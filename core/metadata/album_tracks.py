@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
+from core.source_ids import id_keys
 from core.metadata.lookup import MetadataLookupOptions
 from core.metadata.types import Album
 from utils.logging_config import get_logger
@@ -98,19 +100,63 @@ def _search_albums_for_source(source: str, client: Any, query: str, limit: int =
         return []
 
 
+def _artist_catalog_weight(artist: Any) -> tuple:
+    """Rank same-named search results: catalog size, then popularity.
+
+    §62.5: providers carry FRAGMENT artist entries under the exact same name
+    (Deezer lists five "Hiroyuki Sawano"s; the first exact hit had 4 albums,
+    the real one 104). Catalog size (`nb_album`) is the direct discriminator;
+    fan/follower counts (`nb_fan`, Spotify's `followers.total`, `popularity`)
+    break remaining ties. Missing signals rank lowest, preserving the old
+    first-exact-hit behavior when a source reports nothing."""
+    def _num(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    albums = _num(_extract_lookup_value(artist, 'nb_album', 'album_count'))
+    followers = _extract_lookup_value(artist, 'followers')
+    if isinstance(followers, dict):
+        followers = followers.get('total')
+    fans = max(_num(_extract_lookup_value(artist, 'nb_fan')), _num(followers))
+    return (albums, fans, _num(_extract_lookup_value(artist, 'popularity')))
+
+
 def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Optional[Any]:
+    """Pick the search result whose artist NAME matches, or None.
+
+    Exact (normalized) name wins; among SEVERAL exact hits the largest
+    catalog/most-popular entry is chosen (§62.5 — provider-side fragment
+    artists share the real entry's exact name). Otherwise the closest fuzzy
+    match, but only if it's similar enough. Never a blind first result — that
+    handed back an unrelated popular artist (#988: a Deezer name-search for
+    "The Outfield" returning The Beatles) when the source's search doesn't
+    actually contain the artist we asked for. Returning None lets the caller
+    fall back / show nothing instead of the wrong artist's catalogue.
+    """
     if not search_results:
         return None
-
     target_name = _normalize_artist_name(artist_name)
+    if not target_name:
+        return None
+    exact: List[Any] = []
+    best, best_ratio = None, 0.0
     for artist in search_results:
         candidate_name = _normalize_artist_name(
             _extract_lookup_value(artist, 'name', 'artist_name', 'title')
         )
+        if not candidate_name:
+            continue
         if candidate_name == target_name:
-            return artist
-
-    return search_results[0]
+            exact.append(artist)
+            continue
+        ratio = SequenceMatcher(None, target_name, candidate_name).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = artist, ratio
+    if exact:
+        return max(exact, key=_artist_catalog_weight)
+    return best if best_ratio >= 0.85 else None
 
 
 def _extract_track_items(api_tracks: Any) -> List[Dict[str, Any]]:
@@ -447,10 +493,29 @@ def get_album_tracks_for_source(source: str, album_id: str):
         return None
 
 
-def get_album_for_source(source: str, album_id: str):
+def get_album_for_source(source: str, album_id: str, artist_name: str = '', album_name: str = ''):
     """Get album metadata for an exact source."""
     client = metadata_registry.get_client_for_source(source)
-    if not client or not hasattr(client, 'get_album'):
+    if not client:
+        return None
+
+    if source == 'bandcamp':
+        # Bandcamp has no numeric-ID lookup API — everything is URL-based —
+        # so this resolves by name regardless of album_id, then reshapes
+        # into the 'Spotify-shaped' dict this module's extraction helpers
+        # expect (Bandcamp's own field names don't match their alias chains).
+        if not (artist_name and album_name):
+            return None
+        try:
+            from core.bandcamp_client import release_to_spotify_shape
+            release = client.search_album(artist_name, album_name)
+            if not release:
+                return None
+            return release_to_spotify_shape(release, album_id, album_name, artist_name)
+        except Exception:
+            return None
+
+    if not hasattr(client, 'get_album'):
         return None
 
     try:
@@ -459,6 +524,52 @@ def get_album_for_source(source: str, album_id: str):
         return client.get_album(album_id)
     except Exception:
         return None
+
+
+def resolve_artist_identity(
+    artist_name: str,
+    *,
+    options: Optional[MetadataLookupOptions] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve an artist NAME to a single provider identity.
+
+    Walks the source-priority chain; for each source it searches by name and
+    takes the strict ``_pick_best_artist_match`` result (exact name wins; the
+    §62.5 catalog-weight tiebreak; a ≥0.85 fuzzy at most; never an unrelated
+    popular artist). Returns the first source that yields a match as
+    ``{source, artist_id, name, image_url, genres}``, or ``None`` when no
+    provider models this exact name as one artist — the expected outcome for a
+    genuine collaboration string like "Ian Asher & Galantis".
+    """
+    name = str(artist_name or '').strip()
+    if not name:
+        return None
+    options = options or MetadataLookupOptions()
+    for source in _get_source_chain_for_lookup(options):
+        client = metadata_registry.get_client_for_source(source)
+        if not client:
+            continue
+        results = _search_artists_for_source(source, client, name, limit=5)
+        best = _pick_best_artist_match(results, name)
+        if best is None:
+            continue
+        provider_id = _extract_lookup_value(best, 'id', 'artist_id')
+        if not provider_id:
+            continue
+        genres = _extract_lookup_value(best, 'genres', default=[]) or []
+        return {
+            'source': source,
+            'artist_id': str(provider_id),
+            'name': str(
+                _extract_lookup_value(best, 'name', 'artist_name', 'title') or name
+            ),
+            'image_url': _extract_lookup_value(
+                best, 'image_url', 'picture_xl', 'picture_big', 'picture',
+                'thumb_url', 'image',
+            ),
+            'genres': list(genres) if isinstance(genres, (list, tuple)) else [],
+        }
+    return None
 
 
 def get_artist_albums_for_source(
@@ -480,6 +591,13 @@ def get_artist_albums_for_source(
             'album_type': album_type,
             'limit': limit,
         }
+        if source == 'jiosaavn':
+            kwargs['artist_name'] = artist_name
+        if source == 'bandcamp':
+            # Bandcamp has no numeric-ID lookup API — everything is
+            # URL-based — so it always resolves by name regardless of
+            # target_artist_id (same fallback shape as JioSaavn above).
+            kwargs['artist_name'] = artist_name
         if source == 'spotify':
             kwargs['allow_fallback'] = False
             kwargs['skip_cache'] = skip_cache
@@ -517,6 +635,18 @@ def get_artist_albums_for_source(
         return None
 
 
+def _album_reference_source_columns() -> Dict[str, tuple]:
+    """Per-source album ID column names used by ``resolve_album_reference``."""
+    return {
+        'spotify': id_keys('spotify', 'album'),
+        'deezer': id_keys('deezer', 'album'),
+        'itunes': id_keys('itunes', 'album'),
+        'discogs': id_keys('discogs', 'album'),
+        'hydrabase': ('soul_id', 'hydrabase_album_id'),
+        'jiosaavn': id_keys('jiosaavn', 'album'),
+    }
+
+
 def resolve_album_reference(
     album_id: str,
     preferred_source: Optional[str] = None,
@@ -538,13 +668,7 @@ def resolve_album_reference(
             if override:
                 source_chain = [override] + [source for source in source_chain if source != override]
 
-            source_columns = {
-                'spotify': ('spotify_album_id',),
-                'deezer': ('deezer_id', 'deezer_album_id'),
-                'itunes': ('itunes_album_id',),
-                'discogs': ('discogs_id',),
-                'hydrabase': ('soul_id', 'hydrabase_album_id'),
-            }
+            source_columns = _album_reference_source_columns()
 
             select_columns = ["a.title", "ar.name as artist_name"]
             for columns in source_columns.values():
@@ -628,7 +752,7 @@ def get_artist_album_tracks(
         if not client:
             continue
 
-        album_data = get_album_for_source(source, album_id)
+        album_data = get_album_for_source(source, album_id, artist_name=artist_name, album_name=album_name)
         if not album_data:
             continue
 
@@ -667,7 +791,7 @@ def get_artist_album_tracks(
             if not client:
                 continue
 
-            album_data = get_album_for_source(source, resolved_album_id)
+            album_data = get_album_for_source(source, resolved_album_id, artist_name=artist_name, album_name=album_name)
             if not album_data:
                 continue
 

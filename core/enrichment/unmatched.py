@@ -32,6 +32,8 @@ SERVICE_ENTITY_SUPPORT = {
     'tidal': ('artist', 'album', 'track'),
     'qobuz': ('artist', 'album', 'track'),
     'amazon': ('artist', 'album', 'track'),
+    'bandcamp': ('album', 'track'),          # no artist-level id column (see core/bandcamp_worker.py)
+    'jiosaavn': ('artist', 'album', 'track'),
     # Relationship enrichment (not a metadata source): the Similar Artists worker
     # only operates at the artist level, and its <service>_match_status tracks
     # whether MusicMap similars were fetched (not a source-id match). So the
@@ -216,7 +218,29 @@ def build_reset_query(
     table = meta['table']
     ms = match_status_column(service)
     la = last_attempted_column(service)
-    set_clause = f"SET {ms} = NULL, {la} = NULL"
+    set_parts = [f"{ms} = NULL", f"{la} = NULL"]
+
+    # Also forget the stored source ID so re-matching actually RE-RESOLVES the
+    # entity. Without this, the worker hits its existing-id short-circuit, sees
+    # the old (possibly WRONG) id and just re-confirms it — which is why "click
+    # to rematch" never fixed a mis-matched same-name artist (#868). Tracks keep
+    # their ids in file tags rather than a column, so only artist/album clear one
+    # — except Bandcamp, whose canonical match handle (bandcamp_url) lives in a
+    # real column on BOTH albums and tracks, so it must be nulled for tracks too
+    # or the worker re-confirms the old release from bandcamp_url.
+    if entity_type in ('artist', 'album') or service == 'bandcamp':
+        try:
+            from core.source_ids import id_column
+            id_col = id_column(service, entity_type)
+        except Exception:
+            id_col = None
+        if id_col:
+            set_parts.append(f"{id_col} = NULL")
+    # Bandcamp carries a supplementary numeric id alongside its canonical URL;
+    # clear it too so a stale id can't linger past a reset.
+    if service == 'bandcamp':
+        set_parts.append("bandcamp_id = NULL")
+    set_clause = "SET " + ", ".join(set_parts)
 
     if scope == 'item':
         if not entity_id:

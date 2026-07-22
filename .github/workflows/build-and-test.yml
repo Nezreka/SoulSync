@@ -34,3 +34,46 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest
+
+  webui:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: webui
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          # Matches the Dockerfile's node:24-slim webui-builder stage
+          node-version: 24
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint and format check
+        run: npm run check
+
+      - name: Build webui
+        run: npm run build
+
+      # Audit §16.1: the generated route tree must be committed in sync with
+      # the route files. A diff here means someone edited routes without
+      # committing the regenerated webui/src/routeTree.gen.ts (or edited the
+      # generated file by hand) — routes would differ between dev and the
+      # checked-in tree.
+      - name: Route tree must not drift
+        run: |
+          git diff --exit-code -- src/routeTree.gen.ts || {
+            echo "::error file=webui/src/routeTree.gen.ts::routeTree.gen.ts is stale — run the webui build and commit the regenerated file."
+            exit 1
+          }
+
+      - name: Run tests
+        run: npm test

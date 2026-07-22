@@ -24,10 +24,10 @@ from typing import Optional
 # to the local media server) and repair (user-scheduled job runner, not a
 # background API drip) intentionally keep running.
 ALL_YIELD_WORKERS = (
-    'musicbrainz', 'audiodb', 'discogs', 'deezer',
+    'musicbrainz', 'audiodb', 'discogs', 'deezer', 'jiosaavn',
     'spotify-enrichment', 'itunes-enrichment', 'lastfm-enrichment',
     'genius-enrichment', 'tidal-enrichment', 'qobuz-enrichment',
-    'amazon-enrichment', 'similar_artists', 'hydrabase', 'soulid',
+    'amazon-enrichment', 'bandcamp-enrichment', 'similar_artists', 'hydrabase', 'soulid',
 )
 
 # The sources discovery contends with (track matching APIs).

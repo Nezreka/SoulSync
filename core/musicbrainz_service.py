@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from utils.logging_config import get_logger
 from core.musicbrainz_client import MusicBrainzClient
+from core.worker_utils import catalog_overlap_score, pick_artist_by_catalog
 from database.music_database import MusicDatabase
 
 logger = get_logger("musicbrainz_service")
@@ -117,23 +118,51 @@ class MusicBrainzService:
             if conn:
                 conn.close()
     
-    def match_artist(self, artist_name: str) -> Optional[Dict[str, Any]]:
+    def _candidate_release_titles(self, mbid: str) -> list:
+        """Release-group titles for a candidate MBID — the catalog side of
+        same-name artist disambiguation."""
+        if not mbid:
+            return []
+        try:
+            data = self.mb_client.get_artist(mbid, includes=['release-groups'])
+        except Exception:
+            return []
+        groups = (data or {}).get('release-groups') or []
+        return [g.get('title') for g in groups if isinstance(g, dict) and g.get('title')]
+
+    def match_artist(self, artist_name: str, owned_titles: Optional[list] = None) -> Optional[Dict[str, Any]]:
         """
-        Match an artist by name to MusicBrainz
-        
+        Match an artist by name to MusicBrainz.
+
+        ``owned_titles`` — the library artist's owned album titles. When given and
+        more than one strong same-name candidate exists, the one whose release
+        groups overlap those owned titles is chosen (disambiguates the ~5 "Rone"s);
+        omitted → falls back to the highest-confidence candidate as before.
+
         Returns:
             Dict with 'mbid', 'name', 'confidence' or None if no good match
         """
         # Check cache first
         cached = self._check_cache('artist', artist_name)
         if cached:
-            logger.debug(f"Cache hit for artist '{artist_name}'")
-            return {
-                'mbid': cached['musicbrainz_id'],
-                'name': artist_name,
-                'confidence': cached['confidence'],
-                'cached': True
-            }
+            cached_mbid = cached.get('musicbrainz_id')
+            # Don't trust a cached mbid whose catalog has ZERO overlap with the
+            # albums this library owns — that's the wrong same-name artist (and a
+            # re-match would otherwise be blocked for up to the 90-day cache TTL,
+            # #868). Fall through to a fresh, disambiguated resolve in that case.
+            stale_wrong_match = bool(
+                cached_mbid and owned_titles
+                and catalog_overlap_score(owned_titles, self._candidate_release_titles(cached_mbid)) == 0
+            )
+            if not stale_wrong_match:
+                logger.debug(f"Cache hit for artist '{artist_name}'")
+                return {
+                    'mbid': cached_mbid,
+                    'name': artist_name,
+                    'confidence': cached['confidence'],
+                    'cached': True
+                }
+            logger.debug(f"Cached MB match for '{artist_name}' has no owned-catalog overlap — re-resolving")
         
         # Search MusicBrainz
         try:
@@ -144,25 +173,30 @@ class MusicBrainzService:
                 self._save_to_cache('artist', artist_name, None, None, None, 0)
                 return None
             
-            # Find best match
-            best_match = None
-            best_confidence = 0
-            
+            # Score every candidate (name similarity 60% + MB's own relevance 40%).
+            scored = []
             for result in results:
                 mb_name = result.get('name', '')
                 mb_score = result.get('score', 0)  # MusicBrainz search score
-                
-                # Calculate our own similarity
                 similarity = self._calculate_similarity(artist_name, mb_name)
-                
-                # Combine MusicBrainz score with our similarity (weighted)
                 # Cap at 100 to prevent edge cases where MB score > 100
                 confidence = min(100, int((similarity * 60) + (mb_score / 100 * 40)))
-                
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_match = result
-            
+                scored.append((confidence, result))
+            scored.sort(key=lambda s: s[0], reverse=True)
+
+            # Among the strong (>=70) candidates, disambiguate same-name artists by
+            # which one's release groups overlap the albums this library owns.
+            gated = [r for conf, r in scored if conf >= 70]
+            best_match = None
+            best_confidence = scored[0][0] if scored else 0
+            if gated:
+                chosen, _overlap = pick_artist_by_catalog(
+                    gated, owned_titles or [],
+                    lambda r: self._candidate_release_titles(r.get('id')),
+                )
+                best_match = chosen
+                best_confidence = next(conf for conf, r in scored if r is chosen)
+
             # Only return matches with confidence >= 70%
             if best_match and best_confidence >= 70:
                 mbid = best_match.get('id')

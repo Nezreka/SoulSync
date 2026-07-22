@@ -179,6 +179,14 @@ function initAccentColorListeners() {
             applyReduceEffects(reduceEffectsCheckbox.checked);
         });
     }
+
+    // Max Performance toggle — apply immediately on change
+    const maxPerfCheckbox = document.getElementById('max-performance-enabled');
+    if (maxPerfCheckbox) {
+        maxPerfCheckbox.addEventListener('change', () => {
+            applyMaxPerformance(maxPerfCheckbox.checked);
+        });
+    }
 }
 
 function applyReduceEffects(enabled) {
@@ -211,18 +219,146 @@ function applyReduceEffects(enabled) {
     }
 }
 
+// Max Performance overrides Worker Orbs / Particles / Reduce Effects, so while it's
+// on we lock those checkboxes (greyed + visually off) and restore them when it's
+// off. We never fire their change handlers, so the user's real saved prefs
+// (window._workerOrbsEnabled / _particlesEnabled / the reduce-effects localStorage)
+// stay intact — saving reads those, not these forced-off boxes.
+function _syncMaxPerfDependentToggles(maxPerfOn) {
+    const ids = ['worker-orbs-enabled', 'particles-enabled', 'reduce-effects-enabled'];
+    ids.forEach(id => {
+        const cb = document.getElementById(id);
+        if (!cb) return;
+        const group = cb.closest('.form-group');
+        if (maxPerfOn) {
+            cb.disabled = true;
+            cb.checked = false;
+            if (group) group.classList.add('setting-overridden');
+        } else {
+            cb.disabled = false;
+            if (group) group.classList.remove('setting-overridden');
+            // Restore each box to the user's real per-device preference.
+            if (id === 'worker-orbs-enabled') cb.checked = window._workerOrbsEnabled !== false;
+            else if (id === 'particles-enabled') cb.checked = window._particlesEnabled === true;
+            else if (id === 'reduce-effects-enabled') cb.checked = localStorage.getItem('soulsync-reduce-effects') === '1';
+        }
+    });
+}
+
+// Max Performance — the nuclear low-power switch for software-rendered / no-GPU
+// setups (e.g. Docker). Superset of Reduce Visual Effects: body.max-performance CSS
+// kills the expensive GPU properties AND all animation/transitions, while here we
+// halt every JS canvas loop (particles + worker orbs; cursor-glow + API sparks gate
+// on window._maxPerfActive themselves).
+function applyMaxPerformance(enabled) {
+    if (enabled) {
+        document.body.classList.add('max-performance');
+    } else {
+        document.body.classList.remove('max-performance');
+    }
+    window._maxPerfActive = enabled;
+    localStorage.setItem('soulsync-max-performance', enabled ? '1' : '0');
+
+    const pcanvas = document.getElementById('page-particles-canvas');
+    if (enabled) {
+        if (window.pageParticles) window.pageParticles.stop();
+        if (pcanvas) pcanvas.style.display = 'none';
+        if (window.workerOrbs) window.workerOrbs.setPage('_disabled');
+    } else {
+        // Restore whatever the user's own toggles (and reduce-effects) still allow.
+        const reduce = window._reduceEffectsActive === true;
+        const activePage = document.querySelector('.page.active');
+        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        if (!reduce && window._particlesEnabled !== false) {
+            if (pcanvas) pcanvas.style.display = '';
+            if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
+        }
+        if (window._workerOrbsEnabled !== false && window.workerOrbs && activeId) {
+            window.workerOrbs.setPage(activeId);
+        }
+    }
+    _syncMaxPerfDependentToggles(enabled);
+}
+
 // Bootstrap accent and reduce-effects from localStorage instantly (prevents flash)
 (function () {
-    if (localStorage.getItem('soulsync-reduce-effects') === '1') {
+    // Auto performance mode on likely-weak hardware. Only acts when this device has
+    // NO stored preference yet (null) — so it runs at most once and never overrides
+    // a choice the user (or a prior auto-run) made. Device-scoped via localStorage on
+    // purpose: a weak laptop shouldn't flip the server setting for the user's other
+    // machines. Mobile already disables these effects elsewhere, so skip it here.
+    if (localStorage.getItem('soulsync-reduce-effects') === null) {
+        const ua = navigator.userAgent || '';
+        const isMobile = window.innerWidth <= 768 || /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+        const cores = navigator.hardwareConcurrency || 0;   // widely supported
+        const mem = navigator.deviceMemory || 0;            // Chromium only; 0 elsewhere
+        // Conservative — avoid flagging capable machines: <=2 cores, or <=2GB, or a
+        // low-mid box that's low on BOTH (<=4 cores AND <=4GB). A 4-core/8GB laptop
+        // (mem>4) is NOT flagged; Firefox/Safari (mem unknown) only trip on <=2 cores.
+        const weak = !isMobile && (
+            (cores > 0 && cores <= 2) ||
+            (mem > 0 && mem <= 2) ||
+            (cores > 0 && cores <= 4 && mem > 0 && mem <= 4)
+        );
+        if (weak) {
+            localStorage.setItem('soulsync-reduce-effects', '1');
+            window._autoPerfModeApplied = true;   // show the explainer toast once the UI is up
+        }
+    }
+
+    if (window._autoPerfModeApplied) {
+        // Toast lives in downloads.js (loaded separately) — retry until it's defined.
+        const fireToast = (tries) => {
+            if (typeof showToast === 'function') {
+                showToast('Performance mode is on — this looks like a lower-power device. ' +
+                          'Turn effects back on in Settings → Appearance.', 'info');
+            } else if (tries < 40) {
+                setTimeout(() => fireToast(tries + 1), 250);
+            }
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => fireToast(0));
+        } else {
+            fireToast(0);
+        }
+    }
+
+    const reduceEffectsSaved = localStorage.getItem('soulsync-reduce-effects');
+    if (reduceEffectsSaved === '1') {
         document.body.classList.add('reduce-effects');
         window._reduceEffectsActive = true;
+    } else if (reduceEffectsSaved === '0') {
+        document.body.classList.remove('reduce-effects');
+        window._reduceEffectsActive = false;
+    } else if (window._reduceEffectsActive) {
+        document.body.classList.add('reduce-effects');
+    }
+    // Max Performance — device-scoped (localStorage wins over the server default,
+    // same as reduce-effects). The window flag is seeded server-side in index.html
+    // for a flash-free first paint; localStorage reconciles it here.
+    const maxPerfSaved = localStorage.getItem('soulsync-max-performance');
+    if (maxPerfSaved === '1') {
+        document.body.classList.add('max-performance');
+        window._maxPerfActive = true;
+    } else if (maxPerfSaved === '0') {
+        document.body.classList.remove('max-performance');
+        window._maxPerfActive = false;
+    } else if (window._maxPerfActive) {
+        document.body.classList.add('max-performance');
     }
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
-    // Bootstrap particles setting from localStorage
+    // Bootstrap particles setting from localStorage — OFF by default (continuous
+    // full-page canvas = real GPU cost); only on when the user explicitly enabled it.
     const particlesSaved = localStorage.getItem('soulsync-particles');
-    if (particlesSaved === 'false') {
+    if (particlesSaved === 'true') {
+        window._particlesEnabled = true;
+    } else if (particlesSaved === 'false') {
         window._particlesEnabled = false;
+    } else if (typeof window._particlesEnabled !== 'boolean') {
+        window._particlesEnabled = false;
+    }
+    if (!window._particlesEnabled) {
         const canvas = document.getElementById('page-particles-canvas');
         if (canvas) canvas.style.display = 'none';
     }
@@ -230,7 +366,123 @@ function applyReduceEffects(enabled) {
     const workerOrbsSaved = localStorage.getItem('soulsync-worker-orbs');
     if (workerOrbsSaved === 'false') {
         window._workerOrbsEnabled = false;
+    } else if (workerOrbsSaved === 'true') {
+        window._workerOrbsEnabled = true;
+    } else if (typeof window._workerOrbsEnabled !== 'boolean') {
+        window._workerOrbsEnabled = true;
     }
+})();
+
+async function bootstrapServerAppearanceSettings() {
+    try {
+        const response = await fetch('/api/settings', { credentials: 'same-origin' });
+        const settings = await response.json();
+        if (!response.ok || !settings || typeof settings !== 'object' || settings.error) return;
+
+        const appearance = settings.ui_appearance || {};
+        const preset = appearance.accent_preset || '#1db954';
+        const custom = appearance.accent_color || '#1db954';
+        const accent = preset === 'custom' ? custom : preset;
+        applyAccentColor(accent);
+
+        if (Object.prototype.hasOwnProperty.call(appearance, 'particles_enabled')) {
+            applyParticlesSetting(appearance.particles_enabled !== false);
+        }
+        if (Object.prototype.hasOwnProperty.call(appearance, 'worker_orbs_enabled')) {
+            applyWorkerOrbsSetting(appearance.worker_orbs_enabled !== false);
+        }
+        if (localStorage.getItem('soulsync-reduce-effects') === null) {
+            applyReduceEffects(appearance.reduce_effects === true);
+        }
+    } catch (error) {
+        console.warn('Could not bootstrap appearance settings:', error);
+    }
+}
+
+bootstrapServerAppearanceSettings();
+
+// ── Password-manager autofill suppression ──────────────────────────────
+// Bitwarden / 1Password / LastPass etc. attach an inline autofill overlay to
+// every <input>/<select>/<textarea> and REBUILD it on every DOM mutation. This
+// app mutates the DOM continuously (live service status, download/automation
+// progress bars, the per-second "next run" countdown, innerHTML hub rebuilds),
+// so the managers' whole-document MutationObserver storms the main thread. A
+// captured DevTools trace (2026-06-29) showed Bitwarden's
+// bootstrap-autofill-overlay.js (setupOverlayOnField / setupOverlayListeners)
+// using ~6× the CPU of the entire SoulSync app — almost the whole freeze.
+//
+// None of these fields are credentials (they're search boxes, filters, config),
+// so we mark them ignored and the managers skip them: once a field carries the
+// ignore hint, the overlay is never (re)attached, so the mutation→re-setup storm
+// stops. Real sign-in fields (password type + the auth overlays) are left alone
+// so the user can still autofill the login / PIN screen. Purely additive data-*
+// attributes — no functional effect on the app, and a no-op for any manager that
+// doesn't honour them.
+(function suppressPasswordManagerAutofill() {
+    const SKIP_CONTAINERS = ['#login-overlay', '#launch-pin-overlay', '#profile-pin-dialog'];
+    const isCredentialField = (el) => {
+        if (el.type === 'password') return true;
+        return SKIP_CONTAINERS.some(sel => typeof el.closest === 'function' && el.closest(sel));
+    };
+    const IGNORE_ATTRS = ['data-bwignore', 'data-1p-ignore', 'data-lpignore', 'data-form-type'];
+    const tag = (el) => {
+        if (el.dataset.pmTagged) return;            // tagged once — never touch again
+        if (isCredentialField(el)) return;          // leave real login fields for the manager
+        el.dataset.pmTagged = '1';
+        el.setAttribute('data-bwignore', 'true');   // Bitwarden
+        el.setAttribute('data-1p-ignore', '');      // 1Password
+        el.setAttribute('data-lpignore', 'true');   // LastPass
+        el.setAttribute('data-form-type', 'other'); // Dashlane
+        if (!el.hasAttribute('autocomplete')) el.setAttribute('autocomplete', 'off');
+    };
+    const sweep = () => {
+        document.querySelectorAll(
+            'input:not([data-pm-tagged]),textarea:not([data-pm-tagged]),select:not([data-pm-tagged])'
+        ).forEach(tag);
+    };
+
+    // Debounce: a burst of DOM mutations triggers at most one sweep per idle slot.
+    // The `:not([data-pm-tagged])` selector makes the steady-state sweep a no-op
+    // (it only ever processes freshly-added inputs), and our own attribute writes
+    // don't re-arm the observer (it watches childList, not attributes).
+    let pending = false, observer = null, disabled = false;
+    const scheduleSweep = () => {
+        if (disabled || pending) return;
+        pending = true;
+        const run = () => { pending = false; if (!disabled) sweep(); };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 400 });
+        else setTimeout(run, 300);
+    };
+
+    const startObserving = () => {
+        if (observer) return;
+        observer = new MutationObserver(scheduleSweep);
+        observer.observe(document.body, { childList: true, subtree: true });
+    };
+    const start = () => { sweep(); startObserving(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+
+    // Benchmark hook (not used by the app): toggle the suppression at runtime so a
+    // before/after can be measured without rebuilding. disable() strips the ignore
+    // hints + stops the observer, so password managers re-attach their autofill
+    // overlay — i.e. the pre-fix "before" behaviour. enable() re-tags + resumes.
+    window.__pmSuppress = {
+        disable() {
+            disabled = true;
+            if (observer) { observer.disconnect(); observer = null; }
+            document.querySelectorAll('[data-pm-tagged]').forEach((el) => {
+                IGNORE_ATTRS.forEach((a) => el.removeAttribute(a));
+                delete el.dataset.pmTagged;
+            });
+        },
+        enable() {
+            disabled = false;
+            sweep();
+            startObserving();
+        },
+        get isActive() { return !disabled; },
+    };
 })();
 
 // ── Profile System ─────────────────────────────────────────────
@@ -274,11 +526,23 @@ function isPageAllowed(pageId) {
     if (currentProfile.id === 1) return true;
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
+    // Library v2 replaces the legacy Library surface and therefore inherits
+    // that page permission.  It must not become a permission bypass merely
+    // because its route id differs from the persisted `library` page id.
+    if (normalizedPageId === 'library-v2') {
+        const ap = normalizeProfilePageList(currentProfile.allowed_pages);
+        return !ap || ap.includes('library') || ap.includes('library-v2');
+    }
     if (normalizedPageId === 'settings') return currentProfile.is_admin;
     if (normalizedPageId === 'artist-detail') {
         const ap = normalizeProfilePageList(currentProfile.allowed_pages);
         if (!ap) return true;
         return ap.includes('library') || ap.includes('search');
+    }
+    if (normalizedPageId === 'label-detail') {
+        const ap = normalizeProfilePageList(currentProfile.allowed_pages);
+        if (!ap) return true;
+        return ap.includes('search') || ap.includes('watchlist') || ap.includes('library');
     }
     const ap = normalizeProfilePageList(currentProfile.allowed_pages);
     if (!ap) return true; // null = all pages
@@ -1116,6 +1380,15 @@ function updateProfileIndicator() {
     const statusSection = document.querySelector('.status-section--clickable');
     if (statusSection) statusSection.classList.toggle('status-section--locked', !currentProfile.is_admin);
 
+    // My Accounts (per-profile streaming OAuth) and My Settings (per-profile
+    // server library) are inert for admin — admin uses the global app account
+    // for every service and the full Settings page. Hide both for admin; keep
+    // them for non-admins, who actually get a connect/library UI.
+    const myAccountsBtn = document.getElementById('my-accounts-btn');
+    const personalSettingsBtn = document.getElementById('personal-settings-btn');
+    if (myAccountsBtn) myAccountsBtn.style.display = currentProfile.is_admin ? 'none' : '';
+    if (personalSettingsBtn) personalSettingsBtn.style.display = currentProfile.is_admin ? 'none' : '';
+
     indicator.onclick = async () => {
         const res = await fetch('/api/profiles');
         const data = await res.json();
@@ -1136,10 +1409,24 @@ function updateProfileIndicator() {
         } else if (currentProfile.id === 1) {
             btn.style.display = ''; // Root admin sees all
         } else {
-            const ap = currentProfile.allowed_pages;
-            btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
+            btn.style.display = isPageAllowed(page) ? '' : 'none';
         }
     });
+
+    // Video side — same model. Control surfaces (Import, Settings, Automations) are
+    // admin-only; the Overlay Studio launcher is admin-only via a body class (robust
+    // to the dashboard re-rendering it); everything else is a per-profile page toggle
+    // sharing the same allowed_pages list. Help/Issues always visible.
+    const VIDEO_ADMIN_ONLY = ['video-import', 'video-settings', 'video-automations'];
+    document.querySelectorAll('.video-nav .nav-button[data-video-page]').forEach(btn => {
+        const page = btn.getAttribute('data-video-page');
+        if (page === 'video-help' || page === 'video-issues') { btn.style.display = ''; return; }
+        if (VIDEO_ADMIN_ONLY.includes(page)) { btn.style.display = currentProfile.is_admin ? '' : 'none'; return; }
+        if (currentProfile.id === 1) { btn.style.display = ''; return; }
+        const ap = currentProfile.allowed_pages;
+        btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
+    });
+    document.body.classList.toggle('video-admin', !!currentProfile.is_admin);
 
     // Toggle download capability
     if (canDownload()) {
@@ -1147,6 +1434,34 @@ function updateProfileIndicator() {
     } else {
         document.body.classList.add('downloads-disabled');
     }
+
+    // Per-profile SIDE access (music | video | both): a single-side profile
+    // never sees the Music↔Video switcher — they just live on their side.
+    // Forcing the side here (boot + every profile switch) also covers a stale
+    // localStorage side from a previous profile on the same browser. The video
+    // API is enforced server-side too; this is the visible half.
+    const sides = profileAllowedSides();
+    const sideToggle = document.querySelector('.side-toggle');
+    if (sideToggle) sideToggle.style.display = sides === 'both' ? '' : 'none';
+    // Keep the pre-paint flash guard in sync: the html-level class (seeded from
+    // this cache by the inline <head> script) hides the switcher on the NEXT
+    // reload before the profile has even been fetched.
+    document.documentElement.classList.toggle('side-locked', sides !== 'both');
+    try { localStorage.setItem('ss_allowed_sides', sides); } catch (e) { /* ignore */ }
+    if (sides !== 'both' &&
+            document.body.getAttribute('data-side') !== sides &&
+            typeof window._switchAppSide === 'function') {
+        window._switchAppSide(sides, { force: true });
+    }
+}
+
+// Per-profile side access — 'music' | 'video' | 'both'. Admins always both;
+// non-admins default to music unless explicitly granted (mirrors the server's
+// get_profile resolution, so a stale payload can't widen access).
+function profileAllowedSides() {
+    if (!currentProfile || currentProfile.is_admin || currentProfile.id === 1) return 'both';
+    const s = currentProfile.allowed_sides;
+    return (s === 'video' || s === 'both') ? s : 'music';
 }
 
 // =====================
@@ -1681,6 +1996,15 @@ const PROFILE_PAGE_LABELS = {
     help: 'Help & Docs',
     settings: 'Settings',
     'artist-detail': 'Artist Detail',
+    'video-dashboard': 'Video · Dashboard',
+    'video-search': 'Video · Search',
+    'video-discover': 'Video · Discover',
+    'video-library': 'Video · Library',
+    'video-watchlist': 'Video · Watchlist',
+    'video-wishlist': 'Video · Wishlist',
+    'video-downloads': 'Video · Downloads',
+    'video-calendar': 'Video · Calendar',
+    'video-tools': 'Video · Tools',
 };
 
 function getProfilePageLabel(pageId) {
@@ -1726,11 +2050,20 @@ function getProfilePageAccessOptions(profileSettings = {}) {
     if (accessContainer) {
         accessContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
             if (seen.has(cb.value)) return;
+            // Permanent always-on pages (Help/Issues) are marked data-always-on
+            // in the template — checked+locked here too. Plain .disabled can't
+            // be the signal anymore: the create modal also disables a whole
+            // SIDE's boxes when its side-access radio excludes them, and that
+            // transient state must not leak into the edit form as "locked on".
+            const alwaysOn = cb.dataset.alwaysOn === '1';
             options.push({
                 value: cb.value,
-                label: cb.parentElement?.textContent?.trim() || getProfilePageLabel(cb.value),
-                checked: cb.disabled ? true : (allowedSet ? allowedSet.has(cb.value) : true),
-                disabled: cb.disabled,
+                // Use the canonical label (keeps the 'Video · …' prefix) so the edit
+                // form's FLAT list stays unambiguous; the create modal groups them
+                // under Music/Video dividers with plain labels instead.
+                label: getProfilePageLabel(cb.value),
+                checked: alwaysOn ? true : (allowedSet ? allowedSet.has(cb.value) : true),
+                disabled: alwaysOn,
             });
             seen.add(cb.value);
         });
@@ -1750,6 +2083,26 @@ function getProfilePageAccessOptions(profileSettings = {}) {
     }
 
     return options;
+}
+
+// Which side a profile page id belongs to — 'shared' pages (Help/Issues) are
+// exempt from side gating.
+function profilePageSide(pageId) {
+    if (pageId === 'help' || pageId === 'issues') return 'shared';
+    return String(pageId).startsWith('video-') ? 'video' : 'music';
+}
+
+// Grey out (and lock) the page checkboxes of a side the profile can't access.
+// Always-on boxes (Help/Issues) keep their permanent state.
+function applySidesToPageCheckboxes(checkboxes, sides) {
+    checkboxes.forEach(cb => {
+        if (cb.dataset.alwaysOn === '1') return;
+        const side = profilePageSide(cb.value);
+        const blocked = side !== 'shared' && sides !== 'both' && side !== sides;
+        cb.disabled = blocked;
+        const lbl = cb.closest('label');
+        if (lbl) lbl.style.opacity = blocked ? '0.35' : '';
+    });
 }
 
 function initProfileManagement() {
@@ -1789,6 +2142,19 @@ function initProfileManagement() {
     const firstSwatch = document.querySelector('.profile-color-swatch');
     if (firstSwatch) firstSwatch.classList.add('selected');
 
+    // Side access radios: greying out the excluded side's page checkboxes live.
+    // Default (from the template) is Music only — the shipped default.
+    const sideRadios = document.querySelectorAll('input[name="new-profile-sides"]');
+    const _createPageBoxes = () => Array.from(document.querySelectorAll('#new-profile-allowed-pages input[type="checkbox"]'));
+    const _selectedSides = () => {
+        const r = document.querySelector('input[name="new-profile-sides"]:checked');
+        return r ? r.value : 'music';
+    };
+    sideRadios.forEach(r => r.addEventListener('change', () => {
+        applySidesToPageCheckboxes(_createPageBoxes(), _selectedSides());
+    }));
+    applySidesToPageCheckboxes(_createPageBoxes(), _selectedSides());
+
     if (createBtn) {
         createBtn.onclick = async () => {
             const name = document.getElementById('new-profile-name').value.trim();
@@ -1814,7 +2180,8 @@ function initProfileManagement() {
                     password: loginPassword || undefined,
                     home_page: homePage,
                     allowed_pages: allowedPages,
-                    can_download: canDl
+                    can_download: canDl,
+                    allowed_sides: _selectedSides()
                 })
             });
             const data = await res.json();
@@ -1826,6 +2193,10 @@ function initProfileManagement() {
                 document.getElementById('new-profile-home-page').value = '';
                 pageCheckboxes.forEach(cb => cb.checked = true);
                 document.getElementById('new-profile-can-download').checked = true;
+                // Reset side access to the Music-only default.
+                const musicRadio = document.querySelector('input[name="new-profile-sides"][value="music"]');
+                if (musicRadio) { musicRadio.checked = true; }
+                applySidesToPageCheckboxes(_createPageBoxes(), 'music');
                 loadProfileManageList();
                 // Show admin PIN section if >1 profiles and admin has no PIN
                 checkAdminPinRequired();
@@ -2176,10 +2547,38 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     });
     form.appendChild(homeSelect);
 
-    // Admin-only settings: allowed pages & can_download
+    // Admin-only settings: side access, allowed pages & can_download
     let pageCheckboxes = [];
     let canDlCheckbox = null;
+    let selectedSides = null;
     if (isAdmin && !isEditingAdmin) {
+        // Side access — music | video | both, never nothing.
+        selectedSides = (profileSettings.allowed_sides === 'video' || profileSettings.allowed_sides === 'both')
+            ? profileSettings.allowed_sides : 'music';
+        const sidesLabel = document.createElement('label');
+        sidesLabel.className = 'profile-settings-label';
+        sidesLabel.textContent = 'Side Access';
+        form.appendChild(sidesLabel);
+
+        const sidesRow = document.createElement('div');
+        sidesRow.className = 'profile-sides-picker';
+        [['music', 'Music only'], ['video', 'Video only'], ['both', 'Music + Video']].forEach(([value, label]) => {
+            const lbl = document.createElement('label');
+            const r = document.createElement('input');
+            r.type = 'radio';
+            r.name = 'edit-profile-sides';
+            r.value = value;
+            r.checked = value === selectedSides;
+            r.addEventListener('change', () => {
+                selectedSides = value;
+                applySidesToPageCheckboxes(pageCheckboxes, selectedSides);
+            });
+            lbl.appendChild(r);
+            lbl.appendChild(document.createTextNode(' ' + label));
+            sidesRow.appendChild(lbl);
+        });
+        form.appendChild(sidesRow);
+
         const apLabel = document.createElement('label');
         apLabel.className = 'profile-settings-label';
         apLabel.textContent = 'Page Access';
@@ -2194,12 +2593,14 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
             cb.value = value;
             cb.checked = checked;
             cb.disabled = disabled;
+            if (disabled) cb.dataset.alwaysOn = '1';   // Help/Issues stay locked-on
             lbl.appendChild(cb);
             lbl.appendChild(document.createTextNode(' ' + label));
             apContainer.appendChild(lbl);
             pageCheckboxes.push(cb);
         });
         form.appendChild(apContainer);
+        applySidesToPageCheckboxes(pageCheckboxes, selectedSides);
 
         const dlLabel = document.createElement('label');
         dlLabel.className = 'profile-checkbox-label';
@@ -2232,6 +2633,7 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
             const allChecked = editablePageCheckboxes.every(cb => cb.checked);
             payload.allowed_pages = allChecked ? null : editablePageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
             payload.can_download = canDlCheckbox ? canDlCheckbox.checked : true;
+            if (selectedSides) payload.allowed_sides = selectedSides;
         }
 
         try {
@@ -2250,6 +2652,7 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
                     if (payload.home_page !== undefined) currentProfile.home_page = payload.home_page;
                     if (payload.allowed_pages !== undefined) currentProfile.allowed_pages = payload.allowed_pages;
                     if (payload.can_download !== undefined) currentProfile.can_download = payload.can_download;
+                    if (payload.allowed_sides !== undefined) currentProfile.allowed_sides = payload.allowed_sides;
                     updateProfileIndicator();
                     notifyProfileContextChanged();
                 }
@@ -2465,6 +2868,24 @@ async function _continueAppInit() {
     initApp();
 }
 
+// Reveal the native Library v2 entry after the server confirms availability
+// and the active profile owns the persisted `library` page permission.
+function revealLibraryV2NavIfEnabled() {
+    const navEl = document.getElementById('library-v2-nav');
+    if (!navEl) return;
+    fetch('/api/library/v2/enabled')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (data && data.enabled && isPageAllowed('library-v2')) {
+                navEl.style.display = '';
+            } else {
+                navEl.style.display = 'none';
+            }
+        })
+        .catch(() => { /* leave hidden */ });
+}
+document.addEventListener('DOMContentLoaded', revealLibraryV2NavIfEnabled);
+
 function initApp() {
     // Unlocked / authenticated — reveal the app (the lock screens hide it via
     // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
@@ -2541,7 +2962,7 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
-    'hydrabase', 'tools'
+    'hydrabase', 'tools', 'chat'
 ]);
 
 function _getPageFromPath() {
@@ -2564,12 +2985,19 @@ function _normalizeArtistDetailSource(source) {
     return value || 'library';
 }
 
-function buildArtistDetailPath(artistId, source = null) {
+function buildArtistDetailPath(artistId, source = null, name = null) {
     if (!artistId) {
         throw new Error('artistId is required for artist-detail navigation');
     }
     const normalizedSource = _normalizeArtistDetailSource(source);
-    return '/artist-detail/' + encodeURIComponent(normalizedSource) + '/' + encodeURIComponent(String(artistId));
+    let path = '/artist-detail/' + encodeURIComponent(normalizedSource) + '/' + encodeURIComponent(String(artistId));
+    // Some sources (Bandcamp) have no numeric-ID lookup API at all — the
+    // artist's display name has to travel with the URL, or a page load /
+    // browser-back landing on this route has nothing to resolve against.
+    if (name) {
+        path += '?name=' + encodeURIComponent(name);
+    }
+    return path;
 }
 
 function parseArtistDetailPath(pathname = window.location.pathname) {
@@ -2580,10 +3008,58 @@ function parseArtistDetailPath(pathname = window.location.pathname) {
     const artistId = decodeURIComponent(segs.slice(2).join('/'));
     if (!source || !artistId) return null;
 
+    const name = new URLSearchParams(window.location.search).get('name') || '';
+
     return {
         artistId,
         source: source.toLowerCase() === 'library' ? null : source,
+        name,
     };
+}
+
+// ---- Label detail (a record label's catalog, monitored like a watchlist) ----
+// A static legacy page; the label MBID rides the query string so a reload /
+// browser-back can re-resolve it. Purely additive, parallel to artist-detail
+// but far simpler (no dynamic route, no label stack).
+let _labelDetailState = { id: null, name: null };
+let _labelDetailReturnTo = 'search';   // where the Back button returns to
+
+function buildLabelDetailPath(labelId, name = null) {
+    if (!labelId) throw new Error('labelId is required for label-detail navigation');
+    // Real path-based route (like artist-detail) so a refresh reloads the page.
+    let path = '/label-detail/' + encodeURIComponent(String(labelId));
+    if (name) path += '?name=' + encodeURIComponent(name);
+    return path;
+}
+
+function parseLabelDetailPath(pathname = window.location.pathname) {
+    const segs = String(pathname || '').split('/').filter(Boolean);
+    if (segs[0] !== 'label-detail' || segs.length < 2) return null;
+    const id = decodeURIComponent(segs.slice(1).join('/'));
+    if (!id) return null;
+    const name = new URLSearchParams(window.location.search || '').get('name') || '';
+    return { id, name };
+}
+
+function navigateToLabelDetail(labelId, name = null, options = {}) {
+    if (!labelId) return;
+    // Remember where we came from so the label-detail Back button returns there
+    // (raw history.back() is unreliable through the SPA router).
+    if (typeof currentPage === 'string' && currentPage && currentPage !== 'label-detail') {
+        _labelDetailReturnTo = currentPage;
+    }
+    window._labelDetailReturnTo = _labelDetailReturnTo;   // read by label-detail.js
+    // The TanStack route component re-fires this on mount; skip the reload if
+    // we're already showing this exact label (mirrors navigateToArtistDetail).
+    if (String(labelId) === String(_labelDetailState.id) && currentPage === 'label-detail') {
+        return;
+    }
+    _labelDetailState = { id: String(labelId), name: name || '' };
+    navigateToPage('label-detail', {
+        labelId: String(labelId),
+        labelName: name || '',
+        skipRouteChange: options.skipRouteChange === true,
+    });
 }
 
 // ===============================
@@ -2628,6 +3104,44 @@ function initializeMobileNavigation() {
                 closeMobileNav();
             }
         });
+    });
+
+    restoreNavSections();
+}
+
+// --- Collapsible sidebar sections (persisted per section in localStorage) ---
+function _navSectionItems(label) {
+    const items = [];
+    let el = label.nextElementSibling;
+    while (el && !el.classList.contains('nav-section-label')) {
+        if (el.classList.contains('nav-button')) items.push(el);
+        el = el.nextElementSibling;
+    }
+    return items;
+}
+function _setNavSectionCollapsed(label, collapsed) {
+    label.classList.toggle('collapsed', collapsed);
+    _navSectionItems(label).forEach(it => it.classList.toggle('nav-item-hidden', collapsed));
+}
+function toggleNavSection(label) {
+    const collapsed = !label.classList.contains('collapsed');
+    _setNavSectionCollapsed(label, collapsed);
+    try {
+        const saved = JSON.parse(localStorage.getItem('navSections') || '{}');
+        saved[label.dataset.section] = collapsed;
+        localStorage.setItem('navSections', JSON.stringify(saved));
+    } catch (e) { /* localStorage unavailable — collapse still works for the session */ }
+}
+function restoreNavSections() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) { saved = {}; }
+    const path = window.location.pathname;
+    document.querySelectorAll('.nav-section-label').forEach(label => {
+        // Expanded by default; collapsed only when the user explicitly collapsed it.
+        let collapsed = saved[label.dataset.section] === true;
+        // Never collapse the section holding the current page — the active item must stay visible.
+        if (_navSectionItems(label).some(it => it.getAttribute('href') === path)) collapsed = false;
+        _setNavSectionCollapsed(label, collapsed);
     });
 }
 
@@ -2702,6 +3216,9 @@ function navigateToPage(pageId, options = {}) {
     if (pageId === 'artist-detail' && !options.artistId) {
         return false;
     }
+    if (pageId === 'label-detail' && !options.labelId) {
+        return false;
+    }
 
     const router = getWebRouter();
     if (router && !options.skipRouteChange) {
@@ -2710,7 +3227,7 @@ function navigateToPage(pageId, options = {}) {
         if (route?.kind === 'react') {
             showReactHost(pageId);
             setActivePageChrome(pageId);
-        } else if (route?.kind === 'legacy' && pageId !== 'artist-detail') {
+        } else if (route?.kind === 'legacy' && pageId !== 'artist-detail' && pageId !== 'label-detail') {
             // Show legacy page immediately — don't wait for TanStack Router's async cycle
             showLegacyPage(pageId);
             setActivePageChrome(pageId);
@@ -2724,6 +3241,9 @@ function navigateToPage(pageId, options = {}) {
             replace: options.replace === true,
             artistId: options.artistId,
             artistSource: options.artistSource,
+            artistName: options.artistName,
+            labelId: options.labelId,
+            labelName: options.labelName,
         });
     }
 
@@ -2740,7 +3260,8 @@ function navigateToPage(pageId, options = {}) {
 
     if (!options.skipPushState) {
         const urlPath = pageId === 'dashboard' ? '/'
-            : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource)
+            : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource, options.artistName)
+            : (pageId === 'label-detail' && options.labelId) ? buildLabelDetailPath(options.labelId, options.labelName)
             : '/' + pageId;
         if (window.location.pathname !== urlPath) {
             if (options.replace === true) {
@@ -2782,6 +3303,18 @@ async function loadPageData(pageId) {
                 initializeSearchModeToggle();
                 initializeFilters();
                 break;
+            case 'label-detail': {
+                // Resolve the label from nav state, falling back to the URL
+                // (reload / browser-back). label-detail.js owns the render.
+                const lab = (_labelDetailState && _labelDetailState.id)
+                    ? _labelDetailState
+                    : (typeof parseLabelDetailPath === 'function' ? parseLabelDetailPath() : null);
+                if (lab && lab.id && typeof loadLabelDetailData === 'function') {
+                    if (typeof initializeLabelDetailPage === 'function') initializeLabelDetailPage();
+                    loadLabelDetailData(lab.id, lab.name || '');
+                }
+                break;
+            }
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;
@@ -2869,6 +3402,9 @@ async function loadPageData(pageId) {
             case 'automations':
                 await loadAutomations();
                 break;
+            case 'chat':
+                if (window.ChatPage) window.ChatPage.open();
+                break;
             case 'help':
                 initializeDocsPage();
                 break;
@@ -2900,7 +3436,8 @@ async function loadPageData(pageId) {
     const RECENTER_DELAY_MS = 1500;
     let recenterTimer = 0;
 
-    const isReduced = () => document.body.classList.contains('reduce-effects');
+    const isReduced = () => document.body.classList.contains('reduce-effects')
+        || document.body.classList.contains('max-performance');
 
     const gridCenter = () => {
         const r = grid.getBoundingClientRect();

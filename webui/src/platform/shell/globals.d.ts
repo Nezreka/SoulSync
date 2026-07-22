@@ -32,6 +32,9 @@ declare global {
           replace?: boolean;
           artistId?: string | number;
           artistSource?: string | null;
+          artistName?: string;
+          labelId?: string | number;
+          labelName?: string;
         },
       ) => Promise<boolean>;
     };
@@ -50,11 +53,21 @@ declare global {
           skipRouteChange?: boolean;
         },
       ) => void;
+      navigateToLabelDetail: (
+        labelId: string,
+        labelName: string,
+        options?: {
+          skipRouteChange?: boolean;
+        },
+      ) => void;
       cancelSimilarArtistsLoad: () => void;
       showReactHost: (pageId: ShellPageId) => void;
       playLibraryTrack: (
         track: {
-          id: string | number;
+          id?: string | number | null;
+          lib2_track_id?: string | number | null;
+          legacy_track_id?: string | number | null;
+          server_track_id?: string | number | null;
           title: string;
           file_path: string;
           bitrate?: string | number | null;

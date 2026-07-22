@@ -158,6 +158,33 @@ def clean_track_title(track_title: str, artist_name: str) -> str:
     return cleaned if cleaned else original
 
 
+# A leading track-number prefix is EITHER a zero-padded number (01, 04, 099 — no
+# real song title starts with one), OR a plain number followed by a real separator
+# AND a space ("3 - ", "12. "). Deliberately NOT a bare "number space word", so it
+# leaves "7 Rings", "99 Luftballons", "50 Ways to Leave Your Lover" and
+# "1-800-273-8255" untouched.
+_TRACK_NUM_PREFIX_RE = re.compile(r"^\s*(?:0\d{1,2}[\s._)\-]*|\d{1,3}\s*[._)\-]\s+)(?=\S)")
+
+
+def strip_leading_track_number(title: str) -> str:
+    """Conservatively remove a leading track-number prefix from a track title.
+
+    Fixes #890 — files named ``01 - Sun It Rises.flac`` whose stem leaks into the
+    title as ``01 - Sun It Rises``, which then never matches the canonical
+    ``Sun It Rises`` (false "missing"). Only strips an unambiguous track-number
+    prefix; a coincidental leading number that's part of the title is preserved, and
+    it never reduces a title to empty or a bare number."""
+    s = (title or "").strip()
+    if not s:
+        return title or ""
+    stripped = _TRACK_NUM_PREFIX_RE.sub("", s, count=1).strip()
+    # Keep the original if stripping left nothing real — empty, a bare number, or
+    # only punctuation (e.g. "01 - " → "-"). A real title has a letter/digit.
+    if stripped.isdigit() or not re.search(r"[^\W_]", stripped):
+        return s
+    return stripped
+
+
 
 
 def get_album_type_display(raw_type, track_count) -> str:
@@ -230,8 +257,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "title": clean_context.get("title", "Unknown Track"),
         "track": f"{_coerce_int(clean_context.get('track_number', 1), 1):02d}",
         "cdnum": cdnum_value,
-        "disc": str(_coerce_int(clean_context.get("disc_number", 1), 1)),
-        "discnum": str(_coerce_int(clean_context.get("disc_number", 1), 1)),
+        # #981: ${disc}/${discnum} vanish on single-disc albums, matching ${cdnum}
+        # (a track on disc 2+ still shows even if total_discs wasn't populated).
+        "disc": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
+        "discnum": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
         "year": str(clean_context.get("year", "")),
         "quality": clean_context.get("quality", ""),
     }
@@ -269,8 +298,10 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
 
     quality_value = context.get("quality", "")
     disc_number = _coerce_int(context.get("disc_number", 1), 1)
-    disc_value = f"{disc_number:02d}"
-    disc_value_raw = str(disc_number)
+    # #981: single-disc albums drop $disc/$discnum (like $cdnum) so no "01-" prefix.
+    _multi_disc = _coerce_int(context.get("total_discs", 1), 1) > 1 or disc_number > 1
+    disc_value = f"{disc_number:02d}" if _multi_disc else ""
+    disc_value_raw = str(disc_number) if _multi_disc else ""
 
     path_parts = full_path.split("/")
     if len(path_parts) > 1:
@@ -326,10 +357,22 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
 
     templates = _get_config_manager().get("file_organization.templates", {})
     template = templates.get(template_type)
+    # The settings page used to seed the singles input with this exact string
+    # and Save persisted it — so most installs carry the old default without
+    # ever having customized anything. A stored value that IS the old default
+    # upgrades to the new one (same pattern as the YouTube template upgrade);
+    # anything the user actually edited is untouched.
+    if template_type == "single_path" and template == "$artist/$artist - $title/$title":
+        template = None
     if not template:
         default_templates = {
             "album_path": "$albumartist/$albumartist - $album/$track - $title",
-            "single_path": "$artist/$artist - $title/$title",
+            # $albumartist, not $artist, for the FOLDER identity: only
+            # $albumartist honors the Collaborative Album Artist setting, so a
+            # multi-artist single ("A, B & C") files under its main artist when
+            # the mode is 'first' (TheHomeGuy). For single-artist tracks the two
+            # are identical; users with a CUSTOM template are untouched.
+            "single_path": "$albumartist/$albumartist - $title/$title",
             "compilation_path": "Compilations/$album/$track - $artist - $title",
             "playlist_path": "$playlist/$artist - $title",
         }
@@ -340,8 +383,14 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
     path_parts = full_path.split("/")
     quality_value = context.get("quality", "")
     disc_number = _coerce_int(context.get("disc_number", 1), 1)
-    disc_value = f"{disc_number:02d}"
-    disc_value_raw = str(disc_number)
+    # #981: $disc/$discnum are empty on single-disc albums, same as $cdnum — a
+    # single-disc album shouldn't stamp "01-" on every filename. Multi-disc is
+    # either 2+ total discs OR a track that's itself on disc 2+ (so a known disc-3
+    # track still shows even if total_discs wasn't populated). The leading-dash
+    # cleanup below drops the orphaned separator (e.g. "$disc-$track" -> "$track").
+    _multi_disc = _coerce_int(context.get("total_discs", 1), 1) > 1 or disc_number > 1
+    disc_value = f"{disc_number:02d}" if _multi_disc else ""
+    disc_value_raw = str(disc_number) if _multi_disc else ""
 
     if len(path_parts) > 1:
         folder_parts = path_parts[:-1]
@@ -502,6 +551,14 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                     _album_artist_name = _first_sa
                 _album_artists_for_collab = _sa_artists
 
+        # #989: an iTunes single's collection carries a placeholder album artist
+        # ("Unknown Artist") — or none — while the track artist ($artist) is real.
+        # Don't let that bury the file under "Unknown Artist"; fall back to the real
+        # track artist so $albumartist matches $artist.
+        if (not _album_artist_name or _album_artist_name == "Unknown Artist") and \
+                _artist_name and _artist_name != "Unknown Artist":
+            _album_artist_name = _artist_name
+
         template_context = {
             "artist": _artist_name,
             "albumartist": _album_artist_name,
@@ -539,7 +596,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # so $cdnum can decide between "CDxx" and an empty string.
         template_context["total_discs"] = total_discs
 
-        album_template = _get_config_manager().get("file_organization.templates", {}).get("album_path", "") or ""
+        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile") else "album_path"
+
+        album_template = _get_config_manager().get("file_organization.templates", {}).get(_template_key, "") or ""
         # Suppress the auto-injected disc folder when the user already
         # encodes the disc in the filename via $disc, $discnum, or $cdnum.
         user_controls_disc = (
@@ -551,7 +610,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         )
         disc_label = _get_config_manager().get("file_organization.disc_label", "Disc")
 
-        folder_path, filename_base = get_file_path_from_template(template_context, "album_path")
+        folder_path, filename_base = get_file_path_from_template(template_context, _template_key)
 
         # #829: if this album already lives in a single folder on disk, drop the
         # new track there instead of a freshly-templated folder — this is what
@@ -559,8 +618,25 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # batches (wishlist, Album Completeness, a missed track later). Strict
         # match + transfer-dir-only + single-folder-only inside the resolver;
         # any miss falls through to the template path below. Best-effort.
+        # Compilations skip reuse — their namespace moved from artist-based to
+        # Compilations/, so matching an old artist folder would scatter tracks.
+        # Multi-disc albums skip reuse too (#1009): their correct layout is
+        # SEVERAL folders (one per disc — $cdnum/$disc templates or the auto
+        # "Disc N" folder), but the resolver can only answer "the album's one
+        # existing folder" (DatabaseTrack carries no disc number). Mid-download
+        # that one folder is whichever disc landed first, so every later track
+        # of a box set would be funneled into it — collapsing all discs into a
+        # single disc folder and colliding same-numbered filenames.
+        # Reorganize disables reuse outright (`_no_album_folder_reuse`): its whole
+        # job is to move albums OUT of the folder they currently sit in, and the
+        # resolver would answer with exactly that folder — making every reorganize
+        # compute "destination == current location" and no-op (the template-change
+        # complaint from TheHomeGuy).
         reuse_folder = None
-        if filename_base:
+        _multi_disc_album = total_discs > 1 or disc_number > 1
+        if (filename_base and not _multi_disc_album
+                and raw_album_type not in ("compilation", "compile")
+                and not context.get("_no_album_folder_reuse")):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder
                 from database.music_database import get_database
@@ -601,11 +677,14 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
             return final_path, True
 
-        artist_name_sanitized = sanitize_filename(template_context["albumartist"])
         album_name_sanitized = sanitize_filename(album_info["album_name"])
-        artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
-        album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
-        album_dir = os.path.join(artist_dir, album_folder_name)
+        if raw_album_type in ("compilation", "compile"):
+            album_dir = os.path.join(transfer_dir, "Compilations", album_name_sanitized)
+        else:
+            artist_name_sanitized = sanitize_filename(template_context["albumartist"])
+            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+            album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
+            album_dir = os.path.join(artist_dir, album_folder_name)
         if total_discs > 1:
             album_dir = os.path.join(album_dir, f"{disc_label} {disc_number}")
         _ensure_dir(album_dir, exist_ok=True)

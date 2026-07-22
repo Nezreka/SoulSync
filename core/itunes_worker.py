@@ -9,7 +9,15 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.itunes_client import iTunesClient
-from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
+from core.worker_utils import (
+    accept_artist_match,
+    artist_name_matches,
+    interruptible_sleep,
+    owned_album_titles,
+    pick_artist_by_catalog,
+    release_titles,
+    set_album_api_track_count,
+)
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("itunes_worker")
@@ -392,20 +400,30 @@ class iTunesWorker:
             logger.debug(f"No iTunes results for artist '{artist_name}'")
             return
 
-        for artist_obj in results:
+        # Candidates clearing the name gate (results are source-ranked, so [0] is
+        # the legacy "first passing" pick), then disambiguate same-name artists by
+        # which one's catalog overlaps the albums this library owns.
+        gated = [a for a in results if artist_name_matches(artist_name, a.name)]
+        chosen, _overlap = pick_artist_by_catalog(
+            gated,
+            owned_album_titles(self.db, artist_id),
+            lambda a: release_titles(self.client.get_artist_albums(a.id)),
+        )
+
+        if chosen:
             ok, reason = accept_artist_match(
-                self.db, 'itunes_artist_id', artist_obj.id, artist_id,
-                artist_name, artist_obj.name,
+                self.db, 'itunes_artist_id', chosen.id, artist_id,
+                artist_name, chosen.name,
             )
             if ok:
-                if not self._is_itunes_id(artist_obj.id):
-                    logger.warning(f"Rejecting non-iTunes ID '{artist_obj.id}' for artist '{artist_name}'")
+                if not self._is_itunes_id(chosen.id):
+                    logger.warning(f"Rejecting non-iTunes ID '{chosen.id}' for artist '{artist_name}'")
                     self._mark_status('artist', artist_id, 'error')
                     self.stats['errors'] += 1
                     return
-                self._update_artist(artist_id, artist_obj)
+                self._update_artist(artist_id, chosen)
                 self.stats['matched'] += 1
-                logger.info(f"Matched artist '{artist_name}' -> iTunes ID: {artist_obj.id}")
+                logger.info(f"Matched artist '{artist_name}' -> iTunes ID: {chosen.id}")
                 return
 
         self._mark_status('artist', artist_id, 'not_found')

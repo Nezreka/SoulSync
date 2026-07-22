@@ -68,6 +68,7 @@ from core.download_plugins.album_bundle import (
     resolve_reported_save_path,
 )
 from core.download_plugins.base import DownloadSourcePlugin
+from core.download_plugins.candidate_store import get_candidate_store
 from core.download_plugins.torrent_stall import (
     StallTracker,
     get_stall_action,
@@ -189,7 +190,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             download_url = result.magnet_uri or result.download_url
             if not download_url:
                 continue
-            filename = f"{download_url}{_FILENAME_SEP}{result.title}"
+            # The filename crosses to the browser in search responses and
+            # comes back on grab. Indexer URLs can carry API keys / signed
+            # params, so only an opaque server-side token travels (P0-03).
+            token = get_candidate_store().put(download_url)
+            filename = f"{token}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
@@ -219,6 +224,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     'seeders': result.seeders,
                     'leechers': result.leechers,
                     'grabs': result.grabs,
+                    'publish_date': result.publish_date,
                     'protocol': 'torrent',
                 },
             )
@@ -248,9 +254,16 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
     ) -> Optional[str]:
         if not self.is_configured():
             return None
-        download_url, display_name = _decode_filename(filename)
+        token, display_name = _decode_filename(filename)
+        if not token:
+            logger.error("Torrent download missing candidate token in filename: %r", filename)
+            return None
+        # Only a token from OUR candidate store is accepted — a raw URL from
+        # the client is a trust-boundary violation, not a fallback (P0-03).
+        download_url = get_candidate_store().resolve(token)
         if not download_url:
-            logger.error("Torrent download missing URL in filename: %r", filename)
+            logger.error("Torrent download: unknown or expired candidate for %r "
+                         "— re-run the search", display_name)
             return None
 
         download_id = str(uuid.uuid4())
@@ -289,7 +302,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             return
 
         try:
-            torrent_hash = run_async(adapter.add_torrent(download_url))
+            from core.torrent_clients.base import add_torrent_smart
+            torrent_hash = run_async(add_torrent_smart(adapter, download_url))
         except Exception as e:
             self._mark_error(download_id, f"add_torrent failed: {e}")
             return
@@ -349,7 +363,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 last_save_path = status.save_path
 
             if status.state in _COMPLETE_STATES:
-                self._finalize_download(download_id, last_save_path)
+                self._finalize_download(download_id, last_save_path,
+                                        torrent_name=status.name)
                 return
             if status.state == 'error':
                 # Clean the dead torrent out of the client, or it's left orphaned
@@ -375,7 +390,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         except Exception:
             final = None
         if final is not None and final.state in _COMPLETE_STATES:
-            self._finalize_download(download_id, final.save_path or last_save_path)
+            self._finalize_download(download_id, final.save_path or last_save_path,
+                                    torrent_name=final.name)
             return
         self._cleanup_torrent(torrent_hash, get_stall_action())
         self._mark_error(download_id, "Torrent download timed out")
@@ -412,21 +428,33 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             f"Torrent stalled (no progress for {timeout_min} min) — {verb}",
         )
 
-    def _finalize_download(self, download_id: str, save_path: Optional[str]) -> None:
+    def _finalize_download(self, download_id: str, save_path: Optional[str],
+                           torrent_name: Optional[str] = None) -> None:
         """Adapter said complete. Walk the directory + pick the
         first audio file as the canonical ``file_path``."""
         if not save_path:
             self._mark_error(download_id, "Torrent completed but no save_path reported")
             return
         # Resolve the client-reported path to one this process can read
-        # (the client may report its own container's mount). See
-        # ``resolve_reported_save_path``.
-        local_path = resolve_reported_save_path(save_path)
+        # (the client may report its own container's mount). The torrent's
+        # NAME is the content check: a same-named directory that doesn't
+        # contain this torrent is the wrong mount, not a resolution
+        # (TheHomeGuy's '/downloads'). See ``resolve_reported_save_path``.
+        local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
         if local_path != save_path:
             logger.info("Torrent %s: resolved client path %r -> %r",
                         download_id[:8], save_path, local_path)
+        # save_path is the torrent's save DIRECTORY; the content lives at
+        # <save_path>/<name>. Walking just the release keeps a shared
+        # download root from donating the "first audio file" of some OTHER
+        # torrent that happens to live there.
+        walk_root = Path(local_path)
+        if torrent_name and (walk_root / torrent_name).is_dir():
+            # is_dir, not exists: a single-FILE torrent's name points at the
+            # file itself, and the audio walker only walks directories.
+            walk_root = walk_root / torrent_name
         try:
-            audio_files = collect_audio_after_extraction(Path(local_path))
+            audio_files = collect_audio_after_extraction(walk_root)
         except Exception as e:
             self._mark_error(download_id, f"Post-extract walk failed: {e}")
             return
@@ -435,6 +463,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             self._mark_error(download_id, f"No audio files found in {save_path}{suffix}")
             return
         primary = audio_files[0]
+        completed_hash = None
         with self._lock:
             row = self.active_downloads.get(download_id)
             if row is not None:
@@ -442,8 +471,16 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 row['progress'] = 100.0
                 row['file_path'] = str(primary)
                 row['audio_files'] = [str(path) for path in audio_files]
+                completed_hash = row.get('torrent_hash')
         logger.info("Torrent download complete: %s -> %s (%d audio files)",
                     download_id[:8], primary.name, len(audio_files))
+        # Durably record this completed grab so the seeding sweep can manage the
+        # tail (seed until ratio/time goals, then remove from the client). The
+        # torrent_hash only lives in the in-memory row for the transfer, so this
+        # is the one point it can be persisted. Best-effort: a DB hiccup here
+        # must never affect the (already complete) download.
+        if completed_hash:
+            self._apply_seed_policy(completed_hash, torrent_name)
 
     def _mark_error(self, download_id: str, message: str) -> None:
         logger.error("Torrent download %s failed: %s", download_id[:8], message)
@@ -452,6 +489,41 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             if row is not None:
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
+
+    def _apply_seed_policy(self, torrent_hash: str, title: Optional[str]) -> None:
+        """Route a completed grab per the seed-enforcement mode. 'client' writes
+        the ratio/time limit into the torrent client so it enforces (arr-style);
+        'soulsync' (default) records the grab for the seeding sweep. If a client
+        push fails/isn't supported, fall back to recording so the goal still
+        applies. Best-effort — never raises into the completion path."""
+        try:
+            from config.settings import config_manager
+            mode = config_manager.get('torrent_client.seed_mode', 'soulsync')
+            if mode == 'client':
+                ratio_goal = config_manager.get('torrent_client.seed_ratio_goal', 0)
+                time_goal = config_manager.get('torrent_client.seed_time_goal_hours', 0)
+                if ratio_goal or time_goal:
+                    from core.torrent_clients import get_active_adapter as _adapter
+                    from core.torrent_clients.share_limits import push_seed_goal
+                    if push_seed_goal(_adapter(), torrent_hash, ratio_goal, time_goal):
+                        return  # the client now enforces the goal itself
+                    # push failed/unsupported → fall through to the sweep
+        except Exception as e:
+            logger.warning("Seed policy check failed for %s (%s); recording for sweep",
+                           torrent_hash[:8] if torrent_hash else "?", e)
+        self._record_seed_grab(torrent_hash, title)
+
+    def _record_seed_grab(self, torrent_hash: str, title: Optional[str]) -> None:
+        """Persist a completed torrent grab for the seeding sweep. Best-effort:
+        never raises into the completion path."""
+        try:
+            from database.music_database import get_database
+            from config.settings import config_manager
+            category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+            get_database().record_torrent_seed_grab(torrent_hash, title, category)
+        except Exception as e:
+            logger.warning("Could not record torrent seed grab %s: %s",
+                           torrent_hash[:8] if torrent_hash else "?", e)
 
     # ------------------------------------------------------------------
     # Status / lifecycle
@@ -583,9 +655,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     picked.title, picked.size / 1_048_576, picked.seeders, picked.indexer_name)
         _emit('queued', release=picked.title, size=picked.size, seeders=picked.seeders)
 
-        # Phase 2: hand to adapter.
+        # Phase 2: hand to adapter. Fetch the .torrent server-side first —
+        # the client often can't reach Prowlarr itself (split containers).
         try:
-            torrent_id = run_async(adapter.add_torrent(download_url))
+            from core.torrent_clients.base import add_torrent_smart
+            torrent_id = run_async(add_torrent_smart(adapter, download_url))
         except Exception as e:
             result['error'] = f'Torrent client refused the release: {e}'
             return result
@@ -615,6 +689,14 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # default-'error' fallback the helper treats as transient.
             failed_states=frozenset(['error']),
             is_shutdown=self.shutdown_check,
+            # P2-21: remap the client-container path before the incomplete_path
+            # stability check, not just on the final save_path — otherwise a
+            # split-container mount never resolves to a readable local path and
+            # the fallback can't stabilize. expect_name isn't known this early
+            # (fetched below only after the poll returns), so this is the
+            # weaker no-expect_name resolution; the final walk_root re-resolves
+            # with expect_name for the stricter content-checked path.
+            resolve_path=resolve_reported_save_path,
             log_prefix='[Torrent album]',
         )
         if save_path is None:
@@ -624,12 +706,26 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
         # Phase 4: extract + walk + copy to staging.
         _emit('staging', release=picked.title)
-        # Resolve the client-reported path to one this process can read.
-        local_path = resolve_reported_save_path(save_path)
+        # Resolve the client-reported path to one this process can read,
+        # content-checked against the torrent's on-disk NAME (the release
+        # folder) so an existing-but-wrong mount can't win, and walk just
+        # that release so a shared root can't donate another torrent's files.
+        torrent_name = None
+        try:
+            _final_status = run_async(adapter.get_status(torrent_id))
+            torrent_name = _final_status.name if _final_status else None
+        except Exception:   # noqa: BLE001 - the name is an assist, not a requirement
+            torrent_name = None
+        local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
         if local_path != save_path:
             logger.info("[Torrent album] Resolved client path %r -> %r", save_path, local_path)
+        walk_root = Path(local_path)
+        if torrent_name and (walk_root / torrent_name).is_dir():
+            # is_dir, not exists: a single-FILE torrent's name points at the
+            # file itself, and the audio walker only walks directories.
+            walk_root = walk_root / torrent_name
         try:
-            audio_files = collect_audio_after_extraction(Path(local_path))
+            audio_files = collect_audio_after_extraction(walk_root)
         except Exception as e:
             result['error'] = f'Failed to walk audio files: {e}'
             return result

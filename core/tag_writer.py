@@ -39,6 +39,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         'has_cover_art': False,
         'format': None,
         'error': None,
+        'lyrics': None,
         # ReplayGain (None if not present in file)
         'replaygain_track_gain': None,
         'replaygain_track_peak': None,
@@ -86,6 +87,9 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 if getattr(fr, 'desc', '') == 'SOULSYNC_VERIFICATION' and fr.text:
                     result['verification_status'] = str(fr.text[0])
                     break
+            uslt_frames = audio.tags.getall('USLT')
+            if uslt_frames and uslt_frames[0].text:
+                result['lyrics'] = str(uslt_frames[0].text[0])
 
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             # FLAC / OGG
@@ -109,6 +113,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 # OGG doesn't have a standard picture field we can easily check
                 result['has_cover_art'] = False
             result['verification_status'] = _vorbis_first(audio, 'soulsync_verification')
+            result['lyrics'] = _vorbis_first(audio, 'lyrics') or _vorbis_first(audio, 'unsyncedlyrics')
 
         elif isinstance(audio, MP4):
             # MP4 / M4A
@@ -125,6 +130,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             if disk:
                 result['disc_number'] = disk[0][0] if isinstance(disk[0], tuple) else None
             result['has_cover_art'] = bool(audio.tags.get('covr', [])) if audio.tags else False
+            result['lyrics'] = _mp4_first(audio, '\xa9lyr')
             vs = (audio.tags or {}).get('----:com.soulsync:VERIFICATION')
             if vs:
                 raw = vs[0]
@@ -202,6 +208,24 @@ def write_verification_status(file_path: str, status: str) -> bool:
         return False
 
 
+def genre_write_value_is_subset_of_existing(file_genre_str: Any, db_genre_str: Any) -> bool:
+    """True when every genre token in ``db_genre_str`` already appears in
+    ``file_genre_str``'s (comma/semicolon-split) list — writing the DB
+    value would only narrow a richer existing tag, not add information
+    (prevents a generic parent genre like "Pop" from overwriting a rich
+    file genre list). Shared by ``build_tag_diff`` (the preview) and
+    ``write_tags_to_file`` (the actual write) so the two never disagree
+    about whether a genre write is a real change."""
+    import re
+    if not db_genre_str or not file_genre_str:
+        return False
+    file_genres = [g.strip().lower() for g in re.split(r'[,;]+', str(file_genre_str)) if g.strip()]
+    db_genres = [g.strip().lower() for g in re.split(r'[,;]+', str(db_genre_str)) if g.strip()]
+    if not db_genres:
+        return False
+    return all(g in file_genres for g in db_genres)
+
+
 def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
     """#800 guard: never replace a real file value with a placeholder.
 
@@ -215,6 +239,29 @@ def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
     if is_placeholder_meta(db_val) and not is_placeholder_meta(file_val):
         return None
     return db_val
+
+
+def _normalize_date_str(s: str) -> str:
+    """Normalize date/time strings (strip 'T', 'Z', seconds, offsets, and a
+    no-information midnight time-of-day) to compare values.
+
+    A bare ``YYYY-MM-DD`` and the same date written as a full ISO timestamp
+    (``YYYY-MM-DDT00:00:00Z``, the common shape from taggers that always
+    emit a time component) must normalize to the SAME value — the time
+    portion carries no real information for a music release date."""
+    import re
+    if not s:
+        return ''
+    s = s.replace('T', ' ').replace('Z', '').split('+')[0].strip()
+    match = re.match(
+        r'^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?(?::\d{2})?(?:\.\d+)?$', s,
+    )
+    if not match:
+        return s
+    date_part, time_part = match.group(1), match.group(2)
+    if time_part and time_part != '00:00':
+        return f'{date_part} {time_part}'
+    return date_part
 
 
 def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -275,6 +322,20 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # (writer skips fields where DB value is empty, so don't show them as diffs)
         changed = bool(db_str) and file_str != db_str
 
+        if changed and db_key == 'year':
+            # Check if normalized date/time matches to avoid false format-only mismatches
+            if _normalize_date_str(file_str) == _normalize_date_str(db_str):
+                changed = False
+
+        if changed and db_key == 'genres' and db_val:
+            # If the file genres contain the database genres, do not flag as
+            # changed (prevents overwriting a rich genre list with a generic
+            # parent genre like Pop). write_tags_to_file applies the SAME
+            # check before writing, so this preview always matches the
+            # actual write outcome.
+            if genre_write_value_is_subset_of_existing(file_str, db_str):
+                changed = False
+
         # #800 — if the change would replace a real file value with a
         # placeholder (Various Artists / [Unknown Album] / …), hold it back:
         # the writer preserves the file's value, so show it as no-change.
@@ -302,6 +363,23 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
     })
 
     return diffs
+
+
+def diff_has_actionable_change(diff: List[Dict[str, Any]], embed_cover: bool = True) -> bool:
+    """True if writing would actually change the file. #1052 — lets the batch
+    write skip files the preview marks unchanged, touching only affected files.
+
+    Mirrors the preview's ``has_changes`` (any diff row ``changed``) with one
+    refinement: a cover-only difference counts only when cover embedding is on,
+    since with it off the writer wouldn't touch the file for that alone.
+    """
+    for d in diff:
+        if not d.get('changed'):
+            continue
+        if d.get('file_key') == 'cover_art' and not embed_cover:
+            continue
+        return True
+    return False
 
 
 def download_cover_art(cover_url: str) -> Optional[Tuple[bytes, str]]:
@@ -392,6 +470,19 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
                 genre_str = ', '.join(genres) if genres else None
             elif isinstance(genres, str):
                 genre_str = genres
+
+        # Same guard build_tag_diff's preview applies: don't narrow a
+        # richer existing genre tag down to a DB value that's a pure
+        # subset of it (prevents a generic parent genre like "Pop" from
+        # clobbering a real multi-genre tag). Without this, a batch write
+        # (gated on build_tag_diff's verdict) would skip the file, while a
+        # single-track write — which calls this function directly — would
+        # still overwrite it, silently disagreeing with what the preview
+        # told the user.
+        if genre_str and not _current.get('error'):
+            existing_genre = _current.get('genre')
+            if genre_write_value_is_subset_of_existing(existing_genre, genre_str):
+                genre_str = existing_genre
 
         # Multi-value artist support — issue #587. Caller can pass
         # `artists_list` (per-track list of contributor names) and the
@@ -510,8 +601,18 @@ def _date_to_write(existing: Optional[str], year) -> str:
     year_str = str(year)
     if existing:
         existing = str(existing).strip()
-        if len(existing) > 4 and existing[:4] == year_str:
-            return existing
+        if len(existing) > 4 and len(year_str) >= 4 and existing[:4] == year_str[:4]:
+            if _normalize_date_str(existing) == _normalize_date_str(year_str):
+                return existing
+            # Only keep the (longer) existing value when the new value is
+            # itself just a bare year — genuinely less specific, so it
+            # can't express a real month/day correction. Any longer new
+            # value (e.g. a full date) is a genuine correction and must
+            # win even if `existing` happens to be an even longer string
+            # (a stale full timestamp is not "more specific" than a
+            # shorter but correct date).
+            if len(year_str) <= 4:
+                return existing
     return year_str
 
 

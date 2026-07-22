@@ -23,6 +23,7 @@ let _autoSyncScheduleState = {
 };
 let _autoSyncActiveTab = 'schedule';
 let _autoSyncSidebarFilter = '';
+let _autoSyncExpandedKinds = new Set();  // variant-kind groups the user has expanded
 let _autoSyncHistoryFilter = 'all';  // 'all' | 'error' | 'completed' | 'skipped'
 let _autoSyncHistoryLimit = 50;
 // Open weekly-editor popover state. ``null`` when no popover is open.
@@ -71,6 +72,17 @@ function autoSyncIntervalLabel(hours) {
         return `Every ${days} day${days === 1 ? '' : 's'}`;
     }
     return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
+}
+
+// Short cadence word for the lane badge (under the interval number).
+function autoSyncLaneCadence(hours) {
+    if (hours === 1) return 'Hourly';
+    if (hours === 12) return 'Twice a day';
+    if (hours === 24) return 'Daily';
+    if (hours === 168) return 'Weekly';
+    if (hours < 24) return `Every ${hours}h`;
+    const days = hours / 24;
+    return `Every ${days} days`;
 }
 
 // Browser-detected default tz for new schedules. Used when the user
@@ -228,6 +240,234 @@ function autoSyncIsScheduleOwned(auto) {
     return group === 'Playlist Auto-Sync' || name.startsWith('Auto-Sync:');
 }
 
+// ── Personalized (SoulSync Discovery) rows in the Auto-Sync board ────────────
+// Variant kinds (Time Machine per-decade, Genre, Seasonal, ...) and not-yet-
+// generated singletons don't exist as mirrored rows until generated. We surface
+// them as synthetic schedulable rows with NEGATIVE numeric ids: negatives never
+// collide with real (positive) mirrored ids AND flow through every parseInt(id)
+// in this board unchanged, so drag/drop/bulk/weekly keep working as-is.
+// Scheduling one creates a single-kind personalized_pipeline automation, which
+// auto-generates on its first run — no manual pre-generation.
+
+// Collapsible-group heading for a variant kind: the name_template with the
+// "{variant}" placeholder (and any trailing separator) stripped, e.g.
+// "Time Machine — {variant}" → "Time Machine". Falls back to the kind id.
+function autoSyncKindLabel(k) {
+    return String((k && k.name_template) || (k && k.kind) || '')
+        .split('{variant}')[0]
+        .replace(/[\s—–:>·.\-]+$/, '')
+        .trim() || (k && k.kind) || '';
+}
+
+// Tag already-generated SoulSync Discovery rows (real mirrored playlists) with
+// the kind/variant parsed from their 'ssd_<kind>_<variant>' source id, so a
+// generated Time Machine decade groups under the same collapsible header as the
+// not-yet-generated ones. Rows whose kind is no longer registered (e.g. a
+// reverted 'year_mix' left in mirrored_playlists) are DROPPED — they can't be
+// regenerated and shouldn't clutter the board. Fails open: with no kinds
+// metadata, every row passes through untouched.
+function autoSyncEnrichDiscoveryRows(playlists, kinds) {
+    if (!Array.isArray(playlists)) return [];
+    if (!Array.isArray(kinds) || !kinds.length) return playlists;
+    const singletons = new Map();   // 'ssd_<kind>' → true
+    const variantKinds = [];        // [{ prefix, k }]
+    for (const k of kinds) {
+        if (!k || !k.kind) continue;
+        if (k.requires_variant) variantKinds.push({ prefix: `ssd_${k.kind}_`, k });
+        else singletons.set(`ssd_${k.kind}`, true);
+    }
+    // Longest prefix first so a shorter kind can't shadow a longer one.
+    variantKinds.sort((a, b) => b.prefix.length - a.prefix.length);
+    const out = [];
+    for (const p of playlists) {
+        if (!p || p.source !== 'soulsync_discovery' || !p.source_playlist_id) { out.push(p); continue; }
+        const sid = String(p.source_playlist_id);
+        if (singletons.has(sid)) { out.push(p); continue; }  // registered singleton → flat, as-is
+        const vk = variantKinds.find(v => sid.startsWith(v.prefix));
+        if (vk) {
+            out.push({ ...p, kind: vk.k.kind, variant: sid.slice(vk.prefix.length),
+                       kind_label: autoSyncKindLabel(vk.k) });
+            continue;
+        }
+        // Unregistered kind (orphaned mirror row) → drop.
+    }
+    return out;
+}
+
+// Map (kind, variant) → current generated track count, from
+// /api/personalized/playlists. A playlist that's been GENERATED (refreshed on
+// the Sync page) but not yet SYNCED has a real count here even though it has no
+// mirrored_playlists row yet — this lets the board show that count instead of 0.
+function autoSyncGeneratedCountMap(playlistsData) {
+    const map = new Map();
+    const list = playlistsData && playlistsData.success && Array.isArray(playlistsData.playlists)
+        ? playlistsData.playlists : [];
+    for (const p of list) {
+        if (!p || !p.kind) continue;
+        map.set(`${p.kind} ${p.variant || ''}`, parseInt(p.track_count, 10) || 0);
+    }
+    return map;
+}
+
+function autoSyncExpandPersonalizedRows(kinds, existingPlaylists, generatedCounts) {
+    const rows = [];
+    if (!Array.isArray(kinds)) return rows;
+    // Skip anything already present as a real mirrored soulsync_discovery row
+    // (matched by its synthetic source_playlist_id 'ssd_<kind>_<variant>').
+    const existingSsd = new Set(
+        (existingPlaylists || [])
+            .filter(p => p && p.source === 'soulsync_discovery' && p.source_playlist_id)
+            .map(p => String(p.source_playlist_id))
+    );
+    let nextId = -1;
+    for (const k of kinds) {
+        if (!k || !k.kind) continue;
+        const variants = k.requires_variant
+            ? (Array.isArray(k.variants) ? k.variants : [])
+            : [''];
+        for (const raw of variants) {
+            const variant = k.requires_variant ? String(raw) : '';
+            const ssdId = `ssd_${k.kind}${variant ? `_${variant}` : ''}`;
+            if (existingSsd.has(ssdId)) continue;
+            const name = k.requires_variant
+                ? String(k.name_template || `${k.kind} ${variant}`).replace('{variant}', variant)
+                : String(k.name_template || k.kind);
+            const kindLabel = k.requires_variant ? autoSyncKindLabel(k) : '';
+            // A generated-but-not-yet-synced playlist has no mirror row, so show
+            // its real generated count instead of 0 when we know it.
+            const generated = generatedCounts ? (generatedCounts.get(`${k.kind} ${variant}`) || 0) : 0;
+            rows.push({
+                id: nextId--,
+                source: 'soulsync_discovery',
+                name,
+                track_count: generated,
+                kind: k.kind,
+                variant,
+                kind_label: kindLabel,
+                source_playlist_id: ssdId,
+                _personalized: true,
+            });
+        }
+    }
+    return rows;
+}
+
+function autoSyncActionForPlaylist(playlist, playlistId) {
+    // Personalized rows schedule a single-kind personalized_pipeline (auto-generates
+    // on first run); every other row schedules a playlist_pipeline by numeric id
+    // exactly as before.
+    if (playlist && playlist._personalized) {
+        const entry = { kind: playlist.kind };
+        if (playlist.variant) entry.variant = playlist.variant;
+        return {
+            action_type: 'personalized_pipeline',
+            action_config: { kinds: [entry], refresh_first: true },
+        };
+    }
+    return {
+        action_type: 'playlist_pipeline',
+        action_config: { playlist_id: String(playlistId), all: false },
+    };
+}
+
+function autoSyncIsPersonalizedAutomation(auto) {
+    return !!(auto && auto.action_type === 'personalized_pipeline');
+}
+
+function autoSyncPersonalizedEntry(auto) {
+    // The single {kind, variant} a BOARD-created personalized schedule targets.
+    // Multi-kind pipelines (built on the Automations page) return null so they're
+    // never mistaken for a per-row board schedule.
+    if (!autoSyncIsPersonalizedAutomation(auto)) return null;
+    const kinds = (auto.action_config || {}).kinds;
+    if (!Array.isArray(kinds) || kinds.length !== 1) return null;
+    const k = kinds[0] || {};
+    if (!k.kind) return null;
+    return { kind: k.kind, variant: k.variant || '' };
+}
+
+function autoSyncRowIdForPersonalized(entry, playlists) {
+    // Map a personalized {kind, variant} to its board row id: the real mirrored
+    // row if generated, else the synthetic row. Null if neither exists.
+    if (!entry) return null;
+    const ssdId = `ssd_${entry.kind}${entry.variant ? `_${entry.variant}` : ''}`;
+    const real = (playlists || []).find(
+        p => p && p.source === 'soulsync_discovery' && String(p.source_playlist_id) === ssdId);
+    if (real) return real.id;
+    const synth = (playlists || []).find(
+        p => p && p._personalized && p.kind === entry.kind && (p.variant || '') === entry.variant);
+    return synth ? synth.id : null;
+}
+
+// Split a sidebar source-group's rows into flat rows and collapsible variant
+// groups. Ungenerated variant kinds (Time Machine decades, Genres, ...) come in
+// as many synthetic rows at once; bucketing them by kind lets the sidebar show a
+// single expandable header per kind instead of every variant inline. Everything
+// else (singletons, already-generated rows) stays flat. Encounter order is
+// preserved; each group keeps its first row's `kind_label` as the heading.
+function autoSyncGroupSidebarRows(rows) {
+    const flat = [];
+    const groups = [];
+    const byKind = new Map();
+    (rows || []).forEach(p => {
+        // Group any variant-kind row — synthetic (not-yet-generated) OR an
+        // already-generated mirrored row enriched with kind/variant — so both
+        // land under one collapsible header. Singletons (no variant) and other
+        // sources (no kind) stay flat.
+        if (p && p.variant && p.kind) {
+            let g = byKind.get(p.kind);
+            if (!g) {
+                g = { kind: p.kind, label: p.kind_label || p.kind, rows: [] };
+                byKind.set(p.kind, g);
+                groups.push(g);
+            }
+            g.rows.push(p);
+        } else {
+            flat.push(p);
+        }
+    });
+    return { flat, groups };
+}
+
+// Render a source group's rows: flat cards first, then one collapsible block per
+// variant kind. `cardRenderer(p, displayName)` builds a single draggable card
+// (displayName lets a grouped card show just its variant). `isScheduled(p)`
+// (optional) drives the "N on" badge shown on a collapsed header.
+function autoSyncSidebarGroupHtml(rows, cardRenderer, isScheduled) {
+    const { flat, groups } = autoSyncGroupSidebarRows(rows);
+    const flatHtml = flat.map(p => cardRenderer(p)).join('');
+    const groupsHtml = groups.map(g => {
+        const expanded = _autoSyncExpandedKinds.has(g.kind);
+        const activeCount = typeof isScheduled === 'function'
+            ? g.rows.filter(isScheduled).length : 0;
+        const cards = g.rows.map(p => cardRenderer(p, p.variant)).join('');
+        return `
+            <div class="auto-sync-kind-group ${expanded ? 'expanded' : ''} ${activeCount ? 'has-active' : ''}" data-kind="${_escAttr(g.kind)}">
+                <div class="auto-sync-kind-group-head" onclick="toggleAutoSyncKindGroup('${_escAttr(g.kind)}')">
+                    <span class="auto-sync-kind-group-chevron">&#9654;</span>
+                    <span class="auto-sync-kind-group-label">${_esc(g.label)}</span>
+                    ${activeCount ? `<span class="auto-sync-kind-group-active">${activeCount} on</span>` : ''}
+                    <span class="auto-sync-kind-group-count">${g.rows.length}</span>
+                </div>
+                <div class="auto-sync-kind-group-body">${cards}</div>
+            </div>
+        `;
+    }).join('');
+    return flatHtml + groupsHtml;
+}
+
+// Toggle a variant-kind group open/closed. Flips the class on the live element
+// (both boards can have rendered it) and records the state so a full modal
+// re-render keeps it open.
+function toggleAutoSyncKindGroup(kind) {
+    if (_autoSyncExpandedKinds.has(kind)) _autoSyncExpandedKinds.delete(kind);
+    else _autoSyncExpandedKinds.add(kind);
+    const expanded = _autoSyncExpandedKinds.has(kind);
+    document.querySelectorAll(`.auto-sync-kind-group[data-kind="${kind}"]`).forEach(el => {
+        el.classList.toggle('expanded', expanded);
+    });
+}
+
 function buildAutoSyncScheduleState(playlists, automations, historyData = {}) {
     const playlistSchedules = {};
     const weeklySchedules = {};
@@ -277,6 +517,46 @@ function buildAutoSyncScheduleState(playlists, automations, historyData = {}) {
         }
         automationPipelines.push(auto);
     });
+
+    // Additive: recognize board-owned single-kind personalized_pipeline schedules
+    // and bucket them onto their row (real mirrored row if generated, else the
+    // synthetic row). The playlist_pipeline loop above is untouched.
+    automations.filter(autoSyncIsPersonalizedAutomation).forEach(auto => {
+        const entry = autoSyncPersonalizedEntry(auto);
+        if (!entry || !autoSyncIsScheduleOwned(auto)) return;
+        const key = autoSyncRowIdForPersonalized(entry, playlists);
+        if (key == null) return;
+        if (auto.trigger_type === 'schedule') {
+            const hours = autoSyncHoursFromTrigger(auto.trigger_config || {});
+            if (hours) {
+                playlistSchedules[key] = {
+                    automation_id: auto.id,
+                    automation_name: auto.name,
+                    hours,
+                    enabled: auto.enabled !== false && auto.enabled !== 0,
+                    owned: true,
+                    next_run: auto.next_run,
+                    trigger_config: auto.trigger_config || {},
+                };
+            }
+        } else if (auto.trigger_type === 'weekly_time') {
+            const parsed = autoSyncWeeklyFromTrigger(auto.trigger_config);
+            if (parsed) {
+                weeklySchedules[key] = {
+                    automation_id: auto.id,
+                    automation_name: auto.name,
+                    time: parsed.time,
+                    days: parsed.days,
+                    tz: parsed.tz,
+                    enabled: auto.enabled !== false && auto.enabled !== 0,
+                    owned: true,
+                    next_run: auto.next_run,
+                    trigger_config: auto.trigger_config || {},
+                };
+            }
+        }
+    });
+
     return {
         playlists,
         automations,
@@ -323,10 +603,12 @@ async function refreshAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
     try {
-        const [playlistRes, automationRes, historyRes] = await Promise.all([
+        const [playlistRes, automationRes, historyRes, kindsRes, genRes] = await Promise.all([
             fetch('/api/mirrored-playlists'),
             fetch('/api/automations'),
             fetch(`/api/playlist-pipeline/history?limit=${_autoSyncHistoryLimit}`),
+            fetch('/api/personalized/kinds').catch(() => null),      // best-effort; never blocks the board
+            fetch('/api/personalized/playlists').catch(() => null),  // generated counts; best-effort
         ]);
         const playlists = await playlistRes.json();
         const automations = await automationRes.json();
@@ -334,7 +616,24 @@ async function refreshAutoSyncScheduleModal() {
         if (!playlistRes.ok || playlists.error) throw new Error(playlists.error || 'Failed to load mirrored playlists');
         if (!automationRes.ok || automations.error) throw new Error(automations.error || 'Failed to load automations');
         if (!historyRes.ok || historyData.error) throw new Error(historyData.error || 'Failed to load pipeline run history');
-        _autoSyncScheduleState = buildAutoSyncScheduleState(playlists, automations, historyData);
+        // Additive: surface not-yet-generated personalized kinds/variants as synthetic
+        // schedulable rows. Best-effort — a kinds failure never breaks the board; real
+        // mirrored soulsync_discovery rows are de-duped inside the expander.
+        let allPlaylists = playlists;
+        try {
+            const kindsData = kindsRes && kindsRes.ok ? await kindsRes.json() : null;
+            if (kindsData && kindsData.success && Array.isArray(kindsData.kinds)) {
+                // Generated (but maybe unsynced) counts, so a refreshed-not-synced
+                // variant shows its real track count instead of 0.
+                const genData = genRes && genRes.ok ? await genRes.json() : null;
+                const genCounts = autoSyncGeneratedCountMap(genData);
+                // Tag generated variant rows + drop orphaned mirrors, THEN append
+                // the not-yet-generated variants; both flow into one group per kind.
+                const enriched = autoSyncEnrichDiscoveryRows(playlists, kindsData.kinds);
+                allPlaylists = [...enriched, ...autoSyncExpandPersonalizedRows(kindsData.kinds, enriched, genCounts)];
+            }
+        } catch (e) { /* personalized kinds optional */ }
+        _autoSyncScheduleState = buildAutoSyncScheduleState(allPlaylists, automations, historyData);
         renderAutoSyncScheduleModal();
         manageAutoSyncStatusPolling();
     } catch (err) {
@@ -353,6 +652,12 @@ async function refreshAutoSyncScheduleModal() {
 function renderAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
+
+    // Preserve the visible lane board's scroll across the full re-render so dropping /
+    // removing a playlist doesn't snap it back to the top (the user used to have to scroll
+    // back). Targets the ACTIVE tab so it works for both the hourly + weekly boards.
+    const _prevLanes = overlay.querySelector('.auto-sync-tab-panel.active .auto-sync-lanes');
+    const _prevScroll = _prevLanes ? _prevLanes.scrollTop : null;
 
     const { playlists, playlistSchedules, weeklySchedules, automationPipelines, runHistory, runHistoryTotal } = _autoSyncScheduleState;
     const scheduledCount = Object.keys(playlistSchedules).length + Object.keys(weeklySchedules || {}).length;
@@ -408,6 +713,11 @@ function renderAutoSyncScheduleModal() {
     `;
     populateAutoSyncHistoryList(overlay);
     bindAutoSyncHistoryCardInteractions(overlay);
+
+    if (_prevScroll != null) {
+        const nl = overlay.querySelector('.auto-sync-tab-panel.active .auto-sync-lanes');
+        if (nl) nl.scrollTop = _prevScroll;
+    }
 }
 
 function setAutoSyncTab(tab) {
@@ -433,6 +743,17 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
     }, {});
     const sourceKeys = Object.keys(grouped).sort((a, b) => autoSyncSourceLabel(a).localeCompare(autoSyncSourceLabel(b)));
 
+    const cardRenderer = (p, displayName) => {
+        const schedule = playlistSchedules[p.id];
+        const assigned = schedule ? autoSyncIntervalLabel(schedule.hours) : 'Unscheduled';
+        return `
+                    <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
+                        <div class="auto-sync-playlist-name">${_esc(displayName || p.name)}</div>
+                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
+                    </div>
+                `;
+    };
+    const isScheduled = (p) => !!playlistSchedules[p.id];
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
             <div class="auto-sync-source-group-head">
@@ -446,16 +767,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
                     Bulk
                 </button>
             </div>
-            ${grouped[source].map(p => {
-                const schedule = playlistSchedules[p.id];
-                const assigned = schedule ? autoSyncIntervalLabel(schedule.hours) : 'Unscheduled';
-                return `
-                    <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
-                        <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
-                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
-                    </div>
-                `;
-            }).join('')}
+            ${autoSyncSidebarGroupHtml(grouped[source], cardRenderer, isScheduled)}
         </div>
     `).join('') : '<div class="auto-sync-empty">No refreshable mirrored playlists yet.</div>';
 
@@ -479,17 +791,23 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
         .map(s => parseInt(s?.hours, 10))
         .filter(h => Number.isFinite(h) && h > 0 && !AUTO_SYNC_BUCKETS.includes(h));
     const allBuckets = [...new Set([...AUTO_SYNC_BUCKETS, ...customHours])].sort((a, b) => a - b);
+    // Concept 1 — interval LANES (horizontal rows) instead of columns: no side-scroll,
+    // empty intervals collapse to thin strips, busy ones grow. Same drag handlers + card.
     const bucketHtml = allBuckets.map(hours => {
         const assigned = schedulablePlaylists.filter(p => playlistSchedules[p.id]?.hours === hours);
         const isCustom = !AUTO_SYNC_BUCKETS.includes(hours);
+        const filled = assigned.length > 0;
         return `
-            <div class="auto-sync-column ${isCustom ? 'custom' : ''}" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondragleave="autoSyncDragLeave(event)" ondrop="autoSyncDrop(event, ${hours})">
-                <div class="auto-sync-column-head">
-                    <span>${autoSyncBucketLabel(hours)}${isCustom ? ' <em>custom</em>' : ''}</span>
-                    <small>${assigned.length} playlist${assigned.length === 1 ? '' : 's'}</small>
+            <div class="auto-sync-lane ${filled ? 'filled' : 'empty'} ${isCustom ? 'custom' : ''}" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondragleave="autoSyncDragLeave(event)" ondrop="autoSyncDrop(event, ${hours})">
+                <div class="auto-sync-lane-badge">
+                    <b>${autoSyncBucketLabel(hours)}</b>
+                    <span>${_esc(autoSyncLaneCadence(hours))}${isCustom ? ' · custom' : ''}</span>
+                    ${filled ? `<em class="auto-sync-lane-count">${assigned.length}</em>` : ''}
                 </div>
-                <div class="auto-sync-column-list">
-                    ${assigned.length ? assigned.map(p => autoSyncScheduledCardHtml(p, playlistSchedules[p.id])).join('') : '<div class="auto-sync-drop-hint"><strong>Drop here</strong><span>Schedule playlists at this interval</span></div>'}
+                <div class="auto-sync-lane-track">
+                    ${filled
+                        ? assigned.map(p => autoSyncScheduledCardHtml(p, playlistSchedules[p.id])).join('')
+                        : `<div class="auto-sync-lane-hint"><span class="auto-sync-lane-hint-ic">+</span> Drag a playlist here to sync ${_esc(autoSyncIntervalLabel(hours).toLowerCase())}</div>`}
                 </div>
             </div>
         `;
@@ -514,7 +832,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
                     </div>
                     <div class="auto-sync-source-list">${sidebarHtml}${unavailableHtml}</div>
                 </aside>
-                <main class="auto-sync-board">${bucketHtml}</main>
+                <main class="auto-sync-lanes">${bucketHtml}</main>
             </div>
     `;
 }
@@ -546,6 +864,22 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
     }, {});
     const sourceKeys = Object.keys(grouped).sort((a, b) => autoSyncSourceLabel(a).localeCompare(autoSyncSourceLabel(b)));
 
+    const cardRenderer = (p, displayName) => {
+        const weekly = weeklySchedules[p.id];
+        const hourly = playlistSchedules[p.id];
+        let assigned = 'Unscheduled';
+        if (weekly) assigned = autoSyncWeeklyLabel(weekly);
+        else if (hourly) assigned = `Hourly (${autoSyncIntervalLabel(hourly.hours).toLowerCase()})`;
+        return `
+                    <div class="auto-sync-playlist ${weekly ? 'scheduled' : (hourly ? 'scheduled-elsewhere' : '')}"
+                         draggable="true" data-playlist-id="${p.id}"
+                         ondragstart="autoSyncWeeklyDragStart(event)" ondragend="autoSyncWeeklyDragEnd()">
+                        <div class="auto-sync-playlist-name">${_esc(displayName || p.name)}</div>
+                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
+                    </div>
+                `;
+    };
+    const isScheduled = (p) => !!(weeklySchedules[p.id] || playlistSchedules[p.id]);
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
             <div class="auto-sync-source-group-head">
@@ -554,21 +888,7 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
                     <span class="auto-sync-source-title-label">${_esc(autoSyncSourceLabel(source))}</span>
                 </span>
             </div>
-            ${grouped[source].map(p => {
-                const weekly = weeklySchedules[p.id];
-                const hourly = playlistSchedules[p.id];
-                let assigned = 'Unscheduled';
-                if (weekly) assigned = autoSyncWeeklyLabel(weekly);
-                else if (hourly) assigned = `Hourly (${autoSyncIntervalLabel(hourly.hours).toLowerCase()})`;
-                return `
-                    <div class="auto-sync-playlist ${weekly ? 'scheduled' : (hourly ? 'scheduled-elsewhere' : '')}"
-                         draggable="true" data-playlist-id="${p.id}"
-                         ondragstart="autoSyncWeeklyDragStart(event)" ondragend="autoSyncWeeklyDragEnd()">
-                        <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
-                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
-                    </div>
-                `;
-            }).join('')}
+            ${autoSyncSidebarGroupHtml(grouped[source], cardRenderer, isScheduled)}
         </div>
     `).join('') : '<div class="auto-sync-empty">No refreshable mirrored playlists yet.</div>';
 
@@ -598,21 +918,24 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
         });
     });
 
+    // Day LANES (horizontal rows, Mon–Sun) — mirrors the hourly board's lane layout.
     const dayColumnsHtml = AUTO_SYNC_WEEKDAYS.map(day => {
         const cards = cardsByDay[day];
-        const cardHtml = cards.length
+        const filled = cards.length > 0;
+        const cardHtml = filled
             ? cards.map(({ playlist, schedule }) => autoSyncWeeklyCardHtml(playlist, schedule)).join('')
-            : '<div class="auto-sync-drop-hint"><strong>Drop here</strong><span>Schedule playlists on this day</span></div>';
+            : `<div class="auto-sync-lane-hint"><span class="auto-sync-lane-hint-ic">+</span> Drag a playlist here to sync every ${_esc(AUTO_SYNC_WEEKDAY_LABELS[day])}</div>`;
         return `
-            <div class="auto-sync-column auto-sync-weekly-column" data-day="${day}"
+            <div class="auto-sync-lane ${filled ? 'filled' : 'empty'}" data-day="${day}"
                  ondragover="autoSyncWeeklyDragOver(event)"
                  ondragleave="autoSyncWeeklyDragLeave(event)"
                  ondrop="autoSyncWeeklyDrop(event, '${day}')">
-                <div class="auto-sync-column-head">
-                    <span>${AUTO_SYNC_WEEKDAY_LABELS[day]}</span>
-                    <small>${cards.length} playlist${cards.length === 1 ? '' : 's'}</small>
+                <div class="auto-sync-lane-badge">
+                    <b>${_esc(AUTO_SYNC_WEEKDAY_LABELS[day])}</b>
+                    <span>Weekly</span>
+                    ${filled ? `<em class="auto-sync-lane-count">${cards.length}</em>` : ''}
                 </div>
-                <div class="auto-sync-column-list">${cardHtml}</div>
+                <div class="auto-sync-lane-track">${cardHtml}</div>
             </div>
         `;
     }).join('');
@@ -637,7 +960,7 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
                 </div>
                 <div class="auto-sync-source-list">${sidebarHtml}${unavailableHtml}</div>
             </aside>
-            <main class="auto-sync-board auto-sync-weekly-board">${dayColumnsHtml}</main>
+            <main class="auto-sync-lanes auto-sync-weekly-lanes">${dayColumnsHtml}</main>
         </div>
         ${editorHtml}
     `;
@@ -1035,8 +1358,7 @@ async function saveAutoSyncPlaylistScheduleSilent(playlistId, hours) {
         name: `Auto-Sync: ${playlist.name}`,
         trigger_type: 'schedule',
         trigger_config: autoSyncTriggerForHours(hours),
-        action_type: 'playlist_pipeline',
-        action_config: { playlist_id: String(playlistId), all: false },
+        ...autoSyncActionForPlaylist(playlist, playlistId),
         then_actions: [],
         group_name: 'Playlist Auto-Sync',
         owned_by: 'auto_sync',
@@ -1728,8 +2050,7 @@ async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
         name: `Auto-Sync: ${playlist.name}`,
         trigger_type: 'schedule',
         trigger_config: autoSyncTriggerForHours(hours),
-        action_type: 'playlist_pipeline',
-        action_config: { playlist_id: String(playlistId), all: false },
+        ...autoSyncActionForPlaylist(playlist, playlistId),
         then_actions: [],
         group_name: 'Playlist Auto-Sync',
         owned_by: 'auto_sync',
@@ -1925,8 +2246,7 @@ async function saveAutoSyncWeeklySchedule(playlistId, { time, days, tz }) {
         name: `Auto-Sync: ${playlist.name}`,
         trigger_type: 'weekly_time',
         trigger_config: triggerConfig,
-        action_type: 'playlist_pipeline',
-        action_config: { playlist_id: String(playlistId), all: false },
+        ...autoSyncActionForPlaylist(playlist, playlistId),
         then_actions: [],
         group_name: 'Playlist Auto-Sync',
         owned_by: 'auto_sync',
@@ -1967,6 +2287,25 @@ async function unscheduleAutoSyncWeekly(playlistId) {
 async function runAutoSyncScheduledPlaylist(playlistId) {
     const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     if (!playlist) return;
+    if (playlist._personalized) {
+        // A synthetic personalized row has no mirrored pipeline to run; run its
+        // scheduled personalized_pipeline automation immediately instead.
+        const sched = _autoSyncScheduleState.playlistSchedules?.[playlistId]
+                   || _autoSyncScheduleState.weeklySchedules?.[playlistId];
+        if (!sched || !sched.automation_id) {
+            if (typeof showToast === 'function') showToast('Schedule it first, then Run now.', 'info');
+            return;
+        }
+        try {
+            const res = await fetch(`/api/automations/${sched.automation_id}/run`, { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || 'Failed to run');
+            if (typeof showToast === 'function') showToast(`Running ${playlist.name}…`, 'success');
+        } catch (err) {
+            if (typeof showToast === 'function') showToast(`Error: ${err.message}`, 'error');
+        }
+        return;
+    }
     await runMirroredPlaylistPipeline(playlistId, playlist.name || `Playlist #${playlistId}`);
     await refreshAutoSyncScheduleModal();
 }

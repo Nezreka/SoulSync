@@ -79,14 +79,19 @@ def test_server_id_str_int_coercion():
     assert result == {0: 0}
 
 
-def test_two_sources_pointing_at_same_server_track_only_first_wins():
-    # Defensive — UNIQUE constraint prevents this in production but
-    # cache_lookup is injectable so we verify the safety.
+def test_two_sources_pointing_at_same_server_track_both_win():
+    # Two DIFFERENT source ids sharing one server track is legitimate (a
+    # playlist carrying the same song twice under different provider ids,
+    # both hand-matched to the user's single library copy). The old
+    # first-wins rule silently dropped the second pairing, so that row read
+    # "missing" forever no matter how many times Find & Add was re-run
+    # (wolf39us). The cache's UNIQUE is per (source_track_id, server_source)
+    # — it never prevented this case. Both are user-confirmed: honor both.
     sources = [{"source_track_id": "a"}, {"source_track_id": "b"}]
     servers = [{"id": 5001, "title": "Iron Man"}]
     cache = {"a": 5001, "b": 5001}
     result = resolve_match_overrides(sources, servers, lambda sid: cache.get(sid))
-    assert result == {0: 0}
+    assert result == {0: 0, 1: 0}
 
 
 def test_cache_lookup_raising_treated_as_miss():
@@ -276,3 +281,67 @@ def test_durable_match_safe_when_db_lacks_methods():
 def test_durable_match_empty_source_id_returns_none():
     db = _FakeMatchDB(match={"library_track_id": "5001"})
     assert resolve_durable_match_server_id(db, 1, "", "plex", {"5001"}) is None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# resolve_override_server_id — validated cache hit, else durable (#wolf39us)
+# ──────────────────────────────────────────────────────────────────────
+
+from core.sync.match_overrides import resolve_override_server_id
+
+
+def _cache(mapping):
+    """A read_sync_match_cache-shaped callable backed by {source_id: server_id}."""
+    return lambda sid, source: (
+        {"server_track_id": mapping[sid]} if sid in mapping else None)
+
+
+def test_override_prefers_valid_cache_hit():
+    db = _FakeMatchDB(match=None)
+    out = resolve_override_server_id(
+        db, 1, "iron", "plex", {"5001", "5002"}, _cache({"iron": "5001"}))
+    assert out == "5001"
+
+
+def test_override_stale_cache_falls_through_to_durable(caplog):
+    """The reported bug: a cache hit whose server id is NOT in the current playlist
+    must NOT be returned — it has to fall through to the durable match, which
+    self-heals via file path. Previously the stale hit short-circuited that."""
+    import logging
+    # Cache says 5001 (gone from playlist); durable re-resolves to 7777 via file path.
+    db = _FakeMatchDB(
+        match={"library_track_id": "5001", "library_file_path": "/m/a.flac",
+               "profile_id": 1, "source": "spotify", "source_track_id": "iron",
+               "server_source": "plex"},
+        file_path_id="7777",
+    )
+    with caplog.at_level(logging.WARNING):
+        out = resolve_override_server_id(
+            db, 1, "iron", "plex", {"7777", "9000"}, _cache({"iron": "5001"}))
+    assert out == "7777"                       # durable self-heal won, not the stale 5001
+    assert any("stale match-cache" in r.message.lower() for r in caplog.records)
+
+
+def test_override_cache_miss_uses_durable():
+    db = _FakeMatchDB(match={"library_track_id": "5001", "library_file_path": "/m/a.flac",
+                             "profile_id": 1, "source": "spotify", "source_track_id": "iron",
+                             "server_source": "plex"})
+    out = resolve_override_server_id(
+        db, 1, "iron", "plex", {"5001"}, _cache({}))   # empty cache
+    assert out == "5001"
+
+
+def test_override_none_when_both_miss():
+    db = _FakeMatchDB(match=None)
+    assert resolve_override_server_id(
+        db, 1, "iron", "plex", {"9999"}, _cache({})) is None
+
+
+def test_override_cache_read_raising_treated_as_miss():
+    db = _FakeMatchDB(match={"library_track_id": "5001", "library_file_path": "/m/a.flac",
+                             "profile_id": 1, "source": "spotify", "source_track_id": "iron",
+                             "server_source": "plex"})
+    def _boom(sid, source):
+        raise RuntimeError("db down")
+    out = resolve_override_server_id(db, 1, "iron", "plex", {"5001"}, _boom)
+    assert out == "5001"                        # fell through to durable

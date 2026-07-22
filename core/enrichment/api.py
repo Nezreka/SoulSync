@@ -16,6 +16,8 @@ no branching on service id inside this module.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any, Callable, Optional
 
 from flask import Blueprint, jsonify, request
@@ -93,9 +95,69 @@ def _add_yield_override(service: EnrichmentService) -> None:
         logger.debug("yield override add: %s", e)
 
 
+# ── status TTL cache ─────────────────────────────────────────────────────────
+# get_stats() runs live COUNT queries; right after a restart those contend with
+# the resuming workers and take seconds each. The frontend's fallback pollers
+# (pre-websocket-connect) then stack duplicate heavy reads until the request
+# queue is saturated — which delays the socket handshake that would silence
+# them. A short per-service cache caps the cost at one stats read per service
+# per window no matter how many polls pile up. Time source injectable for tests.
+_STATUS_TTL_SECONDS = 2.0
+_status_cache: dict = {}          # service_id -> (monotonic_ts, stats_dict)
+_status_cache_lock = threading.Lock()
+
+
+def _cached_stats(service: EnrichmentService, now: Optional[float] = None) -> dict:
+    t = time.monotonic() if now is None else now
+    with _status_cache_lock:
+        hit = _status_cache.get(service.id)
+        if hit and t - hit[0] < _STATUS_TTL_SECONDS:
+            return hit[1]
+    worker = service.get_worker()
+    stats = service.fallback_status() if worker is None else worker.get_stats()
+    with _status_cache_lock:
+        _status_cache[service.id] = (t, stats)
+    return stats
+
+
+def _invalidate_status_cache(service_id: Optional[str] = None) -> None:
+    """Drop cached stats (one service, or all) — pause/resume must reflect
+    immediately, not after the TTL."""
+    with _status_cache_lock:
+        if service_id is None:
+            _status_cache.clear()
+        else:
+            _status_cache.pop(service_id, None)
+
+
 def create_blueprint() -> Blueprint:
     """Build the Flask blueprint — call once during host startup."""
     bp = Blueprint('enrichment_api', __name__)
+
+    @bp.route('/api/enrichment/status-all', methods=['GET'])
+    def enrichment_status_all():
+        """Every service's status in ONE response — the page-load hydrate
+        (replaces ~13 individual /status requests). Collected CONCURRENTLY:
+        a serial pass would SUM the slow collectors (jiosaavn/bandcamp run
+        3-4s cold) into a 10s+ request. A failing service degrades to its own
+        error field, never the whole bundle."""
+        from concurrent.futures import ThreadPoolExecutor
+        from core.enrichment.services import all_services
+        services = all_services()
+
+        def one(svc):
+            try:
+                return svc.id, _cached_stats(svc)
+            except Exception as e:   # noqa: BLE001 - per-service isolation
+                logger.error("status-all: %s failed: %s", svc.id, e)
+                return svc.id, {'error': str(e)}
+
+        out = {}
+        if services:
+            with ThreadPoolExecutor(max_workers=min(8, len(services))) as ex:
+                for sid, payload in ex.map(one, services):
+                    out[sid] = payload
+        return jsonify({'services': out}), 200
 
     @bp.route('/api/enrichment/<service_id>/status', methods=['GET'])
     def enrichment_status(service_id: str):
@@ -103,10 +165,7 @@ def create_blueprint() -> Blueprint:
         if service is None:
             return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
         try:
-            worker = service.get_worker()
-            if worker is None:
-                return jsonify(service.fallback_status()), 200
-            return jsonify(worker.get_stats()), 200
+            return jsonify(_cached_stats(service)), 200
         except Exception as e:
             logger.error("Error getting %s enrichment status: %s", service.id, e)
             return jsonify({'error': str(e)}), 500
@@ -123,6 +182,7 @@ def create_blueprint() -> Blueprint:
             }), 400
         try:
             worker.pause()
+            _invalidate_status_cache(service.id)   # the click must reflect instantly
             _persist_paused(service, True)
             _drop_auto_pause_marker(service)
             logger.info("%s worker paused via UI", service.display_name)
@@ -157,6 +217,7 @@ def create_blueprint() -> Blueprint:
                 return jsonify(payload), http_status
         try:
             worker.resume()
+            _invalidate_status_cache(service.id)   # the click must reflect instantly
             _persist_paused(service, False)
             _drop_auto_pause_marker(service)
             _add_yield_override(service)

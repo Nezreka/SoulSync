@@ -47,6 +47,62 @@ def test_resave_is_idempotent_on_run_id(db):
     assert len(runs) == 1 and runs[0]['tracks_added'] == 11
 
 
+# ── persist_scan_run: the shared seam both scan paths use (#933) ──
+
+from datetime import datetime
+
+from core.watchlist.scan_history import persist_scan_run
+
+
+def _state(**over):
+    """A watchlist_scan_state as the scanner leaves it when a scan finishes."""
+    s = {
+        'scan_run_id': 'auto-run-1',
+        'started_at': datetime(2026, 6, 26, 2, 0, 0),
+        'completed_at': datetime(2026, 6, 26, 2, 4, 0),
+        'total_artists': 40,
+        'tracks_found_this_scan': 7,
+        'tracks_added_this_scan': 3,
+        'scan_track_events': _events(n_added=3, n_skipped=1),
+        'summary': {'total_artists': 40, 'successful_scans': 40,
+                    'new_tracks_found': 7, 'tracks_added_to_wishlist': 3},
+    }
+    s.update(over)
+    return s
+
+
+def test_persist_scan_run_records_a_history_row(db):
+    # the #933 fix: an automatic (all-profiles → profile_id=None) scan must land in History.
+    assert persist_scan_run(db, _state(), profile_id=None, was_cancelled=False) is True
+    runs = db.get_watchlist_scan_runs()
+    assert len(runs) == 1
+    r = runs[0]
+    assert (r['run_id'], r['status'], r['tracks_found'], r['tracks_added']) == \
+        ('auto-run-1', 'completed', 7, 3)
+    assert r['profile_id'] == 1  # None coerced to a concrete profile, never NULL
+    # the per-run ledger came through too
+    assert [e['status'] for e in db.get_watchlist_scan_run_events('auto-run-1')] == \
+        ['added', 'added', 'added', 'skipped']
+
+
+def test_persist_scan_run_cancelled_status(db):
+    persist_scan_run(db, _state(scan_run_id='c1'), profile_id=2, was_cancelled=True)
+    assert db.get_watchlist_scan_runs()[0]['status'] == 'cancelled'
+
+
+def test_persist_scan_run_accepts_datetime_or_iso_string(db):
+    # state timestamps may be datetime (auto path) or already-iso strings — both must persist.
+    persist_scan_run(db, _state(scan_run_id='dt', completed_at='2026-06-26T02:09:00'),
+                     profile_id=1, was_cancelled=False)
+    assert db.get_watchlist_scan_runs()[0]['run_id'] == 'dt'
+
+
+def test_persist_scan_run_tolerates_sparse_state(db):
+    # a bare/early-finished state must not raise — history-write must never break a scan.
+    assert persist_scan_run(db, {'scan_run_id': 'sparse'}, profile_id=None, was_cancelled=False)
+    assert db.get_watchlist_scan_runs()[0]['tracks_added'] == 0
+
+
 def test_prune_keeps_most_recent(db):
     for i in range(1, 8):
         db.save_watchlist_scan_run(

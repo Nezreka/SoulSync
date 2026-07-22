@@ -63,6 +63,55 @@ def test_create_dirs_false_does_not_create_folders(monkeypatch, tmp_path):
     assert not (tmp_path / "Transfer").exists()
 
 
+def test_itunes_single_albumartist_falls_back_to_track_artist(monkeypatch, tmp_path):
+    """#989: an iTunes single's collection carries a placeholder 'Unknown Artist'
+    album artist while the track artist is real. The album_path must use the real
+    artist for $albumartist, not bury the file under 'Unknown Artist'. FAILS pre-fix
+    (the placeholder album-context artist overrode the real track artist)."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    ctx = {
+        "source": "itunes",
+        "artist": {"name": "Forevert", "id": "123456"},
+        "album": {"name": "CHAOSRIFT", "id": "999", "album_type": "single", "total_tracks": 1,
+                  "artists": [{"name": "Unknown Artist"}]},   # placeholder collection artist
+        "track_info": {"name": "CHAOSRIFT", "track_number": 1, "disc_number": 1,
+                       "artists": [{"name": "Forevert"}]},
+        "original_search_result": {"title": "CHAOSRIFT", "clean_title": "CHAOSRIFT",
+                                   "artists": [{"name": "Forevert"}]},
+    }
+    info = {"is_album": True, "album_name": "CHAOSRIFT", "track_number": 1, "disc_number": 1}
+    final_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Forevert", "id": "123456"}, info, ".flac", create_dirs=False)
+    assert final_path == str(tmp_path / "Transfer" / "Forevert" / "Forevert - CHAOSRIFT" / "01 - CHAOSRIFT.flac")
+    assert "Unknown Artist" not in final_path
+
+
+def test_compilation_uses_compilation_path_template(monkeypatch, tmp_path):
+    """Compilation albums route through the compilation_path template so all tracks
+    land in a single Compilations/<album>/ folder instead of being split by artist."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    ctx = {
+        "source": "spotify",
+        "artist": {"name": "Guest Singer"},
+        "album": {"name": "Big Comp", "id": "c1", "album_type": "compilation", "total_tracks": 20,
+                  "artists": [{"name": "Various Artists"}]},
+        "track_info": {"name": "A Song", "track_number": 3, "disc_number": 1,
+                       "artists": [{"name": "Guest Singer"}]},
+        "original_search_result": {"title": "A Song", "clean_title": "A Song",
+                                   "artists": [{"name": "Guest Singer"}]},
+    }
+    info = {"is_album": True, "album_name": "Big Comp", "track_number": 3, "disc_number": 1}
+    final_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Guest Singer"}, info, ".flac", create_dirs=False)
+    # compilation_path default: Compilations/$album/$track - $artist - $title
+    assert "Compilations" in final_path
+    assert "Big Comp" in final_path
+    assert "Guest Singer" in final_path
+    assert "Various Artists" not in final_path
+
+
 def test_create_dirs_true_still_creates_folders(monkeypatch, tmp_path):
     # The download/import flow must keep working (default behavior unchanged).
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
@@ -151,6 +200,41 @@ def test_get_file_path_from_template_raw_handles_quality_and_disc_placeholders(m
 
     assert folder_path == os.path.join("Artist One", "Album One")
     assert filename == "3 - Song One [FLAC 16bit]"
+
+
+def test_disc_placeholder_drops_on_single_disc_album(monkeypatch):
+    """#981: $disc must NOT stamp '01-' on every track of a single-disc album
+    (reported on 'The Best of Snoop Dogg (2005)'). Empty like $cdnum; the
+    leading-dash cleanup removes the orphaned separator."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "Snoop Dogg", "album": "The Best of Snoop Dogg (2005)",
+         "title": "Bitch Please", "track_number": 7, "disc_number": 1, "total_discs": 1},
+    )
+    assert filename == "07 - Bitch Please"          # not "01-07 - Bitch Please"
+
+
+def test_disc_placeholder_kept_on_multi_disc_album(monkeypatch):
+    """The disc prefix stays for a genuine multi-disc album."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "A", "album": "B", "title": "Song",
+         "track_number": 7, "disc_number": 2, "total_discs": 2},
+    )
+    assert filename == "02-07 - Song"
+
+
+def test_disc_placeholder_kept_when_track_is_on_disc_two_without_total(monkeypatch):
+    """A track known to be on disc 2 shows its disc even if total_discs wasn't
+    populated — disc_number > 1 is itself proof of a multi-disc release."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "A", "album": "B", "title": "Song", "track_number": 3, "disc_number": 2},
+    )
+    assert filename == "02-03 - Song"
 
 
 def test_get_file_path_from_template_raw_substitutes_cdnum_for_multi_disc(monkeypatch):
@@ -603,3 +687,191 @@ def test_build_final_path_keeps_real_year_in_folder(monkeypatch, tmp_path):
 
     album_folder = os.path.basename(os.path.dirname(final_path))
     assert album_folder == "Mantras (Deluxe) (2026) [Album]"
+
+
+# ── #1009: album-folder reuse (#829) must never collapse a multi-disc album ──
+
+def _reuse_test_config(tmp_path, template):
+    return _Config(
+        {
+            "soulseek.transfer_path": str(tmp_path / "Transfer"),
+            "file_organization.enabled": True,
+            "file_organization.templates": {
+                "album_path": template,
+                "single_path": "$artist/$artist - $title",
+            },
+            "file_organization.collab_artist_mode": "first",
+            "file_organization.disc_label": "Disc",
+        }
+    )
+
+
+def _reuse_context(disc_number, total_discs_from_api):
+    return {
+        "artist": {"name": "Artist One"},
+        "album": {
+            "name": "Album One",
+            "id": "album-1",
+            "release_date": "2026-01-01",
+            "total_tracks": 40,
+            "total_discs": total_discs_from_api,
+            "album_type": "album",
+            "artists": [{"name": "Artist One"}],
+        },
+        "track_info": {
+            "name": "Song One", "id": "track-1",
+            "track_number": 13, "disc_number": disc_number,
+            "artists": [{"name": "Artist One"}],
+        },
+        "original_search_result": {
+            "title": "Song One", "clean_title": "Song One",
+            "clean_album": "Album One", "clean_artist": "Artist One",
+            "artists": [{"name": "Artist One"}],
+        },
+        "source": "deezer",
+        "is_album_download": True,
+    }
+
+
+def test_multi_disc_album_skips_folder_reuse(monkeypatch, tmp_path):
+    """#1009: mid-download the album 'exists' in exactly one folder — whichever
+    disc landed first. Reusing it funnels every later track of the box set into
+    that one disc folder ($cdnum templates AND the auto 'Disc N' folder alike),
+    colliding the per-disc '01 - …' filenames. Multi-disc albums must always
+    take the template path."""
+    config = _reuse_test_config(tmp_path, "$albumartist/$album/$cdnum/$track - $title")
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+
+    # a poisoned resolver: reuse would drop this disc-2 track into the CD01 folder
+    cd01 = tmp_path / "Transfer" / "Artist One" / "Album One" / "CD01"
+    cd01.mkdir(parents=True)
+    import core.library.existing_album_folder as eaf
+    import database.music_database as mdb
+    monkeypatch.setattr(mdb, "get_database", lambda: object(), raising=False)
+    monkeypatch.setattr(eaf, "resolve_existing_album_folder",
+                        lambda **kw: str(cd01))
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _reuse_context(disc_number=2, total_discs_from_api=5),
+        {"name": "Artist One"},
+        {"is_album": True, "album_name": "Album One", "track_number": 13, "disc_number": 2},
+        ".flac",
+    )
+    assert created is True
+    assert final_path == str(
+        tmp_path / "Transfer" / "Artist One" / "Album One" / "CD02" / "13 - Song One.flac")
+
+
+def test_reorganize_flag_disables_folder_reuse(monkeypatch, tmp_path):
+    """A reorganize context carries `_no_album_folder_reuse` — its destination
+    must come from the CURRENT template, never the folder the album already
+    sits in. Otherwise a template change computes "destination == current
+    location" for every already-together album and reorganize silently no-ops
+    (TheHomeGuy's report: old `$albumartist - $album` folders never moved)."""
+    config = _reuse_test_config(tmp_path, "$albumartist/$album/$track - $title")
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    # The album's current home under the OLD template — the resolver would
+    # happily return it, and the resulting path must NOT use it.
+    old_home = tmp_path / "Transfer" / "Artist One" / "Artist One - Album One"
+    old_home.mkdir(parents=True)
+    import core.library.existing_album_folder as eaf
+    import database.music_database as mdb
+    monkeypatch.setattr(mdb, "get_database", lambda: object(), raising=False)
+    resolver_calls = []
+    monkeypatch.setattr(eaf, "resolve_existing_album_folder",
+                        lambda **kw: resolver_calls.append(kw) or str(old_home))
+
+    context = _reuse_context(disc_number=1, total_discs_from_api=1)
+    context["_no_album_folder_reuse"] = True
+    final_path, created = import_paths.build_final_path_for_track(
+        context,
+        {"name": "Artist One"},
+        {"is_album": True, "album_name": "Album One", "track_number": 13, "disc_number": 1},
+        ".flac",
+        create_dirs=False,
+    )
+    assert created is True
+    assert resolver_calls == []  # reuse lookup skipped entirely
+    assert final_path == str(
+        tmp_path / "Transfer" / "Artist One" / "Album One" / "13 - Song One.flac")
+
+
+def test_single_disc_album_still_reuses_existing_folder(monkeypatch, tmp_path):
+    """The #829 behavior the gate must NOT break: single-disc albums keep
+    joining their existing folder so $albumtype/$year drift can't split them."""
+    config = _reuse_test_config(
+        tmp_path, "$albumartist/$albumartist - $album/$track - $title")
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    existing = tmp_path / "Transfer" / "Artist One" / "Artist One - Album One (2020)"
+    existing.mkdir(parents=True)
+    import core.library.existing_album_folder as eaf
+    import database.music_database as mdb
+    monkeypatch.setattr(mdb, "get_database", lambda: object(), raising=False)
+    monkeypatch.setattr(eaf, "resolve_existing_album_folder",
+                        lambda **kw: str(existing))
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _reuse_context(disc_number=1, total_discs_from_api=1),
+        {"name": "Artist One"},
+        {"is_album": True, "album_name": "Album One", "track_number": 13, "disc_number": 1},
+        ".flac",
+    )
+    assert created is True
+    assert final_path == str(existing / "13 - Song One.flac")
+
+
+# ── TheHomeGuy: multi-artist singles must honor the Collaborative Artist mode ──
+
+def _single_ctx():
+    return {
+        "artist": "Larry June, Currensy & The Alchemist",
+        "albumartist": "Larry June, Currensy & The Alchemist",
+        "album": "Orange Villa", "title": "Orange Villa",
+        "track_number": 1, "disc_number": 1, "year": "2023",
+        "quality": "", "albumtype": "Single",
+        "_artists_list": [{"name": "Larry June"}, {"name": "Currensy"},
+                          {"name": "The Alchemist"}],
+    }
+
+
+def _collab_cfg(templates=None, mode="first"):
+    return _Config({
+        "file_organization.enabled": True,
+        "file_organization.templates": templates or {},
+        "file_organization.collab_artist_mode": mode,
+    })
+
+
+def test_default_single_template_files_under_the_main_artist(monkeypatch):
+    # The old default used $artist, which NEVER collab-reduces — every
+    # multi-artist single landed under "A, B & C" no matter the setting.
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg())
+    folder, filename = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder.split(os.sep)[0] == "Larry June"
+    assert filename == "Orange Villa"
+
+
+def test_persisted_old_default_single_template_upgrades(monkeypatch):
+    # The settings page used to seed + persist the old default on Save —
+    # a stored value that IS the old default is treated as never-customized.
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg(
+        templates={"single_path": "$artist/$artist - $title/$title"}))
+    folder, _ = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder.split(os.sep)[0] == "Larry June"
+
+
+def test_custom_single_template_is_untouched(monkeypatch):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg(
+        templates={"single_path": "$artist/$title"}))
+    folder, _ = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder == "Larry June, Currensy & The Alchemist"
+
+
+def test_collab_mode_all_keeps_the_combined_folder(monkeypatch):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg(mode="all"))
+    folder, _ = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
+    assert folder.split(os.sep)[0] == "Larry June, Currensy & The Alchemist"

@@ -50,7 +50,8 @@ class _Track:
 
 class _Client:
     def __init__(self, *, name='fake', artists=None, albums=None, tracks=None,
-                 fail_search=False, authed=True, connected=True, meta_available=None):
+                 fail_search=False, authed=True, connected=True, meta_available=None,
+                 free_installed=False):
         self.name = name
         self._artists = artists or []
         self._albums = albums or []
@@ -62,18 +63,25 @@ class _Client:
         # explicitly to model the no-creds SpotipyFree fallback: not authed but
         # metadata still available.
         self._meta_available = meta_available
+        self._free_installed_flag = free_installed
+        # Records the prefer_free kwarg the last search call received (None if it
+        # was never passed) — lets a test assert the explicit-pick free routing.
+        self.prefer_free_seen = None
 
-    def search_artists(self, q, limit=10):
+    def search_artists(self, q, limit=10, prefer_free=False):
+        self.prefer_free_seen = prefer_free
         if self._fail:
             raise RuntimeError("client search boom")
         return self._artists
 
-    def search_albums(self, q, limit=10):
+    def search_albums(self, q, limit=10, prefer_free=False):
+        self.prefer_free_seen = prefer_free
         if self._fail:
             raise RuntimeError("client search boom")
         return self._albums
 
-    def search_tracks(self, q, limit=10):
+    def search_tracks(self, q, limit=10, prefer_free=False):
+        self.prefer_free_seen = prefer_free
         if self._fail:
             raise RuntimeError("client search boom")
         return self._tracks
@@ -83,6 +91,9 @@ class _Client:
 
     def is_spotify_metadata_available(self):
         return self._authed if self._meta_available is None else self._meta_available
+
+    def _free_installed(self):
+        return self._free_installed_flag
 
     def is_connected(self):
         return self._connected
@@ -94,6 +105,15 @@ class _DB:
 
     def search_artists(self, q, limit=5, server_source=None):
         return self._artists
+
+
+class _V2DB(_DB):
+    def __init__(self, connection, artists=None):
+        super().__init__(artists)
+        self._connection = connection
+
+    def _get_connection(self):
+        return self._connection
 
 
 class _Cfg:
@@ -260,6 +280,50 @@ def test_short_query_with_explicit_source_uses_that_source_label():
     assert result['metadata_source'] == 'deezer'
 
 
+def test_global_search_merges_v2_only_artists_and_provider_deduplicates(tmp_path):
+    import sqlite3
+
+    path = tmp_path / 'search.sqlite'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE artists(
+            id INTEGER PRIMARY KEY, name TEXT, spotify_artist_id TEXT
+        );
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT, image_url TEXT,
+            spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Shared Artist', 'spotify-shared');
+        INSERT INTO lib2_artists VALUES(
+            11, 'Shared Artist', NULL, 'spotify-shared', NULL, '{}', NULL, NULL
+        );
+        INSERT INTO lib2_artists VALUES(
+            12, 'V2 Native Artist', 'cover.jpg', 'spotify-native', NULL, '{}', NULL, NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+    legacy = _Artist(1, 'Shared Artist')
+    deps = _build_deps(database=_V2DB(
+        sqlite3.connect(path), artists=[legacy],
+    ))
+    deps.database._connection.row_factory = sqlite3.Row
+
+    result = orchestrator.run_enhanced_search('artist', '', deps)
+
+    library = result['db_artists']
+    assert len([artist for artist in library if artist['name'] == 'Shared Artist']) == 1
+    assert next(a for a in library if a['name'] == 'Shared Artist')['library_v2_id'] == 11
+    assert next(a for a in library if a['name'] == 'V2 Native Artist') == {
+        'id': 12,
+        'library_v2_id': 12,
+        'name': 'V2 Native Artist',
+        'image_url': 'FIXED::cover.jpg',
+    }
+
+
 # ---------------------------------------------------------------------------
 # run_enhanced_search — single source
 # ---------------------------------------------------------------------------
@@ -282,6 +346,35 @@ def test_single_source_unavailable_returns_empty_with_source_available_false():
     assert result['source_available'] is False
     assert result['spotify_artists'] == []
     assert result['primary_source'] == 'spotify'
+
+
+def test_single_source_spotify_uses_free_when_unauthed_but_package_installed():
+    # The reported case: no Spotify auth, and 'Spotify Free' isn't the chosen
+    # metadata source (is_spotify_metadata_available False), but the no-creds
+    # SpotipyFree package IS installed. An EXPLICIT Spotify search pick must still
+    # serve results via the free source — and the client must be told prefer_free
+    # so it takes the no-creds path instead of returning a blank page.
+    spot = _Client(authed=False, meta_available=False, free_installed=True,
+                   artists=[_Artist('s1', 'Free Spot Artist')])
+    deps = _build_deps(spotify_client=spot)
+    result = orchestrator.run_enhanced_search('kendrick lamar', 'spotify', deps)
+
+    assert result['source_available'] is True
+    assert result['spotify_artists'][0]['name'] == 'Free Spot Artist'
+    assert spot.prefer_free_seen is True          # client routed to free for this pick
+
+
+def test_single_source_spotify_unavailable_when_package_missing():
+    # Same no-auth / not-'Spotify Free'-source case but SpotipyFree NOT installed →
+    # nothing to serve, so it stays unavailable exactly as before (no regression,
+    # no silent free scraping when the package can't back it).
+    spot = _Client(authed=False, meta_available=False, free_installed=False)
+    deps = _build_deps(spotify_client=spot)
+    result = orchestrator.run_enhanced_search('kendrick lamar', 'spotify', deps)
+
+    assert result['source_available'] is False
+    assert result['spotify_artists'] == []
+    assert spot.prefer_free_seen is None          # search never ran
 
 
 def test_single_source_search_failure_returns_empty():
@@ -323,6 +416,36 @@ def test_fanout_lists_alternate_sources_excluding_primary():
     assert 'spotify' in alts
     assert 'youtube_videos' in alts
     assert 'musicbrainz' in alts
+    assert 'jiosaavn' not in alts
+
+
+def test_fanout_includes_jiosaavn_alternate_when_experimental_enabled(monkeypatch):
+    import core.metadata.registry as registry_mod
+    monkeypatch.setattr(registry_mod, 'is_source_enabled', lambda source: True)
+    deps = _build_deps(
+        get_metadata_fallback_source=lambda: 'deezer',
+        spotify_client=_Client(authed=True),
+    )
+    result = orchestrator.run_enhanced_search('pink floyd', '', deps)
+    assert 'jiosaavn' in result['alternate_sources']
+
+
+def test_fanout_includes_multiple_experimental_alternates_simultaneously(monkeypatch):
+    # Multiple experimental providers enabled at once must all surface together
+    # as alternates — none is mutually exclusive with another.
+    import core.metadata.registry as registry_mod
+    monkeypatch.setattr(
+        registry_mod, 'EXPERIMENTAL_SOURCES',
+        {'jiosaavn': 'experimental.jiosaavn_enabled', 'demosource': 'experimental.demosource_enabled'},
+    )
+    monkeypatch.setattr(registry_mod, 'is_source_enabled', lambda source: True)
+    deps = _build_deps(
+        get_metadata_fallback_source=lambda: 'deezer',
+        spotify_client=_Client(authed=True),
+    )
+    result = orchestrator.run_enhanced_search('pink floyd', '', deps)
+    assert 'jiosaavn' in result['alternate_sources']
+    assert 'demosource' in result['alternate_sources']
 
 
 def test_fanout_omits_spotify_alternate_when_unauthed():

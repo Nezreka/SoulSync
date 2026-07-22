@@ -2811,145 +2811,8 @@ function stopDbUpdatePolling() {
     }
 }
 
-// ===================================================================
-// QUALITY SCANNER TOOL
-// ===================================================================
-
-async function handleQualityScanButtonClick() {
-    const button = document.getElementById('quality-scan-button');
-    const currentAction = button.textContent;
-
-    if (currentAction === 'Scan Library') {
-        const scopeSelect = document.getElementById('quality-scan-scope');
-        const scope = scopeSelect.value;
-
-        try {
-            button.disabled = true;
-            button.textContent = 'Starting...';
-            const response = await fetch('/api/quality-scanner/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ scope: scope })
-            });
-
-            if (response.ok) {
-                showToast('Quality scan started!', 'success');
-                // Start polling immediately to get live status
-                checkAndUpdateQualityScanProgress();
-            } else {
-                const errorData = await response.json();
-                showToast(`Error: ${errorData.error}`, 'error');
-                button.disabled = false;
-                button.textContent = 'Scan Library';
-            }
-        } catch (error) {
-            showToast('Failed to start quality scan.', 'error');
-            button.disabled = false;
-            button.textContent = 'Scan Library';
-        }
-
-    } else { // "Stop Scan"
-        try {
-            const response = await fetch('/api/quality-scanner/stop', { method: 'POST' });
-            if (response.ok) {
-                showToast('Stop request sent.', 'info');
-            } else {
-                showToast('Failed to send stop request.', 'error');
-            }
-        } catch (error) {
-            showToast('Error sending stop request.', 'error');
-        }
-    }
-}
-
-async function checkAndUpdateQualityScanProgress() {
-    if (socketConnected) return; // WebSocket handles this
-    try {
-        const response = await fetch('/api/quality-scanner/status', {
-            signal: AbortSignal.timeout(10000) // 10 second timeout
-        });
-        if (!response.ok) return;
-
-        const state = await response.json();
-        console.debug('🔍 Quality Scanner Status:', state.status, `${state.processed}/${state.total}`, `${state.progress.toFixed(1)}%`);
-        updateQualityScanProgressUI(state);
-
-        // Start polling only if not already polling and status is running
-        if (state.status === 'running' && !qualityScannerStatusInterval) {
-            console.log('🔄 Starting quality scanner polling (1 second interval)');
-            qualityScannerStatusInterval = setInterval(checkAndUpdateQualityScanProgress, 1000);
-        }
-
-    } catch (error) {
-        console.warn('Could not fetch quality scanner status:', error);
-        // Don't stop polling on network errors - keep trying
-    }
-}
-
-function updateQualityScanProgressFromData(data) {
-    const prev = _lastToolStatus['quality-scanner'];
-    _lastToolStatus['quality-scanner'] = data.status;
-    if (prev !== undefined && data.status === prev && data.status !== 'running') return;
-    updateQualityScanProgressUI(data);
-}
-
-function updateQualityScanProgressUI(state) {
-    const button = document.getElementById('quality-scan-button');
-    const phaseLabel = document.getElementById('quality-phase-label');
-    const progressLabel = document.getElementById('quality-progress-label');
-    const progressBar = document.getElementById('quality-progress-bar');
-    const scopeSelect = document.getElementById('quality-scan-scope');
-
-    // Stats
-    const processedStat = document.getElementById('quality-stat-processed');
-    const metStat = document.getElementById('quality-stat-met');
-    const lowStat = document.getElementById('quality-stat-low');
-    const matchedStat = document.getElementById('quality-stat-matched');
-
-    if (!button || !phaseLabel || !progressLabel || !progressBar || !scopeSelect) return;
-
-    // Update stats
-    if (processedStat) processedStat.textContent = state.processed || 0;
-    if (metStat) metStat.textContent = state.quality_met || 0;
-    if (lowStat) lowStat.textContent = state.low_quality || 0;
-    if (matchedStat) matchedStat.textContent = state.matched || 0;
-
-    if (state.status === 'running') {
-        button.textContent = 'Stop Scan';
-        button.disabled = false;
-        scopeSelect.disabled = true;
-
-        phaseLabel.textContent = state.phase || 'Scanning...';
-        progressLabel.textContent = `${state.processed} / ${state.total} tracks scanned (${state.progress.toFixed(1)}%)`;
-        progressBar.style.width = `${state.progress}%`;
-    } else { // idle, finished, or error
-        stopQualityScannerPolling();
-        button.textContent = 'Scan Library';
-        button.disabled = false;
-        scopeSelect.disabled = false;
-
-        if (state.status === 'error') {
-            phaseLabel.textContent = `Error: ${state.error_message}`;
-            progressBar.style.backgroundColor = '#ff4444'; // Red for error
-        } else {
-            phaseLabel.textContent = state.phase || 'Ready to scan';
-            progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))'; // Green for normal
-        }
-
-        if (state.status === 'finished') {
-            // Show completion toast with results
-            showToast(`Scan complete! ${state.matched} tracks added to wishlist`, 'success');
-        }
-    }
-}
-
-function stopQualityScannerPolling() {
-    if (qualityScannerStatusInterval) {
-        console.log('⏹️ Stopping quality scanner polling');
-        clearInterval(qualityScannerStatusInterval);
-        qualityScannerStatusInterval = null;
-    }
-}
+// (Quality Scanner tool removed — quality scanning is now the 'Quality Upgrade
+// Finder' job in Library Maintenance / Tools → repair jobs.)
 
 // ===================================================================
 // IMPORT IDS FROM FILE TAGS (reconcile embedded provider IDs)
@@ -3393,180 +3256,22 @@ function openLibraryHistoryModal() {
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Quarantine tab — rendered inside the Library History modal as a third
-// tab next to Downloads + Server Imports. Reuses the existing list +
-// pagination chrome; provides per-row Approve / Recover / Delete actions.
-// ──────────────────────────────────────────────────────────────────────
-
-async function loadQuarantineList() {
-    const list = document.getElementById('library-history-list');
-    const pagination = document.getElementById('library-history-pagination');
-    const sourceBar = document.getElementById('history-source-bar');
-    if (!list) return;
-    list.innerHTML = '<div class="library-history-loading">Loading...</div>';
-    if (pagination) pagination.innerHTML = '';
-    if (sourceBar) sourceBar.style.display = 'none';
-
-    try {
-        const resp = await fetch('/api/quarantine/list');
-        const data = await resp.json();
-        const entries = data.entries || [];
-        const countEl = document.getElementById('history-quarantine-count');
-        if (countEl) countEl.textContent = entries.length;
-
-        if (!data.success) {
-            list.innerHTML = `<div class="library-history-empty">Error: ${escapeHtml(data.error || 'Failed to load')}</div>`;
-            return;
-        }
-        if (entries.length === 0) {
-            list.innerHTML = '<div class="library-history-empty">🛡️<br><br>No quarantined files. Nice and clean.</div>';
-            return;
-        }
-        list.innerHTML = entries.map(renderQuarantineEntry).join('');
-    } catch (err) {
-        console.error('Error loading quarantine entries:', err);
-        list.innerHTML = '<div class="library-history-empty">Error loading quarantine</div>';
+// Bucket entries that are alternatives for the SAME intended target
+// (same backend group_key — derived from expected_artist/expected_track, the
+// track SoulSync was trying to fetch, not the bad file's own tags). Entries
+// with a null group_key (legacy/orphan, ungroupable) each stand alone.
+// Preserves the newest-first order the backend already sorted by.
+function _groupQuarantineEntries(entries) {
+    const groups = [];
+    const byKey = new Map();
+    for (const entry of entries) {
+        const key = entry.group_key;
+        if (!key) { groups.push({ key: null, members: [entry] }); continue; }
+        let g = byKey.get(key);
+        if (!g) { g = { key, members: [] }; byKey.set(key, g); groups.push(g); }
+        g.members.push(entry);
     }
-}
-
-function renderQuarantineEntry(entry) {
-    const triggerLabels = { integrity: 'Duration / Integrity', acoustid: 'AcoustID Mismatch', bit_depth: 'Bit Depth Filter', unknown: 'Unknown' };
-    const triggerColors = { integrity: '#facc15', acoustid: '#ef5350', bit_depth: '#fb923c', unknown: '#888' };
-    const triggerLabel = triggerLabels[entry.trigger] || entry.trigger || 'Unknown';
-    const triggerColor = triggerColors[entry.trigger] || '#888';
-
-    // Keep dynamic filenames/ids out of inline JS. Quarantine ids are derived
-    // from filenames, so quotes in the filename can break onclick attributes
-    // if they are interpolated as JS string literals.
-    const entryIdAttr = escapeHtml(String(entry.id || ''));
-    const approveLabel = entry.has_full_context ? 'Approve' : 'Recover';
-    const approveTitle = entry.has_full_context
-        ? 'Re-run post-processing with quarantine checks skipped for this approved file'
-        : 'Legacy entry — move to Staging, finish via Import flow';
-    const approveCall = entry.has_full_context
-        ? 'approveQuarantineEntryFromButton(this)'
-        : 'recoverQuarantineEntryFromButton(this)';
-
-    const meta = [entry.expected_artist, entry.original_filename].filter(Boolean).join(' — ');
-    const triggerBadge = `<span class="library-history-badge" style="border-color:${triggerColor};color:${triggerColor}">${escapeHtml(triggerLabel)}</span>`;
-    const reasonDetail = `<div class="library-history-entry-source"><span class="lh-prov-label">Reason:</span> ${escapeHtml(entry.reason || 'Unknown')}</div>`;
-
-    // Issue #608 follow-up: show source uploader + original soulseek
-    // filename when the sidecar carried that context. Helps the user
-    // understand which uploader the bad file came from at a glance.
-    const sourceParts = [];
-    if (entry.source_username) {
-        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Source:</span> ${escapeHtml(entry.source_username)}</div>`);
-    }
-    if (entry.source_filename) {
-        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Original filename:</span> ${escapeHtml(entry.source_filename)}</div>`);
-    }
-    const sourceDetail = sourceParts.join('');
-
-    return `<div class="library-history-entry lh-expandable" onclick="this.classList.toggle('lh-expanded')">
-        <div class="library-history-thumb-placeholder">🛡️</div>
-        <div class="library-history-entry-content">
-            <div class="library-history-entry-row1">
-                <div class="library-history-entry-text">
-                    <div class="library-history-entry-title">${escapeHtml(entry.expected_track || entry.original_filename || 'Unknown')}</div>
-                    <div class="library-history-entry-meta">${escapeHtml(meta)}</div>
-                </div>
-                <div class="library-history-entry-badges">${triggerBadge}</div>
-                <div class="library-history-entry-time">${formatHistoryTime(entry.timestamp)}</div>
-                <button class="lh-audit-btn" title="${approveTitle}" data-entry-id="${entryIdAttr}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
-                <button class="lh-audit-btn" title="Delete permanently" data-entry-id="${entryIdAttr}" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntryFromButton(this)">Delete</button>
-                <span class="lh-expand-btn">&#x25BE;</span>
-            </div>
-            <div class="library-history-entry-details">
-                ${reasonDetail}
-                ${sourceDetail}
-            </div>
-        </div>
-    </div>`;
-}
-
-function getQuarantineEntryIdFromButton(button) {
-    return button?.dataset?.entryId || '';
-}
-
-function approveQuarantineEntryFromButton(button) {
-    return approveQuarantineEntry(getQuarantineEntryIdFromButton(button));
-}
-
-function recoverQuarantineEntryFromButton(button) {
-    return recoverQuarantineEntry(getQuarantineEntryIdFromButton(button));
-}
-
-function deleteQuarantineEntryFromButton(button) {
-    return deleteQuarantineEntry(getQuarantineEntryIdFromButton(button));
-}
-
-async function approveQuarantineEntry(entryId) {
-    const ok = await showConfirmDialog({
-        title: 'Approve Quarantined File',
-        message: 'Re-run post-processing for this file with quarantine checks skipped for this approved pass. The file will be tagged, lyrics generated, and moved into your library.',
-        confirmText: 'Approve & Import',
-        cancelText: 'Cancel',
-    });
-    if (!ok) return;
-    try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
-        const data = await r.json();
-        if (!data.success) {
-            showToast(`Approve failed: ${data.error}`, 'error');
-        } else {
-            showToast(`Approved — skipped ${data.trigger_bypassed} check, re-running pipeline.`, 'success');
-        }
-    } catch (err) {
-        showToast(`Approve failed: ${err.message}`, 'error');
-    }
-    loadQuarantineList();
-}
-
-async function recoverQuarantineEntry(entryId) {
-    const ok = await showConfirmDialog({
-        title: 'Recover To Staging',
-        message: 'Legacy entry — no embedded context. The file will be moved to your Staging folder so you can finish via the Import page (manual match).',
-        confirmText: 'Move To Staging',
-        cancelText: 'Cancel',
-    });
-    if (!ok) return;
-    try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, { method: 'POST' });
-        const data = await r.json();
-        if (!data.success) {
-            showToast(`Recover failed: ${data.error}`, 'error');
-        } else {
-            showToast('Moved to Staging — finish via the Import page.', 'success');
-        }
-    } catch (err) {
-        showToast(`Recover failed: ${err.message}`, 'error');
-    }
-    loadQuarantineList();
-}
-
-async function deleteQuarantineEntry(entryId) {
-    const ok = await showConfirmDialog({
-        title: 'Delete Quarantined File',
-        message: 'This permanently removes the file and its metadata sidecar. Cannot be undone.',
-        confirmText: 'Delete',
-        cancelText: 'Cancel',
-        destructive: true,
-    });
-    if (!ok) return;
-    try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}`, { method: 'DELETE' });
-        const data = await r.json();
-        if (!data.success) {
-            showToast(`Delete failed: ${data.error}`, 'error');
-        } else {
-            showToast('Quarantined file deleted.', 'success');
-        }
-    } catch (err) {
-        showToast(`Delete failed: ${err.message}`, 'error');
-    }
-    loadQuarantineList();
+    return groups;
 }
 
 function closeLibraryHistoryModal() {
@@ -3585,12 +3290,6 @@ function switchHistoryTab(tab) {
 
 async function loadLibraryHistory() {
     const { tab, page, limit } = _libraryHistoryState;
-    if (tab === 'quarantine') {
-        // Refresh the count for the other two tabs in the background so
-        // the badge stays accurate when the user switches over.
-        loadQuarantineList();
-        return;
-    }
     const list = document.getElementById('library-history-list');
     const pagination = document.getElementById('library-history-pagination');
     if (!list) return;
@@ -5630,43 +5329,6 @@ const TOOL_HELP_CONTENT = {
             <p>Available for <strong>Plex</strong> and <strong>Jellyfin</strong> media servers. Each enrichment worker only runs if its service is authenticated.</p>
         `
     },
-    'quality-scanner': {
-        title: 'Quality Scanner',
-        content: `
-            <h4>What does this tool do?</h4>
-            <p>The Quality Scanner identifies tracks in your library that don't meet your preferred quality settings and automatically matches them to Spotify to add to your wishlist for re-downloading.</p>
-
-            <h4>Scan Scope</h4>
-            <ul>
-                <li><strong>Watchlist Artists Only:</strong> Only scans tracks from artists you're watching. Faster and more focused.</li>
-                <li><strong>All Library Tracks:</strong> Scans your entire music library. Comprehensive but takes longer.</li>
-            </ul>
-
-            <h4>How it works</h4>
-            <ol>
-                <li>Scans tracks and checks file format against your quality preferences</li>
-                <li>Identifies tracks below your quality threshold (e.g., MP3 when you prefer FLAC)</li>
-                <li>Uses fuzzy matching to find the track on Spotify (70% confidence minimum)</li>
-                <li>Automatically adds matched tracks to your wishlist for re-download</li>
-            </ol>
-
-            <h4>Quality Tiers</h4>
-            <ul>
-                <li><strong>Tier 1 (Best):</strong> FLAC, WAV, ALAC, AIFF - Lossless formats</li>
-                <li><strong>Tier 2:</strong> OPUS, OGG - High quality lossy</li>
-                <li><strong>Tier 3:</strong> M4A, AAC - Standard lossy</li>
-                <li><strong>Tier 4:</strong> MP3, WMA - Lower quality lossy</li>
-            </ul>
-
-            <h4>Stats Explained</h4>
-            <ul>
-                <li><strong>Processed:</strong> Total tracks scanned so far</li>
-                <li><strong>Quality Met:</strong> Tracks that meet your quality standards</li>
-                <li><strong>Low Quality:</strong> Tracks below your quality threshold</li>
-                <li><strong>Matched:</strong> Low quality tracks successfully matched to Spotify and added to wishlist</li>
-            </ul>
-        `
-    },
     'duplicate-cleaner': {
         title: 'Duplicate Cleaner',
         content: `
@@ -6837,6 +6499,40 @@ const TOOL_HELP_CONTENT = {
                 <li><strong>Hits:</strong> Total number of times cached data was served instead of making an API call</li>
             </ul>
         `
+    },
+    'video-backups': {
+        title: 'Video Database Backups',
+        content: `
+            <h4>What is this?</h4>
+            <p>Automatic safety copies of the video library database (matches, wishlist, watchlist, settings — everything). A backup is taken on a schedule and kept in rotation; you can also take one on demand with <strong>Back up now</strong>.</p>
+
+            <h4>Restoring</h4>
+            <p>Restoring is <em>staged</em>: the backup you pick is applied on the next app restart, and the database it replaces is kept next to it as a <code>.pre-restore</code> copy — so even a restore is reversible. You can cancel a staged restore any time before restarting.</p>
+
+            <h4>Good to know</h4>
+            <ul>
+                <li>Backups only cover the video database — your actual media files are never touched.</li>
+                <li>The newest 8 backups are kept; older ones rotate out automatically.</li>
+                <li>Download a backup from the list to keep an off-machine copy.</li>
+            </ul>
+        `
+    },
+    'video-rename': {
+        title: 'Mass Rename',
+        content: `
+            <h4>What is this?</h4>
+            <p>Naming templates (Settings → Organization) normally apply only when a file is imported. If you change the templates later, your library ends up with two naming eras. Mass Rename re-renders <em>every</em> owned file name to the current templates.</p>
+
+            <h4>How it works</h4>
+            <p><strong>Preview</strong> lists every file whose on-disk name differs from what the templates say — nothing is touched. <strong>Apply renames</strong> then performs the moves: subtitles and other sidecar files travel with their video, and the database follows each move.</p>
+
+            <h4>Safety</h4>
+            <ul>
+                <li>An occupied destination is skipped with a reason — a rename never overwrites another file.</li>
+                <li>Files never move across library roots; they are renamed in place under the folder they already live in.</li>
+                <li>Your media server re-adopts the new names on its next library scan — run one after applying.</li>
+            </ul>
+        `
     }
 };
 
@@ -7566,11 +7262,6 @@ async function initializeToolsPage() {
         metadataButton._toolsWired = true;
     }
 
-    const qualityScanButton = document.getElementById('quality-scan-button');
-    if (qualityScanButton && !qualityScanButton._toolsWired) {
-        qualityScanButton.addEventListener('click', handleQualityScanButtonClick);
-        qualityScanButton._toolsWired = true;
-    }
 
     const duplicateCleanButton = document.getElementById('duplicate-clean-button');
     if (duplicateCleanButton && !duplicateCleanButton._toolsWired) {
@@ -7615,7 +7306,6 @@ async function initializeToolsPage() {
 
     // Check for ongoing operations
     await checkAndUpdateDbProgress();
-    await checkAndUpdateQualityScanProgress();
     await checkAndUpdateDuplicateCleanProgress();
 
     // Initialize library maintenance section

@@ -1593,6 +1593,9 @@ function openNowPlayingModal() {
     npModalOpen = true;
     overlay.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
+    // Suppress the floating bottom chrome (global search bar, FAB buttons)
+    // so it can't sit over the immersive player's transport controls.
+    document.body.classList.add('np-modal-open');
     syncExpandedPlayerUI();
     // Bind lyrics toggle (idempotent — only attaches once). Lyrics
     // fetch fires from setTrackInfo so by the time the modal opens
@@ -1608,6 +1611,7 @@ function closeNowPlayingModal() {
     npModalOpen = false;
     overlay.classList.add('hidden');
     document.body.style.overflow = '';
+    document.body.classList.remove('np-modal-open');
     npStopVisualizerLoop();
 }
 
@@ -3146,6 +3150,9 @@ function npMaybeLogPlay() {
             body: JSON.stringify({
                 track: {
                     id: currentTrack.id,
+                    lib2_track_id: currentTrack.lib2_track_id || null,
+                    legacy_track_id: currentTrack.legacy_track_id || null,
+                    server_track_id: currentTrack.server_track_id || null,
                     title: currentTrack.title,
                     artist: currentTrack.artist,
                     album: currentTrack.album,

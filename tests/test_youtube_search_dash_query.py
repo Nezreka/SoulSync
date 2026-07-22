@@ -14,6 +14,21 @@ from core import youtube_client
 from core.youtube_client import YouTubeClient
 
 
+def _run(coro):
+    loop = asyncio.new_event_loop()
+
+    async def _drain_with_heartbeat():
+        task = loop.create_task(coro)
+        while not task.done():
+            await asyncio.sleep(0.01)
+        return task.result()
+
+    try:
+        return loop.run_until_complete(_drain_with_heartbeat())
+    finally:
+        loop.close()
+
+
 def test_escape_ytsearch_query_handles_leading_dash():
     assert YouTubeClient._escape_ytsearch_query("-4WUHJRhvrM") == r"\-4WUHJRhvrM"
     assert YouTubeClient._escape_ytsearch_query(r"\-4WUHJRhvrM") == r"\-4WUHJRhvrM"
@@ -47,7 +62,7 @@ def test_search_escapes_leading_dash_before_yt_dlp(monkeypatch):
         lambda entry, best_audio: SimpleNamespace(filename=entry["title"]),
     )
 
-    tracks, albums = asyncio.run(client.search("-4WUHJRhvrM"))
+    tracks, albums = _run(client.search("-4WUHJRhvrM"))
 
     assert captured == [r"ytsearch50:\-4WUHJRhvrM"]
     assert len(tracks) == 1
@@ -81,7 +96,7 @@ def test_search_videos_escapes_leading_dash_before_yt_dlp(monkeypatch):
     monkeypatch.setattr(youtube_client.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
     client = YouTubeClient.__new__(YouTubeClient)
 
-    results = asyncio.run(client.search_videos("-4WUHJRhvrM", max_results=8))
+    results = _run(client.search_videos("-4WUHJRhvrM", max_results=8))
 
     assert captured == [r"ytsearch8:\-4WUHJRhvrM"]
     assert [r.video_id for r in results] == ["-4WUHJRhvrM"]

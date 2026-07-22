@@ -166,8 +166,12 @@ function initializeSearchModeToggle() {
         resultsContainer.classList.remove('hidden');
         showDropdown();
 
+        // Record labels are searched independently (separate endpoint) and
+        // rendered alongside the source results — purely additive.
+        _maybeFetchLabels(state.query);
+
         if (src === 'youtube_videos') {
-            ['enh-db-artists-section', 'enh-spotify-artists-section', 'enh-albums-section', 'enh-singles-section', 'enh-tracks-section'].forEach(id => {
+            ['enh-db-artists-section', 'enh-spotify-artists-section', 'enh-albums-section', 'enh-singles-section', 'enh-tracks-section', 'enh-labels-section'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.classList.add('hidden');
             });
@@ -375,6 +379,73 @@ function initializeSearchModeToggle() {
         }
     });
 
+    // ---- Record labels (searched separately, rendered alongside results) ----
+    // Labels aren't part of the per-source enhanced-search payload; they come
+    // from /api/labels/search. We fetch once per query (deduped) and re-render
+    // the Labels section when results land. Purely additive: nothing here
+    // touches the existing source/section flow.
+    let _labelSearchQuery = null;
+    let _labelResults = [];
+
+    function _maybeFetchLabels(query) {
+        const q = (query || '').trim();
+        if (!q) {
+            _labelSearchQuery = null;
+            _labelResults = [];
+            const sec = document.getElementById('enh-labels-section');
+            if (sec) sec.classList.add('hidden');
+            return;
+        }
+        if (q === _labelSearchQuery) {
+            _renderLabelsSection();      // already fetched — just (re)render
+            return;
+        }
+        _labelSearchQuery = q;
+        _labelResults = [];
+        fetch('/api/labels/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: q }),
+        })
+            .then(r => (r.ok ? r.json() : { labels: [] }))
+            .then(d => {
+                if (_labelSearchQuery !== q) return;   // a newer query superseded us
+                _labelResults = (d && d.labels) || [];
+                _renderLabelsSection();
+            })
+            .catch(() => { /* label search is best-effort; never break the page */ });
+    }
+
+    function _renderLabelsSection() {
+        const src = searchController.state.activeSource;
+        if (src === 'youtube_videos' || src === 'soulseek') {
+            const sec = document.getElementById('enh-labels-section');
+            if (sec) sec.classList.add('hidden');
+            return;
+        }
+        renderCompactSection(
+            'enh-labels-section',
+            'enh-labels-list',
+            'enh-labels-count',
+            _labelResults,
+            (lab) => ({
+                image: null,
+                placeholder: '🏷️',
+                name: lab.name,
+                meta: [lab.type, lab.area].filter(Boolean).join(' • ') || 'Record label',
+                href: (typeof buildLabelDetailPath === 'function')
+                    ? buildLabelDetailPath(lab.id, lab.name)
+                    : `/label-detail/${encodeURIComponent(lab.id)}`,
+                onClick: (e) => {
+                    if (e && e.preventDefault) e.preventDefault();
+                    if (typeof navigateToLabelDetail === 'function') {
+                        navigateToLabelDetail(lab.id, lab.name);
+                    }
+                },
+            })
+        );
+    }
+
     function renderDropdownResults(data) {
         const activeSource = searchController.state.activeSource;
 
@@ -398,7 +469,9 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'In Your Library',
                 badge: { text: 'Library', class: 'enh-badge-library' },
-                href: buildArtistDetailPath(artist.id),
+                href: artist.library_v2_id
+                    ? `/library-v2?artist=${encodeURIComponent(artist.library_v2_id)}`
+                    : buildArtistDetailPath(artist.id),
             })
         );
 
@@ -414,7 +487,7 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'Artist',
                 badge: sourceBadge,
-                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null),
+                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null, artist.name),
             })
         );
 
@@ -472,6 +545,10 @@ function initializeSearchModeToggle() {
                 };
             }
         );
+
+        // Record labels — rendered from the independently-fetched results
+        // (may already be populated, or fill in when the fetch settles).
+        _renderLabelsSection();
 
         // Lazy load artist images that are missing
         lazyLoadEnhancedSearchArtistImages();
@@ -710,6 +787,12 @@ function initializeSearchModeToggle() {
             // Pass Hydrabase plugin origin so server routes to correct client
             if (album.external_urls?.hydrabase_plugin) {
                 albumParams.set('plugin', album.external_urls.hydrabase_plugin);
+            }
+            // Bandcamp has no numeric-ID lookup API — pass the exact release
+            // URL so the server can fetch it directly instead of re-searching
+            // by name (still falls back to that if this is missing).
+            if (activeSource === 'bandcamp' && album.external_urls?.bandcamp) {
+                albumParams.set('bandcamp_url', album.external_urls.bandcamp);
             }
             const response = await fetch(`/api/spotify/album/${album.id}?${albumParams}`);
 
@@ -1291,7 +1374,7 @@ async function loadInitialData() {
         if (targetPage === 'artist-detail') {
             const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
             if (artistRoute && typeof navigateToArtistDetail === 'function') {
-                navigateToArtistDetail(artistRoute.artistId, '', artistRoute.source);
+                navigateToArtistDetail(artistRoute.artistId, artistRoute.name || '', artistRoute.source);
             }
             return;
         }

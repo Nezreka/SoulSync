@@ -173,6 +173,32 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                 logger.debug("sync match cache fast-path failed: %s", e)
         # --- End cache fast-path ---
 
+        # Durable manual library match (#787) — survives a library rescan (the
+        # sync_match_cache above does not), so a user's Find & Add pairing keeps
+        # sticking across auto-syncs instead of being re-matched from scratch (#895
+        # follow-up). Self-heals a stale library id via the stored file path.
+        if spotify_id:
+            try:
+                from core.artists.map import get_current_profile_id
+                m = db.find_manual_library_match_by_source_track_id(
+                    get_current_profile_id(), str(spotify_id), active_server)
+                if m:
+                    lib_id = m.get('library_track_id')
+                    dt = db.get_track_by_id(lib_id) if lib_id is not None else None
+                    if not dt and m.get('library_file_path'):
+                        new_id = db.find_track_id_by_file_path(m['library_file_path'])
+                        dt = db.get_track_by_id(new_id) if new_id else None
+                    if dt:
+                        class DatabaseTrackDurable:
+                            def __init__(self, db_t):
+                                self.ratingKey = db_t.id
+                                self.title = db_t.title
+                                self.id = db_t.id
+                        logger.debug(f"Durable manual match hit: '{original_title}' → {lib_id}")
+                        return DatabaseTrackDurable(dt), 1.0
+            except Exception as e:
+                logger.debug("durable manual match fast-path failed: %s", e)
+
         # Try each artist
         for artist in spotify_track.artists:
             if isinstance(artist, str):
@@ -281,35 +307,11 @@ def run_sync_task(
         # This avoids needing to re-fetch it from Spotify
         logger.info("Converting JSON tracks to SpotifyTrack objects...")
 
-        # Store original track data with full album objects (for wishlist with cover art)
-        # Normalize formats for wishlist: album must be dict {'name': ...}, artists must be [{'name': ...}]
-        # Important: copy data — don't mutate tracks_json since SpotifyTrack expects List[str] artists
-        original_tracks_map = {}
-        for t in tracks_json:
-            track_id = t.get('id', '')
-            if track_id:
-                normalized = dict(t)
-                # Normalize album to dict format, preserving images and metadata
-                raw_album = normalized.get('album', '')
-                if isinstance(raw_album, str):
-                    normalized['album'] = {
-                        'name': raw_album or normalized.get('name', 'Unknown Album'),
-                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
-                    }
-                elif not isinstance(raw_album, dict):
-                    normalized['album'] = {
-                        'name': str(raw_album) if raw_album else normalized.get('name', 'Unknown Album'),
-                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
-                    }
-                else:
-                    # Dict — ensure required keys exist
-                    raw_album.setdefault('name', 'Unknown Album')
-                    raw_album.setdefault('images', [])
-                # Normalize artists to list of dicts
-                raw_artists = normalized.get('artists', [])
-                if raw_artists and isinstance(raw_artists[0], str):
-                    normalized['artists'] = [{'name': a} for a in raw_artists]
-                original_tracks_map[track_id] = normalized
+        # Store original track data with full album objects (for wishlist with cover art).
+        # Shared with the sync-detail "re-add to wishlist" action so both build the
+        # IDENTICAL payload (album→dict + images, artists→dicts). Copy-safe.
+        from core.sync.wishlist_readd import build_original_tracks_map
+        original_tracks_map = build_original_tracks_map(tracks_json)
 
         tracks = []
         for i, t in enumerate(tracks_json):
@@ -479,6 +481,28 @@ def run_sync_task(
                 playlist_name,
             )
 
+        # #993 — the source cover is pushed only to a BRAND-NEW playlist. Capture
+        # whether the target already exists on the media server BEFORE the sync
+        # creates/updates it (after the sync it always exists, so this must be read
+        # now). An already-present playlist keeps its current cover — the art we set
+        # on a prior sync, or one the user set by hand. Resolve the SAME server +
+        # client the cover push below uses (deps.config_manager, not the module-level
+        # one) so the check and the upload always agree, and default to "pre-existed"
+        # on any error so an unverifiable case never stomps an existing cover.
+        _playlist_preexisted = True
+        # Only probe when a cover might actually be pushed below (there IS a source
+        # cover, and the mode isn't one that always preserves the existing image) —
+        # otherwise the extra playlist-list call is wasted.
+        if playlist_image_url and sync_mode not in ('reconcile', 'append'):
+            try:
+                _cover_server = deps.config_manager.get_active_media_server()
+                _cover_engine = deps.media_server_engine
+                _cover_client = _cover_engine.client(_cover_server) if _cover_engine else None
+                if _cover_client is not None and hasattr(_cover_client, 'get_playlist_by_name'):
+                    _playlist_preexisted = bool(_cover_client.get_playlist_by_name(playlist_name))
+            except Exception as _pre_err:
+                logger.debug(f"[PLAYLIST IMAGE] pre-sync existence check failed (assuming pre-existed): {_pre_err}")
+
         # Run the sync (this is a blocking call within this thread)
         result = deps.run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id, sync_mode=sync_mode))
 
@@ -524,12 +548,15 @@ def run_sync_task(
         # don't want persisted to app.log.
         _synced = getattr(result, 'synced_tracks', 0)
         logger.info(f"[PLAYLIST IMAGE] has_image={bool(playlist_image_url)}, synced_tracks={_synced}")
-        # Modes that edit a playlist in place (reconcile #792, append #811) must
-        # NOT push the source image — doing so re-clobbers a user's custom poster
-        # every sync, the exact bug these modes exist to avoid. Only the
-        # destructive 'replace' (recreate-from-scratch) pushes the image.
+        # Modes that edit a playlist in place (reconcile #792, append #811) must NOT
+        # push the source image, and neither does a sync of a playlist that already
+        # exists (#993) — either re-clobbers a user's custom poster. The source cover
+        # is pushed only to a brand-new playlist (a genuine first mirror); after that
+        # its cover is left alone. A one-off retroactive backfill is future work.
         if sync_mode in ('reconcile', 'append'):
             logger.info(f"[PLAYLIST IMAGE] {sync_mode} mode — preserving existing playlist image")
+        elif playlist_image_url and _synced > 0 and _playlist_preexisted:
+            logger.info("[PLAYLIST IMAGE] playlist already existed — leaving its current cover untouched (#993)")
         elif playlist_image_url and _synced > 0:
             try:
                 active_server = deps.config_manager.get_active_media_server()
@@ -541,7 +568,12 @@ def run_sync_task(
                 elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
                     ok = _engine.client('jellyfin').set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
-                # Navidrome doesn't support custom playlist images
+                elif active_server == 'navidrome' and _engine and _engine.client('navidrome'):
+                    # Subsonic has no playlist-cover field, but Navidrome's native
+                    # API accepts a multipart upload (same creds). See
+                    # NavidromeClient.set_playlist_image.
+                    ok = _engine.client('navidrome').set_playlist_image(playlist_name, playlist_image_url)
+                    logger.info(f"[PLAYLIST IMAGE] Navidrome upload result: {ok}")
             except Exception as img_err:
                 logger.error(f"[PLAYLIST IMAGE] Exception: {img_err}")
 

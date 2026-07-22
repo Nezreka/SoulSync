@@ -28,6 +28,126 @@ def _artist_name(artist) -> str:
             return name
     return str(artist) if artist is not None else ''
 
+
+def _plex_track_file(plex_track) -> str:
+    """Best-effort file path of a live Plex track object (media[0].parts[0].file)."""
+    try:
+        return plex_track.media[0].parts[0].file or ''
+    except Exception:
+        return ''
+
+
+def _dedupe_by_rating_key(tracks: list) -> list:
+    """Drop repeated media-server tracks (same ratingKey), preserving first-seen
+    order. The same library track can match more than one source entry (or appear
+    twice in the source), and pushing the dupes made reconcile/replace re-add the
+    track every sync — part of the #905 doubling. The sync dispatch MUST send this
+    deduped list, not the raw matched list."""
+    seen = set()
+    out = []
+    for t in tracks:
+        key = getattr(t, 'ratingKey', None)
+        if key is None or key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
+
+
+def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
+                                     source_track_id, server_source):
+    """Re-resolve a manual match whose stored Plex ratingKey went stale.
+
+    Plex re-keys tracks on a metadata refresh/optimize, and the SoulSync DB id is
+    itself that old ratingKey — so until a SoulSync rescan, BOTH the stored
+    ``library_track_id`` and the file-path self-heal land on the same dead key and
+    ``fetchItem`` 404s. The only live source of truth is Plex, so search it by the
+    matched track's metadata, disambiguate by the stored file path (so the user's
+    EXACT chosen track wins when several versions exist), heal the stored id, and
+    return the current live Plex track. Best-effort: returns the live track or
+    None, never raises — a manual match must never be dropped on a transient miss.
+    """
+    try:
+        title = (m.get('source_title') or '').strip()
+        artist = (m.get('source_artist') or '').strip()
+        file_path = (m.get('library_file_path') or '').strip()
+        if not title:
+            return None
+        results = media_client.search_tracks(title, artist, limit=15) or []
+        if not results:
+            return None
+
+        import os as _os
+        want_base = _os.path.basename(file_path.replace('\\', '/')) if file_path else ''
+        chosen = None
+        if want_base:
+            for t in results:
+                live = getattr(t, '_original_plex_track', None)
+                p = _plex_track_file(live) if live is not None else ''
+                if p and _os.path.basename(p.replace('\\', '/')) == want_base:
+                    chosen = t
+                    break
+        if chosen is None:
+            chosen = results[0]   # search_tracks already ranks artist→title; best effort
+        live = getattr(chosen, '_original_plex_track', None)
+        if live is None or not hasattr(live, 'ratingKey'):
+            return None
+
+        # Heal the stored id (+ the cache, done by the caller) so the next sync is
+        # fast and doesn't repeat the live search.
+        try:
+            cache_db.save_manual_library_match(
+                profile_id, m.get('source') or 'spotify', str(source_track_id), str(live.ratingKey),
+                source_title=m.get('source_title'), source_artist=m.get('source_artist'),
+                source_album=m.get('source_album'),
+                server_source=server_source,
+                library_file_path=file_path or _plex_track_file(live),
+            )
+        except Exception as _heal_err:
+            logger.debug("manual-match heal (save) failed: %s", _heal_err)
+        return live
+    except Exception:
+        return None
+
+
+def rescue_stale_plex_track(media_client, db_track, artist_name):
+    """A fuzzy db match whose stored ratingKey went stale (Plex re-keys tracks
+    on a metadata refresh/optimize, and SoulSync's db id IS that old key).
+
+    Same recipe as the manual-match self-heal: search live Plex by the matched
+    track's metadata, prefer the exact file (basename of the db track's stored
+    path) when several versions exist, and return the live Plex object or
+    None. Best-effort — never raises; a miss just leaves the track unmatched
+    exactly as before (#1047)."""
+    try:
+        title = (getattr(db_track, 'title', '') or '').strip()
+        if not title:
+            return None
+        results = media_client.search_tracks(title, artist_name or '', limit=15) or []
+        if not results:
+            return None
+
+        import os as _os
+        file_path = (getattr(db_track, 'file_path', '') or '').strip()
+        want_base = _os.path.basename(file_path.replace('\\', '/')) if file_path else ''
+        chosen = None
+        if want_base:
+            for t in results:
+                live = getattr(t, '_original_plex_track', None)
+                p = _plex_track_file(live) if live is not None else ''
+                if p and _os.path.basename(p.replace('\\', '/')) == want_base:
+                    chosen = t
+                    break
+        if chosen is None:
+            chosen = results[0]   # search_tracks ranks artist→title; best effort
+        live = getattr(chosen, '_original_plex_track', None)
+        if live is None or not hasattr(live, 'ratingKey'):
+            return None
+        return live
+    except Exception:
+        return None
+
+
 @dataclass
 class SyncResult:
     playlist_name: str
@@ -285,7 +405,11 @@ class PlaylistSyncService:
                     spotify_track=track,
                     plex_track=plex_match,
                     confidence=confidence,
-                    match_type="robust_search" if plex_match else "no_match"
+                    match_type="robust_search" if plex_match else "no_match",
+                    # The finder accepts db matches at 0.7 (the app-wide "you
+                    # own this" bar) — is_match must agree, or the 0.70-0.79
+                    # band is wishlisted AND left off the playlist (#1047).
+                    match_threshold=0.7,
                 )
                 match_results.append(match_result)
             
@@ -373,20 +497,15 @@ class PlaylistSyncService:
                     f"{server_type.title()} objects with ratingKeys"
                 )
 
-                # Deduplicate by ratingKey — media servers silently drop duplicates
-                seen_keys = set()
-                deduped_tracks = []
-                for t in valid_tracks:
-                    if t.ratingKey not in seen_keys:
-                        seen_keys.add(t.ratingKey)
-                        deduped_tracks.append(t)
-                if len(deduped_tracks) < len(valid_tracks):
+                # Deduplicate by ratingKey — media servers silently drop duplicates,
+                # and pushing dupes made every sync re-add the same track (#905). The
+                # dispatch below sends THIS deduped list, never the raw `valid_tracks`.
+                plex_tracks = _dedupe_by_rating_key(valid_tracks)
+                if len(plex_tracks) < len(valid_tracks):
                     logger.info(
-                        f"Deduplicated {len(valid_tracks) - len(deduped_tracks)} duplicate ratingKeys "
-                        f"({len(valid_tracks)} → {len(deduped_tracks)} tracks)"
+                        f"Deduplicated {len(valid_tracks) - len(plex_tracks)} duplicate ratingKeys "
+                        f"({len(valid_tracks)} → {len(plex_tracks)} tracks)"
                     )
-
-                plex_tracks = deduped_tracks
 
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
@@ -397,11 +516,11 @@ class PlaylistSyncService:
                         f"(mode: {sync_mode})"
                     )
                     if sync_mode == 'append':
-                        sync_success = media_client.append_to_playlist(playlist.name, valid_tracks)
+                        sync_success = media_client.append_to_playlist(playlist.name, plex_tracks)
                     elif sync_mode == 'reconcile':
-                        sync_success = self._reconcile_or_replace(media_client, playlist.name, valid_tracks)
+                        sync_success = self._reconcile_or_replace(media_client, playlist.name, plex_tracks)
                     else:
-                        sync_success = media_client.update_playlist(playlist.name, valid_tracks)
+                        sync_success = media_client.update_playlist(playlist.name, plex_tracks)
 
                 synced_tracks = len(plex_tracks) if sync_success else 0
                 # Not in library (for wishlist), not "total minus playlist size".
@@ -470,6 +589,17 @@ class PlaylistSyncService:
                         )
 
                         if success:
+                            # §52.8: playlist sync is a confirmed acquisition
+                            # intent for this track — materialize the lib2
+                            # Artist/Release/Track now, same as any other
+                            # confirmed wishlist write. Best-effort/fail-open.
+                            from core.library2.materialize import materialize_wishlist_intent
+                            actor_profile_id = int(profile_id or 1)
+                            materialize_wishlist_intent(
+                                spotify_track_data,
+                                profile_id=actor_profile_id,
+                                actor_profile_id=actor_profile_id,
+                            )
                             wishlist_added_count += 1
 
                     logger.info(f"Successfully added {wishlist_added_count}/{len(unmatched_tracks)} tracks to wishlist")
@@ -599,38 +729,81 @@ class PlaylistSyncService:
             spotify_id = getattr(spotify_track, 'id', '') or ''
             active_server = config_manager.get_active_media_server()
 
-            # --- Sync match cache fast-path ---
+            # --- User-confirmed match fast-path (Find & Add / manual match) ---
             if spotify_id:
+                cache_db = MusicDatabase()
+
+                def _materialize(server_track_id):
+                    """Turn a stored library track id into the actual server item the
+                    sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
+                    if server_track_id is None:
+                        return None
+                    dbt = cache_db.get_track_by_id(server_track_id)
+                    if not dbt:
+                        return None
+                    if server_type in ("jellyfin", "navidrome", "soulsync"):
+                        class DbTrackFromCache:
+                            def __init__(self, db_t):
+                                self.ratingKey = db_t.id
+                                self.title = db_t.title
+                                self.id = db_t.id
+                        return DbTrackFromCache(dbt)
+                    try:
+                        at = media_client.server.fetchItem(int(server_track_id))
+                        return at if (at and hasattr(at, 'ratingKey')) else None
+                    except Exception:
+                        return None
+
+                # 1) Volatile sync_match_cache — fast, but wiped on every library rescan.
                 try:
-                    cache_db = MusicDatabase()
                     cached = cache_db.read_sync_match_cache(spotify_id, active_server)
                     if cached:
-                        server_track_id = cached['server_track_id']
-                        db_track_check = cache_db.get_track_by_id(server_track_id)
-                        if db_track_check:
-                            if server_type in ("jellyfin", "navidrome", "soulsync"):
-                                class DbTrackFromCache:
-                                    def __init__(self, db_t):
-                                        self.ratingKey = db_t.id
-                                        self.title = db_t.title
-                                        self.id = db_t.id
-                                actual_track = DbTrackFromCache(db_track_check)
-                            else:
-                                try:
-                                    actual_track = media_client.server.fetchItem(int(server_track_id))
-                                    if not (actual_track and hasattr(actual_track, 'ratingKey')):
-                                        actual_track = None
-                                except Exception:
-                                    actual_track = None
-
-                            if actual_track:
-                                logger.debug(f"Sync cache hit: '{original_title}' → server track {server_track_id}")
-                                return actual_track, cached['confidence']
-
-                        logger.debug(f"Sync cache stale for '{original_title}' — track {server_track_id} gone")
+                        actual_track = _materialize(cached['server_track_id'])
+                        if actual_track:
+                            logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                            return actual_track, cached['confidence']
+                        logger.debug(f"Sync cache stale for '{original_title}' — track {cached['server_track_id']} gone")
                 except Exception as cache_err:
                     logger.debug(f"Sync cache lookup error: {cache_err}")
-            # --- End cache fast-path ---
+
+                # 2) Durable manual library match (#787) — SURVIVES a rescan (the cache
+                #    above does not). Without this, a user's Find & Add pairing is
+                #    re-matched from scratch on the next auto-sync after a library scan,
+                #    so they have to Find & Add the same track again (#895 follow-up).
+                #    Self-heals a stale library id via the stored file path.
+                try:
+                    from core.artists.map import get_current_profile_id
+                    _profile_id = get_current_profile_id()
+                    m = cache_db.find_manual_library_match_by_source_track_id(
+                        _profile_id, str(spotify_id), active_server)
+                    if m:
+                        actual_track = _materialize(m.get('library_track_id'))
+                        if not actual_track and m.get('library_file_path'):
+                            new_id = cache_db.find_track_id_by_file_path(m['library_file_path'])
+                            actual_track = _materialize(new_id)
+                        # Plex re-keys tracks on a metadata refresh, and the SoulSync
+                        # DB id IS that ratingKey — so both lookups above can land on
+                        # the same stale key and 404. Re-resolve against LIVE Plex by
+                        # the matched track's metadata so a manual match is NEVER
+                        # dropped or silently re-matched by the fuzzy path below.
+                        if not actual_track and server_type == "plex":
+                            actual_track = reresolve_manual_match_live_plex(
+                                cache_db, media_client, m,
+                                profile_id=_profile_id, source_track_id=spotify_id,
+                                server_source=active_server)
+                            if actual_track and spotify_id:
+                                try:
+                                    cache_db.save_sync_match_cache(
+                                        spotify_id, original_title, _artist_name(spotify_track.artists[0]) if spotify_track.artists else '',
+                                        active_server, actual_track.ratingKey, getattr(actual_track, 'title', original_title), 1.0)
+                                except Exception as _cache_err:
+                                    logger.debug("sync cache heal failed: %s", _cache_err)
+                        if actual_track:
+                            logger.info(f"Durable manual match honored for '{original_title}' → {getattr(actual_track, 'ratingKey', m.get('library_track_id'))}")
+                            return actual_track, 1.0
+                except Exception as durable_err:
+                    logger.debug(f"Durable manual match lookup error: {durable_err}")
+            # --- End match fast-path ---
 
             # Try each artist (same as modal logic)
             for artist in spotify_track.artists:
@@ -715,12 +888,25 @@ class PlaylistSyncService:
                                         return actual_plex_track, confidence
                                     else:
                                         logger.warning(f"Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
+                                        rescued = rescue_stale_plex_track(media_client, db_track, artist_name)
+                                        if rescued is not None:
+                                            logger.info(f"[Stale-Key Rescue] '{db_track.title}' re-resolved live "
+                                                        f"(stored id {db_track.id} → {rescued.ratingKey})")
+                                            return rescued, confidence
                                 except ValueError:
                                     logger.warning(f"Invalid Plex track ID format for '{db_track.title}' (ID: {db_track.id}) - skipping this track")
                                     continue
-                                
+
                         except Exception as fetch_error:
+                            # Plex re-keys tracks on metadata refresh — the stored id
+                            # 404s here. The track EXISTS; find it live before giving
+                            # up, or it silently counts as missing (#1047).
                             logger.error(f"Failed to fetch actual {server_type} track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")
+                            rescued = rescue_stale_plex_track(media_client, db_track, artist_name)
+                            if rescued is not None:
+                                logger.info(f"[Stale-Key Rescue] '{db_track.title}' re-resolved live "
+                                            f"(stored id {db_track.id} → {rescued.ratingKey})")
+                                return rescued, confidence
                             # Continue to try other artists rather than fail completely
                             continue
                         

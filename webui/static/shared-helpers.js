@@ -76,6 +76,15 @@ const SOURCE_LABELS = {
         logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
         tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz',
     },
+    jiosaavn: {
+        text: 'JioSaavn', icon: '🎵',
+        tabClass: 'enh-tab-jiosaavn', badgeClass: 'enh-badge-jiosaavn',
+    },
+    bandcamp: {
+        text: 'Bandcamp', icon: '🎵',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg',
+        tabClass: 'enh-tab-bandcamp', badgeClass: 'enh-badge-bandcamp',
+    },
     youtube_videos: {
         text: 'Music Videos', icon: '🎬',
         tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube',
@@ -91,7 +100,7 @@ const SOURCE_LABELS = {
 // Canonical display order for the source picker. Standard metadata sources
 // first, then YouTube Music Videos, then Soulseek (basic-file source).
 const SOURCE_ORDER = [
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz', 'jiosaavn', 'bandcamp',
     'youtube_videos', 'soulseek',
 ];
 
@@ -100,19 +109,88 @@ const SOURCE_ORDER = [
 // Soulseek IS configurable (needs slskd URL), so it's intentionally not here:
 // /api/settings/config-status reports its real state and the picker dims it
 // when no slskd is set up, redirecting clicks to Settings → Downloads.
-const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'youtube_videos']);
+const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'jiosaavn', 'bandcamp', 'youtube_videos']);
+
+// Experimental metadata sources — each is opt-in via Settings → Advanced →
+// Experimental and individually toggleable. The backend reports their on/off
+// state in the `_experimental` payload ({'<name>_enabled': bool}); the picker
+// hides any experimental source that isn't currently enabled. To add a new
+// experimental provider, add its name here (plus a SOURCE_DEFINITIONS entry).
+const EXPERIMENTAL_SOURCES = new Set(['jiosaavn', 'bandcamp']);
+
+/** Parse an `_experimental` payload into a Set of enabled experimental names. */
+function parseEnabledExperimental(data) {
+    const enabled = new Set();
+    const flags = data && data._experimental;
+    if (flags && typeof flags === 'object') {
+        for (const [key, value] of Object.entries(flags)) {
+            if (value && key.endsWith('_enabled')) {
+                enabled.add(key.slice(0, -'_enabled'.length));
+            }
+        }
+    }
+    return enabled;
+}
+
+/** True when JioSaavn experimental opt-in is on (settings, payload, or /status). */
+function isJiosaavnExperimentalEnabled() {
+    if (document.getElementById('experimental-jiosaavn-enabled')?.checked === true) return true;
+    if (window._settingsPayload?.experimental?.jiosaavn_enabled === true) return true;
+    if (window._lastStatusPayload && parseEnabledExperimental(window._lastStatusPayload).has('jiosaavn')) {
+        return true;
+    }
+    return false;
+}
+
+/** True when Bandcamp experimental opt-in is on (settings, payload, or /status). */
+function isBandcampExperimentalEnabled() {
+    if (document.getElementById('experimental-bandcamp-enabled')?.checked === true) return true;
+    if (window._settingsPayload?.experimental?.bandcamp_enabled === true) return true;
+    if (window._lastStatusPayload && parseEnabledExperimental(window._lastStatusPayload).has('bandcamp')) {
+        return true;
+    }
+    return false;
+}
+
+/** Drop JioSaavn rows from service lists when experimental is off. */
+function filterJiosaavnServiceEntries(items, idKey = 'key') {
+    if (isJiosaavnExperimentalEnabled()) return items;
+    return items.filter((item) => {
+        const id = item[idKey] ?? item.svc ?? item.id;
+        return id !== 'jiosaavn';
+    });
+}
+
+/** Set of currently-enabled experimental sources (read from /status). */
+async function fetchEnabledExperimentalSources() {
+    try {
+        const resp = await fetch('/status');
+        if (resp.ok) return parseEnabledExperimental(await resp.json());
+    } catch (_) { /* fall through */ }
+    return new Set();
+}
+
+/** Source picker order with disabled experimental sources removed. */
+function visibleSourceOrder(enabledExperimental = new Set()) {
+    return SOURCE_ORDER.filter(
+        src => !EXPERIMENTAL_SOURCES.has(src) || enabledExperimental.has(src)
+    );
+}
 
 // Fetch /api/settings/config-status and return a map { src -> bool }
-// covering every source in SOURCE_ORDER. Sources not present in the backend
+// covering every visible source. Sources not present in the backend
 // registry (musicbrainz / youtube_videos / soulseek) are reported as
 // configured so the picker doesn't dim always-available sources.
-async function fetchSourceConfiguredMap() {
+async function fetchSourceConfiguredMap(enabledExperimental = new Set()) {
     const map = {};
     try {
         const resp = await fetch('/api/settings/config-status');
         if (resp.ok) {
             const data = await resp.json();
-            for (const src of SOURCE_ORDER) {
+            // /status and config-status share the _experimental shape; trust the
+            // freshest read so the picker and config agree.
+            enabledExperimental = parseEnabledExperimental(data);
+            for (const src of visibleSourceOrder(enabledExperimental)) {
                 if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
                     map[src] = true;
                 } else if (src === 'spotify') {
@@ -126,8 +204,11 @@ async function fetchSourceConfiguredMap() {
             return map;
         }
     } catch (_) { /* fall through to conservative default */ }
-    // Network / endpoint failure — be permissive rather than dim everything.
-    for (const src of SOURCE_ORDER) map[src] = true;
+    // Network / endpoint failure — be permissive for standard sources. Disabled
+    // experimental sources are already excluded from visibleSourceOrder.
+    for (const src of visibleSourceOrder(enabledExperimental)) {
+        map[src] = true;
+    }
     return map;
 }
 
@@ -182,6 +263,7 @@ function createSearchController({
         fallbacks: {},
         loadingSources: new Set(),
         configuredSources: {},
+        enabledExperimental: new Set(),
         _initialized: false,
     };
     // Optimistic default — replaced by the real config-status lookup on
@@ -208,7 +290,8 @@ function createSearchController({
 
     function renderSourceRow() {
         if (!sourceRowElement) return;
-        sourceRowElement.innerHTML = SOURCE_ORDER.map(src => {
+        const order = visibleSourceOrder(state.enabledExperimental);
+        sourceRowElement.innerHTML = order.map(src => {
             const info = SOURCE_LABELS[src];
             if (!info) return '';
             const active = src === state.activeSource;
@@ -292,16 +375,22 @@ function createSearchController({
         } catch (_) { /* best-effort */ }
         if (!SOURCE_LABELS[state.activeSource]) state.activeSource = 'spotify';
 
+        state.enabledExperimental = await fetchEnabledExperimentalSources();
+        if (EXPERIMENTAL_SOURCES.has(state.activeSource) && !state.enabledExperimental.has(state.activeSource)) {
+            state.activeSource = 'spotify';
+        }
+
         // Figure out which sources actually have credentials saved.
         try {
-            state.configuredSources = await fetchSourceConfiguredMap();
+            state.configuredSources = await fetchSourceConfiguredMap(state.enabledExperimental);
         } catch (_) { /* keep optimistic default */ }
 
         // If the configured primary is itself unconfigured (Spotify saved
         // as primary but no client_id yet), fall forward to the first
         // configured source so the default active icon is usable.
         if (state.configuredSources[state.activeSource] === false) {
-            const firstConfigured = SOURCE_ORDER.find(s => state.configuredSources[s] !== false);
+            const firstConfigured = visibleSourceOrder(state.enabledExperimental)
+                .find(s => state.configuredSources[s] !== false);
             if (firstConfigured) state.activeSource = firstConfigured;
         }
 
@@ -311,6 +400,7 @@ function createSearchController({
 
     function setActiveSource(src) {
         if (!SOURCE_LABELS[src]) return;
+        if (EXPERIMENTAL_SOURCES.has(src) && !state.enabledExperimental.has(src)) return;
 
         // Unconfigured — jump to the relevant card in Settings rather than
         // firing a search that can't succeed. Don't swap activeSource so the
@@ -547,9 +637,12 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
     const isArtist = sectionId.includes('artists');
     const isAlbum = sectionId.includes('albums') || sectionId.includes('singles');
     const isTrack = sectionId.includes('tracks');
+    // Labels behave like artists (clickable link-card into a detail page) but
+    // carry no image + skip the artist lazy-image machinery.
+    const isLabel = sectionId.includes('labels');
 
     // Add appropriate grid class to list
-    if (isArtist) {
+    if (isArtist || isLabel) {
         list.classList.add('enh-artists-grid');
     } else if (isAlbum) {
         list.classList.add('enh-albums-grid');
@@ -559,11 +652,13 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
 
     items.forEach(item => {
         const config = mapItem(item);
-        const isLink = isArtist && !!config.href;
+        const isLink = (isArtist || isLabel) && !!config.href;
         const elem = document.createElement(isLink ? 'a' : 'div');
 
         // Add appropriate card class
-        if (isArtist) {
+        if (isLabel) {
+            elem.className = 'enh-compact-item label-card artist-card';
+        } else if (isArtist) {
             elem.className = 'enh-compact-item artist-card';
             // Add data attributes for lazy loading
             if (item.id) {
@@ -592,7 +687,7 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
         let imageClass = 'enh-item-image';
         let placeholderClass = 'enh-item-image-placeholder';
 
-        if (isArtist) {
+        if (isArtist || isLabel) {
             imageClass += ' artist-image';
             placeholderClass += ' artist-placeholder';
         } else if (isAlbum) {
@@ -1340,6 +1435,51 @@ async function navigateToMirroredPlaylist(playlistRef, source = 'spotify') {
     }
 }
 
+function isConfirmedSearchIntentModal(playlistId) {
+    const value = String(playlistId || '');
+    return value.startsWith('enhanced_search_') || value.startsWith('gsearch_');
+}
+
+function confirmedSearchQualityProfileControl(playlistId) {
+    if (!isConfirmedSearchIntentModal(playlistId)) return '';
+    return `<label class="search-quality-profile-picker" for="search-quality-profile-${escapeHtml(playlistId)}">
+        <span>Quality Profile</span>
+        <select id="search-quality-profile-${escapeHtml(playlistId)}" disabled>
+            <option value="">Loading profiles…</option>
+        </select>
+        <small>Saved as an explicit Track profile before analysis starts.</small>
+    </label>`;
+}
+
+async function initializeConfirmedSearchQualityProfile(playlistId) {
+    if (!isConfirmedSearchIntentModal(playlistId)) return;
+    const select = document.getElementById(`search-quality-profile-${playlistId}`);
+    const process = activeDownloadProcesses[playlistId];
+    if (!select || !process) return;
+    try {
+        const response = await fetch('/api/quality-profile/custom');
+        const data = await response.json();
+        if (!response.ok || !data.success || !Array.isArray(data.profiles) || !data.profiles.length) {
+            throw new Error(data.error || 'No quality profiles available');
+        }
+        select.innerHTML = data.profiles.map(profile =>
+            `<option value="${Number(profile.id)}">${escapeHtml(profile.name || `Profile ${profile.id}`)}</option>`
+        ).join('');
+        const selected = data.profiles.find(profile => profile.is_default) || data.profiles[0];
+        select.value = String(selected.id);
+        select.disabled = false;
+        process.qualityProfileId = Number(selected.id);
+        select.addEventListener('change', () => {
+            const value = Number(select.value);
+            process.qualityProfileId = Number.isInteger(value) && value > 0 ? value : null;
+        });
+    } catch (error) {
+        select.innerHTML = '<option value="">App default (profiles unavailable)</option>';
+        select.title = String(error?.message || error);
+        process.qualityProfileId = null;
+    }
+}
+
 async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true, contextType = 'artist_album') {
     if (showLoadingOverlayParam) {
         showLoadingOverlay('Loading album...');
@@ -1395,6 +1535,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         artist: artist,
         album: album,
         albumType: album.album_type,
+        qualityProfileId: null,
         source: artist?.source || album?.source || artistsPageState.artistDiscography?.source || null
     };
 
@@ -1490,6 +1631,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
+                    ${confirmedSearchQualityProfileControl(virtualPlaylistId)}
                     <div class="force-download-toggle-container" style="margin-bottom: 0px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;">
                         <label class="force-download-toggle">
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
@@ -1544,6 +1686,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         </div>
     `;
 
+    await initializeConfirmedSearchQualityProfile(virtualPlaylistId);
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
@@ -1708,6 +1851,13 @@ async function hydrateArtistBubblesFromSnapshot() {
 
         // Restore artistDownloadBubbles with hydrated data
         for (const [artistId, bubbleData] of Object.entries(bubbles)) {
+            // One malformed snapshot entry must not poison the map or abort
+            // hydration of the rest (#1038: it broke Library page init).
+            if (!bubbleData || !bubbleData.artist || bubbleData.artist.id == null
+                || !Array.isArray(bubbleData.downloads)) {
+                console.warn(`⚠️ Skipping malformed bubble snapshot entry for artist ${artistId}`, bubbleData);
+                continue;
+            }
             artistDownloadBubbles[artistId] = {
                 artist: bubbleData.artist,
                 downloads: bubbleData.downloads.map(download => ({
@@ -1726,7 +1876,7 @@ async function hydrateArtistBubblesFromSnapshot() {
             // Start monitoring for any in-progress downloads
             for (const download of bubbleData.downloads) {
                 if (download.status === 'in_progress') {
-                    console.log(`📡 Starting monitoring for: ${download.album.name}`);
+                    console.log(`📡 Starting monitoring for: ${(download.album && download.album.name) || '?'}`);
                     monitorArtistDownload(artistId, download.virtualPlaylistId);
                 }
             }
@@ -2499,7 +2649,9 @@ function showArtistDownloadsSection() {
 
     // Count active artists (those with downloads)
     const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId =>
-        artistDownloadBubbles[artistId].downloads.length > 0
+        artistDownloadBubbles[artistId] && artistDownloadBubbles[artistId].artist
+        && Array.isArray(artistDownloadBubbles[artistId].downloads)
+        && artistDownloadBubbles[artistId].downloads.length > 0
     );
 
     if (activeArtists.length === 0) {
@@ -2540,8 +2692,14 @@ function showArtistDownloadsSection() {
  * Show download bubbles on the Library page (mirrors showArtistDownloadsSection)
  */
 function showLibraryDownloadsSection() {
-    const libraryContent = document.querySelector('.library-content');
-    if (!libraryContent) return;
+    // Anchor on the MUSIC library's grid and derive the container FROM it.
+    // Never querySelector('.library-content'): the video library page reuses
+    // that class and its copy comes FIRST in the DOM, so the old global query
+    // grabbed the wrong container and insertBefore threw ("not a child of
+    // this node") — killing the whole Library page init (#1038).
+    const artistGrid = document.getElementById('library-artists-grid');
+    if (!artistGrid || !artistGrid.parentElement) return;
+    const libraryContent = artistGrid.parentElement;
 
     let downloadsSection = document.getElementById('library-downloads-section');
 
@@ -2550,17 +2708,15 @@ function showLibraryDownloadsSection() {
         downloadsSection = document.createElement('div');
         downloadsSection.id = 'library-downloads-section';
         downloadsSection.className = 'artist-downloads-section';
-
-        // Insert before the artist grid
-        const artistGrid = document.getElementById('library-artists-grid');
-        if (artistGrid) {
-            libraryContent.insertBefore(downloadsSection, artistGrid);
-        }
+        downloadsSection.style.display = 'none';   // revealed below only when bubbles exist
+        libraryContent.insertBefore(downloadsSection, artistGrid);
     }
 
     // Count active artists (reuses artistDownloadBubbles state)
     const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId =>
-        artistDownloadBubbles[artistId].downloads.length > 0
+        artistDownloadBubbles[artistId] && artistDownloadBubbles[artistId].artist
+        && Array.isArray(artistDownloadBubbles[artistId].downloads)
+        && artistDownloadBubbles[artistId].downloads.length > 0
     );
 
     if (activeArtists.length === 0) {
@@ -2598,7 +2754,13 @@ function showLibraryDownloadsSection() {
  * Create HTML for an artist bubble card
  */
 function createArtistBubbleCard(artistBubbleData) {
-    const { artist, downloads } = artistBubbleData;
+    const { artist, downloads } = artistBubbleData || {};
+    // A malformed bubble (snapshot from an older/partial write) must not take
+    // down the whole page render — skip it instead of throwing (#1038).
+    if (!artist || artist.id == null || !Array.isArray(downloads)) {
+        console.warn('⚠️ Skipping malformed artist bubble:', artistBubbleData);
+        return '';
+    }
     const activeCount = downloads.filter(d => d.status === 'in_progress').length;
     const completedCount = downloads.filter(d => d.status === 'view_results').length;
     const allCompleted = activeCount === 0 && completedCount > 0;
@@ -2609,7 +2771,7 @@ function createArtistBubbleCard(artistBubbleData) {
         activeCount,
         completedCount,
         allCompleted,
-        downloadStatuses: downloads.map(d => `${d.album.name}: ${d.status}`)
+        downloadStatuses: downloads.map(d => `${(d.album && d.album.name) || '?'}: ${d.status}`)
     });
 
     // CRITICAL: Green checkmark detection logging
@@ -3645,6 +3807,7 @@ function getMetadataSourceLabel(source) {
     if (source === 'hydrabase') return 'Hydrabase';
     if (source === 'itunes') return 'iTunes';
     if (source === 'musicbrainz') return 'MusicBrainz';
+    if (source === 'jiosaavn') return 'JioSaavn';
     if (source === 'spotify_free') return 'Spotify (no auth)';
     if (source === 'spotify') return 'Spotify';
     return 'Unmapped';
@@ -3686,7 +3849,8 @@ function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
     if (source) {
         return {
             statusClass: connected ? 'connected' : 'disconnected',
-            statusText: connected ? (spotifyFamily ? `Connected (${metadataStatus?.response_time}ms)` : sourceLabel) : 'Disconnected',
+            // Uniform state word; the ms lives in the card's Response row (D4).
+            statusText: connected ? 'Connected' : 'Disconnected',
             dotClass: connected ? 'connected' : 'disconnected',
             dotTitle: connected ? sourceLabel : 'Disconnected',
             sessionActive
@@ -3720,7 +3884,7 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
         } else {
             if (statusData.connected) {
                 indicator.className = 'service-card-indicator connected';
-                statusText.textContent = `Connected (${statusData.response_time}ms)`;
+                statusText.textContent = 'Connected';
                 statusText.className = 'service-card-status-text connected';
             } else {
                 indicator.className = 'service-card-indicator disconnected';
@@ -3728,6 +3892,16 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
                 statusText.className = 'service-card-status-text disconnected';
             }
         }
+    }
+
+    // Response time row — populated uniformly for every service card so all
+    // three read the same way (D4).
+    const responseRow = document.getElementById(`${service}-response-time`);
+    if (responseRow) {
+        const rt = statusData?.response_time;
+        responseRow.textContent = (rt !== undefined && rt !== null)
+            ? `Response: ${rt}ms`
+            : 'Response: --';
     }
 
     // Update music source title based on active source
@@ -3751,14 +3925,6 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
         }
 
         syncPrimaryMetadataSourceAvailability(spotifyStatus);
-
-        const responseTimeElement = document.getElementById('metadata-source-response-time');
-        if (responseTimeElement) {
-            const responseTime = statusData.response_time;
-            responseTimeElement.textContent = responseTime !== undefined && responseTime !== null
-                ? `Response: ${responseTime}ms`
-                : 'Response: --';
-        }
 
         const testButton = document.querySelector('#metadata-source-service-card .service-card-button');
         if (testButton) {
@@ -3826,10 +3992,13 @@ function renderEnrichmentCards(enrichment) {
     const grid = document.getElementById('enrichment-status-grid');
     if (!grid || !enrichment) return;
 
+    const jiosaavnEnabled = isJiosaavnExperimentalEnabled();
+    const bandcampEnabled = isBandcampExperimentalEnabled();
+
     // Service display order
     const serviceOrder = [
-        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment',
-        'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
+        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment', 'jiosaavn_enrichment',
+        'bandcamp_enrichment', 'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
         'acoustid', 'listenbrainz'
     ];
 
@@ -3846,6 +4015,8 @@ function renderEnrichmentCards(enrichment) {
 
     const chips = [];
     for (const key of serviceOrder) {
+        if (key === 'jiosaavn_enrichment' && !jiosaavnEnabled) continue;
+        if (key === 'bandcamp_enrichment' && !bandcampEnabled) continue;
         const svc = enrichment[key];
         if (!svc) continue;
 

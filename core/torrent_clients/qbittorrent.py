@@ -67,7 +67,9 @@ class QBittorrentAdapter:
         self._url = normalize_client_url(config_manager.get('torrent_client.url', ''))
         self._username = config_manager.get('torrent_client.username', '') or ''
         self._password = config_manager.get('torrent_client.password', '') or ''
-        self._category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
         self._save_path = config_manager.get('torrent_client.save_path', '') or ''
         # Drop any existing session — credentials may have changed.
         with self._session_lock:
@@ -307,6 +309,9 @@ class QBittorrentAdapter:
             peers=int(item.get('num_leechs') or 0),
             eta=item.get('eta') if isinstance(item.get('eta'), int) and item.get('eta', 0) > 0 else None,
             save_path=item.get('save_path'),
+            content_path=item.get('content_path'),   # exact path to this torrent's file/folder
+            ratio=float(item['ratio']) if item.get('ratio') is not None else None,
+            seeding_time=int(item['seeding_time']) if isinstance(item.get('seeding_time'), (int, float)) else None,
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:
@@ -325,13 +330,63 @@ class QBittorrentAdapter:
         return await loop.run_in_executor(None, self._pause_sync, torrent_id)
 
     def _pause_sync(self, torrent_id: str) -> bool:
-        resp = self._call('POST', '/api/v2/torrents/pause', data={'hashes': torrent_id})
-        return bool(resp and resp.ok)
+        return self._stop_start('/api/v2/torrents/stop', '/api/v2/torrents/pause', torrent_id)
 
     async def resume(self, torrent_id: str) -> bool:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._resume_sync, torrent_id)
 
     def _resume_sync(self, torrent_id: str) -> bool:
-        resp = self._call('POST', '/api/v2/torrents/resume', data={'hashes': torrent_id})
+        return self._stop_start('/api/v2/torrents/start', '/api/v2/torrents/resume', torrent_id)
+
+    def _stop_start(self, v5_path: str, v4_path: str, torrent_id: str) -> bool:
+        """qBittorrent 5.0 renamed pause→stop / resume→start and REMOVED the old
+        paths (they 404). Try the 5.x endpoint first, fall back to the 4.x one so
+        SoulSync pauses/resumes correctly on both — this is why a stalled torrent
+        wasn't getting paused on qBit 5.x (the old /pause silently 404'd)."""
+        resp = self._call('POST', v5_path, data={'hashes': torrent_id})
+        if resp is not None and resp.status_code == 404:
+            resp = self._call('POST', v4_path, data={'hashes': torrent_id})
+        return bool(resp and resp.ok)
+
+    async def set_share_limits(self, torrent_id: str, ratio_limit: float,
+                               seeding_time_limit: int) -> bool:
+        """Write per-torrent seed criteria into qBittorrent so the CLIENT
+        enforces them (arr-style). ``ratio_limit`` / ``seeding_time_limit`` use
+        qBit's sentinels: -1 = no limit, -2 = use global. ``seeding_time_limit``
+        is in MINUTES (qBit's unit). Returns True on a 2xx."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._set_share_limits_sync, torrent_id, ratio_limit, seeding_time_limit)
+
+    def _set_share_limits_sync(self, torrent_id: str, ratio_limit: float,
+                               seeding_time_limit: int) -> bool:
+        resp = self._call('POST', '/api/v2/torrents/setShareLimits', data={
+            'hashes': torrent_id,
+            'ratioLimit': ratio_limit,
+            'seedingTimeLimit': seeding_time_limit,
+            # newer qBit (4.6+) reads this; older builds ignore the extra field
+            'inactiveSeedingTimeLimit': -1,
+        })
+        return bool(resp and resp.ok)
+
+    async def set_share_limits(self, torrent_id: str, ratio_limit: float,
+                               seeding_time_limit: int) -> bool:
+        """Write per-torrent seed criteria into qBittorrent so the CLIENT
+        enforces them (arr-style). ``ratio_limit`` / ``seeding_time_limit`` use
+        qBit's sentinels: -1 = no limit, -2 = use global. ``seeding_time_limit``
+        is in MINUTES (qBit's unit). Returns True on a 2xx."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._set_share_limits_sync, torrent_id, ratio_limit, seeding_time_limit)
+
+    def _set_share_limits_sync(self, torrent_id: str, ratio_limit: float,
+                               seeding_time_limit: int) -> bool:
+        resp = self._call('POST', '/api/v2/torrents/setShareLimits', data={
+            'hashes': torrent_id,
+            'ratioLimit': ratio_limit,
+            'seedingTimeLimit': seeding_time_limit,
+            # newer qBit (4.6+) reads this; older builds ignore the extra field
+            'inactiveSeedingTimeLimit': -1,
+        })
         return bool(resp and resp.ok)

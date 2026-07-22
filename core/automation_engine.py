@@ -125,6 +125,13 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 300,
     },
     {
+        'name': 'Seeding Sweep',                       # release music torrents once seed goals are met
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 30, 'unit': 'minutes'},
+        'action_type': 'seeding_sweep',
+        'initial_delay': 1080,
+    },
+    {
         'name': 'Auto-Deep Scan Library',
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 7, 'unit': 'days'},
@@ -144,6 +151,267 @@ SYSTEM_AUTOMATIONS = [
         'trigger_config': {'interval': 12, 'unit': 'hours'},
         'action_type': 'full_cleanup',
         'initial_delay': 900,  # 15 min after startup
+    },
+    # ── Video side (isolated app, shared engine) ──────────────────────────
+    # owned_by='video' keeps these OFF the music automations page (it filters
+    # them out) and ON the video Automations page (it shows only these).
+    # Schedule-based for now; a video-download-complete event trigger can
+    # replace the schedule once that event is wired into the engine.
+    # (No standalone scheduled scan — the post-download chain below keeps the library
+    # fresh. The 'video_scan_library' action/block still exist for a custom automation.)
+    # Post-download chain (video twin of music's batch_complete → scan_library →
+    # library_scan_completed → start_database_update). Event-based, so a finished
+    # video download refreshes the server then pulls the new media into video.db.
+    {
+        'name': 'Auto-Scan Video After Downloads',
+        'trigger_type': 'video_batch_complete',
+        'trigger_config': {},
+        'action_type': 'video_scan_server',
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Update Video Database After Scan',
+        'trigger_type': 'video_library_scan_completed',
+        'trigger_config': {},
+        'action_type': 'video_update_database',
+        'action_config': {'mode': 'incremental'},
+        'owned_by': 'video',
+    },
+    # Safety net: re-read the server hourly too, so MANUAL library additions (which Plex
+    # auto-scans) appear within the hour instead of waiting for the weekly deep scan. Same
+    # cheap incremental read as the after-scan one.
+    {
+        'name': 'Auto-Update Video Database (Hourly)',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_update_database_hourly',
+        'action_config': {'mode': 'incremental'},
+        'initial_delay': 900,
+        'owned_by': 'video',
+    },
+    # Sonarr-style: once a day at 1am (server-local), wishlist every episode airing
+    # today for the shows you follow (skipping ones already owned) so the day's episodes
+    # are queued overnight. A fixed wall-clock 'daily_time' (not a rolling 24h interval
+    # that drifts with restarts) — the seeder now arms timed system triggers, and
+    # _fix_airing_automation_schedule migrates the old 24h-interval row.
+    # Runs before the airing automation so the calendar it reads is current — re-pulls
+    # TMDB episode schedules for still-airing watchlist shows (the airing read is LOCAL).
+    {
+        'name': 'Refresh Airing TV Schedules',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '23:00'},
+        'action_type': 'video_refresh_airing_schedules',
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Wishlist Episodes Airing Today',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '01:00'},
+        'action_type': 'video_add_airing_episodes',
+        'owned_by': 'video',
+    },
+    # Freshness: every 6 hours, re-enrich the stalest matched library items (oldest-refreshed
+    # first, capped per run, skipping anything touched in the last 2 weeks) so ratings drift,
+    # newly-written overviews, late-arriving art and episode air-dates roll in over time. Rolling
+    # rather than a monthly big-bang — the whole library cycles through without spiking TMDB/OMDb.
+    # A 900s initial delay keeps it off the boot path.
+    {
+        'name': 'Refresh Stale Metadata',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_reenrich_stale',
+        'action_config': {'batch_size': 500, 'movie_stale_days': 30, 'show_stale_days': 30},
+        'initial_delay': 900,
+        'owned_by': 'video',
+    },
+    # Daily: re-apply overlays to the library. Reads the per-scope overlay settings
+    # (movie/show/season/episode assignments) and touches ONLY enabled scopes; the
+    # applier skips items whose template + art + consumed data are unchanged since
+    # last run, so a nightly pass re-renders just what changed. Runs at 4am, after
+    # the airing/wishlist jobs and the overnight scans have refreshed the data.
+    {
+        'name': 'Auto-Update Overlays',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:00'},
+        'action_type': 'video_apply_overlays',
+        'owned_by': 'video',
+    },
+    # Daily: keep SoulSync-managed collections in sync with the library. Resolves
+    # each enabled collection's members and pushes add/remove to the server,
+    # skipping collections whose members + settings are unchanged. Runs at 4:30am,
+    # after the overnight scans + overlay pass so it sees fresh library state.
+    {
+        'name': 'Sync Collections',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:30'},
+        'action_type': 'video_sync_collections',
+        'owned_by': 'video',
+    },
+    # Weekly: reclaim the Plex space that overlay re-uploads accumulate (Plex keeps
+    # every uploaded poster in its bundles). Runs Empty Trash → Clean Bundles →
+    # Optimize DB via the API. Weekly + a big initial delay so it never overlaps the
+    # nightly overlay run (Plex warns against concurrent bundle cleanup).
+    {
+        'name': 'Clean Up Plex Images',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 7, 'unit': 'days'},
+        'action_type': 'video_clean_plex_images',
+        'initial_delay': 1800,
+        'owned_by': 'video',
+    },
+    # Video twins of the music maintenance jobs — same schedule + shared handler,
+    # distinct action_type + owned_by='video' so they seed as separate rows and
+    # show on the video Automations page (music's copies are untouched).
+    {
+        'name': 'Clean Search History',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_clean_search_history',
+        'initial_delay': 600,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Clean Completed Downloads',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 5, 'unit': 'minutes'},
+        'action_type': 'video_clean_completed_downloads',
+        'initial_delay': 300,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Full Cleanup',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 12, 'unit': 'hours'},
+        'action_type': 'video_full_cleanup',
+        'initial_delay': 900,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Backup Database',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 3, 'unit': 'days'},
+        'action_type': 'video_backup_database',
+        'initial_delay': 600,
+        'owned_by': 'video',
+    },
+    # Video twin of music's 'Auto-Deep Scan Library', split into TWO because Movies
+    # and TV are independent libraries — a TV scan never pulls in new movies and
+    # vice-versa. Fixed weekly deep scan (re-read + prune removed) at 02:00 server-
+    # local: TV Mondays, Movies Tuesdays — different days so they never overlap. The
+    # seeder arms timed system triggers; _fix_deep_scan_schedules migrates the
+    # original rolling-7-day rows. (Busy guard in the scanner is still a safety net.)
+    {
+        'name': 'Auto-Deep Scan TV Library',
+        'trigger_type': 'weekly_time',
+        'trigger_config': {'time': '02:00', 'days': ['mon']},
+        'action_type': 'video_deep_scan_tv',
+        'action_config': {'mode': 'deep', 'media_type': 'show'},
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Deep Scan Movie Library',
+        'trigger_type': 'weekly_time',
+        'trigger_config': {'time': '02:00', 'days': ['tue']},
+        'action_type': 'video_deep_scan_movies',
+        'action_config': {'mode': 'deep', 'media_type': 'movie'},
+        'owned_by': 'video',
+    },
+    # ── Watchlist → Wishlist pipeline ─────────────────────────────────────────
+    # Stage 1: SCANS that FILL the wishlist from what you follow. (The airing-episodes
+    # scan above is the show equivalent.) All no-op cleanly if you follow nobody.
+    {
+        'name': 'Auto-Scan Watchlist People',          # followed actors/directors → wished movies
+        'trigger_type': 'daily_time',                  # daily; filmographies change slowly
+        'trigger_config': {'time': '03:00'},           # after airing/deep-scan jobs, no overlap
+        'action_type': 'video_scan_watchlist_people',
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Scan Watchlist Studios',         # followed studios → wished movies
+        'trigger_type': 'daily_time',                  # daily; catalogs change slowly
+        'trigger_config': {'time': '03:30'},           # staggered off the people scan
+        'action_type': 'video_scan_watchlist_studios',
+        'initial_delay': 1500,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Scan Watchlist Channels',        # followed YouTube channels → wished videos
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},   # YouTube posts at all hours
+        'action_type': 'video_scan_watchlist_channels',
+        # backfill_count omitted → inherits the global "videos to grab" setting (Settings → Library)
+        'initial_delay': 1200,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Scan Watchlist Playlists',       # followed playlists (mirror-all) → wished videos
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_scan_watchlist_playlists',
+        'initial_delay': 1320,
+        'owned_by': 'video',
+    },
+    # Stage 2: PROCESSORS that DRAIN the wishlist by downloading. Hourly; each skips
+    # quietly until its library folder (+ slskd, for movie/episode) is configured.
+    {
+        'name': 'Auto-Process Movie Wishlist',         # wished movies → slskd search/pick/grab
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_process_movie_wishlist',
+        'action_config': {'max_concurrent': 3},
+        'initial_delay': 1620,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Process Episode Wishlist',       # wished episodes → slskd search/pick/grab
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_process_episode_wishlist',
+        'action_config': {'max_concurrent': 3},
+        'initial_delay': 1740,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Process YouTube Wishlist',       # wished YouTube videos → yt-dlp download
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_process_youtube_wishlist',
+        'action_config': {'max_concurrent': 3},
+        'initial_delay': 1500,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'RSS Sync (Instant Grabs)',            # indexers' newest releases vs the wishlist
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 15, 'unit': 'minutes'},
+        'action_type': 'video_rss_sync',
+        'initial_delay': 900,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Seeding Sweep',                       # release torrents once seed goals are met
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 30, 'unit': 'minutes'},
+        'action_type': 'video_seeding_sweep',
+        'initial_delay': 1080,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Sync Import Lists',                   # external lists → wishlist/watchlist
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_import_lists',
+        'initial_delay': 1860,
+        'owned_by': 'video',
+    },
+    # YouTube retention: delete channel episodes outside each channel's keep window. No-op
+    # unless a channel opts in (cog modal → Keep); default keeps everything, so safe to seed.
+    {
+        'name': 'Auto-Clean Old YouTube Episodes',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:00'},
+        'action_type': 'video_clean_youtube_episodes',
+        'owned_by': 'video',
     },
 ]
 
@@ -195,6 +463,56 @@ class AutomationEngine:
             'monthly_time': self._setup_monthly_time_trigger,
         }
 
+    # --- Global per-side pause (the Automations pages' master toggles) ---
+    # One switch per side. It does NOT touch individual automations' enabled
+    # flags — those stay exactly as the user set them — it just gates whether
+    # anything RUNS: scheduled slots are skipped (schedule stays alive) and
+    # event triggers are dropped while the side is paused. Manual "Run now"
+    # still executes — an explicit click outranks the pause.
+
+    # Stored in the engine DB's `metadata` KV (music_library.db — the same DB
+    # the automations themselves live in), NOT config.json.
+    MASTER_KEYS = {'music': 'automation_master_music_enabled',
+                   'video': 'automation_master_video_enabled'}
+    # Video ships paused: most installs predate the video side and only asked
+    # for music automation. Music keeps its historic always-on behaviour.
+    MASTER_DEFAULTS = {'music': True, 'video': False}
+
+    @staticmethod
+    def automation_side(auto) -> str:
+        """Which side an automation belongs to — 'video' when the system row is
+        video-owned or a custom automation uses a video trigger/action."""
+        auto = auto or {}
+        if auto.get('owned_by') == 'video':
+            return 'video'
+        if str(auto.get('action_type') or '').startswith('video_'):
+            return 'video'
+        if str(auto.get('trigger_type') or '').startswith('video_'):
+            return 'video'
+        return 'music'
+
+    def master_enabled(self, side: str) -> bool:
+        """Live DB read — flipping the toggle applies to the very next run.
+        An absent/unreadable key means the side's shipped default."""
+        key = self.MASTER_KEYS.get(side)
+        if not key:
+            return True
+        try:
+            raw = self.db.get_metadata(key)
+        except Exception:
+            raw = None
+        if raw is None or str(raw).strip() == '':
+            return self.MASTER_DEFAULTS.get(side, True)
+        return str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
+
+    def set_master_enabled(self, side: str, enabled: bool) -> bool:
+        """Persist one side's master state to the engine DB. False on bad side."""
+        key = self.MASTER_KEYS.get(side)
+        if not key:
+            return False
+        self.db.set_metadata(key, '1' if enabled else '0')
+        return True
+
     # --- Action Handler Registration ---
 
     def register_action_handler(self, action_type, handler_fn, guard_fn=None):
@@ -237,8 +555,11 @@ class AutomationEngine:
                     trigger_type=spec['trigger_type'],
                     trigger_config=json.dumps(spec['trigger_config']),
                     action_type=spec['action_type'],
-                    action_config='{}',
+                    action_config=json.dumps(spec.get('action_config', {})),
                     profile_id=1,
+                    # owned_by tags the side that owns this automation (e.g.
+                    # 'video'), so the music page can exclude another side's rows.
+                    owned_by=spec.get('owned_by'),
                 )
                 if aid:
                     self.db.update_automation(aid, is_system=1)
@@ -284,7 +605,117 @@ class AutomationEngine:
                     self.db.update_automation(existing['id'], next_run=nr)
                     logger.info(f"System automation '{spec['name']}' next_run set to {initial_delay}s from now")
                 else:
-                    logger.info(f"System automation '{spec['name']}' ready (event-based)")
+                    # No initial_delay. A timer-based timed trigger (daily/weekly/
+                    # monthly at a fixed wall-clock time) still needs its next_run
+                    # armed — compute it from the schedule. Genuinely event-based
+                    # triggers (batch_complete, scan_done) have no next_run, so
+                    # next_run_at returns None and we leave them alone. Don't clobber
+                    # an existing future next_run (manual edit / restart-resume).
+                    nr_dt = next_run_at(spec['trigger_type'], spec['trigger_config'],
+                                        now_utc=_utcnow(), default_tz=self._default_tz)
+                    if nr_dt is not None and not existing.get('next_run'):
+                        self.db.update_automation(existing['id'], next_run=_dt_to_db_str(nr_dt))
+                        logger.info(f"System automation '{spec['name']}' next_run armed for {_dt_to_db_str(nr_dt)} (timed)")
+                    else:
+                        logger.info(f"System automation '{spec['name']}' ready (event-based)")
+        self._fix_video_scan_default()
+        self._fix_airing_automation_schedule()
+        self._fix_deep_scan_schedules()
+        self._fix_wishlist_processor_rename()
+
+    def _fix_video_scan_default(self):
+        """Remove the obsolete standalone 'Scan Video Library' SYSTEM automation — it's
+        superseded by the post-download chain (Auto-Scan Video After Downloads →
+        Auto-Update Video Database After Scan).
+
+        ``get_system_automation_by_action`` matches ONLY a system-seeded row
+        (is_system=1), so a user's own scan automation is never touched. Idempotent —
+        safe to run on every startup; once the row is gone the lookup returns None and
+        it no-ops. (No flag guard: the old one could latch True without ever deleting,
+        which is exactly why the row survived earlier 'cleanups'.)"""
+        try:
+            auto = self.db.get_system_automation_by_action('video_scan_library')
+            if auto:
+                self.db.delete_automation(auto['id'])
+                logger.info("Removed superseded 'Scan Video Library' system automation (id=%s)",
+                            auto.get('id'))
+        except Exception:
+            logger.exception("video scan cleanup failed")
+
+    def _fix_wishlist_processor_rename(self):
+        """Migrate the wishlist processors' 'Download' → 'Process' rename so a DB seeded
+        under the old names doesn't show stale duplicates.
+
+        The movie/episode ACTIONS were renamed (``video_download_*`` → ``video_process_*``),
+        so the old seeded rows are now orphaned (dead action_type) while the new ones reseed
+        alongside them — delete the orphans. ``delete_automation`` refuses system rows, so
+        clear ``is_system`` first. The YouTube action kept its type but its label changed, so
+        rename that row in place. Idempotent — no-ops once the DB is clean."""
+        try:
+            for dead in ('video_download_movie_wishlist', 'video_download_episode_wishlist'):
+                auto = self.db.get_system_automation_by_action(dead)
+                if auto:
+                    self.db.update_automation(auto['id'], is_system=0)   # lift the delete guard
+                    self.db.delete_automation(auto['id'])
+                    logger.info("Removed orphaned '%s' system automation (renamed to process, id=%s)",
+                                auto.get('name'), auto.get('id'))
+            yt = self.db.get_system_automation_by_action('video_process_youtube_wishlist')
+            if yt and yt.get('name') == 'Auto-Download YouTube Wishlist':
+                self.db.update_automation(yt['id'], name='Auto-Process YouTube Wishlist')
+                logger.info("Renamed YouTube wishlist automation → 'Auto-Process YouTube Wishlist' (id=%s)",
+                            yt.get('id'))
+        except Exception:
+            logger.exception("wishlist processor rename migration failed")
+
+    def _fix_airing_automation_schedule(self):
+        """Migrate 'Auto-Wishlist Episodes Airing Today' from the old rolling 24h
+        interval to a fixed daily 1am run.
+
+        It originally shipped as a 'schedule'/24h interval because the seeder only
+        armed interval specs — a 'daily_time' spec sat idle and never fired. The 24h
+        interval fires reliably but at a time that drifts with every restart (5 min
+        after startup, then +24h). Now that the seeder arms timed triggers, rewrite
+        the live row to run at a fixed 1am (better for 'today's airings' — queues the
+        day overnight). Matches only the is_system row; idempotent (no-op once the row
+        is already daily_time)."""
+        try:
+            auto = self.db.get_system_automation_by_action('video_add_airing_episodes')
+            if not auto or auto.get('trigger_type') == 'daily_time':
+                return
+            cfg = {'time': '01:00'}
+            nr_dt = next_run_at('daily_time', cfg, now_utc=_utcnow(), default_tz=self._default_tz)
+            self.db.update_automation(
+                auto['id'], trigger_type='daily_time', trigger_config=json.dumps(cfg),
+                next_run=_dt_to_db_str(nr_dt) if nr_dt is not None else None)
+            logger.info("Migrated 'Auto-Wishlist Episodes Airing Today' to a fixed daily 01:00 (id=%s)",
+                        auto.get('id'))
+        except Exception:
+            logger.exception("airing automation schedule migration failed")
+
+    def _fix_deep_scan_schedules(self):
+        """Migrate the two video deep-scan system automations from the original
+        rolling 7-day interval to fixed weekly times — TV Mondays 02:00, Movies
+        Tuesdays 02:00 (different days so they never overlap). The seeder only
+        creates rows, never updates a drifted trigger; this rewrites the live rows.
+        Only converts the original interval rows (skips once trigger_type is already
+        weekly_time, so a hand-tuned day/time sticks). Idempotent."""
+        targets = {
+            'video_deep_scan_tv': {'time': '02:00', 'days': ['mon']},
+            'video_deep_scan_movies': {'time': '02:00', 'days': ['tue']},
+        }
+        for action_type, cfg in targets.items():
+            try:
+                auto = self.db.get_system_automation_by_action(action_type)
+                if not auto or auto.get('trigger_type') == 'weekly_time':
+                    continue
+                nr_dt = next_run_at('weekly_time', cfg, now_utc=_utcnow(), default_tz=self._default_tz)
+                self.db.update_automation(
+                    auto['id'], trigger_type='weekly_time', trigger_config=json.dumps(cfg),
+                    next_run=_dt_to_db_str(nr_dt) if nr_dt is not None else None)
+                logger.info("Set '%s' to weekly %s %s (id=%s)", auto.get('name'),
+                            cfg['days'], cfg['time'], auto.get('id'))
+            except Exception:
+                logger.exception("deep-scan schedule migration failed for %s", action_type)
 
     def get_system_automation_next_run_seconds(self, action_type):
         """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""
@@ -376,6 +807,31 @@ class AutomationEngine:
             name=f'automation-event-{event_type}'
         )
         thread.start()
+
+    def is_event_action_enabled(self, event_type: str, action_type: str) -> bool:
+        """True if an ENABLED automation exists for (event_type → action_type).
+
+        Lets code paths that fire an effect DIRECTLY — e.g. the simple-download
+        library scan, which never forms a batch and so never emits
+        ``batch_complete`` — honor the user's automation toggle instead of always
+        running (#995 follow-up: 'Media scan completed' kept popping up with
+        Auto-Scan After Downloads turned off). Best-effort: any error returns
+        False so the caller can decide its own fallback.
+        """
+        try:
+            if self._event_cache_dirty:
+                self._rebuild_event_cache()
+            for aid in self._event_automations.get(event_type, []):
+                auto = self.db.get_automation(aid)
+                if auto and auto.get('enabled') and auto.get('action_type') == action_type:
+                    # Direct-effect callers honor the per-side master pause too —
+                    # otherwise a paused side's effects would still fire through
+                    # the code paths that never route via _run_event_automation.
+                    return self.master_enabled(self.automation_side(auto))
+            return False
+        except Exception as e:
+            logger.debug(f"is_event_action_enabled({event_type}, {action_type}) failed: {e}")
+            return False
 
     def _process_event(self, event_type, data):
         """Find matching automations and run them."""
@@ -486,6 +942,14 @@ class AutomationEngine:
 
     def _run_event_automation(self, auto, automation_id, event_data):
         """Execute action for an event-triggered automation."""
+        # Global per-side pause — event triggers are simply dropped while the
+        # side is paused (nothing to reschedule; the next event fires normally
+        # once the master is back on).
+        side = self.automation_side(auto)
+        if not self.master_enabled(side):
+            logger.info(f"Event automation '{auto.get('name')}' skipped — {side} automations are paused")
+            return
+
         action_type = auto.get('action_type')
 
         # Check for action delay
@@ -606,6 +1070,19 @@ class AutomationEngine:
         auto = self.db.get_automation(automation_id)
         if not auto or not auto.get('enabled'):
             return
+
+        # Global per-side pause: a scheduled slot is skipped but the schedule
+        # stays alive (_finish_run computes the next natural slot), so flipping
+        # the master back on resumes at the normal cadence — no restart, no
+        # burst of catch-up runs. Manual run_now (skip_delay=True) bypasses.
+        if not skip_delay:
+            side = self.automation_side(auto)
+            if not self.master_enabled(side):
+                logger.info(f"Automation '{auto.get('name')}' skipped — {side} automations are paused")
+                self._finish_run(auto, automation_id,
+                                 {'status': 'skipped', 'reason': f'{side} automations are paused'},
+                                 error=None)
+                return
 
         action_type = auto.get('action_type')
 
