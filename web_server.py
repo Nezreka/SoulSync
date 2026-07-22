@@ -11870,6 +11870,13 @@ def batch_update_library_tracks():
 def _build_library_tag_db_data(track_data, album_genres=None):
     """Build the metadata payload consumed by core.tag_writer."""
     album_genres = album_genres or []
+    # #1057 — strict genre filtering applies at the tag-write seam too, so
+    # 'Write Tags' cleans up genres written before the whitelist was enabled.
+    # The tag PREVIEW uses this same builder, so the diff modal shows the
+    # cleanup as a pending change. Strict off → filter_genres is a no-op.
+    if album_genres:
+        from core.genre_filter import filter_genres
+        album_genres = filter_genres(album_genres, config_manager)
     db_data = {
         'title': track_data.get('title'),
         'artist_name': track_data.get('artist_name'),

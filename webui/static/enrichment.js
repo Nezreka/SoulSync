@@ -3054,7 +3054,8 @@ async function loadRepairFindings() {
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
             missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
-            quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip'
+            quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip',
+            genre_cleanup: 'Genres'
         };
 
         // Finding types that have an automated fix action
@@ -3076,6 +3077,7 @@ async function loadRepairFindings() {
             missing_discography_track: 'Add to Wishlist',
             library_retag: 'Apply Tags',
             short_preview_track: 'Re-download',
+            genre_cleanup: 'Clean Genres',
         };
 
         container.innerHTML = items.map(f => {
@@ -3083,6 +3085,7 @@ async function loadRepairFindings() {
             const age = formatCacheAge(f.created_at);
             const actionLabels = {
                 removed_db_entry: 'Entry Removed', added_to_wishlist: 'Wishlisted', deleted_file: 'File Deleted',
+                genres_cleaned: 'Genres Cleaned',
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
                 applied_lyrics: 'Lyrics Applied',
@@ -3268,6 +3271,17 @@ function _renderFindingDetail(f) {
     const media = _renderFindingMedia(d);
 
     switch (f.finding_type) {
+        case 'genre_cleanup': {
+            // #1057 — show exactly what stays and what goes; the fix applies
+            // kept_genres verbatim, so this IS the contract.
+            const kept = Array.isArray(d.kept_genres) ? d.kept_genres : [];
+            const removed = Array.isArray(d.removed_genres) ? d.removed_genres : [];
+            rows.push(['Kept', kept.length ? kept.join(', ') : '— none (all genres are off your whitelist)']);
+            rows.push(['Removed', removed.join(', ')]);
+            if (d.entity) rows.push(['Applies to', d.entity === 'artist' ? 'Artist genres' : 'Album genres']);
+            return media + _gridRows(rows);
+        }
+
         case 'dead_file':
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album) rows.push(['Album', d.album]);

@@ -1030,11 +1030,45 @@ class RepairWorker:
             'short_preview_track': self._fix_short_preview_track,
             'corrupt_audio': self._fix_corrupt_audio,
             'canonical_version': self._fix_canonical_version,
+            'genre_cleanup': self._fix_genre_cleanup,
         }
         handler = handlers.get(finding_type)
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_genre_cleanup(self, entity_type, entity_id, file_path, details):
+        """#1057 — rewrite a stored genre list to only its whitelisted genres.
+
+        Removal-only: stores exactly the ``kept_genres`` the finding showed the
+        user; never invents or substitutes. An all-off-whitelist entity ends up
+        with NULL (no genres) — strict means strict, and the finding said so."""
+        kept = details.get('kept_genres')
+        if not isinstance(kept, list):
+            return {'success': False, 'error': 'Finding has no kept_genres list'}
+        table = {'artist': 'artists', 'album': 'albums'}.get(entity_type)
+        if table is None:
+            return {'success': False, 'error': f'Unsupported entity type: {entity_type}'}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            value = json.dumps(kept) if kept else None
+            cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (value, entity_id))  # noqa: S608 - table from fixed map
+            if cursor.rowcount == 0:
+                conn.commit()
+                return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
+            conn.commit()
+            removed = details.get('removed_genres') or []
+            logger.info("Genre cleanup: %s %s — removed %d off-whitelist genre(s)",
+                        entity_type, entity_id, len(removed))
+            return {'success': True, 'action': 'genres_cleaned'}
+        except Exception as e:
+            logger.error("Genre cleanup fix failed for %s %s: %s", entity_type, entity_id, e)
+            return {'success': False, 'error': str(e)}
+        finally:
+            if conn:
+                conn.close()
 
     def _fix_canonical_version(self, entity_type, entity_id, file_path, details):
         """Apply a canonical-version finding — pin the release the resolver chose
