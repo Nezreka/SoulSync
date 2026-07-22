@@ -28,8 +28,25 @@ contains the fix and its regression coverage.
 | 16 | Verify existing acquisition working copies by content | Done | `9592159f` |
 | 17 | Make Refresh & Scan reportable and asynchronous | Done | `7ded959c` |
 
-Last updated: 2026-07-22 (all review findings implemented; final regression
-suite and push pending).
+Last updated: 2026-07-22 (all review findings implemented and verified).
+
+## Verification status
+
+- Finding-specific backend regression files: **396 passed**.
+- Complete Web UI test suite: **251 passed** across 42 files.
+- Ruff over every changed Python file: **passed**.
+- `git diff --check origin/library-overhaul..HEAD`: **passed**.
+- The broader baseline run still exposes two failures in unchanged repair-job
+  files: `test_cover_art_scanner_flags_v2_only_album` and
+  `test_metadata_gap_scanner_covers_v2_only_track`. Their minimal legacy test
+  schemas omit columns that the scanners select before appending native V2
+  subjects, which leaves those synthetic rows too short. Neither scanner file
+  differs from `origin/library-overhaul` in this remediation series.
+- The broader Acquisition suite cannot complete under the workspace's Python
+  3.14.6 runtime because the unchanged `utils.async_helpers.run_async` shared
+  loop blocks even for an isolated `asyncio.sleep(0)`. The finding-specific
+  acquisition coordinator and staging-copy regressions are included in the
+  passing 396-test set above.
 
 ## P1 — Update only the file that reorganize actually moved
 
