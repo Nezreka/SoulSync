@@ -120,6 +120,23 @@ def test_split_comma_parts():
 
 def test_normalize_artist_name():
     assert normalize_artist_name('  Toby   FOX ') == 'toby fox'
+    # Comma spacing can't dodge the whitelist / API exact-match.
+    assert normalize_artist_name('Tyler,The Creator') == 'tyler, the creator'
+    assert normalize_artist_name('Tyler ,  The Creator') == 'tyler, the creator'
+
+
+def test_whitelist_matches_commas_without_spaces(tmp_path, monkeypatch):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('TY', 'Tyler,The Creator', 'test')")
+        conn.execute("INSERT INTO albums (id, title, artist_id, server_source) VALUES ('AL1', 'Igor', 'TY', 'test')")
+        conn.execute("INSERT INTO tracks (id, title, file_path, artist_id, album_id, server_source) "
+                     "VALUES ('T1', 'Earfquake', '/x/e.flac', 'TY', 'AL1', 'test')")
+        conn.commit()
+    client = _FakeArtistClient()
+    result, findings = _run(db, monkeypatch, {'deezer': client})
+    assert findings == []
+    assert client.calls == []
 
 
 # ── scan: the verification gates ─────────────────────────────────────────────

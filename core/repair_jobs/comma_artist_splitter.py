@@ -58,8 +58,12 @@ _API_SOURCES = ('deezer', 'itunes', 'spotify')
 
 
 def normalize_artist_name(name) -> str:
-    """Casefold + whitespace-collapse for exact-name comparison."""
-    return ' '.join(str(name or '').casefold().split())
+    """Casefold + whitespace-collapse for exact-name comparison. Comma spacing
+    is normalized too ("Tyler,The Creator" == "Tyler, The Creator") so a
+    missing space after the comma can't dodge the whitelist / API match."""
+    import re
+    text = re.sub(r'\s*,\s*', ', ', str(name or ''))
+    return ' '.join(text.casefold().split())
 
 
 def split_comma_parts(name: str) -> list:
