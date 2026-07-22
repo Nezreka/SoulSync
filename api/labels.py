@@ -221,7 +221,6 @@ def create_blueprint() -> Blueprint:
         url = _resolve_cover(artist, album)
         _cover_cache[key] = {"at": now, "url": url}
         return jsonify({"url": url})
-
     @bp.route("/api/labels/search", methods=["POST"])
     def labels_search():
         """Label search results for the search page's Labels section."""
@@ -271,7 +270,6 @@ def create_blueprint() -> Blueprint:
         total = len(items)
         start = (page - 1) * page_size
         releases = items[start:start + page_size]
-
         db = _db()
         is_watching = False
         backlog = False

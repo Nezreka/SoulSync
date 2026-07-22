@@ -368,4 +368,130 @@ def _stringify(value: Any) -> str:
         return ""
 
 
-__all__ = ["read_embedded_tags"]
+def write_embedded_tag(file_path: str, tag_key: str, value: str | None) -> Dict[str, Any]:
+    """Write or delete a tag in an audio file via mutagen.
+
+    Atomic save via save_audio_file verifies that audio integrity is maintained.
+    """
+    symbols = get_mutagen_symbols()
+    if symbols is None:
+        return {"success": False, "error": "Mutagen is unavailable."}
+
+    if not os.path.exists(file_path):
+        return {"success": False, "error": f"File no longer exists at: {file_path}"}
+
+    try:
+        audio = symbols.File(file_path)
+    except Exception as exc:
+        logger.debug("Mutagen open failed for %s: %s", file_path, exc)
+        return {"success": False, "error": f"Could not open file: {exc}"}
+
+    if audio is None:
+        return {"success": False, "error": "File format not recognised by mutagen."}
+
+    tags = getattr(audio, "tags", None)
+    if tags is None:
+        if hasattr(audio, "add_tags"):
+            try:
+                audio.add_tags()
+                tags = audio.tags
+            except Exception:
+                pass
+
+    friendly_to_id3 = {v: k for k, v in _ID3_TEXT_FRAMES.items()}
+    txxx_friendly_to_desc = {v: k for k, v in _KNOWN_TXXX_DESCS.items()}
+
+    mp4_friendly_to_key = {
+        "title": "\xa9nam",
+        "artist": "\xa9ART",
+        "album_artist": "aART",
+        "album": "\xa9alb",
+        "date": "\xa9day",
+        "genre": "\xa9gen",
+        "tracknumber": "trkn",
+        "discnumber": "disk",
+        "lyrics": "\xa9lyr",
+        "bpm": "tmpo",
+        "copyright": "cprt",
+    }
+
+    from core.metadata.common import save_audio_file
+
+    try:
+        # ID3 (MP3)
+        if tags is not None and isinstance(tags, symbols.ID3):
+            desc = txxx_friendly_to_desc.get(tag_key)
+            if desc is None and tag_key not in friendly_to_id3 and tag_key != "lyrics":
+                desc = tag_key.replace("_", " ").title()
+
+            if tag_key == "lyrics":
+                from mutagen.id3 import USLT
+                to_remove = [k for k in audio.tags if k.startswith("USLT")]
+                for k in to_remove:
+                    del audio.tags[k]
+                if value:
+                    audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=value))
+            elif tag_key in friendly_to_id3:
+                frame_code = friendly_to_id3[tag_key]
+                audio.tags.delall(frame_code)
+                if value:
+                    frame_class = getattr(symbols, frame_code, None)
+                    if frame_class:
+                        audio.tags.add(frame_class(encoding=3, text=[value]))
+            else:
+                to_remove = [k for k in audio.tags if k.startswith("TXXX:") and desc.lower() in k.lower()]
+                for k in to_remove:
+                    del audio.tags[k]
+                if value:
+                    audio.tags.add(symbols.TXXX(encoding=3, desc=desc, text=[value]))
+
+        # MP4
+        elif isinstance(audio, symbols.MP4):
+            key = mp4_friendly_to_key.get(tag_key)
+            if key is None:
+                key = f"----:com.apple.iTunes:{tag_key.upper()}"
+                if not value:
+                    if key in audio:
+                        del audio[key]
+                else:
+                    audio[key] = [symbols.MP4FreeForm(value.encode('utf-8'))]
+            else:
+                if not value:
+                    if key in audio:
+                        del audio[key]
+                else:
+                    if key in ("trkn", "disk"):
+                        try:
+                            parts = value.split('/')
+                            if len(parts) >= 2:
+                                val = [(int(parts[0]), int(parts[1]))]
+                            else:
+                                val = [(int(parts[0]), 0)]
+                            audio[key] = val
+                        except Exception:
+                            audio[key] = [value]
+                    else:
+                        audio[key] = [value]
+
+        # FLAC / OGG / OPUS (Vorbis-like)
+        else:
+            key = tag_key.upper()
+            if not value:
+                if key in audio:
+                    del audio[key]
+                if tag_key.lower() in audio:
+                    del audio[tag_key.lower()]
+            else:
+                audio[key] = [value]
+
+        success = save_audio_file(audio, symbols)
+        if not success:
+            return {"success": False, "error": "Atomic save failed (integrity check failed)."}
+        return {"success": True}
+
+    except Exception as exc:
+        logger.error("Failed to write tag %s to %s: %s", tag_key, file_path, exc)
+        return {"success": False, "error": f"Failed to write tag: {exc}"}
+
+
+__all__ = ["read_embedded_tags", "write_embedded_tag"]

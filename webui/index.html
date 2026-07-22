@@ -360,6 +360,10 @@
                     <span class="nav-text">Chat</span>
                     <span class="issues-nav-badge hidden" id="chat-nav-badge">0</span>
                 </a>
+                <a class="nav-button" data-page="library-v2" id="library-v2-nav" href="/library-v2" style="display: none;">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><circle cx="13" cy="11" r="3.2"/></svg></span>
+                    <span class="nav-text">Library v2</span>
+                </a>
                 <a class="nav-button" data-page="tools" href="/tools">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
                     <span class="nav-text">Tools</span>
@@ -8589,6 +8593,12 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Minimum free disk space (GB):</label>
+                                    <input type="number" id="min-free-disk-gb" min="0" step="0.5" placeholder="5">
+                                    <small class="settings-hint">New downloads are refused when the download disk drops below this. Stops a full disk from hanging the whole system (0 = off).</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Import Folder:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="staging-path" placeholder="./Staging" readonly>
@@ -9985,100 +9995,6 @@
                 </div>
             </div>
 
-            <!-- Chat — Soulseek rooms + private messages, proxied through slskd.
-                 ONE page for the whole app: the video sidebar reveals this same div
-                 via SHARED_PAGES (video-side.js). All content driven by chat.js. -->
-            <div class="page" id="chat-page">
-                <div class="page-shell chat-page-container">
-                    <div class="tools-page-header">
-                        <div class="tools-page-header-left">
-                            <h2 class="tools-page-title">
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                                Chat
-                            </h2>
-                            <p class="tools-page-subtitle" data-chat-subtitle>Soulseek rooms &amp; private messages</p>
-                        </div>
-                    </div>
-                    <div class="chat-shell">
-                        <aside class="chat-side">
-                            <div class="chat-side-label">Rooms</div>
-                            <div class="chat-side-list" data-chat-rooms></div>
-                            <div class="chat-side-label">Messages</div>
-                            <div class="chat-side-list" data-chat-convos></div>
-                        </aside>
-                        <main class="chat-main">
-                            <div class="chat-head" data-chat-head></div>
-                            <!-- user popover card (click any username) -->
-                            <div class="chat-settings-overlay" data-chat-user-card hidden>
-                                <div class="chat-settings-modal chat-user-card">
-                                    <div data-chat-user-card-body></div>
-                                    <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-card-close>Close</button>
-                                        <button type="button" class="chat-send-btn" data-chat-card-message>Message</button>
-                                    </div>
-                                </div>
-                            </div>
-                            <!-- admin settings modal (cog in the room head) -->
-                            <div class="chat-settings-overlay" data-chat-settings-modal hidden>
-                                <div class="chat-settings-modal">
-                                    <h3 class="chat-settings-title">Chat Settings</h3>
-                                    <label class="chat-settings-label">Community room
-                                        <input class="chat-input" data-chat-set-room type="text" maxlength="64"
-                                               placeholder="SoulSync" autocomplete="off">
-                                        <span class="chat-settings-hint">Soulseek room names are case-sensitive</span>
-                                    </label>
-                                    <label class="chat-settings-label">GIPHY API key
-                                        <input class="chat-input" data-chat-set-giphy type="password"
-                                               placeholder="" autocomplete="off">
-                                        <span class="chat-settings-hint">free at developers.giphy.com — enables GIF search; leave blank to keep the current key</span>
-                                    </label>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-autojoin>
-                                        Auto-join the community room</label>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
-                                        Let non-admin profiles send messages</label>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
-                                        Auto-answer "prove you're human" download challenges</label>
-                                    <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-settings-cancel>Cancel</button>
-                                        <button type="button" class="chat-send-btn" data-chat-settings-save>Save</button>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="chat-scroll" data-chat-messages></div>
-                            <div class="chat-toolbar" data-chat-toolbar hidden>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="bold" title="Bold (**text**)"><b>B</b></button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="italic" title="Italic (*text*)"><i>I</i></button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="strike" title="Strikethrough (~~text~~)"><s>S</s></button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="code" title="Code (`text`)">&lt;/&gt;</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="codeblock" title="Code block (```)">▤</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="spoiler" title="Spoiler (||text||)">◼</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="quote" title="Quote (> text)">❝</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-emoji-btn title="Emoji">🙂</button>
-                                <button type="button" class="chat-fmt-btn chat-gif-btn" data-chat-gif-btn title="Send a GIF">GIF</button>
-                                <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
-                                <div class="chat-gif-pop" data-chat-gif-pop hidden>
-                                    <input class="chat-input chat-gif-search" data-chat-gif-search type="text"
-                                           placeholder="Search GIPHY…" autocomplete="off">
-                                    <div class="chat-gif-grid" data-chat-gif-grid></div>
-                                </div>
-                            </div>
-                            <button class="chat-jump-pill" type="button" data-chat-jump hidden>New messages ↓</button>
-                            <div class="chat-reply-bar" data-chat-reply-bar hidden>
-                                <span class="chat-reply-bar-label">↩ Replying to <b data-chat-reply-who></b>
-                                    <span class="chat-reply-bar-x" data-chat-reply-excerpt></span></span>
-                                <button type="button" class="chat-reply-bar-close" data-chat-reply-cancel>×</button>
-                            </div>
-                            <div class="chat-mention-pop" data-chat-mention-pop hidden></div>
-                            <form class="chat-composer" data-chat-composer>
-                                <textarea class="chat-input chat-input--area" data-chat-input maxlength="1000"
-                                          placeholder="Message…" autocomplete="off" rows="1"></textarea>
-                                <button class="chat-send-btn" type="submit">Send</button>
-                            </form>
-                        </main>
-                        <aside class="chat-users" data-chat-users></aside>
-                    </div>
-                </div>
-            </div>
             <div class="page" id="tools-page">
                 <div class="page-shell tools-page-container">
                     <div class="tools-page-header">

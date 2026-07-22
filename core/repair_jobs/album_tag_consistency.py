@@ -17,7 +17,7 @@ from mutagen.oggvorbis import OggVorbis
 from mutagen.mp4 import MP4
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.album_tag_consistency")
@@ -65,6 +65,30 @@ def _read_tag(audio, tag_name):
     except Exception as e:
         logger.debug("read tag value failed: %s", e)
     return None
+
+
+def _detect_inconsistencies(tag_data, check_album, check_artist, check_mbid):
+    """Majority-vote inconsistency detection over per-file tag snapshots."""
+    inconsistencies = []
+    checks = (
+        ('album', 'album_tag', check_album),
+        ('albumartist', 'albumartist_tag', check_artist),
+        ('musicbrainz_albumid', 'mbid_tag', check_mbid),
+    )
+    for field, key, enabled in checks:
+        if not enabled:
+            continue
+        values = [t[key] for t in tag_data if t[key]]
+        if values and len(set(values)) > 1:
+            majority = Counter(values).most_common(1)[0][0]
+            outliers = [t for t in tag_data if t[key] and t[key] != majority]
+            inconsistencies.append({
+                'field': field,
+                'canonical': majority,
+                'variants': list(set(values)),
+                'outlier_count': len(outliers),
+            })
+    return inconsistencies
 
 
 def _write_tag(audio, tag_name, value):
@@ -117,6 +141,7 @@ def _write_tag(audio, tag_name, value):
 @register_job
 class AlbumTagConsistencyJob(RepairJob):
     job_id = 'album_tag_consistency'
+    supports_artist_scope = True
     display_name = 'Album Tag Consistency'
     description = 'Finds albums where tracks have inconsistent tags causing media server splits'
     help_text = (
@@ -160,22 +185,27 @@ class AlbumTagConsistencyJob(RepairJob):
         if not any([check_album, check_artist, check_mbid]):
             return result
 
+        scope_artist = get_scope_artist(context)
+        scope_clause = "AND lower(ar.name) = lower(?)" if scope_artist else ""
+        scope_params = (scope_artist,) if scope_artist else ()
+
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
 
             # Get all albums with 2+ tracks that have file paths
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT al.id, al.title, ar.name as artist_name,
                        COUNT(t.id) as track_count
                 FROM albums al
                 JOIN artists ar ON ar.id = al.artist_id
                 JOIN tracks t ON t.album_id = al.id
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                  {scope_clause}
                 GROUP BY al.id
                 HAVING COUNT(t.id) >= 2
                 ORDER BY ar.name, al.title
-            """)
+            """, scope_params)
             albums = cursor.fetchall()
             total = len(albums)
 
@@ -239,44 +269,8 @@ class AlbumTagConsistencyJob(RepairJob):
                 if len(tag_data) < 2:
                     continue
 
-                # Check for inconsistencies
-                inconsistencies = []
-
-                if check_album:
-                    album_values = [t['album_tag'] for t in tag_data if t['album_tag']]
-                    if album_values and len(set(album_values)) > 1:
-                        majority = Counter(album_values).most_common(1)[0][0]
-                        outliers = [t for t in tag_data if t['album_tag'] and t['album_tag'] != majority]
-                        inconsistencies.append({
-                            'field': 'album',
-                            'canonical': majority,
-                            'variants': list(set(album_values)),
-                            'outlier_count': len(outliers),
-                        })
-
-                if check_artist:
-                    artist_values = [t['albumartist_tag'] for t in tag_data if t['albumartist_tag']]
-                    if artist_values and len(set(artist_values)) > 1:
-                        majority = Counter(artist_values).most_common(1)[0][0]
-                        outliers = [t for t in tag_data if t['albumartist_tag'] and t['albumartist_tag'] != majority]
-                        inconsistencies.append({
-                            'field': 'albumartist',
-                            'canonical': majority,
-                            'variants': list(set(artist_values)),
-                            'outlier_count': len(outliers),
-                        })
-
-                if check_mbid:
-                    mbid_values = [t['mbid_tag'] for t in tag_data if t['mbid_tag']]
-                    if mbid_values and len(set(mbid_values)) > 1:
-                        majority = Counter(mbid_values).most_common(1)[0][0]
-                        outliers = [t for t in tag_data if t['mbid_tag'] and t['mbid_tag'] != majority]
-                        inconsistencies.append({
-                            'field': 'musicbrainz_albumid',
-                            'canonical': majority,
-                            'variants': list(set(mbid_values)),
-                            'outlier_count': len(outliers),
-                        })
+                inconsistencies = _detect_inconsistencies(
+                    tag_data, check_album, check_artist, check_mbid)
 
                 if inconsistencies:
                     fields_affected = ', '.join(i['field'] for i in inconsistencies)
@@ -324,7 +318,110 @@ class AlbumTagConsistencyJob(RepairJob):
             logger.error(f"Album tag consistency scan error: {e}")
             result.errors += 1
 
+        self._scan_native_albums(context, result, check_album, check_artist, check_mbid)
         return result
+
+    def _scan_native_albums(self, context: JobContext, result: JobResult,
+                            check_album: bool, check_artist: bool, check_mbid: bool):
+        """Library-v2 releases grouped by their native file subjects."""
+        try:
+            from core.library2.maintenance_subjects import active_file_subjects
+            from core.library2.paths import resolve_lib2_path
+
+            albums = {}
+            for subject in active_file_subjects(
+                context.db, context.config_manager,
+            ):
+                albums.setdefault(subject['album_id'], []).append(subject)
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
+            return
+
+        scope_artist = get_scope_artist(context)
+        for album_id, subjects in albums.items():
+            if context.check_stop() or context.wait_if_paused():
+                return
+            if len(subjects) < 2:
+                continue
+            if scope_artist and (subjects[0].get('artist_name') or '').lower() != scope_artist.lower():
+                continue
+            result.scanned += 1
+
+            tag_data = []
+            for subject in subjects:
+                raw = str(subject['path'])
+                resolved = raw if os.path.exists(raw) else resolve_lib2_path(
+                    raw, config_manager=context.config_manager)
+                if not resolved or not os.path.exists(resolved):
+                    continue
+                try:
+                    audio = MutagenFile(resolved, easy=False)
+                    if audio is None:
+                        continue
+                    tag_data.append({
+                        'track_id': f"lib2:{subject['track_id']}",
+                        'track_title': subject['title'],
+                        'file_path': raw,
+                        'resolved_path': resolved,
+                        'album_tag': _read_tag(audio, 'album'),
+                        'albumartist_tag': _read_tag(audio, 'albumartist'),
+                        'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
+                    })
+                except Exception:
+                    continue
+
+            if len(tag_data) < 2:
+                continue
+
+            inconsistencies = _detect_inconsistencies(
+                tag_data, check_album, check_artist, check_mbid)
+            if not inconsistencies or not context.create_finding:
+                continue
+
+            album_title = subjects[0].get('album_title')
+            artist_name = subjects[0].get('artist_name')
+            fields_affected = ', '.join(i['field'] for i in inconsistencies)
+            total_outliers = sum(i['outlier_count'] for i in inconsistencies)
+            desc_parts = []
+            for inc in inconsistencies:
+                variants_str = ' vs '.join(f'"{v}"' for v in inc['variants'][:3])
+                desc_parts.append(f"{inc['field']}: {variants_str}")
+
+            inserted = context.create_finding(
+                job_id=self.job_id,
+                finding_type='album_tag_inconsistency',
+                severity='warning',
+                entity_type='album',
+                entity_id=f"lib2:{album_id}",
+                file_path=None,
+                title=f'Inconsistent tags: {album_title} by {artist_name}',
+                description=f'{total_outliers} track(s) have mismatched {fields_affected}. ' + '; '.join(desc_parts),
+                details={
+                    'album_id': f"lib2:{album_id}",
+                    'album_title': album_title,
+                    'artist_name': artist_name,
+                    'inconsistencies': inconsistencies,
+                    'track_count': len(tag_data),
+                    'tracks': [{'id': t['track_id'], 'title': t['track_title'],
+                                'file_path': t['file_path']} for t in tag_data],
+                    'library_v2_native': True,
+                    'library_v2': {
+                        'artist_id': subjects[0].get('artist_id'),
+                        'album_id': album_id,
+                        'track_id': None,
+                        'file_id': None,
+                        'artist_ids': [subjects[0]['artist_id']] if subjects[0].get('artist_id') else [],
+                        'album_ids': [album_id],
+                        'track_ids': sorted({s['track_id'] for s in subjects}),
+                        'file_ids': sorted({s['file_id'] for s in subjects}),
+                    },
+                },
+            )
+            if inserted:
+                result.findings_created += 1
+            else:
+                result.findings_skipped_dedup += 1
 
     def _resolve_path(self, file_path, context):
         """Resolve a DB file path to an actual filesystem path."""

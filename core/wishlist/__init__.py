@@ -9,6 +9,7 @@ from core.wishlist.processing import (
     WishlistManualDownloadRuntime,
     cleanup_wishlist_against_library,
     process_wishlist_automatically,
+    start_direct_track_download_batch,
     start_manual_wishlist_download_batch,
 )
 from core.wishlist.service import WishlistService, get_wishlist_service
@@ -20,5 +21,6 @@ __all__ = [
     "WishlistManualDownloadRuntime",
     "cleanup_wishlist_against_library",
     "process_wishlist_automatically",
+    "start_direct_track_download_batch",
     "start_manual_wishlist_download_batch",
 ]

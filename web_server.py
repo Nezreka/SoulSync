@@ -149,6 +149,7 @@ from core.wishlist.processing import (
     cleanup_wishlist_against_library as _cleanup_wishlist_against_library,
     build_wishlist_source_context as _build_wishlist_source_context,
     finalize_auto_wishlist_completion as _finalize_auto_wishlist_completion,
+    start_direct_track_download_batch as _start_direct_track_download_batch,
     start_manual_wishlist_download_batch as _start_manual_wishlist_download_batch,
     process_wishlist_automatically as _process_wishlist_automatically_impl,
     recover_uncaptured_failed_tracks as _recover_uncaptured_failed_tracks,
@@ -954,6 +955,7 @@ IS_SHUTTING_DOWN = False
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 logger.info("Initializing SoulSync services for Web UI...")
 spotify_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = media_server_engine = None
+usenet_acquisition_monitor = None
 
 try:
     spotify_client = get_spotify_client()
@@ -1028,6 +1030,24 @@ try:
     logger.info("  Download orchestrator initialized")
 except Exception as e:
     logger.error(f"  Download orchestrator failed to initialize: {e}")
+
+try:
+    from core.acquisition.client_monitor import UsenetAcquisitionMonitor
+    usenet_acquisition_monitor = UsenetAcquisitionMonitor(
+        get_database()._get_connection,
+        category_getter=lambda: config_manager.get(
+            "usenet_client.category", "soulsync"),
+        interval_getter=lambda: config_manager.get(
+            "usenet_client.acquisition_monitor_interval_seconds", 15),
+        # Resolved when the monitor starts (after module initialization).  The
+        # same evidence-based runner also powers the admin dry-run endpoint.
+        persistent_reconciler_runner=lambda: (
+            _run_persistent_acquisition_reconciliation(dry_run=False)
+        ),
+    )
+    logger.info("  Usenet acquisition monitor initialized")
+except Exception as e:
+    logger.error(f"  Usenet acquisition monitor failed to initialize: {e}")
 
 try:
     tidal_client = TidalClient()
@@ -1197,6 +1217,14 @@ missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix
 # own bounded pool decouples that: hung/slow album downloads can only delay
 # other album downloads, never the user-facing path.
 album_bundle_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlbumBundleWorker")
+
+# Dedicated pool for Library-v2 scoped Automatic Search (§29/C1) — a user
+# clicking "Automatic Search" on one artist/album/track expects that item to
+# be searched right away, not queued behind whatever the periodic auto-
+# wishlist cycle currently has saturating missing_download_executor (docs
+# §69.3: same starvation class as #740, just never split out for the
+# per-track/scoped-search flow the way album bundles were).
+scoped_search_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ScopedSearchWorker")
 
 # Parallelizes the per-file metadata-lookup + post-processing in
 # /api/import/singles/process. Single-file work is dominated by
@@ -1419,7 +1447,10 @@ def _register_automation_handlers():
         duplicate_cleaner_lock=duplicate_cleaner_lock,
         duplicate_cleaner_executor=duplicate_cleaner_executor,
         run_duplicate_cleaner=_run_duplicate_cleaner,
-        run_repair_job_now=lambda job_id: repair_worker.run_job_now(job_id) if repair_worker else None,
+        run_repair_job_now=(
+            lambda job_id, scope=None: repair_worker.run_job_now(job_id, scope=scope)
+            if repair_worker else None
+        ),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -2034,6 +2065,7 @@ def _shutdown_runtime_components():
     # Stop long-lived worker components in parallel so shutdown waits for the
     # slowest worker instead of serially burning the timeout for each one.
     _stop_components_parallel([
+        (usenet_acquisition_monitor, "usenet acquisition monitor"),
         (mb_worker, "musicbrainz worker"),
         (audiodb_worker, "audiodb worker"),
         (discogs_worker, "discogs worker"),
@@ -2060,6 +2092,7 @@ def _shutdown_runtime_components():
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
         (album_bundle_executor, "album bundle executor"),
+        (scoped_search_executor, "scoped search executor"),
         (import_singles_executor, "import singles executor"),
         (tidal_discovery_executor, "tidal discovery executor"),
         (deezer_discovery_executor, "deezer discovery executor"),
@@ -5104,7 +5137,11 @@ def reset_quality_preset(preset_name):
 
 @app.route('/api/quality-profile/custom', methods=['GET'])
 def list_custom_quality_profiles():
-    """List every quality profile (built-ins + user-created), default first."""
+    """List every quality profile (built-ins + user-created), default first.
+
+    ``upgrade_policy`` values are ``acceptable``, ``until_cutoff`` and the
+    persisted compatibility alias ``until_top`` (implicit cutoff index 0).
+    """
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
@@ -5116,7 +5153,12 @@ def list_custom_quality_profiles():
 
 @app.route('/api/quality-profile/custom', methods=['POST'])
 def create_custom_quality_profile():
-    """Save the current Quality-page settings as a new named profile."""
+    """Save the current Quality-page settings as a new named profile.
+
+    New UI writes use ``acceptable`` or ``until_cutoff``; ``until_top`` stays
+    accepted on existing/imported profiles as the top-target compatibility
+    alias.
+    """
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
@@ -6672,8 +6714,23 @@ def search_music():
     logger.info(f"Web UI Search initiated for: '{query}'" + (f" (source={requested_source})" if requested_source else ""))
     add_activity_item("", "Search Started", f"'{query}'", "Now")
 
+    # Candidate-token binding (audit §16.1): torrent/usenet results carry
+    # opaque candidate tokens; mint them bound to the searching profile.
+    # An entity-scoped search (Library-v2 interactive search names the
+    # track/album it acts for) additionally pins its tokens to that entity —
+    # a named-but-invalid entity fails the search instead of minting
+    # unbound tokens.
+    from core.download_plugins.candidate_store import candidate_binding
+    from core.library2.grab_context import resolve_lib2_grab_context
+    _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
+    if _lib2_state == 'invalid':
+        return jsonify({"error": "Unknown Library v2 entity for this search."}), 400
+
     try:
-        results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
+        with candidate_binding(get_current_profile_id(),
+                               lib2_track_id=(_lib2_ctx or {}).get('track_id'),
+                               lib2_album_id=(_lib2_ctx or {}).get('album_id')):
+            results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
     except ValueError as ve:
@@ -7018,6 +7075,92 @@ def get_music_video_status(video_id):
     return jsonify(status)
 
 
+def _audit_manual_skip(context_key, title, artist, skip_checks, profile_id=1):
+    """Record a user-initiated check override in the Library v2 skip audit.
+
+    Only when the Library v2 feature is enabled — the audit exists for lib2's
+    cleanup/repair jobs, and a disabled feature shouldn't accumulate rows.
+    Best-effort: failures never block the download.
+    """
+    try:
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
+        from core.library2.manual_skips import record_manual_skip
+        record_manual_skip(
+            get_database(),
+            content_key=context_key,
+            title=title,
+            artist=artist,
+            skipped_checks=skip_checks,
+            profile_id=profile_id,
+        )
+    except Exception as _se:
+        logger.debug("manual-skip audit write failed: %s", _se)
+
+
+def _prepare_manual_grab(username, search_result, lib2_ctx, batch_id=None):
+    """Prepare Acquisition correlation before a manual client dispatch.
+
+    Entirely fail-open: correlation is observational bookkeeping and must
+    never fail or delay the download it describes. When the plugin registry
+    cannot identify the source, correlation is skipped instead of guessing a
+    source family from the username (ADR-08).
+    """
+    try:
+        from core.library2 import ADMIN_PROFILE_ID
+        if get_current_profile_id() != ADMIN_PROFILE_ID:
+            return None
+        spec = download_orchestrator.registry.get_spec(username) if username else None
+        source = spec.name if spec else 'soulseek'
+        from core.acquisition.manual_grab import try_prepare_manual_grab
+        return try_prepare_manual_grab(
+            lib2_context=lib2_ctx,
+            target_context=search_result,
+            search_result=search_result,
+            source=source,
+            batch_id=batch_id,
+        )
+    except Exception as _acq_err:
+        logger.debug("manual grab correlation skipped: %s", _acq_err)
+        return None
+
+
+def _manual_acquisition_preparation_required(username):
+    """Whether this route dispatch is covered by the opt-in strict gate."""
+    try:
+        from core.library2 import ADMIN_PROFILE_ID
+        if get_current_profile_id() != ADMIN_PROFILE_ID:
+            return False
+        spec = download_orchestrator.registry.get_spec(username) if username else None
+        source = spec.name if spec else 'soulseek'
+        from core.acquisition.capabilities import get_source_capabilities
+        capabilities = get_source_capabilities(source)
+        return bool(capabilities and capabilities.recording_download)
+    except Exception:
+        # The normal username-based route is Soulseek when no explicit plugin
+        # spec exists. Unknown bookkeeping state is in-scope under strict mode.
+        return True
+
+
+def _manual_acquisition_dispatch_blocked(username, markers):
+    from core.acquisition.manual_grab import correlation_enforcement_enabled
+    return (
+        not markers
+        and correlation_enforcement_enabled()
+        and _manual_acquisition_preparation_required(username)
+    )
+
+
+def _record_manual_acquisition_gap(username, markers, *, blocked):
+    if markers or not _manual_acquisition_preparation_required(username):
+        return
+    from core.acquisition.correlation_coverage import (
+        record_correlation_outcome_fail_open,
+    )
+    record_correlation_outcome_fail_open(
+        "manual", "blocked" if blocked else "unprepared_dispatched")
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -7030,26 +7173,138 @@ def start_download():
     
     try:
         result_type = data.get('result_type', 'track')
-        
+
+        # Library-v2 entity context (audit P1-16): the browser may NAME the
+        # lib2 track/album this grab acts for; existence and the effective
+        # quality profile are resolved server-side. A named-but-invalid
+        # entity fails the grab instead of degrading to a context-free one.
+        from core.library2 import ADMIN_PROFILE_ID
+        from core.library2.grab_context import (
+            build_lib2_import_pipeline_fields,
+            build_lib2_track_info,
+            names_lib2_entity,
+            resolve_lib2_grab_context,
+        )
+        from core.download_plugins.candidate_store import candidate_binding
+        if (names_lib2_entity(data)
+                and get_current_profile_id() != ADMIN_PROFILE_ID):
+            return jsonify({
+                "success": False,
+                "error": "Admin access required",
+            }), 403
+        _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
+        if _lib2_state == 'invalid':
+            return jsonify({"error": "Unknown Library v2 entity for this grab."}), 400
+
+        # Candidate-token binding (audit §16.1): torrent/usenet grabs resolve
+        # an opaque candidate token server-side; the store revalidates that
+        # the token was minted for THIS profile (and, when entity-scoped,
+        # THIS lib2 entity). Grabs without tokens are unaffected. Factory,
+        # not instance — the album branch enters one scope per track.
+        _requesting_profile = get_current_profile_id()
+
+        def _cand_scope():
+            return candidate_binding(
+                _requesting_profile,
+                lib2_track_id=(_lib2_ctx or {}).get('track_id'),
+                lib2_album_id=(_lib2_ctx or {}).get('album_id'),
+            )
+
         if result_type == 'album':
             tracks = data.get('tracks', [])
             if not tracks:
                 return jsonify({"error": "No tracks found in album."}), 400
 
+            # Per-download check overrides apply to every track of the album —
+            # the Library v2 interactive search sends them on album grabs too.
+            _album_skip_checks = []
+            if data.get('skip_acoustid'):
+                _album_skip_checks.append('acoustid')
+            if data.get('quality_check') is False:
+                _album_skip_checks.extend(['bit_depth', 'quality'])
+
+            # Acquisition correlation (roadmap 3): one shared batch id ties
+            # the per-file requests of this album grab together.
+            _album_batch_id = str(uuid.uuid4())
+
+            # Two-phase album grab: validate and persist every acquisition
+            # preparation before the first external client dispatch. A strict
+            # gate failure can therefore truthfully report zero starts and a
+            # browser retry cannot duplicate tracks that already escaped.
+            _prepared_album_tracks = []
+            try:
+                for track_data in tracks:
+                    username = track_data.get('username')
+                    _manual_result = {
+                        'username': username,
+                        'filename': track_data.get('filename'),
+                        'size': track_data.get('size', 0),
+                        'title': track_data.get('title'),
+                        'artist': track_data.get('artist'),
+                        'album': data.get('album_name'),
+                        'quality': track_data.get('quality'),
+                        'bitrate': track_data.get('bitrate'),
+                    }
+                    _acq_markers = _prepare_manual_grab(
+                        username,
+                        _manual_result,
+                        _lib2_ctx,
+                        batch_id=_album_batch_id,
+                    )
+                    _prepared_album_tracks.append((track_data, _acq_markers))
+                    if _manual_acquisition_dispatch_blocked(username, _acq_markers):
+                        _record_manual_acquisition_gap(
+                            username, _acq_markers, blocked=True)
+                        raise RuntimeError(
+                            "Acquisition preparation unavailable; album download not started."
+                        )
+                    _record_manual_acquisition_gap(
+                        username, _acq_markers, blocked=False)
+            except Exception as preflight_error:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+
+                for _track, prepared_markers in _prepared_album_tracks:
+                    fail_prepared_correlated_grab(
+                        prepared_markers, "album preflight aborted before dispatch")
+                logger.error("Manual album preflight failed: %s", preflight_error)
+                return jsonify({
+                    "success": False,
+                    "error": str(preflight_error),
+                    "started": 0,
+                    "requested": len(tracks),
+                }), 503
+
             started_downloads = 0
-            for track_data in tracks:
+            failed_downloads = 0
+            for track_data, _acq_markers in _prepared_album_tracks:
                 try:
                     username = track_data.get('username')
                     filename = track_data.get('filename')
                     file_size = track_data.get('size', 0)
-
-                    download_id = run_async(download_orchestrator.download(
-                        username,
-                        filename,
-                        file_size
-                    ))
+                    try:
+                        with _cand_scope():
+                            download_id = run_async(download_orchestrator.download(
+                                username,
+                                filename,
+                                file_size
+                            ))
+                    except Exception:
+                        from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                        fail_prepared_correlated_grab(
+                            _acq_markers, "legacy client dispatch raised")
+                        raise
                     if download_id:
-                        # Register download for post-processing (simple transfer to /Transfer)
+                        from core.acquisition.manual_grab import bind_correlated_grab_transfer
+                        bind_correlated_grab_transfer(_acq_markers, download_id)
+                        # A grab naming a resolved Library-v2 entity runs
+                        # through the full import pipeline (real file
+                        # placement + tags + quarantine gate, docs §69.2) —
+                        # everything else falls back to the metadata-free
+                        # simple-download shortcut (transfer to /Transfer),
+                        # unchanged for grabs with no library target.
+                        _pipeline_fields = build_lib2_import_pipeline_fields(
+                            track_data, _lib2_ctx, album_name=data.get('album_name'),
+                        )
                         context_key = _make_context_key(username, filename)
                         with matched_context_lock:
                             matched_downloads_context[context_key] = {
@@ -7060,15 +7315,36 @@ def start_download():
                                     'title': track_data.get('title', 'Unknown'),
                                     'artist': track_data.get('artist', 'Unknown'),
                                     'quality': track_data.get('quality', 'Unknown'),
-                                    'is_simple_download': True  # Flag for simple processing
+                                    'is_simple_download': _pipeline_fields.get('is_simple_download', True),
                                 },
-                                'spotify_artist': None,  # No Spotify metadata
+                                'artist': _pipeline_fields.get('artist'),
+                                'album': _pipeline_fields.get('album'),
+                                'spotify_artist': None,  # legacy alias; 'artist' above wins when set
                                 'spotify_album': None,
-                                'track_info': None
+                                'track_info': _pipeline_fields.get('track_info') or build_lib2_track_info(
+                                    track_data,
+                                    _lib2_ctx,
+                                    album_name=data.get('album_name'),
+                                ),
+                                '_skip_quarantine_check': _album_skip_checks or None,
+                                'lib2_entity': _lib2_ctx,
+                                '_acquisition_grab_download_id': (
+                                    _acq_markers or {}).get('download_id'),
                             }
+                        if _album_skip_checks:
+                            _audit_manual_skip(
+                                context_key, track_data.get('title'),
+                                track_data.get('artist'), _album_skip_checks,
+                                _requesting_profile)
                         started_downloads += 1
+                    else:
+                        from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                        fail_prepared_correlated_grab(
+                            _acq_markers, "legacy client rejected the dispatch")
+                        failed_downloads += 1
                 except Exception as e:
                     logger.error(f"Failed to start track download: {e}")
+                    failed_downloads += 1
                     continue
 
             # Add activity for album download start
@@ -7078,7 +7354,10 @@ def start_download():
 
             return jsonify({
                 "success": True,
-                "message": f"Started {started_downloads} downloads from album"
+                "message": f"Started {started_downloads}/{len(tracks)} downloads from album",
+                "started": started_downloads,
+                "failed": failed_downloads,
+                "requested": len(tracks),
             })
         
         else:
@@ -7087,10 +7366,10 @@ def start_download():
             filename = data.get('filename')
             file_size = data.get('size', 0)
 
-            logger.info(f"Download request - Username: {username}, Filename: {filename[:50]}...")
-
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
+
+            logger.info(f"Download request - Username: {username}, Filename: {filename[:50]}...")
 
             # Blocklist guard (Phase 2b): a manual download is source-file-centric
             # (no metadata IDs), so this matches the blocked ARTIST by name. The
@@ -7111,20 +7390,61 @@ def start_download():
                 except Exception as _bl_err:
                     logger.debug("manual download blocklist check skipped: %s", _bl_err)
 
-            download_id = run_async(download_orchestrator.download(username, filename, file_size))
+            _manual_result = {
+                'username': username,
+                'filename': filename,
+                'size': file_size,
+                'title': data.get('title'),
+                'artist': data.get('artist'),
+                'album': data.get('album_name'),
+                'quality': data.get('quality'),
+                'bitrate': data.get('bitrate'),
+            }
+            _acq_markers = _prepare_manual_grab(
+                username, _manual_result, _lib2_ctx)
+            if _manual_acquisition_dispatch_blocked(username, _acq_markers):
+                _record_manual_acquisition_gap(
+                    username, _acq_markers, blocked=True)
+                logger.error(
+                    "Manual dispatch blocked: acquisition preparation is required")
+                return jsonify({
+                    "success": False,
+                    "error": "Acquisition preparation unavailable; download not started.",
+                }), 503
+            _record_manual_acquisition_gap(
+                username, _acq_markers, blocked=False)
+            try:
+                with _cand_scope():
+                    download_id = run_async(download_orchestrator.download(
+                        username, filename, file_size))
+            except Exception:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                fail_prepared_correlated_grab(
+                    _acq_markers, "legacy client dispatch raised")
+                raise
             logger.info(f"Download ID returned: {download_id}")
 
             if download_id:
+                from core.acquisition.manual_grab import bind_correlated_grab_transfer
+                bind_correlated_grab_transfer(_acq_markers, download_id)
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
-                # Per-download check overrides: skip AcoustID and/or
-                # quality-quarantine checks on request.
+                # Per-download check overrides (Library v2 interactive search passes
+                # these): skip AcoustID and/or quality-quarantine checks on request.
                 _skip_checks = []
                 if data.get('skip_acoustid'):
                     _skip_checks.append('acoustid')
                 if data.get('quality_check') is False:
                     _skip_checks.extend(['bit_depth', 'quality'])
+                # A grab naming a resolved Library-v2 entity runs through the
+                # full import pipeline (real file placement + tags +
+                # quarantine gate, docs §69.2) — everything else falls back
+                # to the metadata-free simple-download shortcut (transfer to
+                # /Transfer), unchanged for grabs with no library target.
+                _pipeline_fields = build_lib2_import_pipeline_fields(
+                    data, _lib2_ctx, album_name=data.get('album_name'),
+                )
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -7134,15 +7454,32 @@ def start_download():
                             'title': data.get('title', 'Unknown'),
                             'artist': data.get('artist', 'Unknown'),
                             'quality': data.get('quality', 'Unknown'),
-                            'is_simple_download': True  # Flag for simple processing
+                            'is_simple_download': _pipeline_fields.get('is_simple_download', True),
                         },
-                        'spotify_artist': None,  # No Spotify metadata
+                        'artist': _pipeline_fields.get('artist'),
+                        'album': _pipeline_fields.get('album'),
+                        'spotify_artist': None,  # legacy alias; 'artist' above wins when set
                         'spotify_album': None,
-                        'track_info': None,
+                        'track_info': _pipeline_fields.get('track_info') or build_lib2_track_info(
+                            data,
+                            _lib2_ctx,
+                            album_name=data.get('album_name'),
+                        ),
                         '_skip_quarantine_check': _skip_checks or None,
+                        'lib2_entity': _lib2_ctx,
+                        '_acquisition_grab_download_id': (
+                            _acq_markers or {}).get('download_id'),
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
-                    logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
+                    logger.info(f"[{source_label}] Registered download for post-processing: {context_key}")
+
+                # Audit a user-initiated override: record which profile-enforced
+                # checks were skipped so cleanup/repair jobs (and the user) know it
+                # was a deliberate manual choice (#library-v2).
+                if _skip_checks:
+                    _audit_manual_skip(
+                        context_key, data.get('title'), data.get('artist'),
+                        _skip_checks, _requesting_profile)
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
@@ -7150,6 +7487,9 @@ def start_download():
                 add_activity_item("", "Track Download Started", f"'{track_name}'", "Now")
                 return jsonify({"success": True, "message": "Download started"})
             else:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                fail_prepared_correlated_grab(
+                    _acq_markers, "legacy client rejected the dispatch")
                 logger.error(f"Failed to start download for: {filename}")
                 return jsonify({"error": "Failed to start download"}), 500
                 
@@ -7737,11 +8077,7 @@ def clear_finished_downloads():
         logger.error(f"Error clearing finished downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-# Streaming sources where the candidate's `username` field IS the source name
-# (Soulseek uses a real peer username; everything else stamps the source string).
-_STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'
-))
+from core.downloads.source_policy import STREAMING_SOURCE_NAMES as _STREAMING_SOURCE_NAMES
 
 
 def _infer_candidate_source(username: str) -> str:
@@ -8030,10 +8366,18 @@ def download_selected_candidate(task_id):
         # pick indefinitely, leaving the user stuck at "downloading 0%".
         # Manual picks are user-initiated and infrequent; a fresh thread
         # per pick is cheaper than starving them behind background work.
+        # Candidate-token binding (audit §16.1): the worker thread below has
+        # no request context, so a torrent/usenet candidate token would be
+        # resolved as admin and rejected for any other profile. Bind the
+        # grab to the requesting profile explicitly.
+        from core.download_plugins.candidate_store import candidate_binding
+        _grab_profile = get_current_profile_id()
+
         def _run_manual_download():
             logger.info(f"[Manual Download] worker started for task {task_id} ({username} / {track_name})")
             try:
-                success = _attempt_download_with_candidates(task_id, [candidate], track, batch_id)
+                with candidate_binding(_grab_profile):
+                    success = _attempt_download_with_candidates(task_id, [candidate], track, batch_id)
                 logger.info(f"[Manual Download] worker finished for task {task_id} success={success}")
                 if not success:
                     with tasks_lock:
@@ -8199,13 +8543,21 @@ def manual_search_for_task(task_id):
         }
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        from core.download_plugins.candidate_store import candidate_binding
+
+        # Captured NOW: the pool threads and the streaming generator run
+        # outside the Flask request context, where get_current_profile_id()
+        # would silently degrade to admin. Candidate tokens minted by this
+        # search must belong to the profile that asked for it (audit §16.1).
+        _search_profile = get_current_profile_id()
 
         def _search_one(src_name: str):
             client = download_orchestrator.client(src_name) if download_orchestrator else None
             if not client:
                 return src_name, [], None
             try:
-                result = run_async(client.search(query))
+                with candidate_binding(_search_profile):
+                    result = run_async(client.search(query))
                 if isinstance(result, tuple):
                     tracks = result[0] if result else []
                 else:
@@ -8383,6 +8735,13 @@ def approve_quarantine_item(entry_id):
         # for this one restored pass so multi-reason failures do not loop.
         context['_skip_quarantine_check'] = 'all'
         context['_approved_quarantine_trigger'] = trigger
+        # Acquisition tracks: the approve resolves this track by hand, so the
+        # persistent retry walk must not be resumable after a restart.
+        try:
+            from core.acquisition.pipeline_callback import notify_quarantine_approved
+            notify_quarantine_approved(context)
+        except Exception as _acq_journal_exc:
+            logger.debug(f"[Quarantine] acquisition retry journal close skipped: {_acq_journal_exc}")
         # If the caller (download-modal chooser) passed the originating task, run
         # the re-import through the verification WRAPPER with that task_id so the
         # task is marked completed on success — otherwise the modal row stays
@@ -8417,7 +8776,40 @@ def approve_quarantine_item(entry_id):
                 context_key, context, restored_path, _task_id, _batch_id,
             )
         else:
-            _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
+            def _reprocess():
+                _post_process_matched_download(context_key, context, restored_path)
+                # A manager approval can outlive its original in-memory task.
+                # Without a batch completion callback, external media servers
+                # never learn about the newly imported file. Request the same
+                # coalesced scan used by direct downloads, but only after the
+                # pipeline produced a real final file and no rejection flag.
+                try:
+                    from core.imports.pipeline import import_rejection_reason
+                    final_path = (
+                        context.get('_final_processed_path')
+                        or context.get('_final_path')
+                    )
+                    auto_scan_on = (
+                        automation_engine is None
+                        or automation_engine.is_event_action_enabled(
+                            'batch_complete', 'scan_library'
+                        )
+                    )
+                    if (
+                        web_scan_manager
+                        and auto_scan_on
+                        and final_path
+                        and os.path.isfile(final_path)
+                        and import_rejection_reason(context) is None
+                    ):
+                        web_scan_manager.request_scan(
+                            "Quarantine approval completed"
+                        )
+                except Exception as scan_exc:
+                    logger.warning(
+                        "[Quarantine] Post-approval media scan failed: %s",
+                        scan_exc,
+                    )
         threading.Thread(target=_reprocess, daemon=True).start()
         logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
         # #876: once one alternative for a song is accepted, the other
@@ -8838,9 +9230,20 @@ def approve_verification_item(history_id):
                 conn.execute(
                     "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
                     (HUMAN_VERIFIED, p))
+            from core.library2.verification import mark_file_verification_status
+            lib2_updated = mark_file_verification_status(
+                conn,
+                {p for p in (file_path, on_disk) if p},
+                HUMAN_VERIFIED,
+                config_manager=config_manager,
+            )
             conn.commit()
         tag_written = bool(on_disk) and write_verification_status(on_disk, HUMAN_VERIFIED)
-        return jsonify({"success": True, "tag_written": tag_written})
+        return jsonify({
+            "success": True,
+            "tag_written": tag_written,
+            "lib2_files_updated": lib2_updated,
+        })
     except Exception as e:
         logger.error(f"[Verification] Approve failed for {history_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -8915,12 +9318,21 @@ def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
     can manually finish via the existing Import flow."""
     try:
-        from core.imports.quarantine import recover_to_staging
+        from core.acquisition.recovery import recover_quarantine_entry_to_staging
         from core.imports.staging import get_staging_path
-        target = recover_to_staging(_get_quarantine_dir(), get_staging_path(), entry_id)
-        if not target:
+        recovery = recover_quarantine_entry_to_staging(
+            get_database()._get_connection,
+            quarantine_dir=_get_quarantine_dir(),
+            staging_dir=get_staging_path(),
+            entry_id=entry_id,
+        )
+        if not recovery:
             return jsonify({"success": False, "error": "Entry not found"}), 404
-        return jsonify({"success": True, "staged_path": target})
+        return jsonify({
+            "success": True,
+            "staged_path": recovery.staged_path,
+            "recovery": recovery.to_public_dict(),
+        })
     except Exception as e:
         logger.error(f"[Quarantine] Error recovering {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -13019,6 +13431,7 @@ try:
         get_transfer_path=lambda: docker_resolve_path(
             config_manager.get('soulseek.transfer_path', './Transfer')
         ),
+        get_config_manager=lambda: config_manager,
         # Rename-only mode (#875) computes destinations via the same path builder the
         # preview uses, so apply matches exactly what the user saw.
         build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),
@@ -13605,7 +14018,11 @@ def library_play_track():
             # Not on disk. For a streaming server (Navidrome/Subsonic) we can
             # play it through the server's own stream API instead of requiring
             # the library to be mounted into the SoulSync container (#809).
-            stream_url = _build_library_stream_url(data.get('track_id'), file_path)
+            server_track_id = (
+                data.get('server_track_id') or data.get('legacy_track_id')
+                or (None if data.get('lib2_track_id') else data.get('track_id'))
+            )
+            stream_url = _build_library_stream_url(server_track_id, file_path)
             if not stream_url:
                 return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
 
@@ -13925,9 +14342,38 @@ def library_search_service():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/library/match-artist-releases', methods=['POST'])
+def library_match_artist_releases():
+    """Return a lean release strip for one exact artist match candidate.
+
+    Kept separate from artist search so eight candidates do not force eight
+    provider discography calls. Library v2 auto-loads only the top candidates
+    and lets the user expand the rest on demand.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        service = str(data.get('service') or '').strip().lower()
+        artist_id = str(data.get('artist_id') or '').strip()
+        if not service or not artist_id:
+            return jsonify({"success": False, "error": "service and artist_id are required"}), 400
+        preview = artist_release_preview(
+            service,
+            artist_id,
+            artist_name=data.get('artist_name') or '',
+            limit=data.get('limit', 6),
+        )
+        return jsonify({"success": True, **preview})
+    except Exception as e:
+        logger.debug("Artist match release preview failed: %s", e)
+        # Candidate search remains usable even when a provider's release
+        # endpoint is unavailable or rate-limited.
+        return jsonify({"success": True, "supported": True, "albums": []})
+
+
 from core.library.service_search import (
     _detect_provider,
     _search_service,
+    artist_release_preview,
     init as _init_service_search,
 )
 
@@ -13949,6 +14395,46 @@ _SERVICE_ID_COLUMNS = {
     'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
+_WATCHLIST_PROVIDER_COLUMNS = {
+    'spotify': 'spotify_artist_id',
+    'itunes': 'itunes_artist_id',
+    'deezer': 'deezer_artist_id',
+    'discogs': 'discogs_artist_id',
+    'amazon': 'amazon_artist_id',
+    'musicbrainz': 'musicbrainz_artist_id',
+}
+
+
+def _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, artist_id):
+    """Fail closed before syncing a Library-v2 Settings provider change.
+
+    The combined Settings UI knows the concrete watchlist row. The public
+    legacy matcher historically knows only the legacy library artist id. This
+    guard accepts the bridge only when the rows already share a provider id or
+    the same normalized name; an arbitrary row id cannot be updated.
+    """
+    artist = cursor.execute(
+        """SELECT name, spotify_artist_id, itunes_artist_id, deezer_id,
+                  discogs_id, amazon_id, musicbrainz_id
+             FROM artists WHERE id=?""",
+        (artist_id,),
+    ).fetchone()
+    watchlist = cursor.execute(
+        """SELECT artist_name, spotify_artist_id, itunes_artist_id,
+                  deezer_artist_id, discogs_artist_id, amazon_artist_id,
+                  musicbrainz_artist_id
+             FROM watchlist_artists WHERE id=?""",
+        (watchlist_row_id,),
+    ).fetchone()
+    if not artist or not watchlist:
+        return False
+    if str(artist[0] or '').strip().casefold() == str(watchlist[0] or '').strip().casefold():
+        return True
+    return any(
+        left not in (None, '') and str(left) == str(right)
+        for left, right in zip(artist[1:], watchlist[1:], strict=True)
+    )
+
 @app.route('/api/library/manual-match', methods=['PUT'])
 def library_manual_match():
     """Manually set a service ID for an entity.
@@ -13960,6 +14446,7 @@ def library_manual_match():
         entity_id = data.get('entity_id')
         service = data.get('service')
         service_id = data.get('service_id')
+        watchlist_row_id = data.get('watchlist_row_id')
 
         if not all([entity_type, entity_id, service, service_id]):
             return jsonify({"success": False, "error": "entity_type, entity_id, service, and service_id are required"}), 400
@@ -13975,14 +14462,50 @@ def library_manual_match():
         database = get_database()
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            if watchlist_row_id is not None:
+                if entity_type != 'artist' or service not in _WATCHLIST_PROVIDER_COLUMNS:
+                    return jsonify({"success": False, "error": "Watchlist sync is only supported for artist providers"}), 400
+                try:
+                    watchlist_row_id = int(watchlist_row_id)
+                except (TypeError, ValueError):
+                    return jsonify({"success": False, "error": "watchlist_row_id must be an integer"}), 400
+                if not _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, entity_id):
+                    return jsonify({"success": False, "error": "Watchlist artist does not match this library artist"}), 409
+                watchlist_col = _WATCHLIST_PROVIDER_COLUMNS[service]
+                duplicate = cursor.execute(
+                    f"SELECT artist_name FROM watchlist_artists WHERE {watchlist_col}=? AND id<>?",
+                    (service_id, watchlist_row_id),
+                ).fetchone()
+                if duplicate:
+                    return jsonify({
+                        "success": False,
+                        "error": f"Another watchlist artist ('{duplicate[0]}') already has this {service} ID",
+                    }), 409
             cursor.execute(f"""
                 UPDATE {table}
                 SET {id_col} = ?, {status_col} = 'matched', {attempted_col} = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (service_id, entity_id))
-            conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
+            from core.enrichment.match_provenance import record_manual_match
+            record_manual_match(
+                conn,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                service=service,
+                external_id=service_id,
+                actor=f"profile:{get_current_profile_id()}",
+            )
+            if watchlist_row_id is not None:
+                cursor.execute(
+                    f"""UPDATE watchlist_artists
+                           SET {_WATCHLIST_PROVIDER_COLUMNS[service]}=?,
+                               updated_at=CURRENT_TIMESTAMP
+                         WHERE id=?""",
+                    (service_id, watchlist_row_id),
+                )
+            conn.commit()
 
         # #758 — a manual ALBUM match also pins (and LOCKS) the canonical album
         # version to the chosen release, so the auto resolve job and every tool
@@ -14029,6 +14552,7 @@ def library_clear_match():
         entity_type = data.get('entity_type')
         entity_id = data.get('entity_id')
         service = data.get('service')
+        watchlist_row_id = data.get('watchlist_row_id')
 
         if not all([entity_type, entity_id, service]):
             return jsonify({"success": False, "error": "entity_type, entity_id, and service are required"}), 400
@@ -14046,14 +14570,31 @@ def library_clear_match():
         database = get_database()
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            if watchlist_row_id is not None:
+                if entity_type != 'artist' or service not in _WATCHLIST_PROVIDER_COLUMNS:
+                    return jsonify({"success": False, "error": "Watchlist sync is only supported for artist providers"}), 400
+                try:
+                    watchlist_row_id = int(watchlist_row_id)
+                except (TypeError, ValueError):
+                    return jsonify({"success": False, "error": "watchlist_row_id must be an integer"}), 400
+                if not _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, entity_id):
+                    return jsonify({"success": False, "error": "Watchlist artist does not match this library artist"}), 409
             cursor.execute(f"""
                 UPDATE {table}
                 SET {id_col} = NULL, {status_col} = 'not_found', {attempted_col} = NULL
                 WHERE id = ?
             """, (entity_id,))
-            conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
+            if watchlist_row_id is not None:
+                cursor.execute(
+                    f"""UPDATE watchlist_artists
+                           SET {_WATCHLIST_PROVIDER_COLUMNS[service]}=NULL,
+                               updated_at=CURRENT_TIMESTAMP
+                         WHERE id=?""",
+                    (watchlist_row_id,),
+                )
+            conn.commit()
 
         # Re-fetch fresh data
         artist_id = data.get('artist_id', entity_id)
@@ -17201,14 +17742,31 @@ def _post_process_matched_download_with_verification(context_key, context, file_
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
     Only sets task status to 'completed' after successful file verification and move operation.
     """
-    from core.imports.pipeline import post_process_matched_download_with_verification
-    return post_process_matched_download_with_verification(
+    from core.acquisition.recovery import (
+        attach_recovered_staging_context,
+        record_recovered_staging_result,
+    )
+    recovered_context = attach_recovered_staging_context(
+        get_database()._get_connection, file_path, context,
+    )
+    context.clear()
+    context.update(recovered_context)
+    from core.imports.pipeline import (
+        import_rejection_reason,
+        post_process_matched_download_with_verification,
+    )
+    result = post_process_matched_download_with_verification(
         context_key,
         context,
         file_path,
         task_id,
         batch_id,
-        _build_import_pipeline_runtime(),
+        _build_import_pipeline_runtime(
+            automation_engine=automation_engine,
+            on_download_completed=_on_download_completed,
+            web_scan_manager=web_scan_manager,
+            repair_worker=repair_worker,
+        ),
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
@@ -17224,6 +17782,20 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
         ),
     )
+    if context.get('_quarantine_recovery_entry_id'):
+        final_path = context.get('_final_processed_path') or context.get('_final_path')
+        rejection = import_rejection_reason(context)
+        success = bool(final_path and os.path.isfile(str(final_path)) and not rejection)
+        record_recovered_staging_result(
+            get_database()._get_connection,
+            context,
+            success=success,
+            error=rejection or (
+                None if success
+                else 'Shared import pipeline did not produce a final file'
+            ),
+        )
+    return result
 
 
 def _safe_move_file(src, dst):
@@ -17329,12 +17901,26 @@ def _post_process_matched_download(context_key, context, file_path):
     Also handles simple downloads (from search page "Download" button) which
     just move files to /Transfer without metadata enhancement.
     """
-    from core.imports.pipeline import post_process_matched_download
-    return post_process_matched_download(
+    from core.acquisition.recovery import (
+        attach_recovered_staging_context,
+        record_recovered_staging_result,
+    )
+    recovered_context = attach_recovered_staging_context(
+        get_database()._get_connection, file_path, context,
+    )
+    context.clear()
+    context.update(recovered_context)
+    from core.imports.pipeline import import_rejection_reason, post_process_matched_download
+    result = post_process_matched_download(
         context_key,
         context,
         file_path,
-        _build_import_pipeline_runtime(),
+        _build_import_pipeline_runtime(
+            automation_engine=automation_engine,
+            on_download_completed=_on_download_completed,
+            web_scan_manager=web_scan_manager,
+            repair_worker=repair_worker,
+        ),
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
@@ -17350,6 +17936,20 @@ def _post_process_matched_download(context_key, context, file_path):
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
         ),
     )
+    if context.get('_quarantine_recovery_entry_id'):
+        final_path = context.get('_final_processed_path') or context.get('_final_path')
+        rejection = import_rejection_reason(context)
+        success = bool(final_path and os.path.isfile(str(final_path)) and not rejection)
+        record_recovered_staging_result(
+            get_database()._get_connection,
+            context,
+            success=success,
+            error=rejection or (
+                None if success
+                else 'Shared import pipeline did not produce a final file'
+            ),
+        )
+    return result
 
 # Track stale transfer keys (completed in slskd but no context — e.g., from before app restart)
 # so we only log the warning once per key instead of spamming every poll cycle
@@ -17603,7 +18203,12 @@ def is_watchlist_actually_scanning():
 
     return True
 
-def _process_wishlist_automatically(automation_id=None):
+def _process_wishlist_automatically(
+    automation_id=None,
+    *,
+    track_ids=None,
+    profile_ids=None,
+):
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
     from core.wishlist_service import get_wishlist_service
@@ -17647,7 +18252,12 @@ def _process_wishlist_automatically(automation_id=None):
         profile_id=1,
     )
 
-    _process_wishlist_automatically_impl(runtime, automation_id=automation_id)
+    _process_wishlist_automatically_impl(
+        runtime,
+        automation_id=automation_id,
+        track_ids=track_ids,
+        profile_ids=profile_ids,
+    )
 
 # ===============================
 # == DATABASE UPDATER API      ==
@@ -20564,7 +21174,15 @@ def cancel_download_task():
             
             # Immediately mark as cancelled to prevent race conditions
             task['status'] = 'cancelled'
-            
+
+        # Acquisition tracks: cancel ends the persistent retry walk — it must
+        # never auto-restart after a process restart (docs/library-v2.md §8).
+        try:
+            from core.acquisition.pipeline_callback import notify_task_retry_cancelled
+            notify_task_retry_cancelled(task.get('track_info'))
+        except Exception as _acq_journal_exc:
+            logger.debug(f"[Cancel] acquisition retry journal close skipped: {_acq_journal_exc}")
+
         # IMPROVED WORKER SLOT MANAGEMENT: Use batch state validation instead of task status
         batch_id = task.get('batch_id')
         worker_slot_freed = False
@@ -22108,7 +22726,7 @@ def start_missing_tracks_process(playlist_id):
     A single, robust endpoint to kick off the entire missing tracks workflow.
     It creates a batch and starts the master worker in the background.
     """
-    data = request.get_json()
+    data = request.get_json() or {}
     tracks = data.get('tracks', [])
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
     force_download_all = data.get('force_download_all', False)
@@ -22194,6 +22812,53 @@ def start_missing_tracks_process(playlist_id):
             }), 429
 
     batch_id = str(uuid.uuid4())
+
+    # §52.8/§55.2: an Enhanced-/Global-Search "Begin Analysis" click is a
+    # confirmed acquisition intent. Materialize its exact Artist/Release/Track
+    # rows before the background search can fail or quarantine, then carry the
+    # resolved ids/profile/correlation through the existing task payload. A
+    # plain /api/search candidate lookup remains read-only, and non-search
+    # playlist batches keep their established mirroring semantics.
+    try:
+        from core.library2 import ADMIN_PROFILE_ID
+        from core.library2.confirmed_intent import (
+            is_confirmed_search_process,
+            materialize_confirmed_search_tracks,
+        )
+        _materialize_search = (
+            get_current_profile_id() == ADMIN_PROFILE_ID
+            and is_confirmed_search_process(playlist_id)
+        )
+        if _materialize_search:
+            _lib2_conn = get_database()._get_connection()
+            try:
+                _requested_quality_profile = data.get('quality_profile_id')
+                if _requested_quality_profile is None:
+                    from core.library2.profile_lookup import default_quality_profile_id
+                    _requested_quality_profile = default_quality_profile_id(_lib2_conn)
+                tracks = list(materialize_confirmed_search_tracks(
+                    _lib2_conn,
+                    tracks,
+                    album_context=album_context,
+                    artist_context=artist_context,
+                    explicit_profile_id=_requested_quality_profile,
+                    profile_id=ADMIN_PROFILE_ID,
+                    correlation_id=batch_id,
+                ))
+                _lib2_conn.commit()
+            except Exception:
+                _lib2_conn.rollback()
+                raise
+            finally:
+                _lib2_conn.close()
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logger.exception("Confirmed Search intent materialization failed")
+        return jsonify({
+            "success": False,
+            "error": f"Could not prepare Library v2 search intent: {exc}",
+        }), 500
 
     with tasks_lock:
         download_batches[batch_id] = {
@@ -29700,9 +30365,20 @@ def remove_from_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
 
         database = get_database()
+        # §69.1 reverse edge: capture the row's identity BEFORE deleting so the
+        # matching monitored lib2 artist can be demonitored (states must stay in
+        # sync both ways). Fires only for a user-facing removal — the forward
+        # mirror removes rows via the DB layer directly, never through here.
+        _wl_descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
         success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id())
 
         if success:
+            try:
+                from core.library2.monitor_sync import sync_watchlist_removal
+                sync_watchlist_removal(database, config_manager, _wl_descriptor,
+                                       profile_id=get_current_profile_id())
+            except Exception as _sync_e:
+                logger.debug("watchlist reverse-sync (single) failed: %s", _sync_e)
             # Push updated count to this profile's WebSocket room immediately
             try:
                 pid = get_current_profile_id()
@@ -29893,9 +30569,23 @@ def remove_batch_from_watchlist():
 
         database = get_database()
         removed = 0
+        # §69.1 reverse edge (covers "Clear Watchlist" = batch remove): demonitor
+        # the matching lib2 artist for every row we actually removed.
+        removed_descriptors = []
         for artist_id in artist_ids:
+            descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
             if database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id()):
                 removed += 1
+                if descriptor:
+                    removed_descriptors.append(descriptor)
+
+        try:
+            from core.library2.monitor_sync import sync_watchlist_removal
+            for descriptor in removed_descriptors:
+                sync_watchlist_removal(database, config_manager, descriptor,
+                                       profile_id=get_current_profile_id())
+        except Exception as _sync_e:
+            logger.debug("watchlist reverse-sync (batch) failed: %s", _sync_e)
 
         return jsonify({
             "success": True,
@@ -31280,6 +31970,33 @@ def _autostart_popularity_backfill():
         except Exception as e:
             logger.debug(f"popularity backfill tick skipped: {e}")
         _t.sleep(3600)  # re-check hourly; new artists fill within the hour
+
+
+def _autostart_library_v2_bootstrap_import():
+    """Existing installations only get `lib2_*` rows once someone opens the Library
+    v2 UI and clicks Import — native repair/quality/wanted jobs then have nothing to
+    work with until that happens (docs/library-v2.md §78). This makes the first
+    import happen on its own: no button, survives a restart, retries on failure, and
+    won't race a concurrent manual import — see core/library2/bootstrap.py for the
+    persisted claim/heartbeat/retry mechanics this loop just drives repeatedly.
+
+    Exits for good once the import has actually completed; otherwise keeps
+    retrying with backoff so a transient failure is picked up without a
+    restart."""
+    import time as _t
+    from core.library2 import bootstrap as lib2_bootstrap
+    delay = 30
+    max_delay = 1800
+    while True:
+        _t.sleep(delay)
+        delay = min(delay * 2, max_delay)
+        try:
+            database = get_database()
+            result = lib2_bootstrap.run_bootstrap_if_needed(database, config_manager.get)
+            if result.get("skipped") == "already_done" or result.get("success") is True:
+                return
+        except Exception as e:
+            logger.debug(f"lib2 bootstrap import tick skipped: {e}")
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
@@ -39271,14 +39988,37 @@ def repair_job_settings(job_id):
 
 @app.route('/api/repair/jobs/<job_id>/run', methods=['POST'])
 def repair_job_run(job_id):
-    """Trigger immediate run of a specific job"""
+    """Trigger immediate run of a specific job.
+
+    Optional JSON body ``{"artist_id": 1, "artist_name": "..."}`` resolves a
+    Library-v2 artist to an exact file allowlist. Jobs that move/delete files
+    enforce that path scope; metadata-only jobs use the accompanying name.
+    Other jobs ignore the scope and run library-wide."""
     try:
         if repair_worker is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
-        repair_worker.run_job_now(job_id)
-        logger.info("Repair job %s triggered manually via UI", job_id)
-        return jsonify({'success': True, 'job_id': job_id}), 200
+        body = request.get_json(silent=True) or {}
+        artist_name = str(body.get('artist_name') or '').strip()
+        artist_id = body.get('artist_id')
+        scope = None
+        if artist_id is not None:
+            from core.repair_jobs.base import build_artist_file_scope
+            scope = build_artist_file_scope(repair_worker.db, artist_id, artist_name)
+            artist_name = scope['artist_name']
+        elif artist_name:
+            scope = {'artist_name': artist_name}
+        repair_worker.run_job_now(job_id, scope=scope)
+        logger.info("Repair job %s triggered manually via UI%s", job_id,
+                    f" (artist scope: {artist_name})" if artist_name else "")
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'scoped_to': artist_name or None,
+            'scope_files': len(scope.get('file_paths', [])) if scope else None,
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         logger.error(f"Error running repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500
@@ -40506,6 +41246,334 @@ try:
 except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
 
+# Library Manager v2 (opt-in) — UI-facing read API mounted on /api/library/v2/*.
+# Library V2 is the native, non-disableable catalogue surface.
+from api.library_v2 import register_library_v2_routes as _register_library_v2_routes
+
+
+def _library_v2_submission_adapter(source):
+    if source != "usenet" or download_orchestrator is None:
+        return None
+    plugin = download_orchestrator.registry.get("usenet")
+    if plugin is None:
+        return None
+    from core.acquisition.submission import UsenetSubmissionAdapter
+    return UsenetSubmissionAdapter(
+        monitor_callback=(
+            usenet_acquisition_monitor.notify_submission
+            if usenet_acquisition_monitor is not None else None
+        ))
+
+
+def _library_v2_scoped_wishlist_search(track_ids, profile_id):
+    """Submit a manual wishlist batch scoped to exactly ``track_ids`` — same
+    executors/pools ``/api/wishlist/download_missing`` uses. Injected into
+    the Library-v2 scoped Automatic Search endpoint (C1) so it dispatches
+    through the identical download path instead of a second one."""
+    from database.music_database import MusicDatabase
+    db = MusicDatabase()
+    runtime = _WishlistManualDownloadRuntime(
+        get_music_database=lambda: db,
+        download_batches=download_batches,
+        tasks_lock=tasks_lock,
+        # Its own small pool (not the shared missing_download_executor) so a
+        # scoped/manual single-item search is never starved by a busy
+        # periodic wishlist auto-cycle (docs §69.3) — same precedent as
+        # album_bundle_executor below.
+        missing_download_executor=scoped_search_executor,
+        album_bundle_executor=album_bundle_executor,
+        run_full_missing_tracks_process=_run_full_missing_tracks_process,
+        get_batch_max_concurrent=_get_batch_max_concurrent,
+        add_activity_item=add_activity_item,
+        active_server=config_manager.get_active_media_server(),
+        profile_id=profile_id,
+    )
+    payload, _status = _start_manual_wishlist_download_batch(runtime, track_ids=track_ids)
+    return payload
+
+
+def _library_v2_scoped_direct_search(tracks, profile_id):
+    """Run transient Library-v2 payloads through the shared download engine.
+
+    Unlike the Wishlist-scoped adapter above, this is used for one concrete
+    track click and never persists the track in Wishlist merely to make the
+    existing worker see it.
+    """
+    from database.music_database import MusicDatabase
+    db = MusicDatabase()
+    runtime = _WishlistManualDownloadRuntime(
+        get_music_database=lambda: db,
+        download_batches=download_batches,
+        tasks_lock=tasks_lock,
+        missing_download_executor=scoped_search_executor,
+        album_bundle_executor=album_bundle_executor,
+        run_full_missing_tracks_process=_run_full_missing_tracks_process,
+        get_batch_max_concurrent=_get_batch_max_concurrent,
+        add_activity_item=add_activity_item,
+        active_server=config_manager.get_active_media_server(),
+        profile_id=profile_id,
+    )
+    payload, _status = _start_direct_track_download_batch(runtime, tracks)
+    return payload
+
+
+# core.library2.match_status.SERVICES ids that spell their "configured" flag
+# under a different key in _get_enrichment_status() (the enrichment workers'
+# keys carry a '_enrichment' suffix for some services; others match as-is).
+_LIB2_MATCH_SERVICE_ENRICHMENT_KEYS = {
+    "spotify": "spotify_enrichment",
+    "deezer": "deezer_enrichment",
+    "itunes": "itunes_enrichment",
+    "tidal": "tidal_enrichment",
+    "qobuz": "qobuz_enrichment",
+    "amazon": "amazon_enrichment",
+    "jiosaavn": "jiosaavn_enrichment",
+    "bandcamp": "bandcamp_enrichment",
+}
+
+
+def _library_v2_live_artist_stats(spotify_id):
+    """On-demand single-artist Spotify lookup for the settings modal's
+    current-match identity card (§52.5/§56.2) — same pattern the legacy
+    ``/api/watchlist/artist/<id>/config`` endpoint already uses: one call per
+    load, gated on auth + the global rate-limit flag, ``None`` on any
+    failure so the identity card just omits the stat row."""
+    if not spotify_client or not spotify_client.is_authenticated() or _spotify_rate_limited():
+        return None
+    try:
+        from core.api_call_tracker import api_call_tracker
+        api_call_tracker.record_call('spotify', endpoint='artist')
+        artist_data = spotify_client.sp.artist(spotify_id)
+    except Exception as e:
+        logger.debug(f"live artist stats fetch failed for {spotify_id}: {e}")
+        return None
+    if not artist_data:
+        return None
+    images = artist_data.get('images') or []
+    return {
+        'name': artist_data.get('name') or None,
+        'image_url': images[0].get('url') if images and isinstance(images[0], dict) else None,
+        'followers': artist_data.get('followers', {}).get('total', 0),
+        'popularity': artist_data.get('popularity', 0),
+        'genres': artist_data.get('genres') or [],
+    }
+
+
+def _library_v2_configured_match_services() -> set:
+    """Which match_status.SERVICES ids are actually configured on this
+    instance right now (deep-dive A8) — reuses the exact 'configured' flags
+    the Settings enrichment-status cards already show, so the lib2 match
+    chips never drift from what Enrich/Settings consider usable. A service
+    absent from ``_get_enrichment_status()`` (worker not running, or gated
+    behind an experimental flag) is correctly treated as not configured."""
+    from core.library2.match_status import SERVICES as _lib2_match_services
+    try:
+        status = _get_enrichment_status()
+    except Exception:
+        return set()
+    configured = set()
+    for service, _label, _id_cols in _lib2_match_services:
+        key = _LIB2_MATCH_SERVICE_ENRICHMENT_KEYS.get(service, service)
+        entry = status.get(key)
+        if entry and entry.get("configured"):
+            configured.add(service)
+    return configured
+
+
+def _acquisition_runtime_evidence():
+    """Take short, lock-protected copies before any client or DB I/O."""
+    with tasks_lock:
+        runtime_tasks = {
+            str(task_id): dict(task)
+            for task_id, task in download_tasks.items()
+            if isinstance(task, dict)
+        }
+    with matched_context_lock:
+        matched_contexts = [
+            dict(context)
+            for context in matched_downloads_context.values()
+            if isinstance(context, dict)
+        ]
+    from core.imports.quarantine import (
+        get_quarantine_entry_context,
+        list_quarantine_entries,
+    )
+    quarantine_entries = []
+    for entry in list_quarantine_entries(_get_quarantine_dir()):
+        item = dict(entry)
+        item["context"] = get_quarantine_entry_context(
+            _get_quarantine_dir(), str(entry.get("id") or ""),
+        )
+        quarantine_entries.append(item)
+    return runtime_tasks, matched_contexts, quarantine_entries
+
+
+def _acquisition_client_observations():
+    if download_orchestrator is None:
+        return {}
+    try:
+        statuses = run_async(download_orchestrator.get_all_downloads()) or []
+    except Exception as exc:  # external evidence is optional, never inferred
+        logger.warning("Persistent acquisition client snapshot failed: %s", exc)
+        return {}
+    observations = {}
+    for status in statuses:
+        download_id = str(getattr(status, "id", "") or "").strip()
+        if not download_id:
+            continue
+        observations[download_id] = {
+            "state": getattr(status, "state", None),
+            "file_path": getattr(status, "file_path", None),
+            "filename": getattr(status, "filename", None),
+        }
+    return observations
+
+
+def _run_persistent_acquisition_reconciliation(*, dry_run=True):
+    """Reconcile restart-lost legacy grabs from independently observed facts."""
+    from core.acquisition import ensure_acquisition_schema
+    from core.acquisition.reconciler import reconcile_persistent_grabs
+
+    runtime_tasks, matched_contexts, quarantine_entries = (
+        _acquisition_runtime_evidence()
+    )
+    client_observations = _acquisition_client_observations()
+    conn = get_database()._get_connection()
+    try:
+        ensure_acquisition_schema(conn)
+        report = reconcile_persistent_grabs(
+            conn,
+            runtime_tasks=runtime_tasks,
+            matched_contexts=matched_contexts,
+            client_observations=client_observations,
+            quarantine_entries=quarantine_entries,
+            dry_run=bool(dry_run),
+            evidence_ttl_seconds=config_manager.get(
+                "acquisition.reconciliation_evidence_ttl_seconds", 24 * 60 * 60,
+            ),
+        )
+        if dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+        return report.to_public_dict()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _library_v2_media_server_state():
+    active_server = config_manager.get_active_media_server()
+    connected = False
+    if media_server_engine is not None:
+        try:
+            connected = bool(media_server_engine.is_connected())
+        except Exception as exc:
+            logger.debug("Integrity report media-server probe failed: %s", exc)
+    return {
+        "available": media_server_engine is not None,
+        "active_server": active_server,
+        "connected": connected,
+        # The cross-server contract has no uniform full track-path read.  The
+        # persisted tracks.server_source projection is the comparable index.
+        "path_projection": "tracks.file_path",
+    }
+
+
+def _run_library_v2_integrity_report(*, max_findings=1000):
+    """One read-only cross-index snapshot; no schema ensure or repair writes."""
+    from core.acquisition.reconciler import reconcile_persistent_grabs
+    from core.library2.integrity_reconciler import build_integrity_report
+
+    runtime_tasks, matched_contexts, quarantine_entries = (
+        _acquisition_runtime_evidence()
+    )
+    client_observations = _acquisition_client_observations()
+    conn = get_database()._get_connection()
+    try:
+        has_acquisition = all(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone() is not None
+            for table in ("acquisition_requests", "acquisition_grabs")
+        )
+        acquisition_report = None
+        if has_acquisition:
+            acquisition_report = reconcile_persistent_grabs(
+                conn,
+                runtime_tasks=runtime_tasks,
+                matched_contexts=matched_contexts,
+                client_observations=client_observations,
+                quarantine_entries=quarantine_entries,
+                dry_run=True,
+                evidence_ttl_seconds=config_manager.get(
+                    "acquisition.reconciliation_evidence_ttl_seconds",
+                    24 * 60 * 60,
+                ),
+            ).to_public_dict()
+        report = build_integrity_report(
+            conn,
+            runtime_tasks=runtime_tasks,
+            matched_contexts=matched_contexts,
+            client_observations=client_observations,
+            quarantine_entries=quarantine_entries,
+            quarantine_dir=_get_quarantine_dir(),
+            acquisition_report=acquisition_report,
+            media_server=_library_v2_media_server_state(),
+            config_manager=config_manager,
+            max_findings=max_findings,
+        )
+        # A read endpoint owns no commit boundary, even if a future path helper
+        # accidentally begins a transaction.
+        conn.rollback()
+        return report.to_public_dict()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _library_v2_profile_page_allowed(page_id):
+    """Apply the persisted profile page ACL to Library v2 API reads.
+
+    Library v2 intentionally shares the legacy ``library`` permission instead
+    of introducing a second checkbox during the cutover.
+    """
+    profile_id = get_current_profile_id()
+    if profile_id == 1:
+        return True
+    profile = get_database().get_profile(profile_id)
+    if not profile:
+        return False
+    allowed_pages = profile.get('allowed_pages')
+    return allowed_pages is None or page_id in allowed_pages
+
+
+_register_library_v2_routes(
+    app,
+    get_database=get_database,
+    config_get=lambda key, default=None: config_manager.get(key, default),
+    config_manager=config_manager,
+    profile_id_getter=get_current_profile_id,
+    profile_page_allowed_getter=_library_v2_profile_page_allowed,
+    acquisition_submission_adapter_getter=_library_v2_submission_adapter,
+    run_enrichment=_run_single_enrichment,
+    scoped_wishlist_search_dispatcher=_library_v2_scoped_wishlist_search,
+    scoped_track_search_dispatcher=_library_v2_scoped_direct_search,
+    configured_match_services_getter=_library_v2_configured_match_services,
+    live_artist_stats_getter=_library_v2_live_artist_stats,
+    make_context_key=_make_context_key,
+    get_cached_transfer_data=get_cached_transfer_data,
+    acquisition_reconciliation_runner=(
+        _run_persistent_acquisition_reconciliation
+    ),
+    integrity_report_runner=_run_library_v2_integrity_report,
+)
+
 
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.
@@ -41127,6 +42195,17 @@ def start_runtime_services():
         logger.info("Starting simple background monitor...")
         start_simple_background_monitor()
         logger.info("Simple background monitor started (includes automatic search cleanup)")
+
+        if usenet_acquisition_monitor is not None:
+            usenet_acquisition_monitor.start()
+
+        # Existing-installation bootstrap: import legacy -> lib2_* on its own the
+        # native catalogue bootstrap, no UI click required (§78).
+        try:
+            threading.Thread(target=_autostart_library_v2_bootstrap_import, daemon=True,
+                             name='Lib2BootstrapImportAutostart').start()
+        except Exception as _lib2_bootstrap_err:
+            logger.debug(f"could not start lib2 bootstrap import autostart: {_lib2_bootstrap_err}")
 
         # Wishlist/watchlist timers are now managed by AutomationEngine system automations
 

@@ -5,7 +5,7 @@ the apply handler's analyze→compute→write seam (ffmpeg mocked)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from core.repair_jobs.replaygain_filler import needs_replaygain
 from core.repair_worker import RepairWorker
@@ -74,6 +74,59 @@ def test_apply_errors_when_file_missing():
     res = _worker()._fix_missing_replaygain(
         'track', '1', '/no/such/file.flac', {'file_path': '/no/such/file.flac'})
     assert res['success'] is False
+
+
+# ── native (lib2:<id>) findings must use resolve_lib2_path, not the legacy
+# resolver — same LV2-LYRICS-01 divergence, same fix, applied consistently. ──
+
+def test_apply_native_finding_uses_lib2_resolver(tmp_path, monkeypatch):
+    f = tmp_path / 'song.flac'
+    f.write_bytes(b'\x00' * 64)
+
+    def _boom(*a, **k):
+        raise AssertionError('legacy resolver must not be used for a native lib2 finding')
+    monkeypatch.setattr('core.repair_worker._resolve_file_path', _boom)
+    resolve_calls = []
+    monkeypatch.setattr(
+        'core.library2.paths.resolve_lib2_path',
+        lambda raw, config_manager=None: resolve_calls.append(raw) or str(f),
+    )
+
+    with patch('core.replaygain.is_ffmpeg_available', return_value=True), \
+         patch('core.replaygain.analyze_track', return_value=(-12.0, -1.5)), \
+         patch('core.replaygain.write_replaygain_tags', return_value=True), \
+         patch('core.replaygain.RG_REFERENCE_LUFS', -18.0):
+        res = _worker()._fix_missing_replaygain(
+            'track', 'lib2:1', None, {'file_path': 'stored/song.flac'})
+
+    assert res['success'] is True
+    assert resolve_calls == ['stored/song.flac']
+
+
+def test_apply_native_finding_refreshes_lib2_tag_cache(tmp_path, monkeypatch):
+    f = tmp_path / 'song.flac'
+    f.write_bytes(b'\x00' * 64)
+
+    w = _worker()
+    w.db = SimpleNamespace(_get_connection=lambda: MagicMock())
+    monkeypatch.setattr(
+        'core.library2.paths.resolve_lib2_path', lambda raw, config_manager=None: str(f))
+    refreshed = {}
+    monkeypatch.setattr(
+        'core.library2.tag_cache.read_and_persist_tag_cache',
+        lambda conn, file_id, path: refreshed.update(file_id=file_id, path=path) or True,
+    )
+
+    with patch('core.replaygain.is_ffmpeg_available', return_value=True), \
+         patch('core.replaygain.analyze_track', return_value=(-12.0, -1.5)), \
+         patch('core.replaygain.write_replaygain_tags', return_value=True), \
+         patch('core.replaygain.RG_REFERENCE_LUFS', -18.0):
+        res = w._fix_missing_replaygain(
+            'track', 'lib2:1', None,
+            {'file_path': 'song.flac', 'library_v2': {'file_id': 7}})
+
+    assert res['success'] is True
+    assert refreshed == {'file_id': 7, 'path': str(f)}
 
 
 def test_job_is_registered_and_opt_in():

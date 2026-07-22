@@ -369,6 +369,79 @@ class TransientMissCounter:
         self.misses = 0
 
 
+def snapshot_incomplete_path(path: str) -> Optional[tuple]:
+    """Cheap on-disk fingerprint of a path: total size, file count, and
+    latest mtime across every file under it (or a single file's own stat).
+
+    Used as the stability gate for the ``incomplete_path`` fallback
+    (P2-21): the client reporting a terminal-success *state* does not mean
+    its post-processing (unpack/repair/move) has stopped writing into that
+    directory. Two equal snapshots taken one poll apart are the signal
+    that writes have actually stopped — a fixed wait window elapsing is
+    not. Returns ``None`` if the path doesn't exist or can't be read,
+    which the caller treats as "not yet stable"."""
+    try:
+        p = Path(path)
+        if p.is_file():
+            st = p.stat()
+            return (st.st_size, 1, st.st_mtime)
+        if not p.is_dir():
+            return None
+        total_size = 0
+        count = 0
+        latest_mtime = 0.0
+        for entry in p.rglob('*'):
+            if entry.is_file():
+                st = entry.stat()
+                total_size += st.st_size
+                count += 1
+                latest_mtime = max(latest_mtime, st.st_mtime)
+        return (total_size, count, latest_mtime)
+    except OSError:
+        return None
+
+
+def incomplete_path_stability_check(
+    raw_path: str,
+    prior_path: Optional[str],
+    prior_snapshot: Optional[tuple],
+    *,
+    snapshot_path: Callable[[str], Optional[tuple]] = snapshot_incomplete_path,
+    resolve_path: Callable[[str], str] = lambda p: p,
+) -> tuple:
+    """P2-21 stability gate for the ``incomplete_path`` fallback, shared by
+    ``poll_album_download`` and the usenet single-track poll loop.
+
+    ``raw_path`` is the client-reported in-progress directory, which may
+    live inside the client's OWN container/mount and not be directly
+    readable here. ``resolve_path`` (typically ``resolve_reported_save_path``)
+    is applied BEFORE snapshotting so the stability check — and the path
+    returned on success — both operate on somewhere this process can
+    actually read; snapshotting the raw path meant a remote-mounted
+    directory always read as unreadable (``None``) and could never
+    stabilize, stalling the fallback until the outer poll deadline instead
+    of the intended ~120s window.
+
+    A snapshot with zero files never counts as stable either: the client
+    may have just created an empty in-progress directory a moment before
+    starting to populate it, and two empty reads in a row would otherwise
+    look identical to "writes have stopped".
+
+    Returns ``(stable, resolved_path, new_snapshot)``. Callers should
+    remember ``resolved_path``/``new_snapshot`` as ``prior_path``/
+    ``prior_snapshot`` for the next poll regardless of ``stable``.
+    """
+    resolved = resolve_path(raw_path) or raw_path
+    current = snapshot_path(resolved)
+    stable = (
+        current is not None
+        and current[1] > 0
+        and prior_path == resolved
+        and current == prior_snapshot
+    )
+    return stable, resolved, current
+
+
 def poll_album_download(
     *,
     get_status: Callable[[], Optional[Any]],
@@ -383,6 +456,8 @@ def poll_album_download(
     timeout: Optional[float] = None,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
+    snapshot_path: Callable[[str], Optional[tuple]] = snapshot_incomplete_path,
+    resolve_path: Callable[[str], str] = lambda p: p,
     log_prefix: str = '[album_bundle]',
 ) -> Optional[str]:
     """Drive the per-poll status loop for an album-bundle download.
@@ -419,21 +494,32 @@ def poll_album_download(
       already succeeded, so this defaults to ~120s (configurable via
       ``download_source.album_bundle_completed_no_path_seconds``) instead
       of reusing the 10s miss window — #721 showed SAB can take 2+ minutes
-      to write ``storage``. When the window is exhausted the loop falls
-      back to the adapter's ``incomplete_path`` (the on-disk in-progress
-      dir) if present, and only emits terminal ``failed`` when there's no
-      path of any kind to scan.
+      to write ``storage``. Once the window is exhausted, the loop does
+      NOT immediately trust the adapter's ``incomplete_path`` (the on-disk
+      in-progress dir) — that path can still be actively written by the
+      client's own unpack/repair/move post-processing at the exact moment
+      we'd read it (P2-21). It is only accepted once ``snapshot_path``
+      reports the SAME fingerprint (size/file-count/mtime) on two polls in
+      a row, i.e. the directory has visibly stopped changing; until then
+      the loop keeps polling (bounded by the outer ``timeout``, not by
+      this window). Terminal ``failed`` only fires when there's no path of
+      any kind to scan.
 
     Returns the adapter's reported save_path (or, as a last resort, its
-    ``incomplete_path``) on terminal success, or ``None`` on any failure
-    (timeout / disappeared / explicit failed / shutdown). On every
-    failure path emits ``'failed'`` once with an ``error`` field
-    describing why.
+    stability-confirmed ``incomplete_path``) on terminal success, or
+    ``None`` on any failure (timeout / disappeared / explicit failed /
+    shutdown). On every failure path emits ``'failed'`` once with an
+    ``error`` field describing why.
     """
     interval = poll_interval if poll_interval is not None else get_poll_interval()
     deadline = monotonic() + (timeout if timeout is not None else get_poll_timeout())
     last_save_path: Optional[str] = None
     last_incomplete_path: Optional[str] = None
+    # Stability gate for the incomplete_path fallback below (P2-21): the
+    # snapshot + path it was taken for, so a poll that returns the SAME
+    # snapshot for the SAME path counts as "stopped changing".
+    last_incomplete_snapshot: Optional[tuple] = None
+    last_incomplete_snapshot_path: Optional[str] = None
     misses = TransientMissCounter(transient_miss_threshold)
     # Separate counter for "client reports terminal-success state but no
     # save_path field has landed yet." SAB History flips ``status`` to
@@ -548,15 +634,41 @@ def poll_album_download(
                 # leaving the user stuck with a completed-in-SAB download
                 # that SoulSync never imports.
                 if last_incomplete_path:
-                    logger.warning(
-                        "%s '%s' completed on the client but never exposed a final "
-                        "save_path after %d polls — falling back to the in-progress "
-                        "path %r as a last resort. If staging fails, the SAB job "
-                        "likely needs its post-process move to finish first.",
-                        log_prefix, title, completed_no_path_misses.misses,
+                    # Don't trust incomplete_path just because the window
+                    # elapsed — the client's own post-processing may still
+                    # be writing into it. Require the same fingerprint on
+                    # two consecutive polls (writes have stopped) before
+                    # accepting it; otherwise keep polling, bounded by the
+                    # outer deadline rather than this window (P2-21).
+                    stable, resolved_incomplete_path, current_snapshot = incomplete_path_stability_check(
                         last_incomplete_path,
+                        last_incomplete_snapshot_path,
+                        last_incomplete_snapshot,
+                        snapshot_path=snapshot_path,
+                        resolve_path=resolve_path,
                     )
-                    return last_incomplete_path
+                    if stable:
+                        logger.warning(
+                            "%s '%s' completed on the client but never exposed a "
+                            "final save_path after %d polls — falling back to the "
+                            "in-progress path %r as a last resort (its contents were "
+                            "unchanged across a poll, so post-processing looks done).",
+                            log_prefix, title, completed_no_path_misses.misses,
+                            resolved_incomplete_path,
+                        )
+                        return resolved_incomplete_path
+                    logger.info(
+                        "%s '%s' completed on the client but save_path never landed "
+                        "and the in-progress path %r is still changing (or unreadable) "
+                        "— waiting for it to stabilize before treating it as final "
+                        "(poll %d).",
+                        log_prefix, title, resolved_incomplete_path,
+                        completed_no_path_misses.misses,
+                    )
+                    last_incomplete_snapshot = current_snapshot
+                    last_incomplete_snapshot_path = resolved_incomplete_path
+                    sleep(interval)
+                    continue
                 logger.error(
                     "%s '%s' reported terminal success but no save_path landed "
                     "after %d consecutive polls — bundle cannot stage. Adapter "

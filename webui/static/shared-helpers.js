@@ -1435,6 +1435,51 @@ async function navigateToMirroredPlaylist(playlistRef, source = 'spotify') {
     }
 }
 
+function isConfirmedSearchIntentModal(playlistId) {
+    const value = String(playlistId || '');
+    return value.startsWith('enhanced_search_') || value.startsWith('gsearch_');
+}
+
+function confirmedSearchQualityProfileControl(playlistId) {
+    if (!isConfirmedSearchIntentModal(playlistId)) return '';
+    return `<label class="search-quality-profile-picker" for="search-quality-profile-${escapeHtml(playlistId)}">
+        <span>Quality Profile</span>
+        <select id="search-quality-profile-${escapeHtml(playlistId)}" disabled>
+            <option value="">Loading profiles…</option>
+        </select>
+        <small>Saved as an explicit Track profile before analysis starts.</small>
+    </label>`;
+}
+
+async function initializeConfirmedSearchQualityProfile(playlistId) {
+    if (!isConfirmedSearchIntentModal(playlistId)) return;
+    const select = document.getElementById(`search-quality-profile-${playlistId}`);
+    const process = activeDownloadProcesses[playlistId];
+    if (!select || !process) return;
+    try {
+        const response = await fetch('/api/quality-profile/custom');
+        const data = await response.json();
+        if (!response.ok || !data.success || !Array.isArray(data.profiles) || !data.profiles.length) {
+            throw new Error(data.error || 'No quality profiles available');
+        }
+        select.innerHTML = data.profiles.map(profile =>
+            `<option value="${Number(profile.id)}">${escapeHtml(profile.name || `Profile ${profile.id}`)}</option>`
+        ).join('');
+        const selected = data.profiles.find(profile => profile.is_default) || data.profiles[0];
+        select.value = String(selected.id);
+        select.disabled = false;
+        process.qualityProfileId = Number(selected.id);
+        select.addEventListener('change', () => {
+            const value = Number(select.value);
+            process.qualityProfileId = Number.isInteger(value) && value > 0 ? value : null;
+        });
+    } catch (error) {
+        select.innerHTML = '<option value="">App default (profiles unavailable)</option>';
+        select.title = String(error?.message || error);
+        process.qualityProfileId = null;
+    }
+}
+
 async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true, contextType = 'artist_album') {
     if (showLoadingOverlayParam) {
         showLoadingOverlay('Loading album...');
@@ -1490,6 +1535,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         artist: artist,
         album: album,
         albumType: album.album_type,
+        qualityProfileId: null,
         source: artist?.source || album?.source || artistsPageState.artistDiscography?.source || null
     };
 
@@ -1585,6 +1631,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
+                    ${confirmedSearchQualityProfileControl(virtualPlaylistId)}
                     <div class="force-download-toggle-container" style="margin-bottom: 0px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;">
                         <label class="force-download-toggle">
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
@@ -1639,6 +1686,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         </div>
     `;
 
+    await initializeConfirmedSearchQualityProfile(virtualPlaylistId);
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();

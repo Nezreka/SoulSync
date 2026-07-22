@@ -2,7 +2,7 @@
 
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.metadata_gap")
@@ -31,6 +31,7 @@ class MetadataGapFillerJob(RepairJob):
         'fill_musicbrainz_id': True,
     }
     auto_fix = False
+    supports_artist_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -51,6 +52,9 @@ class MetadataGapFillerJob(RepairJob):
             return result
 
         where = " OR ".join(conditions)
+        scope_artist = get_scope_artist(context)
+        scope_clause = "AND lower(ar.name) = lower(?)" if scope_artist else ""
+        scope_params = (scope_artist,) if scope_artist else ()
 
         # Fetch tracks with gaps, prioritizing those with source track IDs.
         tracks = []
@@ -90,17 +94,52 @@ class MetadataGapFillerJob(RepairJob):
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND ({where})
+                  {scope_clause}
                 LIMIT 500
-            """)
+            """, scope_params)
             tracks = cursor.fetchall()
             tracks = sorted(tracks, key=lambda row: _track_row_priority(row, column_index, source_priority))
         except Exception as e:
             logger.error("Error fetching tracks with metadata gaps: %s", e, exc_info=True)
             result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
+            tracks = []
+            column_index = {}
+
+        if conn:
+            conn.close()
+
+        # Native Library-v2 coverage: tracks without a legacy backref, deduped
+        # to one row per track (the enumerator yields one row per file).
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            tracks = list(tracks)
+            pad = [None] * len(column_index)
+            scope_lower = scope_artist.lower() if scope_artist else None
+            for subject in active_file_subjects(
+                context.db, context.config_manager,
+            ):
+                entity = f"lib2:{subject['track_id']}"
+                if entity in native_subjects:
+                    continue
+                isrc_missing = fill_isrc and not (subject.get('isrc') or '').strip()
+                mbid_missing = fill_mb_id and not (
+                    subject.get('musicbrainz_recording_id') or '').strip()
+                if not (isrc_missing or mbid_missing):
+                    continue
+                if scope_lower and (subject.get('artist_name') or '').lower() != scope_lower:
+                    continue
+                native_subjects[entity] = subject
+                tracks.append((
+                    entity, subject['title'], subject['artist_name'],
+                    subject['album_title'], subject.get('isrc'),
+                    subject.get('musicbrainz_recording_id'),
+                    subject.get('album_image'), subject.get('artist_image'), *pad,
+                ))
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
 
         total = len(tracks)
         if context.update_progress:
@@ -179,6 +218,24 @@ class MetadataGapFillerJob(RepairJob):
                 if context.create_finding:
                     try:
                         field_names = ', '.join(found_fields.keys())
+                        finding_details = {
+                            'track_id': track_id,
+                            'title': title,
+                            'artist': artist_name,
+                            'album': album_title,
+                            'track_ids': source_track_ids,
+                            'resolved_source': resolved_source,
+                            'resolved_track_id': resolved_track_id,
+                            'found_fields': found_fields,
+                            'album_thumb_url': album_thumb or None,
+                            'artist_thumb_url': artist_thumb or None,
+                            'artist_id': artist_id,
+                        }
+                        subject = native_subjects.get(str(track_id))
+                        if subject:
+                            from core.library2.maintenance_subjects import subject_details
+
+                            finding_details.update(subject_details(subject))
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='metadata_gap',
@@ -191,19 +248,7 @@ class MetadataGapFillerJob(RepairJob):
                                 f'Track "{title}" by {artist_name or "Unknown"} is missing: {field_names}. '
                                 f'Found values from API lookup.'
                             ),
-                            details={
-                                'track_id': track_id,
-                                'title': title,
-                                'artist': artist_name,
-                                'album': album_title,
-                                'track_ids': source_track_ids,
-                                'resolved_source': resolved_source,
-                                'resolved_track_id': resolved_track_id,
-                                'found_fields': found_fields,
-                                'album_thumb_url': album_thumb or None,
-                                'artist_thumb_url': artist_thumb or None,
-                                'artist_id': artist_id,
-                            }
+                            details=finding_details
                         )
                         if inserted:
                             result.findings_created += 1
