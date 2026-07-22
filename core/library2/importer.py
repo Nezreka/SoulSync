@@ -34,6 +34,7 @@ from .schema import ensure_library_v2_schema
 logger = get_logger("library2.importer")
 
 ProgressCb = Optional[Callable[[str, int, int], None]]
+IMPORT_BATCH_SIZE = 200
 
 # Credit separators: "feat."/"ft."/"featuring"/"with" plus list separators.
 _FEAT_RE = re.compile(
@@ -209,6 +210,61 @@ def dedup_title_key(title: str) -> str:
 def _existing_columns(cursor, table: str) -> Set[str]:
     cursor.execute(f"PRAGMA table_info({table})")
     return {row[1] for row in cursor.fetchall()}
+
+
+def _legacy_projection(
+    existing: Set[str],
+    *,
+    required: Iterable[str],
+    optional: Iterable[str],
+) -> Tuple[str, ...]:
+    """Return a deterministic minimal projection for a legacy table."""
+    required_columns = tuple(required)
+    missing = [column for column in required_columns if column not in existing]
+    if missing:
+        raise RuntimeError(
+            "legacy table is missing required columns: " + ", ".join(missing)
+        )
+    return required_columns + tuple(
+        column for column in optional
+        if column in existing and column not in required_columns
+    )
+
+
+def _legacy_rows(
+    conn: Any,
+    table: str,
+    columns: Iterable[str],
+    *,
+    batch_size: int = IMPORT_BATCH_SIZE,
+) -> Iterable[Any]:
+    """Stream a rowid table in commit-safe, bounded keyset batches."""
+    selected = tuple(columns)
+    if not selected:
+        return
+    size = max(int(batch_size), 1)
+    projection = ", ".join(f'"{column}"' for column in selected)
+    last_rowid = 0
+    while True:
+        rows = conn.execute(
+            f'SELECT rowid AS "__lib2_source_rowid", {projection} '
+            f'FROM "{table}" WHERE rowid>? ORDER BY rowid LIMIT ?',
+            (last_rowid, size),
+        ).fetchall()
+        if not rows:
+            return
+        yield from rows
+        last_rowid = int(rows[-1]["__lib2_source_rowid"])
+
+
+def _provider_id_columns(entity_type: str) -> Tuple[str, ...]:
+    from .match_status import SERVICES
+
+    return tuple(dict.fromkeys(
+        id_columns[entity_type]
+        for _service, _label, id_columns in SERVICES
+        if id_columns.get(entity_type)
+    ))
 
 
 def _pick(row: Any, *keys: str) -> Optional[Any]:
@@ -1151,10 +1207,24 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         except Exception:  # noqa: BLE001
             valid_profile_ids = set()
 
-        cursor.execute("SELECT * FROM tracks")
-        track_rows = cursor.fetchall()
-        report_progress("tracks", 0, len(track_rows))
-        for i, row in enumerate(track_rows):
+        track_projection = _legacy_projection(
+            track_cols,
+            required=("id", "album_id", "title"),
+            optional=(
+                "track_number", "disc_number", "duration", "isrc",
+                "musicbrainz_recording_id", "spotify_track_id", "bpm",
+                "explicit", "genius_lyrics", "copyright", "style", "mood",
+                "play_count", "last_played", "file_path", "quality_profile_id",
+                "artist_id", "track_artist", "file_size", "bitrate",
+                "sample_rate", "bit_depth", "verification_status",
+                *_provider_id_columns("track"),
+            ),
+        )
+        track_total = int(cursor.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
+        report_progress("tracks", 0, track_total)
+        for i, row in enumerate(
+            _legacy_rows(conn, "tracks", track_projection)
+        ):
             album_id = album_map.get(_legacy_key(row["album_id"]))
             if album_id is None:
                 continue
@@ -1311,8 +1381,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                          _pick(row, "verification_status"), row["id"], run_id, file_id),
                     )
             if (i + 1) % 200 == 0:
-                report_progress("tracks", i + 1, len(track_rows))
-        report_progress("tracks", len(track_rows), len(track_rows))
+                report_progress("tracks", i + 1, track_total)
+        report_progress("tracks", track_total, track_total)
 
         stats.update(_reconcile_legacy_snapshot(cursor, run_id))
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)

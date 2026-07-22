@@ -8,6 +8,8 @@ import sqlite3
 import pytest
 
 from core.library2.importer import (
+    _legacy_projection,
+    _legacy_rows,
     featured_from_title,
     import_legacy_library,
     split_artist_credits,
@@ -70,6 +72,37 @@ def test_import_reports_start_and_completion_for_every_row_stage(legacy_db):
         stage_events = [event for event in events if event[0] == stage]
         assert stage_events[0] == (stage, 0, total)
         assert stage_events[-1] == (stage, total, total)
+
+
+def test_legacy_track_reader_projects_columns_and_uses_keyset_batches(tmp_path):
+    conn = sqlite3.connect(tmp_path / "streaming.sqlite")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE tracks(id INTEGER PRIMARY KEY, album_id INTEGER, title TEXT, "
+        "genius_lyrics TEXT, unused_enrichment TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO tracks(id, album_id, title, genius_lyrics, unused_enrichment) "
+        "VALUES(?, 1, ?, ?, ?)",
+        [(index, f"Track {index}", "lyrics", "x" * 1000) for index in range(1, 6)],
+    )
+    statements = []
+    conn.set_trace_callback(statements.append)
+
+    projection = _legacy_projection(
+        {"id", "album_id", "title", "genius_lyrics", "unused_enrichment"},
+        required=("id", "album_id", "title"),
+        optional=("genius_lyrics",),
+    )
+    rows = list(_legacy_rows(conn, "tracks", projection, batch_size=2))
+
+    assert [row["id"] for row in rows] == [1, 2, 3, 4, 5]
+    assert "unused_enrichment" not in rows[0].keys()
+    selects = [sql for sql in statements if "FROM \"tracks\"" in sql]
+    assert len(selects) == 4  # three bounded data pages plus the empty sentinel page
+    assert all("rowid>" in sql and "LIMIT 2" in sql for sql in selects)
+    assert all("SELECT *" not in sql for sql in selects)
+    conn.close()
 
 
 def test_import_preloads_row_lookup_maps_instead_of_n_plus_one_selects(legacy_db):
