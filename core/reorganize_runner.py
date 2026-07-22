@@ -75,6 +75,11 @@ def build_runner(
             with db._get_connection() as conn:
                 from core.library2.feature import library_v2_enabled
                 library_v2_enabled(config_manager)
+                legacy_row = conn.execute(
+                    "SELECT file_path FROM tracks WHERE id=?",
+                    (str(track_id),),
+                ).fetchone()
+                previous_path = legacy_row["file_path"] if legacy_row else None
                 has_v2_files = bool(conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' "
                     "AND name='lib2_track_files'"
@@ -83,10 +88,17 @@ def build_runner(
                     rows = conn.execute(
                         """SELECT f.id AS file_id, f.track_id
                              FROM lib2_track_files f
-                             JOIN lib2_tracks t ON t.id=f.track_id
-                            WHERE f.legacy_track_id=? OR t.legacy_track_id=?""",
-                        (str(track_id), str(track_id)),
+                            WHERE f.legacy_track_id=?""",
+                        (str(track_id),),
                     ).fetchall()
+                    if not rows and previous_path:
+                        rows = conn.execute(
+                            """SELECT f.id AS file_id, f.track_id
+                                 FROM lib2_track_files f
+                                 JOIN lib2_tracks t ON t.id=f.track_id
+                                WHERE t.legacy_track_id=? AND f.path=?""",
+                            (str(track_id), previous_path),
+                        ).fetchall()
                     lib2_links = {
                         "track_ids": sorted({int(row["track_id"]) for row in rows}),
                         "file_ids": sorted({int(row["file_id"]) for row in rows}),

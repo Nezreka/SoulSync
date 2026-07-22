@@ -67,6 +67,21 @@ def imported_legacy_db(legacy_db):
 def test_legacy_path_update_atomically_updates_linked_lib2_file(
     monkeypatch, tmp_path, imported_legacy_db
 ):
+    conn = imported_legacy_db._get_connection()
+    try:
+        track_id = conn.execute(
+            "SELECT track_id FROM lib2_track_files WHERE legacy_track_id=100"
+        ).fetchone()["track_id"]
+        secondary_path = "/library/Drake/Views/One Dance instrumental.flac"
+        conn.execute(
+            """INSERT INTO lib2_track_files(track_id, path, legacy_track_id)
+               VALUES (?, ?, NULL)""",
+            (track_id, secondary_path),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
     captured = {}
 
     def fake_reorganize_album(*, update_track_path_fn, **kwargs):
@@ -105,6 +120,11 @@ def test_legacy_path_update_atomically_updates_linked_lib2_file(
         ).fetchone()
         assert lib2_row is not None, "importer should have linked track 100 via legacy_track_id"
         assert lib2_row['path'] == '/library/Drake/Views/01 One Dance.flac'
+        secondary_row = conn.execute(
+            "SELECT path FROM lib2_track_files WHERE track_id=? AND legacy_track_id IS NULL",
+            (track_id,),
+        ).fetchone()
+        assert secondary_row["path"] == secondary_path
     finally:
         conn.close()
 
