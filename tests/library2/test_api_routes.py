@@ -2337,6 +2337,46 @@ def test_track_history_rejects_invalid_limits(api, limit):
     assert response.status_code == 400
 
 
+def test_file_history_surfaces_compact_pipeline_result(api):
+    client, db, ids = api
+    conn = _conn(db)
+    file_id = conn.execute(
+        "SELECT id FROM lib2_track_files WHERE track_id=?",
+        (ids["album_track"],),
+    ).fetchone()[0]
+    conn.execute(
+        """UPDATE lib2_track_files
+              SET verification_status='verified', acoustid_status='pass'
+            WHERE id=?""",
+        (file_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(f"/api/library/v2/files/{file_id}/history")
+
+    assert response.status_code == 200
+    result = next(
+        event for event in response.get_json()["history"]
+        if event["event_type"] == "file_pipeline_result"
+    )
+    assert result["payload"]["verification_status"] == "verified"
+    assert result["payload"]["acoustid_status"] == "pass"
+
+
+def test_file_history_404_for_unknown_file(api):
+    client, _db, _ids = api
+    response = client.get("/api/library/v2/files/999999/history")
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("limit", ["abc", "0", "501"])
+def test_file_history_rejects_invalid_limits(api, limit):
+    client, _db, _ids = api
+    response = client.get(f"/api/library/v2/files/1/history?limit={limit}")
+    assert response.status_code == 400
+
+
 @pytest.mark.parametrize(
     "track_ids",
     [None, "1", [True], ["1"], [0], [-1], [1] * 501],

@@ -575,6 +575,15 @@ class PlaylistSyncService:
                                 'external_urls': getattr(spotify_track, 'external_urls', {})
                             }
 
+                        if original_track_data and original_track_data.get(
+                            '_quality_profile_conflict'
+                        ):
+                            logger.warning(
+                                "Skipping wishlist for '%s': playlist quality profile conflict",
+                                spotify_track.name,
+                            )
+                            continue
+
                         # Add to wishlist with source context
                         success = wishlist_service.add_spotify_track_to_wishlist(
                             spotify_track_data=spotify_track_data,
@@ -589,8 +598,7 @@ class PlaylistSyncService:
                             profile_id=getattr(self, '_active_profile_id', None) or 1,
                             quality_profile_id=(
                                 original_track_data.get('quality_profile_id')
-                                if isinstance(original_track_data, dict)
-                                else None
+                                if original_track_data else None
                             ),
                         )
 

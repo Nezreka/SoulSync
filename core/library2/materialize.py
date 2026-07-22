@@ -30,7 +30,7 @@ from typing import Any, Dict, Optional
 from utils.logging_config import get_logger
 
 from .autolink import find_or_create_album, find_or_create_artist, find_or_create_track
-from .monitor_rules import PROVENANCE_WISHLIST, record_rule
+from .monitor_rules import PROVENANCE_PLAYLIST, PROVENANCE_WISHLIST, record_rule
 from .profile_lookup import assign_quality_profile, effective_quality_profile
 from .wanted import recompute_wanted_for_entity
 
@@ -56,6 +56,8 @@ def materialize_track_intent(
     provenance: str = PROVENANCE_WISHLIST,
     profile_id: int = 1,
     source: Optional[str] = None,
+    playlist_id: Optional[int] = None,
+    mirrored_track_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Resolve-or-create Artist/Release/Track, optionally pin an explicit
     track profile, mark the concrete track monitored/wanted, and return the
@@ -92,6 +94,16 @@ def materialize_track_intent(
         assign_quality_profile(conn, "tracks", track_id, int(explicit_profile_id))
 
     record_rule(conn, "track", track_id, True, provenance, profile_id=profile_id)
+    if mirrored_track_id is not None:
+        if playlist_id is None:
+            raise ValueError("mirrored_track_id requires playlist_id")
+        linked = conn.execute(
+            """UPDATE mirrored_playlist_tracks SET lib2_track_id=?
+                 WHERE id=? AND playlist_id=?""",
+            (int(track_id), int(mirrored_track_id), int(playlist_id)),
+        )
+        if linked.rowcount <= 0:
+            raise ValueError("mirrored playlist track not found")
     recompute_wanted_for_entity(conn, "track", track_id, profile_id=profile_id)
 
     return {
@@ -212,8 +224,81 @@ def materialize_wishlist_intent(
         return None
 
 
+def materialize_mirrored_playlist_intents(
+    database,
+    playlist_id: int,
+    *,
+    actor_profile_id: int = 1,
+) -> Dict[str, Any]:
+    """Materialize and link one confirmed mirrored-playlist pipeline intent.
+
+    The operation is one transaction for every processable playlist row.  It
+    deliberately does not assign the playlist profile as a Track override;
+    the linked mirror row lets the shared effective-profile resolver apply the
+    lower-priority Playlist tier and expose equal-priority conflicts.
+    """
+    from core.library2 import ADMIN_PROFILE_ID
+
+    if int(actor_profile_id) != ADMIN_PROFILE_ID:
+        return {"linked": 0, "conflicts": []}
+    playlist = database.get_mirrored_playlist(int(playlist_id))
+    if not playlist:
+        raise LookupError("Playlist not found")
+    rows = database.get_mirrored_playlist_tracks(int(playlist_id)) or []
+    from core.playlists.organize_download import mirrored_tracks_to_download_json
+
+    payloads = mirrored_tracks_to_download_json(rows)
+    conn = database._get_connection()
+    linked = 0
+    try:
+        for payload in payloads:
+            mirrored_track_id = payload.get("_mirrored_track_id")
+            if mirrored_track_id is None:
+                continue
+            source = str(payload.get("source") or playlist.get("source") or "").lower()
+            if source == "spotify_public":
+                source = "spotify"
+            elif source in {"file", "soulsync_discovery"}:
+                source = ""
+            candidate = dict(payload)
+            if source and not candidate.get("source"):
+                candidate["source"] = source
+            result = materialize_from_spotify_track(
+                conn,
+                candidate,
+                provenance=PROVENANCE_PLAYLIST,
+                profile_id=ADMIN_PROFILE_ID,
+                playlist_id=int(playlist_id),
+                mirrored_track_id=int(mirrored_track_id),
+            )
+            if result is not None:
+                linked += 1
+        from .profile_lookup import playlist_quality_conflicts
+
+        conflicts = playlist_quality_conflicts(conn, playlist_id=int(playlist_id))
+        conn.commit()
+        # A row queued by an earlier single-playlist run must not keep
+        # downloading after a second playlist introduces an unresolved
+        # equal-priority profile. Remove only that exact admin Wishlist key;
+        # choosing a Track override makes the next pipeline run re-add it.
+        if conflicts:
+            from .wishlist_mirror import track_wishlist_payload
+
+            for conflict in conflicts:
+                payload = track_wishlist_payload(conn, int(conflict["track_id"]))
+                if payload and payload.get("id"):
+                    database.remove_from_wishlist(str(payload["id"]), ADMIN_PROFILE_ID)
+        return {"linked": linked, "conflicts": conflicts}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 __all__ = [
     "materialize_from_spotify_track",
+    "materialize_mirrored_playlist_intents",
     "materialize_track_intent",
     "materialize_wishlist_intent",
 ]

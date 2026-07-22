@@ -3891,6 +3891,37 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "history": history})
 
+    @app.route("/api/library/v2/files/<int:file_id>/history")
+    def lib2_file_history(file_id):
+        """Exact physical-file history with its correlated acquisition attempt."""
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            limit = int(request.args.get("limit", 50))
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 500",
+            }), 400
+        if not 1 <= limit <= 500:
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 500",
+            }), 400
+        from core.library2.history_feed import scoped_history
+        conn = _conn()
+        try:
+            try:
+                history = scoped_history(
+                    conn, scope="file", entity_id=file_id, limit=limit,
+                )
+            except LookupError:
+                return jsonify({"success": False, "error": "File not found"}), 404
+        finally:
+            conn.close()
+        return jsonify({"success": True, "history": history})
+
     @app.route("/api/library/v2/albums/<int:album_id>/history")
     def lib2_album_history(album_id):
         """Merged history for this album/EP/single (§52.9 album branch): grabs,

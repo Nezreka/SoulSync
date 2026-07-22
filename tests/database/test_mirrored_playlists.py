@@ -40,6 +40,22 @@ def test_update_mirrored_playlist_source_ref_preserves_tracks(tmp_path):
     assert tracks[0]["extra_data"] is not None
 
 
+def test_playlist_quality_profile_can_be_set_and_cleared(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = db.mirror_playlist(
+        source="spotify",
+        source_playlist_id="quality",
+        name="Quality",
+        tracks=[{"track_name": "Song", "artist_name": "Artist"}],
+        profile_id=1,
+    )
+
+    assert db.set_mirrored_playlist_quality_profile(playlist_id, 2) is True
+    assert db.get_mirrored_playlist(playlist_id)["quality_profile_id"] == 2
+    assert db.set_mirrored_playlist_quality_profile(playlist_id, None) is True
+    assert db.get_mirrored_playlist(playlist_id)["quality_profile_id"] is None
+
+
 def test_mirror_playlist_refresh_preserves_existing_description(tmp_path):
     db = MusicDatabase(str(tmp_path / "music.db"))
     playlist_id = db.mirror_playlist(
@@ -62,6 +78,98 @@ def test_mirror_playlist_refresh_preserves_existing_description(tmp_path):
     assert refreshed_id == playlist_id
     playlist = db.get_mirrored_playlist(playlist_id)
     assert playlist["description"] == "https://open.spotify.com/playlist/abc"
+
+
+def test_mirror_playlist_refresh_preserves_library_v2_track_link(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = db.mirror_playlist(
+        source="spotify",
+        source_playlist_id="linked",
+        name="Linked",
+        tracks=[{
+            "track_name": "Song",
+            "artist_name": "Artist",
+            "source_track_id": "track-1",
+        }],
+        profile_id=1,
+    )
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE mirrored_playlist_tracks SET lib2_track_id=42 WHERE playlist_id=?",
+            (playlist_id,),
+        )
+        conn.commit()
+
+    db.mirror_playlist(
+        source="spotify",
+        source_playlist_id="linked",
+        name="Linked",
+        tracks=[{
+            "track_name": "Song (refreshed)",
+            "artist_name": "Artist",
+            "source_track_id": "track-1",
+        }],
+        profile_id=1,
+    )
+
+    rows = db.get_mirrored_playlist_tracks(playlist_id)
+    assert rows[0]["lib2_track_id"] == 42
+
+
+def test_new_playlist_profile_conflict_removes_stale_wishlist_row(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    with db._get_connection() as conn:
+        from core.library2.schema import ensure_library_v2_schema
+
+        ensure_library_v2_schema(conn)
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, sort_name) VALUES('Artist', 'Artist')"
+        ).lastrowid
+        album_id = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Album')",
+            (artist_id,),
+        ).lastrowid
+        track_id = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, spotify_id) "
+            "VALUES(?, 'Song', 'sp-track')",
+            (album_id,),
+        ).lastrowid
+        conn.commit()
+    playlist_ids = [
+        db.mirror_playlist(
+            source="spotify",
+            source_playlist_id=f"quality-{index}",
+            name=f"Quality {index}",
+            tracks=[{
+                "track_name": "Song",
+                "artist_name": "Artist",
+                "source_track_id": "sp-track",
+            }],
+            profile_id=1,
+        )
+        for index in (1, 2)
+    ]
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE mirrored_playlist_tracks SET lib2_track_id=?",
+            (track_id,),
+        )
+        conn.commit()
+    assert db.set_mirrored_playlist_quality_profile(playlist_ids[0], 1) is True
+    assert db.add_to_wishlist({
+        "id": "sp-track",
+        "name": "Song",
+        "artists": [{"name": "Artist"}],
+        "album": {"name": "Album"},
+    }) is True
+
+    assert db.set_mirrored_playlist_quality_profile(playlist_ids[1], 2) is True
+
+    with db._get_connection() as conn:
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM wishlist_tracks WHERE spotify_track_id='sp-track'"
+        ).fetchone()[0]
+    assert remaining == 0
 
 
 def test_file_import_tracks_get_a_stable_source_track_id(tmp_path):

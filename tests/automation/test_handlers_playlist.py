@@ -114,6 +114,7 @@ def _build_deps(**overrides) -> AutomationDeps:
         get_deezer_client=lambda: None,
         parse_youtube_playlist=lambda url: None,
         playlist_source_registry=_registry,
+        materialize_playlist_intents=lambda *a, **k: {'linked': 0, 'conflicts': []},
         get_sync_states=lambda: {},
         set_db_update_automation_id=lambda v: None,
         get_db_update_state=lambda: {},
@@ -691,6 +692,26 @@ class TestSyncPlaylist:
         deps = _build_deps(get_database=lambda: db)
         result = auto_sync_playlist({'playlist_id': '1'}, deps)
         assert result == {'status': 'error', 'reason': 'No tracks in playlist'}
+
+    def test_quality_profile_conflict_stops_before_sync(self):
+        conflict = {'track_id': 42, 'playlists': []}
+        db = _StubDB(
+            playlists=[{'id': 1, 'name': 'P'}],
+            playlist_tracks={1: [{'source_track_id': 'track-1'}]},
+        )
+        deps = _build_deps(
+            get_database=lambda: db,
+            materialize_playlist_intents=lambda *a, **k: {
+                'linked': 1,
+                'conflicts': [conflict],
+            },
+        )
+
+        result = auto_sync_playlist({'playlist_id': '1'}, deps)
+
+        assert result['status'] == 'error'
+        assert result['reason_code'] == 'quality_profile_conflict'
+        assert result['quality_conflicts'] == [conflict]
 
     def test_no_discovered_tracks_skips(self):
         # All tracks lack discovery + spotify_hint + valid IDs.

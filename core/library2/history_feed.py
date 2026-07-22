@@ -1,4 +1,4 @@
-"""Unified, read-only history feed for one artist/album/track (§A6/C3).
+"""Unified, read-only history feed for one artist/album/track/file (§A6/C3).
 
 The artist History modal used to read only ``track_downloads`` (by a fuzzy
 artist-name match). Three richer journals already exist but were never
@@ -68,7 +68,7 @@ ENTITY_EVENT_LABEL = {
     "entity_moved": "Moved",
 }
 
-SCOPES = ("artist", "album", "track")
+SCOPES = ("artist", "album", "track", "file")
 PIPELINE_CHECK_EVENTS = frozenset({"quality_checked", "acoustic_id_checked"})
 
 MAINTENANCE_EVENT_LABEL = {
@@ -382,6 +382,114 @@ def _manual_skip_events(conn, track_ids: Sequence[int], limit: int) -> List[Dict
     return events
 
 
+def _manual_skip_events_for_file(
+    conn, file_path: str, limit: int,
+) -> List[Dict[str, Any]]:
+    """Manual overrides for exactly one physical file, not its siblings."""
+    try:
+        rows = _rows(
+            conn,
+            """SELECT skipped_checks, created_at
+                 FROM lib2_manual_skips
+                WHERE file_path=? ORDER BY id DESC LIMIT ?""",
+            (file_path, limit),
+        )
+    except Exception:  # noqa: BLE001 -- additive table on older databases
+        return []
+    events = []
+    for row in rows:
+        try:
+            checks = json.loads(row["skipped_checks"] or "[]")
+        except (TypeError, ValueError):
+            checks = []
+        events.append({
+            "date": row["created_at"],
+            "event_type": "manual_skip",
+            "category": "override",
+            "title": "Check overridden",
+            "detail": ", ".join(checks) if checks else None,
+            "source": "manual",
+        })
+    return events
+
+
+def _file_download_events(conn, file_path: str, limit: int) -> List[Dict[str, Any]]:
+    """Legacy download fallback constrained to the exact physical path."""
+    try:
+        rows = _rows(
+            conn,
+            """SELECT id, track_title, track_album, source_service, status, created_at
+                 FROM track_downloads WHERE file_path=?
+                ORDER BY id DESC LIMIT ?""",
+            (file_path, limit),
+        )
+    except Exception:  # noqa: BLE001 -- legacy table may be absent
+        return []
+    return _track_downloads_to_events(rows)
+
+
+def _file_pipeline_event(file_row: Any) -> Dict[str, Any]:
+    """Compact final file result stored by the shared import callback."""
+    try:
+        pipeline = json.loads(file_row["pipeline_result_json"] or "{}")
+    except (TypeError, ValueError):
+        pipeline = {}
+    if not isinstance(pipeline, dict):
+        pipeline = {}
+    status = str(file_row["import_status"] or "imported")
+    details = [status.replace("_", " ")]
+    if file_row["verification_status"]:
+        details.append(f"verification {file_row['verification_status']}")
+    if file_row["acoustid_status"]:
+        details.append(f"AcoustID {file_row['acoustid_status']}")
+    if pipeline.get("acoustid_message"):
+        details.append(str(pipeline["acoustid_message"]))
+    fallbacks = pipeline.get("quality_fallback")
+    if isinstance(fallbacks, list) and fallbacks:
+        details.append("quality fallback " + ", ".join(map(str, fallbacks)))
+    quality = {
+        key: file_row[key]
+        for key in ("format", "bitrate", "sample_rate", "bit_depth", "quality_tier")
+        if file_row[key] is not None
+    }
+    return {
+        "date": file_row["updated_at"] or file_row["added_at"],
+        "event_type": "file_pipeline_result",
+        "category": "failed" if status == "failed" else "imported",
+        "title": "File pipeline result",
+        "detail": " · ".join(details),
+        "source": file_row["source"] or "library",
+        "status": status,
+        "payload": {
+            "file_id": int(file_row["id"]),
+            "path": file_row["path"],
+            "processing_status": file_row["processing_status"],
+            "verification_status": file_row["verification_status"],
+            "acoustid_status": file_row["acoustid_status"],
+            "quality": quality,
+            "pipeline_result": pipeline,
+        },
+    }
+
+
+def _file_request_ids(conn, pipeline_result_json: str) -> List[str]:
+    """Resolve the exact acquisition attempt persisted on a file row."""
+    try:
+        pipeline = json.loads(pipeline_result_json or "{}")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(pipeline, dict) or not pipeline.get("acquisition_import_id"):
+        return []
+    try:
+        row = conn.execute(
+            "SELECT request_id FROM acquisition_imports WHERE id=?",
+            (str(pipeline["acquisition_import_id"]),),
+        ).fetchone()
+    except Exception:  # noqa: BLE001 -- acquisition tables may be absent
+        return []
+    return [str(row[0])] if row and row[0] else []
+
+
 def _maintenance_events(
     conn,
     *,
@@ -550,9 +658,9 @@ def _artist_name_fallback_events(
 def scoped_history(
     conn, *, scope: str, entity_id: int, limit: int = 100, artist_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Merged, newest-first history for one artist/album/track.
+    """Merged, newest-first history for one artist/album/track/file.
 
-    ``scope`` is ``'artist'``, ``'album'`` or ``'track'`` (a lib2 entity kind —
+    ``scope`` is ``'artist'``, ``'album'``, ``'track'`` or ``'file'`` (a lib2 entity kind —
     not to be confused with ``acquisition_requests.scope``, which this
     function resolves internally per relevant request). ``artist_name`` only
     applies to ``scope='artist'``: it adds the pre-existing name-match legacy
@@ -607,7 +715,7 @@ def scoped_history(
             conn, album_ids=[entity_id], track_ids=track_ids, limit=limit,
         )
         events += download_events
-    else:  # track
+    elif scope == "track":
         recording_ids = _recording_ids_for_track(conn, entity_id)
         request_ids = _acquisition_request_ids(conn, recording_ids=recording_ids)
         download_events, _matched_ids = _track_download_events(conn, [entity_id], limit)
@@ -616,6 +724,23 @@ def scoped_history(
         events += _manual_skip_events(conn, [entity_id], limit)
         events += _maintenance_events(conn, track_ids=[entity_id], limit=limit)
         events += download_events
+    else:  # file
+        file_row = conn.execute(
+            """SELECT id, track_id, path, source, import_status,
+                      processing_status, verification_status, acoustid_status,
+                      pipeline_result_json, format, bitrate, sample_rate,
+                      bit_depth, quality_tier, added_at, updated_at
+                 FROM lib2_track_files WHERE id=?""",
+            (int(entity_id),),
+        ).fetchone()
+        if file_row is None:
+            raise LookupError("File not found")
+        events += _acquisition_events(
+            conn, _file_request_ids(conn, file_row["pipeline_result_json"]), limit,
+        )
+        events += _manual_skip_events_for_file(conn, file_row["path"], limit)
+        events += _file_download_events(conn, file_row["path"], limit)
+        events.append(_file_pipeline_event(file_row))
 
     events.sort(key=lambda e: e["date"] or "", reverse=True)
     return events[:limit]

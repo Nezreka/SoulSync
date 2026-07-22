@@ -44,6 +44,28 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     if not pl:
         return {'status': 'error', 'reason': 'Playlist not found'}
 
+    # A pipeline run is a confirmed playlist intent. Materialize/link its
+    # Library-v2 entities before any sync or download can start, then stop on
+    # equal-priority Playlist Quality Profile conflicts until the user chooses
+    # an explicit Track profile.
+    materialize_playlist_intents = deps.materialize_playlist_intents
+    if materialize_playlist_intents is None:
+        from core.library2.materialize import materialize_mirrored_playlist_intents
+
+        materialize_playlist_intents = materialize_mirrored_playlist_intents
+    materialized = materialize_playlist_intents(
+        db,
+        int(playlist_id),
+        actor_profile_id=int(pl.get('profile_id') or 1),
+    )
+    if materialized['conflicts']:
+        return {
+            'status': 'error',
+            'reason': 'Playlist quality profile conflict requires review',
+            'reason_code': 'quality_profile_conflict',
+            'quality_conflicts': materialized['conflicts'],
+        }
+
     tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
     if not tracks:
         return {'status': 'error', 'reason': 'No tracks in playlist'}
@@ -53,6 +75,32 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     # hint or raw playlist fields when not.
     tracks_json = []
     skipped_count = 0
+    linked_ids = [
+        int(track['lib2_track_id']) for track in tracks
+        if track.get('lib2_track_id') is not None
+    ]
+    effective_profiles = {}
+    if linked_ids:
+        conn = db._get_connection()
+        try:
+            from core.library2.profile_lookup import effective_quality_profiles
+
+            effective_profiles = effective_quality_profiles(conn, linked_ids)
+        finally:
+            conn.close()
+
+    def _quality_context(track):
+        lib2_track_id = track.get('lib2_track_id')
+        state = (
+            effective_profiles.get(int(lib2_track_id))
+            if lib2_track_id is not None else None
+        )
+        return {
+            '_mirrored_track_id': track.get('id'),
+            '_lib2_track_id': lib2_track_id,
+            'quality_profile_id': state.get('id') if state else None,
+            '_quality_profile_conflict': bool(state and state.get('conflict')),
+        }
 
     for t in tracks:
         # Parse extra_data for discovery info.
@@ -74,6 +122,8 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                 'album': album_obj,
                 'duration_ms': md.get('duration_ms', 0),
                 'id': md.get('id', ''),
+                'source': md.get('provider') or extra.get('provider'),
+                **_quality_context(t),
             }
             if md.get('track_number'):
                 _track_entry['track_number'] = md['track_number']
@@ -112,6 +162,8 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'album': album_obj,
                     'duration_ms': t.get('duration_ms', 0),
                     'id': hint['id'],
+                    'source': 'spotify',
+                    **_quality_context(t),
                 })
             elif t.get('source_track_id') and (t.get('track_name') or '').strip():
                 # Has a valid source ID and track name — usable for wishlist.
@@ -121,6 +173,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'album': album_obj,
                     'duration_ms': t.get('duration_ms', 0),
                     'id': t['source_track_id'],
+                    **_quality_context(t),
                 })
             else:
                 skipped_count += 1  # No usable ID or name — truly can't process.

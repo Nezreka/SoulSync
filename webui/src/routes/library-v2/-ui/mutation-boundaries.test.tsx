@@ -12,6 +12,7 @@ import {
   ArtistAliases,
   MirrorStatusBanner,
   PlaylistPipelineButton,
+  PlaylistQualityProfileControl,
 } from './library-v2-page';
 
 function renderWithQueryClient(node: React.ReactNode) {
@@ -166,5 +167,77 @@ describe('library v2 remaining mutation boundaries', () => {
       expect(screen.queryByText('Playlist source is unavailable')).not.toBeInTheDocument(),
     );
     expect(attempts).toBe(2);
+  });
+
+  it('blocks a playlist pipeline while quality defaults conflict', () => {
+    const playlist: LibraryV2PlaylistSummary = {
+      id: 9,
+      source: 'spotify',
+      source_playlist_id: 'source-9',
+      name: 'Road Trip',
+      display_name: 'Road Trip',
+      description: null,
+      owner: null,
+      image_url: null,
+      track_count: 2,
+      total_count: 2,
+      discovered_count: 2,
+      wishlisted_count: 0,
+      in_library_count: 0,
+      updated_at: null,
+      quality_conflict_count: 1,
+      pipeline_state: null,
+    };
+
+    renderWithQueryClient(<PlaylistPipelineButton playlist={playlist} />);
+
+    expect(screen.getByRole('button', { name: 'Run pipeline' })).toBeDisabled();
+    expect(screen.getByTitle(/Resolve playlist Quality Profile conflicts/)).toBeVisible();
+  });
+
+  it('persists a playlist quality default and exposes unresolved conflicts', async () => {
+    let submitted: unknown;
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({
+          success: true,
+          profiles: [
+            {
+              id: 9,
+              name: 'Lossless',
+              description: null,
+              upgrade_policy: 'until_top',
+              upgrade_cutoff_index: 0,
+              ranked_targets: [],
+              repair_job_id: '',
+              repair_settings: {},
+              is_default: false,
+            },
+          ],
+        }),
+      ),
+      http.patch('/api/mirrored-playlists/9/preferences', async ({ request }) => {
+        submitted = await request.json();
+        return HttpResponse.json({
+          success: true,
+          playlist: { id: 9, quality_profile_id: 9 },
+        });
+      }),
+    );
+    const playlist = {
+      id: 9,
+      quality_profile_id: null,
+      quality_conflict_count: 2,
+    } as LibraryV2PlaylistSummary;
+
+    renderWithQueryClient(<PlaylistQualityProfileControl playlist={playlist} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('2 track profile conflicts');
+    await screen.findByRole('option', { name: 'Lossless' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Playlist quality default' }), {
+      target: { value: '9' },
+    });
+
+    await waitFor(() => expect(submitted).toEqual({ quality_profile_id: 9 }));
   });
 });

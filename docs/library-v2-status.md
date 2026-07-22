@@ -5,8 +5,9 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 22. Juli 2026, einschließlich der Review-Remediation bis `aabf5445`
-und der Dokumentkonsolidierung danach.
+Stand: 22. Juli 2026, einschließlich der Review-Remediation bis `aabf5445`,
+der Dokumentkonsolidierung danach und des Playlist-Quality-/File-History-
+Abschlusses im aktuellen Arbeitsbaum.
 
 ## 1. Statusbegriffe
 
@@ -30,14 +31,14 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 |---|---|---|---|---|
 | [F-01](library-v2-features.md#feat-artwork) | Media-server-unabhängiges Artwork | Verified | Deep-Dive §28, Security-Fix `80b5af95` | Picker, Embed, Cache-Bust und Fetch-Hardening gezielt geprüft |
 | [F-02](library-v2-features.md#feat-monitoring) | Monitoring, Watchlist/Wishlist, Outbox | Verified | P3/§82, Regression-Checkpoint | Bidirektionale Sync-, Reconcile- und Profilgrenzen geprüft |
-| [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Partial | §53/§60 | Track→Album→Artist→Global verified; Playlist-Quality-Profile und Konflikt-UI fehlen |
+| [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Verified | §53/§60, Fortsetzung 22. Juli | Track→Album→Artist→Playlist→Global, persistente Playlist-Defaults, explizite Konflikte und Track-Auflösung gezielt geprüft |
 | [F-04](library-v2-features.md#feat-discography) | Discography, Tracklists, `monitor_new_items` | Verified | `2249f5d7`, `8f965d31` (später gesquasht) | Content-Filter und nie manuell expandierte Artists abgedeckt |
 | [F-05](library-v2-features.md#feat-bootstrap) | Automatischer Initialimport | Verified | Review 4/5, `c2d99eda`, `e9730afe` | Bounded Transactions und Streaming; Owner-/Fresh-Install-Fixes im Regression-Checkpoint |
 | [F-06](library-v2-features.md#feat-alias) | Artist Alias Registry und Scope | Verified | `ce7b4516`, `a95e5309` | Listen, Suche, Totals und artist-weite Actions gezielt geprüft |
 | [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3 | Code und gezielte Tests vorhanden; produktive Datenreparatur bleibt Backup/Dry-Run-abhängig |
 | [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11 | Enrich/Smart-Split und globale Suche abgedeckt |
-| [F-09](library-v2-features.md#feat-playlists) | Playlist-scoped Pipeline | Partial | LV2-015, Regression M-09 | Scope/Multi-Profil implemented; Quality-Konfliktmodell fehlt |
-| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Partial | §35/§37/§57/§58 | Feed, File-Ergebnis und Albumzweig vorhanden; vollständiger Track-Stepper/Eventvokabular nicht vollständig belegt |
+| [F-09](library-v2-features.md#feat-playlists) | Playlist-scoped Pipeline | Verified | LV2-015, Regression M-09, Fortsetzung 22. Juli | Scope/Multi-Profil plus materialisierter Playlist-Intent; konfliktbehaftete Tracks werden weder gesynct noch gewishlistet, bis ein Track-Profil gewählt wurde |
+| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Partial | §35/§37/§57/§58, Fortsetzung 22. Juli | Artist-/Album-/Track-/File-Scope, Track-Stepper und Check-Status belegt; durchgängige Erzeugung der vollständigen externen Lifecycle-Eventvokabel bleibt offen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Implemented | Regression-Checkpoint `ee30247a`, im aktuellen Squash `fb0096ce` | `import-review`-Route, Queue/Detail, Assignments und Resolve/Rescan/Resume vorhanden; vollständiger Browser-E2E fehlt |
 | [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Implemented | §29/§53/§55/§60/§71 | Scoped/Transient Search, Force-Audit und gemeinsame Pipeline gezielt geprüft |
@@ -53,6 +54,34 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Implemented | Preferences/Sort/Provider vorhanden; Resize bewusst Deferred |
 | [UI-04](library-v2-features.md#ui-bulk) | Multi-Select/Bulk Bar | Implemented | Monitor, Profil, RG, Tags, Delete und Rich Bulk Edit |
 | F-12 UI | Acquisition Review | Implemented | Frontend-Consumer und Review-Oberfläche vorhanden; Browser-E2E bleibt Release-Gate |
+
+### Fortsetzung vom 22. Juli: Playlist Quality und File History
+
+- Mirrored Playlists besitzen ein persistentes Quality Profile und eine
+  dauerhafte `lib2_track_id`-Verknüpfung, die Refreshes überlebt.
+- Die gemeinsame Auflösung ist
+  `Track → Album → Artist → Playlist → Global`. Mehrere gleiche
+  Playlist-Defaults sind eindeutig; unterschiedliche Defaults erzeugen einen
+  sichtbaren Konflikt statt einer stillen Auswahl.
+- Pipeline, Organize-Download und Wishlist stoppen konfliktbehaftete Tracks.
+  Bereits gequeue-te Wishlist-Zeilen werden beim Entstehen eines Konflikts
+  entfernt; ein explizites Track-Profil löst ihn auf.
+- Playlist-Detail und Pipeline-Button zeigen den Konflikt und bieten die
+  Playlist-Default- sowie Track-Auflösung an.
+- File-History ist über einen eigenen API-Scope filterbar. Neue File-Zeilen
+  speichern die Acquisition-Import-ID, sodass genau der zugehörige Versuch
+  statt aller Versuche desselben Tracks geladen wird; das kompakte
+  Pipeline-Ergebnis bleibt zusätzlich sichtbar.
+
+Verifikation dieses Pakets:
+
+- gezielte Playlist-/Quality-/History-/API-/Automation-Regressionen grün;
+- breiter Library-V2-Lauf: 1.047 Tests bestanden; zwei bereits dokumentierte,
+  unveränderte Repair-Job-Fixture-Fehler blieben bestehen;
+- Library-V2-WebUI: 153 Tests in 25 Dateien bestanden;
+- Production-Build erfolgreich;
+- Ruff über alle geänderten Python-Dateien ohne Finding;
+- Type-Lint ohne Fehler; sechs bestehende Warnungen außerhalb dieses Pakets.
 
 ---
 
@@ -216,8 +245,8 @@ Historische Bugcluster-Prüfung:
 | DD-A1/A2 — Cover Embed/Cache | Verified | §28 |
 | DD-A3/A4 — scoped Search/serverseitiges Ranking | Verified | §29 |
 | DD-A5 — BPM/Duration | Verified | §29 |
-| DD-A6 — History Feed | Implemented | §35; vollständiger Track-Stepper bleibt F-10 Partial |
-| DD-A7 — File Pipeline Result | Partial | §37; granularer gesamter Versuch bleibt F-10 Partial |
+| DD-A6 — History Feed | Verified | §35 plus Fortsetzung 22. Juli; Artist-/Album-/Track-/File-Scope und Track-Stepper gezielt geprüft |
+| DD-A7 — File Pipeline Result | Implemented | §37 plus exakte Acquisition-Import-Korrelation; vollständige externe Lifecycle-Eventvokabel bleibt F-10 Partial |
 | DD-A8/A9 — Provider-Filter/Artist Picker | Verified | §29 |
 | DD-G1–G6 | Verified | §28 |
 | DD-G7 | Verified | §29 |
