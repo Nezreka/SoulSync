@@ -25,17 +25,17 @@ const _RATE_GAUGE_COLORS = {
 // reads as branded chips, not anonymous initials. AudioDB ships
 // no public logo URL, so it lives as a local static file.
 const _RATE_GAUGE_LOGOS = {
-    spotify:    'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
-    itunes:     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
-    deezer:     'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
-    jiosaavn:   'https://cdn-1.webcatalog.io/catalog/jiosaavn/jiosaavn-icon-filled-256.webp?v=1782693273643',
-    lastfm:     'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
-    genius:     'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png',
-    musicbrainz:'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
+    spotify:    '/static/img/brands/spotify.png',
+    itunes:     '/static/img/brands/itunes.png',
+    deezer:     '/static/img/brands/deezer.png',
+    jiosaavn:   '/static/img/brands/jiosaavn.webp',
+    lastfm:     '/static/img/brands/lastfm.png',
+    genius:     '/static/img/brands/genius.png',
+    musicbrainz:'/static/img/brands/musicbrainz.png',
     audiodb:    '/static/audiodb.png',
-    tidal:      'https://www.svgrepo.com/show/519734/tidal.svg',
-    qobuz:      'https://www.svgrepo.com/show/504778/qobuz.svg',
-    discogs:    'https://www.svgrepo.com/show/305957/discogs.svg',
+    tidal:      '/static/img/brands/tidal.svg',
+    qobuz:      '/static/img/brands/qobuz.svg',
+    discogs:    '/static/img/brands/discogs.svg',
     amazon:     '/static/amazon.svg',
 };
 

@@ -41,8 +41,8 @@
         return (w && w.kinds && w.kinds[0]) || 'movie';
     }
     var LOGOS = {
-        tmdb: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg',
-        tvdb: 'https://www.svgrepo.com/show/443500/brand-tvdb.svg',
+        tmdb: '/static/img/brands/tmdb.svg',
+        tvdb: '/static/img/brands/tvdb.svg',
     };
     var GLYPH = { movie: '🎬', show: '📺', episode: '🎞️', video: '▶' };
     var KIND_LABEL = { movie: 'Movies', show: 'Shows', episode: 'Episodes', video: 'Videos' };

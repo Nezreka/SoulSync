@@ -13,17 +13,17 @@
     var SOURCES = ['soulseek', 'torrent', 'usenet'];
     // Real service logos, same sources the music side uses (torrent/usenet have no logo → emoji).
     var DL_INFO = {
-        soulseek: { name: 'Soulseek', logo: 'https://raw.githubusercontent.com/slskd/slskd/master/docs/icon.png', emoji: '🎵' },
+        soulseek: { name: 'Soulseek', logo: '/static/img/brands/slskd.png', emoji: '🎵' },
         torrent: { name: 'Torrent', logo: null, emoji: '🧲' },
         usenet: { name: 'Usenet', logo: null, emoji: '📰' }
     };
     var SRV_INFO = {
-        plex: { name: 'Plex', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Plex_logo_2022_full-color-on-black.svg/1280px-Plex_logo_2022_full-color-on-black.svg.png?_=20241028114506', emoji: '🖥️', dark: true },
-        jellyfin: { name: 'Jellyfin', logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png', emoji: '🖥️' }
+        plex: { name: 'Plex', logo: '/static/img/brands/plex.png', emoji: '🖥️', dark: true },
+        jellyfin: { name: 'Jellyfin', logo: '/static/img/brands/jellyfin.png', emoji: '🖥️' }
     };
     var META_INFO = {
-        tmdb: { name: 'TMDB', logo: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg', emoji: '🎬' },
-        tvdb: { name: 'TVDB', logo: 'https://www.svgrepo.com/show/443500/brand-tvdb.svg', emoji: '📺' }
+        tmdb: { name: 'TMDB', logo: '/static/img/brands/tmdb.svg', emoji: '🎬' },
+        tvdb: { name: 'TVDB', logo: '/static/img/brands/tvdb.svg', emoji: '📺' }
     };
     var SRC_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', usenet: 'Usenet' };
     var SRV_LABEL = { plex: 'Plex', jellyfin: 'Jellyfin' };

@@ -182,15 +182,15 @@ function autoSyncSourceLabel(source) {
 // the ``<img onerror>`` swap so the header renders cleanly without
 // a broken-image placeholder.
 const _AUTO_SYNC_SOURCE_LOGOS = {
-    spotify:            'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
-    spotify_public:     'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
-    tidal:              'https://www.svgrepo.com/show/519734/tidal.svg',
-    youtube:            'https://www.svgrepo.com/show/13671/youtube.svg',
-    deezer:             'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
-    qobuz:              'https://www.svgrepo.com/show/504778/qobuz.svg',
-    itunes_link:        'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
-    lastfm:             'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
-    listenbrainz:       'https://listenbrainz.org/static/img/listenbrainz-logo-no-text.svg',
+    spotify:            '/static/img/brands/spotify.png',
+    spotify_public:     '/static/img/brands/spotify.png',
+    tidal:              '/static/img/brands/tidal.svg',
+    youtube:            '/static/img/brands/youtube.svg',
+    deezer:             '/static/img/brands/deezer.png',
+    qobuz:              '/static/img/brands/qobuz.svg',
+    itunes_link:        '/static/img/brands/itunes.png',
+    lastfm:             '/static/img/brands/lastfm.png',
+    listenbrainz:       '/static/img/brands/listenbrainz.png',
     soulsync_discovery: '/static/favicon.png',
 };
 

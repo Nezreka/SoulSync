@@ -39,27 +39,27 @@ async function enhancedSearchFetch(query, { source = null, signal = null } = {})
 const SOURCE_LABELS = {
     spotify: {
         text: 'Spotify', icon: '🎵',
-        logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+        logo: '/static/img/brands/spotify.png',
         tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify',
     },
     spotify_free: {
         text: 'Spotify (no auth)', icon: '🎵',
-        logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+        logo: '/static/img/brands/spotify.png',
         tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify',
     },
     itunes: {
         text: 'Apple Music', icon: '🍎',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
+        logo: '/static/img/brands/itunes.png',
         tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes',
     },
     deezer: {
         text: 'Deezer', icon: '🎶',
-        logo: 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
+        logo: '/static/img/brands/deezer.png',
         tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer',
     },
     discogs: {
         text: 'Discogs', icon: '📀',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Discogs_icon.svg/960px-Discogs_icon.svg.png',
+        logo: '/static/img/brands/discogs-icon.png',
         tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs',
     },
     hydrabase: {
@@ -73,7 +73,7 @@ const SOURCE_LABELS = {
     },
     musicbrainz: {
         text: 'MusicBrainz', icon: '🧠',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
+        logo: '/static/img/brands/musicbrainz.png',
         tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz',
     },
     jiosaavn: {
@@ -82,7 +82,7 @@ const SOURCE_LABELS = {
     },
     bandcamp: {
         text: 'Bandcamp', icon: '🎵',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg',
+        logo: '/static/img/brands/bandcamp.svg',
         tabClass: 'enh-tab-bandcamp', badgeClass: 'enh-badge-bandcamp',
     },
     youtube_videos: {
