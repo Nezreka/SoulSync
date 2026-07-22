@@ -14,6 +14,7 @@ import pytest
 from core.wishlist.ignore import (
     IGNORE_TTL_DAYS,
     REASON_CANCELLED,
+    REASON_DELETED_FROM_LIBRARY,
     REASON_REMOVED,
     active_ignored_ids,
     extract_display,
@@ -46,6 +47,17 @@ def test_is_expired_unparseable_is_treated_expired_fail_open():
     assert is_expired("not-a-date", datetime(2026, 6, 15)) is True
     assert is_expired("", datetime(2026, 6, 15)) is True
     assert is_expired(None, datetime(2026, 6, 15)) is True
+
+
+def test_deleted_from_library_ignore_is_permanent():
+    now = datetime(2026, 6, 15, 12, 0, 0)
+    stale = (now - timedelta(days=400)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = [
+        {"track_id": "deleted-track", "reason": REASON_DELETED_FROM_LIBRARY, "created_at": stale},
+        {"track_id": "removed-track", "reason": REASON_REMOVED, "created_at": stale},
+    ]
+
+    assert active_ignored_ids(rows, now) == {"deleted-track"}
 
 
 def test_is_ignored_matches_composite_and_bare_ids():

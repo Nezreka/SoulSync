@@ -379,6 +379,28 @@ def test_wishlist_albums_cycle_residual_for_orphan_tracks():
     assert residual_batches[0]["analysis_total"] == 1
 
 
+def test_wishlist_albums_cycle_skips_residual_when_atomic_publish_is_enabled(monkeypatch):
+    """Strict album publishing should not turn album-cycle leftovers into
+    independent per-track downloads."""
+    monkeypatch.setattr(processing, "_atomic_album_publish_enabled", lambda: True)
+    batch_map = {}
+    runtime, _service, _profiles_db, _music_db, executor, logger, _progress, _guards = _build_runtime(
+        tracks=_two_album_tracks_plus_orphan(),
+        cycle_value="albums",
+        count=3,
+        batch_map=batch_map,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-atomic-no-residual")
+
+    assert len(executor.submissions) == 1
+    assert len(batch_map) == 1
+    batch = next(iter(batch_map.values()))
+    assert batch.get("is_album_download") is True
+    assert batch["album_context"]["name"] == "Album One"
+    assert any("Skipping 1 album-cycle residual tracks" in msg for msg in logger.info_messages)
+
+
 def test_process_wishlist_automatically_returns_early_when_already_processing():
     runtime, _service, _profiles_db, music_db, executor, logger, progress_calls, guard_events = _build_runtime(
         tracks=[

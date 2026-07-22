@@ -52,6 +52,10 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 def classify_wishlist_track(track: Dict[str, Any]) -> str:
     """Classify a wishlist track as `singles` or `albums`."""
+    source_type = str(track.get('source_type') or '').lower()
+    if source_type in ('album', 'discography'):
+        return 'albums'
+
     track_data = _extract_track_data(track)
 
     album_data = track_data.get('album') or {}

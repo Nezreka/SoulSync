@@ -68,6 +68,35 @@ _MIRRORED_KEYS = ('progress', 'release', 'speed', 'downloaded',
                   'size', 'seeders', 'grabs', 'count', 'failed')
 
 
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        try:
+            number = int(float(value))
+        except (TypeError, ValueError):
+            return None
+    return number if number > 0 else None
+
+
+def _strict_soulseek_album_mode(mode: str, config_get: Callable[..., Any]) -> bool:
+    return (mode or '').lower() == 'soulseek' and _coerce_bool(
+        config_get('album_downloads.atomic_publish', False)
+    )
+
+
 def is_eligible(
     *,
     mode: str,
@@ -166,10 +195,15 @@ def try_dispatch(
         except Exception as exc:
             logger.debug("[Album Bundle] emit failed: %s", exc)
 
+    source_plugin_kwargs = dict(plugin_kwargs or {})
+    requested_expected_count = _coerce_positive_int(source_plugin_kwargs.pop('expected_track_count', None))
+    if requested_expected_count is None:
+        requested_expected_count = _coerce_positive_int((album_context or {}).get('total_tracks'))
+
     try:
         outcome = plugin.download_album_to_staging(
             album_name, artist_name, staging_dir, _emit,
-            **(plugin_kwargs or {}),
+            **source_plugin_kwargs,
         )
     except Exception as exc:
         logger.exception("[Album Bundle] %s plugin raised: %s", mode, exc)
@@ -193,6 +227,13 @@ def try_dispatch(
     if not outcome.get('success'):
         err = outcome.get('error', 'Album bundle download failed')
         if outcome.get('fallback'):
+            if _strict_soulseek_album_mode(mode, config_get):
+                logger.warning(
+                    "[Album Bundle] %s flow could not commit for '%s': %s - strict atomic album mode blocks per-track fallback",
+                    mode, album_name, err,
+                )
+                state.mark_failed(batch_id, err)
+                return True
             logger.warning(
                 "[Album Bundle] %s flow could not commit for '%s': %s — falling back to per-track flow",
                 mode, album_name, err,
@@ -207,6 +248,32 @@ def try_dispatch(
             return False
         logger.error("[Album Bundle] %s flow failed for '%s': %s",
                      mode, album_name, err)
+        state.mark_failed(batch_id, err)
+        return True
+
+    source_expected_count = _coerce_positive_int(outcome.get('expected_count'))
+    expected_count = max(
+        count for count in (source_expected_count, requested_expected_count)
+        if count is not None
+    ) if (source_expected_count is not None or requested_expected_count is not None) else None
+    completed_count = _coerce_positive_int(
+        outcome.get('completed_count', len(outcome.get('files', [])))
+    )
+    if _strict_soulseek_album_mode(mode, config_get) and (
+        outcome.get('partial') or (
+            expected_count is not None
+            and completed_count is not None
+            and completed_count < expected_count
+        )
+    ):
+        err = (
+            outcome.get('error')
+            or f"Soulseek album bundle incomplete ({completed_count or 0}/{expected_count or '?'} tracks completed)"
+        )
+        logger.warning(
+            "[Album Bundle] %s staged an incomplete album for '%s': %s - strict atomic album mode blocks per-track fallback",
+            mode, album_name, err,
+        )
         state.mark_failed(batch_id, err)
         return True
 

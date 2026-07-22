@@ -258,6 +258,85 @@ def test_dispatch_fallback_failure_returns_false_for_per_track_flow() -> None:
     assert state.fields['album_bundle_error'] == 'No complete Soulseek album folders found'
 
 
+def test_dispatch_soulseek_atomic_fallback_failure_stops_per_track_flow() -> None:
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {
+        'success': False,
+        'files': [],
+        'error': 'No complete Soulseek album folders found',
+        'fallback': True,
+    }
+    result = try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'Album'}, artist_context={'name': 'Artist'},
+        config_get=_config({
+            'download_source.mode': 'soulseek',
+            'album_downloads.atomic_publish': True,
+        }),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert result is True
+    assert state.failed_with == 'No complete Soulseek album folders found'
+    assert state.fields['phase'] == 'failed'
+
+
+def test_dispatch_soulseek_atomic_partial_success_stops_per_track_flow() -> None:
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {
+        'success': True,
+        'files': ['/tmp/01.flac', '/tmp/02.flac'],
+        'partial': True,
+        'expected_count': 5,
+        'completed_count': 2,
+    }
+    result = try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'Album'}, artist_context={'name': 'Artist'},
+        config_get=_config({
+            'download_source.mode': 'soulseek',
+            'album_downloads.atomic_publish': True,
+        }),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert result is True
+    assert 'incomplete' in state.failed_with
+    assert state.fields['phase'] == 'failed'
+
+
+def test_dispatch_soulseek_atomic_uses_requested_album_track_count() -> None:
+    """A Soulseek folder can be internally complete but still not be the
+    requested album. Strict atomic mode must compare against the album's
+    expected track count before allowing per-track staging to continue."""
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {
+        'success': True,
+        'files': ['/tmp/01.flac', '/tmp/02.flac', '/tmp/03.flac'],
+        'partial': False,
+        'expected_count': 3,
+        'completed_count': 3,
+    }
+
+    result = try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'Album', 'total_tracks': 10},
+        artist_context={'name': 'Artist'},
+        config_get=_config({
+            'download_source.mode': 'soulseek',
+            'album_downloads.atomic_publish': True,
+        }),
+        plugin_resolver=lambda _name: plugin, state=state,
+        plugin_kwargs={'expected_track_count': 10},
+    )
+
+    assert result is True
+    assert 'incomplete' in state.failed_with
+    assert state.fields['phase'] == 'failed'
+    assert 'expected_track_count' not in plugin.download_album_to_staging.call_args.kwargs
+
+
 def test_dispatch_plugin_exception_treated_as_failure() -> None:
     """A bug / network error in the plugin must not propagate into
     the master worker — caught + treated as a normal failure so

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import uuid
+import os
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from contextlib import AbstractContextManager
@@ -29,6 +31,25 @@ logger = module_logger
 # per-track flow. Configurable via ``wishlist.album_bundle_min_tracks``
 # for users who want different behaviour.
 _DEFAULT_ALBUM_BUNDLE_MIN_TRACKS = 2
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)
+
+
+def _atomic_album_publish_enabled() -> bool:
+    """Return whether album batches should stay private until complete."""
+    try:
+        from config.settings import config_manager
+        return _coerce_bool(config_manager.get('album_downloads.atomic_publish', False))
+    except Exception:  # noqa: S110 - config may be unavailable in tests/import tools
+        return False
 
 
 def _resolve_album_bundle_threshold() -> int:
@@ -258,6 +279,12 @@ def _run_wishlist_cycle(
         )
 
     residual_tracks = grouping.residual_tracks if grouping is not None else tracks
+    if residual_tracks and cycle == 'albums' and _atomic_album_publish_enabled():
+        logger.info(
+            f"[Wishlist Processing] Skipping {len(residual_tracks)} album-cycle residual tracks because "
+            "album_downloads.atomic_publish is enabled"
+        )
+        residual_tracks = []
     residual_count = len(residual_tracks) if residual_tracks else 0
     if residual_tracks:
         residual_batch_id = _alloc_id()
@@ -622,6 +649,164 @@ def remove_tracks_already_in_library(
     return cleanup_removed
 
 
+def _wishlist_track_display(track: dict[str, Any]) -> tuple[str, str, str]:
+    track_id = str(track.get('spotify_track_id') or track.get('id') or '').strip()
+    name = str(track.get('name') or '').strip()
+    artists = track.get('artists') or []
+    artist = ''
+    if isinstance(artists, list) and artists:
+        first = artists[0]
+        artist = str(first.get('name') if isinstance(first, dict) else first or '').strip()
+    return track_id, name, artist
+
+
+def _wishlist_track_album(track: dict[str, Any]) -> tuple[str, str]:
+    album = track.get('album') or {}
+    if not isinstance(album, dict):
+        return '', ''
+    album_name = str(album.get('name') or '').strip()
+    album_id = str(album.get('id') or album.get('itunes_id') or '').strip()
+    return album_name, album_id
+
+
+def _path_exists_in_soulsync(path: str) -> bool:
+    raw = str(path or '').strip()
+    if not raw:
+        return False
+    candidates = [raw]
+    if raw.startswith('/host/music/'):
+        candidates.append('/data/media/music/' + raw[len('/host/music/'):])
+    if raw.startswith('/data/media/music/'):
+        candidates.append('/host/music/' + raw[len('/data/media/music/'):])
+    if raw.startswith('/mnt/user/data/media/music/'):
+        candidates.append('/host/music/' + raw[len('/mnt/user/data/media/music/'):])
+    if raw.startswith('/media/data/media/music/'):
+        candidates.append('/host/music/' + raw[len('/media/data/media/music/'):])
+    return any(os.path.exists(candidate) for candidate in candidates)
+
+
+def remove_deleted_downloads_from_wishlist(
+    wishlist_service,
+    profiles_database,
+    music_database,
+    *,
+    logger=logger,
+    log_prefix: str = "[Wishlist]",
+) -> int:
+    """Remove wishlist rows for tracks whose previously downloaded file is gone.
+
+    A user can delete an album from Plex/the library while its tracks remain in
+    the wishlist or get re-added by automation. If the completed download
+    history points only to files that no longer exist, treat that as intentional
+    deletion: remove the wishlist row, permanently ignore the track, and
+    blocklist the album id when available so an album cycle cannot rehydrate it.
+    """
+    db_path = getattr(music_database, 'database_path', None)
+    if not db_path:
+        return 0
+
+    removed = 0
+    profiles = profiles_database.get_all_profiles()
+    try:
+        with sqlite3.connect(str(db_path), timeout=30.0) as conn:
+            conn.row_factory = sqlite3.Row
+            for profile in profiles:
+                profile_id = profile["id"]
+                for track in wishlist_service.get_wishlist_tracks_for_download(profile_id=profile_id):
+                    track_id, track_name, artist_name = _wishlist_track_display(track)
+                    if not track_id:
+                        continue
+                    rows = conn.execute(
+                        """
+                        SELECT file_path
+                        FROM track_downloads
+                        WHERE status = 'completed'
+                          AND file_path IS NOT NULL
+                          AND file_path <> ''
+                          AND (
+                            track_id = ?
+                            OR spotify_track_id = ?
+                            OR soul_id = ?
+                            OR itunes_track_id = ?
+                            OR deezer_track_id = ?
+                            OR tidal_track_id = ?
+                            OR qobuz_track_id = ?
+                            OR musicbrainz_recording_id = ?
+                          )
+                        """,
+                        (track_id, track_id, track_id, track_id, track_id, track_id, track_id, track_id),
+                    ).fetchall()
+                    if not rows:
+                        continue
+                    paths = [row['file_path'] for row in rows if row['file_path']]
+                    if not paths or any(_path_exists_in_soulsync(path) for path in paths):
+                        continue
+
+                    removed_ok = False
+                    try:
+                        removed_ok = bool(
+                            wishlist_service.remove_track_from_wishlist(track_id, profile_id=profile_id)
+                        )
+                    except AttributeError:
+                        removed_ok = bool(
+                            wishlist_service.mark_track_download_result(track_id, success=True, profile_id=profile_id)
+                        )
+                    if not removed_ok:
+                        continue
+
+                    removed += 1
+                    try:
+                        music_database.add_to_wishlist_ignore(
+                            track_id,
+                            track_name=track_name,
+                            artist_name=artist_name,
+                            reason='deleted_from_library',
+                            profile_id=profile_id,
+                        )
+                    except Exception as ignore_error:
+                        logger.debug("%s could not add deleted track to ignore-list: %s", log_prefix, ignore_error)
+
+                    album_name, album_id = _wishlist_track_album(track)
+                    if album_name and album_id:
+                        try:
+                            conn.execute(
+                                """
+                                INSERT INTO blocklist (
+                                    profile_id, entity_type, name, parent_name,
+                                    itunes_id, match_status
+                                )
+                                SELECT ?, 'album', ?, ?, ?, 'matched'
+                                WHERE NOT EXISTS (
+                                    SELECT 1
+                                    FROM blocklist
+                                    WHERE profile_id = ?
+                                      AND entity_type = 'album'
+                                      AND itunes_id = ?
+                                )
+                                """,
+                                (profile_id, album_name, artist_name, album_id, profile_id, album_id),
+                            )
+                            logger.info(
+                                "%s Blocked deleted album from future wishlist runs: '%s' by %s",
+                                log_prefix,
+                                album_name,
+                                artist_name or 'unknown artist',
+                            )
+                        except Exception as block_error:
+                            logger.debug("%s could not add deleted album to blocklist: %s", log_prefix, block_error)
+
+                    logger.info(
+                        "%s Removed deleted library track from wishlist: '%s' by %s",
+                        log_prefix,
+                        track_name or track_id,
+                        artist_name or 'unknown artist',
+                    )
+            conn.commit()
+    except Exception as exc:
+        logger.error("%s Error removing deleted library tracks from wishlist: %s", log_prefix, exc)
+    return removed
+
+
 @dataclass
 class WishlistManualDownloadRuntime:
     """Dependencies needed to start a manual wishlist download batch outside the controller."""
@@ -711,6 +896,16 @@ def _prepare_and_run_manual_wishlist_batch(
         duplicates_removed = db.remove_wishlist_duplicates(profile_id=manual_profile_id)
         if duplicates_removed > 0:
             logger.warning(f"[Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
+
+        deleted_removed = remove_deleted_downloads_from_wishlist(
+            wishlist_service,
+            SimpleNamespace(get_all_profiles=lambda: [{"id": manual_profile_id}]),
+            db,
+            logger=logger,
+            log_prefix="[Manual-Wishlist]",
+        )
+        if deleted_removed > 0:
+            logger.warning(f"[Manual-Wishlist] Removed {deleted_removed} previously deleted library track(s)")
 
         # NOTE: We deliberately do NOT call remove_tracks_already_in_library here.
         # Wishlist tracks are already known-missing (force_download_all=True is set on
@@ -839,6 +1034,13 @@ def cleanup_wishlist_against_library(
             logger=logger,
             log_prefix="[Wishlist Cleanup]",
         )
+        removed_count += remove_deleted_downloads_from_wishlist(
+            wishlist_service,
+            SimpleNamespace(get_all_profiles=lambda: [{"id": profile_id}]),
+            music_database,
+            logger=logger,
+            log_prefix="[Wishlist Cleanup]",
+        )
 
         logger.info(f"[Wishlist Cleanup] Completed cleanup: {removed_count} tracks removed from wishlist")
         return {
@@ -909,6 +1111,18 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                     duplicates_removed = music_database.remove_wishlist_duplicates(profile_id=profile['id'])
                     if duplicates_removed > 0:
                         logger.warning(f"[Auto-Wishlist] Removed {duplicates_removed} duplicate tracks from profile {profile['id']}")
+
+                deleted_removed = remove_deleted_downloads_from_wishlist(
+                    wishlist_service,
+                    SimpleNamespace(get_all_profiles=lambda: all_profiles),
+                    music_database,
+                    logger=logger,
+                    log_prefix="[Auto-Wishlist]",
+                )
+                if deleted_removed > 0:
+                    logger.warning(
+                        f"[Auto-Wishlist] Removed {deleted_removed} previously deleted library track(s)"
+                    )
 
                 # NOTE: We deliberately do NOT call remove_tracks_already_in_library here.
                 # The batch sets force_download_all=True (see comment a few lines below),
@@ -1112,4 +1326,5 @@ __all__ = [
     "start_manual_wishlist_download_batch",
     "cleanup_wishlist_against_library",
     "remove_tracks_already_in_library",
+    "remove_deleted_downloads_from_wishlist",
 ]
