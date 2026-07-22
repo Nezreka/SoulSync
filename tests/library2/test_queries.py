@@ -120,7 +120,7 @@ def test_list_artists_materializes_requested_page_before_catalog_rollups(
 
     rollup_sql = next(
         statement for statement in statements
-        if "WITH page_artists AS MATERIALIZED" in statement
+        if "page_artists AS MATERIALIZED" in statement
     )
     assert len(artists) == 1
     assert total == 2
@@ -351,6 +351,47 @@ def test_list_artists_hides_alias_member_rows(imported_conn):
     assert "Drake (Alias)" not in names
     assert alias_id not in {a["id"] for a in artists}
     assert total == 2  # Drake + Wizkid, same as before linking — alias not counted twice
+
+
+def test_list_artists_search_and_totals_include_alias_members(imported_conn):
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    alias_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name) "
+        "VALUES('Secret Alias Name', 'Secret Alias Name')"
+    ).lastrowid
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) "
+        "VALUES(?, 'Alias-Owned Album')", (alias_id,),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+        (album_id, alias_id),
+    )
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Alias-Owned Track')",
+        (album_id,),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?, ?)",
+        (track_id, alias_id),
+    )
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, size, is_primary) "
+        "VALUES(?, '/m/alias-owned.flac', 777, 1)", (track_id,),
+    )
+    _link_alias(imported_conn, alias_id, drake_id)
+
+    artists, total = Q.list_artists(imported_conn, search="Secret Alias")
+
+    assert total == 1
+    assert [artist["id"] for artist in artists] == [drake_id]
+    assert artists[0]["album_count"] == 2
+    assert artists[0]["single_count"] == 1
+    assert artists[0]["track_count"] == 3
+    assert artists[0]["tracks_present"] == 3
+    assert artists[0]["total_size_bytes"] == 10777
 
 
 def test_get_artist_merges_albums_across_alias_group(imported_conn):

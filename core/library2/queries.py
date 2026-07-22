@@ -33,12 +33,14 @@ def _artist_page_order(sort: str) -> str:
                FROM (
                     SELECT aa.album_id
                       FROM lib2_album_artists aa
-                     WHERE aa.artist_id=a.id
+                      JOIN lib2_artists member ON member.id=aa.artist_id
+                     WHERE COALESCE(member.canonical_artist_id, member.id)=a.id
                     UNION
                     SELECT t.album_id
                       FROM lib2_track_artists ta
                       JOIN lib2_tracks t ON t.id=ta.track_id
-                     WHERE ta.artist_id=a.id
+                      JOIN lib2_artists member ON member.id=ta.artist_id
+                     WHERE COALESCE(member.canonical_artist_id, member.id)=a.id
                ) candidate
                JOIN lib2_albums al ON al.id=candidate.album_id
               WHERE al.album_type <> 'single'
@@ -50,9 +52,10 @@ def _artist_page_order(sort: str) -> str:
             (SELECT COUNT(DISTINCT t.id)
                FROM lib2_track_artists ta
                JOIN lib2_tracks t ON t.id=ta.track_id
+               JOIN lib2_artists member ON member.id=ta.artist_id
                LEFT JOIN lib2_wanted_tracks w
                       ON w.track_id=t.id AND w.profile_id=1
-              WHERE ta.artist_id=a.id
+              WHERE COALESCE(member.canonical_artist_id, member.id)=a.id
                 AND (COALESCE(w.wanted, t.monitored)=1 OR EXISTS (
                     SELECT 1 FROM lib2_track_files tf
                      WHERE tf.track_id=t.id
@@ -133,7 +136,11 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     # (get_artist merges their albums in) and never listed on their own.
     clauses, params = ["a.canonical_artist_id IS NULL"], {}
     if search:
-        clauses.append("a.name LIKE :like")
+        clauses.append(
+            "EXISTS (SELECT 1 FROM lib2_artists member "
+            "WHERE COALESCE(member.canonical_artist_id, member.id)=a.id "
+            "AND member.name LIKE :like)"
+        )
         params["like"] = f"%{search}%"
     if monitored == "monitored":
         clauses.append("a.monitored = 1")
@@ -147,7 +154,12 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
 
     rows = conn.execute(
         f"""
-        WITH page_artists AS MATERIALIZED (
+        WITH canonical_members AS MATERIALIZED (
+            SELECT member.id AS member_id,
+                   COALESCE(member.canonical_artist_id, member.id) AS canonical_id
+              FROM lib2_artists member
+        ),
+        page_artists AS MATERIALIZED (
             SELECT a.*
               FROM lib2_artists a
               {where}
@@ -155,14 +167,16 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
              LIMIT :limit OFFSET :offset
         ),
         artist_albums AS (
-            SELECT aa.artist_id, aa.album_id
+            SELECT cm.canonical_id AS artist_id, aa.album_id
               FROM lib2_album_artists aa
-              JOIN page_artists pa ON pa.id=aa.artist_id
+              JOIN canonical_members cm ON cm.member_id=aa.artist_id
+              JOIN page_artists pa ON pa.id=cm.canonical_id
             UNION
-            SELECT ta.artist_id, t.album_id
+            SELECT cm.canonical_id AS artist_id, t.album_id
               FROM lib2_track_artists ta
               JOIN lib2_tracks t ON t.id=ta.track_id
-              JOIN page_artists pa ON pa.id=ta.artist_id
+              JOIN canonical_members cm ON cm.member_id=ta.artist_id
+              JOIN page_artists pa ON pa.id=cm.canonical_id
         ),
         album_stats AS (
             SELECT aa.artist_id,
@@ -179,7 +193,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
              GROUP BY aa.artist_id
         ),
         track_stats AS (
-            SELECT ta.artist_id,
+            SELECT cm.canonical_id AS artist_id,
                    COUNT(DISTINCT CASE
                        WHEN COALESCE(w.wanted, t.monitored)=1 OR tf.id IS NOT NULL
                        THEN t.id END) AS track_count,
@@ -189,12 +203,13 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                             NOT IN ('missing_confirmed','deleted')
                        THEN t.id END) AS track_files_present
               FROM lib2_track_artists ta
-              JOIN page_artists pa ON pa.id=ta.artist_id
+              JOIN canonical_members cm ON cm.member_id=ta.artist_id
+              JOIN page_artists pa ON pa.id=cm.canonical_id
               JOIN lib2_tracks t ON t.id=ta.track_id
               LEFT JOIN lib2_wanted_tracks w
                      ON w.track_id=t.id AND w.profile_id=1
               LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
-             GROUP BY ta.artist_id
+             GROUP BY cm.canonical_id
         ),
         track_primary_files AS (
             SELECT tf.track_id, tf.size,
@@ -205,7 +220,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
              WHERE EXISTS (
                    SELECT 1
                      FROM lib2_track_artists ta
-                     JOIN page_artists pa ON pa.id=ta.artist_id
+                     JOIN canonical_members cm ON cm.member_id=ta.artist_id
+                     JOIN page_artists pa ON pa.id=cm.canonical_id
                     WHERE ta.track_id=tf.track_id
              )
                AND COALESCE(tf.file_state, 'active') <> 'deleted'
@@ -215,11 +231,13 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         -- row, which would inflate a SUM(size) sharing the same join. This
         -- one joins each track's single ADR-03 primary file exactly once.
         artist_size AS (
-            SELECT ta.artist_id, COALESCE(SUM(pf.size), 0) AS total_size_bytes
+            SELECT cm.canonical_id AS artist_id,
+                   COALESCE(SUM(pf.size), 0) AS total_size_bytes
               FROM lib2_track_artists ta
-              JOIN page_artists pa ON pa.id=ta.artist_id
+              JOIN canonical_members cm ON cm.member_id=ta.artist_id
+              JOIN page_artists pa ON pa.id=cm.canonical_id
               JOIN track_primary_files pf ON pf.track_id=ta.track_id AND pf.rank=1
-             GROUP BY ta.artist_id
+             GROUP BY cm.canonical_id
         )
         SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
                a.monitored, a.monitor_new_items, a.quality_profile_id,
