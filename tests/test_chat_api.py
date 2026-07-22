@@ -421,3 +421,40 @@ class TestReactions:
         res = http.get("/api/chat/user/some pal").get_json()
         assert res["status"] == {"isOnline": True}
         assert res["info"] == {"uploadSlots": 3, "description": "hi"}   # primitives only
+
+
+# ── auto-join OFF must mean OUT (popwaffle9000) ──────────────────────────────
+# The room poll used to _ensure_joined unconditionally, so the page's 4s poll
+# re-joined within seconds of the settings cog walking you out — "uncheck
+# auto-join to leave" didn't work while the chat page was open.
+
+
+def test_room_poll_respects_auto_join_off(chat_app):
+    http, state = chat_app
+    state["config"]["soulseek.chat_auto_join"] = False
+    res = http.get("/api/chat/room")
+    body = res.get_json()
+    assert res.status_code == 200
+    assert body["joined"] is False
+    assert body["messages"] == [] and body["users"] == []
+    assert state["client"].joined == []          # the poll did NOT join the room
+
+
+def test_room_poll_joins_again_after_opt_in(chat_app):
+    http, state = chat_app
+    state["config"]["soulseek.chat_auto_join"] = False
+    http.get("/api/chat/room")
+    assert state["client"].joined == []
+    state["config"]["soulseek.chat_auto_join"] = True     # the Join gate flips this
+    body = http.get("/api/chat/room").get_json()
+    assert body.get("joined", True) is True
+    assert state["client"].joined == ["SoulSync"]
+
+
+def test_join_gate_wired_in_frontend():
+    from pathlib import Path
+    js = Path("webui/static/chat.js").read_text(encoding="utf-8")
+    assert "res.body.joined === false" in js
+    assert "renderJoinGate" in js
+    assert "auto_join: true" in js               # the gate's Join button opts back in
+    assert "form.hidden = false" in js           # composer restored after rejoin

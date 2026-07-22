@@ -71648,6 +71648,12 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     padding: 40px 20px; text-align: center; font-size: 14px; color: rgba(255,255,255,0.4);
 }
 .chat-problem { color: #f0a05a; }
+/* join gate (auto-join off = you're out until you say otherwise) */
+.chat-join-btn { padding: 8px 18px; border-radius: 10px; border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.5);
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.15); color: rgb(var(--accent-rgb, 29, 185, 84));
+    font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+.chat-join-btn:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); color: #fff; }
+.chat-join-btn:disabled { opacity: 0.5; cursor: default; }
 
 .chat-composer {
     display: flex; gap: 10px; padding: 12px 14px;

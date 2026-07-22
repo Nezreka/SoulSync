@@ -341,6 +341,19 @@ def create_blueprint() -> Blueprint:
         if client is None:
             return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
         room = _room_name()
+        # popwaffle9000: auto-join OFF must mean OUT. This endpoint used to
+        # _ensure_joined unconditionally, so the page's 4s poll silently
+        # re-joined within seconds of the settings cog walking you out —
+        # "uncheck auto-join to leave" simply didn't work. With the opt-out
+        # set, return a not-joined payload; the page renders a join gate,
+        # and Join = the settings POST flipping auto_join back on.
+        try:
+            _auto_join = bool(_config_get("soulseek.chat_auto_join", True)) if _config_get else True
+        except Exception:
+            _auto_join = True
+        if not _auto_join:
+            return jsonify({"room": room, "joined": False, "messages": [],
+                            "users": [], "can_send": _can_send()})
         try:
             if not _ensure_joined(client, room):
                 return jsonify({"error": "Could not join room '%s' — is slskd connected "
@@ -371,7 +384,8 @@ def create_blueprint() -> Blueprint:
                     out = arch
             except Exception:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
-        return jsonify({"room": room, "messages": _attach_reactions(out, reactions),
+        return jsonify({"room": room, "joined": True,
+                        "messages": _attach_reactions(out, reactions),
                         "users": users or [], "can_send": _can_send()})
 
     @bp.route("/api/chat/room/history", methods=["GET"])
