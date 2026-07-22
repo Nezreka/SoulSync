@@ -307,11 +307,13 @@ export async function setLibraryV2QualityProfile(
   if (!payload.success) throw new Error(payload.error || 'Failed to update quality profile');
 }
 
-export async function refreshLibraryV2(entity: 'artists' | 'albums', id: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+export async function refreshLibraryV2(entity: 'artists' | 'albums', id: number): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/refresh`, { json: {} }),
   );
   if (!payload.success) throw new Error(payload.error || 'Failed to refresh');
+  if (!payload.job_id) throw new Error('Refresh did not return a job id');
+  return payload.job_id;
 }
 
 export async function fetchLibraryV2Artist(artistId: number): Promise<LibraryV2ArtistDetail> {

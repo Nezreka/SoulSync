@@ -13,11 +13,17 @@ describe('library v2 artist refresh mutation', () => {
     server.use(
       http.post('/api/library/v2/artists/7/refresh', () => {
         attempts += 1;
-        return HttpResponse.json(
-          attempts === 1
-            ? { success: false, error: 'Music root is temporarily unavailable' }
-            : { success: true },
-        );
+        return HttpResponse.json({ success: true, job_id: `refresh-${attempts}` });
+      }),
+      http.get('/api/library/v2/jobs/status', ({ request }) => {
+        const jobId = new URL(request.url).searchParams.get('job_id');
+        return HttpResponse.json({
+          job_id: jobId,
+          running: false,
+          error:
+            jobId === 'refresh-1' ? 'Music root is temporarily unavailable' : null,
+          result: jobId === 'refresh-1' ? null : { refreshed_albums: 3, scanned: 8 },
+        });
       }),
     );
 
