@@ -4988,6 +4988,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const search = Route.useSearch();
   const releasesMode = search.releases;
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
+  const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   const artist = artistQuery.data;
   const [discographyBusy, setDiscographyBusy] = useState(false);
   const [modalAction, setModalAction] = useState<{
@@ -5277,6 +5278,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             albums={visibleReleases(artist.albums, releasesMode)}
             artistId={artistId}
             scope="albums"
+            queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
             onAction={handleAction}
           />
           <AlbumGroup
@@ -5284,6 +5286,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             albums={visibleReleases(artist.eps ?? [], releasesMode)}
             artistId={artistId}
             scope="eps"
+            queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
             onAction={handleAction}
           />
           <AlbumGroup
@@ -5291,6 +5294,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             albums={visibleReleases(artist.singles, releasesMode)}
             artistId={artistId}
             scope="singles"
+            queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
             onAction={handleAction}
           />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
@@ -5510,12 +5514,14 @@ function AlbumGroup({
   albums,
   artistId,
   scope,
+  queueStatusByAlbum,
   onAction,
 }: {
   title: string;
   albums: LibraryV2AlbumSummary[];
   artistId: number;
   scope: 'albums' | 'eps' | 'singles';
+  queueStatusByAlbum: Record<number, number>;
   onAction: ActionHandler;
 }) {
   if (albums.length === 0) return null;
@@ -5535,7 +5541,12 @@ function AlbumGroup({
       </h2>
       <div className={styles.albumList}>
         {albums.map((album) => (
-          <AlbumBlock key={album.id} album={album} onAction={onAction} />
+          <AlbumBlock
+            key={album.id}
+            album={album}
+            activeDownloads={queueStatusByAlbum[album.id] ?? 0}
+            onAction={onAction}
+          />
         ))}
       </div>
     </section>
@@ -5544,16 +5555,16 @@ function AlbumGroup({
 
 function AlbumBlock({
   album,
+  activeDownloads,
   onAction,
 }: {
   album: LibraryV2AlbumSummary;
+  activeDownloads: number;
   onAction: ActionHandler;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
-  const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('albums', album.id));
-  const activeDownloads = Object.keys(queueStatusQuery.data?.tracks ?? {}).length;
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
   const releaseDate =
