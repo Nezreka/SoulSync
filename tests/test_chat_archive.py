@@ -136,9 +136,33 @@ def test_frontend_store_and_scrollback_pins():
     js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8", errors="replace")
     assert "function mergeMessages(" in js
     assert "function loadOlder(" in js
-    assert "/api/chat/room/history?before=" in js
+    assert "/api/chat/room/history?room=" in js   # room-scoped since multi-room P1
     assert "scroller.scrollTop < 60) loadOlder()" in js
     # scroll anchor preserved when history prepends
     assert "host.scrollHeight - prevH + prevTop" in js
     # store trims once the reader returns to the bottom
     assert "state.msgs.slice(-300)" in js
+
+
+class TestArchiveSearch:
+    def test_search_matches_text_and_sender_newest_first(self, mdb):
+        mdb.add_chat_messages("SoulSync", [
+            _m(1, text="anyone have the new Meshuggah?"),
+            _m(2, user="bob", text="check soulseek search"),
+            _m(3, text="meshuggah rules"),
+        ])
+        hits = mdb.search_chat_messages("SoulSync", "meshuggah")
+        assert [h["message"] for h in hits] == ["meshuggah rules",
+                                               "anyone have the new Meshuggah?"]
+        assert [h["message"] for h in mdb.search_chat_messages("SoulSync", "bob")] == \
+            ["check soulseek search"]
+
+    def test_search_is_room_scoped_and_escapes_like(self, mdb):
+        mdb.add_chat_messages("SoulSync", [_m(1, text="hello 100% real")])
+        mdb.add_chat_messages("indie", [_m(2, text="hello from indie")])
+        assert mdb.search_chat_messages("indie", "hello")[0]["message"] == "hello from indie"
+        # LIKE wildcards in the query are literals, not patterns
+        assert mdb.search_chat_messages("SoulSync", "100%")[0]["message"] == "hello 100% real"
+        assert mdb.search_chat_messages("SoulSync", "%") != []      # literal % exists
+        assert mdb.search_chat_messages("SoulSync", "zzz") == []
+        assert mdb.search_chat_messages("SoulSync", "") == []

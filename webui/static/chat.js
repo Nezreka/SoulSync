@@ -320,16 +320,17 @@
             ? '<div class="chat-reply-ref">↩ <b>' + esc(m.reply.u) + '</b> ' +
               '<span>' + esc(m.reply.x || '') + '</span></div>'
             : '';
-        var actions = '';
+        var acts = '<button type="button" class="chat-line-reply" title="Copy text" ' +
+            'data-chat-copy="' + attr(String(m.message || '')) + '">⧉</button>';
         if (state.view === 'room' && state.canSend && !self) {
-            actions = '<span class="chat-line-acts">' +
-                '<button type="button" class="chat-line-reply" title="React" ' +
+            acts = '<button type="button" class="chat-line-reply" title="React" ' +
                 'data-chat-react-user="' + attr(m.username || '') + '" ' +
-                'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>'   // FULL text — the react key is a hash of it +
+                'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>' +   // FULL text — the react key is a hash of it
                 '<button type="button" class="chat-line-reply" title="Reply" ' +
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
-                'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button></span>';
+                'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
         }
+        var actions = '<span class="chat-line-acts">' + acts + '</span>';
         var chips = '';
         if (m.reactions && m.reactions.length) {
             chips = '<div class="chat-react-row">' + m.reactions.map(function (r) {
@@ -608,6 +609,12 @@
               '<span class="chat-head-sub">' + (isHome
                   ? 'the SoulSync community room on Soulseek'
                   : 'a public Soulseek room') + '</span>' +
+              '<span class="chat-head-search' + (state.searchMode ? ' chat-head-search--on' : '') + '">' +
+                  '<button class="chat-filter-btn" type="button" data-chat-search-btn title="Search this room\'s history">🔍</button>' +
+                  '<input class="chat-head-search-in" data-chat-search-input type="text" ' +
+                      'placeholder="Search history…" autocomplete="off"' +
+                      (state.searchMode ? '' : ' hidden') + '>' +
+              '</span>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
@@ -1172,9 +1179,54 @@
             .catch(function () { state.loadingOlder = false; });
     }
 
+    // ── archive search (local history — Soulseek has no server-side search) ──
+    function enterSearch() {
+        state.searchMode = true;
+        renderHead();
+        var inp = q('[data-chat-search-input]');
+        if (inp) { inp.hidden = false; inp.focus(); }
+    }
+
+    function exitSearch() {
+        if (!state.searchMode) return;
+        state.searchMode = false;
+        state.lastStamp = null;
+        renderHead();
+        renderMessages(state.msgs);
+        var host = q('[data-chat-messages]');
+        if (host) host.scrollTop = host.scrollHeight;
+    }
+
+    function runSearch(qstr) {
+        qstr = String(qstr || '').trim();
+        var host = q('[data-chat-messages]');
+        if (!qstr || !host) return;
+        host.innerHTML = '<div class="chat-empty">Searching…</div>';
+        getJSON('/api/chat/room/search?room=' + encodeURIComponent(state.room || '') +
+                '&q=' + encodeURIComponent(qstr)).then(function (res) {
+            if (!state.searchMode || !res.ok) return;
+            var msgs = (res.body.messages || []).slice().reverse();   // oldest-first for render
+            host.innerHTML =
+                '<div class="chat-search-banner">' + msgs.length + ' result' +
+                    (msgs.length === 1 ? '' : 's') + ' for “' + esc(qstr) + '”' +
+                    '<button type="button" class="chat-filter-btn" data-chat-search-exit>Back to live</button>' +
+                '</div>' +
+                (msgs.length ? renderGroups(msgs)
+                             : '<div class="chat-empty">Nothing in the archive matches.</div>');
+            host.scrollTop = 0;
+        });
+    }
+
     // ── refresh loop ─────────────────────────────────────────────────────────
     function refresh() {
         if (!pageVisible()) return Promise.resolve();
+        if (state.searchMode && state.view === 'room') {
+            // search results are a frozen snapshot — don't repaint over them;
+            // the side rails still refresh below
+            return getJSON('/api/chat/conversations').then(function (res) {
+                if (res.ok) renderSide(res.body.conversations);
+            }).catch(function () { /* next tick retries */ });
+        }
         var work;
         if (state.view === 'room') {
             work = getJSON('/api/chat/room?room=' + encodeURIComponent(state.room || '')).then(function (res) {
@@ -1350,6 +1402,7 @@
     function openPm(username) {
         if (!username) return;
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
+        state.searchMode = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
         renderHead(); renderComposer();
@@ -1476,8 +1529,22 @@
                 renderHead(); refresh();
                 return;
             }
+            t = e.target.closest('[data-chat-search-btn]');
+            if (t) { state.searchMode ? exitSearch() : enterSearch(); return; }
+            t = e.target.closest('[data-chat-search-exit]');
+            if (t) { exitSearch(); return; }
+            t = e.target.closest('[data-chat-copy]');
+            if (t) {
+                var txt = t.getAttribute('data-chat-copy') || '';
+                try {
+                    navigator.clipboard.writeText(txt).then(function () {
+                        if (typeof showToast === 'function') showToast('Copied', 'success');
+                    });
+                } catch (err) { /* clipboard unavailable */ }
+                return;
+            }
             t = e.target.closest('[data-chat-open-room]');
-            if (t) { openRoom(t.getAttribute('data-chat-open-room') || undefined); return; }
+            if (t) { state.searchMode = false; openRoom(t.getAttribute('data-chat-open-room') || undefined); return; }
             t = e.target.closest('[data-chat-browse-rooms]');
             if (t) { openRoomBrowser(); return; }
             t = e.target.closest('[data-chat-join-room]');
@@ -1586,6 +1653,14 @@
 
         // user-list search: delegated ('input' bubbles; the input is re-created
         // only when the whole panel resets, so direct binding would go stale)
+        // history-search input is re-created by every renderHead → delegate
+        page.addEventListener('keydown', function (e) {
+            if (e.target && e.target.matches('[data-chat-search-input]')) {
+                if (e.key === 'Enter') { e.preventDefault(); runSearch(e.target.value); }
+                if (e.key === 'Escape') exitSearch();
+            }
+        });
+
         page.addEventListener('input', function (e) {
             if (e.target && e.target.matches('[data-chat-user-search]')) {
                 state.userFilter = e.target.value.trim();

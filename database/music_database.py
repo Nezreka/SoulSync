@@ -10434,6 +10434,28 @@ class MusicDatabase:
             logger.error("Error reading chat archive: %s", e)
             return []
 
+    def search_chat_messages(self, room: str, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Archive search: messages in ``room`` whose text OR sender matches
+        ``query`` (case-insensitive substring), newest first."""
+        query = str(query or '').strip()
+        if not query:
+            return []
+        like = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        try:
+            with self._get_connection() as conn:
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT username, message, rich, timestamp, reply FROM chat_room_messages "
+                    "WHERE room = ? AND (message LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\') "
+                    "ORDER BY timestamp DESC, id DESC LIMIT ?",
+                    (str(room), like, like, max(1, min(int(limit), 200)))).fetchall()]
+            for r in rows:
+                r['rich'] = bool(r['rich'])
+                r.pop('reply', None)   # search results render flat
+            return rows
+        except Exception as e:
+            logger.error("Error searching chat archive: %s", e)
+            return []
+
     def get_notification_history(self, profile_id: int = 1, type_filter: str = None,
                                  search: str = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """A profile's journaled notifications, newest first, optionally

@@ -71698,6 +71698,28 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 }
 .chat-browse-meta { flex: none; font-size: 11.5px; color: rgba(255,255,255,0.4); }
 .chat-browse-row input[type="checkbox"] { flex: none; accent-color: #1db954; }
+/* history search (room head) + results banner */
+.chat-head-search { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.chat-head-search .chat-filter-btn { margin-left: 0; }
+.chat-head-search + .chat-filter-btn { margin-left: 8px; }
+button.chat-hidden-note {
+    display: block; width: 100%; border: none; background: transparent; cursor: pointer;
+}
+button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
+.chat-head-search-in {
+    width: 190px; padding: 5px 10px; border-radius: 999px; font-size: 12.5px;
+    border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.3); color: #fff;
+}
+.chat-head-search-in:focus { outline: none; border-color: rgba(29,185,84,0.5); }
+.chat-search-banner {
+    position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px;
+    padding: 8px 12px; margin-bottom: 8px; border-radius: 10px;
+    background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.25);
+    color: #d9ffe9; font-size: 13px; font-weight: 600;
+}
+.chat-search-banner .chat-filter-btn { margin-left: auto; }
+/* polish: subtle avatar ring so initials read as identity, not blobs */
+.chat-avatar { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.14); }
 
 .chat-main {
     position: relative;   /* containing block for the settings overlay */

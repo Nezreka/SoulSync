@@ -607,6 +607,21 @@ def create_blueprint() -> Blueprint:
         msgs = db.get_chat_messages(room, before=before or None, limit=limit)
         return jsonify({"messages": msgs, "done": len(msgs) < limit})
 
+    @bp.route("/api/chat/room/search", methods=["GET"])
+    def chat_room_search():
+        """Archive search: ?room=&q= → newest-first matches (message text or
+        sender). Local archive only — Soulseek has no server-side history."""
+        db = _db()
+        if db is None:
+            return jsonify({"messages": []})
+        room = _resolve_room(request.args.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
+        qstr = str(request.args.get("q") or "").strip()[:200]
+        if not qstr:
+            return jsonify({"messages": []})
+        return jsonify({"messages": db.search_chat_messages(room, qstr), "q": qstr})
+
     @bp.route("/api/chat/room/message", methods=["POST"])
     def chat_room_send():
         client = _client()
