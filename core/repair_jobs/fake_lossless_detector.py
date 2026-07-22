@@ -5,7 +5,7 @@ import os
 import subprocess
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, skip_deleted_quarantine
+from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.fake_lossless")
@@ -52,20 +52,37 @@ class FakeLosslessDetectorJob(RepairJob):
         settings = self._get_settings(context)
         cutoff_khz = settings.get('spectral_cutoff_khz', 16.0)
 
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return result
-
-        # Collect lossless files
+        # Indexed subjects carry stable catalogue identity. Filesystem-only
+        # subjects remain eligible too: spectral analysis does not require an
+        # import, and dropping those files was a cutover regression.
         lossless_files = []
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in LOSSLESS_EXTENSIONS:
-                    lossless_files.append(os.path.join(root, fname))
+        native_subjects = {}
+        try:
+            from core.library2.maintenance_subjects import active_file_subjects
+            from core.library2.paths import resolve_lib2_path
+
+            for subject in active_file_subjects(
+                context.db, context.config_manager,
+            ):
+                raw = str(subject["path"])
+                if os.path.splitext(raw)[1].lower() not in LOSSLESS_EXTENSIONS:
+                    continue
+                resolved = raw if os.path.isfile(raw) else resolve_lib2_path(
+                    raw, config_manager=context.config_manager)
+                if not resolved or not os.path.isfile(resolved):
+                    continue
+                native_subjects[resolved] = subject
+                lossless_files.append(resolved)
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for resolved in filesystem_audio_files(
+            context, extensions=LOSSLESS_EXTENSIONS,
+        ):
+            if resolved not in native_subjects and resolved not in lossless_files:
+                lossless_files.append(resolved)
 
         total = len(lossless_files)
         if context.update_progress:
@@ -111,12 +128,27 @@ class FakeLosslessDetectorJob(RepairJob):
                             log_type='error'
                         )
                     if context.create_finding:
+                        finding_details = {
+                            'detected_cutoff_khz': round(detected_cutoff, 1),
+                            'expected_min_khz': cutoff_khz,
+                            'sample_rate': sample_rate,
+                            'nyquist_khz': round(max_freq_khz, 1),
+                            'format': os.path.splitext(fpath)[1].lower().lstrip('.'),
+                            'bit_depth': analysis.get('bit_depth'),
+                            'bitrate': analysis.get('bitrate'),
+                            'file_size': os.path.getsize(fpath),
+                        }
+                        subject = native_subjects.get(fpath)
+                        if subject:
+                            from core.library2.maintenance_subjects import subject_details
+
+                            finding_details.update(subject_details(subject))
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='fake_lossless',
                             severity='warning',
                             entity_type='file',
-                            entity_id=None,
+                            entity_id=f"lib2:{subject['track_id']}" if subject else None,
                             file_path=fpath,
                             title=f'Possible fake lossless: {os.path.basename(fpath)}',
                             description=(
@@ -124,16 +156,7 @@ class FakeLosslessDetectorJob(RepairJob):
                                 f'(expected >{cutoff_khz:.1f} kHz for true lossless). '
                                 f'File may be transcoded from a lossy source.'
                             ),
-                            details={
-                                'detected_cutoff_khz': round(detected_cutoff, 1),
-                                'expected_min_khz': cutoff_khz,
-                                'sample_rate': sample_rate,
-                                'nyquist_khz': round(max_freq_khz, 1),
-                                'format': os.path.splitext(fpath)[1].lower().lstrip('.'),
-                                'bit_depth': analysis.get('bit_depth'),
-                                'bitrate': analysis.get('bitrate'),
-                                'file_size': os.path.getsize(fpath),
-                            }
+                            details=finding_details
                         )
                         if inserted:
                             result.findings_created += 1
@@ -163,15 +186,23 @@ class FakeLosslessDetectorJob(RepairJob):
         return merged
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
         count = 0
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in LOSSLESS_EXTENSIONS:
+        try:
+            from core.library2.maintenance_subjects import active_file_subjects
+            for subject in active_file_subjects(context.db, context.config_manager):
+                raw = str(subject.get("path") or "")
+                if os.path.splitext(raw)[1].lower() in LOSSLESS_EXTENSIONS:
                     count += 1
+        except Exception:
+            pass
+        try:
+            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+            count += len(filesystem_audio_files(
+                context, extensions=LOSSLESS_EXTENSIONS,
+            ))
+        except Exception:
+            pass
         return count
 
 

@@ -63,5 +63,17 @@ jobs:
       - name: Build webui
         run: npm run build
 
+      # Audit §16.1: the generated route tree must be committed in sync with
+      # the route files. A diff here means someone edited routes without
+      # committing the regenerated webui/src/routeTree.gen.ts (or edited the
+      # generated file by hand) — routes would differ between dev and the
+      # checked-in tree.
+      - name: Route tree must not drift
+        run: |
+          git diff --exit-code -- src/routeTree.gen.ts || {
+            echo "::error file=webui/src/routeTree.gen.ts::routeTree.gen.ts is stale — run the webui build and commit the regenerated file."
+            exit 1
+          }
+
       - name: Run tests
         run: npm test

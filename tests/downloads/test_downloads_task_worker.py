@@ -439,6 +439,33 @@ def test_no_results_marks_not_found_and_calls_completion():
     assert ('done', ('b1', 't1', False), {}) in rec.calls
 
 
+def test_no_results_reports_acquisition_retry_exhaustion(monkeypatch):
+    track_info = {
+        'id': 'lib2-track:42',
+        'name': 'Money',
+        'artists': ['Pink Floyd'],
+        'album': 'DSOTM',
+        'duration_ms': 383000,
+        '_acquisition_import_id': 'aim1-test',
+    }
+    _seed_task(track_info=track_info)
+    exhausted = []
+    monkeypatch.setattr(
+        tw,
+        '_notify_acquisition_retry_exhausted',
+        lambda context, error: exhausted.append((context, error)) or True,
+    )
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=[]),
+        matching=_FakeMatchEngine(queries=['q1']),
+    )
+
+    tw.download_track_worker('t1', None, deps)
+
+    assert download_tasks['t1']['status'] == 'not_found'
+    assert exhausted == [(track_info, 'No match found after 3 shared-pipeline queries')]
+
+
 def test_results_but_no_valid_candidates_stores_raw_for_review():
     """Each query that returns results contributes top 20 to cached_candidates.
     With legacy fallback queries (track-only, cleaned), multiple queries fire."""

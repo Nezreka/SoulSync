@@ -64,7 +64,10 @@ declare global {
       showReactHost: (pageId: ShellPageId) => void;
       playLibraryTrack: (
         track: {
-          id: string | number;
+          id?: string | number | null;
+          lib2_track_id?: string | number | null;
+          legacy_track_id?: string | number | null;
+          server_track_id?: string | number | null;
           title: string;
           file_path: string;
           bitrate?: string | number | null;

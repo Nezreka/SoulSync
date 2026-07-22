@@ -130,6 +130,18 @@ def register_routes(bp):
             )
             ok = run_async(soulseek.cancel_download(download_id, username, remove=True))
             if ok:
+                # Roadmap 3: an optional, observational correlation must not
+                # alter the established Downloads cancel result.  Native
+                # Acquisition and ordinary legacy downloads are no-ops.
+                try:
+                    from core.acquisition.pipeline_callback import (
+                        notify_correlated_grab_cancelled,
+                    )
+                    notify_correlated_grab_cancelled(download_id)
+                except Exception as correlation_error:  # pragma: no cover - defensive boundary
+                    current_app.logger.debug(
+                        "Correlated grab cancellation skipped for %s: %s",
+                        download_id, correlation_error)
                 return api_success({"message": "Download cancelled."})
             return api_error("CANCEL_FAILED", "Failed to cancel download.", 500)
         except Exception as e:

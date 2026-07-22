@@ -107,6 +107,15 @@ class _DB:
         return self._artists
 
 
+class _V2DB(_DB):
+    def __init__(self, connection, artists=None):
+        super().__init__(artists)
+        self._connection = connection
+
+    def _get_connection(self):
+        return self._connection
+
+
 class _Cfg:
     def __init__(self, values=None):
         self._v = values or {}
@@ -269,6 +278,50 @@ def test_short_query_with_explicit_source_uses_that_source_label():
     result = orchestrator.run_enhanced_search('aa', 'deezer', deps)
     assert result['primary_source'] == 'deezer'
     assert result['metadata_source'] == 'deezer'
+
+
+def test_global_search_merges_v2_only_artists_and_provider_deduplicates(tmp_path):
+    import sqlite3
+
+    path = tmp_path / 'search.sqlite'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE artists(
+            id INTEGER PRIMARY KEY, name TEXT, spotify_artist_id TEXT
+        );
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT, image_url TEXT,
+            spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Shared Artist', 'spotify-shared');
+        INSERT INTO lib2_artists VALUES(
+            11, 'Shared Artist', NULL, 'spotify-shared', NULL, '{}', NULL, NULL
+        );
+        INSERT INTO lib2_artists VALUES(
+            12, 'V2 Native Artist', 'cover.jpg', 'spotify-native', NULL, '{}', NULL, NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+    legacy = _Artist(1, 'Shared Artist')
+    deps = _build_deps(database=_V2DB(
+        sqlite3.connect(path), artists=[legacy],
+    ))
+    deps.database._connection.row_factory = sqlite3.Row
+
+    result = orchestrator.run_enhanced_search('artist', '', deps)
+
+    library = result['db_artists']
+    assert len([artist for artist in library if artist['name'] == 'Shared Artist']) == 1
+    assert next(a for a in library if a['name'] == 'Shared Artist')['library_v2_id'] == 11
+    assert next(a for a in library if a['name'] == 'V2 Native Artist') == {
+        'id': 12,
+        'library_v2_id': 12,
+        'name': 'V2 Native Artist',
+        'image_url': 'FIXED::cover.jpg',
+    }
 
 
 # ---------------------------------------------------------------------------

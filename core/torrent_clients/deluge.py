@@ -75,7 +75,9 @@ class DelugeAdapter:
             or config_manager.get('torrent_client.username', '')
             or ''
         )
-        self._category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
         self._save_path = config_manager.get('torrent_client.save_path', '') or ''
         with self._session_lock:
             self._session = None

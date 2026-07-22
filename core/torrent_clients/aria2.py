@@ -71,7 +71,9 @@ class Aria2Adapter:
         self._url = url
         # aria2 has no username; the RPC secret maps onto the password field.
         self._secret = config_manager.get('torrent_client.password', '') or ''
-        self._category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
         self._save_path = config_manager.get('torrent_client.save_path', '') or ''
 
     def reload_settings(self) -> None:

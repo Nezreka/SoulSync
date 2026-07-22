@@ -80,3 +80,174 @@ def test_profile_scoped_wishlist_clear_not_overgated(client, nonadmin):
     # Clearing your OWN wishlist is profile-scoped data — a non-admin MUST still
     # be allowed. This is the guard against a blanket sweep.
     assert _call(client, 'POST', '/api/wishlist/clear').status_code != 403
+
+
+def test_nonadmin_cannot_attach_library_v2_context(client, nonadmin):
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/song.flac',
+        'lib2_track_id': 1,
+    })
+
+    assert response.status_code == 403
+    assert response.get_json()['error'] == 'Admin access required'
+
+
+def test_normal_nonadmin_download_is_not_admin_gated(client, nonadmin):
+    response = client.post('/api/download', json={'title': 'incomplete'})
+
+    assert response.status_code == 400
+    assert response.get_json()['error'] == 'Missing username or filename.'
+
+
+def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
+    from core.library2.schema import ensure_library_v2_schema
+
+    database = web_server.get_database()
+    conn = database._get_connection()
+    ensure_library_v2_schema(conn)
+    cur = conn.cursor()
+    # The lib2 FK triggers (audit P1-01) reject quality_profile_ids that
+    # don't exist in the app-wide quality_profiles table — create the row
+    # this test assigns instead of assuming bare ids pass.
+    cur.execute(
+        "INSERT OR IGNORE INTO quality_profiles(id, name) VALUES(7, 'Route Profile')")
+    cur.execute("INSERT INTO lib2_artists(name) VALUES('Route Artist')")
+    artist_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id) "
+        "VALUES(?, 'Route Album', 7)", (artist_id,))
+    album_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_tracks(album_id, title, quality_profile_id) "
+        "VALUES(?, 'Route Track', 7)", (album_id,))
+    track_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*_args):
+            return object()
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, 'run_async', lambda _result: 'download-id')
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+
+    key = web_server._make_context_key('user', 'folder/song.flac')
+    web_server.matched_downloads_context.pop(key, None)
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/song.flac',
+        'title': 'Route Track',
+        'artist': 'Route Artist',
+        'album_name': 'Route Album',
+        'quality_profile_id': 999,
+        'lib2_track_id': track_id,
+    })
+
+    assert response.status_code == 200
+    context = web_server.matched_downloads_context.pop(key)
+    assert context['lib2_entity']['track_id'] == track_id
+    assert context['track_info']['quality_profile_id'] == 7
+    assert context['track_info']['name'] == 'Route Track'
+    assert context['track_info']['artists'] == [{'name': 'Route Artist'}]
+
+
+def test_admin_manual_download_without_lib2_context_is_correlated(client, monkeypatch):
+    calls = []
+    order = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*_args):
+            order.append('dispatch')
+            return object()
+
+    def _capture(username, search_result, lib2_ctx, **kwargs):
+        order.append('prepare')
+        calls.append((username, search_result, lib2_ctx, kwargs))
+        return {"download_id": "manual-shadow", "request_id": "arq1-shadow"}
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, 'run_async', lambda _result: 'download-id')
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+    monkeypatch.setattr(web_server, '_prepare_manual_grab', _capture)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab,
+        'bind_correlated_grab_transfer',
+        lambda markers, transfer_id: order.append(
+            ('bind', markers['download_id'], transfer_id)),
+    )
+
+    key = web_server._make_context_key('user', 'folder/shadow.flac')
+    web_server.matched_downloads_context.pop(key, None)
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/shadow.flac',
+        'title': 'Shadow Track',
+        'artist': 'Shadow Artist',
+        'album_name': 'Shadow Album',
+    })
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert order == [
+        'prepare',
+        'dispatch',
+        ('bind', 'manual-shadow', 'download-id'),
+    ]
+    assert calls[0][2] is None
+    assert calls[0][1]['title'] == 'Shadow Track'
+    context = web_server.matched_downloads_context.pop(key)
+    assert context['_acquisition_grab_download_id'] == 'manual-shadow'
+
+
+def test_manual_enforcement_blocks_dispatch_when_preparation_fails(
+        client, monkeypatch):
+    download_calls = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*args):
+            download_calls.append(args)
+            return object()
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, '_prepare_manual_grab', lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        web_server, '_manual_acquisition_preparation_required', lambda _u: True)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, 'correlation_enforcement_enabled', lambda: True)
+    outcomes = []
+    from core.acquisition import correlation_coverage
+    monkeypatch.setattr(
+        correlation_coverage,
+        'record_correlation_outcome_fail_open',
+        lambda consumer, outcome: outcomes.append((consumer, outcome)),
+    )
+
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/not-started.flac',
+        'title': 'Not Started',
+        'artist': 'Artist',
+    })
+
+    assert response.status_code == 503
+    assert response.get_json()['error'].startswith(
+        'Acquisition preparation unavailable')
+    assert download_calls == []
+    assert outcomes == [('manual', 'blocked')]
+
+
+def test_manual_enforcement_exempts_non_recording_sources(monkeypatch):
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, 'correlation_enforcement_enabled', lambda: True)
+    monkeypatch.setattr(
+        web_server, '_manual_acquisition_preparation_required', lambda _u: False)
+
+    assert not web_server._manual_acquisition_dispatch_blocked('usenet', None)

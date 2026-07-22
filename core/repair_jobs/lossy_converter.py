@@ -91,29 +91,38 @@ class LossyConverterJob(RepairJob):
         out_ext = CODEC_MAP.get(codec, '.mp3')
         quality_label = f'{codec.upper()}-{bitrate}'
 
-        # Get all FLAC tracks from DB
+        # Enumerate the authoritative native file index.
         tracks = []
-        conn = None
+        native_subjects = {}
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path,
-                       al.thumb_url, ar.thumb_url, ar.id
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND {_lossless_ext_where('t.file_path')}
-            """)
-            tracks = cursor.fetchall()
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            for subject in active_file_subjects(
+                context.db, context.config_manager,
+            ):
+                file_path = str(subject["path"])
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext not in LOSSLESS_CANDIDATE_EXTENSIONS:
+                    continue
+                native_subjects[file_path] = subject
+                tracks.append((
+                    f"lib2:{subject['track_id']}", subject["title"],
+                    subject["artist_name"], subject["album_title"], file_path,
+                    subject.get("album_image"), subject.get("artist_image"),
+                ))
         except Exception as e:
-            logger.error("Error fetching tracks: %s", e)
+            logger.warning("V2 subject enumeration failed: %s", e)
             result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for file_path in filesystem_audio_files(
+            context, extensions=LOSSLESS_CANDIDATE_EXTENSIONS,
+        ):
+            tracks.append((
+                None, os.path.splitext(os.path.basename(file_path))[0],
+                None, os.path.basename(os.path.dirname(file_path)), file_path,
+                None, None,
+            ))
 
         total = len(tracks)
         if context.update_progress:
@@ -140,7 +149,7 @@ class LossyConverterJob(RepairJob):
             if i % 200 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb, artist_id = row
+            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb = row
             result.scanned += 1
 
             if context.report_progress and i % 50 == 0:
@@ -152,8 +161,18 @@ class LossyConverterJob(RepairJob):
                 )
 
             # Resolve path
-            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
-                                           config_manager=context.config_manager)
+            subject = native_subjects.get(str(file_path))
+            if subject:
+                if os.path.isfile(file_path):
+                    resolved = file_path
+                else:
+                    from core.library2.paths import resolve_lib2_path
+
+                    resolved = resolve_lib2_path(
+                        file_path, config_manager=context.config_manager)
+            else:
+                resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
+                                              config_manager=context.config_manager)
             if not resolved or not os.path.exists(resolved):
                 skipped_missing += 1
                 continue
@@ -183,33 +202,37 @@ class LossyConverterJob(RepairJob):
             if context.create_finding:
                 try:
                     file_size = os.path.getsize(resolved)
+                    finding_details = {
+                        'track_id': track_id,
+                        'title': title,
+                        'artist': artist_name,
+                        'album': album_title,
+                        'file_path': file_path,
+                        'resolved_path': resolved,
+                        'codec': codec,
+                        'bitrate': bitrate,
+                        'quality_label': quality_label,
+                        'file_size': file_size,
+                        'album_thumb_url': album_thumb or None,
+                        'artist_thumb_url': artist_thumb or None,
+                    }
+                    if subject:
+                        from core.library2.maintenance_subjects import subject_details
+
+                        finding_details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lossy_copy',
                         severity='info',
-                        entity_type='track',
-                        entity_id=str(track_id),
+                        entity_type='track' if subject else 'file',
+                        entity_id=str(track_id) if track_id is not None else None,
                         file_path=file_path,
                         title=f'No {quality_label} copy: {title or "Unknown"}',
                         description=(
                             f'Lossless file "{title}" by {artist_name or "Unknown"} does not have '
                             f'a {quality_label} copy alongside it'
                         ),
-                        details={
-                            'track_id': track_id,
-                            'title': title,
-                            'artist': artist_name,
-                            'album': album_title,
-                            'file_path': file_path,
-                            'resolved_path': resolved,
-                            'codec': codec,
-                            'bitrate': bitrate,
-                            'quality_label': quality_label,
-                            'file_size': file_size,
-                            'album_thumb_url': album_thumb or None,
-                            'artist_thumb_url': artist_thumb or None,
-                            'artist_id': artist_id,
-                        }
+                        details=finding_details
                     )
                     if inserted:
                         result.findings_created += 1
@@ -242,19 +265,26 @@ class LossyConverterJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
+        count = 0
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-                  AND {_lossless_ext_where('file_path')}
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            count += sum(
+                1 for subject in active_file_subjects(
+                    context.db, context.config_manager,
+                ) if os.path.splitext(str(subject.get("path") or ""))[1].lower()
+                in LOSSLESS_CANDIDATE_EXTENSIONS
+            )
         except Exception:
-            return 0
-        finally:
-            if conn:
-                conn.close()
+            pass
+        try:
+            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+            count += sum(
+                1 for path in filesystem_audio_files(
+                    context, extensions=LOSSLESS_CANDIDATE_EXTENSIONS,
+                ) if os.path.splitext(path)[1].lower() in LOSSLESS_CANDIDATE_EXTENSIONS
+            )
+        except Exception:
+            pass
+        return count

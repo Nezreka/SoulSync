@@ -1,0 +1,1985 @@
+"""Import the existing (legacy) library into the Library v2 ``lib2_*`` tables.
+
+This reads the legacy ``artists`` / ``albums`` / ``tracks`` tables **read-only** and
+populates the v2 schema. It is:
+
+- **Idempotent / re-runnable** — rows are keyed on their ``legacy_*_id`` so a second
+  run reconciles instead of duplicating. ``reset=True`` wipes ``lib2_*`` first for a
+  clean rebuild.
+- **Defensive about columns** — the legacy schema has many migration-added columns
+  that vary by install, so every SELECT is built from the columns that actually
+  exist (``_existing_columns``).
+- **Multi-artist aware** — a track's primary artist is its album artist; additional
+  credits are parsed from the legacy ``track_artist`` field and from ``feat.`` /
+  ``ft.`` markers in the title (``split_artist_credits``) and linked through the
+  ``lib2_track_artists`` junction so the song is stored once but shows under each
+  artist.
+- **Single-vs-album aware** — after import, the same recording appearing both as a
+  ``single`` and on a regular album is linked via ``canonical_track_id``
+  (``link_single_album_duplicates``).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import uuid
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+
+from utils.logging_config import get_logger
+
+from .profile_lookup import default_quality_profile_id
+from .schema import ensure_library_v2_schema
+
+logger = get_logger("library2.importer")
+
+ProgressCb = Optional[Callable[[str, int, int], None]]
+
+# Credit separators: "feat."/"ft."/"featuring"/"with" plus list separators.
+_FEAT_RE = re.compile(
+    r"\b(?:feat|ft|featuring|with)\b\.?|\bw/",
+    re.IGNORECASE,
+)
+_FEAT_IN_TITLE_RE = re.compile(
+    r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with|w/)\s+([^)\]]+)[\)\]]",
+    re.IGNORECASE,
+)
+# A bare (un-parenthesized) trailing featured-artist credit, e.g. "Song feat. X".
+# "with" is intentionally excluded here — bare "with" is too ambiguous (e.g.
+# "Dancing With Myself"); only the parenthesized form above strips a "with" credit.
+_FEAT_TITLE_TAIL_RE = re.compile(r"\s+(?:featuring|feat|ft)\b\.?\s+\S.*$", re.IGNORECASE)
+_LIST_SEP_RE = re.compile(r"\s*(?:,|;|/|&|\bx\b|\band\b|\bvs\.?\b|×|\+)\s*", re.IGNORECASE)
+# These markers communicate a collaboration rather than merely looking like a
+# list.  Commas, ``&``, ``and``, ``/`` and ``+`` are intentionally absent:
+# they are also ordinary parts of providerless band names.
+_EXPLICIT_CREDIT_RE = re.compile(
+    r"\b(?:feat|ft|featuring|with)\b\.?|\bw/|\s(?:x|vs\.?)\s|\s×\s",
+    re.IGNORECASE,
+)
+
+
+def normalize_name(name: str) -> str:
+    """Casefold + collapse whitespace for dedup keys. Not for display."""
+    return re.sub(r"\s+", " ", (name or "").strip()).casefold()
+
+
+def release_title_key(title: str) -> str:
+    """Release-title identity key for dedup (§62.3). Not for display.
+
+    Stricter than ``normalize_name``: NFKC folds width/compatibility forms
+    (full-width ：, quotes), then punctuation is treated as a separator so
+    `TV Anime "Attack on Titan" OST` and its quote-less provider variant
+    collapse to one key. Word characters (incl. CJK) are untouched — this
+    never merges genuinely different titles, only punctuation variants.
+    """
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(title or "")).casefold()
+    return " ".join(part for part in re.split(r"\W+", text) if part)
+
+
+_SPOTIFY_ID_RE = re.compile(r"^[0-9A-Za-z]{22}$")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def looks_like_spotify_id(value: Any) -> bool:
+    """Whether a provider id has real Spotify shape (22-char base62)."""
+    text = str(value or "").strip()
+    return bool(_SPOTIFY_ID_RE.match(text)) and not text.isdigit()
+
+
+def looks_like_foreign_provider_id(value: Any) -> bool:
+    """Whether an id CANNOT be a Spotify id (§62.4's poison signature).
+
+    Legacy payloads label the ACTIVE provider's id "spotify" — numeric
+    Deezer/iTunes ids and MusicBrainz UUIDs ended up in spotify_id columns
+    and broke every later id match. Spotify ids are 22-char base62 and never
+    purely numeric or UUID-shaped, so those two shapes are safe to reject
+    without touching odd-but-possible values."""
+    text = str(value or "").strip()
+    return bool(text) and (text.isdigit() or bool(_UUID_RE.match(text)))
+
+
+def split_artist_credits(*sources: str) -> List[str]:
+    """Split one or more raw artist/credit strings into individual artist names.
+
+    Handles ``"A feat. B"``, ``"A, B & C"``, ``"A x B"``, ``"A / B"`` etc. Order is
+    preserved and duplicates (case-insensitive) are dropped. Empty inputs yield an
+    empty list.
+    """
+    out: List[str] = []
+    seen: Set[str] = set()
+    for raw in sources:
+        if not raw:
+            continue
+        # Promote any "feat." segment to a plain separator, then split the list.
+        flattened = _FEAT_RE.sub(",", raw)
+        for piece in _LIST_SEP_RE.split(flattened):
+            name = piece.strip().strip("-").strip()
+            if not name:
+                continue
+            key = normalize_name(name)
+            if key and key not in seen:
+                seen.add(key)
+                out.append(name)
+    return out
+
+
+def featured_from_title(title: str) -> List[str]:
+    """Extract featured-artist names embedded in a track title's ``(feat. X)`` tail."""
+    names: List[str] = []
+    for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
+        names.extend(split_artist_credits(match.group(1)))
+    return names
+
+
+def _credit_names_for_import(
+    raw: str,
+    known_name: Callable[[str], bool],
+    *,
+    split_with_known_anchor: bool = False,
+) -> List[str]:
+    """Resolve a flat legacy credit without inventing provider identities.
+
+    ``split_artist_credits`` remains the deliberately liberal syntax parser used
+    when the input is known to describe a list.  A legacy ``track_artist`` value
+    does not carry that guarantee: ``Earth, Wind & Fire`` and ``Hall & Oates``
+    are complete artist names, not three/two separate identities.  We therefore
+    split at ambiguous punctuation only when the complete credit or every
+    resulting component is already known.  Explicit collaboration markers
+    (``feat.``, ``x``, ``vs``...) retain the existing multi-artist behaviour.
+
+    Unknown ambiguous text is preserved losslessly as one credit.  A later
+    provider match or manual alias link can refine it; creating several phantom
+    artists cannot be reversed reliably from the source text alone (P2-24).
+    """
+    display = (raw or "").strip()
+    if not display:
+        return []
+    if known_name(display):
+        return [display]
+
+    pieces = split_artist_credits(display)
+    if len(pieces) <= 1:
+        return pieces
+    if _EXPLICIT_CREDIT_RE.search(display):
+        return pieces
+    if all(known_name(piece) for piece in pieces):
+        return pieces
+    if split_with_known_anchor and any(known_name(piece) for piece in pieces):
+        return pieces
+    return [display]
+
+
+def _featured_names_for_import(
+    title: str, known_name: Callable[[str], bool]
+) -> List[str]:
+    """Extract title credits through the same P2-24 identity guard."""
+    names: List[str] = []
+    for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
+        # A title's ``feat.`` wrapper establishes that this is a guest-credit
+        # list.  One already known component is enough to disambiguate its
+        # conjunctions; with no known anchor we still preserve an unknown band
+        # name as a unit.
+        names.extend(
+            _credit_names_for_import(
+                match.group(1), known_name, split_with_known_anchor=True
+            )
+        )
+    return names
+
+
+def dedup_title_key(title: str) -> str:
+    """Grouping key for single↔album duplicate detection.
+
+    Drops a featured-artist annotation (``(feat. …)`` / ``[ft. …]`` /
+    ``featuring …``) so the same recording links across releases even when only
+    one side spells out the guests — the common real-world reason a single and
+    its album cut carry different raw titles (#39). Version qualifiers (Remix,
+    Live, Remastered, Acoustic, …) are deliberately preserved: those are distinct
+    recordings and must not be collapsed into one canonical row.
+    """
+    text = _FEAT_IN_TITLE_RE.sub("", title or "")   # drop "(feat. …)"/"(with …)" groups
+    text = _FEAT_TITLE_TAIL_RE.sub("", text)         # drop a bare trailing "feat. …"
+    return normalize_name(text)
+
+
+def _existing_columns(cursor, table: str) -> Set[str]:
+    cursor.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in cursor.fetchall()}
+
+
+def _pick(row: Any, *keys: str) -> Optional[Any]:
+    """Return the first non-empty value among ``keys`` from a sqlite3.Row, or None."""
+    for key in keys:
+        try:
+            val = row[key]
+        except (IndexError, KeyError):
+            continue
+        if val not in (None, ""):
+            return val
+    return None
+
+
+def _legacy_spotify_id(row: Any, *keys: str) -> Optional[Any]:
+    """A legacy spotify_* column value — unless its shape proves it is
+    another provider's id (§62.4: legacy enrichment stored iTunes/Deezer ids
+    under spotify_* names). Foreign-shaped values are dropped here; they
+    reach lib2 through their own itunes/deezer/… mappings instead."""
+    value = _pick(row, *keys)
+    if value is not None and looks_like_foreign_provider_id(value):
+        return None
+    return value
+
+
+def _legacy_key(legacy_id: Any) -> Optional[str]:
+    """Normalize a legacy row id to a stable dict key.
+
+    A legacy ``artists``/``albums``/``tracks`` id can be TEXT (soulsync/Deezer-
+    generated, e.g. '630009860') while the lib2 back-reference columns
+    (``legacy_artist_id``/``legacy_album_id``/``legacy_track_id``) are
+    INTEGER-affinity, so the SAME id round-trips as int on re-seed but str on
+    lookup. Without coercion the re-import maps (``_by_legacy``/``album_map``/
+    ``track_map``) miss the existing row and INSERT a duplicate every run
+    (#38/#40 — duplicate artists AND albums/EPs/singles on re-import). Coerce to
+    str on both write and read so re-imports always match the same row."""
+    return None if legacy_id is None else str(legacy_id)
+
+
+def _detect_single(track_count: Optional[int], actual_tracks: int) -> bool:
+    """A legacy album with a single track is treated as a 'single'."""
+    count = track_count if track_count else actual_tracks
+    return bool(count) and count <= 1
+
+
+def _normalize_album_type(raw: Any, track_count: Optional[int], actual_tracks: int) -> str:
+    """Return a stable release type for the v2 release row.
+
+    Prefer explicit provider metadata when the legacy DB has it. Only fall back to
+    the one-track heuristic for old rows that have no release-type metadata at all.
+    """
+    value = str(raw or "").strip().lower()
+    if value in {"album", "single", "ep", "compilation", "live"}:
+        return value
+    if value in {"appears_on", "appears-on"}:
+        return "compilation"
+    return "single" if _detect_single(track_count, actual_tracks) else "album"
+
+
+def _merge_external_ids(cursor, table: str, entity_id: int, ids: Dict[str, Any]) -> None:
+    """Merge {source: id} into an entity's ``external_ids`` JSON column (never
+    overwrites an existing source, so a discography-claimed row keeps its
+    provider ids). Shared by albums and tracks — used to import EVERY provider
+    id the legacy row carries, not only the ones with a dedicated column."""
+    clean = {
+        str(source).strip().lower(): str(value).strip()
+        for source, value in ids.items()
+        if value not in (None, "") and str(value).strip()
+    }
+    if not clean:
+        return
+    row = cursor.connection.execute(
+        f"SELECT external_ids FROM {table} WHERE id=?", (entity_id,)).fetchone()
+    try:
+        current = json.loads((row["external_ids"] if row else None) or "{}")
+        if not isinstance(current, dict):
+            current = {}
+    except (TypeError, ValueError):
+        current = {}
+    merged = dict(current)
+    for source, value in clean.items():
+        merged.setdefault(source, value)
+    if merged != current:
+        cursor.execute(
+            f"UPDATE {table} SET external_ids=? WHERE id=?",
+            (json.dumps(merged, sort_keys=True, separators=(",", ":")), entity_id))
+
+
+def _merge_album_external_ids(cursor, album_id: int, ids: Dict[str, Any]) -> None:
+    _merge_external_ids(cursor, "lib2_albums", album_id, ids)
+
+
+def _merge_track_external_ids(cursor, track_id: int, ids: Dict[str, Any]) -> None:
+    _merge_external_ids(cursor, "lib2_tracks", track_id, ids)
+
+
+def _parse_json_list(raw: Any) -> Optional[List[Any]]:
+    """Best-effort parse of a JSON-array-shaped legacy TEXT column. Returns
+    None (not []) when there's nothing usable, so callers can drop the key
+    entirely rather than storing an empty list."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, list) and parsed else None
+
+
+def _artist_enrichment_payload(row: Any) -> Dict[str, Dict[str, Any]]:
+    """Provider-specific bio/stats fields (§17.7 remainder) the legacy row may
+    carry, keyed by source. These are enrichment content, not identity (unlike
+    ``external_ids``), so they're grouped per-provider instead of flattened —
+    a Last.fm bio and a Genius description are different text, not the same
+    field from two sources."""
+    lastfm = {
+        "bio": _pick(row, "lastfm_bio"),
+        "listeners": _pick(row, "lastfm_listeners"),
+        "tags": _parse_json_list(_pick(row, "lastfm_tags")),
+        "similar": _parse_json_list(_pick(row, "lastfm_similar")),
+        "url": _pick(row, "lastfm_url"),
+    }
+    genius = {
+        "description": _pick(row, "genius_description"),
+        "alt_names": _parse_json_list(_pick(row, "genius_alt_names")),
+        "url": _pick(row, "genius_url"),
+    }
+    discogs = {
+        "bio": _pick(row, "discogs_bio"),
+        "members": _parse_json_list(_pick(row, "discogs_members")),
+        "urls": _parse_json_list(_pick(row, "discogs_urls")),
+    }
+    out: Dict[str, Dict[str, Any]] = {}
+    for source, fields in (("lastfm", lastfm), ("genius", genius), ("discogs", discogs)):
+        cleaned = {k: v for k, v in fields.items() if v not in (None, "", [])}
+        if cleaned:
+            out[source] = cleaned
+    return out
+
+
+def _merge_artist_enrichment(cursor, artist_id: int, payload: Dict[str, Dict[str, Any]]) -> None:
+    """Merge provider enrichment into the artist's ``enrichment`` JSON column,
+    filling only fields not already set (per-provider, per-field) — mirrors
+    ``_merge_external_ids``'s never-overwrite semantics so a thinner re-import
+    never clobbers richer data an earlier import already captured."""
+    if not payload:
+        return
+    row = cursor.connection.execute(
+        "SELECT enrichment FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
+    try:
+        current = json.loads((row["enrichment"] if row else None) or "{}")
+        if not isinstance(current, dict):
+            current = {}
+    except (TypeError, ValueError):
+        current = {}
+    merged = {k: dict(v) for k, v in current.items() if isinstance(v, dict)}
+    for source, fields in payload.items():
+        bucket = merged.setdefault(source, {})
+        for field, value in fields.items():
+            bucket.setdefault(field, value)
+    if merged != current:
+        cursor.execute(
+            "UPDATE lib2_artists SET enrichment=? WHERE id=?",
+            (json.dumps(merged, sort_keys=True, separators=(",", ":")), artist_id))
+
+
+def _extra_provider_ids(row: Any, entity_type: str, exclude: Set[str]) -> Dict[str, Any]:
+    """Provider ids for ``entity_type`` ('album'|'track') from the legacy row,
+    keyed by source, for every service ``match_status.SERVICES`` maps to a
+    column on this entity type — except ``exclude`` (services already handled
+    by the caller's own dedicated-column ``_pick`` logic). This is the same
+    service->column mapping the match-status chips already trust, so a new
+    provider only needs to be added there to be picked up here too."""
+    from .match_status import SERVICES
+    out: Dict[str, Any] = {}
+    for service, _label, id_cols in SERVICES:
+        if service in exclude:
+            continue
+        col = id_cols.get(entity_type)
+        if col:
+            out[service] = _pick(row, col)
+    return out
+
+
+class _ArtistResolver:
+    """Resolves artist names to ``lib2_artists`` ids, creating rows on demand.
+
+    Legacy artists are pre-seeded keyed on ``legacy_artist_id`` *and* normalized
+    name, so featured artists parsed out of titles reuse an existing artist row when
+    the name matches, and only create a new row when genuinely new.
+    """
+
+    def __init__(self, cursor, default_profile_id: int):
+        self.cursor = cursor
+        self.default_profile_id = default_profile_id
+        self._by_name: Dict[str, int] = {}
+        self._by_legacy: Dict[str, int] = {}
+        # (source, provider-id) -> artist id. Any source counts — SoulSync is
+        # multi-source (Deezer is the DEFAULT), so identity must key on ANY
+        # provider id, not just Spotify. Keying on the source TOO (§62.6
+        # Stufe 5) keeps numerically-colliding ids of different providers
+        # (a Deezer id equal to some iTunes id) from merging two artists.
+        self._by_provider: Dict[tuple, int] = {}
+
+    @staticmethod
+    def _clean_ids(ids: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for source, value in (ids or {}).items():
+            src = str(source).strip().lower()
+            val = str(value).strip() if value not in (None, "") else ""
+            if src and val:
+                out[src] = val
+        return out
+
+    def _register(self, artist_id: int, ids: Dict[str, str]) -> None:
+        for source, value in ids.items():
+            self._by_provider.setdefault((source, value), artist_id)
+
+    def _row_legacy_id(self, artist_id: int) -> Optional[Any]:
+        row = self.cursor.connection.execute(
+            "SELECT legacy_artist_id FROM lib2_artists WHERE id=?",
+            (artist_id,)).fetchone()
+        return row["legacy_artist_id"] if row else None
+
+    def _stored_ids(self, artist_id: int) -> Dict[str, str]:
+        """The artist's current source→id map (external_ids + the two columns)."""
+        row = self.cursor.connection.execute(
+            "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists WHERE id=?",
+            (artist_id,)).fetchone()
+        if not row:
+            return {}
+        ids: Dict[str, str] = {}
+        try:
+            raw = json.loads(row["external_ids"] or "{}")
+            if isinstance(raw, dict):
+                ids.update(self._clean_ids(raw))
+        except (TypeError, ValueError):
+            pass
+        if row["spotify_id"]:
+            ids.setdefault("spotify", str(row["spotify_id"]))
+        if row["musicbrainz_id"]:
+            ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+        return ids
+
+    def _merge_ids(self, artist_id: int, ids: Dict[str, str]) -> None:
+        """Adopt any NEW provider ids onto an existing artist (never overwrite)."""
+        stored = self._stored_ids(artist_id)
+        merged = dict(stored)
+        for source, value in ids.items():
+            merged.setdefault(source, value)
+        if merged != stored:
+            self.cursor.execute(
+                "UPDATE lib2_artists SET external_ids=?, "
+                "spotify_id=COALESCE(NULLIF(spotify_id,''), ?), "
+                "musicbrainz_id=COALESCE(NULLIF(musicbrainz_id,''), ?), "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (json.dumps(merged, sort_keys=True, separators=(",", ":")),
+                 merged.get("spotify"), merged.get("musicbrainz"), artist_id),
+            )
+        self._register(artist_id, merged)
+
+    def seed_existing(self) -> None:
+        self.cursor.execute(
+            "SELECT id, name, legacy_artist_id, spotify_id, musicbrainz_id, "
+            "external_ids FROM lib2_artists")
+        for row in self.cursor.fetchall():
+            self._by_name.setdefault(normalize_name(row["name"]), row["id"])
+            if row["legacy_artist_id"] is not None:
+                self._by_legacy[_legacy_key(row["legacy_artist_id"])] = row["id"]
+            ids: Dict[str, str] = {}
+            try:
+                raw = json.loads(row["external_ids"] or "{}")
+                if isinstance(raw, dict):
+                    ids.update(self._clean_ids(raw))
+            except (TypeError, ValueError):
+                pass
+            if row["spotify_id"]:
+                ids.setdefault("spotify", str(row["spotify_id"]))
+            if row["musicbrainz_id"]:
+                ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+            self._register(row["id"], ids)
+
+    def get_legacy(self, legacy_id: Any) -> Optional[int]:
+        return self._by_legacy.get(_legacy_key(legacy_id))
+
+    def known_name(self, name: str) -> bool:
+        """Whether an artist with exactly this (normalized) name already exists."""
+        return normalize_name(name) in self._by_name
+
+    def get_or_create_by_name(self, name: str, *,
+                              provider_ids: Optional[Dict[str, Any]] = None,
+                              spotify_id: Optional[str] = None,
+                              musicbrainz_id: Optional[str] = None) -> int:
+        """Resolve an artist name to a lib2 id, disambiguating by provider id.
+
+        A provider id (from ANY source — Deezer, MusicBrainz, Spotify, …) is the
+        authoritative key (§16.3(b)): two artists sharing a display name but
+        carrying DIFFERENT ids are distinct entities, and the same id always
+        resolves to the same row even under a different display name — this is
+        what stops an album from being hung on the wrong same-named artist (and
+        its real tracklist never being fetchable). Only when no id matches do we
+        fall back to the normalized-name key. A same-named row whose stored id
+        CONFLICTS for the same source forces a new row; otherwise any new ids are
+        adopted. ``spotify_id`` / ``musicbrainz_id`` are convenience aliases for
+        ``provider_ids={'spotify': …, 'musicbrainz': …}``.
+        """
+        ids = self._clean_ids(provider_ids)
+        if spotify_id:
+            ids.setdefault("spotify", str(spotify_id).strip())
+        if musicbrainz_id:
+            ids.setdefault("musicbrainz", str(musicbrainz_id).strip())
+        ids = self._clean_ids(ids)
+
+        # 1) authoritative provider-id match (any source beats the name key)
+        for source, value in ids.items():
+            hit = self._by_provider.get((source, value))
+            if hit is not None:
+                self._merge_ids(hit, ids)
+                return hit
+
+        # 2) name match — reuse unless a stored id conflicts for the same source
+        key = normalize_name(name)
+        existing = self._by_name.get(key)
+        if existing is not None:
+            stored = self._stored_ids(existing)
+            conflict = any(src in stored and stored[src] != val
+                           for src, val in ids.items())
+            if not conflict:
+                self._merge_ids(existing, ids)  # adopt any new ids
+                return existing
+
+        # 3) create a fresh row (may share a name but is id-distinct)
+        self.cursor.execute(
+            "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
+            "external_ids, quality_profile_id, monitored) VALUES(?,?,?,?,?,?,?)",
+            (name, name, ids.get("spotify"), ids.get("musicbrainz"),
+             json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}",
+             self.default_profile_id, 0),
+        )
+        new_id = self.cursor.lastrowid
+        self._by_name.setdefault(key, new_id)  # keep first-seen for name-only lookups
+        self._register(new_id, ids)
+        return new_id
+
+    def upsert_legacy(
+        self, legacy_id: Any, fields: Dict[str, Any], run_id: str
+    ) -> int:
+        """Insert or update a lib2 artist mirrored from a legacy artist row.
+
+        Captures EVERY provider id the legacy row carries (``fields['provider_ids']``
+        = source→id, e.g. spotify/deezer/musicbrainz) into ``external_ids`` so a
+        non-Spotify (e.g. Deezer-primary) library keeps its full identity — not
+        just the two well-known columns.
+        """
+        ids = self._clean_ids(fields.get("provider_ids"))
+        if fields.get("spotify_id"):
+            ids.setdefault("spotify", str(fields["spotify_id"]).strip())
+        if fields.get("musicbrainz_id"):
+            ids.setdefault("musicbrainz", str(fields["musicbrainz_id"]).strip())
+        existing = self._by_legacy.get(_legacy_key(legacy_id))
+        adopted = False
+        if existing is None:
+            # §62.6 Stufe 4: a wishlist-materialize/autolink may have created
+            # this artist (name-only or with partial ids) BEFORE the first
+            # legacy import ran — §62.1's timeline. Inserting blindly here
+            # minted the same-named twin (artist 31/32); adopt that row
+            # instead, with the same disambiguation rules as
+            # ``get_or_create_by_name``: any shared provider-id value wins,
+            # then a same-name row without a conflicting same-source id.
+            # Never steal a row that already mirrors ANOTHER legacy artist.
+            for source, value in ids.items():
+                hit = self._by_provider.get((source, value))
+                if hit is not None and self._row_legacy_id(hit) is None:
+                    existing, adopted = hit, True
+                    break
+            if existing is None:
+                candidate = self._by_name.get(normalize_name(fields["name"]))
+                if candidate is not None and self._row_legacy_id(candidate) is None:
+                    stored = self._stored_ids(candidate)
+                    conflict = any(src in stored and stored[src] != val
+                                   for src, val in ids.items())
+                    if not conflict:
+                        existing, adopted = candidate, True
+        if existing is not None:
+            row_ids = dict(ids)
+            if adopted:
+                # The adopted row may carry ids the legacy mirror lacks —
+                # keep them (never-overwrite semantics, like _merge_ids).
+                row_ids = self._stored_ids(existing)
+                for source, value in ids.items():
+                    row_ids.setdefault(source, value)
+            external_json = (json.dumps(row_ids, sort_keys=True, separators=(",", ":"))
+                             if row_ids else "{}")
+            self.cursor.execute(
+                "UPDATE lib2_artists SET name=?, sort_name=?, spotify_id=?, "
+                "musicbrainz_id=?, external_ids=?, image_url=?, genres=?, summary=?, "
+                "style=COALESCE(?, style), mood=COALESCE(?, mood), "
+                "label=COALESCE(?, label), banner_url=COALESCE(?, banner_url), "
+                "aliases=?, legacy_artist_id=?, "
+                "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (fields["name"], fields["sort_name"], row_ids.get("spotify"),
+                 row_ids.get("musicbrainz"),
+                 external_json, fields["image_url"], fields["genres"],
+                 fields["summary"], fields["style"], fields["mood"],
+                 fields["label"], fields["banner_url"], fields["aliases"],
+                 legacy_id, run_id, existing),
+            )
+            self._by_legacy[_legacy_key(legacy_id)] = existing
+            self._by_name.setdefault(normalize_name(fields["name"]), existing)
+            self._register(existing, row_ids)
+            return existing
+        external_json = json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}"
+        spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
+        self.cursor.execute(
+            "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
+            "external_ids, image_url, genres, summary, style, mood, label, "
+            "banner_url, aliases, legacy_artist_id, quality_profile_id, "
+            "legacy_import_run_id, monitored) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (fields["name"], fields["sort_name"], spotify_col, mbid_col, external_json,
+             fields["image_url"], fields["genres"], fields["summary"],
+             fields["style"], fields["mood"], fields["label"], fields["banner_url"],
+             fields["aliases"], legacy_id, self.default_profile_id, run_id, 0),
+        )
+        new_id = self.cursor.lastrowid
+        self._by_legacy[_legacy_key(legacy_id)] = new_id
+        self._by_name.setdefault(normalize_name(fields["name"]), new_id)
+        self._register(new_id, ids)
+        return new_id
+
+
+def _discography_album_index(cursor) -> Dict[Tuple[int, str], List[Dict[str, Any]]]:
+    """Preload claimable provider-only releases for O(1) legacy matching."""
+    rows = cursor.execute(
+        """SELECT id, primary_artist_id, title, album_type FROM lib2_albums
+            WHERE origin='discography' AND legacy_album_id IS NULL"""
+    ).fetchall()
+    index: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
+    for row in rows:
+        index.setdefault(
+            (int(row["primary_artist_id"]), release_title_key(row["title"])), []
+        ).append(dict(row))
+    return index
+
+
+def _claim_discography_album(
+    cursor,
+    artist_id: int,
+    title: str,
+    album_type: str,
+    *,
+    index: Optional[Dict[Tuple[int, str], List[Dict[str, Any]]]] = None,
+) -> Optional[int]:
+    """Find a provider-only (origin='discography') row matching a legacy album.
+
+    A discography expansion may have created the release before the user's files
+    were imported; claiming that row (instead of inserting a fresh one) keeps a
+    single release identity — its monitor state and metadata carry over.
+    Matching mirrors ``core/library2/discography.py``: normalized title, prefer
+    the same single-vs-release bucket.
+    """
+    key = release_title_key(title)
+    want_single = (album_type or "").lower() == "single"
+    if index is None:
+        index = _discography_album_index(cursor)
+    candidates = index.get((int(artist_id), key), [])
+    if not candidates:
+        return None
+    selected = next(
+        (
+            row for row in candidates
+            if ((row["album_type"] or "").lower() == "single") == want_single
+        ),
+        candidates[0],
+    )
+    candidates.remove(selected)
+    return int(selected["id"])
+
+
+def _normalize_genres(raw: Any) -> str:
+    """Mirror legacy genre storage (JSON array OR comma string) → JSON array string."""
+    if not raw:
+        return "[]"
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return json.dumps([str(g).strip() for g in parsed if str(g).strip()])
+    except (ValueError, TypeError):
+        pass
+    parts = [p.strip() for p in str(raw).split(",") if p.strip()]
+    return json.dumps(parts)
+
+
+def _has_preserved_intent(cursor, entity_type: str, entity_id: int) -> bool:
+    """Whether a stale legacy row has an independent user-owned reason to live."""
+    return cursor.execute(
+        """SELECT 1 FROM lib2_monitor_rules
+            WHERE entity_type=? AND entity_id=?
+              AND provenance IN ('user_explicit', 'wishlist_import')
+            LIMIT 1""",
+        (entity_type, entity_id),
+    ).fetchone() is not None
+
+
+def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
+    """Reconcile importer-owned rows not observed in the current snapshot.
+
+    Legacy-owned files are removed first. Metadata that also has a provider
+    identity, explicit user/wishlist intent, or a non-legacy file is detached
+    from the legacy source instead of deleted. This keeps snapshot semantics
+    without letting the importer erase independently managed Library v2 state.
+    """
+    stats = {
+        "reconciled_files": 0,
+        "reconciled_tracks": 0,
+        "reconciled_albums": 0,
+        "reconciled_artists": 0,
+    }
+
+    cursor.execute(
+        """DELETE FROM lib2_track_files
+            WHERE legacy_track_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    )
+    stats["reconciled_files"] = cursor.rowcount
+
+    stale_tracks = cursor.execute(
+        """SELECT id FROM lib2_tracks
+            WHERE legacy_track_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    ).fetchall()
+    for row in stale_tracks:
+        track_id = int(row["id"])
+        independently_backed = cursor.execute(
+            """SELECT 1 FROM lib2_tracks t
+                WHERE t.id=? AND (
+                    NULLIF(t.spotify_id, '') IS NOT NULL
+                    OR NULLIF(t.musicbrainz_id, '') IS NOT NULL
+                    OR NULLIF(t.isrc, '') IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM lib2_track_files f
+                         WHERE f.track_id=t.id AND f.legacy_track_id IS NULL
+                    )
+                )""",
+            (track_id,),
+        ).fetchone()
+        if independently_backed or _has_preserved_intent(cursor, "track", track_id):
+            cursor.execute(
+                """UPDATE lib2_tracks
+                      SET legacy_track_id=NULL, legacy_import_run_id=NULL,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (track_id,),
+            )
+        else:
+            cursor.execute("DELETE FROM lib2_tracks WHERE id=?", (track_id,))
+        stats["reconciled_tracks"] += 1
+
+    stale_albums = cursor.execute(
+        """SELECT id FROM lib2_albums
+            WHERE legacy_album_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    ).fetchall()
+    for row in stale_albums:
+        album_id = int(row["id"])
+        independently_backed = cursor.execute(
+            """SELECT 1 FROM lib2_albums al
+                WHERE al.id=? AND (
+                    NULLIF(al.spotify_id, '') IS NOT NULL
+                    OR NULLIF(al.musicbrainz_id, '') IS NOT NULL
+                    OR EXISTS (SELECT 1 FROM lib2_tracks t WHERE t.album_id=al.id)
+                )""",
+            (album_id,),
+        ).fetchone()
+        if independently_backed or _has_preserved_intent(cursor, "album", album_id):
+            cursor.execute(
+                """UPDATE lib2_albums
+                      SET legacy_album_id=NULL, legacy_import_run_id=NULL,
+                          origin='discography', updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (album_id,),
+            )
+        else:
+            cursor.execute("DELETE FROM lib2_albums WHERE id=?", (album_id,))
+        stats["reconciled_albums"] += 1
+
+    stale_artists = cursor.execute(
+        """SELECT id FROM lib2_artists
+            WHERE legacy_artist_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    ).fetchall()
+    for row in stale_artists:
+        artist_id = int(row["id"])
+        independently_backed = cursor.execute(
+            """SELECT 1 FROM lib2_artists ar
+                WHERE ar.id=? AND (
+                    NULLIF(ar.spotify_id, '') IS NOT NULL
+                    OR NULLIF(ar.musicbrainz_id, '') IS NOT NULL
+                    OR EXISTS (SELECT 1 FROM lib2_albums al
+                                WHERE al.primary_artist_id=ar.id)
+                    OR EXISTS (SELECT 1 FROM lib2_album_artists aa
+                                WHERE aa.artist_id=ar.id)
+                    OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                                WHERE ta.artist_id=ar.id)
+                )""",
+            (artist_id,),
+        ).fetchone()
+        if independently_backed or _has_preserved_intent(cursor, "artist", artist_id):
+            cursor.execute(
+                """UPDATE lib2_artists
+                      SET legacy_artist_id=NULL, legacy_import_run_id=NULL,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (artist_id,),
+            )
+        else:
+            # §40: if this row was someone's canonical artist, its alias rows
+            # become standalone again instead of pointing at a deleted row.
+            cursor.execute(
+                "UPDATE lib2_artists SET canonical_artist_id=NULL, "
+                "updated_at=CURRENT_TIMESTAMP WHERE canonical_artist_id=?",
+                (artist_id,))
+            cursor.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
+        stats["reconciled_artists"] += 1
+
+    from core.library2.monitor_rules import prune_orphaned_rules
+    prune_orphaned_rules(cursor)
+    return stats
+
+
+def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb = None,
+                          profile_id: Optional[int] = None) -> Dict[str, int]:
+    """Populate ``lib2_*`` from the legacy library. Returns a stats dict.
+
+    ``database`` is a ``MusicDatabase`` instance (we use its ``_get_connection``).
+    ``reset`` wipes the v2 tables first. ``progress(stage, current, total)`` is an
+    optional callback for UI progress. ``profile_id`` scopes the watchlist/
+    wishlist-derived monitoring to the admin profile. Omitting it is an alias
+    for admin profile 1, never for an all-profile import.
+
+    ADR-01 (admin-only): only the admin profile may drive this import. The
+    lib2 monitored flags are GLOBAL columns derived from exactly one
+    profile's watchlist/wishlist here — importing with another profile would
+    overwrite the admin's monitoring intent for everyone (audit P0-02).
+    """
+    from core.library2 import ADMIN_PROFILE_ID
+    effective_profile_id = (ADMIN_PROFILE_ID if profile_id is None
+                            else int(profile_id))
+    if effective_profile_id != ADMIN_PROFILE_ID:
+        raise ValueError(
+            f"Library v2 import is admin-only (ADR-01): got profile_id={profile_id}, "
+            f"expected {ADMIN_PROFILE_ID}")
+    profile_id = effective_profile_id
+    stats = {
+        "artists": 0,
+        "albums": 0,
+        "tracks": 0,
+        "files": 0,
+        "wishlist_tracks": 0,
+        "linked_duplicates": 0,
+        "reconciled_files": 0,
+        "reconciled_tracks": 0,
+        "reconciled_albums": 0,
+        "reconciled_artists": 0,
+    }
+    conn = database._get_connection()
+    try:
+        ensure_library_v2_schema(conn)
+        cursor = conn.cursor()
+        run_id = uuid.uuid4().hex
+
+        preserved_album_intent = {}
+
+        def report_progress(stage: str, current: int, total: int) -> None:
+            if not progress:
+                return
+            if getattr(progress, "lib2_connection_aware", False):
+                progress(stage, current, total, connection=conn)
+            else:
+                progress(stage, current, total)
+
+        if reset:
+            # Local ids change across a destructive rebuild. Preserve deliberate
+            # album intent by provider/stable identity, never by surrogate id.
+            from core.library2.monitor_rules import snapshot_album_monitor_intent
+            from core.library2.stable_ids import backfill_stable_ids
+            backfill_stable_ids(cursor)
+            preserved_album_intent = snapshot_album_monitor_intent(
+                conn, profile_id=profile_id
+            )
+            # lib2_manual_skips deliberately survives a reset: it's an audit of
+            # user decisions about FILES, not derived library state.
+            for table in ("lib2_track_files", "lib2_track_artists", "lib2_tracks",
+                          "lib2_album_artists", "lib2_albums", "lib2_artists"):
+                cursor.execute(f"DELETE FROM {table}")
+            cursor.execute("DELETE FROM lib2_monitor_rules")
+            cursor.execute("DELETE FROM lib2_wanted_tracks")
+
+        artist_cols = _existing_columns(cursor, "artists")
+        album_cols = _existing_columns(cursor, "albums")
+        track_cols = _existing_columns(cursor, "tracks")
+
+        default_profile_id = default_quality_profile_id(conn)
+        resolver = _ArtistResolver(cursor, default_profile_id)
+        resolver.seed_existing()
+        discography_albums = _discography_album_index(cursor)
+
+        # --- Artists -------------------------------------------------------
+        cursor.execute("SELECT * FROM artists")
+        artist_rows = cursor.fetchall()
+        report_progress("artists", 0, len(artist_rows))
+        for i, row in enumerate(artist_rows):
+            name = row["name"]
+            if not name:
+                continue
+            lib2_artist_id = resolver.upsert_legacy(row["id"], {
+                "name": name,
+                "sort_name": name,
+                "spotify_id": _legacy_spotify_id(row, "spotify_artist_id"),
+                "musicbrainz_id": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
+                # Import EVERY provider id the legacy row carries (SoulSync's
+                # default source is Deezer, not Spotify) into external_ids.
+                # The real legacy schema names these deezer_id/tidal_id/qobuz_id
+                # (only Spotify/MusicBrainz carry the *_artist_id suffix). Accept
+                # both so a Deezer-primary artist keeps its id in external_ids —
+                # without it, expand_artist_discography has no id to fetch with
+                # and "Update Discography" returns only a stray single (#38).
+                # Beyond the five below, capture the long tail (iTunes/AudioDB/
+                # Discogs/…) via match_status.SERVICES like albums/tracks do —
+                # §62.4 needs the iTunes artist id here so a foreign-shaped
+                # "spotify" id can be dropped without losing the identity.
+                "provider_ids": {
+                    "spotify": _legacy_spotify_id(row, "spotify_artist_id"),
+                    "deezer": _pick(row, "deezer_artist_id", "deezer_id"),
+                    "musicbrainz": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
+                    "tidal": _pick(row, "tidal_artist_id", "tidal_id"),
+                    "qobuz": _pick(row, "qobuz_artist_id", "qobuz_id"),
+                    **_extra_provider_ids(
+                        row, "artist",
+                        exclude={"spotify", "deezer", "musicbrainz", "tidal", "qobuz"},
+                    ),
+                },
+                "image_url": _pick(row, "thumb_url", "banner_url"),
+                "genres": _normalize_genres(_pick(row, "genres")),
+                "summary": _pick(row, "summary"),
+                # §17.7 remainder: AudioDB-sourced fields + MusicBrainz aliases
+                # had no lib2 destination column at all.
+                "style": _pick(row, "style"),
+                "mood": _pick(row, "mood"),
+                "label": _pick(row, "label"),
+                "aliases": _normalize_genres(_pick(row, "aliases")),
+                "banner_url": _pick(row, "banner_url"),
+            }, run_id)
+            # Last.fm/Genius/Discogs bio/listeners/similar/tags — provider
+            # enrichment content, not identity, so it's merged separately
+            # (never overwrites a richer existing value) rather than threaded
+            # through the same COALESCE-on-UPDATE columns as name/image/genres.
+            _merge_artist_enrichment(cursor, lib2_artist_id, _artist_enrichment_payload(row))
+            stats["artists"] += 1
+            if (i + 1) % 200 == 0:
+                report_progress("artists", i + 1, len(artist_rows))
+        report_progress("artists", len(artist_rows), len(artist_rows))
+
+        # --- Albums (map legacy album id -> lib2 album id) -----------------
+        album_map: Dict[str, int] = {}
+        cursor.execute("SELECT id, legacy_album_id FROM lib2_albums WHERE legacy_album_id IS NOT NULL")
+        for r in cursor.fetchall():
+            album_map[_legacy_key(r["legacy_album_id"])] = r["id"]
+
+        cursor.execute("SELECT * FROM albums")
+        album_rows = cursor.fetchall()
+        report_progress("albums", 0, len(album_rows))
+        # Legacy media-server ids are TEXT and may be provider-shaped (for
+        # example a 22-character Spotify album id).  Use the same normalized
+        # key as ``album_map`` instead of assuming that ``tracks.album_id`` is
+        # numeric.  The old int coercion made otherwise valid libraries abort
+        # before the first album was imported.
+        actual_track_counts = {
+            _legacy_key(row["album_id"]): int(row["count"])
+            for row in cursor.execute(
+                "SELECT album_id, COUNT(*) AS count FROM tracks GROUP BY album_id"
+            ).fetchall()
+        }
+        # Files actually present per legacy album — used to derive the initial
+        # album monitor flag (§16.2). An album is only auto-monitored when it is
+        # fully owned; a partially-downloaded album must NOT be blanket-monitored
+        # (that would project every un-owned track wanted and auto-grab it).
+        present_track_counts = {
+            _legacy_key(row["album_id"]): int(row["count"])
+            for row in cursor.execute(
+                "SELECT album_id, COUNT(*) AS count FROM tracks "
+                "WHERE file_path IS NOT NULL AND TRIM(file_path) <> '' "
+                "GROUP BY album_id"
+            ).fetchall()
+        }
+        for i, row in enumerate(album_rows):
+            lib2_artist = resolver.get_legacy(row["artist_id"])
+            if lib2_artist is None:
+                continue  # orphan album with no artist; skip
+            # actual track rows for single-detection
+            actual = actual_track_counts.get(_legacy_key(row["id"]), 0)
+            track_count = _pick(row, "track_count")
+            album_type = _normalize_album_type(
+                _pick(row, "album_type", "release_type", "type"),
+                track_count,
+                actual,
+            )
+            year = _pick(row, "year")
+            # Expected total = the metadata track count (api_track_count) when known,
+            # else the stored track_count, else the number of tracks we actually have.
+            expected = _pick(row, "api_track_count") or track_count or actual
+            fields = (
+                lib2_artist, row["title"], album_type,
+                _pick(row, "release_date"), year,
+                _legacy_spotify_id(row, "spotify_album_id"), _pick(row, "musicbrainz_release_id"),
+                _pick(row, "thumb_url"), _normalize_genres(_pick(row, "genres")),
+                track_count, expected,
+                _pick(row, "explicit"), _pick(row, "label"), _pick(row, "upc"),
+                # §48: rich-metadata-edit parity — same AudioDB-sourced fields
+                # already carried over for artists (see above).
+                _pick(row, "style"), _pick(row, "mood"),
+            )
+            existing = album_map.get(_legacy_key(row["id"]))
+            if existing is None:
+                # A discography expansion may already have created a provider-only
+                # row for this release — claim it instead of inserting a duplicate.
+                existing = _claim_discography_album(
+                    cursor,
+                    lib2_artist,
+                    row["title"],
+                    album_type,
+                    index=discography_albums,
+                )
+                if existing is not None:
+                    album_map[_legacy_key(row["id"])] = existing
+            if existing is not None:
+                cursor.execute(
+                    "UPDATE lib2_albums SET primary_artist_id=?, title=?, album_type=?, "
+                    "release_date=?, year=?, spotify_id=COALESCE(?, spotify_id), "
+                    "musicbrainz_id=COALESCE(?, musicbrainz_id), "
+                    "image_url=COALESCE(?, image_url), "
+                    "genres=?, track_count=?, expected_track_count=?, "
+                    "explicit=COALESCE(?, explicit), label=COALESCE(?, label), "
+                    "upc=COALESCE(?, upc), "
+                    "style=COALESCE(?, style), mood=COALESCE(?, mood), "
+                    "origin='library', legacy_album_id=?, legacy_import_run_id=?, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (*fields, row["id"], run_id, existing),
+                )
+                album_id = existing
+            else:
+                # Derive the initial album monitor flag from ownership (§16.2)
+                # instead of taking the schema default of 1. Fully owned (every
+                # known track present, and at least as many as the metadata
+                # expects) → monitored; anything partial → unmonitored, so only
+                # the concretely-wanted tracks (wishlist rules) stay wanted.
+                present = present_track_counts.get(_legacy_key(row["id"]), 0)
+                album_monitored = (
+                    1 if present and present >= actual and present >= (expected or 0)
+                    else 0
+                )
+                cursor.execute(
+                    "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
+                    "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
+                    "track_count, expected_track_count, explicit, label, upc, "
+                    "style, mood, "
+                    "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*fields, row["id"], default_profile_id, album_monitored, run_id),
+                )
+                album_id = cursor.lastrowid
+                album_map[_legacy_key(row["id"])] = album_id
+            # Real legacy albums carry deezer_id/tidal_id/qobuz_id; accept the
+            # *_album_id aliases too (see the artist provider_ids note above).
+            # Beyond those five, capture the long tail (iTunes/AudioDB/Discogs/
+            # Amazon/JioSaavn/Bandcamp/…) from match_status.SERVICES so a new
+            # provider only needs to be added there, not re-derived here (§17.7).
+            _merge_album_external_ids(cursor, album_id, {
+                "spotify": _legacy_spotify_id(row, "spotify_album_id"),
+                "deezer": _pick(row, "deezer_album_id", "deezer_id"),
+                "musicbrainz": _pick(row, "musicbrainz_release_id"),
+                "tidal": _pick(row, "tidal_album_id", "tidal_id"),
+                "qobuz": _pick(row, "qobuz_album_id", "qobuz_id"),
+                **_extra_provider_ids(
+                    row, "album",
+                    exclude={"spotify", "deezer", "musicbrainz", "tidal", "qobuz"},
+                ),
+            })
+            cursor.execute(
+                "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+                "VALUES(?,?, 'primary')", (album_id, lib2_artist),
+            )
+            stats["albums"] += 1
+            if (i + 1) % 200 == 0:
+                report_progress("albums", i + 1, len(album_rows))
+        report_progress("albums", len(album_rows), len(album_rows))
+
+        # --- Tracks + track files + track-artist junctions -----------------
+        track_map: Dict[str, int] = {}
+        cursor.execute("SELECT id, legacy_track_id FROM lib2_tracks WHERE legacy_track_id IS NOT NULL")
+        for r in cursor.fetchall():
+            track_map[_legacy_key(r["legacy_track_id"])] = r["id"]
+        existing_files = {
+            (int(row["track_id"]), str(row["path"])): int(row["id"])
+            for row in cursor.execute(
+                "SELECT id, track_id, path FROM lib2_track_files "
+                "WHERE track_id IS NOT NULL AND path IS NOT NULL"
+            ).fetchall()
+        }
+        # A file is concrete track-level coverage.  The release flag is derived
+        # later, after Wishlist rows have also been seeded; it must not suppress
+        # an individually-owned track on a partial album.
+        album_monitored_by_id = {
+            int(r["id"]): int(r["monitored"])
+            for r in cursor.execute("SELECT id, monitored FROM lib2_albums").fetchall()
+        }
+        album_profile_by_id = {
+            int(r["id"]): int(r["quality_profile_id"])
+            for r in cursor.execute(
+                "SELECT id, quality_profile_id FROM lib2_albums"
+            ).fetchall()
+        }
+        # Per-track quality_profile_id (§17.7 remainder): only trusted at INSERT
+        # time for a brand-new row (never on UPDATE — an existing lib2 track may
+        # have been reassigned a profile independently of the legacy row, and
+        # this fix's scope is "new tracks always got the run-wide default", not
+        # re-import overwrite). Validated against the actual profile table
+        # (fetched once, not per-row) rather than trusted blindly, since a
+        # legacy profile id can dangle after that profile was deleted. The
+        # table itself is owned by core/quality/schema.py, not lib2 — it may
+        # not exist yet in a minimal/test DB, so this fails open to "no valid
+        # ids", which just means every track falls back to default_profile_id.
+        try:
+            valid_profile_ids = {
+                int(r[0]) for r in cursor.execute("SELECT id FROM quality_profiles").fetchall()
+            }
+        except Exception:  # noqa: BLE001
+            valid_profile_ids = set()
+
+        cursor.execute("SELECT * FROM tracks")
+        track_rows = cursor.fetchall()
+        report_progress("tracks", 0, len(track_rows))
+        for i, row in enumerate(track_rows):
+            album_id = album_map.get(_legacy_key(row["album_id"]))
+            if album_id is None:
+                continue
+            title = row["title"]
+            tfields = (
+                album_id, title, _pick(row, "track_number"),
+                _pick(row, "disc_number") or 1, _pick(row, "duration"),
+                _pick(row, "isrc"), _pick(row, "musicbrainz_recording_id"),
+                _legacy_spotify_id(row, "spotify_track_id"),
+                _pick(row, "bpm"), _pick(row, "explicit"),
+                _pick(row, "genius_lyrics"), _pick(row, "copyright"),
+                # §48: rich-metadata-edit parity (same fields as album/artist).
+                # Kept before play_count/last_played so the insert_fields
+                # play-count-fallback slicing below (tfields[-2:]) still lands
+                # on the right two columns.
+                _pick(row, "style"), _pick(row, "mood"),
+                _pick(row, "play_count"), _pick(row, "last_played"),
+            )
+            existing = track_map.get(_legacy_key(row["id"]))
+            if existing is not None:
+                cursor.execute(
+                    "UPDATE lib2_tracks SET album_id=?, title=?, track_number=?, "
+                    "disc_number=?, duration=?, isrc=?, musicbrainz_id=?, spotify_id=?, "
+                    "bpm=COALESCE(?, bpm), explicit=COALESCE(?, explicit), "
+                    "genius_lyrics=COALESCE(?, genius_lyrics), "
+                    "copyright=COALESCE(?, copyright), "
+                    "style=COALESCE(?, style), mood=COALESCE(?, mood), "
+                    "play_count=COALESCE(?, play_count), "
+                    "last_played=COALESCE(?, last_played), "
+                    "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (*tfields, run_id, existing),
+                )
+                track_id = existing
+            else:
+                track_monitored = 1 if _pick(row, "file_path") else \
+                    album_monitored_by_id.get(album_id, 0)
+                legacy_profile_id = _pick(row, "quality_profile_id")
+                try:
+                    legacy_profile_id = (
+                        int(legacy_profile_id) if legacy_profile_id is not None else None
+                    )
+                except (TypeError, ValueError):
+                    legacy_profile_id = None
+                track_profile_id = (
+                    legacy_profile_id if legacy_profile_id in valid_profile_ids
+                    else default_profile_id
+                )
+                profile_explicit = int(
+                    legacy_profile_id in valid_profile_ids
+                    and track_profile_id != album_profile_by_id.get(album_id)
+                )
+                # play_count is NOT NULL DEFAULT 0; an explicit NULL insert
+                # would violate that (the column default only applies when
+                # omitted), so a missing legacy value falls back to 0 here —
+                # the UPDATE branch above uses COALESCE instead to avoid ever
+                # resetting an already-accumulated count back to 0.
+                insert_fields = (*tfields[:-2], tfields[-2] or 0, tfields[-1])
+                cursor.execute(
+                    "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
+                    "duration, isrc, musicbrainz_id, spotify_id, bpm, explicit, "
+                    "genius_lyrics, copyright, style, mood, play_count, last_played, "
+                    "legacy_track_id, quality_profile_id, quality_profile_explicit, "
+                    "monitored, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*insert_fields, row["id"], track_profile_id, profile_explicit,
+                     track_monitored, run_id),
+                )
+                track_id = cursor.lastrowid
+                track_map[_legacy_key(row["id"])] = track_id
+            # Long-tail provider ids beyond isrc/musicbrainz/spotify (which keep
+            # dedicated columns above) — deezer/tidal/qobuz/itunes/audiodb/genius/
+            # amazon/jiosaavn/bandcamp/lastfm — via the same match_status.SERVICES
+            # mapping the album/track match-status chips already trust (§17.7).
+            _merge_track_external_ids(
+                cursor, track_id,
+                _extra_provider_ids(row, "track", exclude={"spotify", "musicbrainz"}),
+            )
+            stats["tracks"] += 1
+
+            # Artist credits: primary = album artist; plus track_artist + title feats.
+            primary_legacy = _pick(row, "artist_id")
+            primary_lib2 = resolver.get_legacy(primary_legacy) if primary_legacy else None
+            credits: List[Tuple[int, str, int]] = []  # (artist_id, role, position)
+            if primary_lib2 is not None:
+                credits.append((primary_lib2, "primary", 0))
+            raw_credit = _pick(row, "track_artist") or ""
+            extra_names = _credit_names_for_import(raw_credit, resolver.known_name)
+            planned_names = {normalize_name(name) for name in extra_names}
+
+            def _known_or_planned(
+                name: str, planned: Set[str] = planned_names
+            ) -> bool:
+                return resolver.known_name(name) or normalize_name(name) in planned
+
+            extra_names += _featured_names_for_import(
+                title,
+                _known_or_planned,
+            )
+            pos = 1
+            for nm in extra_names:
+                aid = resolver.get_or_create_by_name(nm)
+                if aid not in {c[0] for c in credits}:
+                    credits.append((aid, "featured", pos))
+                    pos += 1
+            # Reset this track's junction rows (idempotent re-run) then insert.
+            cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
+            if credits:
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position) "
+                    "VALUES(?,?,?,?)",
+                    [(track_id, aid, role, position) for aid, role, position in credits],
+                )
+                # Album appearances must be reachable from every credited
+                # artist.  Without this junction a featured artist accumulated
+                # track stats but its My Library/All Releases views were empty.
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+                    "VALUES(?,?,?)",
+                    [
+                        (album_id, aid,
+                         "primary" if aid == primary_lib2 else "featured")
+                        for aid, _role, _position in credits
+                    ],
+                )
+
+            # Track file from legacy file_path.
+            file_path = _pick(row, "file_path")
+            if file_path:
+                fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
+                file_key = (int(track_id), str(file_path))
+                file_id = existing_files.get(file_key)
+                if file_id is None:
+                    cursor.execute(
+                        "INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate, "
+                        "bit_depth, format, verification_status, import_status, legacy_track_id, "
+                        "legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?, 'imported',?,?)",
+                        (track_id, file_path, _pick(row, "file_size"), _pick(row, "bitrate"),
+                         _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
+                         _pick(row, "verification_status"), row["id"], run_id),
+                    )
+                    existing_files[file_key] = int(cursor.lastrowid)
+                    stats["files"] += 1
+                else:
+                    # Adopt pre-P1-02 rows when their exact current path matches;
+                    # unrelated secondary files stay unowned and are never pruned.
+                    cursor.execute(
+                        """UPDATE lib2_track_files
+                              SET size=?, bitrate=?, sample_rate=?, bit_depth=?, format=?,
+                                  verification_status=?, legacy_track_id=?,
+                                  legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP
+                            WHERE id=?""",
+                        (_pick(row, "file_size"), _pick(row, "bitrate"),
+                         _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
+                         _pick(row, "verification_status"), row["id"], run_id, file_id),
+                    )
+            if (i + 1) % 200 == 0:
+                report_progress("tracks", i + 1, len(track_rows))
+        report_progress("tracks", len(track_rows), len(track_rows))
+
+        stats.update(_reconcile_legacy_snapshot(cursor, run_id))
+        stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
+        stats["linked_duplicates"] = link_single_album_duplicates(cursor)
+        apply_monitoring_from_watchlist_wishlist(cursor, profile_id)
+        stats["monitoring_reconciled"] = reconcile_import_monitoring(
+            cursor, profile_id=profile_id or 1
+        )
+        # Mint provider-less stable ids for everything this run inserted
+        # (audit P1-12) — the schema-ensure backfill ran before the inserts.
+        from core.library2.stable_ids import backfill_stable_ids
+        backfill_stable_ids(cursor)
+        from core.library2.monitor_rules import (
+            project_entity_monitor_rules,
+            restore_album_monitor_intent,
+        )
+        stats["album_monitor_intent_restored"] = restore_album_monitor_intent(
+            conn, preserved_album_intent, profile_id=profile_id
+        )
+        # Import-derived monitored flags are provenance 'legacy_import', never
+        # mistaken for deliberate user choices (audit P1-13/P1-14). Recorded
+        # intent (re-import over an existing library) is never downgraded.
+        from core.library2.monitor_rules import seed_legacy_rules
+        seed_legacy_rules(cursor)
+        project_entity_monitor_rules(conn, profile_id=profile_id)
+        # Materialize the edition/recording shadow model for everything this
+        # run inserted (audit P1-04 / ADR-04) — the schema-ensure backfill ran
+        # before the inserts, so it has to run again here.
+        from core.library2.editions import backfill_editions
+        stats["editions"] = backfill_editions(cursor)
+        # Rebuild the wanted projection over the imported rules (§11.2).
+        from core.library2.wanted import ensure_wanted_schema, recompute_wanted
+        ensure_wanted_schema(cursor)
+        stats["wanted"] = recompute_wanted(cursor, profile_id=profile_id or 1)
+        conn.commit()
+        logger.info("Library v2 import complete: %s", stats)
+    finally:
+        conn.close()
+    # §62.6 Stufe 4: heal artist/album twins that pre-fix imports left behind
+    # (own connection, after the import transaction closed). Cheap when clean;
+    # best-effort — a repair failure must never fail the import that just
+    # succeeded.
+    try:
+        from core.library2.dedup_repair import repair_duplicate_artists
+        stats["dedup_repair"] = repair_duplicate_artists(database)
+    except Exception as repair_error:  # noqa: BLE001
+        logger.warning("Post-import duplicate repair failed: %s", repair_error)
+    return stats
+
+
+def link_single_album_duplicates(cursor) -> int:
+    """Link the same recording appearing as a single AND on a regular album.
+
+    Groups tracks by (primary artist name, normalized title); when a group contains
+    both a ``single``-type album track and a non-single album track, the single's
+    ``canonical_track_id`` is pointed at the album track so the dedup UI can offer
+    keep-single / keep-album / move / remove. Returns the number of links made.
+    """
+    cursor.execute(
+        """
+        SELECT t.id AS track_id, t.title AS title, al.album_type AS album_type,
+               ar.name AS artist_name
+        FROM lib2_tracks t
+        JOIN lib2_albums al ON al.id = t.album_id
+        JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+        """
+    )
+    groups: Dict[Tuple[str, str], List[Tuple[int, str]]] = {}
+    for row in cursor.fetchall():
+        key = (normalize_name(row["artist_name"]), dedup_title_key(row["title"]))
+        groups.setdefault(key, []).append((row["track_id"], row["album_type"]))
+
+    linked = 0
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        album_tracks = [tid for tid, typ in members if typ != "single"]
+        single_tracks = [tid for tid, typ in members if typ == "single"]
+        if not album_tracks or not single_tracks:
+            continue
+        canonical = album_tracks[0]
+        for single_id in single_tracks:
+            cursor.execute(
+                "UPDATE lib2_tracks SET canonical_track_id=? WHERE id=? AND "
+                "(canonical_track_id IS NULL OR canonical_track_id<>?)",
+                (canonical, single_id, canonical),
+            )
+            if cursor.rowcount:
+                linked += 1
+    return linked
+
+
+def _first_image_url(images: Any) -> Optional[str]:
+    if isinstance(images, list):
+        for img in images:
+            if isinstance(img, dict) and img.get("url"):
+                return img["url"]
+            if isinstance(img, str) and img:
+                return img
+    return None
+
+
+def _artist_name_from_payload(artist: Any) -> Optional[str]:
+    if isinstance(artist, dict):
+        return artist.get("name")
+    if isinstance(artist, str):
+        return artist
+    return None
+
+
+def _artist_spotify_from_payload(artist: Any) -> Optional[str]:
+    if isinstance(artist, dict):
+        return artist.get("id")
+    return None
+
+
+def _album_type_from_payload(album: Dict[str, Any], total_tracks: int) -> str:
+    typ = str(album.get("album_type") or album.get("type") or "").lower()
+    if typ in {"album", "single", "ep", "compilation", "live"}:
+        return typ
+    if total_tracks and total_tracks <= 1:
+        return "single"
+    if total_tracks and total_tracks <= 6:
+        return "ep"
+    return "album"
+
+
+def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
+                         profile_id: Optional[int] = None) -> int:
+    """Create lib2 metadata rows for wishlist-only tracks.
+
+    The legacy library import only sees downloaded/scanned files. A user can have
+    wishlist tracks for artists with zero local files; those still need lib2 rows
+    so the Lidarr-style UI can show the concrete songs as monitored + missing.
+    Importantly, a wishlisted song must not make the whole artist monitored:
+    artist-level monitoring is the watchlist's job.
+    ``profile_id`` is restricted to the admin wishlist (None = admin profile).
+    """
+    if not _table_exists(cursor, "wishlist_tracks"):
+        return 0
+
+    wishlist_columns = _existing_columns(cursor, "wishlist_tracks")
+    clause, params = _profile_filter(cursor, "wishlist_tracks", profile_id)
+    quality_select = ("quality_profile_id" if "quality_profile_id" in wishlist_columns
+                      else "NULL AS quality_profile_id")
+    rows = cursor.execute(
+        "SELECT id, spotify_track_id, spotify_data, source_type, date_added, "
+        + quality_select + " FROM wishlist_tracks"
+        + (f" WHERE {clause}" if clause else "")
+        + " ORDER BY id",
+        params,
+    ).fetchall()
+
+    default_profile_id = default_quality_profile_id(cursor.connection)
+    valid_profile_ids = {
+        int(row[0]) for row in cursor.execute("SELECT id FROM quality_profiles").fetchall()
+    }
+
+    def _track_profile(row) -> int:
+        raw_profile_id = row["quality_profile_id"]
+        if raw_profile_id is None:
+            return default_profile_id
+        try:
+            candidate = int(raw_profile_id)
+        except (TypeError, ValueError):
+            candidate = None
+        if candidate in valid_profile_ids:
+            return candidate
+        logger.warning(
+            "Wishlist row %s references invalid quality profile %r; using default %s",
+            row["id"], raw_profile_id, default_profile_id,
+        )
+        return default_profile_id
+
+    created_or_updated = 0
+    assigned_profiles: Dict[Tuple[int, str], Tuple[int, int]] = {}
+    album_by_spotify: Dict[Tuple[int, str], int] = {}
+    album_by_identity: Dict[Tuple[int, str, str], int] = {}
+    for album_row in cursor.execute(
+        "SELECT id, primary_artist_id, title, album_type, spotify_id FROM lib2_albums"
+    ).fetchall():
+        album_id = int(album_row["id"])
+        artist_id = int(album_row["primary_artist_id"])
+        if album_row["spotify_id"]:
+            album_by_spotify[(artist_id, str(album_row["spotify_id"]))] = album_id
+        album_by_identity[
+            (artist_id, release_title_key(album_row["title"]), album_row["album_type"])
+        ] = album_id
+    track_by_spotify = {
+        (int(track_row["album_id"]), str(track_row["spotify_id"])): int(track_row["id"])
+        for track_row in cursor.execute(
+            "SELECT id, album_id, spotify_id FROM lib2_tracks "
+            "WHERE spotify_id IS NOT NULL AND spotify_id<>''"
+        ).fetchall()
+    }
+    for row in rows:
+        try:
+            payload = json.loads(row["spotify_data"] or "{}")
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        track_id_raw = payload.get("id") or row["spotify_track_id"]
+        track_id = str(track_id_raw or "").split("::", 1)[0]
+        title = payload.get("name")
+        if not track_id or not title:
+            continue
+        quality_profile_id = _track_profile(row)
+
+        album = payload.get("album") if isinstance(payload.get("album"), dict) else {}
+        album_title = album.get("name") or title
+        album_spotify = album.get("id")
+        total_tracks = int(album.get("total_tracks") or 1)
+        album_type = _album_type_from_payload(album, total_tracks)
+        release_date = album.get("release_date")
+        try:
+            year = int(str(release_date)[:4]) if release_date else None
+        except (TypeError, ValueError):
+            year = None
+        album_image = _first_image_url(album.get("images")) or album.get("image_url")
+
+        artists_payload = payload.get("artists") if isinstance(payload.get("artists"), list) else []
+        album_artists_payload = album.get("artists") if isinstance(album.get("artists"), list) else []
+        primary_payload = (album_artists_payload or artists_payload or [{"name": "Unknown Artist"}])[0]
+        primary_name = _artist_name_from_payload(primary_payload) or "Unknown Artist"
+        primary_spotify = _artist_spotify_from_payload(primary_payload)
+
+        # monitored=0 here is safe only because apply_monitoring_from_watchlist_
+        # wishlist() runs AFTER seeding and re-derives artist flags from the
+        # watchlist — a wishlisted song must never monitor the whole artist.
+        artist_id = resolver.get_or_create_by_name(primary_name, spotify_id=primary_spotify)
+        cursor.execute(
+            """
+            UPDATE lib2_artists
+               SET spotify_id = COALESCE(NULLIF(spotify_id, ''), ?),
+                   monitored = 0,
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?
+            """,
+            (primary_spotify, artist_id),
+        )
+
+        album_id = (
+            album_by_spotify.get((artist_id, str(album_spotify)))
+            if album_spotify else None
+        )
+        if album_id is None:
+            album_id = album_by_identity.get(
+                (artist_id, release_title_key(album_title), album_type)
+            )
+
+        album_fields = (
+            artist_id, album_title, album_type, release_date, year,
+            album_spotify, album_image, total_tracks, total_tracks,
+        )
+        if album_id is not None:
+            cursor.execute(
+                """
+                UPDATE lib2_albums
+                   SET title=?, album_type=?, release_date=?, year=?,
+                       spotify_id=COALESCE(NULLIF(spotify_id, ''), ?),
+                       image_url=COALESCE(NULLIF(image_url, ''), ?),
+                       track_count=COALESCE(track_count, ?),
+                       expected_track_count=MAX(COALESCE(expected_track_count, 0), ?),
+                       updated_at=CURRENT_TIMESTAMP
+                 WHERE id=?
+                """,
+                (album_title, album_type, release_date, year, album_spotify,
+                 album_image, total_tracks, total_tracks, album_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO lib2_albums(primary_artist_id, title, album_type,
+                    release_date, year, spotify_id, image_url, track_count,
+                    expected_track_count, monitored, quality_profile_id)
+                VALUES(?,?,?,?,?,?,?,?,?,0,?)
+                """,
+                (*album_fields, default_profile_id),
+            )
+            album_id = cursor.lastrowid
+        album_by_identity[
+            (artist_id, release_title_key(album_title), album_type)
+        ] = album_id
+        if album_spotify:
+            album_by_spotify[(artist_id, str(album_spotify))] = album_id
+        cursor.execute(
+            "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+            "VALUES(?,?, 'primary')",
+                (album_id, artist_id),
+        )
+
+        existing_track_id = track_by_spotify.get((int(album_id), track_id))
+        preserved_explicit_rule = None
+        if existing_track_id is not None:
+            preserved_explicit_rule = cursor.execute(
+                """SELECT monitored, provenance FROM lib2_monitor_rules
+                    WHERE entity_type='track' AND entity_id=? AND profile_id=?
+                      AND provenance='user_explicit'""",
+                (existing_track_id, profile_id or 1),
+            ).fetchone()
+        entity_key = (album_id, track_id)
+        previous_assignment = assigned_profiles.get(entity_key)
+        if previous_assignment and previous_assignment[0] != quality_profile_id:
+            logger.warning(
+                "Wishlist rows %s and %s assign different quality profiles to "
+                "track %s on album %s; latest row wins (%s)",
+                previous_assignment[1], row["id"], track_id, album_id,
+                quality_profile_id,
+            )
+        assigned_profiles[entity_key] = (quality_profile_id, row["id"])
+        track_number = payload.get("track_number")
+        disc_number = payload.get("disc_number") or 1
+        duration = payload.get("duration_ms")
+        if existing_track_id is not None:
+            lib2_track_id = existing_track_id
+            cursor.execute(
+                """
+                UPDATE lib2_tracks
+                   SET title=?, track_number=COALESCE(track_number, ?),
+                       disc_number=COALESCE(disc_number, ?), duration=COALESCE(duration, ?),
+                       quality_profile_id=?, quality_profile_explicit=1, monitored=1,
+                       updated_at=CURRENT_TIMESTAMP
+                 WHERE id=?
+                """,
+                (title, track_number, disc_number, duration, quality_profile_id,
+                 lib2_track_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
+                    duration, spotify_id, quality_profile_id,
+                    quality_profile_explicit, monitored)
+                VALUES(?,?,?,?,?,?,?,1,1)
+                """,
+                (album_id, title, track_number, disc_number, duration, track_id,
+                 quality_profile_id),
+            )
+            lib2_track_id = cursor.lastrowid
+            track_by_spotify[(int(album_id), track_id)] = lib2_track_id
+            created_or_updated += 1
+
+        # Presence in the admin Wishlist is concrete track-level wanted
+        # intent. Keep it distinct from a Library-v2 click, but stronger than
+        # the parent album's imported unmonitored baseline.
+        from core.library2.monitor_rules import PROVENANCE_WISHLIST, record_rule
+        record_rule(
+            cursor.connection,
+            "track",
+            lib2_track_id,
+            True,
+            PROVENANCE_WISHLIST,
+            profile_id=profile_id or 1,
+        )
+        if preserved_explicit_rule is not None:
+            # A non-destructive re-import may rediscover a still-present
+            # Wishlist row after the user explicitly overrode that track in
+            # Library v2.  The explicit decision is the stronger intent.
+            explicit_value = bool(preserved_explicit_rule["monitored"])
+            cursor.execute(
+                "UPDATE lib2_tracks SET monitored=? WHERE id=?",
+                (1 if explicit_value else 0, lib2_track_id),
+            )
+            from core.library2.monitor_rules import PROVENANCE_USER
+            record_rule(
+                cursor.connection, "track", lib2_track_id, explicit_value,
+                PROVENANCE_USER, profile_id=profile_id or 1,
+            )
+
+        cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (lib2_track_id,))
+        linked_artists: Set[int] = set()
+        for pos, artist_payload in enumerate(artists_payload or [primary_payload]):
+            name = _artist_name_from_payload(artist_payload)
+            if not name:
+                continue
+            spotify_id = _artist_spotify_from_payload(artist_payload)
+            aid = resolver.get_or_create_by_name(name, spotify_id=spotify_id)
+            if aid in linked_artists:
+                continue
+            linked_artists.add(aid)
+            if spotify_id:
+                cursor.execute(
+                    "UPDATE lib2_artists SET spotify_id=COALESCE(NULLIF(spotify_id, ''), ?), "
+                    "monitored=0 WHERE id=?",
+                    (spotify_id, aid),
+                )
+            else:
+                cursor.execute("UPDATE lib2_artists SET monitored=0 WHERE id=?", (aid,))
+            cursor.execute(
+                "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position) "
+                "VALUES(?,?,?,?)",
+                (lib2_track_id, aid, "primary" if pos == 0 else "featured", pos),
+            )
+            cursor.execute(
+                "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+                "VALUES(?,?,?)",
+                (album_id, aid, "primary" if aid == artist_id else "featured"),
+            )
+
+    return created_or_updated
+
+
+def reconcile_import_monitoring(cursor, *, profile_id: int = 1,
+                                album_ids: Optional[Iterable[int]] = None) -> Dict[str, int]:
+    """Reconcile import-derived track and release monitoring.
+
+    A track is covered when it owns an active file or has a positive imported
+    Wishlist rule.  A library release is monitored only when its full expected
+    tracklist is represented and every represented track is covered.  Rules
+    created by an explicit user/runtime action are never overwritten.
+
+    ``album_ids`` scopes the repair for tracklist materialization; an import
+    omits it and reconciles the complete snapshot in one set of reads.
+    """
+    from core.library2.monitor_rules import (
+        PROVENANCE_FILE,
+        PROVENANCE_LEGACY,
+        PROVENANCE_WISHLIST,
+        record_rule,
+    )
+
+    scope = sorted({int(album_id) for album_id in album_ids or []})
+    scope_sql = ""
+    scope_args: List[int] = []
+    if scope:
+        marks = ",".join("?" for _ in scope)
+        scope_sql = f" AND t.album_id IN ({marks})"
+        scope_args = scope
+
+    track_rows = cursor.execute(
+        """SELECT t.id, t.album_id, t.monitored,
+                  r.monitored AS rule_monitored, r.provenance,
+                  EXISTS(
+                      SELECT 1 FROM lib2_track_files tf
+                       WHERE tf.track_id=t.id
+                         AND tf.path IS NOT NULL AND TRIM(tf.path)<>''
+                         AND COALESCE(tf.file_state,'active')
+                             NOT IN ('missing_confirmed','deleted')
+                  ) AS has_file
+             FROM lib2_tracks t
+             LEFT JOIN lib2_monitor_rules r
+                    ON r.entity_type='track' AND r.entity_id=t.id
+                   AND r.profile_id=?
+            WHERE 1=1""" + scope_sql,
+        (int(profile_id), *scope_args),
+    ).fetchall()
+
+    file_tracks = 0
+    cleared_file_tracks = 0
+    for row in track_rows:
+        provenance = row["provenance"]
+        if row["has_file"]:
+            if provenance in (None, PROVENANCE_LEGACY, PROVENANCE_FILE):
+                cursor.execute(
+                    "UPDATE lib2_tracks SET monitored=1 WHERE id=?", (row["id"],)
+                )
+                record_rule(
+                    cursor.connection, "track", row["id"], True,
+                    PROVENANCE_FILE, profile_id=profile_id,
+                )
+                file_tracks += 1
+        elif provenance == PROVENANCE_FILE:
+            # A previously imported file disappeared.  Drop only our derived
+            # positive intent; Wishlist/user/cascade rules are separate rows
+            # and therefore cannot arrive in this branch.
+            cursor.execute(
+                "UPDATE lib2_tracks SET monitored=0 WHERE id=?", (row["id"],)
+            )
+            record_rule(
+                cursor.connection, "track", row["id"], False,
+                PROVENANCE_LEGACY, profile_id=profile_id,
+            )
+            cleared_file_tracks += 1
+
+    album_scope_sql = ""
+    album_scope_args: List[int] = []
+    if scope:
+        marks = ",".join("?" for _ in scope)
+        album_scope_sql = f" AND al.id IN ({marks})"
+        album_scope_args = scope
+    albums = cursor.execute(
+        """SELECT al.id, al.track_count, al.expected_track_count,
+                  r.provenance,
+                  (SELECT COUNT(*) FROM lib2_tracks t
+                    WHERE t.album_id=al.id) AS known_tracks,
+                  (SELECT COUNT(*) FROM lib2_tracks t
+                    WHERE t.album_id=al.id
+                      AND (
+                          EXISTS(
+                              SELECT 1 FROM lib2_track_files tf
+                               WHERE tf.track_id=t.id
+                                 AND tf.path IS NOT NULL AND TRIM(tf.path)<>''
+                                 AND COALESCE(tf.file_state,'active')
+                                     NOT IN ('missing_confirmed','deleted')
+                          )
+                          OR EXISTS(
+                              SELECT 1 FROM lib2_monitor_rules tr
+                               WHERE tr.entity_type='track'
+                                 AND tr.entity_id=t.id AND tr.profile_id=?
+                                 AND tr.monitored=1 AND tr.provenance=?
+                          )
+                      )) AS covered_tracks
+             FROM lib2_albums al
+             LEFT JOIN lib2_monitor_rules r
+                    ON r.entity_type='album' AND r.entity_id=al.id
+                   AND r.profile_id=?
+            WHERE COALESCE(al.origin,'library')='library'""" + album_scope_sql,
+        (int(profile_id), PROVENANCE_WISHLIST, int(profile_id), *album_scope_args),
+    ).fetchall()
+
+    releases_updated = 0
+    for album in albums:
+        # A non-legacy parent rule is deliberate state and survives re-import.
+        if album["provenance"] not in (None, PROVENANCE_LEGACY):
+            continue
+        expected = max(
+            int(album["expected_track_count"] or 0),
+            int(album["track_count"] or 0),
+            int(album["known_tracks"] or 0),
+        )
+        monitored = bool(
+            expected > 0
+            and int(album["known_tracks"] or 0) >= expected
+            and int(album["covered_tracks"] or 0) == int(album["known_tracks"] or 0)
+        )
+        cursor.execute(
+            "UPDATE lib2_albums SET monitored=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (1 if monitored else 0, album["id"]),
+        )
+        record_rule(
+            cursor.connection, "album", album["id"], monitored,
+            PROVENANCE_LEGACY, profile_id=profile_id,
+        )
+        releases_updated += 1
+
+    return {
+        "file_tracks": file_tracks,
+        "cleared_file_tracks": cleared_file_tracks,
+        "releases": releases_updated,
+    }
+
+
+def _table_exists(cursor, name: str) -> bool:
+    cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,))
+    return cursor.fetchone() is not None
+
+
+def _profile_filter(cursor, table: str, profile_id: Optional[int]) -> Tuple[str, tuple]:
+    """WHERE fragment that enforces Library-v2's admin-only legacy scope.
+
+    Tables predating the ``profile_id`` column are necessarily treated as the
+    single admin library. On profile-aware tables, ``None`` means admin profile
+    1, never all profiles.
+    """
+    if "profile_id" not in _existing_columns(cursor, table):
+        return "", ()
+    from core.library2 import ADMIN_PROFILE_ID
+    effective_profile_id = (ADMIN_PROFILE_ID if profile_id is None
+                            else int(profile_id))
+    if effective_profile_id != ADMIN_PROFILE_ID:
+        raise ValueError(
+            f"Library v2 legacy scope is admin-only: got profile_id={profile_id}, "
+            f"expected {ADMIN_PROFILE_ID}")
+    return "profile_id = ?", (effective_profile_id,)
+
+
+def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] = None) -> None:
+    """Make ``monitored`` reflect reality instead of defaulting everything to on.
+
+    Monitoring is the same concept as the existing systems:
+    - an artist is monitored iff it's on the **watchlist** (matched by external id
+      or name),
+    - a track found on the **wishlist** is monitored (matched by Spotify id).
+
+    Album/single monitor flags are explicit Library-v2 state. Toggling an album
+    in the UI still mirrors its tracks to the wishlist, but importing an existing
+    wishlisted song does not turn the parent release into an album-level monitor.
+
+    Artist flags follow the watchlist table. Track flags are Library-v2 state:
+    wishlist rows turn tracks on, but successful downloads or explicit user
+    choices must not be turned off just because the wishlist row disappeared.
+    No-op when those tables are absent (unit-test DBs).
+
+    ``profile_id`` is restricted to the admin watchlist/wishlist so Library v2
+    cannot leak another profile's wanted state into its global flags. ``None``
+    means admin profile 1.
+    """
+    # Artists ← watchlist
+    if _table_exists(cursor, "watchlist_artists"):
+        clause, params = _profile_filter(cursor, "watchlist_artists", profile_id)
+        cursor.execute("UPDATE lib2_artists SET monitored=0")
+        watchlist_columns = _existing_columns(cursor, "watchlist_artists")
+        identity_columns = {
+            "spotify_artist_id": "spotify",
+            "itunes_artist_id": "itunes",
+            "deezer_artist_id": "deezer",
+            "discogs_artist_id": "discogs",
+            "amazon_artist_id": "amazon",
+            "musicbrainz_artist_id": "musicbrainz",
+        }
+        present_id_columns = [
+            column for column in identity_columns if column in watchlist_columns
+        ]
+        wl = cursor.execute(
+            f"SELECT artist_name{''.join(', ' + col for col in present_id_columns)} "
+            "FROM watchlist_artists" + (f" WHERE {clause}" if clause else ""),
+            params,
+        ).fetchall()
+        watchlist_entries = [{
+            "name": row["artist_name"],
+            "provider_ids": {
+                identity_columns[column]: str(row[column]).strip()
+                for column in present_id_columns
+                if row[column] is not None and str(row[column]).strip()
+            },
+        } for row in wl]
+        from core.library2.monitor_sync import _artist_identity_matches
+        from core.library2.provider_ids import source_ids_from_values
+        for artist in cursor.execute(
+            "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
+        ).fetchall():
+            artist_ids = source_ids_from_values(
+                spotify_id=artist["spotify_id"],
+                musicbrainz_id=artist["musicbrainz_id"],
+                external_ids=artist["external_ids"],
+            )
+            if any(
+                _artist_identity_matches(
+                    artist["name"], artist_ids,
+                    entry["name"], entry["provider_ids"],
+                )
+                for entry in watchlist_entries
+            ):
+                cursor.execute(
+                    "UPDATE lib2_artists SET monitored=1 WHERE id=?",
+                    (artist["id"],),
+                )
+
+    # Tracks ← wishlist. Do not reset non-wishlist tracks: monitored also powers
+    # Lidarr-style upgrade checks after a file has already been downloaded.
+    if _table_exists(cursor, "wishlist_tracks"):
+        clause, params = _profile_filter(cursor, "wishlist_tracks", profile_id)
+        wanted = {
+            str(r[0]).split("::", 1)[0]
+            for r in cursor.execute(
+                "SELECT spotify_track_id FROM wishlist_tracks "
+                "WHERE spotify_track_id IS NOT NULL"
+                + (f" AND {clause}" if clause else ""),
+                params,
+            )
+            if r[0]
+        }
+        for sid in wanted:
+            cursor.execute("UPDATE lib2_tracks SET monitored=1 WHERE spotify_id=?", (sid,))
+        # NOTE: an artist is monitored ONLY when on the watchlist — never just
+        # because one of its tracks is wishlisted. A wishlisted song marks the
+        # *track* as wanted, not the whole artist.
+
+
+__all__ = [
+    "import_legacy_library",
+    "link_single_album_duplicates",
+    "apply_monitoring_from_watchlist_wishlist",
+    "reconcile_import_monitoring",
+    "split_artist_credits",
+    "featured_from_title",
+    "normalize_name",
+]

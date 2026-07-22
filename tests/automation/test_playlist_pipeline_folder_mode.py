@@ -90,8 +90,20 @@ def test_all_organize_playlists_skips_wishlist():
 def test_mixed_playlists_still_runs_wishlist():
     wishlist_calls = []
 
+    class _DB:
+        def get_mirrored_playlist_tracks(self, playlist_id):
+            assert playlist_id == 2  # organize-by-playlist rows are excluded
+            return [{
+                'source_track_id': 'native-track',
+                'extra_data': {
+                    'discovered': True,
+                    'matched_data': {'id': 'matched-track'},
+                },
+            }]
+
     deps = _minimal_deps(
-        process_wishlist_automatically=lambda **k: wishlist_calls.append(1),
+        get_database=lambda: _DB(),
+        process_wishlist_automatically=lambda **k: wishlist_calls.append(k),
         is_wishlist_actually_processing=lambda: False,
     )
     playlists = [
@@ -111,4 +123,31 @@ def test_mixed_playlists_still_runs_wishlist():
     )
     assert result['organize_downloads_started'] == 1
     assert result['wishlist_queued'] == 1
-    assert len(wishlist_calls) == 1
+    assert wishlist_calls == [{
+        'automation_id': None,
+        'track_ids': ['matched-track', 'native-track'],
+        'profile_ids': [1],
+    }]
+
+
+def test_pipeline_wishlist_fails_closed_when_no_track_scope_can_be_resolved():
+    wishlist_calls = []
+
+    class _DB:
+        def get_mirrored_playlist_tracks(self, _playlist_id):
+            return []
+
+    deps = _minimal_deps(
+        get_database=lambda: _DB(),
+        process_wishlist_automatically=lambda **kwargs: wishlist_calls.append(kwargs),
+    )
+    result = run_sync_and_wishlist(
+        deps,
+        None,
+        [{'id': 7, 'name': 'Empty identity scope'}],
+        sync_one_fn=lambda _pl: {'status': 'skipped'},
+        sync_id_for_fn=lambda pl: f'mirror_{pl["id"]}',
+    )
+
+    assert result['wishlist_queued'] == 0
+    assert wishlist_calls == []

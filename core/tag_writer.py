@@ -39,6 +39,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         'has_cover_art': False,
         'format': None,
         'error': None,
+        'lyrics': None,
         # ReplayGain (None if not present in file)
         'replaygain_track_gain': None,
         'replaygain_track_peak': None,
@@ -86,6 +87,9 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 if getattr(fr, 'desc', '') == 'SOULSYNC_VERIFICATION' and fr.text:
                     result['verification_status'] = str(fr.text[0])
                     break
+            uslt_frames = audio.tags.getall('USLT')
+            if uslt_frames and uslt_frames[0].text:
+                result['lyrics'] = str(uslt_frames[0].text[0])
 
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             # FLAC / OGG
@@ -109,6 +113,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 # OGG doesn't have a standard picture field we can easily check
                 result['has_cover_art'] = False
             result['verification_status'] = _vorbis_first(audio, 'soulsync_verification')
+            result['lyrics'] = _vorbis_first(audio, 'lyrics') or _vorbis_first(audio, 'unsyncedlyrics')
 
         elif isinstance(audio, MP4):
             # MP4 / M4A
@@ -125,6 +130,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             if disk:
                 result['disc_number'] = disk[0][0] if isinstance(disk[0], tuple) else None
             result['has_cover_art'] = bool(audio.tags.get('covr', [])) if audio.tags else False
+            result['lyrics'] = _mp4_first(audio, '\xa9lyr')
             vs = (audio.tags or {}).get('----:com.soulsync:VERIFICATION')
             if vs:
                 raw = vs[0]

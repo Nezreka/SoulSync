@@ -62,7 +62,9 @@ class NZBGetAdapter:
         self._url = (config_manager.get('usenet_client.url', '') or '').rstrip('/')
         self._username = config_manager.get('usenet_client.username', '') or ''
         self._password = config_manager.get('usenet_client.password', '') or ''
-        self._category = config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
 
     def reload_settings(self) -> None:
         self._load_config()

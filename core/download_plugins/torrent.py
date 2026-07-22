@@ -224,6 +224,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     'seeders': result.seeders,
                     'leechers': result.leechers,
                     'grabs': result.grabs,
+                    'publish_date': result.publish_date,
                     'protocol': 'torrent',
                 },
             )

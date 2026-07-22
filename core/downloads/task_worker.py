@@ -35,6 +35,21 @@ from utils.logging_config import get_logger
 logger = get_logger("downloads.task_worker")
 
 
+def _notify_acquisition_retry_exhausted(track_info: Any, error: str) -> bool:
+    """Notify persistent Acquisition state; ordinary tasks are a no-op."""
+    if not isinstance(track_info, dict):
+        return False
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_pipeline_retry_exhausted,
+        )
+        return notify_pipeline_retry_exhausted(track_info, error=error)
+    except Exception:
+        logger.exception(
+            "[Modal Worker] Could not persist Acquisition retry exhaustion")
+        return False
+
+
 def _resolve_worker_source(username):
     """Logical source bucket for a candidate's username (Soulseek peers all
     collapse to 'soulseek'; streaming sources keep their name). Mirrors the
@@ -689,6 +704,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 if all_raw_results and not download_tasks[task_id].get('cached_candidates'):
                     download_tasks[task_id]['cached_candidates'] = all_raw_results
 
+        _notify_acquisition_retry_exhausted(
+            track_data,
+            f'No match found after {len(search_queries)} shared-pipeline queries',
+        )
+
         # Notify batch manager that this task completed (failed) - THREAD SAFE
         if batch_id:
             try:
@@ -716,6 +736,12 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 logger.error(f"[Exception Recovery] Could not acquire lock to update task {task_id} status")
         except Exception as status_error:
             logger.error(f"Error updating task status in exception handler: {status_error}")
+
+        task_info = locals().get('track_data')
+        _notify_acquisition_retry_exhausted(
+            task_info,
+            f'Unexpected shared-pipeline retry error: {type(e).__name__}',
+        )
 
         # Notify batch manager that this task completed (failed) - THREAD SAFE with RECOVERY
         if batch_id:

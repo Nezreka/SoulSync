@@ -87,6 +87,72 @@ def test_fill_only_simple_download_tags_empty_input_short_circuits(monkeypatch):
     assert calls == []   # never even reads the file when there's nothing to fill
 
 
+def test_post_move_recovery_reconciles_real_destination_without_append_only_replay(
+    tmp_path, monkeypatch,
+):
+    """A failure after the move must not leave a physical DB orphan."""
+    destination = tmp_path / "Library" / "Artist" / "Track.flac"
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"audio")
+    context = {"_final_processed_path": str(destination)}
+    calls = []
+
+    import core.acquisition.pipeline_callback as acquisition_callback
+    import core.library2.autolink as autolink
+
+    monkeypatch.setattr(
+        import_pipeline,
+        "record_soulsync_library_entry",
+        lambda ctx, artist, album: calls.append(("legacy", artist, album)),
+    )
+    monkeypatch.setattr(
+        autolink,
+        "link_download_into_library_v2",
+        lambda ctx: calls.append(("lib2", ctx["_final_processed_path"])),
+    )
+    monkeypatch.setattr(
+        acquisition_callback,
+        "notify_pipeline_import_success",
+        lambda ctx: calls.append(("acquisition",)),
+    )
+    monkeypatch.setattr(
+        acquisition_callback,
+        "notify_manual_grab_import_success",
+        lambda ctx: calls.append(("correlated_grab",)),
+    )
+
+    recovered = import_pipeline._recover_moved_file_bookkeeping(
+        context,
+        {"name": "Artist"},
+        {"album_name": "Album"},
+    )
+
+    assert recovered is True
+    assert context["_post_move_recovered"] is True
+    assert calls == [
+        ("legacy", {"name": "Artist"}, {"album_name": "Album"}),
+        ("lib2", str(destination)),
+        ("acquisition",),
+        ("correlated_grab",),
+    ]
+
+
+def test_post_move_recovery_requires_a_real_destination(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "record_soulsync_library_entry",
+        lambda *args: calls.append(args),
+    )
+
+    recovered = import_pipeline._recover_moved_file_bookkeeping(
+        {"_final_processed_path": str(tmp_path / "missing.flac")},
+    )
+
+    assert recovered is False
+    assert calls == []
+
+
 def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     transfer_root = tmp_path / "Transfer"
     transfer_root.mkdir()
@@ -107,6 +173,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         "is_album_download": False,
         "task_id": task_id,
         "batch_id": batch_id,
+        "_skip_quarantine_check": "acoustid",
     }
 
     mark_calls = []
@@ -153,6 +220,12 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda context: wishlist_calls.append(dict(context)))
     monkeypatch.setattr(import_pipeline, "_mark_task_completed", lambda task, track_info: mark_calls.append((task, track_info)))
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
+    check_events = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "_journal_pipeline_check",
+        lambda _context, **event: check_events.append(event) or True,
+    )
 
     runtime_state.matched_downloads_context[context_key] = context
     runtime_state.download_tasks[task_id] = {"track_info": {}, "status": "running"}
@@ -178,6 +251,14 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         assert scan_calls == ["Simple download completed"]
         assert wishlist_calls and wishlist_calls[0]["search_result"]["is_simple_download"] is True
         assert activity_calls
+        acoustic = [
+            event for event in check_events if event["check"] == "acoustic_id"
+        ]
+        assert len(acoustic) == 1
+        assert acoustic[0]["status"] == "skipped"
+        assert acoustic[0]["reason_code"] == "user_override"
+        assert acoustic[0]["actor"] == "user"
+        assert context["_acoustid_result"] == "skip"
     finally:
         runtime_state.matched_downloads_context.clear()
         runtime_state.matched_downloads_context.update(original_matched_context)
@@ -430,6 +511,12 @@ def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
                         lambda fp, ctx, reason, eng, trigger=None: triggers.append(trigger) or "/q/x.flac.quarantined")
     monkeypatch.setattr(import_pipeline, "_mark_task_quarantined", lambda *a, **k: None)
     monkeypatch.setattr(import_pipeline, "_requeue_quarantined_task_for_retry", lambda *a, **k: False)
+    journal = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "_journal_pipeline_check",
+        lambda _context, **event: journal.append(event) or True,
+    )
 
     # Spy: AcoustID must NOT be constructed when quality already rejected.
     acoustid_constructed = []
@@ -448,6 +535,11 @@ def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
     assert triggers == ["quality"]            # quarantined for quality
     assert acoustid_constructed == []         # AcoustID never ran
     assert context.get("_audio_quality") == "FLAC 16bit/44.1kHz"  # recorded for the sidecar
+    assert [(event["check"], event["status"], event["reason_code"])
+            for event in journal] == [
+        ("quality", "failed", "quality_not_allowed"),
+        ("acoustic_id", "not_run", "blocked_by_quality"),
+    ]
 
 
 def test_mark_task_quarantined_stashes_entry_id_when_task_id_absent():

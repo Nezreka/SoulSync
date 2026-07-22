@@ -24,6 +24,34 @@ def test_library_track_full_event():
     }
 
 
+def test_typed_lib2_id_never_becomes_legacy_db_id():
+    ev = build_play_event({
+        "id": 7,
+        "lib2_track_id": 7,
+        "legacy_track_id": None,
+        "server_track_id": None,
+        "title": "V2 only",
+    }, TS)
+
+    assert ev["track_id"] == "lib2:7"
+    assert ev["lib2_track_id"] == 7
+    assert ev["db_track_id"] is None
+
+
+def test_typed_legacy_id_is_used_instead_of_surrogate_lib2_id():
+    ev = build_play_event({
+        "id": 7,
+        "lib2_track_id": 7,
+        "legacy_track_id": "4321",
+        "server_track_id": "server-song-4321",
+        "title": "Imported",
+    }, TS)
+
+    assert ev["track_id"] == "server-song-4321"
+    assert ev["db_track_id"] == 4321
+    assert ev["lib2_track_id"] == 7
+
+
 def test_int_string_id_is_db_track_id():
     ev = build_play_event({"id": "99", "title": "X"}, TS)
     assert ev["db_track_id"] == 99
