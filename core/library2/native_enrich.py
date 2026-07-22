@@ -220,7 +220,6 @@ def enrich_native_entity_for_service(
     """
 
     from difflib import SequenceMatcher
-    import re
 
     canonical = {
         "artist": "artist", "artists": "artist",
@@ -277,21 +276,17 @@ def enrich_native_entity_for_service(
             query = f"{artist_name} - {query}"
         candidates = searcher(service, canonical, query) or []
 
-        # Artists use the same dedicated, project-wide name gate every other
-        # worker match uses (core.worker_utils.artist_name_matches, threshold
-        # 0.85 chosen specifically to reject "Blance/Blanke"-style near
-        # misses) instead of a locally re-derived, looser 0.72 threshold —
-        # review A12. Its normalizer also keeps CJK characters (Python's
-        # \w is Unicode-aware) where the old ASCII-only [^a-z0-9]+ filter
-        # collapsed any CJK name to '', making SequenceMatcher('', '').ratio()
-        # == 1.0 always accept the first candidate.
+        # Use the project-wide Unicode-aware normalizer for every entity. The
+        # artist threshold remains deliberately stricter to reject
+        # "Blance/Blanke"-style near misses, while album/track title matching
+        # keeps its existing tolerance without collapsing CJK to an empty key.
+        from core.worker_utils import normalize_artist_name
         if canonical == "artist":
-            from core.worker_utils import ARTIST_NAME_MATCH_THRESHOLD, normalize_artist_name
+            from core.worker_utils import ARTIST_NAME_MATCH_THRESHOLD
             normalize_fn = normalize_artist_name
             threshold = ARTIST_NAME_MATCH_THRESHOLD
         else:
-            def normalize_fn(value: Any) -> str:
-                return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+            normalize_fn = normalize_artist_name
             threshold = 0.72
 
         wanted = normalize_fn(row["name"])

@@ -241,6 +241,32 @@ def test_artist_service_enrichment_rejects_unrelated_cjk_names(imported_conn):
     assert row["spotify_id"] is None
 
 
+def test_album_service_enrichment_preserves_non_latin_title(imported_conn):
+    artist_id = _insert_native_artist(imported_conn, "宇多田ヒカル")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, '初恋')",
+        (artist_id,),
+    ).lastrowid)
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "album",
+        album_id,
+        "spotify",
+        searcher=lambda service, entity, query: [{
+            "id": "SP-CJK-ALBUM",
+            "name": "初恋",
+            "provider": "spotify",
+            "image": "https://img.example/cjk.jpg",
+        }],
+    )
+
+    assert result["success"] is True
+    assert imported_conn.execute(
+        "SELECT spotify_id FROM lib2_albums WHERE id=?", (album_id,),
+    ).fetchone()["spotify_id"] == "SP-CJK-ALBUM"
+
+
 def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
     imported_conn, monkeypatch
 ):
