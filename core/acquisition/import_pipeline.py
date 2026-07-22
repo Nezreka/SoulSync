@@ -14,10 +14,12 @@ from core.acquisition.bundle_matching import load_expected_tracks, match_bundle
 from core.acquisition.imports import (
     get_import,
     list_open_imports,
+    release_import_dispatch_claim,
     record_import_deferred,
     record_import_failure,
     record_inventory_result,
     record_matching_result,
+    try_claim_import_dispatch,
 )
 from core.acquisition.main_pipeline_bridge import dispatch_import_to_main_pipeline
 from utils.logging_config import get_logger
@@ -75,6 +77,35 @@ def _defer(connection_factory: Callable[[], Any], import_id: str, error: str) ->
     conn = connection_factory()
     try:
         record_import_deferred(conn, import_id, error=error)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _claim_dispatch(
+    connection_factory: Callable[[], Any], import_id: str,
+) -> Optional[str]:
+    conn = connection_factory()
+    try:
+        token = try_claim_import_dispatch(conn, import_id)
+        conn.commit()
+        return token
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _release_dispatch(
+    connection_factory: Callable[[], Any], import_id: str, token: str,
+) -> None:
+    conn = connection_factory()
+    try:
+        release_import_dispatch_claim(conn, import_id, token)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -183,29 +214,49 @@ def advance_import(
                 conn.close()
 
         if record.status == "importing":
-            result = dispatcher(
-                connection_factory,
-                record.id,
-                config_get=config_get,
-            )
-            conn = connection_factory()
             try:
-                current = get_import(conn, record.id)
-            finally:
-                conn.close()
-            if current and current.status == "completed":
-                return "completed"
-            if result.errors:
-                _defer(connection_factory, record.id, "; ".join(result.errors))
-                return "deferred"
-            if result.waiting:
-                _defer(
+                claim_token = _claim_dispatch(connection_factory, record.id)
+                if claim_token is None:
+                    return "already_running"
+                conn = connection_factory()
+                try:
+                    current = get_import(conn, record.id)
+                finally:
+                    conn.close()
+                if current is None:
+                    return "missing"
+                if current.status != "importing":
+                    return current.status
+                if current.result.get("quarantined"):
+                    return "quarantined"
+                if not is_due(current, now=timestamp):
+                    return "backoff"
+                result = dispatcher(
                     connection_factory,
-                    record.id,
-                    "Waiting for shared pipeline retry or quarantine review",
+                    current.id,
+                    config_get=config_get,
                 )
-                return "waiting_pipeline"
-            return "importing"
+                conn = connection_factory()
+                try:
+                    current = get_import(conn, current.id)
+                finally:
+                    conn.close()
+                if current and current.status == "completed":
+                    return "completed"
+                if result.errors:
+                    _defer(connection_factory, record.id, "; ".join(result.errors))
+                    return "deferred"
+                if result.waiting:
+                    _defer(
+                        connection_factory,
+                        record.id,
+                        "Waiting for shared pipeline retry or quarantine review",
+                    )
+                    return "waiting_pipeline"
+                return "importing"
+            finally:
+                if "claim_token" in locals() and claim_token is not None:
+                    _release_dispatch(connection_factory, record.id, claim_token)
     return "deferred"
 
 

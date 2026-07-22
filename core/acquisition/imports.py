@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS acquisition_imports (
     result_json TEXT NOT NULL DEFAULT '{}',
     attempts INTEGER NOT NULL DEFAULT 0,
     error TEXT,
+    dispatch_claim_token TEXT,
+    dispatch_claim_expires_at REAL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
@@ -190,6 +193,12 @@ def ensure_acquisition_imports_schema(conn: Any) -> None:
         conn.execute(
             "ALTER TABLE acquisition_imports "
             "ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+    if "dispatch_claim_token" not in existing:
+        conn.execute(
+            "ALTER TABLE acquisition_imports ADD COLUMN dispatch_claim_token TEXT")
+    if "dispatch_claim_expires_at" not in existing:
+        conn.execute(
+            "ALTER TABLE acquisition_imports ADD COLUMN dispatch_claim_expires_at REAL")
     for sql in _INDEXES:
         conn.execute(sql)
 
@@ -265,6 +274,53 @@ def list_open_imports(conn: Any) -> Tuple[AcquisitionImport, ...]:
         OPEN_IMPORT_STATUSES,
     ).fetchall()
     return tuple(_from_row(row) for row in rows)
+
+
+def try_claim_import_dispatch(
+    conn: Any,
+    import_id: str,
+    *,
+    lease_seconds: float = 1800.0,
+    now: Optional[float] = None,
+) -> Optional[str]:
+    """Atomically lease one importing row for main-pipeline dispatch.
+
+    The token prevents an expired owner from clearing a newer owner's claim.
+    A lease makes a process crash recoverable without allowing the periodic
+    monitor and an admin resume request to dispatch the same files together.
+    """
+    ensure_acquisition_imports_schema(conn)
+    timestamp = time.time() if now is None else float(now)
+    lease = max(float(lease_seconds), 1.0)
+    token = secrets.token_urlsafe(18)
+    cursor = conn.execute(
+        """UPDATE acquisition_imports
+              SET dispatch_claim_token=?, dispatch_claim_expires_at=?
+            WHERE id=? AND status='importing'
+              AND (
+                    dispatch_claim_token IS NULL
+                    OR dispatch_claim_expires_at IS NULL
+                    OR dispatch_claim_expires_at <= ?
+                  )""",
+        (token, timestamp + lease, str(import_id), timestamp),
+    )
+    return token if cursor.rowcount == 1 else None
+
+
+def release_import_dispatch_claim(
+    conn: Any,
+    import_id: str,
+    token: str,
+) -> bool:
+    """Release only the dispatch claim owned by ``token``."""
+    ensure_acquisition_imports_schema(conn)
+    cursor = conn.execute(
+        """UPDATE acquisition_imports
+              SET dispatch_claim_token=NULL, dispatch_claim_expires_at=NULL
+            WHERE id=? AND dispatch_claim_token=?""",
+        (str(import_id), str(token)),
+    )
+    return cursor.rowcount == 1
 
 
 def record_download_completed(
@@ -871,6 +927,7 @@ __all__ = [
     "get_import",
     "get_import_by_download",
     "list_open_imports",
+    "release_import_dispatch_claim",
     "record_download_completed",
     "record_import_deferred",
     "record_import_failure",
@@ -881,4 +938,5 @@ __all__ = [
     "record_recovered_to_staging",
     "record_pipeline_file_completed",
     "record_pipeline_file_quarantined",
+    "try_claim_import_dispatch",
 ]
