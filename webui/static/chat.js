@@ -13,7 +13,10 @@
     var state = {
         view: 'room',            // 'room' | 'pm'
         pmUser: null,            // active conversation username
-        room: null,              // configured room name (from /status)
+        room: null,              // the ACTIVE room name
+        homeRoom: null,          // the community room (from /status)
+        rooms: [],               // joined rooms rail [{name, home}]
+        canManage: false,        // admin: may join/leave rooms
         canSend: false,
         configured: null,        // null = unknown yet
         timer: null,
@@ -485,9 +488,22 @@
     function renderSide(convos) {
         var rooms = q('[data-chat-rooms]');
         if (rooms) {
-            rooms.innerHTML = '<button class="chat-side-item' +
-                (state.view === 'room' ? ' chat-side-item--on' : '') +
-                '" type="button" data-chat-open-room># ' + esc(state.room || 'SoulSync') + '</button>';
+            var list = (state.rooms.length ? state.rooms
+                : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
+            rooms.innerHTML = list.map(function (r) {
+                var on = state.view === 'room' && state.room === r.name;
+                return '<div class="chat-side-room' + (on ? ' chat-side-item--on' : '') + '">' +
+                    '<button class="chat-side-item" type="button" data-chat-open-room="' +
+                        attr(r.name) + '" title="' + attr(r.name) + '"># ' + esc(r.name) + '</button>' +
+                    (!r.home && state.canManage
+                        ? '<button class="chat-side-leave" type="button" data-chat-leave-room="' +
+                            attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
+                        : '') +
+                '</div>';
+            }).join('') +
+            (state.canManage
+                ? '<button class="chat-side-item chat-side-add" type="button" data-chat-browse-rooms>+ Browse rooms</button>'
+                : '');
         }
         var host = q('[data-chat-convos]');
         if (!host) return;
@@ -506,9 +522,12 @@
     function renderHead() {
         var head = q('[data-chat-head]');
         if (!head) return;
+        var isHome = !state.homeRoom || state.room === state.homeRoom;
         head.innerHTML = state.view === 'room'
             ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
-              '<span class="chat-head-sub">the SoulSync community room on Soulseek</span>' +
+              '<span class="chat-head-sub">' + (isHome
+                  ? 'the SoulSync community room on Soulseek'
+                  : 'a public Soulseek room') + '</span>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
@@ -609,6 +628,7 @@
         if (!target || !emoji) return;
         postJSON('/api/chat/room/react', {
             target_user: target.user, target_text: target.text, e: emoji,
+            room: state.room || '',
         }).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -749,8 +769,13 @@
                 return;
             }
             if (overlay) overlay.hidden = true;
-            state.room = res.body.room || state.room;
+            // a home-room rename moves the active view with it when the home
+            // room WAS the active room; an extra room stays put
+            var wasHome = state.room === state.homeRoom;
+            state.homeRoom = res.body.room || state.homeRoom;
+            if (wasHome) state.room = state.homeRoom;
             state.lastStamp = null;
+            loadRooms();
             renderHead();
             refresh();
             if (typeof showToast === 'function') showToast('Chat settings saved', 'success');
@@ -793,7 +818,7 @@
     function sendGif(url) {
         if (!url || !state.canSend || state.view !== 'room') return;
         toggleGifPicker(true);
-        postJSON('/api/chat/room/message', { message: url }).then(function (res) {
+        postJSON('/api/chat/room/message', { message: url, room: state.room || '' }).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'GIF not sent', 'error');
@@ -883,7 +908,8 @@
         if (state.view !== 'room' || state.loadingOlder || state.historyDone || !state.msgs.length) return;
         state.loadingOlder = true;
         var oldest = String(state.msgs[0].timestamp || '');
-        getJSON('/api/chat/room/history?before=' + encodeURIComponent(oldest) + '&limit=100')
+        getJSON('/api/chat/room/history?room=' + encodeURIComponent(state.room || '') +
+                '&before=' + encodeURIComponent(oldest) + '&limit=100')
             .then(function (res) {
                 state.loadingOlder = false;
                 if (!res.ok) return;
@@ -907,14 +933,13 @@
         if (!pageVisible()) return Promise.resolve();
         var work;
         if (state.view === 'room') {
-            work = getJSON('/api/chat/room').then(function (res) {
+            work = getJSON('/api/chat/room?room=' + encodeURIComponent(state.room || '')).then(function (res) {
                 if (!res.ok) {
                     renderProblem(res.body && res.body.error
                         ? res.body.error
                         : 'Chat is unavailable right now.');
                     return;
                 }
-                state.room = res.body.room || state.room;
                 state.canSend = !!res.body.can_send;
                 // auto-join OFF → the server no longer joins for us; show the
                 // join gate instead of the room (popwaffle9000's leave fix).
@@ -955,17 +980,127 @@
     }
 
     // ── actions ──────────────────────────────────────────────────────────────
-    function openRoom() {
+    function openRoom(name) {
         state.view = 'room'; state.pmUser = null; state.lastStamp = null; state.stickBottom = true;
         state.renderedCount = 0; hideJumpPill();
+        state.room = name || state.room || state.homeRoom || 'SoulSync';
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
+        cancelReply();
         try {
             state.newMarker = localStorage.getItem('chat_seen_' + (state.room || '')) || null;
         } catch (e) { state.newMarker = null; }
-        renderHead(); renderComposer();
+        renderHead(); renderComposer(); renderSide(null);
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
         refresh();
+    }
+
+    function loadRooms() {
+        return getJSON('/api/chat/rooms').then(function (res) {
+            if (!res.ok) return;
+            state.homeRoom = res.body.home || state.homeRoom;
+            state.rooms = res.body.rooms || [];
+            state.canManage = !!res.body.can_manage;
+            renderSide(null);
+        });
+    }
+
+    // ── room browser (join any public Soulseek room) ─────────────────────────
+    var _availRooms = null;
+
+    function openRoomBrowser() {
+        var overlay = q('[data-chat-rooms-modal]');
+        if (!overlay) return;
+        overlay.hidden = false;
+        var listEl = q('[data-chat-rooms-list]');
+        if (listEl) listEl.innerHTML = '<div class="chat-gif-hint">Loading rooms…</div>';
+        var inp = q('[data-chat-rooms-search]');
+        if (inp) { inp.value = ''; inp.focus(); }
+        getJSON('/api/chat/rooms/available').then(function (res) {
+            if (!res.ok) {
+                if (listEl) {
+                    listEl.innerHTML = '<div class="chat-gif-hint">' +
+                        esc(res.body && res.body.error || 'Room list unavailable') + '</div>';
+                }
+                return;
+            }
+            _availRooms = { rooms: res.body.rooms || [], joined: res.body.joined || [] };
+            renderRoomBrowser('');
+        });
+    }
+
+    function renderRoomBrowser(filter) {
+        var listEl = q('[data-chat-rooms-list]');
+        if (!listEl || !_availRooms) return;
+        var f = String(filter || '').toLowerCase();
+        var joined = {};
+        _availRooms.joined.forEach(function (r) { joined[r] = 1; });
+        var rooms = _availRooms.rooms.filter(function (r) {
+            return !r.private && (!f || r.name.toLowerCase().indexOf(f) > -1);
+        }).slice(0, 200);
+        if (!rooms.length) {
+            listEl.innerHTML = '<div class="chat-gif-hint">No rooms match</div>';
+            return;
+        }
+        listEl.innerHTML = rooms.map(function (r) {
+            var isJoined = !!joined[r.name];
+            return '<div class="chat-room-row">' +
+                '<span class="chat-room-name" title="' + attr(r.name) + '"># ' + esc(r.name) + '</span>' +
+                '<span class="chat-room-count">' + r.users + ' online</span>' +
+                (isJoined
+                    ? '<span class="chat-room-joined">joined</span>'
+                    : (state.canManage
+                        ? '<button type="button" class="chat-room-join" data-chat-join-room="' +
+                            attr(r.name) + '">Join</button>'
+                        : '')) +
+            '</div>';
+        }).join('');
+    }
+
+    function joinRoom(name, btn) {
+        if (!name) return;
+        if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+        postJSON('/api/chat/rooms/join', { room: name }).then(function (res) {
+            if (!res.ok) {
+                if (btn) { btn.disabled = false; btn.textContent = 'Join'; }
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not join', 'error');
+                }
+                return;
+            }
+            if (_availRooms && _availRooms.joined.indexOf(name) < 0) _availRooms.joined.push(name);
+            var overlay = q('[data-chat-rooms-modal]');
+            if (overlay) overlay.hidden = true;
+            loadRooms().then(function () { openRoom(name); });
+            if (typeof showToast === 'function') showToast('Joined # ' + name, 'success');
+        });
+    }
+
+    function leaveRoom(name) {
+        if (!name) return;
+        var go = function () {
+            postJSON('/api/chat/rooms/leave', { room: name }).then(function (res) {
+                if (!res.ok) {
+                    if (typeof showToast === 'function') {
+                        showToast(res.body && res.body.error || 'Could not leave', 'error');
+                    }
+                    return;
+                }
+                if (_availRooms) {
+                    _availRooms.joined = _availRooms.joined.filter(function (r) { return r !== name; });
+                }
+                loadRooms().then(function () {
+                    if (state.view === 'room' && state.room === name) openRoom(state.homeRoom);
+                });
+            });
+        };
+        if (typeof showConfirmDialog === 'function') {
+            showConfirmDialog({
+                title: 'Leave Room',
+                message: 'Leave # ' + name + '? You can rejoin any time from Browse rooms.',
+                confirmText: 'Leave', destructive: false,
+            }).then(function (yes) { if (yes) go(); });
+        } else { go(); }
     }
 
     function openPm(username) {
@@ -990,6 +1125,7 @@
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
         var payload = { message: text };
+        if (state.view === 'room') payload.room = state.room || '';
         var sentReply = null;
         if (state.view === 'room' && state.replyTo) {
             payload.reply = state.replyTo;
@@ -1097,7 +1233,17 @@
                 return;
             }
             t = e.target.closest('[data-chat-open-room]');
-            if (t) { openRoom(); return; }
+            if (t) { openRoom(t.getAttribute('data-chat-open-room') || undefined); return; }
+            t = e.target.closest('[data-chat-browse-rooms]');
+            if (t) { openRoomBrowser(); return; }
+            t = e.target.closest('[data-chat-join-room]');
+            if (t) { joinRoom(t.getAttribute('data-chat-join-room'), t); return; }
+            t = e.target.closest('[data-chat-leave-room]');
+            if (t) { leaveRoom(t.getAttribute('data-chat-leave-room')); return; }
+            t = e.target.closest('[data-chat-rooms-close]');
+            if (t) { var rm = q('[data-chat-rooms-modal]'); if (rm) rm.hidden = true; return; }
+            var rmo = e.target.closest('[data-chat-rooms-modal]');
+            if (rmo && e.target === rmo) { rmo.hidden = true; return; }
             t = e.target.closest('[data-chat-open-pm]');
             if (t) { openPm(t.getAttribute('data-chat-open-pm')); return; }
             t = e.target.closest('[data-chat-react-user]');
@@ -1156,6 +1302,13 @@
             });
         }
 
+        var roomsIn = q('[data-chat-rooms-search]');
+        if (roomsIn) {
+            roomsIn.addEventListener('input', function () {
+                renderRoomBrowser(roomsIn.value.trim());
+            });
+        }
+
         var gifIn = q('[data-chat-gif-search]');
         if (gifIn) {
             gifIn.addEventListener('input', function () {
@@ -1194,11 +1347,13 @@
         if (state.configured !== true) {
             getJSON('/api/chat/status').then(function (res) {
                 state.configured = !!(res.ok && res.body.configured);
-                state.room = (res.body && res.body.room) || 'SoulSync';
+                state.homeRoom = (res.body && res.body.room) || 'SoulSync';
+                state.room = state.room || state.homeRoom;
                 state.canSend = !!(res.body && res.body.can_send);
                 state.isAdmin = !!(res.body && res.body.is_admin);
                 state.selfName = String((res.body && res.body.username) || '');
                 renderSide([]); renderHead(); renderComposer();
+                loadRooms();
                 if (!state.configured) {
                     renderProblem('Soulseek (slskd) isn\'t configured — set it up in Settings ' +
                                   'to join the chat.');

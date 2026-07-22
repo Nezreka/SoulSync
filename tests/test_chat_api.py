@@ -123,6 +123,19 @@ class _FakeChatClient:
         self.acked.append(username)
         return True
 
+    def leave_room(self, room):
+        self.left = getattr(self, "left", [])
+        self.left.append(room)
+        if room in self.joined:
+            self.joined.remove(room)
+        return True
+
+    def get_available_rooms(self):
+        self.available_calls = getattr(self, "available_calls", 0) + 1
+        return [{"name": "indie", "userCount": 300},
+                {"name": "SoulSync", "userCount": 42},
+                {"name": "secret", "userCount": 9, "isPrivate": True}]
+
 
 @pytest.fixture()
 def chat_app():
@@ -132,7 +145,9 @@ def chat_app():
         client_getter=lambda: state["client"],
         run_async=lambda v: v,
         config_get=lambda key, default=None: state["config"].get(key, default),
+        config_set=lambda key, value: state["config"].__setitem__(key, value),
     )
+    chat_api._AVAILABLE.update(rooms=None, at=0.0)   # module cache: isolate tests
     app = Flask(__name__)
 
     @app.before_request
@@ -458,3 +473,87 @@ def test_join_gate_wired_in_frontend():
     assert "renderJoinGate" in js
     assert "auto_join: true" in js               # the gate's Join button opts back in
     assert "form.hidden = false" in js           # composer restored after rejoin
+
+
+# ── multi-room (chat best-in-class P1) ───────────────────────────────────────
+
+class TestRooms:
+    def test_rooms_rail_home_plus_extras(self, chat_app):
+        http, state = chat_app
+        res = http.get("/api/chat/rooms").get_json()
+        assert res["home"] == "SoulSync"
+        assert res["rooms"] == [{"name": "SoulSync", "home": True}]
+        state["config"]["soulseek.chat_rooms"] = ["indie", "SoulSync", "indie"]
+        res = http.get("/api/chat/rooms").get_json()
+        # home dedup + duplicate dedup
+        assert res["rooms"] == [{"name": "SoulSync", "home": True},
+                                {"name": "indie", "home": False}]
+        assert res["can_manage"] is True
+
+    def test_available_rooms_cached_and_sorted(self, chat_app):
+        http, state = chat_app
+        res = http.get("/api/chat/rooms/available").get_json()
+        names = [r["name"] for r in res["rooms"]]
+        assert names[0] == "indie"                      # sorted by users desc
+        assert "SoulSync" in res["joined"]
+        http.get("/api/chat/rooms/available")
+        assert state["client"].available_calls == 1     # second hit = cache
+
+    def test_join_persists_config_and_joins_slskd(self, chat_app):
+        http, state = chat_app
+        res = http.post("/api/chat/rooms/join", json={"room": "indie"})
+        assert res.status_code == 200
+        assert state["config"]["soulseek.chat_rooms"] == ["indie"]
+        assert "indie" in state["client"].joined
+
+    def test_join_leave_admin_only(self, chat_app):
+        http, state = chat_app
+        state["admin"] = False
+        assert http.post("/api/chat/rooms/join", json={"room": "indie"}).status_code == 403
+        assert http.post("/api/chat/rooms/leave", json={"room": "indie"}).status_code == 403
+
+    def test_leave_removes_config_and_slskd(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_rooms"] = ["indie", "vinyl"]
+        res = http.post("/api/chat/rooms/leave", json={"room": "indie"})
+        assert res.status_code == 200
+        assert state["config"]["soulseek.chat_rooms"] == ["vinyl"]
+        assert state["client"].left == ["indie"]
+
+    def test_leave_home_room_is_redirected_to_autojoin(self, chat_app):
+        http, state = chat_app
+        assert http.post("/api/chat/rooms/leave", json={"room": "SoulSync"}).status_code == 400
+
+    def test_leave_unknown_room_404(self, chat_app):
+        http, state = chat_app
+        assert http.post("/api/chat/rooms/leave", json={"room": "nope"}).status_code == 404
+
+    def test_room_endpoint_serves_joined_extra_room(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_rooms"] = ["indie"]
+        res = http.get("/api/chat/room?room=indie").get_json()
+        assert res["room"] == "indie"
+        assert res["messages"][0]["roomName"] == "indie"
+        assert "indie" in state["client"].joined         # hydrate re-joins on demand
+
+    def test_room_endpoint_refuses_unlisted_room(self, chat_app):
+        http, state = chat_app
+        assert http.get("/api/chat/room?room=randomroom").status_code == 404
+
+    def test_autojoin_off_gates_home_room_only(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_auto_join"] = False
+        state["config"]["soulseek.chat_rooms"] = ["indie"]
+        home = http.get("/api/chat/room").get_json()
+        assert home["joined"] is False                   # home: the leave fix holds
+        extra = http.get("/api/chat/room?room=indie").get_json()
+        assert extra["joined"] is True                   # extras: explicit joins
+
+    def test_send_routes_to_named_room(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_rooms"] = ["indie"]
+        res = http.post("/api/chat/room/message", json={"message": "hi", "room": "indie"})
+        assert res.status_code == 200
+        assert state["client"].sent_room[-1][0] == "indie"
+        assert http.post("/api/chat/room/message",
+                         json={"message": "hi", "room": "nope"}).status_code == 404
