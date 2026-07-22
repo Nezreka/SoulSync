@@ -67,6 +67,9 @@ Unified history feed merging `acquisition_history`, `lib2_entity_history`, `lib2
 ### <a name="feat-playback"></a> F-11: Track Playback / Preview
 Allows direct streaming/playback of tracks in V2 tables via shell bridge and the legacy player.
 
+### <a name="feat-acq-review"></a> F-12: Acquisition Review / Manual Grab Assignments UI
+Provides a frontend interface for manual assignments when ambiguous album grabs occur. Allows users to resolve ambiguous track-file mappings manually since the backend already supports `/acquisition/requests*`, `/acquisition/imports*` (including `/resolve`), and similar endpoints.
+
 ---
 
 ## 4. UI/UX Requirements
