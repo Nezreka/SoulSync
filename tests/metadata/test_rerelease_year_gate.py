@@ -101,11 +101,15 @@ class TestMatcherYearGate:
         owned = [_album("Album X", None)]
         assert _match(db, "Album X", owned, year="2024") is not None
 
-    def test_non_strict_callers_unchanged(self, db):
-        # download matching / repair paths pass strict=False — the gate must
-        # never fire there even on a hard year mismatch.
+    def test_non_strict_caller_with_year_now_gates(self, db):
+        # ROUND 3 FLIP (5BILLION): this used to pin the gate as strict-only,
+        # which left the download analysis year-blind — a 2023 remaster
+        # edition-matched the 1998 original and every track showed FOUND.
+        # The gate now fires for ANY caller that supplies expected_year;
+        # callers that pass no year (all other non-strict callers) are
+        # byte-identical to before (see test_no_year_still_edition_matches...).
         owned = [_album("Album X", 2005)]
-        assert _match(db, "Album X", owned, year="2024", strict=False) is not None
+        assert _match(db, "Album X", owned, year="2024", strict=False) is None
 
     def test_same_year_deluxe_still_matches_standard_card(self, db):
         # the intentional standard-vs-deluxe behavior is preserved: same year,
@@ -211,3 +215,67 @@ def test_library_completion_stream_maps_the_year_through():
     block = ws.split("def library_completion_stream")[1].split("mapped = {")[1].split("}")[0]
     assert "'year'" in block, "library completion mapped dict dropped the year"
     assert "release_date" in block
+
+
+# ── 5BILLION round 3: the gate reaches the DOWNLOAD ANALYSIS ─────────────────
+# The gate used to fire only under strict_discography_match, so 'Begin
+# analysis' on a re-release edition-matched the original album and every track
+# showed FOUND. Now expected_year gates regardless of strict mode (callers
+# that don't pass a year are byte-identical to before), and the per-track
+# fallback refuses hits that landed on the original of the analyzed re-release.
+
+
+class TestNonStrictYearGate:
+    def test_year_conflict_rejects_without_strict_mode(self):
+        db = MusicDatabase.__new__(MusicDatabase)
+        original = _album("Chaosphere", 1998)
+        album = _match(db, "Chaosphere (25th Anniversary Remastered 2023 Edition)",
+                       [original], year="2023", strict=False)
+        assert album is None                     # the analysis path is no longer year-blind
+
+    def test_no_year_still_edition_matches_without_strict(self):
+        db = MusicDatabase.__new__(MusicDatabase)
+        original = _album("Chaosphere", 1998)
+        album = _match(db, "Chaosphere (Deluxe Edition)", [original],
+                       year=None, strict=False)
+        assert album is not None                 # year-less callers unchanged
+
+
+class TestFallbackRereleaseGuard:
+    def _db_with_original(self, tmp_path):
+        d = MusicDatabase(str(tmp_path / "m.db"))
+        conn = d._get_connection()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO artists (id, name) VALUES ('AR1','Meshuggah')")
+        cur.execute("INSERT INTO albums (id, artist_id, title, year) VALUES ('AL1','AR1','Chaosphere',1998)")
+        cur.execute("INSERT INTO albums (id, artist_id, title, year) VALUES ('AL2','AR1','Rare Trax',2001)")
+        cur.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES ('T1','AL1','AR1','Concatenation')")
+        cur.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES ('T2','AL2','AR1','Vanished')")
+        conn.commit(); conn.close()
+        return d
+
+    def test_hit_on_original_of_rerelease_is_refused(self, tmp_path):
+        from core.downloads.master import owned_hit_is_rerelease_original
+        d = self._db_with_original(tmp_path)
+        track = d.check_track_exists("Concatenation", "Meshuggah", confidence_threshold=0.7)[0]
+        assert track is not None
+        assert owned_hit_is_rerelease_original(
+            d, "Chaosphere (25th Anniversary Remastered 2023 Edition)", "2023", track) is True
+
+    def test_hit_on_unrelated_album_still_counts_as_owned(self, tmp_path):
+        from core.downloads.master import owned_hit_is_rerelease_original
+        d = self._db_with_original(tmp_path)
+        track = d.check_track_exists("Vanished", "Meshuggah", confidence_threshold=0.7)[0]
+        assert track is not None
+        # 'Rare Trax' is not the same release family as the requested album
+        assert owned_hit_is_rerelease_original(
+            d, "Chaosphere (25th Anniversary Remastered 2023 Edition)", "2023", track) is False
+
+    def test_missing_year_fails_open(self, tmp_path):
+        from core.downloads.master import owned_hit_is_rerelease_original
+        d = self._db_with_original(tmp_path)
+        track = d.check_track_exists("Concatenation", "Meshuggah", confidence_threshold=0.7)[0]
+        assert owned_hit_is_rerelease_original(
+            d, "Chaosphere (25th Anniversary Remastered 2023 Edition)", None, track) is False
+        assert owned_hit_is_rerelease_original(d, "", "2023", track) is False
+        assert owned_hit_is_rerelease_original(d, "X", "2023", None) is False

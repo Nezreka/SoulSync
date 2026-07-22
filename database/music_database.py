@@ -6901,6 +6901,22 @@ class MusicDatabase:
             logger.error(f"Error inserting/updating {server_source} album {getattr(album_obj, 'title', 'Unknown')}: {e}")
             return False
     
+    def get_album_title_year(self, album_id) -> Optional[Tuple[str, Any]]:
+        """(title, year) for one album row, or None. Used by the download
+        analysis's re-release guard to see WHICH album an owned track hit."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute("SELECT title, year FROM albums WHERE id = ?",
+                               (album_id,)).fetchone()
+            return (row["title"], row["year"]) if row else None
+        except Exception as e:
+            logger.debug("get_album_title_year failed for %s: %s", album_id, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     def get_album_display_meta(self, album_id) -> Optional[Dict[str, Any]]:
         """Return ``{album_title, artist_id, artist_name}`` for an album row.
 
@@ -8569,14 +8585,16 @@ class MusicDatabase:
                 logger.debug("  Strict discography match rejected: '%s' -> '%s'", search_title, db_album.title)
                 return 0.0
 
-            # Re-release year gate (discography surfaces only): a same-named card
-            # from a different year is a different release — owning the original
-            # must not light up its re-releases. Fires only when BOTH years are
-            # known (±1yr tolerance for edition-date drift); otherwise the match
-            # behaves exactly as before.
-            if (strict_discography_match
-                    and self._release_years_conflict(expected_year,
-                                                     getattr(db_album, 'year', None))):
+            # Re-release year gate: a same-named card from a different year is a
+            # different release — owning the original must not light up its
+            # re-releases. Fires whenever the caller SUPPLIES expected_year and
+            # both years are known (±1yr tolerance for edition-date drift) —
+            # previously strict-discography-only, which left the download
+            # analysis year-blind: the 2023 remaster edition-matched the 1998
+            # album and every track showed FOUND (5BILLION round 3). Callers
+            # that don't pass expected_year are byte-identical to before.
+            if self._release_years_conflict(expected_year,
+                                            getattr(db_album, 'year', None)):
                 logger.debug(
                     "  Year gate rejected: '%s' (%s) -> '%s' (%s)",
                     search_title, expected_year, db_album.title, db_album.year)
