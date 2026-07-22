@@ -17,7 +17,7 @@ contains the fix and its regression coverage.
 | 5 | Stream legacy rows during bootstrap | Done | `e9730afe` |
 | 6 | Reject arbitrary artwork fetch targets | Done | `80b5af95` |
 | 7 | Require artist context when matching Enrich results | Done | `280716d9` |
-| 8 | Bound artist-list aggregation to the requested page | Pending | — |
+| 8 | Bound artist-list aggregation to the requested page | Done | `6c827c33` |
 | 9 | Preserve non-Latin Enrich titles | Done | `abfa27a7` |
 | 10 | Keep native Enrich's metadata-update contract | Done | `87b990bb` |
 | 11 | Fail the monitor mutation when outbox enqueue fails | Done | `088e1dc7` |
