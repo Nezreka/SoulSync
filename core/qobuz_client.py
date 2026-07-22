@@ -613,7 +613,8 @@ class QobuzClient(DownloadSourcePlugin):
             resp = self.session.get(
                 QOBUZ_API_BASE + endpoint,
                 params=params or {},
-                timeout=15,
+                # #1056: user override from Settings → Downloads; unset = 15s
+                timeout=config_manager.get_source_search_timeout() or 15,
             )
 
             if resp.status_code == 401:

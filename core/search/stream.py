@@ -125,13 +125,21 @@ def stream_search_track(
 
     max_peer_queue = config_manager.get('soulseek.max_peer_queue', 0) or 0
 
+    # #1056: user override from Settings → Downloads; unset keeps the
+    # historical 15s. This explicit value has always governed the stream
+    # path regardless of which source serves it (including soulseek's own
+    # windowed search_timeout, which this path never used).
+    # getattr-guarded: config_manager is injected, and test fakes may not
+    # implement the new accessor.
+    search_timeout = getattr(config_manager, 'get_source_search_timeout', lambda: None)() or 15
+
     for query_index, query in enumerate(queries):
         logger.info(f"Stream query {query_index + 1}/{len(queries)}: '{query}'")
         try:
             if use_direct_client:
-                tracks_result, _ = run_async(stream_client.search(query, timeout=15))
+                tracks_result, _ = run_async(stream_client.search(query, timeout=search_timeout))
             else:
-                tracks_result, _ = run_async(download_orchestrator.search(query, timeout=15))
+                tracks_result, _ = run_async(download_orchestrator.search(query, timeout=search_timeout))
 
             if not tracks_result:
                 logger.info(f"No results for query '{query}', trying next...")

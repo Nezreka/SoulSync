@@ -635,7 +635,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             resp = self._session.get(
                 'https://api.deezer.com/search',
                 params={'q': query, 'limit': 30},
-                timeout=10
+                # #1056: user override from Settings → Downloads; unset = the
+                # historical 10s (NOT 15 — preserve this source's own default).
+                # getattr-guarded: tests inject fake configs.
+                timeout=getattr(self._config, 'get_source_search_timeout', lambda: None)() or 10
             )
             resp.raise_for_status()
             data = resp.json()

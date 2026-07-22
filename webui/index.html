@@ -7435,6 +7435,19 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Source search timeout (seconds):</label>
+                                    <input type="number" id="source-search-timeout" min="0" max="120" step="1" placeholder="0 = source defaults" style="max-width:180px;">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        How long to wait on a streaming source's API during search (HiFi, Qobuz, Deezer, and the stream preview search).
+                                        <strong>0 (or blank) = each source's built-in default</strong> — HiFi/Qobuz 15s, Deezer 10s. Raise it if a slow
+                                        connection makes searches give up too early; lower means failing over to the next source faster. Clamped to 5&ndash;120.
+                                        Soulseek is not affected — it has its own Search Timeout setting above.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <button class="test-button" id="test-all-sources-btn" onclick="testAllSources()">Test all sources</button>
                                     <span class="setting-help-text" style="margin-left:10px;">Checks every selected source &amp; configured connection.</span>
                                 </div>

@@ -1503,6 +1503,9 @@ async function loadSettingsData() {
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
         document.getElementById('stream-source').value = settings.download_source?.stream_source || 'youtube';
         document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
+        // #1056 — 0/blank = each source's built-in default
+        const _sst = document.getElementById('source-search-timeout');
+        if (_sst) _sst.value = settings.download_source?.source_search_timeout || '';
         loadHybridSourceOrder(settings);
         loadArtSourceOrder(settings);
         // Per-source download quality is now derived from the global Quality
@@ -4421,6 +4424,8 @@ async function saveSettings(quiet = false) {
             hybrid_order: getHybridOrder(),
             stream_source: document.getElementById('stream-source').value,
             max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
+            // #1056 — streaming-source search timeout override; 0 = source defaults
+            source_search_timeout: parseInt(document.getElementById('source-search-timeout')?.value) || 0,
             // Stalled-torrent knobs (rendered in the torrent client section).
             // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
             // 0 stays 0 (disabled).

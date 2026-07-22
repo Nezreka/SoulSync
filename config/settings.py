@@ -1010,6 +1010,24 @@ class ConfigManager:
     def get_logging_config(self) -> Dict[str, str]:
         return self.get('logging', {})
 
+    def get_source_search_timeout(self):
+        """#1056 — user override for streaming-source search/API timeouts, in
+        seconds. Returns None when unset/0/invalid, meaning "keep each source's
+        built-in default" (HiFi 15, Qobuz 15, Deezer 10, stream search 15) — so
+        out of the box NOTHING changes; only a user-entered value applies.
+        Clamped to 5-120 so a typo can neither hammer sources nor hang workers.
+        Soulseek is NOT governed by this — its windowed soulseek.search_timeout
+        has different semantics (results stream in over the window) and its own
+        setting."""
+        raw = self.get('download_source.source_search_timeout', 0)
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError):
+            return None
+        if value <= 0:
+            return None
+        return max(5, min(120, value))
+
     def get_active_media_server(self) -> str:
         return self.get('active_media_server', 'plex')
 
