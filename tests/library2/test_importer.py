@@ -105,6 +105,36 @@ def test_legacy_track_reader_projects_columns_and_uses_keyset_batches(tmp_path):
     conn.close()
 
 
+def test_import_commits_track_batches_before_publishing_progress(legacy_db):
+    conn = legacy_db._get_connection()
+    conn.executemany(
+        "INSERT INTO tracks VALUES(?,10,1,?, ?,180000,NULL,NULL,NULL,NULL)",
+        [
+            (1000 + index, f"Batch Track {index}", 10 + index)
+            for index in range(205)
+        ],
+    )
+    conn.commit()
+    conn.close()
+    externally_visible = []
+
+    def progress(stage, current, total, *, connection=None):
+        assert connection is not None
+        if stage == "tracks" and current == 200:
+            external = legacy_db._get_connection()
+            try:
+                externally_visible.append(
+                    external.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0]
+                )
+            finally:
+                external.close()
+
+    progress.lib2_connection_aware = True
+    import_legacy_library(legacy_db, progress=progress)
+
+    assert externally_visible == [200]
+
+
 def test_import_preloads_row_lookup_maps_instead_of_n_plus_one_selects(legacy_db):
     """The large-library contract: entity writes remain ordered, but lookup
     SELECTs must not scale once per legacy album/track/wishlist row."""
