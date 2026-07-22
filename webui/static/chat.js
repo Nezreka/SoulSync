@@ -420,10 +420,21 @@
         var newest = String(msgs[msgs.length - 1].timestamp || '') + ':' + msgs.length;
         if (newest === state.lastStamp && host.childElementCount) return;   // nothing new
         state.lastStamp = newest;
-        var shown = msgs, hidden = 0;
-        if (state.view === 'room' && state.ssOnly) {
-            shown = msgs.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
-            hidden = msgs.length - shown.length;
+        var shown = msgs, hidden = 0, muted = 0;
+        if (state.view === 'room') {
+            var ign = ignoredSet();
+            if (ign.length) {
+                shown = shown.filter(function (m) {
+                    if (ign.indexOf(String(m.username || '')) > -1 &&
+                            !(m.self === true || m.direction === 'Out')) { muted++; return false; }
+                    return true;
+                });
+            }
+            if (state.ssOnly) {
+                var before = shown.length;
+                shown = shown.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
+                hidden = before - shown.length;
+            }
         }
         // NEW divider: split at the frozen last-seen marker (set on room open).
         // Groups deliberately break at the divider, like Discord's red line.
@@ -441,8 +452,10 @@
             body = renderGroups(shown);
         }
         host.innerHTML = body +
-            (hidden ? '<div class="chat-hidden-note">' + hidden +
-                ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden</div>' : '');
+            (hidden ? '<button type="button" class="chat-hidden-note" data-chat-filter>' + hidden +
+                ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden — show</button>' : '') +
+            (muted ? '<div class="chat-hidden-note">' + muted +
+                ' message' + (muted === 1 ? '' : 's') + ' from muted users hidden</div>' : '');
         if (state.stickBottom) {
             host.scrollTop = host.scrollHeight;
             // deep-scrollback cleanup: once the reader is back at the bottom,
@@ -466,23 +479,90 @@
         }
     }
 
+    // ── ignore list (local mute — per browser, hides messages + greys the user) ──
+    function ignoredSet() {
+        try { return JSON.parse(localStorage.getItem('chat_ignored') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isIgnored(name) { return ignoredSet().indexOf(name) > -1; }
+    function toggleIgnored(name) {
+        if (!name) return;
+        var list = ignoredSet();
+        var i = list.indexOf(name);
+        if (i > -1) list.splice(i, 1); else list.push(name);
+        try { localStorage.setItem('chat_ignored', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderUsersList();
+    }
+
+    // Users who spoke through SoulSync (the envelope is the app signature) —
+    // sourced from the loaded messages, so it's an approximation of "runs
+    // SoulSync", not a directory.
+    function _soulsyncUsers() {
+        var set = {};
+        (state.msgs || []).forEach(function (m) {
+            if (m.rich && m.username) set[m.username] = 1;
+        });
+        return set;
+    }
+
+    function _userBtn(n, extraClass) {
+        var ign = isIgnored(n);
+        return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
+            '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) + '">' +
+            '<span class="chat-user-dot"></span>' + esc(n) +
+            (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
+    }
+
     function renderUsers(users) {
         var host = q('[data-chat-users]');
         if (!host) return;
         if (state.view !== 'room' || !users || !users.length) {
-            host.innerHTML = ''; host.hidden = true; return;
+            host.innerHTML = ''; host.hidden = true; state.userFilter = ''; return;
         }
         host.hidden = false;
         state.users = users.map(function (u) { return String(u.username || u || ''); }).filter(Boolean);
-        var names = users.map(function (u) { return u.username || u; })
-            .filter(Boolean).sort(function (a, b) {
-                return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
-            });
-        host.innerHTML = '<div class="chat-users-label">' + names.length + ' online</div>' +
-            names.map(function (n) {
-                return '<button class="chat-user" type="button" data-chat-user="' + attr(n) + '" ' +
-                    'title="Message ' + attr(n) + '">' + esc(n) + '</button>';
-            }).join('');
+        // static skeleton once — the search input must survive the 4s poll
+        if (!host.querySelector('[data-chat-user-search]')) {
+            host.innerHTML =
+                '<input class="chat-user-search" data-chat-user-search type="text" ' +
+                    'placeholder="Find a user…" autocomplete="off">' +
+                '<div data-chat-user-list></div>';
+        }
+        renderUsersList();
+    }
+
+    function renderUsersList() {
+        var listHost = q('[data-chat-user-list]');
+        if (!listHost) return;
+        var f = String(state.userFilter || '').toLowerCase();
+        var names = state.users.slice().sort(function (a, b) {
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+        });
+        if (f) names = names.filter(function (n) { return n.toLowerCase().indexOf(f) > -1; });
+        var ss = _soulsyncUsers();
+        var self = [], apps = [], rest = [];
+        names.forEach(function (n) {
+            if (state.selfName && n === state.selfName) self.push(n);
+            else if (ss[n]) apps.push(n);
+            else rest.push(n);
+        });
+        var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
+        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self'); }).join('');
+        if (apps.length) {
+            html += '<div class="chat-users-label chat-users-label--sub">SoulSync users</div>' +
+                apps.map(function (n) { return _userBtn(n); }).join('');
+        }
+        if (rest.length) {
+            html += (apps.length || self.length
+                        ? '<div class="chat-users-label chat-users-label--sub">Everyone</div>' : '') +
+                rest.map(function (n) { return _userBtn(n); }).join('');
+        }
+        if (!self.length && !apps.length && !rest.length) {
+            html += '<div class="chat-side-none">No users match</div>';
+        }
+        listHost.innerHTML = html;
     }
 
     function renderSide(convos) {
@@ -654,6 +734,14 @@
         }
         overlay.hidden = false;
         overlay.setAttribute('data-chat-user-card-for', name);
+        var ignBtn = overlay.querySelector('[data-chat-card-ignore]');
+        if (ignBtn) {
+            ignBtn.hidden = state.selfName && name === state.selfName;
+            ignBtn.textContent = isIgnored(name) ? 'Unmute' : 'Mute';
+            ignBtn.title = isIgnored(name)
+                ? 'Show this user’s messages again'
+                : 'Hide this user’s messages (this browser only)';
+        }
         getJSON('/api/chat/user/' + encodeURIComponent(name)).then(function (res) {
             if (overlay.getAttribute('data-chat-user-card-for') !== name) return;
             var info = (res.ok && res.body.info) || {};
@@ -1266,6 +1354,13 @@
                 if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
                 return;
             }
+            t = e.target.closest('[data-chat-card-ignore]');
+            if (t) {
+                var cardOv = q('[data-chat-user-card]');
+                toggleIgnored(cardOv && cardOv.getAttribute('data-chat-user-card-for'));
+                closeUserCard();
+                return;
+            }
             t = e.target.closest('[data-chat-card-close]');
             if (t) { closeUserCard(); return; }
             var uc = e.target.closest('[data-chat-user-card]');
@@ -1301,6 +1396,15 @@
                 updateMentionPop(inputEl);
             });
         }
+
+        // user-list search: delegated ('input' bubbles; the input is re-created
+        // only when the whole panel resets, so direct binding would go stale)
+        page.addEventListener('input', function (e) {
+            if (e.target && e.target.matches('[data-chat-user-search]')) {
+                state.userFilter = e.target.value.trim();
+                renderUsersList();
+            }
+        });
 
         var roomsIn = q('[data-chat-rooms-search]');
         if (roomsIn) {

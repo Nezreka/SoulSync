@@ -71657,6 +71657,25 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     color: #1db954; cursor: pointer;
 }
 .chat-room-join:hover { background: rgba(29,185,84,0.3); }
+/* user list: search + sections + presence */
+.chat-user-search {
+    width: 100%; padding: 7px 10px; margin-bottom: 8px; border-radius: 9px;
+    border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25);
+    color: #fff; font-size: 12.5px;
+}
+.chat-user-search:focus { outline: none; border-color: rgba(29,185,84,0.5); }
+.chat-users-label--sub { margin-top: 12px; color: rgba(255,255,255,0.35); }
+.chat-user-dot {
+    flex: none; width: 7px; height: 7px; border-radius: 50%;
+    background: #1db954; opacity: 0.75;
+}
+.chat-user--self .chat-user-dot { background: #7c5cff; }
+.chat-user--ignored { opacity: 0.45; }
+.chat-user--ignored .chat-user-dot { background: rgba(255,255,255,0.25); }
+.chat-user-mute {
+    margin-left: auto; font-size: 9.5px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.05em; color: rgba(255,255,255,0.35);
+}
 
 .chat-main {
     position: relative;   /* containing block for the settings overlay */
@@ -71717,7 +71736,8 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     color: rgba(255,255,255,0.45); margin: 4px 4px 8px;
 }
 .chat-user {
-    display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: 8px;
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 6px 10px; border-radius: 8px;
     border: none; background: transparent; color: rgba(255,255,255,0.7);
     font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
