@@ -108,6 +108,50 @@ def test_list_artists_stats(imported_conn):
     assert drake["total_size_bytes"] == 10000
 
 
+def test_list_artists_materializes_requested_page_before_catalog_rollups(
+    imported_conn,
+):
+    statements = []
+    imported_conn.set_trace_callback(statements.append)
+    try:
+        artists, total = Q.list_artists(imported_conn, limit=1)
+    finally:
+        imported_conn.set_trace_callback(None)
+
+    rollup_sql = next(
+        statement for statement in statements
+        if "WITH page_artists AS MATERIALIZED" in statement
+    )
+    assert len(artists) == 1
+    assert total == 2
+    assert rollup_sql.index("page_artists AS MATERIALIZED") < rollup_sql.index(
+        "artist_albums AS"
+    )
+    assert rollup_sql.count("JOIN page_artists") >= 5
+
+
+def test_list_artists_aggregate_sorts_choose_page_before_rollups(imported_conn):
+    by_tracks, _ = Q.list_artists(imported_conn, sort="tracks", limit=1)
+    assert [artist["name"] for artist in by_tracks] == ["Drake"]
+
+    artist_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name) VALUES('Many Albums', 'Many Albums')"
+    ).lastrowid
+    for number in range(2):
+        album_id = imported_conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, ?)",
+            (artist_id, f"Album {number}"),
+        ).lastrowid
+        imported_conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+            (album_id, artist_id),
+        )
+
+    by_albums, _ = Q.list_artists(imported_conn, sort="albums", limit=1)
+    assert [artist["name"] for artist in by_albums] == ["Many Albums"]
+    assert by_albums[0]["album_count"] == 2
+
+
 def test_size_rollup_counts_each_track_once_despite_historical_file_rows(imported_conn):
     """I8: a track can accumulate multiple lib2_track_files rows over its
     history (replaced/lossy-copy/deleted). The disk-space roll-up must count
