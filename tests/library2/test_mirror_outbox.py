@@ -124,6 +124,30 @@ def test_projected_enqueue_uses_wanted_state_and_rejects_projection_gaps(db):
         MO.enqueue_projected_tracks(conn, [track_id])
 
 
+def test_payload_failure_rolls_back_monitor_mutation(db, monkeypatch):
+    flaky, conn = db
+    track_id = flaky.ids["track"]
+    conn.execute("UPDATE lib2_tracks SET monitored=0 WHERE id=?", (track_id,))
+    conn.commit()
+
+    monkeypatch.setattr(
+        "core.library2.wishlist_mirror.track_wishlist_payload",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("payload unavailable")
+        ),
+    )
+
+    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (track_id,))
+    with pytest.raises(RuntimeError, match="payload unavailable"):
+        MO.enqueue_tracks(conn, [track_id], True)
+    conn.rollback()
+
+    assert conn.execute(
+        "SELECT monitored FROM lib2_tracks WHERE id=?", (track_id,),
+    ).fetchone()["monitored"] == 0
+    assert _outbox_rows(conn) == []
+
+
 def test_failed_mirror_stays_pending_and_later_drain_completes(db):
     """The audit's injected-failure scenario: the legacy write fails, the lib2
     command remains traceable as pending, and a later drain reconciles."""
