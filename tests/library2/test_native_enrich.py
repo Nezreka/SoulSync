@@ -302,7 +302,8 @@ def test_track_enrich_requires_album_context(imported_conn, monkeypatch):
         (album_id,),
     ).lastrowid)
     monkeypatch.setattr(
-        "core.library2.provider_adapters.fetch_track_metadata", lambda *_args, **_kwargs: None,
+        "core.library2.provider_adapters.fetch_descriptive_metadata",
+        lambda *_args, **_kwargs: None,
     )
 
     result = NE.enrich_native_entity_for_service(
@@ -360,10 +361,11 @@ def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
 
     from core.library2 import provider_adapters
 
-    def fake_track_metadata(source_ids, *, source_order=None):
+    def fake_track_metadata(entity_type, source_ids, *, source_order=None):
+        captured["entity_type"] = entity_type
         captured["ids"] = dict(source_ids)
         captured["order"] = tuple(source_order or ())
-        return provider_adapters.TrackMetadataProviderResult(
+        return provider_adapters.DescriptiveMetadataProviderResult(
             provider="itunes",
             provider_entity_id="IT-TRACK",
             duration_ms=234000,
@@ -371,7 +373,7 @@ def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
         )
 
     monkeypatch.setattr(
-        provider_adapters, "fetch_track_metadata", fake_track_metadata
+        provider_adapters, "fetch_descriptive_metadata", fake_track_metadata
     )
     result = NE.enrich_native_entity_for_service(
         imported_conn,
@@ -387,7 +389,11 @@ def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
     )
 
     assert result["source"] == "itunes"
-    assert captured == {"ids": {"itunes": "IT-TRACK"}, "order": ("itunes",)}
+    assert captured == {
+        "entity_type": "track",
+        "ids": {"itunes": "IT-TRACK"},
+        "order": ("itunes",),
+    }
     row = imported_conn.execute(
         "SELECT spotify_id, external_ids, duration FROM lib2_tracks WHERE id=?",
         (track_id,),
@@ -398,6 +404,129 @@ def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
     assert imported_conn.execute(
         "SELECT image_url FROM lib2_albums WHERE id=?", (album_id,)
     ).fetchone()["image_url"] == "https://img.example/album.jpg"
+
+
+def test_enrich_updates_descriptive_fields_for_already_matched_artist(
+    imported_conn, monkeypatch,
+):
+    from core.library2 import provider_adapters
+
+    artist_id = _insert_native_artist(imported_conn, "Matched Artist")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ARTIST' WHERE id=?", (artist_id,),
+    )
+    monkeypatch.setattr(
+        provider_adapters,
+        "fetch_descriptive_metadata",
+        lambda *_args, **_kwargs: provider_adapters.DescriptiveMetadataProviderResult(
+            provider="spotify", provider_entity_id="SP-ARTIST",
+            image_url="https://img.example/artist.jpg", genres=("ambient", "idm"),
+            summary="Provider biography", style="Electronic", mood="Dreamy",
+            label="Artist Label", banner_url="https://img.example/banner.jpg",
+        ),
+    )
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn, "artist", artist_id, "spotify",
+        searcher=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("matched entities must not search")
+        ),
+    )
+
+    assert result["success"] is True
+    row = imported_conn.execute(
+        "SELECT image_url, genres, summary, style, mood, label, banner_url "
+        "FROM lib2_artists WHERE id=?", (artist_id,),
+    ).fetchone()
+    assert dict(row) == {
+        "image_url": "https://img.example/artist.jpg",
+        "genres": '["ambient", "idm"]',
+        "summary": "Provider biography",
+        "style": "Electronic",
+        "mood": "Dreamy",
+        "label": "Artist Label",
+        "banner_url": "https://img.example/banner.jpg",
+    }
+
+
+def test_enrich_updates_descriptive_fields_for_already_matched_album(
+    imported_conn, monkeypatch,
+):
+    from core.library2 import provider_adapters
+
+    artist_id = _insert_native_artist(imported_conn, "Matched Artist")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id) "
+        "VALUES(?, 'Matched Album', 'SP-ALBUM')", (artist_id,),
+    ).lastrowid)
+    monkeypatch.setattr(
+        provider_adapters,
+        "fetch_descriptive_metadata",
+        lambda *_args, **_kwargs: provider_adapters.DescriptiveMetadataProviderResult(
+            provider="spotify", provider_entity_id="SP-ALBUM",
+            image_url="https://img.example/album.jpg", genres=("house",),
+            year=2026, release_date="2026-07-22", label="Album Label",
+            upc="123456789", style="Club", mood="Energetic", explicit=False,
+        ),
+    )
+
+    NE.enrich_native_entity_for_service(
+        imported_conn, "album", album_id, "spotify",
+    )
+
+    row = imported_conn.execute(
+        "SELECT image_url, genres, year, release_date, label, upc, style, mood, explicit "
+        "FROM lib2_albums WHERE id=?", (album_id,),
+    ).fetchone()
+    assert dict(row) == {
+        "image_url": "https://img.example/album.jpg", "genres": '["house"]',
+        "year": 2026, "release_date": "2026-07-22", "label": "Album Label",
+        "upc": "123456789", "style": "Club", "mood": "Energetic",
+        "explicit": 0,
+    }
+
+
+def test_enrich_updates_descriptive_fields_for_already_matched_track(
+    imported_conn, monkeypatch,
+):
+    from core.library2 import provider_adapters
+
+    artist_id = _insert_native_artist(imported_conn, "Matched Artist")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Album')",
+        (artist_id,),
+    ).lastrowid)
+    track_id = int(imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, spotify_id) "
+        "VALUES(?, 'Track', 'SP-TRACK')", (album_id,),
+    ).lastrowid)
+    monkeypatch.setattr(
+        provider_adapters,
+        "fetch_descriptive_metadata",
+        lambda *_args, **_kwargs: provider_adapters.DescriptiveMetadataProviderResult(
+            provider="spotify", provider_entity_id="SP-TRACK",
+            image_url="https://img.example/track-album.jpg", duration_ms=201000,
+            bpm=128.5, explicit=True, lyrics="Lyrics", copyright="Copyright",
+            style="Dance", mood="Upbeat",
+        ),
+    )
+
+    NE.enrich_native_entity_for_service(
+        imported_conn, "track", track_id, "spotify",
+    )
+
+    row = imported_conn.execute(
+        "SELECT duration, bpm, explicit, genius_lyrics, copyright, style, mood "
+        "FROM lib2_tracks WHERE id=?", (track_id,),
+    ).fetchone()
+    assert dict(row) == {
+        "duration": 201000, "bpm": 128.5, "explicit": 1,
+        "genius_lyrics": "Lyrics", "copyright": "Copyright",
+        "style": "Dance", "mood": "Upbeat",
+    }
+    assert imported_conn.execute(
+        "SELECT image_url FROM lib2_albums WHERE id=?", (album_id,),
+    ).fetchone()["image_url"] == "https://img.example/track-album.jpg"
 
 
 def _artist_id_by_name(conn, name):

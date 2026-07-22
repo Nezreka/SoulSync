@@ -10,6 +10,7 @@ from core.library2.provider_adapters import (
     ArtworkProviderResult,
     fetch_album_tracklist,
     fetch_artwork_url,
+    fetch_descriptive_metadata,
     fetch_track_metadata,
 )
 
@@ -254,6 +255,43 @@ def test_track_metadata_records_provider_that_actually_answered(monkeypatch):
     assert result.provider == "deezer"
     assert result.provider_entity_id == "dz-track"
     assert result.duration_ms == 201000
+
+
+def test_descriptive_metadata_normalizes_provider_album_fields(monkeypatch):
+    calls = []
+
+    class Deezer:
+        def get_album_metadata(self, album_id, include_tracks=True):
+            calls.append((album_id, include_tracks))
+            return {
+                "release_date": "2024-05-06",
+                "genres": {"data": [{"name": "House"}]},
+                "images": [{"url": "https://img.test/album.jpg"}],
+                "_raw_data": {
+                    "label": "Test Label", "upc": "1234",
+                    "explicit_lyrics": False, "style": "Club", "mood": "Bright",
+                },
+            }
+
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: Deezer() if source == "deezer" else None,
+    )
+
+    result = fetch_descriptive_metadata(
+        "album", {"deezer": "dz-album"}, source_order=("deezer",),
+    )
+
+    assert calls == [("dz-album", False)]
+    assert result is not None
+    assert result.provider == "deezer"
+    assert result.release_date == "2024-05-06"
+    assert result.year == 2024
+    assert result.image_url == "https://img.test/album.jpg"
+    assert result.genres == ("House",)
+    assert result.label == "Test Label"
+    assert result.upc == "1234"
+    assert result.explicit is False
 
 
 def test_artwork_adapter_rejects_unknown_kind():
