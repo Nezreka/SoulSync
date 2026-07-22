@@ -5,8 +5,8 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 22. Juli 2026, einschließlich der Review-Remediation bis `aabf5445`
-und der Dokumentkonsolidierung danach.
+Stand: 22. Juli 2026, einschließlich Branch-Split. Playlist UI ist geparkt;
+native Quality-Profile-Foundation wird vor dem Library-v2-Rebase gemerged.
 
 ## 1. Statusbegriffe
 
@@ -30,13 +30,13 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 |---|---|---|---|---|
 | [F-01](library-v2-features.md#feat-artwork) | Media-server-unabhängiges Artwork | Verified | Deep-Dive §28, Security-Fix `80b5af95` | Picker, Embed, Cache-Bust und Fetch-Hardening gezielt geprüft |
 | [F-02](library-v2-features.md#feat-monitoring) | Monitoring, Watchlist/Wishlist, Outbox | Verified | P3/§82, Regression-Checkpoint | Bidirektionale Sync-, Reconcile- und Profilgrenzen geprüft |
-| [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Partial | §53/§60 | Track→Album→Artist→Global verified; Playlist-Quality-Profile und Konflikt-UI fehlen |
+| [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Partial | §53/§60, Branch-Split | Track→Album→Artist→Global verified; native Watchlist-/Playlist-Zuweisung kommt über Foundation |
 | [F-04](library-v2-features.md#feat-discography) | Discography, Tracklists, `monitor_new_items` | Verified | `2249f5d7`, `8f965d31` (später gesquasht) | Content-Filter und nie manuell expandierte Artists abgedeckt |
 | [F-05](library-v2-features.md#feat-bootstrap) | Automatischer Initialimport | Verified | Review 4/5, `c2d99eda`, `e9730afe` | Bounded Transactions und Streaming; Owner-/Fresh-Install-Fixes im Regression-Checkpoint |
 | [F-06](library-v2-features.md#feat-alias) | Artist Alias Registry und Scope | Verified | `ce7b4516`, `a95e5309` | Listen, Suche, Totals und artist-weite Actions gezielt geprüft |
 | [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3 | Code und gezielte Tests vorhanden; produktive Datenreparatur bleibt Backup/Dry-Run-abhängig |
 | [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11 | Enrich/Smart-Split und globale Suche abgedeckt |
-| [F-09](library-v2-features.md#feat-playlists) | Playlist-scoped Pipeline | Partial | LV2-015, Regression M-09 | Scope/Multi-Profil implemented; Quality-Konfliktmodell fehlt |
+| [F-09](library-v2-features.md#feat-playlists) | Library-v2-Playlist-Oberfläche | Deferred | `library-v2-playlist-ui` | Vollständig aus dem aktiven Overhaul entfernt und separat geparkt |
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Partial | §35/§37/§57/§58 | Feed, File-Ergebnis und Albumzweig vorhanden; vollständiger Track-Stepper/Eventvokabular nicht vollständig belegt |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Implemented | Regression-Checkpoint `ee30247a`, im aktuellen Squash `fb0096ce` | `import-review`-Route, Queue/Detail, Assignments und Resolve/Rescan/Resume vorhanden; vollständiger Browser-E2E fehlt |
@@ -142,7 +142,7 @@ stabiler Commit bekannt ist, wird er zusätzlich genannt.
 | [M-06](library-v2-issues.md#m-06) | Implemented | Finding-Fingerprint |
 | [M-07](library-v2-issues.md#m-07) | Implemented | Filesystem-Coverage für Fake-Lossless, Converter, Tracknummer, RG, Corruption; Cutoff absichtlich katalogabhängig |
 | [M-08](library-v2-issues.md#m-08) | Implemented | Expired Cleaner und Reorganize als sichtbare Review/Apply-Jobs; alte IDs wieder verwendbar |
-| [M-09](library-v2-issues.md#m-09) | Implemented | albumgenauer Playlist-Scope |
+| [M-09](library-v2-issues.md#m-09) | Deferred | historische Playlist-Diagnose; Code liegt nicht im aktiven Overhaul |
 | [M-10](library-v2-issues.md#m-10) | Implemented | idempotenter Teilmigrations-Reconcile |
 | [M-11](library-v2-issues.md#m-11) | Implemented | V2-Artists in globaler Suche |
 | [M-12](library-v2-issues.md#m-12) | Implemented | UI Rollback/Retry |
@@ -191,7 +191,7 @@ keinen vollständigen externen E2E.
 | [LV2-012](library-v2-issues.md#lv2-012) | Partial | Code verified; produktiver Merge/Datenrepair erfordert Backup und Dry Run |
 | [LV2-013](library-v2-issues.md#lv2-013) | Verified | bewusst read-only Integritätsreport |
 | [LV2-014](library-v2-issues.md#lv2-014) | Implemented | später über Regression M-11 geschlossen |
-| [LV2-015](library-v2-issues.md#lv2-015) | Verified | Playlist-Scope fail closed |
+| [LV2-015](library-v2-issues.md#lv2-015) | Deferred | Historische Diagnose; aktive Library-v2-Playlist-Integration wurde geparkt |
 | [LV2-016](library-v2-issues.md#lv2-016) | Verified | Default 0 plus Reconcile/Repair |
 | [LV2-017](library-v2-issues.md#lv2-017) | Implemented | später über H-13 und Review 1 gehärtet; produktiver Backfill bleibt Dry-Run-abhängig |
 | [Orphan Approve](library-v2-issues.md#orphan-bug) | Pending | Hypothese noch durch den beschriebenen Zwei-Pfad-Reproduktionstest zu bestätigen |
@@ -199,7 +199,7 @@ keinen vollständigen externen E2E.
 Historische Bugcluster-Prüfung:
 
 - erster gezielter Lauf: 163 Backendtests;
-- Monitoring/Playlist-Ergänzung: 1.453 Tests;
+- historischer Monitoring/Playlist-Lauf vor dem Branch-Split: 1.453 Tests;
 - breiter Library/Wishlist/Import/Acquisition-Lauf: 1.970 bestanden, 3
   übersprungen;
 - Frontend Library-V2: 141 Tests in 24 Dateien;

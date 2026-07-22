@@ -136,17 +136,16 @@ Für einen Track gilt diese Priorität:
 1. explizites Track-Profil;
 2. explizites Album-/Release-Profil;
 3. explizites Artist-Profil;
-4. Playlist-Default, falls kein höherer expliziter Wert existiert;
-5. app-weites Default-Profil.
+4. app-weites Default-Profil.
 
 Explizite und geerbte Werte müssen getrennt erkennbar bleiben. UI, Wanted,
 Search-Ranking, Import-Gate und Upgrade-Evaluation benutzen denselben
 serverseitigen Resolver und zeigen Profil **plus Herkunft**. Eine Kaskade darf
 keine explizite Kindentscheidung überschreiben.
 
-Treffen zwei gleichrangige Playlist-Profile auf denselben Track, wird der
-Konflikt sichtbar gemacht und vom Nutzer entschieden; „last write wins“ oder
-eine unsichtbare automatische Wahl ist verboten.
+Watchlist-Artist- und native Playlist-Zuweisungen sind persistente Acquisition-
+Intents der Foundation. Sie werden nicht als versteckte zusätzliche Ebene in
+diese Library-v2-Katalogkaskade eingebaut.
 
 ### 2.4 Datenbank als Source of Truth
 
@@ -398,7 +397,7 @@ ein Kandidat Track oder Album-Bundle ist.
   verändern.
 - Artist-/Album-Automatic-Search bleibt wanted-only und darf nie die globale
   Wishlist als versteckten Fallback starten.
-- Ein bestätigter Search-/Playlist-/Watchlist-/Acquisition-Intent
+- Ein bestätigter Library-v2-Search-/Wishlist-/Acquisition-Intent
   materialisiert Artist, Release und Track idempotent **vor** dem Download.
 - Eine alte Datei bleibt bei Replacement bis zum vollständig verifizierten
   Import erhalten. Danach wird nur die alte Datei derselben Track-Entity

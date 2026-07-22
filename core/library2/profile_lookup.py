@@ -1,10 +1,5 @@
 """Resolve Library-v2 quality profiles and their inheritance provenance.
 
-Used by acquisition paths that predate Library v2 (the watchlist scanner's
-new-release queueing) so a per-artist profile assignment still reaches the
-wishlist row — and therefore the download/import pipeline — for releases lib2
-itself didn't queue.
-
 §52.2 adds one important invariant: the stored profile id is the effective
 compatibility projection, while ``quality_profile_explicit`` records whether
 that entity actually owns the choice.  All pipeline consumers resolve through
@@ -248,44 +243,8 @@ def assign_quality_profile(
     return result
 
 
-def lib2_quality_profile_for_artist(database, artist_name: str) -> Optional[int]:
-    """The app-wide ``quality_profiles`` id assigned to this artist in
-    Library v2, or ``None`` when unavailable."""
-    if not artist_name:
-        return None
-    try:
-        from config.settings import config_manager
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(config_manager)
-        from .importer import normalize_name
-        key = normalize_name(artist_name)
-        conn = database._get_connection()
-        try:
-            # Fast path: SQL case-insensitive match (avoids a full-table
-            # python scan on every watchlist queue decision).
-            row = conn.execute(
-                "SELECT id FROM lib2_artists "
-                "WHERE lower(name) = ? AND quality_profile_id IS NOT NULL LIMIT 1",
-                (key,),
-            ).fetchone()
-            if row:
-                return int(effective_quality_profile(conn, "artists", row["id"])["id"])
-            for row in conn.execute(
-                "SELECT id, name FROM lib2_artists "
-                "WHERE quality_profile_id IS NOT NULL"
-            ):
-                if normalize_name(row["name"]) == key:
-                    return int(effective_quality_profile(conn, "artists", row["id"])["id"])
-        finally:
-            conn.close()
-    except Exception as e:  # noqa: BLE001
-        logger.debug("lib2 profile lookup failed (%s): %s", artist_name, e)
-    return None
-
-
 __all__ = [
     "assign_quality_profile",
     "default_quality_profile_id",
     "effective_quality_profile",
-    "lib2_quality_profile_for_artist",
 ]

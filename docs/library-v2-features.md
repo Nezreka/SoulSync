@@ -44,18 +44,21 @@ konkrete Reihenfolge später durch Audits und Nutzerfeedback angepasst wurde.
 
 ### Phase D — Quality, Editionen und Dateiverwaltung
 
-- app-weite Quality Profiles mit Track→Album→Artist→Playlist→Global-
+- app-weite Quality Profiles mit Track→Album→Artist→Global-
   Vererbung;
 - Single-/Album- und Edition-/Recording-Modell;
 - Manage Track Files, Duplicate-Reconcile, Reorganize und Delete;
 - sichere Replacement- und Upgrade-Semantik.
 
-### Phase E — Wanted, Auto-Sync und Playlists
+### Phase E — Wanted und Auto-Sync
 
 - gescopte Suche monitored/wanted Items;
 - periodische Upgrades und Discography-Refresh;
-- Playlist-Intents ohne globales Wishlist-Bleed;
 - globale Missing-/Cutoff-Unmet-Sichten.
+
+Die experimentelle Library-v2-Playlist-Oberfläche ist bewusst aus diesem
+Branch entfernt und auf `library-v2-playlist-ui` geparkt. Native Playlist-
+Synchronisation bleibt außerhalb von Library v2 bestehen.
 
 ### Acquisition-Phasen
 
@@ -205,13 +208,13 @@ Flags.
 
 #### Vererbung und Herkunft
 
-Priorität: Track → Album → Artist → Playlist → Global. Das API-Modell liefert
+Priorität: Track → Album → Artist → Global. Das API-Modell liefert
 mindestens:
 
 ```text
 effective_profile = {
   id,
-  source: track | album | artist | playlist | global,
+  source: track | album | artist | global,
   source_id,
   explicit
 }
@@ -239,10 +242,6 @@ benötigen positive Evidenz.
 - Nach Erfolg wird nur die alte Datei derselben Track-Entity entfernt.
 - Review- und Automatic-Modus benutzen denselben Evaluator; sie unterscheiden
   sich nur darin, ob ein Finding oder ein Wanted-/Search-Intent erzeugt wird.
-
-Playlist-Quality-Konflikte werden nicht unsichtbar aufgelöst. Bei zwei
-gleichrangigen, unterschiedlichen Playlist-Profilen zeigt die UI einen
-Konflikt und verlangt eine explizite Wahl.
 
 ---
 
@@ -385,21 +384,13 @@ bestätigter Match bleibt gegenüber späteren automatischen Writes sticky.
 
 ---
 
-### <a name="feat-playlists"></a> F-09 — Playlist-Intents und Profilkonflikte
+### <a name="feat-playlists"></a> F-09 — Library-v2-Playlist-Oberfläche (geparkt)
 
-„Run Pipeline“ für eine Playlist darf in der Wishlist-Phase ausschließlich
-die tatsächlich verarbeiteten Playlist-Tracks und deren User-Profile
-dispatchen. Wenn keine Trackidentität ermittelt werden kann, gilt fail closed;
-die globale Wishlist ist nie ein Fallback.
-
-Albumidentität bleibt Teil des Scopes. `track::album-a` darf nicht als
-`track::album-b` dispatcht werden. Bei mehreren User-Profilen wird jeder Track
-unter seinem eigenen `profile_id` gebucht und ausgeführt.
-
-Ein bestätigter Playlist-Intent benutzt denselben Early-Materialization-
-Resolver wie Search, Watchlist und manuelle Wishlist. Ein Playlist-Quality-
-Profile ist nur Default für unentschiedene Tracks. Unterschiedliche
-Playlist-Defaults auf derselben Entity erzeugen eine Konflikt-UI.
+Dieses Feature gehört nicht mehr zum aktiven `library-overhaul`. Oberfläche,
+Query-Clients, Typen, Styles und Tests liegen isoliert auf
+`library-v2-playlist-ui` und werden erst nach einem eigenen Produktentscheid
+weitergeführt. Native Playlist-Synchronisation und deren persistentes Quality
+Profile gehören zur Foundation und funktionieren ohne Library v2.
 
 ---
 
@@ -510,7 +501,7 @@ den konkret bestätigten Check.
 
 #### Early Materialization
 
-Sobald ein Search-/Wishlist-/Playlist-/Watchlist-Intent verbindlich
+Sobald ein expliziter Library-v2-Search-/Wishlist-/Acquisition-Intent verbindlich
 geschrieben wird, materialisiert der Server vor Search/Download idempotent:
 
 1. Artist über stabile Provider-ID;

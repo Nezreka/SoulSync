@@ -1,5 +1,10 @@
 # Library V2 — Bugs, Findings und Root-Cause-Register
 
+> Branch-Split (22. Juli 2026): Playlist-spezifische Diagnosen bleiben hier
+> als historische Begründung erhalten, sind aber kein aktiver Scope von
+> `library-overhaul`. Die UI liegt auf `library-v2-playlist-ui`; native
+> Watchlist-/Playlist-Quality-Profile gehören zur Foundation.
+
 Dieses Dokument bewahrt Fehlerbilder, technische Ursachen, Auswirkungen,
 Fixverträge und Reproduktionsideen. Es sagt bewusst **nicht**, ob ein Finding
 offen oder erledigt ist. Der einzige Statusort ist

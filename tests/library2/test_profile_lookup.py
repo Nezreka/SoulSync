@@ -3,7 +3,6 @@
 from core.library2.profile_lookup import (
     assign_quality_profile,
     effective_quality_profile,
-    lib2_quality_profile_for_artist,
 )
 from core.library2.queries import get_album
 from core.library2.wishlist_mirror import track_wishlist_payload
@@ -99,26 +98,3 @@ def test_album_payload_distinguishes_inherited_source_from_own_override(imported
     assert explicit is not None
     assert explicit["quality_profile_source"] == "album"
     assert explicit["quality_profile_explicit"] is True
-
-
-def test_legacy_artist_lookup_follows_a_changed_global_default(
-    imported_conn, legacy_db, monkeypatch,
-):
-    artist_id, _album_id, _track_id = _ids(imported_conn)
-    assign_quality_profile(imported_conn, "artists", artist_id, None)
-    imported_conn.execute("UPDATE quality_profiles SET is_default=0")
-    imported_conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
-    imported_conn.commit()
-
-    from config.settings import config_manager
-
-    original_get = config_manager.get
-    monkeypatch.setattr(
-        config_manager,
-        "get",
-        lambda key, default=None: (
-            True if key == "features.library_v2" else original_get(key, default)
-        ),
-    )
-
-    assert lib2_quality_profile_for_artist(legacy_db, "Drake") == 2
