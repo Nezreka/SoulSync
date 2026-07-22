@@ -24,6 +24,7 @@ during the rollback window, but they are not an enrichment authority.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -32,6 +33,63 @@ logger = get_logger("library2.native_enrich")
 
 # resolver(name) -> {"source", "artist_id", "name", "image_url"?, "genres"?} | None
 ArtistResolver = Callable[[str], Optional[Dict[str, Any]]]
+ENRICH_AMBIGUITY_MARGIN = 0.08
+
+
+def _context_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("title") or "").strip()
+    if isinstance(value, (list, tuple)):
+        return ", ".join(filter(None, (_context_text(item) for item in value)))
+    return str(value or "").strip()
+
+
+def _candidate_context(candidate: Dict[str, Any], entity_type: str) -> tuple[str, str]:
+    artist = _context_text(
+        candidate.get("artist_name")
+        or candidate.get("artist")
+        or candidate.get("artists")
+    )
+    album = _context_text(
+        candidate.get("album_title")
+        or candidate.get("album_name")
+        or candidate.get("album")
+    )
+    parts = [part.strip() for part in str(candidate.get("extra") or "").split("·")]
+    parts = [part for part in parts if part]
+    if not artist and parts:
+        artist = parts[0]
+    if entity_type == "track" and not album and len(parts) > 1:
+        possible_album = parts[1]
+        if not re.match(
+            r"^(?:score|listeners?|fans?|popularity|\d{4}(?:-\d{2})?)\b",
+            possible_album,
+            re.IGNORECASE,
+        ):
+            album = possible_album
+    return artist, album
+
+
+def _artist_context_matches(wanted: str, candidate: str) -> bool:
+    from core.worker_utils import artist_name_matches
+
+    if artist_name_matches(wanted, candidate):
+        return True
+    components = re.split(
+        r"\s*(?:,|;|&|/|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b)\s*",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    return any(artist_name_matches(wanted, component) for component in components)
+
+
+def _title_context_matches(wanted: str, candidate: str) -> bool:
+    from difflib import SequenceMatcher
+    from core.worker_utils import normalize_artist_name
+
+    left = normalize_artist_name(wanted)
+    right = normalize_artist_name(candidate)
+    return bool(left and right) and SequenceMatcher(None, left, right).ratio() >= 0.85
 
 
 def _normalize_genres(raw: Any) -> Optional[str]:
@@ -291,12 +349,33 @@ def enrich_native_entity_for_service(
 
         wanted = normalize_fn(row["name"])
         ranked = []
+        seen_candidates = set()
         for candidate in candidates:
             if not isinstance(candidate, dict) or not candidate.get("id"):
                 continue
+            candidate_key = (
+                str(candidate.get("provider") or service).strip().lower(),
+                str(candidate.get("id")).strip(),
+            )
+            if candidate_key in seen_candidates:
+                continue
+            seen_candidates.add(candidate_key)
             candidate_name = normalize_fn(candidate.get("name"))
             if not wanted or not candidate_name:
                 continue
+            if canonical != "artist":
+                candidate_artist, candidate_album = _candidate_context(
+                    candidate, canonical,
+                )
+                if not candidate_artist or not _artist_context_matches(
+                    artist_name, candidate_artist,
+                ):
+                    continue
+                if canonical == "track" and (
+                    not candidate_album
+                    or not _title_context_matches(album_title, candidate_album)
+                ):
+                    continue
             score = SequenceMatcher(None, wanted, candidate_name).ratio()
             if score >= threshold:
                 ranked.append((score, candidate))
@@ -307,6 +386,15 @@ def enrich_native_entity_for_service(
                 "reason": "not_found", "source": service,
             }
         ranked.sort(key=lambda item: item[0], reverse=True)
+        if (
+            len(ranked) > 1
+            and ranked[0][0] - ranked[1][0] < ENRICH_AMBIGUITY_MARGIN
+        ):
+            return {
+                "success": False, "attempted": True,
+                "entity_type": canonical, "entity_id": int(entity_id),
+                "reason": "ambiguous", "source": service,
+            }
         hit = ranked[0][1]
         provider_id = str(hit["id"]).strip()
         actual_source = str(hit.get("provider") or service).strip().lower()

@@ -258,6 +258,7 @@ def test_album_service_enrichment_preserves_non_latin_title(imported_conn):
             "name": "初恋",
             "provider": "spotify",
             "image": "https://img.example/cjk.jpg",
+            "extra": "宇多田ヒカル · 2018",
         }],
     )
 
@@ -265,6 +266,82 @@ def test_album_service_enrichment_preserves_non_latin_title(imported_conn):
     assert imported_conn.execute(
         "SELECT spotify_id FROM lib2_albums WHERE id=?", (album_id,),
     ).fetchone()["spotify_id"] == "SP-CJK-ALBUM"
+
+
+def test_album_enrich_requires_matching_artist_context(imported_conn):
+    artist_id = _insert_native_artist(imported_conn, "Right Artist")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Home')",
+        (artist_id,),
+    ).lastrowid)
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "album",
+        album_id,
+        "spotify",
+        searcher=lambda *_args: [
+            {"id": "WRONG", "name": "Home", "extra": "Other Artist · 2024",
+             "image": "https://img.example/wrong.jpg"},
+            {"id": "RIGHT", "name": "Home", "extra": "Right Artist · 2020",
+             "image": "https://img.example/right.jpg"},
+        ],
+    )
+
+    assert result["provider_id"] == "RIGHT"
+
+
+def test_track_enrich_requires_album_context(imported_conn, monkeypatch):
+    artist_id = _insert_native_artist(imported_conn, "Right Artist")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Right Album')",
+        (artist_id,),
+    ).lastrowid)
+    track_id = int(imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Intro')",
+        (album_id,),
+    ).lastrowid)
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_track_metadata", lambda *_args, **_kwargs: None,
+    )
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "track",
+        track_id,
+        "spotify",
+        searcher=lambda *_args: [
+            {"id": "WRONG", "name": "Intro", "extra": "Right Artist · Wrong Album"},
+            {"id": "RIGHT", "name": "Intro", "extra": "Right Artist · Right Album"},
+        ],
+    )
+
+    assert result["provider_id"] == "RIGHT"
+
+
+def test_enrich_rejects_tied_identity_candidates(imported_conn):
+    artist_id = _insert_native_artist(imported_conn, "Right Artist")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Home')",
+        (artist_id,),
+    ).lastrowid)
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn,
+        "album",
+        album_id,
+        "spotify",
+        searcher=lambda *_args: [
+            {"id": "ONE", "name": "Home", "extra": "Right Artist · 2020"},
+            {"id": "TWO", "name": "Home", "extra": "Right Artist · 2021"},
+        ],
+    )
+
+    assert result["success"] is False
+    assert result["reason"] == "ambiguous"
+    assert imported_conn.execute(
+        "SELECT spotify_id FROM lib2_albums WHERE id=?", (album_id,),
+    ).fetchone()["spotify_id"] is None
 
 
 def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
@@ -305,6 +382,7 @@ def test_track_service_enrichment_passes_actual_provider_id_to_metadata(
             "id": "IT-TRACK",
             "name": "Exact Song",
             "provider": "itunes",
+            "extra": "Track Artist · Record",
         }],
     )
 
