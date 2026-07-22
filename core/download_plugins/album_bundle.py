@@ -101,6 +101,51 @@ def quality_score(title: str, quality_guess) -> int:
     return _QUALITY_SCORE.get(quality_guess(title) or '', 0)
 
 
+def album_search_queries(album_name: str, artist_name: str) -> list[str]:
+    """Return deduped Prowlarr query variants for album-bundle search.
+
+    Some indexers (notably RuTracker through Prowlarr) match release titles
+    better when the query mirrors tracker naming (``Artist - Album``), while
+    compilations are often listed under ``VA`` instead of ``Various Artists``.
+    Keep the ladder small: broad enough to find tracker-shaped titles, but not
+    so broad that we spam indexers or invite unrelated albums.
+    """
+    album = (album_name or '').strip()
+    artist = (artist_name or '').strip()
+    if not album and not artist:
+        return []
+
+    candidates: list[str] = []
+    if artist and album:
+        is_va = artist.lower() in {'various artists', 'various', 'va'}
+        candidates.extend([
+            f"{artist} {album}",
+            f"{artist} - {album}",
+        ])
+        if is_va:
+            candidates.extend([
+                f"VA {album}",
+                f"VA - {album}",
+                f"Various Artists - {album}",
+            ])
+        candidates.extend([
+            f"{album} {artist}",
+            album,
+        ])
+    else:
+        candidates.append(album or artist)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        query = re.sub(r"\s+", " ", candidate).strip()
+        key = query.lower()
+        if query and key not in seen:
+            out.append(query)
+            seen.add(key)
+    return out
+
+
 def _normalize_release_text(text: str) -> str:
     """Lowercase, fold accents (Björk -> bjork), strip punctuation to spaces.
 
