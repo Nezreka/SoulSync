@@ -21,7 +21,7 @@ const _SS_TABS = [
 const _SS_SERVER_INFO = {
     // `dark`: the logo is a white/light wordmark, so it needs a dark disc to be
     // visible (it'd vanish on the default white disc).
-    plex:      { name: 'Plex',      logo: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg', dark: true },
+    plex:      { name: 'Plex',      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Plex_logo_2022_full-color-on-black.svg/1280px-Plex_logo_2022_full-color-on-black.svg.png?_=20241028114506', dark: true },
     jellyfin:  { name: 'Jellyfin',  logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png' },
     navidrome: { name: 'Navidrome', logo: 'https://tweakers.net/ext/i/2007323764.png' },
     soulsync:  { name: 'SoulSync',  logo: '/static/trans2.png', dark: true },

@@ -18,7 +18,7 @@
         usenet: { name: 'Usenet', logo: null, emoji: '📰' }
     };
     var SRV_INFO = {
-        plex: { name: 'Plex', logo: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg', emoji: '🖥️', dark: true },
+        plex: { name: 'Plex', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Plex_logo_2022_full-color-on-black.svg/1280px-Plex_logo_2022_full-color-on-black.svg.png?_=20241028114506', emoji: '🖥️', dark: true },
         jellyfin: { name: 'Jellyfin', logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png', emoji: '🖥️' }
     };
     var META_INFO = {

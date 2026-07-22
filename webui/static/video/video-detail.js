@@ -20,7 +20,7 @@
     // Real media-server logos for the "Play on your server" watch tile (same
     // sources as the header server toggle).
     var SERVER_LOGOS = {
-        Plex: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg',
+        Plex: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Plex_logo_2022_full-color-on-black.svg/1280px-Plex_logo_2022_full-color-on-black.svg.png?_=20241028114506',
         Jellyfin: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png',
     };
     var VIEW_KEY = 'soulsync_vd_season_view';
