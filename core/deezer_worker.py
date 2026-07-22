@@ -12,6 +12,7 @@ from core.worker_utils import (
     _names_equivalent,
     accept_artist_match,
     artist_name_matches,
+    idle_backoff_seconds,
     interruptible_sleep,
     owned_album_titles,
     pick_artist_by_catalog,
@@ -39,6 +40,9 @@ class DeezerWorker:
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
+
+        # Consecutive empty-queue polls, drives idle_backoff_seconds()
+        self._empty_streak = 0
 
         # Statistics
         self.stats = {
@@ -138,9 +142,11 @@ class DeezerWorker:
 
                 if not item:
                     logger.debug("No pending items, sleeping...")
-                    interruptible_sleep(self._stop_event, 10)
+                    interruptible_sleep(self._stop_event, idle_backoff_seconds(self._empty_streak))
+                    self._empty_streak += 1
                     continue
 
+                self._empty_streak = 0
                 self.current_item = item
                 # Guard: skip items with None/NULL IDs to prevent infinite enrichment loops
                 item_id = item.get('id') or item.get('artist_id') or item.get('album_id')
