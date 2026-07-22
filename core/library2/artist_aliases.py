@@ -110,8 +110,44 @@ def resolve_alias_group(conn: Any, artist_id: int) -> List[int]:
     return [canonical_id] + [int(r["id"]) for r in alias_rows]
 
 
+def artist_album_scope_ids(conn: Any, artist_id: int) -> List[int]:
+    """Return every release shown for an artist's complete alias group."""
+
+    group = resolve_alias_group(conn, artist_id)
+    marks = ",".join("?" for _ in group)
+    return [int(row["album_id"]) for row in conn.execute(
+        f"""SELECT album_id FROM (
+                SELECT aa.album_id
+                  FROM lib2_album_artists aa
+                 WHERE aa.artist_id IN ({marks})
+                UNION
+                SELECT t.album_id
+                  FROM lib2_track_artists ta
+                  JOIN lib2_tracks t ON t.id=ta.track_id
+                 WHERE ta.artist_id IN ({marks})
+            ) ORDER BY album_id""",
+        [*group, *group],
+    )]
+
+
+def artist_track_scope_ids(conn: Any, artist_id: int) -> List[int]:
+    """Return all tracks on releases shown for an alias-group artist."""
+
+    album_ids = artist_album_scope_ids(conn, artist_id)
+    if not album_ids:
+        return []
+    marks = ",".join("?" for _ in album_ids)
+    return [int(row["id"]) for row in conn.execute(
+        f"SELECT id FROM lib2_tracks WHERE album_id IN ({marks}) "
+        "ORDER BY album_id, COALESCE(disc_number, 1), track_number, id",
+        album_ids,
+    )]
+
+
 __all__ = [
     "AliasLinkError",
+    "artist_album_scope_ids",
+    "artist_track_scope_ids",
     "link_artist_alias",
     "unlink_artist_alias",
     "resolve_alias_group",

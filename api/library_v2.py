@@ -2941,18 +2941,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 conn = db._get_connection()
                 try:
+                    from core.library2.artist_aliases import artist_album_scope_ids
+
                     albums = []
                     if album_allowlist is None or album_allowlist:
                         allowlist_sql = ""
-                        params = [artist_id]
+                        scoped_album_ids = artist_album_scope_ids(conn, artist_id)
+                        if not scoped_album_ids:
+                            scoped_album_ids = [-1]
+                        scope_marks = ",".join("?" for _ in scoped_album_ids)
+                        params = list(scoped_album_ids)
                         if album_allowlist is not None:
                             marks = ",".join("?" for _ in album_allowlist)
                             allowlist_sql = f" AND al.id IN ({marks})"
                             params.extend(album_allowlist)
                         albums = [r["id"] for r in conn.execute(
-                            f"""SELECT al.id FROM lib2_album_artists aa
-                                JOIN lib2_albums al ON al.id = aa.album_id
-                               WHERE aa.artist_id = ? AND {type_filter}{allowlist_sql}""",
+                            f"""SELECT al.id FROM lib2_albums al
+                               WHERE al.id IN ({scope_marks})
+                                 AND {type_filter}{allowlist_sql}""",
                             params,
                         )]
                     _job_registry.update(job_id, total=len(albums))
@@ -3650,8 +3656,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             if not conn.execute("SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)).fetchone():
                 return jsonify({"success": False, "error": "Artist not found"}), 404
+            from core.library2.artist_aliases import artist_album_scope_ids
+
+            album_ids = artist_album_scope_ids(conn, artist_id)
+            album_marks = ",".join("?" for _ in album_ids) or "NULL"
             rows = conn.execute(
-                """SELECT s.id AS single_id, s.title, s.monitored AS single_monitored,
+                f"""SELECT s.id AS single_id, s.title, s.monitored AS single_monitored,
                           sal.title AS single_album,
                           c.id AS canonical_id, c.monitored AS canonical_monitored,
                           cal.title AS canonical_album
@@ -3659,10 +3669,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                      JOIN lib2_albums sal ON sal.id = s.album_id
                      JOIN lib2_tracks c ON c.id = s.canonical_track_id
                      JOIN lib2_albums cal ON cal.id = c.album_id
-                     JOIN lib2_album_artists aa ON aa.album_id = s.album_id
-                    WHERE aa.artist_id = ? AND s.canonical_track_id IS NOT NULL
+                    WHERE sal.id IN ({album_marks})
+                      AND s.canonical_track_id IS NOT NULL
                     ORDER BY s.title COLLATE NOCASE""",
-                (artist_id,),
+                album_ids,
             ).fetchall()
 
             def _file_summary(track_id: int) -> Optional[Dict[str, Any]]:
@@ -4274,15 +4284,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if entity == "albums":
                 album_ids = [eid]
             else:
-                album_ids = [r["id"] for r in conn.execute(
-                    """SELECT al.id FROM lib2_album_artists aa JOIN lib2_albums al ON al.id=aa.album_id
-                       WHERE aa.artist_id=?""", (eid,))]
+                from core.library2.artist_aliases import artist_album_scope_ids
+                album_ids = artist_album_scope_ids(conn, eid)
             # Bust full image AND thumbnail — the thumb wins the serve fast
             # path, so leaving it behind would pin the stale cover in lists.
             for aid in album_ids:
                 _delete_artwork_files(db, "album", aid)
             if entity == "artists":
-                _delete_artwork_files(db, "artist", eid)
+                from core.library2.artist_aliases import resolve_alias_group
+                for artist_id in resolve_alias_group(conn, eid):
+                    _delete_artwork_files(db, "artist", artist_id)
         finally:
             conn.close()
         # Probe the files in scope so quality evaluation runs against measured

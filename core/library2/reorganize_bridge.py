@@ -189,14 +189,39 @@ def enqueue_artist_reorganize_all(
     """Enqueue every album of one lib2 artist for reorganize (docs §50)."""
     from core.reorganize_queue import get_queue
 
+    metadata_source = mode if mode in ("api", "tags") else "api"
     conn = db._get_connection()
     try:
-        legacy_artist_id = resolve_legacy_artist_id(conn, lib2_artist_id)
+        artist = conn.execute(
+            "SELECT legacy_artist_id FROM lib2_artists WHERE id=?",
+            (int(lib2_artist_id),),
+        ).fetchone()
+        if artist is None:
+            raise ReorganizeBridgeError("Artist not found", status=404)
+        from core.library2.artist_aliases import resolve_alias_group
+
+        group = resolve_alias_group(conn, lib2_artist_id)
+        marks = ",".join("?" for _ in group)
+        legacy_artist_ids = [
+            int(row["legacy_artist_id"])
+            for row in conn.execute(
+                f"SELECT legacy_artist_id FROM lib2_artists "
+                f"WHERE id IN ({marks}) AND legacy_artist_id IS NOT NULL",
+                group,
+            )
+        ]
+        if not legacy_artist_ids:
+            raise ReorganizeBridgeError(
+                "Artist is not linked to the imported library", status=409,
+            )
     finally:
         conn.close()
 
-    metadata_source = mode if mode in ("api", "tags") else "api"
-    albums = db.get_artist_albums_for_reorganize(legacy_artist_id)
+    albums_by_id = {}
+    for legacy_artist_id in sorted(set(legacy_artist_ids)):
+        for album in db.get_artist_albums_for_reorganize(legacy_artist_id):
+            albums_by_id[str(album["album_id"])] = album
+    albums = list(albums_by_id.values())
     if not albums:
         raise ReorganizeBridgeError("No albums found for this artist", status=404)
 

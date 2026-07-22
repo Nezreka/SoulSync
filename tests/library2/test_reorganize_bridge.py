@@ -343,3 +343,30 @@ def test_enqueue_artist_reorganize_all_raises_for_missing_backref(imported_legac
     with pytest.raises(ReorganizeBridgeError) as exc_info:
         enqueue_artist_reorganize_all(imported_legacy_db, artist_id)
     assert exc_info.value.status == 409
+
+
+def test_enqueue_artist_reorganize_all_includes_linked_alias_legacy_artist(
+    imported_legacy_db,
+):
+    conn = imported_legacy_db._get_connection()
+    canonical_id = conn.execute(
+        "SELECT id FROM lib2_artists WHERE legacy_artist_id=1"
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO artists VALUES(2, 'Alias Artist', NULL, NULL, NULL, NULL, NULL)"
+    )
+    alias_id = conn.execute(
+        "INSERT INTO lib2_artists(name, legacy_artist_id) VALUES('Alias Artist', 2)"
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO albums(id, artist_id, title, year) "
+        "VALUES(999, 2, 'Alias Legacy Album', 2026)"
+    )
+    from core.library2.artist_aliases import link_artist_alias
+    link_artist_alias(conn, alias_id, canonical_id)
+    conn.commit()
+    conn.close()
+
+    result = enqueue_artist_reorganize_all(imported_legacy_db, canonical_id)
+
+    assert result["total_albums"] == 3
