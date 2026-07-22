@@ -1011,14 +1011,19 @@ async function loadArtistDetailData(artistId, artistName) {
             `/api/artist-detail/${encodeURIComponent(artistId)}${qs ? '?' + qs : ''}`
         );
 
-        if (!response.ok) {
-            throw new Error(`Failed to load artist data: ${response.statusText}`);
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || !data.success) {
+            throw new Error(
+                data.error || `Failed to load artist data: ${response.statusText}`
+            );
         }
 
-        const data = await response.json();
-
-        if (!data.success) {
-            throw new Error(data.error || 'Failed to load artist data');
+        if (data.provider_error?.error) {
+            showToast(
+                `Discography provider warning: ${data.provider_error.error}`,
+                "error"
+            );
         }
 
         const isSourceOnlyArtist = !data.artist?.server_source;

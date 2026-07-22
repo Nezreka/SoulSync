@@ -24,7 +24,7 @@ branch becomes a no-op.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from core.artist_source_lookup import SOURCE_ID_FIELD
 from core.metadata import artist_image as metadata_artist_image
@@ -47,12 +47,13 @@ def build_source_only_artist_detail(
     jiosaavn_client: Optional[Any] = None,
     bandcamp_client: Optional[Any] = None,
     lastfm_api_key: Optional[str] = None,
+    discography_loader: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """Build the artist-detail payload for a source-only artist.
 
     Returns ``(payload_dict, http_status)``. Callers wrap the dict in
-    ``jsonify`` or equivalent. Status is 200 on success, 404 when the
-    source's discography lookup returned no releases.
+    ``jsonify`` or equivalent. Status is 200 on success, 404 for a valid
+    empty catalogue, and the provider status for an access failure.
     """
     resolved_name = (artist_name or "").strip()
 
@@ -171,7 +172,11 @@ def build_source_only_artist_detail(
     # 4. Discography from the specified source. Skip variant dedup so the
     #    page shows every release the source returns — matches the inline
     #    Artists-page behaviour that this view was modelled after.
-    discography_result = metadata_discography.get_artist_detail_discography(
+    load_discography = (
+        discography_loader
+        or metadata_discography.get_artist_detail_discography
+    )
+    discography_result = load_discography(
         artist_id,
         artist_name=resolved_name or artist_id,
         options=MetadataLookupOptions(
@@ -190,11 +195,19 @@ def build_source_only_artist_detail(
     )
 
     if not discography_result.get("success"):
+        state = discography_result.get("state") or "empty"
+        status_code = (
+            int(discography_result.get("status_code") or 502)
+            if state == "error"
+            else 404
+        )
         return {
             "success": False,
+            "state": state,
             "error": discography_result.get("error", "Could not load discography"),
-            "source": source,
-        }, 404
+            "source": discography_result.get("source", source),
+            "status_code": status_code,
+        }, status_code
 
     artist_info: Dict[str, Any] = {
         "id": artist_id,
