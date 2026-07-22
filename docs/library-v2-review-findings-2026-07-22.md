@@ -26,9 +26,10 @@ contains the fix and its regression coverage.
 | 14 | Rebuild album artist credits during re-import | Done | `bdc478a5` |
 | 15 | Poll queue status once per artist page | Done | `2e227c1b` |
 | 16 | Verify existing acquisition working copies by content | Done | `9592159f` |
-| 17 | Make Refresh & Scan reportable and asynchronous | Pending | — |
+| 17 | Make Refresh & Scan reportable and asynchronous | Done | `7ded959c` |
 
-Last updated: 2026-07-22 (implementation in progress).
+Last updated: 2026-07-22 (all review findings implemented; final regression
+suite and push pending).
 
 ## P1 — Update only the file that reorganize actually moved
 
