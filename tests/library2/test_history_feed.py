@@ -56,7 +56,14 @@ def _drake_ids(conn) -> dict:
     }
 
 
-def _acquisition_grab(conn, *, scope: str, entity_id: int, quality_profile_id: int = 1):
+def _acquisition_grab(
+    conn,
+    *,
+    scope: str,
+    entity_id: int,
+    quality_profile_id: int = 1,
+    idempotency_key: str | None = None,
+):
     from core.acquisition import ensure_acquisition_schema
     from core.acquisition.history import record_history_event
     from core.acquisition.requests import ADMIN_PROFILE_ID, create_request
@@ -65,7 +72,7 @@ def _acquisition_grab(conn, *, scope: str, entity_id: int, quality_profile_id: i
     request, _created = create_request(
         conn, profile_id=ADMIN_PROFILE_ID, scope=scope, entity_id=entity_id,
         quality_profile_id=quality_profile_id, trigger="manual",
-        idempotency_key=f"test-{scope}-{entity_id}", search_options={},
+        idempotency_key=idempotency_key or f"test-{scope}-{entity_id}", search_options={},
     )
     record_history_event(
         conn, "grab_submitted", request_id=request.id, message="grabbed a candidate",
@@ -170,6 +177,81 @@ def test_structured_pipeline_checks_surface_status_quality_and_reason(imported_c
         for event in history
         if event["event_type"] in {"quality_checked", "acoustic_id_checked"}
     ] == ["acoustic_id_checked", "quality_checked"]
+
+
+def test_file_history_uses_exact_persisted_acquisition_attempt(imported_conn):
+    import json
+
+    from core.acquisition.grabs import record_grab
+    from core.acquisition.imports import ensure_acquisition_imports_schema
+
+    drake = _drake_ids(imported_conn)
+    request_id = _acquisition_grab(
+        imported_conn, scope="recording", entity_id=drake["recording_id"]
+    )
+    # A second request for the same recording must stay out of this file's
+    # history because its import id is not persisted on the file row.
+    unrelated_request_id = _acquisition_grab(
+        imported_conn,
+        scope="recording",
+        entity_id=drake["recording_id"],
+        quality_profile_id=2,
+        idempotency_key="unrelated-file-attempt",
+    )
+    assert unrelated_request_id != request_id
+    record_grab(
+        imported_conn,
+        "download-file-history",
+        "soulseek",
+        acquisition_request_id=request_id,
+    )
+    ensure_acquisition_imports_schema(imported_conn)
+    imported_conn.execute(
+        """INSERT INTO acquisition_imports(
+               id, download_id, request_id, output_path,
+               expected_scope, expected_entity_id)
+           VALUES('aim1-file-history', 'download-file-history', ?, '/remote',
+                  'recording', ?)""",
+        (request_id, drake["recording_id"]),
+    )
+    file_row = imported_conn.execute(
+        "SELECT id FROM lib2_track_files WHERE track_id=? AND is_primary=1",
+        (drake["track_id"],),
+    ).fetchone()
+    imported_conn.execute(
+        """UPDATE lib2_track_files
+              SET verification_status='verified', acoustid_status='pass',
+                  pipeline_result_json=?
+            WHERE id=?""",
+        (
+            json.dumps({
+                "acquisition_import_id": "aim1-file-history",
+                "acoustid_message": "fingerprint matched",
+                "quality_fallback": ["downsample"],
+            }),
+            file_row["id"],
+        ),
+    )
+    imported_conn.commit()
+
+    history = scoped_history(
+        imported_conn, scope="file", entity_id=file_row["id"]
+    )
+
+    grabs = [event for event in history if event["event_type"] == "grab_submitted"]
+    assert len(grabs) == 1
+    result = next(
+        event for event in history if event["event_type"] == "file_pipeline_result"
+    )
+    assert result["status"] == "imported"
+    assert result["payload"]["verification_status"] == "verified"
+    assert result["payload"]["acoustid_status"] == "pass"
+    assert "quality fallback downsample" in result["detail"]
+
+
+def test_file_history_rejects_unknown_file(imported_conn):
+    with pytest.raises(LookupError, match="File not found"):
+        scoped_history(imported_conn, scope="file", entity_id=999999)
 
 
 def test_artist_missing_scope_does_not_leak_into_a_different_artist(imported_conn):

@@ -20,6 +20,8 @@ chose this" from "an import copied a flag" (P1-13).
 - ``wishlist_import`` — a concrete track was present in the admin's legacy
   Wishlist at import time; it beats inherited parent intent but remains
   distinguishable from a direct Library-v2 click.
+- ``playlist_intent`` — a concrete track came from a mirrored playlist. It
+  has the same wanted priority as a Wishlist import while remaining auditable.
 - ``file_import`` — the track had an active local file during import.  Like a
   Wishlist item this is concrete track-level coverage and therefore beats an
   incomplete release's derived (unmonitored) parent baseline.
@@ -42,6 +44,7 @@ PROVENANCE_USER = "user_explicit"
 PROVENANCE_CASCADE = "cascade"
 PROVENANCE_NEW_RELEASE = "new_release"
 PROVENANCE_WISHLIST = "wishlist_import"
+PROVENANCE_PLAYLIST = "playlist_intent"
 PROVENANCE_FILE = "file_import"
 PROVENANCE_LEGACY = "legacy_import"
 
@@ -223,6 +226,7 @@ __all__ = [
     "PROVENANCE_FILE",
     "PROVENANCE_LEGACY",
     "PROVENANCE_NEW_RELEASE",
+    "PROVENANCE_PLAYLIST",
     "PROVENANCE_USER",
     "PROVENANCE_WISHLIST",
     "explicit_track_rules_for_album",

@@ -161,3 +161,8 @@ class AutomationDeps:
     # ``web_server.py`` always populates it via
     # ``core.playlists.sources.bootstrap.build_playlist_source_registry``.
     playlist_source_registry: Optional[Any] = None
+
+    # Optional seam for the Library-v2 mirrored-playlist intent materializer.
+    # Production uses the real implementation; handler tests can keep their
+    # deliberately tiny database fakes without pretending to be SQLite.
+    materialize_playlist_intents: Optional[Callable[..., Dict[str, Any]]] = None

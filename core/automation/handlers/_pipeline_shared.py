@@ -175,6 +175,7 @@ def run_sync_and_wishlist(
     total_synced = 0
     total_skipped = 0
     sync_errors = 0
+    quality_conflicts = 0
     sync_states = deps.get_sync_states()
     n_playlists = max(1, len(playlists))
     progress_span = max(1, progress_end - progress_start - 1)
@@ -241,6 +242,8 @@ def run_sync_and_wishlist(
             )
         elif sync_status == 'error':
             sync_errors += 1
+            if sync_result.get('reason_code') == 'quality_profile_conflict':
+                quality_conflicts += len(sync_result.get('quality_conflicts') or ()) or 1
             deps.update_progress(
                 automation_id,
                 log_line=f'Sync error "{pl_name}": {sync_result.get("reason", "unknown")}',
@@ -289,7 +292,7 @@ def run_sync_and_wishlist(
                 )
 
     all_organize = bool(playlists) and len(organize_playlists) == len(playlists)
-    effective_skip_wishlist = skip_wishlist or all_organize
+    effective_skip_wishlist = skip_wishlist or all_organize or quality_conflicts > 0
     wishlist_track_ids, wishlist_profile_ids = _playlist_wishlist_scope(
         deps, playlists,
     )
@@ -310,6 +313,7 @@ def run_sync_and_wishlist(
         'errors': sync_errors,
         'wishlist_queued': wishlist_queued,
         'organize_downloads_started': organize_started,
+        'quality_conflicts': quality_conflicts,
     }
 
 

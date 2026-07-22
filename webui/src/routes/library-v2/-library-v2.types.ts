@@ -526,7 +526,25 @@ export interface LibraryV2PlaylistSummary {
   wishlisted_count: number;
   in_library_count: number;
   updated_at: string | null;
+  quality_profile_id?: number | null;
+  quality_conflict_count?: number;
+  quality_conflicts?: LibraryV2PlaylistQualityConflict[];
   pipeline_state: LibraryV2PlaylistPipelineState | null;
+}
+
+export interface LibraryV2PlaylistQualityConflictProfile {
+  playlist_id: number;
+  playlist_name: string;
+  profile_id: number;
+  profile_name: string;
+}
+
+export interface LibraryV2PlaylistQualityConflict {
+  track_id: number;
+  title: string;
+  artist: string;
+  album: string;
+  playlists: LibraryV2PlaylistQualityConflictProfile[];
 }
 
 export interface LibraryV2PlaylistTrack {
@@ -539,6 +557,11 @@ export interface LibraryV2PlaylistTrack {
   image_url: string | null;
   source_track_id: string | null;
   extra_data: string | null;
+  lib2_track_id?: number | null;
+  quality_profile_id?: number | null;
+  quality_profile_source?: LibraryV2QualityProfileSource | null;
+  quality_profile_conflict?: boolean;
+  quality_profile_conflicts?: LibraryV2PlaylistQualityConflictProfile[];
 }
 
 export interface LibraryV2PlaylistDetail extends LibraryV2PlaylistSummary {

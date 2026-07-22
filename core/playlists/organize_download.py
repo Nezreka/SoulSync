@@ -31,6 +31,9 @@ def mirrored_tracks_to_download_json(tracks: List[Dict[str, Any]]) -> List[Dict[
                 'album': album_obj,
                 'duration_ms': md.get('duration_ms', 0),
                 'id': md.get('id', ''),
+                '_mirrored_track_id': t.get('id'),
+                '_lib2_track_id': t.get('lib2_track_id'),
+                'source': md.get('provider') or extra.get('provider'),
             }
             if md.get('track_number'):
                 entry['track_number'] = md['track_number']
@@ -58,6 +61,9 @@ def mirrored_tracks_to_download_json(tracks: List[Dict[str, Any]]) -> List[Dict[
                 'album': album_obj,
                 'duration_ms': t.get('duration_ms', 0),
                 'id': hint['id'],
+                '_mirrored_track_id': t.get('id'),
+                '_lib2_track_id': t.get('lib2_track_id'),
+                'source': 'spotify',
             })
         elif t.get('source_track_id') and (t.get('track_name') or '').strip():
             out.append({
@@ -66,6 +72,8 @@ def mirrored_tracks_to_download_json(tracks: List[Dict[str, Any]]) -> List[Dict[
                 'album': album_obj,
                 'duration_ms': t.get('duration_ms', 0),
                 'id': t['source_track_id'],
+                '_mirrored_track_id': t.get('id'),
+                '_lib2_track_id': t.get('lib2_track_id'),
             })
     return out
 
@@ -93,6 +101,29 @@ def run_playlist_organize_download(
     tracks_json = mirrored_tracks_to_download_json(tracks)
     if not tracks_json:
         return {'status': 'skipped', 'reason': 'No processable tracks'}
+    linked_ids = [
+        int(track['_lib2_track_id']) for track in tracks_json
+        if track.get('_lib2_track_id') is not None
+    ]
+    if linked_ids:
+        conn = db._get_connection()
+        try:
+            from core.library2.profile_lookup import effective_quality_profiles
+
+            profiles = effective_quality_profiles(conn, linked_ids)
+        finally:
+            conn.close()
+        for track in tracks_json:
+            lib2_track_id = track.get('_lib2_track_id')
+            state = profiles.get(int(lib2_track_id)) if lib2_track_id is not None else None
+            if state and state.get('conflict'):
+                return {
+                    'status': 'error',
+                    'reason': 'Playlist quality profile conflict requires review',
+                    'reason_code': 'quality_profile_conflict',
+                }
+            if state:
+                track['quality_profile_id'] = state['id']
 
     batch_id = str(uuid.uuid4())
     playlist_id = str(mirrored_playlist_id)

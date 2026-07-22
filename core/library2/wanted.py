@@ -13,8 +13,9 @@ Priority (the audit demands this be pinned in tests before use; see
 
 1. **explicit track rule** (``user_explicit``) — a direct user decision on
    exactly this track beats everything, in both directions (P1-14).
-2. **imported Wishlist track rule** (``wishlist_import``) — a concrete
-   admin-Wishlist item beats inherited album/artist state.
+2. **concrete acquisition track rule** (``wishlist_import`` /
+   ``playlist_intent``) — a concrete admin-Wishlist or mirrored-playlist item
+   beats inherited album/artist state.
 3. **projected track rule** (``cascade`` / ``new_release``) — the most
    recent bulk action projected onto this track (album toggle cascade,
    profile-assign opt-in, new-release enforcement).
@@ -50,7 +51,7 @@ from utils.logging_config import get_logger
 
 logger = get_logger("library2.wanted")
 
-PROJECTION_VERSION = 2
+PROJECTION_VERSION = 3
 
 LIB2_WANTED_TRACKS_DDL = """
 CREATE TABLE IF NOT EXISTS lib2_wanted_tracks (
@@ -80,8 +81,8 @@ def _decide(trk_mon: Optional[int], trk_prov: Optional[str],
     """Apply the documented priority to one track's rule set."""
     if trk_prov == "user_explicit":
         return bool(trk_mon), "track_explicit"
-    if trk_prov == "wishlist_import":
-        return bool(trk_mon), "track_rule:wishlist_import"
+    if trk_prov in ("wishlist_import", "playlist_intent"):
+        return bool(trk_mon), f"track_rule:{trk_prov}"
     if trk_prov in ("cascade", "new_release"):
         return bool(trk_mon), f"track_rule:{trk_prov}"
     if alb_mon is not None and alb_prov != "legacy_import":
@@ -166,9 +167,13 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
 
     from core.library2.profile_lookup import (
         default_quality_profile_id,
+        playlist_quality_profile_states,
         resolve_profile_cascade,
     )
     default_profile_id = default_quality_profile_id(conn)
+    playlist_profiles = playlist_quality_profile_states(
+        conn, (int(row["track_id"]) for row in rows), default_id=default_profile_id,
+    )
 
     for r in rows:
         wanted, reason = _decide(r["trk_mon"], r["trk_prov"],
@@ -176,14 +181,17 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
                                  r["art_mon"], r["art_prov"])
         # Same Track > Album > Artist > Global cascade the per-entity
         # effective_quality_profile uses (shared resolve_profile_cascade).
-        effective_profile_id = resolve_profile_cascade(
+        resolved_profile = resolve_profile_cascade(
             (
                 ("track", r["track_id"], r["trk_prof"], r["trk_prof_expl"]),
                 ("album", r["album_id"], r["alb_prof"], r["alb_prof_expl"]),
                 ("artist", r["artist_id"], r["art_prof"], r["art_prof_expl"]),
             ),
             default_profile_id,
-        )["id"]
+        )
+        if resolved_profile["source"] == "global":
+            resolved_profile = playlist_profiles.get(int(r["track_id"]), resolved_profile)
+        effective_profile_id = resolved_profile["id"]
         # The WHERE on the upsert skips the write (and its updated_at bump)
         # when nothing changed — a full hourly recompute otherwise re-writes
         # every unchanged row, churning indexes for no reason (review Teil B).

@@ -179,6 +179,32 @@ def test_persists_pipeline_result_json_detail(lib2_enabled, imported_conn):
     assert result["quality_fallback"] == ["downsample"]
 
 
+def test_persists_acquisition_import_correlation_for_file_history(
+    lib2_enabled, imported_conn,
+):
+    context = _context(
+        _acquisition_import_id="aim1-correlated",
+        _acquisition_relative_path="Disc 1/01 Song.flac",
+    )
+    context["track_info"]["quality_profile_id"] = 1
+    file_id = A.link_download_into_library_v2(context)
+    row = imported_conn.execute(
+        "SELECT pipeline_result_json FROM lib2_track_files WHERE id=?", (file_id,),
+    ).fetchone()
+
+    result = json.loads(row["pipeline_result_json"])
+    assert result["acquisition_import_id"] == "aim1-correlated"
+    assert result["acquisition_relative_path"] == "Disc 1/01 Song.flac"
+    assert result["quality_profile_id"] == 1
+
+    # A later thin relink must not erase the business correlation.
+    assert A.link_download_into_library_v2(_context()) == file_id
+    result = json.loads(imported_conn.execute(
+        "SELECT pipeline_result_json FROM lib2_track_files WHERE id=?", (file_id,),
+    ).fetchone()["pipeline_result_json"])
+    assert result["acquisition_import_id"] == "aim1-correlated"
+
+
 def test_version_mismatch_fallback_recorded_in_pipeline_result(lib2_enabled, imported_conn):
     file_id = A.link_download_into_library_v2(_context(
         _verification_status="force_imported",

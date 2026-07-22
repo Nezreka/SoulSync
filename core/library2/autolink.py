@@ -336,6 +336,23 @@ def _pipeline_result_json(context: Dict[str, Any]) -> str:
     lossy copy) fired for this file. Built from context keys the pipeline
     already sets; empty when none apply so most rows stay `'{}'`."""
     result: Dict[str, Any] = {}
+    import_id = context.get("_acquisition_import_id")
+    if import_id:
+        # Durable correlation for file-scoped history. The acquisition import
+        # row owns request/candidate/download ids, so persisting this one
+        # opaque business id is enough to reconstruct the exact attempt.
+        result["acquisition_import_id"] = str(import_id)
+    relative_path = context.get("_acquisition_relative_path")
+    if relative_path:
+        result["acquisition_relative_path"] = str(relative_path)
+    track_info = context.get("track_info")
+    if not isinstance(track_info, dict):
+        track_info = {}
+    quality_profile_id = (
+        context.get("quality_profile_id") or track_info.get("quality_profile_id")
+    )
+    if quality_profile_id:
+        result["quality_profile_id"] = quality_profile_id
     message = context.get("_acoustid_message")
     if message:
         result["acoustid_message"] = str(message)
@@ -482,10 +499,30 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
             pipeline_result_json = _pipeline_result_json(context)
 
             existing = conn.execute(
-                "SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
+                "SELECT id, pipeline_result_json FROM lib2_track_files "
+                "WHERE track_id=? AND path=?",
                 (track_id, file_path),
             ).fetchone()
             if existing:
+                # A later idempotent relink/scan may carry a thinner context.
+                # Merge instead of erasing the durable acquisition correlation
+                # and earlier check detail stored by the actual import.
+                try:
+                    previous_pipeline_result = json.loads(
+                        existing["pipeline_result_json"] or "{}"
+                    )
+                except (TypeError, ValueError):
+                    previous_pipeline_result = {}
+                try:
+                    current_pipeline_result = json.loads(pipeline_result_json or "{}")
+                except (TypeError, ValueError):
+                    current_pipeline_result = {}
+                if isinstance(previous_pipeline_result, dict):
+                    previous_pipeline_result.update(
+                        current_pipeline_result
+                        if isinstance(current_pipeline_result, dict) else {}
+                    )
+                    pipeline_result_json = json.dumps(previous_pipeline_result)
                 conn.execute(
                     """UPDATE lib2_track_files SET size=COALESCE(?, size),
                            bitrate=COALESCE(?, bitrate), sample_rate=COALESCE(?, sample_rate),

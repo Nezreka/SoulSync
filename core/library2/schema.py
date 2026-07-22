@@ -296,7 +296,7 @@ CREATE TABLE IF NOT EXISTS lib2_monitor_rules (
     entity_id INTEGER NOT NULL,
     profile_id INTEGER NOT NULL DEFAULT 1,
     monitored INTEGER NOT NULL,
-    provenance TEXT NOT NULL,             -- user_explicit|wishlist_import|cascade|new_release|legacy_import
+    provenance TEXT NOT NULL,             -- user_explicit|wishlist_import|playlist_intent|cascade|new_release|legacy_import
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(entity_type, entity_id, profile_id)

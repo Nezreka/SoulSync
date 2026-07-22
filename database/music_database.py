@@ -620,6 +620,7 @@ class MusicDatabase:
                     image_url TEXT,
                     track_count INTEGER DEFAULT 0,
                     profile_id INTEGER DEFAULT 1,
+                    quality_profile_id INTEGER DEFAULT NULL,
                     mirrored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(source, source_playlist_id, profile_id)
@@ -637,6 +638,7 @@ class MusicDatabase:
                     image_url TEXT,
                     source_track_id TEXT,
                     extra_data TEXT,
+                    lib2_track_id INTEGER DEFAULT NULL,
                     FOREIGN KEY (playlist_id) REFERENCES mirrored_playlists(id) ON DELETE CASCADE,
                     UNIQUE(playlist_id, position)
                 )
@@ -712,6 +714,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_explored_column(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
+            self._add_mirrored_playlist_quality_columns(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1614,6 +1617,30 @@ class MusicDatabase:
                 logger.info("Added custom_name column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_quality_columns(self, cursor):
+        """Add the playlist-default profile and its resolved Library-v2 link."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            playlist_cols = {c[1] for c in cursor.fetchall()}
+            if 'quality_profile_id' not in playlist_cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN quality_profile_id INTEGER DEFAULT NULL"
+                )
+                logger.info("Added quality_profile_id column to mirrored_playlists table")
+            cursor.execute("PRAGMA table_info(mirrored_playlist_tracks)")
+            track_cols = {c[1] for c in cursor.fetchall()}
+            if 'lib2_track_id' not in track_cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlist_tracks ADD COLUMN lib2_track_id INTEGER DEFAULT NULL"
+                )
+                logger.info("Added lib2_track_id column to mirrored_playlist_tracks table")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mirrored_tracks_lib2 "
+                "ON mirrored_playlist_tracks(lib2_track_id)"
+            )
+        except Exception as e:
+            logger.error(f"Error adding mirrored playlist quality columns: {e}")
 
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
@@ -9761,6 +9788,19 @@ class MusicDatabase:
                 "UPDATE tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
                 (profile_id,),
             )
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='mirrored_playlists'"
+            ).fetchone():
+                playlist_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(mirrored_playlists)")
+                }
+                if "quality_profile_id" in playlist_columns:
+                    conn.execute(
+                        "UPDATE mirrored_playlists SET quality_profile_id=NULL "
+                        "WHERE quality_profile_id=?",
+                        (profile_id,),
+                    )
             for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
                 exists = conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -9802,6 +9842,16 @@ class MusicDatabase:
                     (replacement_id,),
                 )
             cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (profile_id,))
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='lib2_wanted_tracks'"
+            ).fetchone():
+                # Profile deletion changes entity and playlist inheritance.
+                # This is rare, so a full projection is safer than trying to
+                # reconstruct every descendant affected by either route.
+                from core.library2.wanted import recompute_wanted
+
+                recompute_wanted(conn)
             conn.commit()
             if cur.rowcount == 0:
                 return False, "Profile not found"
@@ -16196,16 +16246,24 @@ class MusicDatabase:
                     (source, source_playlist_id, profile_id)
                 ).fetchone()['id']
 
-                # Preserve existing extra_data (discovery results) before replacing tracks
+                # Preserve discovery results and the resolved Library-v2 link
+                # before replacing tracks. The link is required for playlist
+                # Quality Profile conflict detection after a source refresh.
                 old_extra_map = {}
+                old_lib2_track_map = {}
                 try:
                     cursor.execute("""
-                        SELECT source_track_id, extra_data FROM mirrored_playlist_tracks
-                        WHERE playlist_id = ? AND source_track_id IS NOT NULL AND extra_data IS NOT NULL
+                        SELECT source_track_id, extra_data, lib2_track_id
+                          FROM mirrored_playlist_tracks
+                         WHERE playlist_id = ? AND source_track_id IS NOT NULL
                     """, (playlist_id,))
-                    old_extra_map = {row['source_track_id']: row['extra_data'] for row in cursor.fetchall()}
+                    for row in cursor.fetchall():
+                        if row['extra_data'] is not None:
+                            old_extra_map[row['source_track_id']] = row['extra_data']
+                        if row['lib2_track_id'] is not None:
+                            old_lib2_track_map[row['source_track_id']] = row['lib2_track_id']
                 except Exception as e:
-                    logger.debug("Failed to preserve mirrored playlist extra_data: %s", e)
+                    logger.debug("Failed to preserve mirrored playlist track state: %s", e)
 
                 # Replace all tracks
                 from core.playlists.source_refs import stable_source_track_id
@@ -16222,15 +16280,17 @@ class MusicDatabase:
                     # Restore preserved discovery data if the incoming track doesn't have its own
                     if not extra and sid and sid in old_extra_map:
                         extra = old_extra_map[sid]
+                    lib2_track_id = old_lib2_track_map.get(sid) if sid else None
                     cursor.execute("""
                         INSERT INTO mirrored_playlist_tracks
-                            (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (playlist_id, position, track_name, artist_name, album_name,
+                             duration_ms, image_url, source_track_id, extra_data, lib2_track_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         playlist_id, i + 1,
                         t.get('track_name', ''), t.get('artist_name', ''),
                         t.get('album_name', ''), t.get('duration_ms', 0),
-                        t.get('image_url'), sid or None, extra
+                        t.get('image_url'), sid or None, extra, lib2_track_id
                     ))
                 conn.commit()
                 logger.info(f"Mirrored playlist '{name}' ({source}) with {len(tracks)} tracks")
@@ -16369,6 +16429,65 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating organize_by_playlist for playlist {playlist_id}: {e}")
+            return False
+
+    def set_mirrored_playlist_quality_profile(
+        self,
+        playlist_id: int,
+        quality_profile_id: Optional[int],
+    ) -> bool:
+        """Set/clear the app-wide Quality Profile used as this playlist's default."""
+        try:
+            wishlist_remove_ids = []
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if quality_profile_id is not None and cursor.execute(
+                    "SELECT 1 FROM quality_profiles WHERE id=?",
+                    (int(quality_profile_id),),
+                ).fetchone() is None:
+                    return False
+                cursor.execute(
+                    """UPDATE mirrored_playlists
+                          SET quality_profile_id=?, updated_at=CURRENT_TIMESTAMP
+                        WHERE id=?""",
+                    (
+                        int(quality_profile_id) if quality_profile_id is not None else None,
+                        int(playlist_id),
+                    ),
+                )
+                if cursor.rowcount <= 0:
+                    return False
+                # Playlist defaults participate in the materialized wanted
+                # projection. Refresh only tracks linked to this playlist.
+                linked = [
+                    int(row[0]) for row in cursor.execute(
+                        "SELECT DISTINCT lib2_track_id FROM mirrored_playlist_tracks "
+                        "WHERE playlist_id=? AND lib2_track_id IS NOT NULL",
+                        (int(playlist_id),),
+                    ).fetchall()
+                ]
+                if linked:
+                    from core.library2.wanted import recompute_wanted
+
+                    recompute_wanted(conn, track_ids=linked)
+                    from core.library2.profile_lookup import playlist_quality_conflicts
+                    from core.library2.wishlist_mirror import track_wishlist_payload
+
+                    for conflict in playlist_quality_conflicts(
+                        conn, playlist_id=int(playlist_id),
+                    ):
+                        payload = track_wishlist_payload(conn, int(conflict["track_id"]))
+                        if payload and payload.get("id"):
+                            wishlist_remove_ids.append(str(payload["id"]))
+                conn.commit()
+            # Changing a playlist default can introduce a conflict after a
+            # track was already queued. Keep that stale job from downloading
+            # under either profile while the explicit Track choice is pending.
+            for track_key in wishlist_remove_ids:
+                self.remove_from_wishlist(track_key, profile_id=1)
+            return True
+        except Exception as e:
+            logger.error(f"Error updating playlist quality profile for {playlist_id}: {e}")
             return False
 
     def set_mirrored_playlist_custom_name(self, playlist_id: int, custom_name) -> bool:

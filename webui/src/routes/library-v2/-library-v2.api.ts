@@ -1693,6 +1693,25 @@ export async function runLibraryV2PlaylistPipeline(
   return payload.state;
 }
 
+export async function setLibraryV2PlaylistQualityProfile(
+  playlistId: number,
+  qualityProfileId: number | null,
+): Promise<LibraryV2PlaylistSummary> {
+  const payload = await readJson<{
+    success?: boolean;
+    playlist?: LibraryV2PlaylistSummary;
+    error?: string;
+  }>(
+    apiClient.patch(`mirrored-playlists/${playlistId}/preferences`, {
+      json: { quality_profile_id: qualityProfileId },
+    }),
+  );
+  if (!payload.success || !payload.playlist) {
+    throw new Error(payload.error || 'Failed to update playlist quality profile');
+  }
+  return payload.playlist;
+}
+
 export function libraryV2PlaylistsQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'playlists'],

@@ -119,6 +119,11 @@ def run_mirrored_playlist_pipeline(
             wishlist_phase_label='Phase 4/4: Processing wishlist...',
             wishlist_phase_start_log='Phase 4: Wishlist',
         )
+        if sync_summary.get('quality_conflicts'):
+            raise RuntimeError(
+                f"{sync_summary['quality_conflicts']} playlist quality profile "
+                "conflict(s) require review"
+            )
 
         duration = int(time.time() - pipeline_start)
         deps.update_progress(
