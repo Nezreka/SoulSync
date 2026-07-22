@@ -1,130 +1,80 @@
-"""Three-state artist-discography orchestration.
+"""Strict three-state artist-discography orchestration.
 
-A valid provider response with no releases is an empty catalogue and may advance
-to the next configured source. A provider-access failure is a different state:
-it stops fallback and is returned to the web layer as a visible error.
-
-The strict path is intentionally limited to artist discography. Search, import
-and enrichment keep their existing best-effort behaviour.
+The orchestrator is provider-agnostic. Provider adapters own their operation and
+return RESULTS, EMPTY or ACCESS_ERROR. Search, import and enrichment keep their
+existing best-effort behaviour.
 """
 
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
-from core.metadata.album_tracks import (
-    _extract_lookup_value,
-    _pick_best_artist_match,
-)
 from core.metadata.discography import (
     _build_artist_detail_release_card,
     _build_discography_release_dict,
     _dedup_variant_releases,
-    _get_source_chain_for_lookup,
     _sort_discography_releases,
 )
-from core.metadata.lookup import MetadataLookupOptions
-from core.metadata.provider_access import (
-    ProviderAccessError,
-    allow_provider_not_found,
-    call_discography_provider,
+from core.metadata.discography_providers import get_discography_provider_adapter
+from core.metadata.discography_result import (
+    DiscographyRequest,
+    DiscographyStatus,
 )
+from core.metadata.lookup import MetadataLookupOptions
 from utils.logging_config import get_logger
 
 logger = get_logger("metadata.discography.strict")
 
 
-def _spotify_free_active(client: Any) -> bool:
-    try:
-        return bool(getattr(client, "_free_active", lambda: False)())
-    except Exception:
-        return False
+def _get_strict_source_chain(options: MetadataLookupOptions) -> List[str]:
+    """Return the provider chain for the user-facing strict discography path.
 
-
-def _search_spotify_free_artists(client: Any, artist_name: str, limit: int) -> List[Any]:
-    """Search Spotify Free directly without enabling cross-provider fallback."""
-
-    free_client = getattr(client, "_free_meta", None)
-    if free_client is None or not hasattr(free_client, "search_artists"):
-        return []
-    return free_client.search_artists(artist_name, limit) or []
-
-
-def _get_artist_albums_with_client(
-    source: str,
-    client: Any,
-    artist_id: str,
-    *,
-    artist_name: str,
-    limit: int,
-    skip_cache: bool,
-    max_pages: int,
-) -> List[Any]:
-    """Run the exact-ID/name-resolution flow on one isolated client.
-
-    ``400``, ``404`` and ``410`` are treated as a valid empty result only while
-    resolving an explicit artist ID. Search failures remain provider-access
-    errors and stop the fallback chain.
+    An explicit source is authoritative and therefore exclusive. Automatic mode
+    preserves the configured priority and may continue after confirmed EMPTY.
     """
 
-    if not client or not hasattr(client, "get_artist_albums"):
-        return []
+    override = (options.source_override or "").strip().lower()
+    if override:
+        return [override]
 
-    spotify_free = source == "spotify" and _spotify_free_active(client)
+    primary_source = metadata_registry.get_primary_source()
+    source_chain = list(metadata_registry.get_source_priority(primary_source))
+    if not options.allow_fallback:
+        return source_chain[:1]
+    return source_chain
 
-    def fetch_for_artist(target_artist_id: str) -> List[Any]:
-        kwargs: Dict[str, Any] = {
-            "album_type": "album,single",
-            "limit": limit,
-        }
-        if source in {"jiosaavn", "bandcamp"}:
-            kwargs["artist_name"] = artist_name
-        if source == "spotify":
-            # Spotify Free is still the Spotify catalogue. Enabling fallback is
-            # safe only for a real Spotify ID: the client's numeric-ID branch is
-            # what delegates to iTunes/Deezer, so it remains disabled here.
-            kwargs["allow_fallback"] = spotify_free and not target_artist_id.isdigit()
-            kwargs["skip_cache"] = skip_cache
-            kwargs["max_pages"] = max_pages
 
-        with allow_provider_not_found(client):
-            return client.get_artist_albums(target_artist_id, **kwargs) or []
+def _lookup_artist_id(
+    source: str,
+    artist_id: str,
+    source_artist_ids: Dict[str, str],
+) -> str:
+    source_artist_id = str(source_artist_ids.get(source) or "").strip()
+    if source_artist_id:
+        return source_artist_id
+    if source_artist_ids:
+        return ""
+    return str(artist_id or "").strip()
 
-    albums = fetch_for_artist(artist_id) if artist_id else []
-    if albums or not artist_name:
-        return albums
 
-    if spotify_free:
-        search_results = _search_spotify_free_artists(client, artist_name, 5)
-    else:
-        search_artists = getattr(client, "search_artists", None)
-        if not callable(search_artists):
-            return albums
-
-        search_kwargs: Dict[str, Any] = {"limit": 5}
-        if source == "spotify":
-            search_kwargs["allow_fallback"] = False
-        search_results = search_artists(artist_name, **search_kwargs) or []
-
-    best = _pick_best_artist_match(search_results, artist_name)
-    if not best:
-        return albums
-
-    found_artist_id = _extract_lookup_value(best, "id", "artist_id")
-    if not found_artist_id:
-        return albums
-
-    resolved = fetch_for_artist(str(found_artist_id))
-    if resolved:
-        logger.debug(
-            "Found %s artist '%s' (id=%s)",
-            source,
-            _extract_lookup_value(best, "name", "artist_name", "title"),
-            found_artist_id,
-        )
-    return resolved
+def _error_response(
+    *,
+    source: str,
+    source_priority: List[str],
+    message: str,
+    status_code: int,
+) -> Dict[str, Any]:
+    return {
+        "success": False,
+        "state": "error",
+        "albums": [],
+        "singles": [],
+        "source": source,
+        "source_priority": source_priority,
+        "error": message,
+        "status_code": status_code,
+    }
 
 
 def get_artist_discography(
@@ -132,14 +82,14 @@ def get_artist_discography(
     artist_name: str = "",
     options: Optional[MetadataLookupOptions] = None,
 ) -> Dict[str, Any]:
-    """Return an artist discography with ``results`` / ``empty`` / ``error``.
+    """Return an artist discography with results / empty / error.
 
-    Fallback continues only after a provider completed successfully and returned
-    no releases. Any outbound communication failure stops the chain immediately.
+    Automatic mode continues only after a confirmed EMPTY. An explicit source
+    never crosses into another provider, regardless of ``allow_fallback``.
     """
 
     options = options or MetadataLookupOptions()
-    source_priority = _get_source_chain_for_lookup(options)
+    source_priority = _get_strict_source_chain(options)
     source_artist_ids = options.artist_source_ids or {}
     releases: List[Any] = []
     active_source: Optional[str] = None
@@ -147,50 +97,51 @@ def get_artist_discography(
     for source in source_priority:
         client = metadata_registry.get_client_for_source(source)
         if not client:
+            if options.source_override:
+                return _error_response(
+                    source=source,
+                    source_priority=source_priority,
+                    message=(
+                        f"Could not access {source} while loading the artist "
+                        "discography: provider is unavailable"
+                    ),
+                    status_code=503,
+                )
             continue
 
-        source_artist_id = str(source_artist_ids.get(source) or "").strip()
-        lookup_artist_id = (
-            source_artist_id
-            if source_artist_id
-            else artist_id if not source_artist_ids else ""
+        request = DiscographyRequest(
+            artist_id=_lookup_artist_id(
+                source,
+                artist_id,
+                source_artist_ids,
+            ),
+            artist_name=artist_name,
+            limit=options.limit,
+            skip_cache=options.skip_cache,
+            max_pages=options.max_pages,
         )
+        outcome = get_discography_provider_adapter(source, client).load(request)
 
-        try:
-            load_discography = partial(
-                _get_artist_albums_with_client,
-                source,
-                artist_id=lookup_artist_id,
-                artist_name=artist_name,
-                limit=options.limit,
-                skip_cache=options.skip_cache,
-                max_pages=options.max_pages,
-            )
-            releases = call_discography_provider(
-                source,
-                client,
-                load_discography,
-            ) or []
-        except ProviderAccessError as exc:
+        if outcome.status is DiscographyStatus.ACCESS_ERROR:
             logger.warning(
                 "Discography access failed for %s and fallback was stopped: %s",
                 source,
-                exc,
+                outcome.message,
             )
-            return {
-                "success": False,
-                "state": "error",
-                "albums": [],
-                "singles": [],
-                "source": source,
-                "source_priority": source_priority,
-                "error": str(exc),
-                "status_code": exc.status_code,
-            }
+            return _error_response(
+                source=source,
+                source_priority=source_priority,
+                message=str(outcome.message),
+                status_code=outcome.status_code,
+            )
 
-        if releases:
+        if outcome.status is DiscographyStatus.RESULTS:
+            releases = list(outcome.releases)
             active_source = source
             break
+
+        # EMPTY is the only state that may advance in automatic mode. For an
+        # explicit source the chain contains exactly one provider, so it ends.
 
     albums: List[Dict[str, Any]] = []
     singles: List[Dict[str, Any]] = []
