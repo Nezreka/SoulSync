@@ -1133,10 +1133,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         if config_manager.get('post_processing.replaygain_enabled', False):
             try:
-                from core.replaygain import analyze_track as _rg_analyze, write_replaygain_tags as _rg_write, is_ffmpeg_available as _rg_ffmpeg_ok, RG_REFERENCE_LUFS as _RG_REF
+                from core.replaygain import analyze_track as _rg_analyze, write_replaygain_tags as _rg_write, is_ffmpeg_available as _rg_ffmpeg_ok, get_target_lufs as _rg_target
                 if _rg_ffmpeg_ok():
                     lufs, peak_dbfs = _rg_analyze(final_path)
-                    gain_db = _RG_REF - lufs
+                    gain_db = _rg_target(config_manager) - lufs   # #1060 target setting
                     _rg_write(final_path, gain_db, peak_dbfs)
                     pp_logger.info(f"ReplayGain: {gain_db:+.2f} dB, peak {peak_dbfs:.2f} dBFS — {os.path.basename(final_path)}")
             except Exception as rg_err:

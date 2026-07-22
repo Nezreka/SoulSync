@@ -1010,6 +1010,7 @@ class RepairWorker:
             'missing_cover_art': self._fix_missing_cover_art,
             'missing_lyrics': self._fix_missing_lyrics,
             'missing_replaygain': self._fix_missing_replaygain,
+            'replaygain_retag': self._fix_missing_replaygain,   # #1060 — same analyze+write
             'empty_folder': self._fix_empty_folder,
             'expired_download': self._fix_expired_download,
             'metadata_gap': self._fix_metadata_gap,
@@ -2005,11 +2006,12 @@ class RepairWorker:
             return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
             from core.replaygain import (analyze_track, write_replaygain_tags,
-                                         is_ffmpeg_available, RG_REFERENCE_LUFS)
+                                         is_ffmpeg_available, get_target_lufs)
             if not is_ffmpeg_available():
                 return {'success': False, 'error': 'ffmpeg not available — cannot analyze ReplayGain'}
             lufs, peak_dbfs = analyze_track(resolved)
-            gain_db = RG_REFERENCE_LUFS - lufs   # same formula as the import pipeline
+            # same formula as the import pipeline; target honours #1060's setting
+            gain_db = get_target_lufs(self._config_manager) - lufs
             ok = write_replaygain_tags(resolved, gain_db, peak_dbfs)
         except Exception as e:
             logger.error("ReplayGain fix failed for %s: %s", os.path.basename(raw_path), e)

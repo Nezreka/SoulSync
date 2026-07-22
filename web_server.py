@@ -12513,7 +12513,7 @@ from core.replaygain import (
     analyze_track as _rg_analyze_track,
     write_replaygain_tags as _rg_write_tags,
     is_ffmpeg_available as _rg_ffmpeg_available,
-    RG_REFERENCE_LUFS as _RG_REFERENCE_LUFS,
+    get_target_lufs as _rg_get_target_lufs,
 )
 
 # State machine for album-level ReplayGain jobs
@@ -12568,7 +12568,7 @@ def analyze_track_replaygain(track_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-    track_gain_db = _RG_REFERENCE_LUFS - lufs
+    track_gain_db = _rg_get_target_lufs(config_manager) - lufs
 
     file_lock = get_file_lock(file_path)
     with file_lock:
@@ -12645,7 +12645,7 @@ def analyze_album_replaygain(album_id):
                 lufs, peak_dbfs = _rg_analyze_track(file_path)
                 lufs_values.append(lufs)
                 peak_values.append(peak_dbfs)
-                track_gain_db = _RG_REFERENCE_LUFS - lufs
+                track_gain_db = _rg_get_target_lufs(config_manager) - lufs
                 track_results.append((file_path, track_gain_db, peak_dbfs))
                 with _rg_album_lock:
                     _rg_album_state['analyzed'] += 1
@@ -12662,7 +12662,7 @@ def analyze_album_replaygain(album_id):
         album_peak_dbfs = None
         if lufs_values:
             mean_lufs = sum(lufs_values) / len(lufs_values)
-            album_gain_db = _RG_REFERENCE_LUFS - mean_lufs
+            album_gain_db = _rg_get_target_lufs(config_manager) - mean_lufs
             album_peak_dbfs = max(peak_values)
 
         # Pass 2: write tags to every successfully analyzed track
@@ -12757,7 +12757,7 @@ def analyze_tracks_replaygain_batch():
 
             try:
                 lufs, peak_dbfs = _rg_analyze_track(file_path)
-                track_gain_db = _RG_REFERENCE_LUFS - lufs
+                track_gain_db = _rg_get_target_lufs(config_manager) - lufs
                 file_lock = get_file_lock(file_path)
                 with file_lock:
                     _rg_write_tags(file_path, track_gain_db, peak_dbfs)

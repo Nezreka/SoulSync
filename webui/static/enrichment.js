@@ -2091,7 +2091,7 @@ async function loadRepairJobs() {
                         <label>${label}</label>
                         <input type="${inputType}" class="repair-setting-input"
                                data-job="${job.job_id}" data-key="${key}"${inputVal}
-                               ${inputType === 'number' ? 'step="0.01" min="0"' : ''}>
+                               ${inputType === 'number' ? (typeof val === 'number' && val < 0 ? 'step="0.01"' : 'step="0.01" min="0"') : ''}>
                     </div>`;
                 }).join('');
 
@@ -3052,7 +3052,8 @@ async function loadRepairFindings() {
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
-            missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
+            missing_replaygain: 'No ReplayGain', replaygain_retag: 'RG Re-analyze',
+            empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
             quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip',
             genre_cleanup: 'Genres'
@@ -3066,6 +3067,7 @@ async function loadRepairFindings() {
             missing_cover_art: 'Apply Art',
             missing_lyrics: 'Apply Lyrics',
             missing_replaygain: 'Apply RG',
+            replaygain_retag: 'Re-analyze',
             empty_folder: 'Delete Folder',
             expired_download: 'Delete',
             metadata_gap: 'Apply',
