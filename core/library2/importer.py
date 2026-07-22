@@ -36,6 +36,36 @@ logger = get_logger("library2.importer")
 ProgressCb = Optional[Callable[[str, int, int], None]]
 IMPORT_BATCH_SIZE = 200
 
+
+def _rebuild_album_artist_credits(cursor: Any, album_ids: Set[int]) -> None:
+    """Replace derived album credits from current album/track ownership."""
+
+    ordered = sorted({int(album_id) for album_id in album_ids})
+    for start in range(0, len(ordered), IMPORT_BATCH_SIZE):
+        batch = ordered[start:start + IMPORT_BATCH_SIZE]
+        marks = ",".join("?" for _ in batch)
+        cursor.execute(
+            f"DELETE FROM lib2_album_artists WHERE album_id IN ({marks})", batch,
+        )
+        cursor.execute(
+            f"""INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role)
+                SELECT al.id, al.primary_artist_id, 'primary'
+                  FROM lib2_albums al
+                 WHERE al.id IN ({marks})""",
+            batch,
+        )
+        cursor.execute(
+            f"""INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role)
+                SELECT DISTINCT t.album_id, ta.artist_id,
+                       CASE WHEN ta.artist_id=al.primary_artist_id
+                            THEN 'primary' ELSE 'featured' END
+                  FROM lib2_tracks t
+                  JOIN lib2_track_artists ta ON ta.track_id=t.id
+                  JOIN lib2_albums al ON al.id=t.album_id
+                 WHERE t.album_id IN ({marks})""",
+            batch,
+        )
+
 # Credit separators: "feat."/"ft."/"featuring"/"with" plus list separators.
 _FEAT_RE = re.compile(
     r"\b(?:feat|ft|featuring|with)\b\.?|\bw/",
@@ -1058,6 +1088,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
 
         # --- Albums (map legacy album id -> lib2 album id) -----------------
         album_map: Dict[str, int] = {}
+        imported_album_ids: Set[int] = set()
         cursor.execute("SELECT id, legacy_album_id FROM lib2_albums WHERE legacy_album_id IS NOT NULL")
         for r in cursor.fetchall():
             album_map[_legacy_key(r["legacy_album_id"])] = r["id"]
@@ -1198,6 +1229,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
                 "VALUES(?,?, 'primary')", (album_id, lib2_artist),
             )
+            imported_album_ids.add(int(album_id))
             stats["albums"] += 1
             if (i + 1) % IMPORT_BATCH_SIZE == 0:
                 checkpoint("albums", i + 1, album_total)
@@ -1260,6 +1292,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         )
         track_total = int(cursor.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
         checkpoint("tracks", 0, track_total)
+        dirty_credit_album_ids = set(imported_album_ids)
         for i, row in enumerate(
             _legacy_rows(conn, "tracks", track_projection)
         ):
@@ -1283,6 +1316,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             )
             existing = track_map.get(_legacy_key(row["id"]))
             if existing is not None:
+                previous = cursor.execute(
+                    "SELECT album_id FROM lib2_tracks WHERE id=?", (existing,),
+                ).fetchone()
+                if previous is not None:
+                    dirty_credit_album_ids.add(int(previous["album_id"]))
                 cursor.execute(
                     "UPDATE lib2_tracks SET album_id=?, title=?, track_number=?, "
                     "disc_number=?, duration=?, isrc=?, musicbrainz_id=?, spotify_id=?, "
@@ -1332,6 +1370,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 )
                 track_id = cursor.lastrowid
                 track_map[_legacy_key(row["id"])] = track_id
+            dirty_credit_album_ids.add(int(album_id))
             # Long-tail provider ids beyond isrc/musicbrainz/spotify (which keep
             # dedicated columns above) — deezer/tidal/qobuz/itunes/audiodb/genius/
             # amazon/jiosaavn/bandcamp/lastfm — via the same match_status.SERVICES
@@ -1419,7 +1458,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                          _pick(row, "verification_status"), row["id"], run_id, file_id),
                     )
             if (i + 1) % IMPORT_BATCH_SIZE == 0:
+                _rebuild_album_artist_credits(cursor, dirty_credit_album_ids)
+                dirty_credit_album_ids.clear()
                 checkpoint("tracks", i + 1, track_total)
+        _rebuild_album_artist_credits(cursor, dirty_credit_album_ids)
         checkpoint("tracks", track_total, track_total)
 
         stats.update(_reconcile_legacy_snapshot(cursor, run_id))

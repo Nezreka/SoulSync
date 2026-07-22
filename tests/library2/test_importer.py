@@ -1113,6 +1113,39 @@ def test_multi_artist_split(imported_conn):
     assert appearance is not None and appearance["role"] == "featured"
 
 
+def test_reimport_rebuilds_album_artist_credits_after_metadata_changes(legacy_db):
+    import_legacy_library(legacy_db, reset=True)
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute(
+        "INSERT INTO artists VALUES(2, 'New Primary', NULL, NULL, NULL, NULL, NULL)"
+    )
+    conn.execute("UPDATE albums SET artist_id=2 WHERE id=10")
+    conn.execute(
+        "UPDATE tracks SET artist_id=2, track_artist=NULL WHERE album_id=10"
+    )
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=False)
+
+    conn = legacy_db._get_connection()
+    try:
+        credits = [
+            (row["name"], row["role"])
+            for row in conn.execute(
+                """SELECT ar.name, aa.role
+                     FROM lib2_album_artists aa
+                     JOIN lib2_artists ar ON ar.id=aa.artist_id
+                     JOIN lib2_albums al ON al.id=aa.album_id
+                    WHERE al.legacy_album_id=10
+                    ORDER BY ar.name"""
+            )
+        ]
+        assert credits == [("New Primary", "primary")]
+    finally:
+        conn.close()
+
+
 def test_single_album_linkage(imported_conn):
     # The single's track points its canonical_track_id at the album track.
     single = _q(imported_conn, "SELECT id, canonical_track_id FROM lib2_tracks WHERE legacy_track_id = 102")[0]
