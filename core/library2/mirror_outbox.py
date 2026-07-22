@@ -51,11 +51,10 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
 
     outbox_ids: List[int] = []
     for tid in track_ids:
-        try:
-            payload = track_wishlist_payload(conn, tid)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("mirror enqueue payload failed (track %s): %s", tid, e)
-            continue
+        # Payload construction is part of the authoritative monitor mutation's
+        # transaction boundary.  Propagate failures so the caller can roll back
+        # instead of committing a flag change with no retryable outbox intent.
+        payload = track_wishlist_payload(conn, tid)
         if not payload:
             continue
         stype = "single" if payload.pop("_album_type", "") == "single" else "album"
