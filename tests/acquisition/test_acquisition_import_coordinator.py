@@ -1,5 +1,6 @@
 """Restart-safe Acquisition import coordinator tests."""
 
+import threading
 from datetime import datetime, timezone
 
 from core.acquisition.import_pipeline import (
@@ -78,3 +79,41 @@ def test_quarantined_import_is_not_blindly_redispatched_after_restart(tmp_path):
 
     assert result.processed == ()
     assert calls == []
+
+
+def test_parallel_resume_and_monitor_dispatch_import_only_once(tmp_path):
+    source_root = tmp_path / "client"
+    source_root.mkdir()
+    (source_root / "01.flac").write_bytes(b"audio")
+    factory, importing, _request = _seed_import(
+        tmp_path / "db.sqlite", source_root)
+    dispatch_started = threading.Event()
+    release_dispatch = threading.Event()
+    calls = []
+    outcomes = []
+
+    def dispatcher(_factory, import_id, **_kwargs):
+        calls.append(import_id)
+        dispatch_started.set()
+        assert release_dispatch.wait(timeout=5)
+        return BridgeDispatchResult(import_id, waiting=("01.flac",))
+
+    def run_advance():
+        outcomes.append(advance_open_imports(factory, dispatcher=dispatcher))
+
+    first = threading.Thread(target=run_advance)
+    first.start()
+    assert dispatch_started.wait(timeout=5)
+    second = threading.Thread(target=run_advance)
+    second.start()
+    second.join(timeout=5)
+    release_dispatch.set()
+    first.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert calls == [importing.id]
+    assert sorted(result.outcomes[importing.id] for result in outcomes) == [
+        "already_running",
+        "waiting_pipeline",
+    ]
