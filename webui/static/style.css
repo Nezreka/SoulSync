@@ -72162,3 +72162,13 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-jump-pill { bottom: 128px; }
 /* the mention pop sits above the (taller) composer now */
 .chat-mention-pop { bottom: 132px; }
+
+/* Global "Retry all failed" — a text button in the Manage Workers topbar
+   (video parity; overrides the round .em-icon-btn sizing; amber = retry). */
+.em-retry-global {
+    width: auto; height: 32px; padding: 0 13px; border-radius: 999px;
+    gap: 6px; font-size: 12px; font-weight: 800; white-space: nowrap;
+    color: #fbcd7a; background: rgba(245, 158, 11, 0.14);
+}
+.em-retry-global:hover { transform: none; background: rgba(245, 158, 11, 0.24); }
+.em-retry-global:disabled { opacity: 0.55; cursor: default; }

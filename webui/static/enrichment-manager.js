@@ -174,6 +174,9 @@ async function openEnrichmentManager(workerId) {
                         </div>
                     </div>
                     <div class="em-topbar-actions">
+                        <button class="em-icon-btn em-retry-global" id="em-retry-global-btn"
+                                title="Re-queue every failed item across ALL workers"
+                                onclick="retryAllFailedEnrichmentGlobal(this)">↻ Retry all failed</button>
                         <button class="em-icon-btn" id="em-refresh-btn" title="Refresh"
                                 onclick="refreshEnrichmentManager(this)">⟳</button>
                         <button class="em-icon-btn em-icon-btn--close" title="Close"
@@ -1028,13 +1031,56 @@ async function retryEnrichmentItem(service, entityType, entityId, btn) {
 }
 
 // Bulk: re-queue every not_found item of the current entity type.
+async function retryAllFailedEnrichmentGlobal(btn) {
+    // Video-parity hub sweep: every failed item, every worker, one press.
+    const ok = typeof showConfirmDialog === 'function'
+        ? await showConfirmDialog({
+            title: 'Retry All Failed',
+            message: 'Re-queue every failed match across ALL enrichment workers? '
+                + 'Each worker retries its items on its next pass.',
+            confirmText: 'Retry All', destructive: false })
+        : true;
+    if (!ok) return;
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Re-queuing…'; }
+    try {
+        const res = await fetch('/api/enrichment/retry-all-failed', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            const n = data.reset || 0;
+            showToast(n ? `Re-queued ${n.toLocaleString()} item(s) across ${Object.keys(data.services || {}).length} worker(s)`
+                        : 'Nothing failed to retry', n ? 'success' : 'info');
+            const svc = enrichmentManagerState.selected;
+            if (svc) {
+                enrichmentManagerState.page = 0;
+                await Promise.all([_emLoadBreakdown(svc), _emLoadUnmatched()]);
+                _emRenderEntityCards();
+                _emRenderUnmatchedControls();
+                _emRenderUnmatchedList();
+            }
+        } else {
+            showToast(data.error || 'Retry-all failed', 'error');
+        }
+    } catch (_e) {
+        showToast('Retry-all failed', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+}
+
 async function retryAllFailedEnrichment(btn) {
     const service = enrichmentManagerState.selected;
     const entity = enrichmentManagerState.entityTab;
     const bd = enrichmentManagerState.breakdown?.[entity];
     const failed = bd ? (bd.not_found || 0) : 0;
     if (!failed) { showToast('No failed items to retry', 'info'); return; }
-    if (!confirm(`Re-queue all ${failed.toLocaleString()} not-found ${_emEntityLabel(entity, true).toLowerCase()} for ${_emWorkerById[service].name}? The worker will retry them on its next pass.`)) return;
+    const okOne = typeof showConfirmDialog === 'function'
+        ? await showConfirmDialog({
+            title: 'Retry Failed Items',
+            message: `Re-queue all ${failed.toLocaleString()} not-found ${_emEntityLabel(entity, true).toLowerCase()} for ${_emWorkerById[service].name}? The worker will retry them on its next pass.`,
+            confirmText: 'Re-queue', destructive: false })
+        : true;
+    if (!okOne) return;
     if (btn) { btn.disabled = true; btn.textContent = 'Re-queuing…'; }
     try {
         const res = await fetch(`/api/enrichment/${service}/retry`, {
