@@ -10087,34 +10087,49 @@
                                 </div>
                             </div>
                             <div class="chat-scroll" data-chat-messages></div>
-                            <div class="chat-toolbar" data-chat-toolbar hidden>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="bold" title="Bold (**text**)"><b>B</b></button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="italic" title="Italic (*text*)"><i>I</i></button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="strike" title="Strikethrough (~~text~~)"><s>S</s></button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="code" title="Code (`text`)">&lt;/&gt;</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="codeblock" title="Code block (```)">▤</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="spoiler" title="Spoiler (||text||)">◼</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-fmt="quote" title="Quote (> text)">❝</button>
-                                <button type="button" class="chat-fmt-btn" data-chat-emoji-btn title="Emoji">🙂</button>
-                                <button type="button" class="chat-fmt-btn chat-gif-btn" data-chat-gif-btn title="Send a GIF">GIF</button>
-                                <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
-                                <div class="chat-gif-pop" data-chat-gif-pop hidden>
-                                    <input class="chat-input chat-gif-search" data-chat-gif-search type="text"
-                                           placeholder="Search GIPHY…" autocomplete="off">
-                                    <div class="chat-gif-grid" data-chat-gif-grid></div>
-                                </div>
-                            </div>
                             <button class="chat-jump-pill" type="button" data-chat-jump hidden>New messages ↓</button>
-                            <div class="chat-reply-bar" data-chat-reply-bar hidden>
-                                <span class="chat-reply-bar-label">↩ Replying to <b data-chat-reply-who></b>
-                                    <span class="chat-reply-bar-x" data-chat-reply-excerpt></span></span>
-                                <button type="button" class="chat-reply-bar-close" data-chat-reply-cancel>×</button>
-                            </div>
                             <div class="chat-mention-pop" data-chat-mention-pop hidden></div>
                             <form class="chat-composer" data-chat-composer>
-                                <textarea class="chat-input chat-input--area" data-chat-input maxlength="1000"
-                                          placeholder="Message…" autocomplete="off" rows="1"></textarea>
-                                <button class="chat-send-btn" type="submit">Send</button>
+                                <div class="chat-reply-bar" data-chat-reply-bar hidden>
+                                    <span class="chat-reply-bar-label">↩ Replying to <b data-chat-reply-who></b>
+                                        <span class="chat-reply-bar-x" data-chat-reply-excerpt></span></span>
+                                    <button type="button" class="chat-reply-bar-close" data-chat-reply-cancel>×</button>
+                                </div>
+                                <div class="chat-composer-panel">
+                                    <div class="chat-toolbar" data-chat-toolbar hidden>
+                                        <button type="button" class="chat-tbtn" data-chat-fmt="bold" title="Bold — **text**">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h6a4 4 0 0 1 0 8H7zM7 12h7a4 4 0 0 1 0 8H7z"/></svg></button>
+                                        <button type="button" class="chat-tbtn" data-chat-fmt="italic" title="Italic — *text*">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+                                        <button type="button" class="chat-tbtn" data-chat-fmt="strike" title="Strikethrough — ~~text~~">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M16 6c-.7-1.5-2.2-2-4-2-2.8 0-4.5 1.3-4.5 3.2 0 1.1.6 1.9 1.7 2.5"/><path d="M8.5 18c.8 1.3 2.1 2 3.7 2 2.9 0 4.8-1.4 4.8-3.5 0-.9-.4-1.7-1.1-2.3"/><line x1="4" y1="12" x2="20" y2="12"/></svg></button>
+                                        <span class="chat-tbtn-sep"></span>
+                                        <button type="button" class="chat-tbtn" data-chat-fmt="code" title="Code — `text`">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+                                        <button type="button" class="chat-tbtn" data-chat-fmt="codeblock" title="Code block — ```">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="9 9 7 12 9 15"/><polyline points="15 9 17 12 15 15"/></svg></button>
+                                        <button type="button" class="chat-tbtn" data-chat-fmt="quote" title="Quote — &gt; text">
+                                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.5 10c-.2 0-.4 0-.6.1.2-1.8 1.5-3.1 3.1-3.6l-.6-1.5C5.9 5.9 4 8.3 4 11.5 4 13.4 5.1 15 7 15s2.9-1.3 2.9-2.8c0-1.4-1-2.2-3.4-2.2zm9 0c-.2 0-.4 0-.6.1.2-1.8 1.5-3.1 3.1-3.6l-.6-1.5c-2.5.9-4.4 3.3-4.4 6.5 0 1.9 1.1 3.5 3 3.5s2.9-1.3 2.9-2.8c0-1.4-1-2.2-3.4-2.2z"/></svg></button>
+                                        <button type="button" class="chat-tbtn" data-chat-fmt="spoiler" title="Spoiler — ||text||">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
+                                        <span class="chat-toolbar-hint">**bold** · *italic* · `code` · ||spoiler||</span>
+                                        <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
+                                        <div class="chat-gif-pop" data-chat-gif-pop hidden>
+                                            <input class="chat-input chat-gif-search" data-chat-gif-search type="text"
+                                                   placeholder="Search GIPHY…" autocomplete="off">
+                                            <div class="chat-gif-grid" data-chat-gif-grid></div>
+                                        </div>
+                                    </div>
+                                    <div class="chat-composer-row">
+                                        <textarea class="chat-input chat-input--area chat-input--bare" data-chat-input maxlength="1000"
+                                                  placeholder="Message…" autocomplete="off" rows="1"></textarea>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-emoji-btn title="Emoji">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side chat-gif-btn" data-chat-gif-btn title="Send a GIF">GIF</button>
+                                        <button class="chat-send-fab" type="submit" title="Send">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                                    </div>
+                                </div>
                             </form>
                         </main>
                         <aside class="chat-users" data-chat-users></aside>

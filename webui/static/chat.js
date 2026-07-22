@@ -641,6 +641,10 @@
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
         var bar = q('[data-chat-toolbar]');
         if (bar) bar.hidden = !(state.view === 'room' && state.canSend);
+        // GIF = sending a CDN URL through the room pipeline — room-only. The
+        // emoji button stays everywhere (plain unicode is fine in PMs).
+        var gifBtn = q('[data-chat-gif-btn]');
+        if (gifBtn) gifBtn.hidden = !(state.view === 'room' && state.canSend);
         if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); }
     }
 

@@ -71706,6 +71706,7 @@ button.chat-hidden-note {
     display: block; width: 100%; border: none; background: transparent; cursor: pointer;
 }
 button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
+
 .chat-head-search-in {
     width: 190px; padding: 5px 10px; border-radius: 999px; font-size: 12.5px;
     border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.3); color: #fff;
@@ -72103,3 +72104,61 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     background: rgba(29,185,84,0.85) !important; color: #06130a !important;
     font-weight: 800;
 }
+
+/* ── composer redesign: one fused panel, ghost icon toolbar, circular send ── */
+.chat-composer {
+    display: block; position: relative;
+    padding: 10px 14px 14px; border-top: 1px solid rgba(255,255,255,0.06);
+}
+.chat-composer-panel {
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;
+    background: rgba(255,255,255,0.04);
+    transition: border-color .15s ease, background .15s ease;
+}
+.chat-composer-panel:focus-within {
+    border-color: rgba(29,185,84,0.45); background: rgba(255,255,255,0.055);
+}
+.chat-toolbar {
+    position: static; display: flex; gap: 2px; align-items: center;
+    padding: 6px 8px 5px; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.chat-tbtn {
+    width: 30px; height: 28px; padding: 0; border: none; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; color: rgba(255,255,255,0.45); cursor: pointer;
+    transition: background .1s ease, color .1s ease;
+}
+.chat-tbtn svg { width: 16px; height: 16px; }
+.chat-tbtn:hover { background: rgba(255,255,255,0.09); color: #fff; }
+.chat-tbtn-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.1); margin: 0 6px; flex: none; }
+.chat-toolbar-hint {
+    margin-left: auto; padding-right: 6px; font-size: 11px;
+    color: rgba(255,255,255,0.22); user-select: none; white-space: nowrap;
+}
+.chat-composer-row { display: flex; align-items: flex-end; gap: 4px; padding: 4px 8px 6px 6px; }
+.chat-input--bare, .chat-input--bare:focus {
+    border: none; background: transparent; box-shadow: none;
+}
+.chat-input--bare { padding: 9px 10px; }
+.chat-tbtn--side { width: 32px; height: 32px; margin-bottom: 2px; flex: none; }
+.chat-tbtn.chat-gif-btn {
+    width: auto; padding: 0 8px; font-size: 10.5px; font-weight: 900; letter-spacing: 0.5px;
+}
+.chat-send-fab {
+    flex: none; width: 34px; height: 34px; margin: 0 2px 2px 4px; border: none;
+    border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    background: #1db954; color: #06130a; cursor: pointer;
+    transition: transform .1s ease, filter .15s ease;
+}
+.chat-send-fab svg { width: 16px; height: 16px; margin: 1px 1px 0 -1px; }
+.chat-send-fab:hover { filter: brightness(1.1); transform: scale(1.06); }
+.chat-composer--locked .chat-send-fab,
+.chat-composer--locked .chat-tbtn--side { opacity: 0.35; cursor: not-allowed; }
+.chat-composer--locked .chat-composer-panel { opacity: 0.75; }
+/* pickers + reply bar anchor to the whole composer now (it's the positioned box) */
+.chat-emoji-pop { bottom: calc(100% + 6px); left: 10px; }
+.chat-gif-pop { bottom: calc(100% + 6px); left: 10px; right: 10px; }
+.chat-reply-bar { position: static; margin: 0 0 8px; }
+.chat-jump-pill { bottom: 128px; }
+/* the mention pop sits above the (taller) composer now */
+.chat-mention-pop { bottom: 132px; }
