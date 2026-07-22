@@ -18,6 +18,30 @@ def delete_origin_download(db, entry, config_manager) -> dict:
     raw_path = entry.get("file_path") or ""
     file_deleted = False
     error = None
+    sync_result = None
+    try:
+        from core.library2.maintenance_sync import annotate_finding_details
+
+        sync_details = annotate_finding_details(
+            db,
+            config_manager,
+            entity_type="track",
+            entity_id=None,
+            file_path=raw_path,
+            details={
+                "history_id": entry.get("id"),
+                "file_path": raw_path,
+                "origin": entry.get("origin"),
+                "origin_context": entry.get("origin_context"),
+            },
+        )
+    except Exception as exc:  # do not delete when V2 subjects cannot be captured
+        return {
+            "removed": 0,
+            "file_deleted": False,
+            "error": f"Library-v2 delete preparation failed: {exc}",
+            "library_v2": None,
+        }
     if raw_path:
         resolved = resolve_library_file_path(raw_path, config_manager=config_manager)
         if resolved and os.path.isfile(resolved):
@@ -33,8 +57,31 @@ def delete_origin_download(db, entry, config_manager) -> dict:
                 logger.debug("expired cleanup track-row delete failed: %s", exc)
     removed = 0
     if error is None:
+        try:
+            from core.library2.maintenance_sync import sync_repair_change
+
+            sync_result = sync_repair_change(
+                db,
+                config_manager,
+                job_id="expired_download_cleaner",
+                finding_type="expired_download",
+                action="deleted_file",
+                entity_type="track",
+                entity_id=None,
+                file_path=raw_path,
+                details=sync_details,
+                result={"library_v2_file_deleted": True},
+            )
+        except Exception as exc:  # preserve history row so the job can retry
+            error = f"Library-v2 delete synchronization failed: {exc}"
+    if error is None:
         removed = db.delete_library_history_rows([entry["id"]])
-    return {"removed": removed, "file_deleted": file_deleted, "error": error}
+    return {
+        "removed": removed,
+        "file_deleted": file_deleted,
+        "error": error,
+        "library_v2": sync_result,
+    }
 
 
 @register_job

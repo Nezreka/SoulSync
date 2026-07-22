@@ -9,6 +9,7 @@ from core.library.expired_cleanup import (
     is_expired,
     select_expired,
 )
+from core.repair_jobs.expired_download_cleaner import delete_origin_download
 
 NOW = datetime(2026, 6, 7, tzinfo=timezone.utc)
 
@@ -89,3 +90,79 @@ def test_select_expired_filters():
     ]
     out = select_expired(entries, watchlist_retention="off", playlist_retention="2mo")
     assert [e["id"] for e in out] == [1]
+
+
+def test_automatic_delete_syncs_v2_before_removing_retry_history(monkeypatch, tmp_path):
+    path = tmp_path / "expired.flac"
+    path.write_bytes(b"audio")
+    calls = []
+
+    class _DB:
+        def delete_track_by_file_path(self, value):
+            calls.append(("legacy", value))
+
+        def delete_library_history_rows(self, ids):
+            calls.append(("history", ids))
+            return 1
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.annotate_finding_details",
+        lambda *_args, **kwargs: {
+            **kwargs["details"],
+            "library_v2": {"track_ids": [7], "file_ids": [9]},
+        },
+    )
+
+    def sync(*_args, **kwargs):
+        calls.append(("sync", kwargs))
+        assert path.exists() is False
+        return {"reason": "synchronized", "files": 1}
+
+    monkeypatch.setattr("core.library2.maintenance_sync.sync_repair_change", sync)
+
+    outcome = delete_origin_download(
+        _DB(),
+        {
+            "id": 42,
+            "file_path": str(path),
+            "origin": "playlist",
+            "origin_context": "mix",
+        },
+        object(),
+    )
+
+    assert outcome["error"] is None
+    assert outcome["file_deleted"] is True
+    assert outcome["removed"] == 1
+    assert outcome["library_v2"]["reason"] == "synchronized"
+    assert [call[0] for call in calls] == ["legacy", "sync", "history"]
+
+
+def test_sync_failure_keeps_history_row_for_retry(monkeypatch, tmp_path):
+    path = tmp_path / "expired.flac"
+    path.write_bytes(b"audio")
+    history_calls = []
+
+    class _DB:
+        def delete_track_by_file_path(self, _value):
+            return 1
+
+        def delete_library_history_rows(self, ids):
+            history_calls.append(ids)
+            return 1
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.annotate_finding_details",
+        lambda *_args, **kwargs: kwargs["details"],
+    )
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.sync_repair_change",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("locked")),
+    )
+
+    outcome = delete_origin_download(
+        _DB(), {"id": 42, "file_path": str(path)}, object(),
+    )
+
+    assert "synchronization failed" in outcome["error"]
+    assert history_calls == []
