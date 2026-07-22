@@ -57,9 +57,23 @@ def test_other_api_errors_stay_failures():
     assert c.last_fetch_failed is True
 
 
-def test_no_folder_selected_error_stays_a_failure():
+def test_no_folder_selected_empty_error_is_verified_when_server_answers():
+    """Round 3 (5BILLION): with NO folder selected the old guard could never
+    verify-empty at all — the branch required a selected id, so an empty
+    server erred forever. A server-wide 'empty' answer plus a LIVE
+    getMusicFolders response is a verified empty server: there is no
+    misconfigured folder id to protect against when none is selected."""
     c = _client(folders=[{"id": 2, "name": "x"}], api_error="Library not found or empty")
-    c.music_folder_id = None                   # 'All Libraries' — error can't mean empty
+    c.music_folder_id = None
+    assert c.get_all_artists() == []
+    assert c.last_fetch_failed is False        # verified empty → stale removal may run
+
+
+def test_no_folder_selected_stays_failure_when_folders_fetch_dead():
+    """The second signal is required: if getMusicFolders does NOT answer with a
+    list, the server isn't demonstrably alive — never verify on one signal."""
+    c = _client(folders=None, api_error="Library not found or empty")
+    c.music_folder_id = None
     assert c.get_all_artists() == []
     assert c.last_fetch_failed is True
 
