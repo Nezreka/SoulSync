@@ -10,7 +10,10 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def mirrored_tracks_to_download_json(tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def mirrored_tracks_to_download_json(
+    tracks: List[Dict[str, Any]],
+    quality_profile_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """Convert mirrored playlist rows to the payload expected by the download master."""
     out: List[Dict[str, Any]] = []
     for t in tracks:
@@ -36,6 +39,8 @@ def mirrored_tracks_to_download_json(tracks: List[Dict[str, Any]]) -> List[Dict[
                 entry['track_number'] = md['track_number']
             if md.get('disc_number'):
                 entry['disc_number'] = md['disc_number']
+            if quality_profile_id is not None:
+                entry['quality_profile_id'] = quality_profile_id
             out.append(entry)
             continue
 
@@ -52,21 +57,27 @@ def mirrored_tracks_to_download_json(tracks: List[Dict[str, Any]]) -> List[Dict[
                 hint_artists = [{'name': a} for a in hint_artists]
             elif not hint_artists:
                 hint_artists = [{'name': t.get('artist_name', '')}]
-            out.append({
+            entry = {
                 'name': hint['name'],
                 'artists': hint_artists,
                 'album': album_obj,
                 'duration_ms': t.get('duration_ms', 0),
                 'id': hint['id'],
-            })
+            }
+            if quality_profile_id is not None:
+                entry['quality_profile_id'] = quality_profile_id
+            out.append(entry)
         elif t.get('source_track_id') and (t.get('track_name') or '').strip():
-            out.append({
+            entry = {
                 'name': t['track_name'].strip(),
                 'artists': [{'name': (t.get('artist_name') or '').strip() or 'Unknown Artist'}],
                 'album': album_obj,
                 'duration_ms': t.get('duration_ms', 0),
                 'id': t['source_track_id'],
-            })
+            }
+            if quality_profile_id is not None:
+                entry['quality_profile_id'] = quality_profile_id
+            out.append(entry)
     return out
 
 
@@ -90,7 +101,10 @@ def run_playlist_organize_download(
     source = (pl.get('source') or 'spotify').strip() or 'spotify'
 
     tracks = db.get_mirrored_playlist_tracks(int(mirrored_playlist_id))
-    tracks_json = mirrored_tracks_to_download_json(tracks)
+    tracks_json = mirrored_tracks_to_download_json(
+        tracks,
+        quality_profile_id=pl.get('quality_profile_id'),
+    )
     if not tracks_json:
         return {'status': 'skipped', 'reason': 'No processable tracks'}
 
@@ -120,6 +134,7 @@ def run_playlist_organize_download(
             'queue_index': 0,
             'analysis_total': len(tracks_json),
             'profile_id': profile_id,
+            'quality_profile_id': pl.get('quality_profile_id'),
             'analysis_processed': 0,
             'analysis_results': [],
             'force_download_all': False,

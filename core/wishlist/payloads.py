@@ -112,7 +112,7 @@ def ensure_wishlist_track_format(track_info):
     album.setdefault('album_type', 'album')
     album.setdefault('total_tracks', 0)
 
-    return {
+    normalized = {
         'id': track_info.get('id', f"webui_{hash(str(track_info))}"),
         'name': track_info.get('name', 'Unknown Track'),
         'artists': artists_list,
@@ -132,6 +132,9 @@ def ensure_wishlist_track_format(track_info):
         'popularity': track_info.get('popularity', 0),
         'source': track_info.get('source', 'webui_modal'),
     }
+    if track_info.get('quality_profile_id') is not None:
+        normalized['quality_profile_id'] = track_info.get('quality_profile_id')
+    return normalized
 
 
 def ensure_spotify_track_format(track_info):

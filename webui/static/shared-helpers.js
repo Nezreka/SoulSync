@@ -1101,6 +1101,37 @@ function normalizePlaylistOrganizeRef(playlistRef, source = 'spotify') {
     return ref;
 }
 
+let _playlistQualityProfilesPromise = null;
+
+async function fetchPlaylistQualityProfiles() {
+    if (!_playlistQualityProfilesPromise) {
+        _playlistQualityProfilesPromise = fetch('/api/quality-profile/custom')
+            .then(res => {
+                if (!res.ok) throw new Error(`Quality profiles: ${res.status}`);
+                return res.json();
+            })
+            .then(data => Array.isArray(data) ? data : (data.profiles || []))
+            .catch(err => {
+                _playlistQualityProfilesPromise = null;
+                throw err;
+            });
+    }
+    return _playlistQualityProfilesPromise;
+}
+
+function playlistQualityProfileSelectHtml(playlistRef, source = 'spotify', compact = false) {
+    const ref = escapeHtml(String(playlistRef || ''));
+    const src = escapeHtml(String(source || 'spotify'));
+    return `
+        <label class="playlist-quality-profile-control ${compact ? 'compact' : ''}" onclick="event.stopPropagation();">
+            <span>Quality Profile</span>
+            <select class="playlist-quality-profile-select" data-playlist-ref="${ref}" data-playlist-source="${src}"
+                onchange="onPlaylistQualityProfileChange(this)">
+                <option value="">Loading…</option>
+            </select>
+        </label>`;
+}
+
 function downloadMissingModalOrganizeCheckboxHtml(playlistId) {
     const safeId = String(playlistId).replace(/'/g, "\\'");
     return `
@@ -1108,7 +1139,8 @@ function downloadMissingModalOrganizeCheckboxHtml(playlistId) {
             <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync"
                 onchange="onPlaylistOrganizePreferenceChange('${safeId}', this.checked, playlistOrganizeSourceForRef('${safeId}'))">
             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
-        </label>`;
+        </label>
+        ${playlistQualityProfileSelectHtml(playlistId, playlistOrganizeSourceForRef(playlistId))}`;
 }
 
 function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
@@ -1120,6 +1152,7 @@ function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
                 onchange="onPlaylistOrganizePreferenceChange('${safeRef}', this.checked, '${safeSource}')">
             <span>Organize by playlist</span>
         </label>
+        ${playlistQualityProfileSelectHtml(playlistRef, source)}
     `;
 }
 
@@ -1137,7 +1170,7 @@ function isPlaylistOrganizeEnabled(playlistRef) {
     return downloadMissingCb ? downloadMissingCb.checked : false;
 }
 
-async function fetchMirroredOrganizePreference(playlistRef, source = null) {
+async function fetchMirroredPlaylistPreference(playlistRef, source = null) {
     try {
         const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
         const resolveRef = normalizePlaylistOrganizeRef(playlistRef, resolvedSource);
@@ -1145,10 +1178,72 @@ async function fetchMirroredOrganizePreference(playlistRef, source = null) {
             `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(resolvedSource)}`
         );
         const data = await res.json();
-        return !!(data.found && data.playlist?.organize_by_playlist);
+        return data.found ? data.playlist : null;
     } catch (err) {
-        console.debug('Could not load organize-by-playlist preference:', err);
-        return false;
+        console.debug('Could not load mirrored-playlist preference:', err);
+        return null;
+    }
+}
+
+async function fetchMirroredOrganizePreference(playlistRef, source = null) {
+    const playlist = await fetchMirroredPlaylistPreference(playlistRef, source);
+    return !!playlist?.organize_by_playlist;
+}
+
+async function hydratePlaylistQualityProfileSelects(
+    playlistRef,
+    source = null,
+    knownQualityProfileId = null,
+) {
+    try {
+        const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+        const [profiles, playlist] = await Promise.all([
+            fetchPlaylistQualityProfiles(),
+            knownQualityProfileId == null
+                ? fetchMirroredPlaylistPreference(playlistRef, resolvedSource)
+                : Promise.resolve(null),
+        ]);
+        const selectedId = knownQualityProfileId ?? playlist?.quality_profile_id;
+        document.querySelectorAll('.playlist-quality-profile-select').forEach(select => {
+            if (String(select.dataset.playlistRef) !== String(playlistRef)) return;
+            if (String(select.dataset.playlistSource) !== String(resolvedSource)) return;
+            select.innerHTML = profiles.map(profile =>
+                `<option value="${profile.id}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (Default)' : ''}</option>`
+            ).join('');
+            if (selectedId != null) select.value = String(selectedId);
+            select.disabled = !profiles.length;
+        });
+    } catch (err) {
+        console.debug('Could not load playlist Quality Profiles:', err);
+    }
+}
+
+async function onPlaylistQualityProfileChange(select) {
+    const playlistRef = select.dataset.playlistRef;
+    const source = select.dataset.playlistSource || 'spotify';
+    const qualityProfileId = parseInt(select.value, 10);
+    if (!Number.isInteger(qualityProfileId)) return;
+    select.disabled = true;
+    try {
+        const playlist = await fetchMirroredPlaylistPreference(playlistRef, source);
+        if (!playlist?.id) {
+            showToast('Mirror this playlist before assigning a Quality Profile', 'warning');
+            return;
+        }
+        const response = await fetch(`/api/mirrored-playlists/${playlist.id}/preferences`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quality_profile_id: qualityProfileId }),
+        });
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || 'Could not save Quality Profile');
+        await hydratePlaylistQualityProfileSelects(playlistRef, source, qualityProfileId);
+        showToast('Playlist Quality Profile saved', 'success');
+    } catch (err) {
+        showToast(`Could not save Quality Profile: ${err.message}`, 'error');
+        await hydratePlaylistQualityProfileSelects(playlistRef, source);
+    } finally {
+        select.disabled = false;
     }
 }
 
@@ -1184,6 +1279,7 @@ async function loadPlaylistOrganizePreferenceIntoModal(playlistRef, source = nul
     const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
     const enabled = await fetchMirroredOrganizePreference(playlistRef, resolvedSource);
     syncPlaylistOrganizeCheckboxes(playlistRef, enabled);
+    await hydratePlaylistQualityProfileSelects(playlistRef, resolvedSource);
 }
 
 async function onPlaylistOrganizePreferenceChange(playlistRef, enabled, source = 'spotify') {

@@ -36,6 +36,7 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         artist_id = body.get("artist_id")
         artist_name = body.get("artist_name")
+        quality_profile_id = body.get("quality_profile_id")
         profile_id = parse_profile_id(request)
 
         if not artist_id or not artist_name:
@@ -43,7 +44,26 @@ def register_routes(bp):
 
         try:
             db = get_database()
-            ok = db.add_artist_to_watchlist(artist_id, artist_name, profile_id=profile_id)
+            if quality_profile_id is not None:
+                try:
+                    quality_profile_id = int(quality_profile_id)
+                except (TypeError, ValueError):
+                    return api_error(
+                        "BAD_REQUEST",
+                        "quality_profile_id must be a positive integer.",
+                        400,
+                    )
+                if quality_profile_id <= 0 or not any(
+                    profile["id"] == quality_profile_id
+                    for profile in db.list_quality_profiles()
+                ):
+                    return api_error("BAD_REQUEST", "Unknown quality_profile_id.", 400)
+            ok = db.add_artist_to_watchlist(
+                artist_id,
+                artist_name,
+                profile_id=profile_id,
+                quality_profile_id=quality_profile_id,
+            )
             if ok:
                 return api_success({"message": f"Added {artist_name} to watchlist."}, status=201)
             return api_error("INTERNAL_ERROR", "Failed to add artist to watchlist.", 500)
@@ -81,29 +101,58 @@ def register_routes(bp):
             "include_live", "include_remixes", "include_acoustic", "include_compilations",
         }
         updates = {k: v for k, v in body.items() if k in allowed_fields}
+        quality_profile_id = body.get("quality_profile_id")
 
-        if not updates:
-            return api_error("BAD_REQUEST", f"No valid filter fields provided. Allowed: {', '.join(sorted(allowed_fields))}", 400)
+        if not updates and quality_profile_id is None:
+            return api_error(
+                "BAD_REQUEST",
+                "No valid fields provided. Allowed: "
+                f"{', '.join(sorted(allowed_fields | {'quality_profile_id'}))}",
+                400,
+            )
 
         try:
             db = get_database()
-            conn = db._get_connection()
-            cursor = conn.cursor()
+            if quality_profile_id is not None:
+                try:
+                    quality_profile_id = int(quality_profile_id)
+                except (TypeError, ValueError):
+                    return api_error(
+                        "BAD_REQUEST",
+                        "quality_profile_id must be a positive integer.",
+                        400,
+                    )
+                if quality_profile_id <= 0 or not any(
+                    profile["id"] == quality_profile_id
+                    for profile in db.list_quality_profiles()
+                ):
+                    return api_error("BAD_REQUEST", "Unknown quality_profile_id.", 400)
+                updates["quality_profile_id"] = quality_profile_id
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
 
-            # Build SET clause
-            set_parts = [f"{k} = ?" for k in updates]
-            values = [int(bool(v)) for v in updates.values()]
+                # Build SET clause
+                set_parts = [f"{k} = ?" for k in updates]
+                values = [
+                    int(v) if key == "quality_profile_id" else int(bool(v))
+                    for key, v in updates.items()
+                ]
 
-            cursor.execute(f"""
-                UPDATE watchlist_artists
-                SET {', '.join(set_parts)}, updated_at = CURRENT_TIMESTAMP
-                WHERE (spotify_artist_id = ? OR itunes_artist_id = ?) AND profile_id = ?
-            """, values + [artist_id, artist_id, profile_id])
+                provider_columns = (
+                    "spotify_artist_id", "itunes_artist_id", "deezer_artist_id",
+                    "discogs_artist_id", "musicbrainz_artist_id", "amazon_artist_id",
+                )
+                provider_clause = " OR ".join(f"{column} = ?" for column in provider_columns)
+                cursor.execute(f"""
+                    UPDATE watchlist_artists
+                    SET {', '.join(set_parts)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE ({provider_clause}) AND profile_id = ?
+                """, values + [artist_id] * len(provider_columns) + [profile_id])
 
-            if cursor.rowcount > 0:
-                conn.commit()
-                return api_success({"message": "Watchlist filters updated.", "updated": updates})
-            return api_error("NOT_FOUND", "Artist not found in watchlist.", 404)
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    return api_success({"message": "Watchlist settings updated.", "updated": updates})
+                return api_error("NOT_FOUND", "Artist not found in watchlist.", 404)
         except Exception as e:
             return api_error("WATCHLIST_ERROR", str(e), 500)
 

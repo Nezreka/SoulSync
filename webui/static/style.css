@@ -19962,6 +19962,34 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     flex-shrink: 0;
 }
 
+.playlist-quality-profile-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary, rgba(255, 255, 255, .72));
+    font-size: 12px;
+}
+
+.playlist-quality-profile-control select {
+    min-width: 170px;
+    padding: 7px 28px 7px 9px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 8px;
+    background: var(--surface-2, #202126);
+    color: var(--text-primary, #fff);
+}
+
+.playlist-quality-profile-control.compact {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+}
+
+.playlist-quality-profile-control.compact select {
+    min-width: 145px;
+    max-width: 190px;
+}
+
 .playlist-modal-btn {
     padding: 12px 24px;
     border-radius: 10px;

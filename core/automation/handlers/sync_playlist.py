@@ -137,6 +137,14 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             'skipped_tracks': str(skipped_count),
         }
 
+    # The mirror owns this assignment.  Carry it on every track so both the
+    # direct sync-time wishlist path and any later failed-download path use
+    # the same profile, independent of Library v2.
+    quality_profile_id = pl.get('quality_profile_id')
+    if quality_profile_id is not None:
+        for track in tracks_json:
+            track['quality_profile_id'] = quality_profile_id
+
     # Preflight: hash the track list and compare against last sync.
     # Skip if the exact same set of tracks was already synced and
     # everything matched (no-op preserves Plex / Jellyfin / Navidrome
@@ -226,7 +234,10 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     skip_wishlist_add = bool(pl.get('organize_by_playlist'))
     threading.Thread(
         target=deps.run_sync_task,
-        args=(sync_id, sync_name, tracks_json, auto_id, 1, pl.get('image_url', '')),
+        args=(
+            sync_id, sync_name, tracks_json, auto_id,
+            int(pl.get('profile_id') or 1), pl.get('image_url', ''),
+        ),
         kwargs={'skip_wishlist_add': skip_wishlist_add},
         daemon=True,
         name=f'auto-sync-{playlist_id}',

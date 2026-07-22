@@ -742,6 +742,41 @@ class TestSyncPlaylist:
         assert kwargs.get('sync_mode') is None      # not forced via kwarg
         assert len(args) == 6                        # no 7th positional sync_mode either
 
+    def test_sync_carries_persisted_quality_profile_on_every_track(self):
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(
+            playlists=[{
+                'id': 1, 'name': 'P', 'profile_id': 7,
+                'quality_profile_id': 23,
+            }],
+            playlist_tracks={1: [discovered_track]},
+        )
+        sync_calls: List[tuple] = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+        )
+
+        assert auto_sync_playlist({'playlist_id': '1'}, deps)['status'] == 'started'
+        for _ in range(50):
+            if sync_calls:
+                break
+            import time
+            time.sleep(0.01)
+
+        args, _kwargs = sync_calls[0]
+        assert args[2][0]['quality_profile_id'] == 23
+        assert args[4] == 7
+
     def test_organize_by_playlist_passes_skip_wishlist_add(self):
         discovered_track = {
             'extra_data': json.dumps({

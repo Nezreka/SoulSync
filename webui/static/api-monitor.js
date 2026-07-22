@@ -2771,7 +2771,7 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
             return;
         }
 
-        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, amazon_artist_id, musicbrainz_artist_id, watchlist_name } = data;
+        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, amazon_artist_id, musicbrainz_artist_id, watchlist_name, quality_profiles } = data;
 
         // Populate linked provider section (use DB watchlist_name for mismatch comparison)
         _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist, deezer_artist_id, discogs_artist_id, amazon_artist_id, musicbrainz_artist_id);
@@ -2835,6 +2835,15 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-include-compilations').checked = config.include_compilations || false;
         document.getElementById('config-include-instrumentals').checked = config.include_instrumentals || false;
         document.getElementById('config-lookback-days').value = config.lookback_days != null ? String(config.lookback_days) : '';
+        const qualityProfileSelect = document.getElementById('config-quality-profile');
+        if (qualityProfileSelect) {
+            qualityProfileSelect.innerHTML = (quality_profiles || []).map(profile =>
+                `<option value="${profile.id}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (Default)' : ''}</option>`
+            ).join('');
+            if (config.quality_profile_id != null) {
+                qualityProfileSelect.value = String(config.quality_profile_id);
+            }
+        }
 
         // Populate metadata source selector
         const sourceSelector = document.getElementById('config-metadata-source-selector');
@@ -3315,6 +3324,8 @@ async function saveWatchlistArtistConfig(artistId) {
         const includeInstrumentals = document.getElementById('config-include-instrumentals').checked;
         const autoDownloadEl = document.getElementById('config-auto-download');
         const autoDownload = autoDownloadEl ? autoDownloadEl.checked : true;
+        const qualityProfileEl = document.getElementById('config-quality-profile');
+        const qualityProfileId = qualityProfileEl?.value ? parseInt(qualityProfileEl.value, 10) : null;
         const lookbackDaysVal = document.getElementById('config-lookback-days').value;
         const lookbackDays = lookbackDaysVal !== '' ? parseInt(lookbackDaysVal) : null;
         const activeSourceBtn = document.querySelector('#config-metadata-source-selector .config-msrc-btn.active');
@@ -3347,6 +3358,7 @@ async function saveWatchlistArtistConfig(artistId) {
                 include_compilations: includeCompilations,
                 include_instrumentals: includeInstrumentals,
                 auto_download: autoDownload,
+                quality_profile_id: qualityProfileId,
                 lookback_days: lookbackDays,
                 preferred_metadata_source: preferredMetadataSource,
             })

@@ -111,6 +111,23 @@ def test_add_spotify_track_to_wishlist_accepts_track_data_alias():
     assert fake_db.add_calls[0]["profile_id"] == 2
 
 
+def test_failed_track_forwards_embedded_quality_profile():
+    fake_db = _FakeWishlistDatabase()
+    service = _build_service(fake_db)
+
+    assert service.add_failed_track_from_modal({
+        "quality_profile_id": 42,
+        "spotify_track": {
+            "id": "sp-42",
+            "name": "Profiled Song",
+            "artists": [{"name": "Artist"}],
+            "album": {"name": "Album"},
+        },
+    }) is True
+
+    assert fake_db.add_calls[0]["quality_profile_id"] == 42
+
+
 def test_get_wishlist_tracks_for_download_formats_modal_shape():
     fake_db = _FakeWishlistDatabase(
         tracks=[

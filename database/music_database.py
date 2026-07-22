@@ -106,6 +106,10 @@ class WatchlistArtist:
     # releases for this artist but does NOT auto-add them to the wishlist (so they
     # don't auto-download). Default True = current behaviour.
     auto_download: bool = True
+    # App-wide quality_profiles row used for every release queued by this
+    # artist.  Stored on the Watchlist itself so consumers do not need to know
+    # about Library v2 (or any other UI that created the watch).
+    quality_profile_id: Optional[int] = None
     profile_id: int = 1
 
 @dataclass
@@ -440,6 +444,7 @@ class MusicDatabase:
                     musicbrainz_artist_id TEXT,
                     amazon_artist_id TEXT,
                     artist_name TEXT NOT NULL,
+                    quality_profile_id INTEGER DEFAULT NULL,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_scan_timestamp TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -591,6 +596,7 @@ class MusicDatabase:
             # from an explicit column list, so any column added before them gets
             # dropped. Adding it here (after the last recreate) makes it stick.
             self._add_watchlist_auto_download_column(cursor)
+            self._add_watchlist_quality_profile_column(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -613,6 +619,7 @@ class MusicDatabase:
                     image_url TEXT,
                     track_count INTEGER DEFAULT 0,
                     profile_id INTEGER DEFAULT 1,
+                    quality_profile_id INTEGER DEFAULT NULL,
                     mirrored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(source, source_playlist_id, profile_id)
@@ -705,6 +712,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_explored_column(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
+            self._add_mirrored_playlist_quality_profile_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1104,6 +1112,11 @@ class MusicDatabase:
                 materialize_default_profile_and_backfill(self, conn)
             except Exception as qp_err:
                 logger.error(f"Quality-profile migration failed: {qp_err}")
+
+            # Watchlist artists and mirrored playlists predate named Quality
+            # Profiles.  Pin every legacy row to the profile that is global at
+            # migration time, matching the behavior it had before this feature.
+            self._backfill_native_quality_profile_assignments(cursor)
 
             self._ensure_core_media_schema_columns(cursor)
             self._normalize_genres_to_json(cursor)
@@ -1588,6 +1601,66 @@ class MusicDatabase:
                 logger.info("Added custom_name column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_quality_profile_column(self, cursor):
+        """Add the native per-playlist Quality Profile assignment.
+
+        The value is intentionally stored on ``mirrored_playlists`` rather
+        than in an automation config: manual syncs, Download Missing, and
+        every scheduled refresh must all resolve the same durable choice.
+        Existing NULL rows are backfilled after ``quality_profiles`` has been
+        ensured later in startup.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if columns and 'quality_profile_id' not in columns:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists "
+                    "ADD COLUMN quality_profile_id INTEGER DEFAULT NULL"
+                )
+                logger.info("Added quality_profile_id column to mirrored_playlists")
+        except Exception as e:
+            logger.error(f"Error adding mirrored playlist quality profile column: {e}")
+
+    def _backfill_native_quality_profile_assignments(self, cursor):
+        """Repair missing/dangling Watchlist and playlist assignments.
+
+        This runs only after ``quality_profiles`` has been seeded and the old
+        global settings have been materialized.  It is idempotent and also
+        self-heals references left by interrupted/older profile deletions.
+        """
+        try:
+            row = cursor.execute(
+                "SELECT id FROM quality_profiles WHERE is_default=1 "
+                "ORDER BY id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                row = cursor.execute(
+                    "SELECT id FROM quality_profiles ORDER BY id LIMIT 1"
+                ).fetchone()
+            if row is None:
+                return
+            default_id = int(row[0])
+            for table in ('watchlist_artists', 'mirrored_playlists'):
+                columns = {
+                    column[1]
+                    for column in cursor.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                if 'quality_profile_id' not in columns:
+                    continue
+                cursor.execute(
+                    f"""UPDATE {table}
+                           SET quality_profile_id=?
+                         WHERE quality_profile_id IS NULL
+                            OR NOT EXISTS (
+                                SELECT 1 FROM quality_profiles qp
+                                 WHERE qp.id={table}.quality_profile_id
+                            )""",
+                    (default_id,),
+                )
+        except Exception as e:
+            logger.error(f"Error backfilling native quality profile assignments: {e}")
 
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
@@ -2539,6 +2612,25 @@ class MusicDatabase:
                 logger.info("Added auto_download column to watchlist_artists table")
         except Exception as e:
             logger.error(f"Error adding auto_download column to watchlist_artists: {e}")
+
+    def _add_watchlist_quality_profile_column(self, cursor):
+        """Add the native per-artist Quality Profile assignment.
+
+        This migration deliberately runs after the profile-table recreation
+        migrations, which use explicit watchlist column lists.  Running it
+        earlier would let an older install silently drop the new column.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if columns and 'quality_profile_id' not in columns:
+                cursor.execute(
+                    "ALTER TABLE watchlist_artists "
+                    "ADD COLUMN quality_profile_id INTEGER DEFAULT NULL"
+                )
+                logger.info("Added quality_profile_id column to watchlist_artists")
+        except Exception as e:
+            logger.error(f"Error adding watchlist quality profile column: {e}")
 
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
@@ -9548,8 +9640,9 @@ class MusicDatabase:
           app without one.
 
         References to the deleted id are cleaned up in the same transaction
-        (wishlist rows AND library tracks are re-pointed to NULL = "use the
-        default", and a matching Auto-Import override is cleared) — and even
+        (wishlist rows and library tracks fall back dynamically, while durable
+        Watchlist/playlist assignments are re-pointed to the active default,
+        and a matching Auto-Import override is cleared) — and even
         a reference missed by that (or written concurrently) safely falls
         back to the default via `core/quality/selection.py::load_profile_by_id`.
 
@@ -9572,6 +9665,15 @@ class MusicDatabase:
                     "UPDATE quality_profiles SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (promote_id,),
                 )
+            default_row = conn.execute(
+                "SELECT id FROM quality_profiles WHERE is_default=1 "
+                "AND id<>? ORDER BY id LIMIT 1",
+                (profile_id,),
+            ).fetchone()
+            replacement_id = int(
+                default_row["id"] if default_row is not None
+                else next(r["id"] for r in rows if r["id"] != profile_id)
+            )
             conn.execute(
                 "UPDATE wishlist_tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
                 (profile_id,),
@@ -9580,6 +9682,17 @@ class MusicDatabase:
                 "UPDATE tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
                 (profile_id,),
             )
+            for table in ('watchlist_artists', 'mirrored_playlists'):
+                columns = {
+                    row[1]
+                    for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                if 'quality_profile_id' in columns:
+                    conn.execute(
+                        f"UPDATE {table} SET quality_profile_id=? "
+                        "WHERE quality_profile_id=?",
+                        (replacement_id, profile_id),
+                    )
             cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (profile_id,))
             conn.commit()
             if cur.rowcount == 0:
@@ -10089,9 +10202,18 @@ class MusicDatabase:
                 from config.settings import config_manager
                 allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
+                # Convert data once; existing rows and inserts use the same
+                # newest payload/context.
+                spotify_json = json.dumps(spotify_track_data)
+                source_json = json.dumps(source_info or {})
+                resolved_qp_id = self._resolve_quality_profile_id(
+                    cursor, quality_profile_id
+                )
+
                 if not allow_duplicates:
                     cursor.execute("""
-                        SELECT id, spotify_track_id, spotify_data FROM wishlist_tracks
+                        SELECT id, spotify_track_id, spotify_data, source_type
+                        FROM wishlist_tracks
                         WHERE profile_id = ?
                     """, (profile_id,))
 
@@ -10117,51 +10239,99 @@ class MusicDatabase:
                             # Case-insensitive comparison of track name and primary artist
                             if (existing_name.lower() == track_name.lower() and
                                 existing_artist.lower() == artist_name.lower()):
-                                # Enhance mode: upsert existing entry with enhance bypass context
-                                if source_type == 'enhance':
-                                    source_json = json.dumps(source_info or {})
-                                    cursor.execute("""
-                                        UPDATE wishlist_tracks
-                                        SET source_type = ?, source_info = ?, failure_reason = ?,
-                                            spotify_data = ?, spotify_track_id = ?
-                                        WHERE id = ?
-                                    """, (source_type, source_json, failure_reason,
-                                          json.dumps(spotify_track_data), track_id, existing['id']))
+                                # A caller carrying an explicit Quality Profile
+                                # is authoritative. Refresh the row rather than
+                                # dropping the request as a duplicate.
+                                if source_type == 'enhance' or quality_profile_id is not None:
+                                    updates = [
+                                        "spotify_data = ?", "failure_reason = ?",
+                                    ]
+                                    params: List[Any] = [spotify_json, failure_reason]
+                                    if source_info:
+                                        updates.append("source_info = ?")
+                                        params.append(source_json)
+                                    if quality_profile_id is not None and resolved_qp_id is not None:
+                                        updates.append("quality_profile_id = ?")
+                                        params.append(resolved_qp_id)
+                                    if source_type == 'manual' or existing['source_type'] != 'manual':
+                                        updates.append("source_type = ?")
+                                        params.append(source_type)
+                                    params.append(existing['id'])
+                                    cursor.execute(
+                                        f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id=?",
+                                        params,
+                                    )
                                     conn.commit()
-                                    logger.info(f"Upserted wishlist entry to enhance mode: '{track_name}' by {artist_name}")
-                                    return True
+                                    logger.info(
+                                        "Refreshed existing wishlist entry: '%s' by %s",
+                                        track_name,
+                                        artist_name,
+                                    )
+                                    return False
                                 logger.info(f"Skipping duplicate wishlist entry: '{track_name}' by {artist_name} (already exists as ID: {existing['id']})")
                                 return False  # Already exists, don't add duplicate
                         except Exception as parse_error:
                             logger.warning(f"Error parsing existing wishlist track data: {parse_error}")
                             continue
 
-                # Convert data to JSON strings
-                spotify_json = json.dumps(spotify_track_data)
-                source_json = json.dumps(source_info or {})
-
-                # When allow_duplicates is on, make the key unique per album so the same
-                # track from different albums can coexist in the wishlist
+                # When duplicates are allowed, retain the established key
+                # convention: the first occurrence uses the bare track id and
+                # another album uses track::album.  Repeated authoritative
+                # intent for the same occurrence updates that row in place.
                 insert_track_id = track_id
+                existing = None
                 if allow_duplicates:
                     album_obj = spotify_track_data.get('album', {})
                     album_id = album_obj.get('id', '') if isinstance(album_obj, dict) else ''
-                    if album_id:
-                        # Check if this exact track+album combo already exists
-                        composite_id = f"{track_id}::{album_id}"
-                        cursor.execute("SELECT id FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
-                                       (composite_id, profile_id))
-                        if cursor.fetchone():
-                            logger.debug(f"Skipping wishlist entry — same track+album already in wishlist: '{track_name}' on '{album_obj.get('name', '')}'")
-                            return False
-                        # Check if base track_id exists (from a different album)
-                        cursor.execute("SELECT id FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
-                                       (track_id, profile_id))
-                        if cursor.fetchone():
-                            # Same track exists from different album — use composite ID
-                            insert_track_id = composite_id
+                    base_row = cursor.execute(
+                        "SELECT id, source_type, spotify_data FROM wishlist_tracks "
+                        "WHERE spotify_track_id=? AND profile_id=?",
+                        (track_id, profile_id),
+                    ).fetchone()
+                    if base_row is not None and album_id:
+                        try:
+                            base_album_id = (
+                                (json.loads(base_row['spotify_data']).get('album') or {})
+                                .get('id', '')
+                            )
+                        except Exception:
+                            base_album_id = ''
+                        if base_album_id == album_id:
+                            existing = base_row
+                        else:
+                            insert_track_id = f"{track_id}::{album_id}"
+                    elif base_row is not None:
+                        existing = base_row
+                    if existing is None and insert_track_id != track_id:
+                        existing = cursor.execute(
+                            "SELECT id, source_type FROM wishlist_tracks "
+                            "WHERE spotify_track_id=? AND profile_id=?",
+                            (insert_track_id, profile_id),
+                        ).fetchone()
 
-                resolved_qp_id = self._resolve_quality_profile_id(cursor, quality_profile_id)
+                if existing is not None:
+                    updates = ["spotify_data = ?"]
+                    params: List[Any] = [spotify_json]
+                    if quality_profile_id is not None and resolved_qp_id is not None:
+                        updates.append("quality_profile_id = ?")
+                        params.append(resolved_qp_id)
+                    if source_info:
+                        updates.append("source_info = ?")
+                        params.append(source_json)
+                    if source_type == 'manual' or existing['source_type'] != 'manual':
+                        updates.append("source_type = ?")
+                        params.append(source_type)
+                    params.append(existing['id'])
+                    cursor.execute(
+                        f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id=?",
+                        params,
+                    )
+                    conn.commit()
+                    logger.debug(
+                        "Wishlist entry already present; refreshed context for '%s'",
+                        track_name,
+                    )
+                    return False
 
                 # Insert the track
                 cursor.execute("""
@@ -10696,20 +10866,34 @@ class MusicDatabase:
             return 0
 
     # Watchlist operations
-    def add_artist_to_watchlist(self, artist_id: str, artist_name: str, profile_id: int = 1, source: str = None) -> bool:
+    def add_artist_to_watchlist(
+        self,
+        artist_id: str,
+        artist_name: str,
+        profile_id: int = 1,
+        source: str = None,
+        quality_profile_id: Optional[int] = None,
+    ) -> bool:
         """Add an artist to the watchlist for monitoring new releases.
 
         Automatically detects if artist_id is a Spotify ID (alphanumeric) or iTunes/Deezer ID (numeric).
-        If the artist already exists (by name match), updates the existing row with the new source ID.
+        If the artist already exists (by name match), updates the existing row
+        with the new source ID.  An explicitly supplied Quality Profile always
+        overwrites the existing assignment; omitted values preserve an existing
+        assignment and resolve to the current global profile for a new row.
         """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                resolved_quality_profile_id = self._resolve_quality_profile_id(
+                    cursor, quality_profile_id
+                )
 
                 # Check if artist already exists by name (case-insensitive) for this profile
                 cursor.execute("""
                     SELECT id, spotify_artist_id, itunes_artist_id, deezer_artist_id,
-                           discogs_artist_id, musicbrainz_artist_id
+                           discogs_artist_id, musicbrainz_artist_id,
+                           quality_profile_id
                     FROM watchlist_artists
                     WHERE LOWER(artist_name) = LOWER(?) AND profile_id = ?
                     LIMIT 1
@@ -10721,7 +10905,9 @@ class MusicDatabase:
                     source = 'itunes' if artist_id.isdigit() else 'spotify'
 
                 if existing:
-                    # Artist already on watchlist — update with new source ID if missing
+                    # Artist already on watchlist — update a missing provider ID
+                    # and/or the explicitly requested Quality Profile in one
+                    # atomic write.  This is the contract Library v2 can call.
                     col_map = {
                         'spotify': 'spotify_artist_id',
                         'itunes': 'itunes_artist_id',
@@ -10730,14 +10916,32 @@ class MusicDatabase:
                         'musicbrainz': 'musicbrainz_artist_id',
                     }
                     col = col_map.get(source)
+                    updates = []
+                    params = []
                     if col and not existing[col]:
-                        cursor.execute(f"""
-                            UPDATE watchlist_artists
-                            SET {col} = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                        """, (artist_id, existing['id']))
+                        updates.append(f"{col} = ?")
+                        params.append(artist_id)
+                    if quality_profile_id is not None:
+                        updates.append("quality_profile_id = ?")
+                        params.append(resolved_quality_profile_id)
+                    elif existing['quality_profile_id'] is None:
+                        updates.append("quality_profile_id = ?")
+                        params.append(resolved_quality_profile_id)
+                    if updates:
+                        params.append(existing['id'])
+                        cursor.execute(
+                            f"""UPDATE watchlist_artists
+                                   SET {', '.join(updates)},
+                                       updated_at = CURRENT_TIMESTAMP
+                                 WHERE id = ?""",
+                            params,
+                        )
                         conn.commit()
-                        logger.info(f"Updated existing watchlist artist '{artist_name}' with {source} ID: {artist_id}")
+                        logger.info(
+                            "Updated existing watchlist artist '%s' (%s)",
+                            artist_name,
+                            source,
+                        )
                     else:
                         logger.info(f"Artist '{artist_name}' already on watchlist (profile: {profile_id})")
                     return True
@@ -10746,37 +10950,42 @@ class MusicDatabase:
                 if source == 'deezer':
                     cursor.execute("""
                         INSERT INTO watchlist_artists
-                        (deezer_artist_id, artist_name, date_added, updated_at, profile_id)
-                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, profile_id))
+                        (deezer_artist_id, artist_name, quality_profile_id,
+                         date_added, updated_at, profile_id)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
                     logger.info(f"Added artist '{artist_name}' to watchlist (Deezer ID: {artist_id}, profile: {profile_id})")
                 elif source == 'itunes':
                     cursor.execute("""
                         INSERT INTO watchlist_artists
-                        (itunes_artist_id, artist_name, date_added, updated_at, profile_id)
-                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, profile_id))
+                        (itunes_artist_id, artist_name, quality_profile_id,
+                         date_added, updated_at, profile_id)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
                     logger.info(f"Added artist '{artist_name}' to watchlist (iTunes ID: {artist_id}, profile: {profile_id})")
                 elif source == 'discogs':
                     cursor.execute("""
                         INSERT INTO watchlist_artists
-                        (discogs_artist_id, artist_name, date_added, updated_at, profile_id)
-                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, profile_id))
+                        (discogs_artist_id, artist_name, quality_profile_id,
+                         date_added, updated_at, profile_id)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
                     logger.info(f"Added artist '{artist_name}' to watchlist (Discogs ID: {artist_id}, profile: {profile_id})")
                 elif source == 'musicbrainz':
                     cursor.execute("""
                         INSERT INTO watchlist_artists
-                        (musicbrainz_artist_id, artist_name, date_added, updated_at, profile_id)
-                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, profile_id))
+                        (musicbrainz_artist_id, artist_name, quality_profile_id,
+                         date_added, updated_at, profile_id)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
                     logger.info(f"Added artist '{artist_name}' to watchlist (MusicBrainz ID: {artist_id}, profile: {profile_id})")
                 else:
                     cursor.execute("""
                         INSERT INTO watchlist_artists
-                        (spotify_artist_id, artist_name, date_added, updated_at, profile_id)
-                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, profile_id))
+                        (spotify_artist_id, artist_name, quality_profile_id,
+                         date_added, updated_at, profile_id)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
                     logger.info(f"Added artist '{artist_name}' to watchlist (Spotify ID: {artist_id}, profile: {profile_id})")
 
                 conn.commit()
@@ -10784,6 +10993,44 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding artist '{artist_name}' to watchlist: {e}")
+            return False
+
+    def set_watchlist_artist_quality_profile(
+        self,
+        artist_id: str,
+        quality_profile_id: int,
+        *,
+        profile_id: int = 1,
+    ) -> bool:
+        """Persist the Quality Profile used for this artist's future releases."""
+        try:
+            with self._get_connection() as conn:
+                if conn.execute(
+                    "SELECT 1 FROM quality_profiles WHERE id=?",
+                    (int(quality_profile_id),),
+                ).fetchone() is None:
+                    return False
+                cursor = conn.execute(
+                    """UPDATE watchlist_artists
+                          SET quality_profile_id=?, updated_at=CURRENT_TIMESTAMP
+                        WHERE profile_id=? AND (
+                              spotify_artist_id=? OR itunes_artist_id=?
+                           OR deezer_artist_id=? OR discogs_artist_id=?
+                           OR musicbrainz_artist_id=? OR amazon_artist_id=?)""",
+                    (
+                        int(quality_profile_id), int(profile_id),
+                        artist_id, artist_id, artist_id,
+                        artist_id, artist_id, artist_id,
+                    ),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(
+                "Error updating Quality Profile for watchlist artist %s: %s",
+                artist_id,
+                e,
+            )
             return False
 
     def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
@@ -10952,7 +11199,7 @@ class MusicDatabase:
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
-                                   'auto_download']
+                                   'auto_download', 'quality_profile_id']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -10991,6 +11238,12 @@ class MusicDatabase:
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
+                    quality_profile_id = (
+                        int(row['quality_profile_id'])
+                        if 'quality_profile_id' in existing_columns
+                        and row['quality_profile_id'] is not None
+                        else None
+                    )
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
@@ -11016,6 +11269,7 @@ class MusicDatabase:
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,
+                        quality_profile_id=quality_profile_id,
                         profile_id=profile_id
                     ))
 
@@ -15815,8 +16069,15 @@ class MusicDatabase:
     # ── Mirrored Playlists ───────────────────────────────────────────────
 
     def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
-                        tracks: List[Dict], profile_id: int = 1, **kwargs) -> Optional[int]:
-        """Upsert a mirrored playlist and replace all its tracks."""
+                        tracks: List[Dict], profile_id: int = 1,
+                        quality_profile_id: Optional[int] = None,
+                        **kwargs) -> Optional[int]:
+        """Upsert a mirrored playlist and replace all its tracks.
+
+        A new mirror inherits the current global Quality Profile. Refreshing
+        an existing mirror preserves its durable assignment unless the caller
+        explicitly supplies a new one.
+        """
         from core.playlists.source_refs import coalesce_mirror_track, stable_source_track_id
 
         # #990: accept mirror-shaped AND Spotify-shaped tracks (the GET playlist
@@ -15846,22 +16107,33 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                resolved_quality_profile_id = self._resolve_quality_profile_id(
+                    cursor, quality_profile_id
+                )
                 # Upsert the playlist row
                 cursor.execute("""
                     INSERT INTO mirrored_playlists
-                        (source, source_playlist_id, name, description, owner, image_url, track_count, profile_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        (source, source_playlist_id, name, description, owner,
+                         image_url, track_count, profile_id, quality_profile_id,
+                         updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
                         owner = excluded.owner,
                         image_url = excluded.image_url,
                         track_count = excluded.track_count,
+                        quality_profile_id = CASE
+                            WHEN ? THEN excluded.quality_profile_id
+                            ELSE mirrored_playlists.quality_profile_id
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     source, source_playlist_id, name,
                     kwargs.get('description'), kwargs.get('owner'),
-                    kwargs.get('image_url'), len(tracks), profile_id
+                    kwargs.get('image_url'), len(tracks), profile_id,
+                    resolved_quality_profile_id,
+                    1 if quality_profile_id is not None else 0,
                 ))
                 playlist_id = cursor.execute(
                     "SELECT id FROM mirrored_playlists WHERE source=? AND source_playlist_id=? AND profile_id=?",
@@ -16020,6 +16292,70 @@ class MusicDatabase:
             return self.get_mirrored_playlist(pk)
         return None
 
+    def resolve_mirrored_playlist_assignment(
+        self,
+        playlist_ref: Any,
+        playlist_name: Optional[str] = None,
+        profile_id: int = 1,
+    ) -> Optional[Dict]:
+        """Resolve the durable mirror behind a provider-agnostic sync request.
+
+        Legacy sync endpoints do not consistently send the provider name.  A
+        source id is therefore matched across all providers first, followed by
+        an explicit synthetic mirror id and finally an unambiguous name.  This
+        lets Spotify, iTunes, Deezer, file imports and future providers share
+        the same persisted Quality Profile without Library v2 involvement.
+        """
+        ref = str(playlist_ref or '').strip()
+        try:
+            with self._get_connection() as conn:
+                rows = []
+                if ref:
+                    rows = conn.execute(
+                        "SELECT * FROM mirrored_playlists "
+                        "WHERE source_playlist_id=? AND profile_id=? "
+                        "ORDER BY updated_at DESC",
+                        (ref, int(profile_id)),
+                    ).fetchall()
+                if len(rows) == 1:
+                    return self._normalize_mirrored_playlist_row(rows[0])
+                if len(rows) > 1 and playlist_name:
+                    wanted = str(playlist_name).strip().casefold()
+                    named = [
+                        row for row in rows
+                        if str(row['name'] or '').strip().casefold() == wanted
+                        or str(row['custom_name'] or '').strip().casefold() == wanted
+                    ]
+                    if len(named) == 1:
+                        return self._normalize_mirrored_playlist_row(named[0])
+
+                from core.playlists.source_refs import extract_mirrored_pk
+                pk = extract_mirrored_pk(ref)
+                if pk is not None and (
+                    ref.startswith(('auto_mirror_', 'youtube_mirrored_', 'mirrored_'))
+                    or not rows
+                ):
+                    row = conn.execute(
+                        "SELECT * FROM mirrored_playlists WHERE id=? AND profile_id=?",
+                        (pk, int(profile_id)),
+                    ).fetchone()
+                    if row:
+                        return self._normalize_mirrored_playlist_row(row)
+
+                if playlist_name:
+                    wanted = str(playlist_name).strip()
+                    named = conn.execute(
+                        "SELECT * FROM mirrored_playlists "
+                        "WHERE profile_id=? AND (name=? OR custom_name=?) "
+                        "ORDER BY updated_at DESC",
+                        (int(profile_id), wanted, wanted),
+                    ).fetchall()
+                    if len(named) == 1:
+                        return self._normalize_mirrored_playlist_row(named[0])
+        except Exception as e:
+            logger.debug("Could not resolve mirrored playlist assignment: %s", e)
+        return None
+
     def set_mirrored_playlist_organize_by_playlist(
         self,
         playlist_id: int,
@@ -16041,6 +16377,39 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating organize_by_playlist for playlist {playlist_id}: {e}")
+            return False
+
+    def set_mirrored_playlist_quality_profile(
+        self,
+        playlist_id: int,
+        quality_profile_id: int,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Persist the Quality Profile shared by manual and automated syncs."""
+        try:
+            with self._get_connection() as conn:
+                if conn.execute(
+                    "SELECT 1 FROM quality_profiles WHERE id=?",
+                    (int(quality_profile_id),),
+                ).fetchone() is None:
+                    return False
+                sql = """UPDATE mirrored_playlists
+                            SET quality_profile_id=?, updated_at=CURRENT_TIMESTAMP
+                          WHERE id=?"""
+                params: List[Any] = [int(quality_profile_id), int(playlist_id)]
+                if profile_id is not None:
+                    sql += " AND profile_id=?"
+                    params.append(int(profile_id))
+                cursor = conn.execute(sql, params)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(
+                "Error updating Quality Profile for mirrored playlist %s: %s",
+                playlist_id,
+                e,
+            )
             return False
 
     def set_mirrored_playlist_custom_name(self, playlist_id: int, custom_name) -> bool:

@@ -19924,7 +19924,54 @@ def _build_master_deps():
 
 
 
+def _tracks_with_mirrored_quality_profile(
+    playlist_ref,
+    playlist_name,
+    tracks_json,
+    profile_id=1,
+):
+    """Apply the native mirror assignment to a provider-agnostic track list.
+
+    Older source-specific endpoints do not all carry ``source`` through to the
+    worker.  The database resolver handles that compatibility boundary; from
+    here onward the chosen profile travels with each track and therefore also
+    survives failed-download-to-Wishlist processing.
+    """
+    if not isinstance(tracks_json, list):
+        return tracks_json, None
+    try:
+        database = get_database()
+        mirror = database.resolve_mirrored_playlist_assignment(
+            playlist_ref,
+            playlist_name,
+            profile_id=int(profile_id or 1),
+        )
+        quality_profile_id = mirror.get('quality_profile_id') if mirror else None
+        if quality_profile_id is None:
+            return tracks_json, None
+        enriched = []
+        for track in tracks_json:
+            if isinstance(track, dict):
+                track = dict(track)
+                # The persisted playlist assignment is authoritative.
+                track['quality_profile_id'] = quality_profile_id
+            enriched.append(track)
+        return enriched, quality_profile_id
+    except Exception as exc:
+        logger.debug("Could not apply mirrored playlist Quality Profile: %s", exc)
+        return tracks_json, None
+
+
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
+    batch = download_batches.get(batch_id, {})
+    tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
+        batch.get('playlist_id') or playlist_id,
+        batch.get('playlist_name'),
+        tracks_json,
+        profile_id=batch.get('profile_id', 1),
+    )
+    if quality_profile_id is not None:
+        batch['quality_profile_id'] = quality_profile_id
     return _downloads_master.run_full_missing_tracks_process(
         batch_id, playlist_id, tracks_json, _build_master_deps(), serialize=serialize
     )
@@ -27318,6 +27365,12 @@ def _run_sync_task(
     if sync_mode is None:
         from core.sync.playlist_edit import normalize_sync_mode
         sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
+    tracks_json, _quality_profile_id = _tracks_with_mirrored_quality_profile(
+        playlist_id,
+        playlist_name,
+        tracks_json,
+        profile_id=profile_id,
+    )
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
@@ -29577,11 +29630,19 @@ def add_to_watchlist():
         data = request.get_json()
         artist_id = data.get('artist_id')
         artist_name = data.get('artist_name')
+        quality_profile_id = data.get('quality_profile_id')
 
         if not artist_id or not artist_name:
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
+        if quality_profile_id is not None:
+            try:
+                quality_profile_id = int(quality_profile_id)
+            except (TypeError, ValueError):
+                return jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400
+            if not any(p['id'] == quality_profile_id for p in database.list_quality_profiles()):
+                return jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400
         # Callers that KNOW the id's source (e.g. the Discovery Web, whose candidates carry
         # [source, id] pairs) can pass it explicitly — numeric Deezer/iTunes ids are ambiguous and
         # the detection below can otherwise mistake them for a library DB row id.
@@ -29635,7 +29696,13 @@ def add_to_watchlist():
         fallback_source = _get_metadata_fallback_source()   # always defined — image block below reads it
         if not source:
             source = fallback_source if is_numeric_id else 'spotify'
-        success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
+        success = database.add_artist_to_watchlist(
+            artist_id,
+            artist_name,
+            profile_id=get_current_profile_id(),
+            source=source,
+            quality_profile_id=quality_profile_id,
+        )
         if success:
             database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
 
@@ -29797,7 +29864,21 @@ def add_batch_to_watchlist():
             is_numeric = artist_id.isdigit()
             fb_source = _get_metadata_fallback_source()
             src = fb_source if is_numeric else 'spotify'
-            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=src)
+            quality_profile_id = artist.get('quality_profile_id')
+            if quality_profile_id is not None:
+                try:
+                    quality_profile_id = int(quality_profile_id)
+                except (TypeError, ValueError):
+                    continue
+                if not any(p['id'] == quality_profile_id for p in database.list_quality_profiles()):
+                    continue
+            success = database.add_artist_to_watchlist(
+                artist_id,
+                artist_name,
+                profile_id=get_current_profile_id(),
+                source=src,
+                quality_profile_id=quality_profile_id,
+            )
             if success:
                 added += 1
                 # Cache artist image
@@ -30420,6 +30501,7 @@ def watchlist_artist_config(artist_id):
         from database.music_database import get_database
 
         database = get_database()
+        active_profile_id = get_current_profile_id()
 
         if request.method == 'GET':
             database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
@@ -30432,11 +30514,14 @@ def watchlist_artist_config(artist_id):
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
                        lookback_days, discogs_artist_id, preferred_metadata_source,
-                       amazon_artist_id, musicbrainz_artist_id, auto_download
+                       amazon_artist_id, musicbrainz_artist_id, auto_download,
+                       quality_profile_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                WHERE profile_id = ? AND (
+                      spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
                       OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
+                )
+            """, (active_profile_id, artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
@@ -30563,6 +30648,7 @@ def watchlist_artist_config(artist_id):
                 'preferred_metadata_source': result[17] if len(result) > 17 else None,
                 # follow-only toggle (default True/auto-download when column absent)
                 'auto_download': bool(result[20]) if len(result) > 20 and result[20] is not None else True,
+                'quality_profile_id': int(result[21]) if len(result) > 21 and result[21] is not None else None,
             }
 
             from core.metadata.registry import get_primary_source
@@ -30579,6 +30665,7 @@ def watchlist_artist_config(artist_id):
                 "musicbrainz_artist_id": musicbrainz_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
+                "quality_profiles": database.list_quality_profiles(),
             })
 
         else:  # POST
@@ -30612,6 +30699,14 @@ def watchlist_artist_config(artist_id):
             # Follow-only toggle: default True so an older client that omits the
             # field keeps auto-downloading.
             auto_download = bool(data.get('auto_download', True))
+            quality_profile_id = data.get('quality_profile_id')
+            if quality_profile_id is not None:
+                try:
+                    quality_profile_id = int(quality_profile_id)
+                except (TypeError, ValueError):
+                    return jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400
+                if not any(p['id'] == quality_profile_id for p in database.list_quality_profiles()):
+                    return jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400
 
             # Validate at least one release type is selected
             if not (include_albums or include_eps or include_singles):
@@ -30623,12 +30718,16 @@ def watchlist_artist_config(artist_id):
 
             # Check if lookback_days changed — if so, clear last_scan_timestamp to force rescan
             cursor.execute("""
-                SELECT lookback_days FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                      OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+                SELECT lookback_days, quality_profile_id FROM watchlist_artists
+                WHERE profile_id = ? AND (
+                      spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                      OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
+                )
+            """, (active_profile_id, artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             old_row = cursor.fetchone()
             old_lookback = old_row[0] if old_row else None
+            if quality_profile_id is None and old_row:
+                quality_profile_id = old_row[1]
             lookback_changed = old_lookback != lookback_days
 
             cursor.execute("""
@@ -30636,15 +30735,18 @@ def watchlist_artist_config(artist_id):
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?, lookback_days = ?, preferred_metadata_source = ?,
-                    auto_download = ?,
+                    auto_download = ?, quality_profile_id = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                      OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
+                WHERE profile_id = ? AND (
+                      spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                      OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
+                )
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  int(include_instrumentals), lookback_days, preferred_metadata_source, int(auto_download), lookback_changed,
-                  artist_id, artist_id, artist_id, artist_id, artist_id))
+                  int(include_instrumentals), lookback_days, preferred_metadata_source, int(auto_download),
+                  quality_profile_id, lookback_changed, active_profile_id,
+                  artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:
@@ -30668,6 +30770,7 @@ def watchlist_artist_config(artist_id):
                     'include_compilations': include_compilations,
                     'include_instrumentals': include_instrumentals,
                     'auto_download': auto_download,
+                    'quality_profile_id': quality_profile_id,
                 }
             })
 
@@ -36782,6 +36885,14 @@ def mirror_playlist_endpoint():
 
         database = get_database()
         profile_id = get_current_profile_id()
+        quality_profile_id = data.get('quality_profile_id')
+        if quality_profile_id is not None:
+            try:
+                quality_profile_id = int(quality_profile_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid quality_profile_id"}), 400
+            if not any(p['id'] == quality_profile_id for p in database.list_quality_profiles()):
+                return jsonify({"error": "Unknown quality_profile_id"}), 400
 
         playlist_id = database.mirror_playlist(
             source=source,
@@ -36789,6 +36900,7 @@ def mirror_playlist_endpoint():
             name=name,
             tracks=tracks,
             profile_id=profile_id,
+            quality_profile_id=quality_profile_id,
             description=data.get('description'),
             owner=data.get('owner'),
             image_url=data.get('image_url')
@@ -36962,18 +37074,33 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if 'organize_by_playlist' not in data:
-            return jsonify({"error": "organize_by_playlist is required"}), 400
+        if not ({'organize_by_playlist', 'quality_profile_id'} & set(data)):
+            return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
-        enabled = bool(data.get('organize_by_playlist'))
-        ok = database.set_mirrored_playlist_organize_by_playlist(playlist_id, enabled)
-        if not ok:
-            return jsonify({"error": "Failed to update preferences"}), 500
+        if int(playlist.get('profile_id') or 1) != int(get_current_profile_id()):
+            return jsonify({"error": "Playlist not found"}), 404
+
+        if 'organize_by_playlist' in data:
+            enabled = bool(data.get('organize_by_playlist'))
+            if not database.set_mirrored_playlist_organize_by_playlist(playlist_id, enabled):
+                return jsonify({"error": "Failed to update preferences"}), 500
+
+        if 'quality_profile_id' in data:
+            try:
+                quality_profile_id = int(data.get('quality_profile_id'))
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid quality_profile_id"}), 400
+            if not database.set_mirrored_playlist_quality_profile(
+                playlist_id,
+                quality_profile_id,
+                profile_id=get_current_profile_id(),
+            ):
+                return jsonify({"error": "Unknown quality_profile_id"}), 400
 
         updated = database.get_mirrored_playlist(playlist_id) or {}
         return jsonify({"success": True, "playlist": updated})

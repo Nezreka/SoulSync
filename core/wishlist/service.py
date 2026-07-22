@@ -34,6 +34,7 @@ class WishlistService:
         source_type: str = "unknown",
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
+        quality_profile_id: Optional[int] = None,
     ) -> bool:
         """
         Add a failed track from a download modal to the wishlist.
@@ -54,7 +55,12 @@ class WishlistService:
             failure_reason = track_info.get("failure_reason", "Download failed")
 
             # Create source info
-            source_info = source_context or {}
+            source_info = dict(source_context or {})
+            if quality_profile_id is None:
+                quality_profile_id = (
+                    track_info.get("quality_profile_id")
+                    or track_data.get("quality_profile_id")
+                )
 
             # Clean up candidates to avoid TrackResult serialization issues
             candidates = track_info.get("candidates", [])
@@ -86,6 +92,7 @@ class WishlistService:
                 source_type=source_type,
                 source_info=source_info,
                 profile_id=profile_id,
+                quality_profile_id=quality_profile_id,
             )
 
         except Exception as e:
@@ -101,6 +108,7 @@ class WishlistService:
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
         user_initiated: bool = False,
+        quality_profile_id: Optional[int] = None,
     ) -> bool:
         """
         Directly add a track to the wishlist.
@@ -128,6 +136,7 @@ class WishlistService:
             source_info=source_context or {},
             profile_id=profile_id,
             user_initiated=user_initiated,
+            quality_profile_id=quality_profile_id,
         )
 
     def add_spotify_track_to_wishlist(
@@ -138,6 +147,7 @@ class WishlistService:
         source_type: str = "manual",
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
+        quality_profile_id: Optional[int] = None,
     ) -> bool:
         """Backward-compatible wrapper for `add_track_to_wishlist`."""
         if track_data is None:
@@ -149,6 +159,7 @@ class WishlistService:
             source_type=source_type,
             source_context=source_context,
             profile_id=profile_id,
+            quality_profile_id=quality_profile_id,
         )
 
     def get_wishlist_tracks_for_download(

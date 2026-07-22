@@ -272,6 +272,7 @@ def serialize_watchlist_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "created_at": _isoformat(d.get("created_at")),
         "updated_at": _isoformat(d.get("updated_at")),
         "profile_id": d.get("profile_id"),
+        "quality_profile_id": d.get("quality_profile_id"),
         # Content type filters — ALL of them
         "include_albums": bool(d.get("include_albums", True)),
         "include_eps": bool(d.get("include_eps", True)),
