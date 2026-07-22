@@ -90,6 +90,18 @@ def test_scope_helpers(imported_conn):
     assert track_id in retag.artist_track_ids(conn, artist_id)
 
 
+def test_artist_scope_helper_includes_linked_alias_release(imported_conn):
+    conn = imported_conn
+    canonical = conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Canonical')"
+    ).lastrowid
+    alias, _album_id, track_id = _seed_album_with_files(conn)
+    from core.library2.artist_aliases import link_artist_alias
+    link_artist_alias(conn, alias, canonical)
+
+    assert track_id in retag.artist_track_ids(conn, canonical)
+
+
 def test_unchanged_retag_refreshes_stale_gap_cache(
         imported_conn, legacy_db, tmp_path, monkeypatch):
     conn = imported_conn

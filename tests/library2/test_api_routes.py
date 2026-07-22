@@ -1441,6 +1441,80 @@ def test_bulk_monitor_album_allowlist_excludes_hidden_releases(api):
     assert rows == {ids["views"]: 1, ids["ep"]: 0, ids["single"]: 0}
 
 
+def test_artist_actions_include_linked_alias_releases(api, monkeypatch):
+    client, db, ids = api
+    with _conn(db) as conn:
+        alias_id = conn.execute(
+            "INSERT INTO lib2_artists(name) VALUES('Linked Alias')"
+        ).lastrowid
+        alias_album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, album_type, monitored) "
+            "VALUES(?, 'Alias Single', 'single', 1)", (alias_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+            (alias_album, alias_id),
+        )
+        alias_track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, monitored, canonical_track_id) "
+            "VALUES(?, 'Alias Duplicate', 1, ?)",
+            (alias_album, ids["album_track"]),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?, ?)",
+            (alias_track, alias_id),
+        )
+        from core.library2.artist_aliases import link_artist_alias
+        link_artist_alias(conn, alias_id, ids["artist"])
+        conn.commit()
+
+    preview = client.get(
+        f"/api/library/v2/artists/{ids['artist']}/tag-preview"
+    ).get_json()
+    assert alias_track in {track["track_id"] for track in preview["tracks"]}
+
+    duplicates = client.get(
+        f"/api/library/v2/artists/{ids['artist']}/duplicates"
+    ).get_json()
+    assert alias_track in {
+        pair["single"]["track_id"] for pair in duplicates["pairs"]
+    }
+
+    scanned = {}
+
+    def fake_rescan(_db, *, album_ids=None, **_kwargs):
+        scanned["album_ids"] = list(album_ids or [])
+        return {"scanned": 0}
+
+    monkeypatch.setattr(
+        "core.library2.scan.rescan_files",
+        fake_rescan,
+    )
+    refresh = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/refresh"
+    ).get_json()
+    assert refresh["success"] is True
+    assert alias_album in scanned["album_ids"]
+
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/releases/monitor",
+        json={"scope": "all", "monitored": False},
+    )
+    job_id = response.get_json()["job_id"]
+    for _ in range(200):
+        status = client.get(
+            "/api/library/v2/jobs/status", query_string={"job_id": job_id},
+        ).get_json()
+        if not status["running"]:
+            break
+        time.sleep(0.01)
+    assert status["error"] is None
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT monitored FROM lib2_albums WHERE id=?", (alias_album,),
+        ).fetchone()[0] == 0
+
+
 def test_bulk_monitor_rejects_invalid_album_allowlist(api):
     client, _db, ids = api
     response = client.post(

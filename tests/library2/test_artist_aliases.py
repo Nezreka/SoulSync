@@ -6,6 +6,8 @@ import pytest
 
 from core.library2.artist_aliases import (
     AliasLinkError,
+    artist_album_scope_ids,
+    artist_track_scope_ids,
     link_artist_alias,
     resolve_alias_group,
     unlink_artist_alias,
@@ -180,3 +182,30 @@ def test_resolve_group_canonical_always_first(imported_conn):
 def test_resolve_unknown_id_falls_back_to_itself(imported_conn):
     conn = imported_conn
     assert resolve_alias_group(conn, 999999) == [999999]
+
+
+def test_artist_action_scope_matches_visible_alias_releases(imported_conn):
+    conn = imported_conn
+    canonical = _new_artist(conn, "Canonical")
+    alias = _new_artist(conn, "Alias")
+    alias_album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Alias Album')",
+        (alias,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+        (alias_album, alias),
+    )
+    alias_track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Alias Track')",
+        (alias_album,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?, ?)",
+        (alias_track, alias),
+    )
+    link_artist_alias(conn, alias, canonical)
+
+    assert artist_album_scope_ids(conn, canonical) == [alias_album]
+    assert artist_album_scope_ids(conn, alias) == [alias_album]
+    assert artist_track_scope_ids(conn, canonical) == [alias_track]

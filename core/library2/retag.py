@@ -69,12 +69,9 @@ def album_track_ids(conn, album_id: int) -> List[int]:
 
 
 def artist_track_ids(conn, artist_id: int) -> List[int]:
-    return [r["id"] for r in conn.execute(
-        """SELECT t.id FROM lib2_tracks t
-           JOIN lib2_album_artists aa ON aa.album_id = t.album_id
-          WHERE aa.artist_id=?
-          ORDER BY t.album_id, COALESCE(t.disc_number,1), t.track_number, t.id""",
-        (artist_id,))]
+    from core.library2.artist_aliases import artist_track_scope_ids
+
+    return artist_track_scope_ids(conn, artist_id)
 
 
 def _genres_list(raw: Any) -> List[str]:
