@@ -23,8 +23,6 @@ import {
   fetchLibraryV2MatchArtistReleases,
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2FileDeletePreview,
-  fetchLibraryV2Playlist,
-  fetchLibraryV2Playlists,
   fetchLibraryV2ReorganizeSourcesGlobal,
   fetchLibraryV2TrackHistory,
   fetchLibraryV2TrackSourceInfo,
@@ -35,7 +33,6 @@ import {
   previewLibraryV2AlbumReorganize,
   rankSearchResultQuality,
   removeLibraryV2FileRecords,
-  runLibraryV2PlaylistPipeline,
   runRepairJob,
   searchLibraryV2MatchService,
   startLibraryV2AlbumReplayGain,
@@ -1088,49 +1085,6 @@ describe('library v2 artist track files api (C2 — Manage Track Files)', () => 
     expect(result.files).toHaveLength(1);
     expect(result.files[0]).toMatchObject({ file_id: 1, track_title: 'Nonstop' });
     expect(result.pagination).toMatchObject({ page: 2, total_pages: 2 });
-  });
-});
-
-describe('library v2 playlist api', () => {
-  it('reuses the mirrored-playlist list and detail reads', async () => {
-    server.use(
-      http.get('/api/mirrored-playlists', () =>
-        HttpResponse.json([{ id: 9, display_name: 'Road Trip', pipeline_state: null }]),
-      ),
-      http.get('/api/mirrored-playlists/9', () =>
-        HttpResponse.json({
-          id: 9,
-          display_name: 'Road Trip',
-          pipeline_state: null,
-          tracks: [{ id: 1, position: 1, track_name: 'One' }],
-        }),
-      ),
-    );
-
-    await expect(fetchLibraryV2Playlists()).resolves.toMatchObject([
-      { id: 9, display_name: 'Road Trip' },
-    ]);
-    await expect(fetchLibraryV2Playlist(9)).resolves.toMatchObject({
-      id: 9,
-      tracks: [{ position: 1, track_name: 'One' }],
-    });
-  });
-
-  it('starts the one existing mirrored-playlist pipeline', async () => {
-    server.use(
-      http.post('/api/mirrored-playlists/9/pipeline/run', async ({ request }) => {
-        expect(await request.json()).toEqual({});
-        return HttpResponse.json({
-          success: true,
-          state: { run_id: 'mirrored_9', playlist_id: 9, status: 'running', progress: 0 },
-        });
-      }),
-    );
-
-    await expect(runLibraryV2PlaylistPipeline(9)).resolves.toMatchObject({
-      playlist_id: 9,
-      status: 'running',
-    });
   });
 });
 

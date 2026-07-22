@@ -5,14 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import type { LibraryV2PlaylistSummary } from '../-library-v2.types';
-
-import {
-  AlbumOverflowMenu,
-  ArtistAliases,
-  MirrorStatusBanner,
-  PlaylistPipelineButton,
-} from './library-v2-page';
+import { AlbumOverflowMenu, ArtistAliases, MirrorStatusBanner } from './library-v2-page';
 
 function renderWithQueryClient(node: React.ReactNode) {
   const queryClient = createTestQueryClient();
@@ -119,52 +112,6 @@ describe('library v2 remaining mutation boundaries', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry again' }));
 
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-    expect(attempts).toBe(2);
-  });
-
-  it('labels a rejected playlist start as retryable and repeats it', async () => {
-    let attempts = 0;
-    server.use(
-      http.post('/api/mirrored-playlists/9/pipeline/run', () => {
-        attempts += 1;
-        return HttpResponse.json(
-          attempts === 1
-            ? { success: false, error: 'Playlist source is unavailable' }
-            : {
-                success: true,
-                state: { run_id: 'run-9', playlist_id: 9, status: 'running', progress: 0 },
-              },
-        );
-      }),
-    );
-    const playlist: LibraryV2PlaylistSummary = {
-      id: 9,
-      source: 'spotify',
-      source_playlist_id: 'source-9',
-      name: 'Road Trip',
-      display_name: 'Road Trip',
-      description: null,
-      owner: null,
-      image_url: null,
-      track_count: 2,
-      total_count: 2,
-      discovered_count: 2,
-      wishlisted_count: 0,
-      in_library_count: 0,
-      updated_at: null,
-      pipeline_state: null,
-    };
-
-    renderWithQueryClient(<PlaylistPipelineButton playlist={playlist} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Run pipeline' }));
-
-    expect(await screen.findByText('Playlist source is unavailable')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry pipeline' }));
-
-    await waitFor(() =>
-      expect(screen.queryByText('Playlist source is unavailable')).not.toBeInTheDocument(),
-    );
     expect(attempts).toBe(2);
   });
 });

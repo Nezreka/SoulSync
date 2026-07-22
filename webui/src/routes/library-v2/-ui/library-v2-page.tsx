@@ -41,8 +41,6 @@ import {
   libraryV2EnabledQueryOptions,
   libraryV2ImportStatusQueryOptions,
   libraryV2MirrorStatusQueryOptions,
-  libraryV2PlaylistQueryOptions,
-  libraryV2PlaylistsQueryOptions,
   libraryV2QualityProfilesQueryOptions,
   libraryV2QueueStatusQueryOptions,
   libraryV2TrackFileTagsQueryOptions,
@@ -64,7 +62,6 @@ import {
   resumeLibraryV2AcquisitionImport,
   retryLibraryV2Mirror,
   runRepairJob,
-  runLibraryV2PlaylistPipeline,
   setLibraryV2Monitored,
   startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
@@ -96,9 +93,6 @@ import {
   type LibraryV2JobState,
   type LibraryV2ManualSkip,
   type LibraryV2MatchService,
-  type LibraryV2PlaylistPipelineState,
-  type LibraryV2PlaylistSummary,
-  type LibraryV2PlaylistTrack,
   type LibraryV2QualityProfileSource,
   type LibraryV2QueueStatusEntry,
   type LibraryV2Track,
@@ -129,7 +123,6 @@ function qualityProfileSourceLabel(source?: LibraryV2QualityProfileSource): stri
   if (source === 'track') return 'Track';
   if (source === 'album') return 'Album';
   if (source === 'artist') return 'Artist';
-  if (source === 'playlist') return 'Playlist';
   return 'App default';
 }
 
@@ -3446,14 +3439,10 @@ export function LibraryV2Page() {
   return (
     <>
       <MirrorStatusBanner />
-      {search.playlist ? (
-        <PlaylistDetailView playlistId={search.playlist} />
-      ) : search.album ? (
+      {search.album ? (
         <AlbumDetailView albumId={search.album} />
       ) : search.artist ? (
         <ArtistDetailView artistId={search.artist} />
-      ) : search.section === 'playlists' ? (
-        <PlaylistIndexView />
       ) : search.section === 'wanted' ? (
         <WantedIndexView />
       ) : search.section === 'import-review' ? (
@@ -3669,7 +3658,7 @@ function ArtistIndexView() {
   );
 }
 
-// --- playlists (Phase E; thin UI over the shared mirrored pipeline) ---------
+// --- Library sections -------------------------------------------------------
 
 function LibrarySectionTabs() {
   const navigate = useNavigate();
@@ -3685,7 +3674,6 @@ function LibrarySectionTabs() {
               ...previous,
               section: 'artists',
               q: '',
-              playlist: undefined,
               artist: undefined,
               album: undefined,
             }),
@@ -3696,25 +3684,6 @@ function LibrarySectionTabs() {
       </button>
       <button
         type="button"
-        className={search.section === 'playlists' ? styles.viewActive : ''}
-        onClick={() =>
-          void navigate({
-            search: (previous) => ({
-              ...previous,
-              section: 'playlists',
-              q: '',
-              playlist: undefined,
-              artist: undefined,
-              album: undefined,
-              page: 1,
-            }),
-          })
-        }
-      >
-        Playlists
-      </button>
-      <button
-        type="button"
         className={search.section === 'wanted' ? styles.viewActive : ''}
         onClick={() =>
           void navigate({
@@ -3722,7 +3691,6 @@ function LibrarySectionTabs() {
               ...previous,
               section: 'wanted',
               q: '',
-              playlist: undefined,
               artist: undefined,
               album: undefined,
               page: 1,
@@ -3741,7 +3709,6 @@ function LibrarySectionTabs() {
               ...previous,
               section: 'import-review',
               q: '',
-              playlist: undefined,
               artist: undefined,
               album: undefined,
               page: 1,
@@ -3831,11 +3798,11 @@ function AcquisitionImportReviewView() {
   const chosenTrackIds = Object.values(assignments);
   const completeAssignment = Boolean(
     detail &&
-      detail.inventory.length > 0 &&
-      detail.inventory.every((file) => assignments[file.relative_path]) &&
-      expectedTracks.length === detail.inventory.length &&
-      new Set(chosenTrackIds).size === chosenTrackIds.length &&
-      chosenTrackIds.length === expectedTracks.length,
+    detail.inventory.length > 0 &&
+    detail.inventory.every((file) => assignments[file.relative_path]) &&
+    expectedTracks.length === detail.inventory.length &&
+    new Set(chosenTrackIds).size === chosenTrackIds.length &&
+    chosenTrackIds.length === expectedTracks.length,
   );
   const mutation = resolveMutation.isError
     ? resolveMutation
@@ -3882,7 +3849,9 @@ function AcquisitionImportReviewView() {
                 onClick={() => setSelectedId(item.id)}
               >
                 <strong>{item.expected_scope.replaceAll('_', ' ')}</strong>
-                <span>#{item.expected_entity_id} · {item.status.replaceAll('_', ' ')}</span>
+                <span>
+                  #{item.expected_entity_id} · {item.status.replaceAll('_', ' ')}
+                </span>
                 <small>
                   {item.inventory_count} files · {item.rejection_count} conflicts
                 </small>
@@ -3910,7 +3879,9 @@ function AcquisitionImportReviewView() {
                     <button
                       type="button"
                       className={styles.btnGhost}
-                      disabled={busy || !['pending', 'matching', 'needs_review'].includes(detail.status)}
+                      disabled={
+                        busy || !['pending', 'matching', 'needs_review'].includes(detail.status)
+                      }
                       onClick={() => rescanMutation.mutate()}
                     >
                       {rescanMutation.isPending ? 'Rescanning…' : 'Rescan & resume'}
@@ -3982,10 +3953,15 @@ function AcquisitionImportReviewView() {
                               {expectedTracks.map((track) => {
                                 const trackId = Number(track.track_id);
                                 const usedElsewhere = Object.entries(assignments).some(
-                                  ([path, selected]) => path !== file.relative_path && selected === trackId,
+                                  ([path, selected]) =>
+                                    path !== file.relative_path && selected === trackId,
                                 );
                                 return (
-                                  <option key={track.expected_key} value={trackId} disabled={usedElsewhere}>
+                                  <option
+                                    key={track.expected_key}
+                                    value={trackId}
+                                    disabled={usedElsewhere}
+                                  >
                                     D{track.disc_number} · {track.track_number ?? '—'} ·{' '}
                                     {track.expected_title}
                                   </option>
@@ -3999,10 +3975,12 @@ function AcquisitionImportReviewView() {
                   </table>
                 </div>
 
-                {detail.status === 'needs_review' && expectedTracks.length !== detail.inventory.length ? (
+                {detail.status === 'needs_review' &&
+                expectedTracks.length !== detail.inventory.length ? (
                   <div className={styles.mutationError} role="alert">
-                    This bundle has {detail.inventory.length} files but {expectedTracks.length} assignable
-                    tracks. Rescan or correct the edition before importing; partial imports are blocked.
+                    This bundle has {detail.inventory.length} files but {expectedTracks.length}{' '}
+                    assignable tracks. Rescan or correct the edition before importing; partial
+                    imports are blocked.
                   </div>
                 ) : null}
                 {mutation.isError ? (
@@ -4011,7 +3989,9 @@ function AcquisitionImportReviewView() {
                   </div>
                 ) : null}
                 {detail.error ? (
-                  <div className={styles.mutationError} role="alert">{detail.error}</div>
+                  <div className={styles.mutationError} role="alert">
+                    {detail.error}
+                  </div>
                 ) : null}
                 {detail.status === 'needs_review' ? (
                   <div className={styles.modalActions}>
@@ -4021,7 +4001,9 @@ function AcquisitionImportReviewView() {
                       disabled={!completeAssignment || busy}
                       onClick={() => resolveMutation.mutate()}
                     >
-                      {resolveMutation.isPending ? 'Applying & resuming…' : 'Apply assignments & resume'}
+                      {resolveMutation.isPending
+                        ? 'Applying & resuming…'
+                        : 'Apply assignments & resume'}
                     </button>
                   </div>
                 ) : null}
@@ -4030,195 +4012,6 @@ function AcquisitionImportReviewView() {
           </section>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function playlistSourceLabel(source: string): string {
-  const labels: Record<string, string> = {
-    spotify: 'Spotify',
-    tidal: 'Tidal',
-    qobuz: 'Qobuz',
-    deezer: 'Deezer',
-    youtube: 'YouTube',
-    listenbrainz: 'ListenBrainz',
-    lastfm: 'Last.fm',
-    soulsync_discovery: 'SoulSync Discovery',
-    file: 'File',
-  };
-  return labels[source] ?? source.replaceAll('_', ' ');
-}
-
-function activePipeline(state: LibraryV2PlaylistPipelineState | null): boolean {
-  return state?.status === 'running';
-}
-
-function pipelineLabel(state: LibraryV2PlaylistPipelineState | null): string | null {
-  if (!state || state.status === 'idle') return null;
-  if (state.status === 'running')
-    return `${state.phase || 'Running'} · ${clampPercent(state.progress)}%`;
-  if (state.status === 'finished') return 'Last pipeline completed';
-  if (state.status === 'skipped') return state.error || 'Pipeline skipped';
-  if (state.status === 'error') return state.error || 'Pipeline failed';
-  return state.status;
-}
-
-export function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2PlaylistSummary }) {
-  const queryClient = useQueryClient();
-  const unsupported = playlist.source === 'file' || playlist.source === 'beatport';
-  const mutation = useMutation({
-    mutationFn: () => runLibraryV2PlaylistPipeline(playlist.id),
-    onSettled: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: [...LIBRARY_V2_QUERY_KEY, 'playlists'] }),
-        queryClient.invalidateQueries({
-          queryKey: [...LIBRARY_V2_QUERY_KEY, 'playlist', playlist.id],
-        }),
-      ]);
-    },
-  });
-  const running = mutation.isPending || activePipeline(playlist.pipeline_state);
-  return (
-    <span className={styles.playlistRunWrap}>
-      <ActionButton
-        icon="refresh"
-        label={running ? 'Pipeline running…' : mutation.isError ? 'Retry pipeline' : 'Run pipeline'}
-        busy={running}
-        disabled={unsupported}
-        title={
-          unsupported
-            ? 'This source cannot be refreshed by the mirrored-playlist pipeline'
-            : 'Refresh source, discover metadata, sync to the server, then process the wishlist'
-        }
-        onClick={() => mutation.mutate()}
-      />
-      {mutation.isError ? (
-        <span className={styles.statusWarn}>
-          {mutation.error instanceof Error ? mutation.error.message : 'Could not start pipeline'}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function PlaylistPipelineState({ state }: { state: LibraryV2PlaylistPipelineState | null }) {
-  const label = pipelineLabel(state);
-  if (!label) return null;
-  const progress = clampPercent(state?.progress);
-  return (
-    <div
-      className={`${styles.playlistPipeline} ${state?.status === 'error' ? styles.playlistPipelineError : ''}`}
-    >
-      <div className={styles.playlistPipelineRow}>
-        <span>{label}</span>
-        {state?.status === 'running' ? <span>{progress}%</span> : null}
-      </div>
-      {state?.status === 'running' ? (
-        <div className={styles.playlistProgressTrack}>
-          <span style={{ width: `${progress}%` }} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PlaylistIndexView() {
-  const navigate = useNavigate();
-  const search = Route.useSearch();
-  const playlistsQuery = useQuery(libraryV2PlaylistsQueryOptions());
-  const playlists = (playlistsQuery.data ?? []).filter((playlist) => {
-    const needle = search.q.trim().toLocaleLowerCase();
-    if (!needle) return true;
-    return [playlist.display_name, playlist.name, playlist.owner, playlist.source].some((value) =>
-      String(value ?? '')
-        .toLocaleLowerCase()
-        .includes(needle),
-    );
-  });
-
-  return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Library</h1>
-          <p className={styles.subtitle}>
-            {playlistsQuery.data ? `${playlistsQuery.data.length} mirrored playlists` : 'Playlists'}
-          </p>
-        </div>
-      </header>
-      <div className={styles.toolbar}>
-        <LibrarySectionTabs />
-        <input
-          className={styles.searchInput}
-          type="search"
-          placeholder="Filter playlists…"
-          value={search.q}
-          onChange={(event) =>
-            void navigate({ search: (previous) => ({ ...previous, q: event.target.value }) })
-          }
-        />
-      </div>
-      {playlistsQuery.isError ? (
-        <div className={styles.emptyState}>Could not load mirrored playlists.</div>
-      ) : playlistsQuery.isLoading ? (
-        <div className={styles.loading}>Loading…</div>
-      ) : playlists.length === 0 ? (
-        <div className={styles.emptyState}>
-          <h2>{search.q ? 'No matching playlists' : 'No mirrored playlists yet'}</h2>
-          <p>
-            Mirror a playlist on the Playlists page first. Library v2 reuses that same persistent
-            mirror and pipeline.
-          </p>
-        </div>
-      ) : (
-        <div className={styles.playlistGrid}>
-          {playlists.map((playlist) => (
-            <article key={playlist.id} className={styles.playlistCard}>
-              <button
-                type="button"
-                className={styles.playlistCardLink}
-                onClick={() =>
-                  void navigate({
-                    search: (previous) => ({
-                      ...previous,
-                      section: 'playlists',
-                      playlist: playlist.id,
-                      artist: undefined,
-                      album: undefined,
-                    }),
-                  })
-                }
-              >
-                <Artwork
-                  src={playlist.image_url ?? ''}
-                  alt={playlist.display_name || playlist.name}
-                  className={styles.playlistArtwork}
-                  thumb
-                />
-                <span className={styles.playlistCardBody}>
-                  <span className={styles.playlistCardTitle}>
-                    {playlist.display_name || playlist.name}
-                  </span>
-                  <span className={styles.playlistMeta}>
-                    {playlistSourceLabel(playlist.source)}
-                    {playlist.owner ? ` · ${playlist.owner}` : ''}
-                  </span>
-                  <span className={styles.playlistCounts}>
-                    <span>{playlist.total_count ?? playlist.track_count} tracks</span>
-                    <span>{playlist.in_library_count ?? 0} in library</span>
-                    <span>{playlist.wishlisted_count ?? 0} wanted</span>
-                    <span>{playlist.discovered_count ?? 0} discovered</span>
-                  </span>
-                </span>
-              </button>
-              <div className={styles.playlistCardFooter}>
-                <PlaylistPipelineState state={playlist.pipeline_state} />
-                <PlaylistPipelineButton playlist={playlist} />
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -4405,111 +4198,6 @@ function WantedIndexView() {
           </button>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function playlistTrackDiscovered(track: LibraryV2PlaylistTrack): boolean {
-  try {
-    const parsed: unknown = JSON.parse(track.extra_data || '{}');
-    return Boolean(
-      parsed && typeof parsed === 'object' && 'discovered' in parsed && parsed.discovered,
-    );
-  } catch {
-    return false;
-  }
-}
-
-function PlaylistDetailView({ playlistId }: { playlistId: number }) {
-  const navigate = useNavigate();
-  const playlistQuery = useQuery(libraryV2PlaylistQueryOptions(playlistId));
-  const playlist = playlistQuery.data;
-  const summary = playlist as LibraryV2PlaylistSummary | undefined;
-  return (
-    <div className={styles.page}>
-      <BackLink
-        onClick={() =>
-          void navigate({
-            search: (previous) => ({
-              ...previous,
-              section: 'playlists',
-              playlist: undefined,
-              artist: undefined,
-              album: undefined,
-            }),
-          })
-        }
-      >
-        ← Playlists
-      </BackLink>
-      {playlistQuery.isError ? (
-        <div className={styles.emptyState}>Playlist not found.</div>
-      ) : playlistQuery.isLoading || !playlist || !summary ? (
-        <div className={styles.loading}>Loading…</div>
-      ) : (
-        <>
-          <header className={styles.detailHeader}>
-            <Artwork
-              src={playlist.image_url ?? ''}
-              alt={playlist.display_name || playlist.name}
-              className={styles.detailThumb}
-            />
-            <div className={styles.detailMeta}>
-              <h1 className={styles.title}>{playlist.display_name || playlist.name}</h1>
-              <p className={styles.subtitle}>
-                {playlistSourceLabel(playlist.source)}
-                {playlist.owner ? ` · ${playlist.owner}` : ''}
-              </p>
-              <div className={styles.detailLabels}>
-                <span className={styles.detailLabel}>
-                  <SvgIcon name="tracks" />
-                  {playlist.tracks.length} tracks
-                </span>
-                <span className={styles.detailLabel}>
-                  <SvgIcon name="download" />
-                  {playlist.in_library_count ?? 0} in library
-                </span>
-                <span className={styles.detailLabel}>
-                  <SvgIcon name="monitor" />
-                  {playlist.wishlisted_count ?? 0} wanted
-                </span>
-              </div>
-              <PlaylistPipelineButton playlist={summary} />
-            </div>
-          </header>
-          <PlaylistPipelineState state={playlist.pipeline_state} />
-          <div className={styles.trackTableWrap}>
-            <table className={styles.trackTable}>
-              <thead>
-                <tr>
-                  <th className={styles.colNum}>#</th>
-                  <th>Title</th>
-                  <th>Artist</th>
-                  <th>Album</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {playlist.tracks.map((track) => (
-                  <tr key={track.id} className={styles.staticRow}>
-                    <td className={styles.colNum}>{track.position}</td>
-                    <td>{track.track_name}</td>
-                    <td>{track.artist_name}</td>
-                    <td>{track.album_name || <span className={styles.muted}>—</span>}</td>
-                    <td>
-                      {playlistTrackDiscovered(track) ? (
-                        <span className={styles.statusOk}>discovered</span>
-                      ) : (
-                        <span className={styles.muted}>pending discovery</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
     </div>
   );
 }

@@ -60,9 +60,7 @@ export function QualityProfilePicker({
           ? entity === 'artists'
             ? 'Artist override'
             : 'Inherited from artist'
-          : currentProfileSource === 'playlist'
-            ? 'Inherited from playlist'
-            : 'App default';
+          : 'App default';
 
   return (
     <>

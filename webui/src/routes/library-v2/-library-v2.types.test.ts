@@ -12,14 +12,9 @@ describe('libraryV2SearchSchema', () => {
     expect(libraryV2SearchSchema.parse({ album: '-1' }).album).toBeUndefined();
   });
 
-  it('accepts playlist navigation and rejects invalid playlist ids', () => {
-    expect(libraryV2SearchSchema.parse({ section: 'playlists', playlist: '17' })).toMatchObject({
-      section: 'playlists',
-      playlist: 17,
-    });
-    expect(libraryV2SearchSchema.parse({ section: 'wat', playlist: '0' })).toMatchObject({
+  it('falls back to artists for an unknown section', () => {
+    expect(libraryV2SearchSchema.parse({ section: 'playlists' })).toMatchObject({
       section: 'artists',
-      playlist: undefined,
     });
   });
 });

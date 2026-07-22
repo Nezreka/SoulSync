@@ -7,8 +7,6 @@ import {
   libraryV2AcquisitionImportsQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
-  libraryV2PlaylistQueryOptions,
-  libraryV2PlaylistsQueryOptions,
   libraryV2WantedQueryOptions,
 } from './-library-v2.api';
 import { libraryV2SearchSchema } from './-library-v2.types';
@@ -28,7 +26,6 @@ export const Route = createFileRoute('/library-v2')({
     page: search.page,
     monitored: search.monitored,
     album: search.album,
-    playlist: search.playlist,
     section: search.section,
     wantedKind: search.wantedKind,
   }),
@@ -38,11 +35,7 @@ export const Route = createFileRoute('/library-v2')({
     await context.queryClient
       .ensureQueryData(libraryV2EnabledQueryOptions())
       .catch(() => undefined);
-    if (deps.playlist) {
-      void context.queryClient.prefetchQuery(libraryV2PlaylistQueryOptions(deps.playlist));
-    } else if (deps.section === 'playlists') {
-      void context.queryClient.prefetchQuery(libraryV2PlaylistsQueryOptions());
-    } else if (deps.section === 'wanted') {
+    if (deps.section === 'wanted') {
       void context.queryClient.prefetchQuery(
         libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),
       );
