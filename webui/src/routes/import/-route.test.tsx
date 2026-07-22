@@ -247,7 +247,11 @@ describe('import route', () => {
 
     expect(await screen.findByTestId('import-page')).toBeInTheDocument();
     expect(await screen.findByText('Import Music')).toBeInTheDocument();
-    expect(await screen.findByText('Import folder: error')).toBeInTheDocument();
+    // The app query client retries once with a ~1s backoff before surfacing
+    // the error, which races findByText's default 1s timeout — wait it out.
+    expect(
+      await screen.findByText('Import folder: error', undefined, { timeout: 5000 }),
+    ).toBeInTheDocument();
   });
 
   it('shows scan progress while a large staging folder is still scanning (#947)', async () => {

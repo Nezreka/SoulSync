@@ -469,7 +469,9 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'In Your Library',
                 badge: { text: 'Library', class: 'enh-badge-library' },
-                href: buildArtistDetailPath(artist.id),
+                href: artist.library_v2_id
+                    ? `/library-v2?artist=${encodeURIComponent(artist.library_v2_id)}`
+                    : buildArtistDetailPath(artist.id),
             })
         );
 

@@ -130,30 +130,36 @@ class ShortPreviewTrackJob(RepairJob):
         # owned files and DECODE them with ffmpeg to get the real length.
         verify_zero = self._setting_bool(context, "verify_zero_length", True)
 
-        conn = context.db._get_connection()
+        rows = []
+        native_subjects = {}
         try:
-            cursor = conn.cursor()
-            where_dur = ("(t.duration IS NULL OR t.duration = 0 OR t.duration <= ?)"
-                         if verify_zero else
-                         "t.duration IS NOT NULL AND t.duration > 0 AND t.duration <= ?")
-            cursor.execute(
-                f"""
-                SELECT t.id, t.title, t.duration, t.file_path,
-                       t.spotify_track_id, t.itunes_track_id, t.musicbrainz_recording_id,
-                       ar.name AS artist_name, ar.thumb_url AS artist_thumb,
-                       al.title AS album_title, al.thumb_url AS album_thumb,
-                       ar.id AS artist_row_id
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE {where_dur}
-                  AND t.file_path IS NOT NULL AND t.file_path != ''
-                """,
-                (max_dur_ms,),
-            )
-            rows = [dict(r) for r in cursor.fetchall()]
-        finally:
-            conn.close()
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            for subject in active_file_subjects(
+                context.db, context.config_manager,
+            ):
+                duration = subject.get("duration") or 0
+                if duration > max_dur_ms or (duration <= 0 and not verify_zero):
+                    continue
+                file_path = str(subject["path"])
+                native_subjects[file_path] = subject
+                rows.append({
+                    "id": f"lib2:{subject['track_id']}",
+                    "title": subject["title"],
+                    "duration": duration,
+                    "file_path": file_path,
+                    "spotify_track_id": subject.get("spotify_track_id"),
+                    "itunes_track_id": subject.get("itunes_track_id"),
+                    "musicbrainz_recording_id": subject.get("musicbrainz_recording_id"),
+                    "track_source_ids": subject.get("track_source_ids") or {},
+                    "artist_name": subject.get("artist_name"),
+                    "artist_thumb": subject.get("artist_image"),
+                    "album_title": subject.get("album_title"),
+                    "album_thumb": subject.get("album_image"),
+                })
+        except Exception as exc:
+            logger.warning("V2 subject enumeration failed: %s", exc)
+            result.errors += 1
 
         total = len(rows)
         if context.report_progress:
@@ -220,6 +226,24 @@ class ShortPreviewTrackJob(RepairJob):
                 title = row["title"] or "Unknown"
                 artist = row["artist_name"] or "Unknown"
                 try:
+                    finding_details = {
+                        "track_id": row["id"],
+                        "title": row["title"],
+                        "artist": row["artist_name"],
+                        "album": row["album_title"],
+                        "album_thumb_url": album_image,
+                        "artist_thumb_url": row["artist_thumb"],
+                        "file_duration_s": round(file_dur_s, 1),
+                        "expected_duration_s": round(expected_dur_s, 1),
+                        "original_path": row["file_path"],
+                        "metadata_source": source.get("provider"),
+                        "metadata_source_id": source.get("provider_id"),
+                    }
+                    subject = native_subjects.get(str(row["file_path"]))
+                    if subject:
+                        from core.library2.maintenance_subjects import subject_details
+
+                        finding_details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type="short_preview_track",
@@ -233,18 +257,7 @@ class ShortPreviewTrackJob(RepairJob):
                             f"{expected_dur_s:.0f}s at the source — looks like a preview clip. "
                             "Approve to delete it and re-download the full version."
                         ),
-                        details={
-                            "track_id": row["id"],
-                            "title": row["title"],
-                            "artist": row["artist_name"],
-                            "album": row["album_title"],
-                            "album_thumb_url": album_image,
-                            "artist_thumb_url": row["artist_thumb"],
-                            "artist_id": row["artist_row_id"],
-                            "file_duration_s": round(file_dur_s, 1),
-                            "expected_duration_s": round(expected_dur_s, 1),
-                            "original_path": row["file_path"],
-                        },
+                        details=finding_details,
                     )
                     if inserted:
                         result.findings_created += 1
@@ -263,61 +276,44 @@ class ShortPreviewTrackJob(RepairJob):
         isn't art-less when the library album thumb is missing (the #937-follow-up: HiFi previews
         on un-enriched albums). Every metadata client exposes get_track_details(id)."""
 
-        def _build(details) -> Optional[Dict[str, Any]]:
-            ms = (details or {}).get("duration_ms")
-            if not ms or ms <= 0:
-                return None
-            return {"duration_s": ms / 1000.0, "album_image": _art_from_details(details)}
+        from core.library2.provider_adapters import fetch_track_metadata
 
-        # Spotify — pass allow_fallback=False. The default fallback scrapes the configured
-        # metadata source, which is slow and can BLOCK a scan loop indefinitely when the
-        # official API isn't authed (the #937-follow-up hang). Official-only is fast and
-        # returns None cleanly when unavailable, so we just move to the next source.
-        sp_id = row.get("spotify_track_id")
-        if sp_id and context.spotify_client and not context.is_spotify_rate_limited():
-            try:
-                r = _build(context.spotify_client.get_track_details(str(sp_id), allow_fallback=False))
-                if r:
-                    return r
-            except TypeError:
-                pass  # older client without the flag — skip, don't risk the slow path
-            except Exception as exc:
-                logger.debug("spotify lookup failed for %s: %s", sp_id, exc)
-
-        # iTunes (public API, no auth, fast) then MusicBrainz.
-        for source_id, client in (
-            (row.get("itunes_track_id"), context.itunes_client),
-            (row.get("musicbrainz_recording_id"), context.mb_client),
+        source_ids = dict(row.get("track_source_ids") or {})
+        for provider, field in (
+            ("spotify", "spotify_track_id"),
+            ("itunes", "itunes_track_id"),
+            ("musicbrainz", "musicbrainz_recording_id"),
         ):
-            if not source_id or client is None:
-                continue
-            getter = getattr(client, "get_track_details", None)
-            if getter is None:
-                continue
-            try:
-                r = _build(getter(str(source_id)))
-                if r:
-                    return r
-            except Exception as exc:
-                logger.debug("lookup failed for %s: %s", source_id, exc)
-        return None
+            if row.get(field):
+                source_ids.setdefault(provider, str(row[field]))
+        injected_clients = {
+            "spotify": getattr(context, "spotify_client", None),
+            "itunes": getattr(context, "itunes_client", None),
+        }
+        resolved = fetch_track_metadata(
+            source_ids,
+            clients={key: value for key, value in injected_clients.items() if value},
+        )
+        if resolved is None or not resolved.duration_ms:
+            return None
+        return {
+            "duration_s": resolved.duration_ms / 1000.0,
+            "album_image": resolved.image_url,
+            "provider": resolved.provider,
+            "provider_id": resolved.provider_entity_id,
+        }
 
     def estimate_scope(self, context: JobContext) -> int:
         try:
             max_dur_ms = self._setting_int(context, "max_duration_seconds", 30) * 1000
             verify_zero = self._setting_bool(context, "verify_zero_length", True)
-            where_dur = ("(duration IS NULL OR duration = 0 OR duration <= ?)"
-                         if verify_zero else "duration > 0 AND duration <= ?")
-            conn = context.db._get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    f"SELECT COUNT(*) FROM tracks WHERE {where_dur} "
-                    "AND file_path IS NOT NULL AND file_path != ''",
-                    (max_dur_ms,),
-                )
-                return (cursor.fetchone() or [0])[0]
-            finally:
-                conn.close()
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            return sum(
+                1 for subject in active_file_subjects(
+                    context.db, context.config_manager,
+                ) if int(subject.get("duration") or 0) <= max_dur_ms
+                and (verify_zero or int(subject.get("duration") or 0) > 0)
+            )
         except Exception:
             return 0

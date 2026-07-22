@@ -66,6 +66,84 @@ def _detect_provider(items, client):
     return 'spotify'
 
 
+def _release_value(value, *names, default=None):
+    for name in names:
+        if isinstance(value, dict):
+            candidate = value.get(name)
+        else:
+            candidate = getattr(value, name, None)
+        if candidate not in (None, ''):
+            return candidate
+    return default
+
+
+def _release_image(value):
+    direct = _release_value(value, 'image_url', 'cover_url', 'album_cover_url')
+    if direct:
+        return str(direct)
+    images = _release_value(value, 'images', default=[]) or []
+    if images:
+        first = images[0]
+        if isinstance(first, dict):
+            return first.get('url') or first.get('#text') or None
+        return str(first)
+    return None
+
+
+def artist_release_preview(service, artist_id, artist_name='', limit=6):
+    """Small, provider-exact release context for an artist match candidate.
+
+    This deliberately uses the same metadata registry/artist-album helper as
+    Library/Watchlist discography. It never falls across providers: the albums
+    shown under a Spotify candidate are Spotify's albums for that exact id.
+    Unsupported/rate-limited providers return ``supported=False`` or an empty
+    list without turning a successful artist search into an error.
+    """
+    service = str(service or '').strip().lower()
+    try:
+        limit = max(1, min(int(limit), 8))
+    except (TypeError, ValueError):
+        limit = 6
+    if service not in {
+        'spotify', 'itunes', 'deezer', 'discogs', 'amazon',
+        'musicbrainz', 'jiosaavn',
+    }:
+        return {'supported': False, 'albums': []}
+
+    from core.metadata.album_tracks import get_artist_albums_for_source
+    albums = get_artist_albums_for_source(
+        service,
+        str(artist_id or '').strip(),
+        artist_name=str(artist_name or '').strip(),
+        limit=limit,
+        max_pages=1,
+    )
+    if albums is None:
+        return {'supported': False, 'albums': []}
+
+    normalized = []
+    seen = set()
+    for album in albums:
+        album_id = str(_release_value(album, 'id', 'album_id', default='') or '')
+        title = str(_release_value(album, 'name', 'title', 'album_name', default='') or '').strip()
+        release_date = str(_release_value(album, 'release_date', 'date', default='') or '')
+        dedupe_key = album_id or f"{title.casefold()}::{release_date[:4]}"
+        if not title or dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized.append({
+            'id': album_id,
+            'title': title,
+            'image': _release_image(album),
+            'release_date': release_date or None,
+            'album_type': str(_release_value(album, 'album_type', 'type', default='') or '') or None,
+            'total_tracks': _release_value(album, 'total_tracks', 'track_count'),
+        })
+        if len(normalized) >= limit:
+            break
+    return {'supported': True, 'albums': normalized}
+
+
 def _mb_direct_lookup(entity_type, mbid):
     """Confirm a pasted MusicBrainz MBID by fetching that exact entity.
     Returns a one-item result list (same shape as the search path) so the
@@ -134,7 +212,14 @@ def _search_service(service, entity_type, query):
             # Detect actual provider from result IDs — Spotify IDs are alphanumeric,
             # iTunes/Deezer IDs are purely numeric. Prevents storing wrong IDs.
             provider = _detect_provider(items, client)
-            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else '', 'provider': provider} for a in items]
+            # §52.5: every Artist dataclass (Spotify, SpotipyFree, and the
+            # iTunes/Deezer fallback this branch can silently resolve to)
+            # already carries followers/popularity — 0 where a provider
+            # doesn't supply it (see core/metadata's "Spotify-only; 0
+            # elsewhere" convention) — so surfacing them is free, no extra
+            # API call regardless of which source actually served this hit.
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else '', 'provider': provider,
+                     'followers': a.followers, 'popularity': a.popularity} for a in items]
         elif entity_type == 'album':
             items = client.search_albums(query, limit=8)
             provider = _detect_provider(items, client)
@@ -200,7 +285,8 @@ def _search_service(service, entity_type, query):
         for item in data:
             if entity_type == 'artist':
                 results.append({'id': str(item.get('id', '')), 'name': item.get('name', ''),
-                                'image': item.get('picture_medium'), 'extra': f"{item.get('nb_fan', 0)} fans"})
+                                'image': item.get('picture_medium'), 'extra': f"{item.get('nb_fan', 0)} fans",
+                                'followers': item.get('nb_fan', 0)})
             elif entity_type == 'album':
                 artist_name = item.get('artist', {}).get('name', '') if isinstance(item.get('artist'), dict) else ''
                 results.append({'id': str(item.get('id', '')), 'name': item.get('title', ''),

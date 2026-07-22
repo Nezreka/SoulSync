@@ -20,7 +20,18 @@ from core.usenet_clients.sabnzbd import SABnzbdAdapter, _map_state as sab_map
 
 
 def _run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+
+    async def _drain_with_heartbeat():
+        task = loop.create_task(coro)
+        while not task.done():
+            await asyncio.sleep(0.01)
+        return task.result()
+
+    try:
+        return loop.run_until_complete(_drain_with_heartbeat())
+    finally:
+        loop.close()
 
 
 def _mock_response(status_code: int, json_body=None):
@@ -64,10 +75,50 @@ def _sab_with_config(url='http://sab:8080', api_key='k'):
     return adapter
 
 
+def test_sab_load_config_strips_incidental_category_whitespace() -> None:
+    """The connection test validates a stripped category against SAB's
+    category list; the adapter must submit that SAME stripped value, or a
+    category configured with incidental whitespace (e.g. a copy-paste)
+    passes the check but still gets silently rewritten to '*' by SAB on
+    the real submit."""
+    with patch('core.usenet_clients.sabnzbd.config_manager') as cm:
+        cm.get.side_effect = lambda key, default=None: {
+            'usenet_client.url': 'http://sab:8080',
+            'usenet_client.api_key': 'k',
+            'usenet_client.category': 'soulsync ',
+        }.get(key, default)
+        adapter = SABnzbdAdapter()
+    assert adapter._category == 'soulsync'
+
+
 def test_sab_is_configured_requires_url_and_key() -> None:
     assert _sab_with_config('http://x', '').is_configured() is False
     assert _sab_with_config('', 'k').is_configured() is False
     assert _sab_with_config('http://x', 'k').is_configured() is True
+
+
+def test_sab_category_exists_uses_authenticated_category_list() -> None:
+    adapter = _sab_with_config()
+    with patch(
+        'core.usenet_clients.sabnzbd.http_requests.get',
+        return_value=_mock_response(200, {
+            'categories': ['*', 'Music', 'SoulSync'],
+        }),
+    ) as mock_get:
+        assert _run(adapter.category_exists('soulsync')) is True
+
+    params = mock_get.call_args.kwargs['params']
+    assert params['mode'] == 'get_cats'
+    assert params['apikey'] == 'k'
+
+
+def test_sab_category_exists_fails_closed_on_invalid_response() -> None:
+    adapter = _sab_with_config()
+    with patch(
+        'core.usenet_clients.sabnzbd.http_requests.get',
+        return_value=_mock_response(200, {'status': True}),
+    ):
+        assert _run(adapter.category_exists('soulsync')) is False
 
 
 def test_sab_state_mapping_covers_queue_states() -> None:

@@ -79,6 +79,30 @@ def move_to_quarantine(file_path: str, context: dict, reason: str, automation_en
     except Exception as exc:
         logger.warning("Failed to write quarantine metadata: %s", exc)
 
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_pipeline_import_quarantined,
+        )
+        notify_pipeline_import_quarantined(
+            context,
+            trigger=trigger,
+            reason=reason,
+        )
+    except Exception:
+        logger.exception("Failed to journal acquisition quarantine state")
+
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_manual_grab_quarantined,
+        )
+        notify_manual_grab_quarantined(
+            context,
+            trigger=trigger,
+            reason=reason,
+        )
+    except Exception:
+        logger.exception("Failed to journal manual grab quarantine state")
+
     logger.warning("File quarantined: %s - Reason: %s", quarantine_path, reason)
 
     if automation_engine:

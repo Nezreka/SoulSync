@@ -8792,7 +8792,8 @@ async function playLibraryTrack(track, albumTitle, artistName) {
     // resolve-track and overwrite the caller-supplied fields with the
     // DB values. Falls back silently to the caller-supplied values on
     // any error so we never lose the play action over a metadata fetch.
-    if (track.id && (track.title || track.name) && (artistName || track.artist_name)) {
+    if ((track.legacy_track_id || (track.id && !track.lib2_track_id)) &&
+            (track.title || track.name) && (artistName || track.artist_name)) {
         try {
             const _dbResp = await fetch('/api/stats/resolve-track', {
                 method: 'POST',
@@ -8852,6 +8853,9 @@ async function playLibraryTrack(track, albumTitle, artistName) {
             is_library: true,
             image_url: albumArt,
             id: track.id,
+            lib2_track_id: track.lib2_track_id || null,
+            legacy_track_id: track.legacy_track_id || null,
+            server_track_id: track.server_track_id || null,
             artist_id: track.artist_id,
             album_id: track.album_id,
             bitrate: track.bitrate,
@@ -8876,7 +8880,11 @@ async function playLibraryTrack(track, albumTitle, artistName) {
                 album: albumTitle || '',
                 // Server song id so playback can stream via the media server
                 // when the file isn't on SoulSync's disk (#809).
-                track_id: track.id || null
+                track_id: track.server_track_id || track.legacy_track_id ||
+                    (track.lib2_track_id ? null : (track.id || null)),
+                lib2_track_id: track.lib2_track_id || null,
+                legacy_track_id: track.legacy_track_id || null,
+                server_track_id: track.server_track_id || null,
             })
         });
 

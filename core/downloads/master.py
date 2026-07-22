@@ -1255,6 +1255,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
+                    'profile_id': batch_profile_id,
                     'playlist_id': playlist_id, 'batch_id': batch_id,
                     'track_index': res['track_index'], 'retry_count': 0,
                     'cached_candidates': [], 'used_sources': set(),

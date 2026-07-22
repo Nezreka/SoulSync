@@ -84,18 +84,61 @@ class TrackNumberRepairJob(RepairJob):
         transfer = context.transfer_folder
         if not os.path.isdir(transfer):
             logger.warning("Transfer folder does not exist: %s", transfer)
-            return result
 
         # Collect album folders (directories containing audio files)
         album_folders: Dict[str, List[str]] = {}
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    album_folders.setdefault(root, []).append(fname)
+        if os.path.isdir(transfer):
+            for root, dirs, files in os.walk(transfer):
+                skip_deleted_quarantine(root, dirs, transfer)
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        album_folders.setdefault(root, []).append(fname)
+
+        # Native Library-v2 coverage: folders of active V2 files that live
+        # outside the transfer walk (deduped against the walked folders).
+        try:
+            from core.library2.maintenance_subjects import active_file_subjects
+            from core.library2.paths import resolve_lib2_path
+
+            transfer_norm = os.path.normcase(os.path.normpath(transfer)) + os.sep
+            walked = {os.path.normcase(os.path.normpath(f)) for f in album_folders}
+            for subject in active_file_subjects(
+                context.db, context.config_manager,
+            ):
+                raw = str(subject['path'])
+                resolved = raw if os.path.isfile(raw) else resolve_lib2_path(
+                    raw, config_manager=context.config_manager)
+                if not resolved or not os.path.isfile(resolved):
+                    continue
+                if os.path.splitext(resolved)[1].lower() not in AUDIO_EXTENSIONS:
+                    continue
+                folder = os.path.dirname(resolved)
+                folder_norm = os.path.normcase(os.path.normpath(folder))
+                if folder_norm in walked or folder_norm.startswith(transfer_norm):
+                    continue
+                fname = os.path.basename(resolved)
+                bucket = album_folders.setdefault(folder, [])
+                if fname not in bucket:
+                    bucket.append(fname)
+        except Exception as e:
+            logger.warning("V2 subject enumeration failed: %s", e)
+            result.errors += 1
+
+        # Restore pre-import coverage for configured library roots as well as
+        # transfer. Track tags and folder grouping are sufficient for this job.
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for resolved in filesystem_audio_files(
+            context, include_indexed=True, extensions=AUDIO_EXTENSIONS,
+        ):
+            folder = os.path.dirname(resolved)
+            name = os.path.basename(resolved)
+            bucket = album_folders.setdefault(folder, [])
+            if name not in bucket:
+                bucket.append(name)
 
         total = sum(len(fnames) for fnames in album_folders.values())
         if context.update_progress:
@@ -145,16 +188,11 @@ class TrackNumberRepairJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
-        count = 0
-        for root, dirs, files in os.walk(transfer):
-            skip_deleted_quarantine(root, dirs, transfer)
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
-        return count
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        return len(filesystem_audio_files(
+            context, include_indexed=True, extensions=AUDIO_EXTENSIONS,
+        ))
 
     def _get_settings(self, context: JobContext) -> dict:
         """Read job settings from config, falling back to defaults."""
@@ -1211,10 +1249,22 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     if not plan['tag_ok']:
         _fix_track_number_tag(file_path, plan['correct_num'], plan['disc_total'])
 
+    final_path = file_path
     if plan['new_basename']:
         new_path = _rename_to_basename(file_path, filename, plan['new_basename'])
         if new_path and context.db:
             _update_db_file_path(context.db, file_path, new_path)
+            final_path = new_path
+
+    if context.report_change:
+        context.report_change(
+            finding_type='track_number_mismatch',
+            action='fixed_track_number',
+            entity_type='file',
+            entity_id=None,
+            file_path=final_path,
+            details={'original_path': file_path},
+        )
 
     return True
 

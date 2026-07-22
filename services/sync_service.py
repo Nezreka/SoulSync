@@ -589,6 +589,17 @@ class PlaylistSyncService:
                         )
 
                         if success:
+                            # §52.8: playlist sync is a confirmed acquisition
+                            # intent for this track — materialize the lib2
+                            # Artist/Release/Track now, same as any other
+                            # confirmed wishlist write. Best-effort/fail-open.
+                            from core.library2.materialize import materialize_wishlist_intent
+                            actor_profile_id = int(profile_id or 1)
+                            materialize_wishlist_intent(
+                                spotify_track_data,
+                                profile_id=actor_profile_id,
+                                actor_profile_id=actor_profile_id,
+                            )
                             wishlist_added_count += 1
 
                     logger.info(f"Successfully added {wishlist_added_count}/{len(unmatched_tracks)} tracks to wishlist")

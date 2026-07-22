@@ -98,14 +98,19 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         if recovered_count:
             logger.warning(f"[Wishlist Processing] Recovered {recovered_count} uncaptured failed tracks for wishlist")
 
-        # STEP 2: Add permanently failed tracks to wishlist (exact sync.py logic)
+        # STEP 2: Add permanently failed tracks to wishlist (exact sync.py logic).
+        # A Library-v2 track-level Automatic Search is a transient one-shot
+        # pipeline input, not monitoring state. Its batch explicitly disables
+        # this replay so a failed unmonitored search cannot materialize itself
+        # in the Wishlist after the fact.
         failed_count = len(permanently_failed_tracks)
         wishlist_added_count = 0
         error_count = 0
+        requeue_failed = batch.get('requeue_failed_to_wishlist', True) is not False
         
         logger.error(f"[Wishlist Processing] Processing {failed_count} failed tracks for wishlist")
         
-        if permanently_failed_tracks:
+        if permanently_failed_tracks and requeue_failed:
             try:
                 wishlist_service = get_wishlist_service()
 
@@ -166,8 +171,13 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 logger.error(f"[Wishlist Processing] Critical error adding failed tracks to wishlist: {e}")
                 import traceback
                 traceback.print_exc()
-        else:
+        elif not permanently_failed_tracks:
             logger.error("ℹ️ [Wishlist Processing] No failed tracks to add to wishlist")
+        else:
+            logger.info(
+                "[Wishlist Processing] Keeping %d transient search failure(s) out of Wishlist",
+                failed_count,
+            )
         
         # Store completion summary in batch for API response (matching sync.py pattern)
         completion_summary = {
