@@ -1000,10 +1000,15 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
-                     file_path: str, details: dict) -> dict:
-        """Route a fix to the correct handler based on finding_type."""
-        handlers = {
+    def _fix_handlers(self) -> dict:
+        """Single source of truth for finding_type → fix handler.
+
+        ``bulk_fix_findings`` derives its fixable-type set from these keys —
+        it used to keep a second hardcoded tuple that silently fell behind
+        (genre_cleanup / replaygain_retag findings matched Fix All's count
+        but were skipped by the fix loop, so "Fixed 0 of N").
+        """
+        return {
             'dead_file': self._fix_dead_file,
             'orphan_file': self._fix_orphan_file,
             'track_number_mismatch': self._fix_track_number,
@@ -1032,8 +1037,13 @@ class RepairWorker:
             'corrupt_audio': self._fix_corrupt_audio,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
+            'comma_artist_split': self._fix_comma_artist_split,
         }
-        handler = handlers.get(finding_type)
+
+    def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
+                     file_path: str, details: dict) -> dict:
+        """Route a fix to the correct handler based on finding_type."""
+        handler = self._fix_handlers().get(finding_type)
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
@@ -1070,6 +1080,158 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _fix_comma_artist_split(self, entity_type, entity_id, file_path, details):
+        """Split a comma-joined artist tag into properly separated artists (jadux).
+
+        Re-tags every file still under the combined artist: display artist
+        becomes "A; B", the per-artist list goes into the multi-value Artists
+        tag (same frames as issue #587's writer — TXXX:Artists for ID3,
+        `artists` for Vorbis, a real list for MP4), and an album-artist equal
+        to the combined string becomes the primary artist. The list is written
+        unconditionally — the user explicitly approved this split, so the
+        global write_multi_artist opt-in doesn't gate it.
+
+        Stale-finding guard: a file whose CURRENT artist tag no longer matches
+        the combined string (user edited it, or it's already split) is left
+        untouched. The file list comes fresh from the DB, not from the
+        finding's display-capped sample.
+        """
+        parts = details.get('split_artists')
+        combined = details.get('combined_name') or details.get('artist_name')
+        if not isinstance(parts, list) or len(parts) < 2 or not combined:
+            return {'success': False, 'error': 'Finding has no split_artists list'}
+        parts = [str(p).strip() for p in parts if str(p).strip()]
+        if len(parts) < 2:
+            return {'success': False, 'error': 'Finding has no split_artists list'}
+        display = details.get('new_display_artist') or '; '.join(parts)
+        primary = details.get('primary_artist') or parts[0]
+
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT file_path FROM tracks WHERE artist_id = ? "
+                "AND file_path IS NOT NULL AND file_path != ''", (entity_id,))
+            files = [r[0] for r in cursor.fetchall()]
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        finally:
+            if conn:
+                conn.close()
+        if not files:
+            return {'success': True, 'action': 'already_gone',
+                    'message': 'No files under this artist anymore'}
+
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3, TPE1, TPE2, TXXX
+        from mutagen.mp4 import MP4
+        from core.library.path_resolver import resolve_library_file_path
+        from core.metadata.common import save_audio_file, get_mutagen_symbols
+
+        def _norm(v):
+            return ' '.join(str(v or '').casefold().split())
+
+        def _single_value(raw):
+            """Current tag value IF it is a single string; None for multi-value
+            (already split) or missing."""
+            if raw is None:
+                return None
+            if isinstance(raw, (list, tuple)):
+                if len(raw) != 1:
+                    return None
+                raw = raw[0]
+            return str(raw)
+
+        combined_norm = _norm(combined)
+        fixed = stale = missing = errors = 0
+
+        for fp in files:
+            resolved = resolve_library_file_path(
+                fp, transfer_folder=self.transfer_folder,
+                config_manager=self._config_manager)
+            if not resolved or not os.path.exists(resolved):
+                missing += 1
+                continue
+            try:
+                audio = MutagenFile(resolved)
+                if audio is None:
+                    errors += 1
+                    continue
+                if audio.tags is None:
+                    audio.add_tags()
+
+                changed = False
+                if isinstance(audio.tags, ID3):
+                    tpe1 = audio.tags.get('TPE1')
+                    current = _single_value(tpe1.text if tpe1 else None)
+                    if current is None or _norm(current) != combined_norm:
+                        stale += 1
+                        continue
+                    audio.tags.delall('TPE1')
+                    audio.tags.add(TPE1(encoding=3, text=[display]))
+                    audio.tags.delall('TXXX:Artists')
+                    audio.tags.add(TXXX(encoding=3, desc='Artists', text=list(parts)))
+                    tpe2 = audio.tags.get('TPE2')
+                    if tpe2 and _norm(_single_value(tpe2.text)) == combined_norm:
+                        audio.tags.delall('TPE2')
+                        audio.tags.add(TPE2(encoding=3, text=[primary]))
+                    changed = True
+                elif isinstance(audio, MP4):
+                    current = _single_value(audio.tags.get('\xa9ART'))
+                    if current is None or _norm(current) != combined_norm:
+                        stale += 1
+                        continue
+                    # MP4 artist carries the list directly (#587 convention).
+                    audio.tags['\xa9ART'] = list(parts)
+                    if _norm(_single_value(audio.tags.get('aART'))) == combined_norm:
+                        audio.tags['aART'] = [primary]
+                    changed = True
+                elif hasattr(audio, 'get'):  # Vorbis family (FLAC/Ogg/Opus)
+                    current = _single_value(audio.get('artist'))
+                    if current is None or _norm(current) != combined_norm:
+                        stale += 1
+                        continue
+                    audio['artist'] = [display]
+                    audio['artists'] = list(parts)
+                    if _norm(_single_value(audio.get('albumartist'))) == combined_norm:
+                        audio['albumartist'] = [primary]
+                    changed = True
+                else:
+                    errors += 1
+                    continue
+
+                if changed:
+                    # Atomic + audio-integrity-verified save (#819/#1000).
+                    save_audio_file(audio, get_mutagen_symbols())
+                    fixed += 1
+            except Exception as e:
+                logger.error("Comma-artist split failed for %s: %s", resolved, e)
+                errors += 1
+
+        if fixed > 0:
+            msg = f'Re-tagged {fixed} file(s) as "{display}"'
+            extras = []
+            if stale:
+                extras.append(f'{stale} skipped (tag changed since scan)')
+            if missing:
+                extras.append(f'{missing} not found on disk')
+            if errors:
+                extras.append(f'{errors} failed')
+            if extras:
+                msg += f' ({", ".join(extras)})'
+            logger.info("Comma-artist split: %s → %s — %s", combined, parts, msg)
+            return {'success': True, 'action': 'artists_split', 'message': msg}
+        if stale and not errors and not missing:
+            return {'success': False,
+                    'error': f'All {stale} file(s) no longer carry "{combined}" — '
+                             f'tags changed since the scan; re-run the job'}
+        if missing == len(files):
+            return {'success': True, 'action': 'already_gone',
+                    'message': 'No files found on disk for this artist'}
+        return {'success': False,
+                'error': f'No files re-tagged ({stale} stale, {missing} missing, {errors} errors)'}
 
     def _fix_canonical_version(self, entity_type, entity_id, file_path, details):
         """Apply a canonical-version finding — pin the release the resolver chose
@@ -3953,16 +4115,11 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            # Build query for pending fixable findings
-            fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
-                             'missing_cover_art', 'missing_lyrics', 'expired_download', 'metadata_gap', 'duplicate_tracks',
-                             'single_album_redundant', 'mbid_mismatch',
-                             'album_mbid_mismatch',
-                             'album_tag_inconsistency',
-                             'incomplete_album', 'path_mismatch',
-                             'missing_lossy_copy', 'missing_replaygain', 'empty_folder',
-                             'missing_discography_track', 'acoustid_mismatch',
-                             'quality_upgrade', 'short_preview_track')
+            # Build query for pending fixable findings. Fixable = has a fix
+            # handler — derived from the dispatch map so the two can never
+            # drift apart again (a stale copy of this list silently skipped
+            # genre_cleanup / replaygain_retag findings in Fix All).
+            fixable_types = tuple(self._fix_handlers().keys())
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
             params = list(fixable_types)
