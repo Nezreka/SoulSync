@@ -139,7 +139,7 @@ def test_apply_art_requires_url(api):
 
 def test_apply_art_400_for_unresolvable_url(monkeypatch, api):
     client, _db, ids = api
-    monkeypatch.setattr("core.library.artist_image.download_image_bytes", lambda url: None)
+    monkeypatch.setattr("core.library2.artwork._download_remote_artwork", lambda url: None)
     resp = client.post(
         f"/api/library/v2/albums/{ids['album']}/art", json={"url": "https://example.com/dead.jpg"},
     )
@@ -149,7 +149,7 @@ def test_apply_art_400_for_unresolvable_url(monkeypatch, api):
 def test_apply_art_404_for_missing_album(monkeypatch, api):
     client, _db, _ids = api
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes", lambda url: _png_bytes(),
+        "core.library2.artwork._download_remote_artwork", lambda url: _png_bytes(),
     )
     resp = client.post(
         "/api/library/v2/albums/999999/art", json={"url": "https://example.com/cover.jpg"},
@@ -161,7 +161,7 @@ def test_apply_art_pins_the_choice_and_serves_it_locally(monkeypatch, api):
     client, _db, ids = api
     chosen = _png_bytes((9, 8, 7))
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes",
+        "core.library2.artwork._download_remote_artwork",
         lambda url: chosen if url == "https://example.com/cover.jpg" else None,
     )
 
@@ -200,7 +200,7 @@ def test_apply_art_triggers_a_background_cover_embed_retag(monkeypatch, api):
     conn.close()
 
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes",
+        "core.library2.artwork._download_remote_artwork",
         lambda url: _png_bytes((9, 8, 7)),
     )
 
@@ -320,7 +320,7 @@ def test_apply_artist_art_requires_url(api):
 
 def test_apply_artist_art_400_for_unresolvable_url(monkeypatch, api):
     client, _db, ids = api
-    monkeypatch.setattr("core.library.artist_image.download_image_bytes", lambda url: None)
+    monkeypatch.setattr("core.library2.artwork._download_remote_artwork", lambda url: None)
     resp = client.post(
         f"/api/library/v2/artists/{ids['artist']}/art", json={"url": "https://example.com/dead.jpg"},
     )
@@ -330,7 +330,7 @@ def test_apply_artist_art_400_for_unresolvable_url(monkeypatch, api):
 def test_apply_artist_art_404_for_missing_artist(monkeypatch, api):
     client, _db, _ids = api
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes", lambda url: _png_bytes(),
+        "core.library2.artwork._download_remote_artwork", lambda url: _png_bytes(),
     )
     resp = client.post(
         "/api/library/v2/artists/999999/art", json={"url": "https://example.com/photo.jpg"},
@@ -342,7 +342,7 @@ def test_apply_artist_art_pins_the_choice_and_serves_it_locally(monkeypatch, api
     client, _db, ids = api
     chosen = _png_bytes((5, 6, 7))
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes",
+        "core.library2.artwork._download_remote_artwork",
         lambda url: chosen if url == "https://example.com/photo.jpg" else None,
     )
 
