@@ -2,13 +2,18 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.imports import (
     get_import,
     record_inventory_result,
     record_matching_result,
 )
-from core.acquisition.main_pipeline_bridge import dispatch_import_to_main_pipeline
+from core.acquisition.main_pipeline_bridge import (
+    _stage_working_copy,
+    dispatch_import_to_main_pipeline,
+)
 from core.runtime_state import download_tasks, tasks_lock
 from tests.acquisition.test_bundle_inventory import _pending_import
 
@@ -146,3 +151,44 @@ def test_quarantined_dispatch_stays_open_for_existing_approve_flow(tmp_path):
     with tasks_lock:
         for task_id in task_ids:
             download_tasks.pop(task_id, None)
+
+
+def test_existing_working_copy_is_reused_only_when_content_matches(tmp_path):
+    source = tmp_path / "source" / "same.flac"
+    source.parent.mkdir()
+    source.write_bytes(b"same-content")
+    transfer = tmp_path / "transfer"
+    transfer.mkdir()
+    destination = transfer / "import-1_101_same.flac"
+    destination.write_bytes(b"same-content")
+
+    staged = _stage_working_copy(
+        source,
+        transfer_dir=str(transfer),
+        import_id="import-1",
+        track_id=101,
+        copier=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("matching content must not be copied again")
+        ),
+    )
+
+    assert staged == str(destination)
+
+
+def test_existing_same_size_working_copy_with_other_content_is_rejected(tmp_path):
+    source = tmp_path / "source" / "collision.flac"
+    source.parent.mkdir()
+    source.write_bytes(b"track-one")
+    transfer = tmp_path / "transfer"
+    transfer.mkdir()
+    destination = transfer / "import-2_202_collision.flac"
+    destination.write_bytes(b"track-two")
+
+    with pytest.raises(ValueError, match="different content"):
+        _stage_working_copy(
+            source,
+            transfer_dir=str(transfer),
+            import_id="import-2",
+            track_id=202,
+            copier=lambda *_args: True,
+        )

@@ -8,6 +8,7 @@ tagging, path and retry decision.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
@@ -18,6 +19,7 @@ from utils.logging_config import get_logger
 
 
 logger = get_logger("acquisition.main_pipeline_bridge")
+_HASH_CHUNK_SIZE = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -149,12 +151,22 @@ def _stage_working_copy(
     prefix = sanitize_filename(str(import_id)).replace(" ", "_")
     destination = destination_root / f"{prefix}_{track_id}_{source.name}"
     if destination.is_file():
-        if destination.stat().st_size == source.stat().st_size:
+        if destination.stat().st_size == source.stat().st_size and _content_hash(
+            destination
+        ) == _content_hash(source):
             return str(destination)
         raise ValueError("existing acquisition working copy has different content")
     if not copier(source, destination):
         raise ValueError("main-pipeline working copy could not be staged")
     return str(destination)
+
+
+def _content_hash(path: Path) -> bytes:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(_HASH_CHUNK_SIZE):
+            digest.update(chunk)
+    return digest.digest()
 
 
 def dispatch_import_to_main_pipeline(
