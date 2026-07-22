@@ -20,7 +20,7 @@ contains the fix and its regression coverage.
 | 8 | Bound artist-list aggregation to the requested page | Pending | — |
 | 9 | Preserve non-Latin Enrich titles | Done | `abfa27a7` |
 | 10 | Keep native Enrich's metadata-update contract | Done | `87b990bb` |
-| 11 | Fail the monitor mutation when outbox enqueue fails | In progress | — |
+| 11 | Fail the monitor mutation when outbox enqueue fails | Done | `088e1dc7` |
 | 12 | Fold alias rows into artist-list search and totals | Pending | — |
 | 13 | Resolve alias groups for every artist-wide action | Pending | — |
 | 14 | Rebuild album artist credits during re-import | Pending | — |
