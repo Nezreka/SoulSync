@@ -56,15 +56,19 @@ def register_routes(bp):
 
     @bp.route("/requests", methods=["GET"])
     def video_request_list():
-        """Admins see everyone's; members see their own. ?status= filters."""
+        """Admins see everyone's; members see their own. ?status= filters.
+        Rows carry ``in_library`` (the title now exists in the video library)
+        so an approved request visibly progresses to 'In library' instead of
+        sitting ambiguously forever; ``counts`` feeds the page tabs."""
         from . import get_video_db
         db = get_video_db()
         status = request.args.get("status") or None
-        rows = db.list_video_requests(
-            profile_id=None if _is_admin() else _me(), status=status)
+        scope = None if _is_admin() else _me()
+        rows = db.list_video_requests(profile_id=scope, status=status)
+        db.annotate_requests_in_library(rows)
+        counts = db.video_requests_status_counts(scope)
         return jsonify({"success": True, "requests": rows,
-                        "pending": db.video_requests_pending_count(
-                            None if _is_admin() else _me())})
+                        "counts": counts, "pending": counts.get("pending", 0)})
 
     @bp.route("/requests/counts", methods=["GET"])
     def video_request_counts():
@@ -116,9 +120,15 @@ def register_routes(bp):
                     logger.exception("request approve: policy expansion failed for %s", req["tmdb_id"])
         if not ok:
             return jsonify({"success": False, "error": "Could not add the title — request left pending."}), 500
-        db.resolve_video_request(request_id, status="approved", resolved_by=_me(),
-                                 admin_response=(body.get("response") or "")[:500] or None)
-        return jsonify({"success": True, "wished": wished})
+        # The add is idempotent, so a resolve failure is safe to surface: the
+        # user retries and the wishlist/watchlist write is a no-op re-upsert.
+        # Swallowing it left the row pending with a success toast — the
+        # "approved but still says Approve" state.
+        if not db.resolve_video_request(request_id, status="approved", resolved_by=_me(),
+                                        admin_response=(body.get("response") or "")[:500] or None):
+            return jsonify({"success": False,
+                            "error": "Title added, but the request could not be marked approved — try again."}), 500
+        return jsonify({"success": True, "wished": wished, "kind": req["kind"]})
 
     @bp.route("/requests/<int:request_id>/deny", methods=["POST"])
     def video_request_deny(request_id):
@@ -133,19 +143,27 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "Unknown or already-resolved request."}), 404
         return jsonify({"success": True})
 
+    @bp.route("/requests/resolved", methods=["DELETE"])
+    def video_request_clear_resolved():
+        """Clear request history: removes approved/denied rows (admin: all;
+        member: their own). Pending requests are never touched, and approval
+        side effects (wishlist/watchlist) stay."""
+        from . import get_video_db
+        removed = get_video_db().clear_resolved_video_requests(
+            None if _is_admin() else _me())
+        return jsonify({"success": True, "removed": removed})
+
     @bp.route("/requests/<int:request_id>", methods=["DELETE"])
     def video_request_withdraw(request_id):
-        """A member withdraws their OWN pending request (admins can too)."""
+        """Pending: a member withdraws their OWN request (admins any).
+        Approved/denied: remove the row from history (same ownership rules) —
+        the approval's wishlist/watchlist entry is untouched."""
         from . import get_video_db
         db = get_video_db()
-        if _is_admin():
-            req = db.get_video_request(request_id)
-            if req and req["status"] == "pending":
-                ok = db.delete_video_request(request_id, req["profile_id"])
-            else:
-                ok = False
-        else:
-            ok = db.delete_video_request(request_id, _me())
+        ok = db.delete_video_request(
+            request_id,
+            profile_id=None if _is_admin() else _me(),
+            include_resolved=True)
         if not ok:
-            return jsonify({"success": False, "error": "Not yours, or not pending."}), 404
+            return jsonify({"success": False, "error": "Not yours, or already gone."}), 404
         return jsonify({"success": True})

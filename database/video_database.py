@@ -6174,13 +6174,24 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def delete_video_request(self, request_id, profile_id) -> bool:
-        """A member withdraws their OWN pending request."""
+    def delete_video_request(self, request_id, profile_id=None, include_resolved=False) -> bool:
+        """Delete a request row.
+
+        ``profile_id`` scopes to that profile's own rows (member); None = any
+        row (admin). ``include_resolved`` False keeps the original withdraw
+        semantics (pending only); True also removes approved/denied rows —
+        the "remove from history" action. Approval side effects (wishlist /
+        watchlist entries) are never touched; this only clears the record."""
+        where, args = ["id=?"], [int(request_id)]
+        if profile_id is not None:
+            where.append("profile_id=?")
+            args.append(int(profile_id))
+        if not include_resolved:
+            where.append("status='pending'")
         conn = self._get_connection()
         try:
             cur = conn.execute(
-                "DELETE FROM video_requests WHERE id=? AND profile_id=? AND status='pending'",
-                (int(request_id), int(profile_id)))
+                "DELETE FROM video_requests WHERE " + " AND ".join(where), args)
             conn.commit()
             return cur.rowcount > 0
         except sqlite3.Error:
@@ -6188,6 +6199,74 @@ class VideoDatabase:
             return False
         finally:
             conn.close()
+
+    def clear_resolved_video_requests(self, profile_id=None) -> int:
+        """Remove all approved/denied request rows (admin housekeeping;
+        profile_id scopes to one member's history). Pending rows are never
+        touched. Returns the number of rows removed."""
+        where = "status IN ('approved','denied')"
+        args = []
+        if profile_id is not None:
+            where += " AND profile_id=?"
+            args.append(int(profile_id))
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_requests WHERE " + where, args)
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:
+            logger.exception("clear_resolved_video_requests failed")
+            return 0
+        finally:
+            conn.close()
+
+    def video_requests_status_counts(self, profile_id=None) -> dict:
+        """{pending, approved, denied} counts for the page tabs (all rows for
+        admins, own rows for members)."""
+        counts = {"pending": 0, "approved": 0, "denied": 0}
+        sql = "SELECT status, COUNT(*) FROM video_requests"
+        args = []
+        if profile_id is not None:
+            sql += " WHERE profile_id=?"
+            args.append(int(profile_id))
+        sql += " GROUP BY status"
+        conn = self._get_connection()
+        try:
+            for status, n in conn.execute(sql, args).fetchall():
+                if status in counts:
+                    counts[status] = n
+            return counts
+        except sqlite3.Error:
+            return counts
+        finally:
+            conn.close()
+
+    def annotate_requests_in_library(self, rows) -> None:
+        """Stamp each request dict with ``in_library`` — whether a library row
+        (movies/shows) exists for its tmdb id. This is what lets an approved
+        request show 'In library' instead of sitting ambiguously forever."""
+        wanted = {"movie": set(), "show": set()}
+        for r in rows:
+            kind, tid = r.get("kind"), r.get("tmdb_id")
+            if kind in wanted and tid:
+                wanted[kind].add(int(tid))
+        owned = {"movie": set(), "show": set()}
+        conn = self._get_connection()
+        try:
+            for kind, table in (("movie", "movies"), ("show", "shows")):
+                ids = list(wanted[kind])
+                if not ids:
+                    continue
+                ph = ",".join("?" * len(ids))
+                owned[kind] = {row[0] for row in conn.execute(
+                    f"SELECT DISTINCT tmdb_id FROM {table} WHERE tmdb_id IN ({ph})", ids)}
+        except sqlite3.Error:
+            logger.exception("annotate_requests_in_library failed")
+        finally:
+            conn.close()
+        for r in rows:
+            r["in_library"] = bool(r.get("tmdb_id")) and \
+                int(r["tmdb_id"]) in owned.get(r.get("kind"), set())
 
     def video_requests_pending_count(self, profile_id=None) -> int:
         conn = self._get_connection()

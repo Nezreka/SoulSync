@@ -2386,6 +2386,23 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vreq-denyin { flex: 1; padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
     border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
 .vreq-empty { padding: 40px 0; text-align: center; color: rgba(255, 255, 255, 0.45); font-size: 13.5px; }
+.vreq-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin: 0 0 16px; flex-wrap: wrap; }
+.vreq-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.vreq-tab { padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.65); }
+.vreq-tab:hover { background: rgba(255, 255, 255, 0.09); color: #fff; }
+.vreq-tab.active { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+.vreq-tab-n { opacity: 0.65; font-weight: 600; margin-left: 2px; }
+.vreq-btn--clear { border-color: rgba(255, 255, 255, 0.1); background: transparent;
+    color: rgba(255, 255, 255, 0.55); font-size: 12px; padding: 7px 12px; }
+.vreq-btn--clear:hover { color: #fff; }
+.vreq-btn--x { padding: 4px 10px; font-size: 15px; line-height: 1; color: rgba(255, 255, 255, 0.5); }
+.vreq-btn--x:hover { color: #fff; background: rgba(239, 68, 68, 0.35); border-color: transparent; }
+/* Approved keeps telling the story: acquiring until the library has it. */
+.vreq-st--lib { background: rgba(34, 197, 94, 0.85); color: #04150a; }
+.vreq-st--acq { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
 @media (max-width: 640px) { .vreq-row { flex-wrap: wrap; } .vreq-actions { width: 100%; justify-content: flex-end; } }
 
 /* Custom Formats editor rows (P3) */
