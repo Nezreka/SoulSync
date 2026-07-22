@@ -23,6 +23,46 @@ _SORTS = {
     "tracks": "track_count DESC, a.name COLLATE NOCASE",
 }
 
+
+def _artist_page_order(sort: str) -> str:
+    """Choose page ids before running the expensive catalog roll-ups."""
+
+    if sort == "albums":
+        return """
+            (SELECT COUNT(*)
+               FROM (
+                    SELECT aa.album_id
+                      FROM lib2_album_artists aa
+                     WHERE aa.artist_id=a.id
+                    UNION
+                    SELECT t.album_id
+                      FROM lib2_track_artists ta
+                      JOIN lib2_tracks t ON t.id=ta.track_id
+                     WHERE ta.artist_id=a.id
+               ) candidate
+               JOIN lib2_albums al ON al.id=candidate.album_id
+              WHERE al.album_type <> 'single'
+                AND (al.origin='library' OR al.monitored=1)
+            ) DESC, a.name COLLATE NOCASE, a.id
+        """
+    if sort == "tracks":
+        return """
+            (SELECT COUNT(DISTINCT t.id)
+               FROM lib2_track_artists ta
+               JOIN lib2_tracks t ON t.id=ta.track_id
+               LEFT JOIN lib2_wanted_tracks w
+                      ON w.track_id=t.id AND w.profile_id=1
+              WHERE ta.artist_id=a.id
+                AND (COALESCE(w.wanted, t.monitored)=1 OR EXISTS (
+                    SELECT 1 FROM lib2_track_files tf
+                     WHERE tf.track_id=t.id
+                       AND COALESCE(tf.file_state, 'active')
+                           NOT IN ('missing_confirmed','deleted')
+                ))
+            ) DESC, a.name COLLATE NOCASE, a.id
+        """
+    return _SORTS.get(sort, _SORTS["name"]) + ", a.id"
+
 def _json_dict(raw: Any) -> Dict[str, Any]:
     if not raw:
         return {}
@@ -85,7 +125,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     ``monitored`` filters the list: ``'all'`` (default), ``'monitored'``, or
     ``'unmonitored'``.
     """
-    order = _SORTS.get(sort, _SORTS["name"])
+    order = _artist_page_order(sort)
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
     offset = (page - 1) * limit
@@ -107,13 +147,22 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
 
     rows = conn.execute(
         f"""
-        WITH artist_albums AS (
+        WITH page_artists AS MATERIALIZED (
+            SELECT a.*
+              FROM lib2_artists a
+              {where}
+             ORDER BY {order}
+             LIMIT :limit OFFSET :offset
+        ),
+        artist_albums AS (
             SELECT aa.artist_id, aa.album_id
               FROM lib2_album_artists aa
+              JOIN page_artists pa ON pa.id=aa.artist_id
             UNION
             SELECT ta.artist_id, t.album_id
               FROM lib2_track_artists ta
               JOIN lib2_tracks t ON t.id=ta.track_id
+              JOIN page_artists pa ON pa.id=ta.artist_id
         ),
         album_stats AS (
             SELECT aa.artist_id,
@@ -140,6 +189,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                             NOT IN ('missing_confirmed','deleted')
                        THEN t.id END) AS track_files_present
               FROM lib2_track_artists ta
+              JOIN page_artists pa ON pa.id=ta.artist_id
               JOIN lib2_tracks t ON t.id=ta.track_id
               LEFT JOIN lib2_wanted_tracks w
                      ON w.track_id=t.id AND w.profile_id=1
@@ -152,7 +202,13 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                        PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
                    ) AS rank
               FROM lib2_track_files tf
-             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'
+             WHERE EXISTS (
+                   SELECT 1
+                     FROM lib2_track_artists ta
+                     JOIN page_artists pa ON pa.id=ta.artist_id
+                    WHERE ta.track_id=tf.track_id
+             )
+               AND COALESCE(tf.file_state, 'active') <> 'deleted'
         ),
         -- I8: disk-space roll-up, kept separate from track_stats above —
         -- that CTE's plain (unranked) tf join fans out per historical file
@@ -161,6 +217,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         artist_size AS (
             SELECT ta.artist_id, COALESCE(SUM(pf.size), 0) AS total_size_bytes
               FROM lib2_track_artists ta
+              JOIN page_artists pa ON pa.id=ta.artist_id
               JOIN track_primary_files pf ON pf.track_id=ta.track_id AND pf.rank=1
              GROUP BY ta.artist_id
         )
@@ -172,13 +229,11 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                COALESCE(ts.track_count, 0) AS track_count,
                COALESCE(ts.track_files_present, 0) AS track_files_present,
                COALESCE(asz.total_size_bytes, 0) AS total_size_bytes
-        FROM lib2_artists a
+        FROM page_artists a
         LEFT JOIN album_stats als ON als.artist_id=a.id
         LEFT JOIN track_stats ts ON ts.artist_id=a.id
         LEFT JOIN artist_size asz ON asz.artist_id=a.id
-        {where}
         ORDER BY {order}
-        LIMIT :limit OFFSET :offset
         """,
         {**params, "limit": limit, "offset": offset},
     ).fetchall()
