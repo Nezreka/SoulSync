@@ -949,6 +949,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             else:
                 progress(stage, current, total)
 
+        def checkpoint(stage: str, current: int, total: int) -> None:
+            """Publish one restart-safe batch and its heartbeat."""
+            conn.commit()
+            report_progress(stage, current, total)
+            # A connection-aware bootstrap heartbeat uses this connection so it
+            # cannot become visible until the batch transaction is committed.
+            conn.commit()
+
         if reset:
             # Local ids change across a destructive rebuild. Preserve deliberate
             # album intent by provider/stable identity, never by surrogate id.
@@ -974,12 +982,29 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         resolver = _ArtistResolver(cursor, default_profile_id)
         resolver.seed_existing()
         discography_albums = _discography_album_index(cursor)
+        conn.commit()
 
         # --- Artists -------------------------------------------------------
-        cursor.execute("SELECT * FROM artists")
-        artist_rows = cursor.fetchall()
-        report_progress("artists", 0, len(artist_rows))
-        for i, row in enumerate(artist_rows):
+        artist_projection = _legacy_projection(
+            artist_cols,
+            required=("id", "name"),
+            optional=(
+                "spotify_artist_id", "musicbrainz_artist_id", "musicbrainz_id",
+                "deezer_artist_id", "deezer_id", "tidal_artist_id", "tidal_id",
+                "qobuz_artist_id", "qobuz_id", "thumb_url", "banner_url",
+                "genres", "summary", "style", "mood", "label", "aliases",
+                "lastfm_bio", "lastfm_listeners", "lastfm_tags",
+                "lastfm_similar", "lastfm_url", "genius_description",
+                "genius_alt_names", "genius_url", "discogs_bio",
+                "discogs_members", "discogs_urls",
+                *_provider_id_columns("artist"),
+            ),
+        )
+        artist_total = int(cursor.execute("SELECT COUNT(*) FROM artists").fetchone()[0])
+        checkpoint("artists", 0, artist_total)
+        for i, row in enumerate(
+            _legacy_rows(conn, "artists", artist_projection)
+        ):
             name = row["name"]
             if not name:
                 continue
@@ -1027,9 +1052,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # through the same COALESCE-on-UPDATE columns as name/image/genres.
             _merge_artist_enrichment(cursor, lib2_artist_id, _artist_enrichment_payload(row))
             stats["artists"] += 1
-            if (i + 1) % 200 == 0:
-                report_progress("artists", i + 1, len(artist_rows))
-        report_progress("artists", len(artist_rows), len(artist_rows))
+            if (i + 1) % IMPORT_BATCH_SIZE == 0:
+                checkpoint("artists", i + 1, artist_total)
+        checkpoint("artists", artist_total, artist_total)
 
         # --- Albums (map legacy album id -> lib2 album id) -----------------
         album_map: Dict[str, int] = {}
@@ -1037,9 +1062,20 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         for r in cursor.fetchall():
             album_map[_legacy_key(r["legacy_album_id"])] = r["id"]
 
-        cursor.execute("SELECT * FROM albums")
-        album_rows = cursor.fetchall()
-        report_progress("albums", 0, len(album_rows))
+        album_projection = _legacy_projection(
+            album_cols,
+            required=("id", "artist_id", "title"),
+            optional=(
+                "track_count", "album_type", "release_type", "type", "year",
+                "api_track_count", "release_date", "spotify_album_id",
+                "musicbrainz_release_id", "thumb_url", "genres", "explicit",
+                "label", "upc", "style", "mood", "deezer_album_id",
+                "deezer_id", "tidal_album_id", "tidal_id", "qobuz_album_id",
+                "qobuz_id", *_provider_id_columns("album"),
+            ),
+        )
+        album_total = int(cursor.execute("SELECT COUNT(*) FROM albums").fetchone()[0])
+        checkpoint("albums", 0, album_total)
         # Legacy media-server ids are TEXT and may be provider-shaped (for
         # example a 22-character Spotify album id).  Use the same normalized
         # key as ``album_map`` instead of assuming that ``tracks.album_id`` is
@@ -1063,7 +1099,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "GROUP BY album_id"
             ).fetchall()
         }
-        for i, row in enumerate(album_rows):
+        for i, row in enumerate(
+            _legacy_rows(conn, "albums", album_projection)
+        ):
             lib2_artist = resolver.get_legacy(row["artist_id"])
             if lib2_artist is None:
                 continue  # orphan album with no artist; skip
@@ -1161,9 +1199,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "VALUES(?,?, 'primary')", (album_id, lib2_artist),
             )
             stats["albums"] += 1
-            if (i + 1) % 200 == 0:
-                report_progress("albums", i + 1, len(album_rows))
-        report_progress("albums", len(album_rows), len(album_rows))
+            if (i + 1) % IMPORT_BATCH_SIZE == 0:
+                checkpoint("albums", i + 1, album_total)
+        checkpoint("albums", album_total, album_total)
 
         # --- Tracks + track files + track-artist junctions -----------------
         track_map: Dict[str, int] = {}
@@ -1221,7 +1259,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             ),
         )
         track_total = int(cursor.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
-        report_progress("tracks", 0, track_total)
+        checkpoint("tracks", 0, track_total)
         for i, row in enumerate(
             _legacy_rows(conn, "tracks", track_projection)
         ):
@@ -1380,17 +1418,21 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
                          _pick(row, "verification_status"), row["id"], run_id, file_id),
                     )
-            if (i + 1) % 200 == 0:
-                report_progress("tracks", i + 1, track_total)
-        report_progress("tracks", track_total, track_total)
+            if (i + 1) % IMPORT_BATCH_SIZE == 0:
+                checkpoint("tracks", i + 1, track_total)
+        checkpoint("tracks", track_total, track_total)
 
         stats.update(_reconcile_legacy_snapshot(cursor, run_id))
+        conn.commit()
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
+        conn.commit()
         stats["linked_duplicates"] = link_single_album_duplicates(cursor)
+        conn.commit()
         apply_monitoring_from_watchlist_wishlist(cursor, profile_id)
         stats["monitoring_reconciled"] = reconcile_import_monitoring(
             cursor, profile_id=profile_id or 1
         )
+        conn.commit()
         # Mint provider-less stable ids for everything this run inserted
         # (audit P1-12) — the schema-ensure backfill ran before the inserts.
         from core.library2.stable_ids import backfill_stable_ids
@@ -1402,17 +1444,20 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         stats["album_monitor_intent_restored"] = restore_album_monitor_intent(
             conn, preserved_album_intent, profile_id=profile_id
         )
+        conn.commit()
         # Import-derived monitored flags are provenance 'legacy_import', never
         # mistaken for deliberate user choices (audit P1-13/P1-14). Recorded
         # intent (re-import over an existing library) is never downgraded.
         from core.library2.monitor_rules import seed_legacy_rules
         seed_legacy_rules(cursor)
         project_entity_monitor_rules(conn, profile_id=profile_id)
+        conn.commit()
         # Materialize the edition/recording shadow model for everything this
         # run inserted (audit P1-04 / ADR-04) — the schema-ensure backfill ran
         # before the inserts, so it has to run again here.
         from core.library2.editions import backfill_editions
         stats["editions"] = backfill_editions(cursor)
+        conn.commit()
         # Rebuild the wanted projection over the imported rules (§11.2).
         from core.library2.wanted import ensure_wanted_schema, recompute_wanted
         ensure_wanted_schema(cursor)
