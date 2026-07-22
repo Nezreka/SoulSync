@@ -48,7 +48,7 @@ def test_manual_override_wins_over_embedded_art(imported_conn, legacy_db, monkey
     override_bytes = _image_bytes((10, 20, 30))
     embedded_bytes = _image_bytes((200, 100, 50))
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes",
+        artwork, "_download_remote_artwork",
         lambda url: override_bytes if url == "https://example.com/manual.jpg" else None,
     )
     monkeypatch.setattr(artwork, "_embedded_art_for_album", lambda *_args: embedded_bytes)
@@ -82,7 +82,7 @@ def test_artist_prefers_provider_photo_over_embedded_album_art(
         artwork, "_provider_art_url", lambda *_args: "https://example.com/artist.jpg"
     )
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes", lambda _url: provider_bytes
+        artwork, "_download_remote_artwork", lambda _url: provider_bytes
     )
     monkeypatch.setattr(artwork, "_embedded_art_for_album", lambda *_args: embedded_bytes)
 
@@ -116,7 +116,7 @@ def test_apply_manual_artwork_downloads_validates_and_caches(
 ):
     chosen_bytes = _image_bytes((1, 2, 3))
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes",
+        artwork, "_download_remote_artwork",
         lambda url: chosen_bytes if url == "https://example.com/cover.jpg" else None,
     )
     database = _art_db(legacy_db)
@@ -138,7 +138,7 @@ def test_apply_manual_artwork_downloads_validates_and_caches(
 def test_apply_manual_artwork_returns_false_for_unreachable_url(
     imported_conn, legacy_db, monkeypatch, album_id,
 ):
-    monkeypatch.setattr("core.library.artist_image.download_image_bytes", lambda url: None)
+    monkeypatch.setattr(artwork, "_download_remote_artwork", lambda url: None)
     database = _art_db(legacy_db)
 
     ok = artwork.apply_manual_artwork(
@@ -153,7 +153,7 @@ def test_apply_manual_artwork_returns_false_for_invalid_image_bytes(
     imported_conn, legacy_db, monkeypatch, album_id,
 ):
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes", lambda url: b"not-an-image",
+        artwork, "_download_remote_artwork", lambda url: b"not-an-image",
     )
     database = _art_db(legacy_db)
 
@@ -165,6 +165,80 @@ def test_apply_manual_artwork_returns_false_for_invalid_image_bytes(
     assert "image_url" not in overrides
 
 
+@pytest.mark.parametrize("url", [
+    "file:///etc/passwd",
+    "http://127.0.0.1/admin",
+    "http://169.254.169.254/latest/meta-data",
+    "http://[::1]/admin",
+    "https://user:password@example.com/image.jpg",
+])
+def test_remote_artwork_rejects_non_public_targets(url):
+    assert artwork._public_remote_artwork_url(url) is False
+
+
+def test_remote_artwork_revalidates_redirect_targets(monkeypatch):
+    monkeypatch.setattr(
+        artwork.socket,
+        "getaddrinfo",
+        lambda host, port, **_kwargs: [
+            (artwork.socket.AF_INET, artwork.socket.SOCK_STREAM, 6, "", (host, port))
+        ],
+    )
+    responses = []
+
+    class _Response:
+        status_code = 302
+        headers = {"Location": "http://127.0.0.1/internal"}
+        raw = None
+
+        def close(self):
+            responses.append("closed")
+
+    calls = []
+    monkeypatch.setattr(
+        "requests.get",
+        lambda url, **_kwargs: calls.append(url) or _Response(),
+    )
+
+    assert artwork._download_remote_artwork("https://93.184.216.34/cover") is None
+    assert calls == ["https://93.184.216.34/cover"]
+    assert responses == ["closed"]
+
+
+def test_remote_artwork_stream_enforces_byte_limit(monkeypatch):
+    monkeypatch.setattr(
+        artwork.socket,
+        "getaddrinfo",
+        lambda host, port, **_kwargs: [
+            (artwork.socket.AF_INET, artwork.socket.SOCK_STREAM, 6, "", (host, port))
+        ],
+    )
+
+    class _Response:
+        status_code = 200
+        headers = {"Content-Type": "image/png"}
+        raw = None
+
+        def iter_content(self, chunk_size):
+            assert chunk_size == 64 * 1024
+            yield b"123"
+            yield b"45"
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("requests.get", lambda *_args, **_kwargs: _Response())
+
+    assert artwork._download_remote_artwork(
+        "https://93.184.216.34/cover", max_bytes=4,
+    ) is None
+
+
+def test_artwork_normalization_rejects_excessive_dimensions(monkeypatch):
+    monkeypatch.setattr(artwork, "MAX_ARTWORK_PIXELS", 4)
+    assert artwork._normalize_jpeg_variants(_image_bytes()) is None
+
+
 def test_force_refresh_does_not_clobber_a_manual_pick(imported_conn, legacy_db, monkeypatch, album_id):
     """The whole point of storing the pick as an override (not just writing
     the cache file once): a later force-refresh (Refresh & Scan / precache)
@@ -172,7 +246,7 @@ def test_force_refresh_does_not_clobber_a_manual_pick(imported_conn, legacy_db, 
     picked_bytes = _image_bytes((9, 9, 9))
     embedded_bytes = _image_bytes((200, 200, 200))
     monkeypatch.setattr(
-        "core.library.artist_image.download_image_bytes",
+        artwork, "_download_remote_artwork",
         lambda url: picked_bytes if url == "https://example.com/pick.jpg" else None,
     )
     database = _art_db(legacy_db)

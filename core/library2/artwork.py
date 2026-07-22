@@ -20,16 +20,23 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
+from urllib.parse import urljoin, urlsplit
 
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.artwork")
+
+MAX_REMOTE_ARTWORK_BYTES = 10 * 1024 * 1024
+MAX_ARTWORK_PIXELS = 40_000_000
+MAX_ARTWORK_DIMENSION = 12_000
+MAX_ARTWORK_REDIRECTS = 4
 
 
 # The import precache and the HTTP slow path may discover the same uncached
@@ -115,6 +122,103 @@ def is_cached_jpeg(path: Path) -> bool:
         return False
 
 
+def _public_remote_artwork_url(url: str) -> bool:
+    """Allow only HTTP(S) targets whose complete DNS answer is public."""
+    from ipaddress import ip_address
+
+    try:
+        parsed = urlsplit(str(url or "").strip())
+        if parsed.scheme not in {"http", "https"}:
+            return False
+        if parsed.username is not None or parsed.password is not None:
+            return False
+        host = parsed.hostname
+        if not host:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addresses = {
+            item[4][0].split("%", 1)[0]
+            for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        }
+        return bool(addresses) and all(ip_address(value).is_global for value in addresses)
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _response_peer_is_public(response: Any) -> bool:
+    """Reject a DNS-rebound connection when Requests exposes its peer socket."""
+    from ipaddress import ip_address
+
+    raw = getattr(response, "raw", None)
+    connection = getattr(raw, "_connection", None) or getattr(raw, "connection", None)
+    sock = getattr(connection, "sock", None)
+    if sock is None:
+        return True  # URL DNS validation remains the portable baseline.
+    try:
+        peer = str(sock.getpeername()[0]).split("%", 1)[0]
+        return ip_address(peer).is_global
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _download_remote_artwork(
+    url: str,
+    *,
+    max_bytes: int = MAX_REMOTE_ARTWORK_BYTES,
+) -> Optional[bytes]:
+    """Fetch public artwork with a bounded, revalidated redirect walk."""
+    import requests
+
+    current = str(url or "").strip()
+    limit = max(1, int(max_bytes))
+    for _redirect in range(MAX_ARTWORK_REDIRECTS + 1):
+        if not _public_remote_artwork_url(current):
+            return None
+        response = None
+        try:
+            response = requests.get(
+                current,
+                timeout=(3.05, 15),
+                stream=True,
+                allow_redirects=False,
+                headers={"Accept": "image/*"},
+            )
+            if not _response_peer_is_public(response):
+                return None
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = str(response.headers.get("Location") or "").strip()
+                if not location:
+                    return None
+                current = urljoin(current, location)
+                continue
+            if response.status_code != 200:
+                return None
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+            if not content_type.startswith("image/"):
+                return None
+            try:
+                declared_size = int(response.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                declared_size = 0
+            if declared_size < 0 or declared_size > limit:
+                return None
+            body = bytearray()
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                body.extend(chunk)
+                if len(body) > limit:
+                    return None
+            return bytes(body) if body else None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("remote artwork fetch failed: %s", exc)
+            return None
+        finally:
+            if response is not None:
+                response.close()
+    return None
+
+
 def _normalize_jpeg_variants(data: bytes, thumb_height: int = 256) -> Optional[tuple[bytes, bytes]]:
     """Validate once and encode the full JPEG plus its list thumbnail.
 
@@ -127,6 +231,14 @@ def _normalize_jpeg_variants(data: bytes, thumb_height: int = 256) -> Optional[t
         from PIL import Image, ImageOps
 
         with Image.open(BytesIO(data)) as image:
+            width, height = image.size
+            if (
+                width <= 0 or height <= 0
+                or width > MAX_ARTWORK_DIMENSION
+                or height > MAX_ARTWORK_DIMENSION
+                or width * height > MAX_ARTWORK_PIXELS
+            ):
+                return None
             image.load()
             image = ImageOps.exif_transpose(image)
             if image.mode in ("RGBA", "LA") or "transparency" in image.info:
@@ -379,8 +491,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
     override_url = _manual_art_override_url(conn, kind, entity_id)
     if override_url:
         try:
-            from core.library.artist_image import download_image_bytes
-            data = download_image_bytes(override_url)
+            data = _download_remote_artwork(override_url)
         except Exception as e:  # noqa: BLE001
             logger.debug("manual art override download failed (%s %s): %s", kind, entity_id, e)
 
@@ -395,8 +506,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
         url = _provider_art_url(conn, kind, entity_id)
         if url:
             try:
-                from core.library.artist_image import download_image_bytes
-                data = download_image_bytes(url)
+                data = _download_remote_artwork(url)
             except Exception as e:  # noqa: BLE001
                 logger.debug("provider image download failed: %s", e)
 
@@ -417,8 +527,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
         url = _provider_art_url(conn, kind, entity_id)
         if url:
             try:
-                from core.library.artist_image import download_image_bytes
-                data = download_image_bytes(url)
+                data = _download_remote_artwork(url)
             except Exception as e:  # noqa: BLE001
                 logger.debug("provider image download failed: %s", e)
 
@@ -559,8 +668,7 @@ def apply_manual_artwork(
     if entity_type is None:
         return False
 
-    from core.library.artist_image import download_image_bytes
-    data = download_image_bytes(url)
+    data = _download_remote_artwork(url)
     if not data:
         return False
     variants = _normalize_jpeg_variants(data)
