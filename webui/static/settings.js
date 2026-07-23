@@ -1683,6 +1683,8 @@ async function loadSettingsData() {
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
+        const _wlTtl = document.getElementById('wishlist-ignore-ttl');
+        if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
@@ -4556,7 +4558,9 @@ async function saveSettings(quiet = false) {
             }
         },
         wishlist: {
-            allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked
+            allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
+            ignore_ttl_days: Math.max(1, Math.min(365,
+                parseInt(document.getElementById('wishlist-ignore-ttl')?.value, 10) || 30)),
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,

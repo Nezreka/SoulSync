@@ -8774,6 +8774,13 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="wishlist-ignore-ttl">Removed-track re-try window (days)</label>
+                                    <input type="number" id="wishlist-ignore-ttl" min="1" max="365" step="1" value="30">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>When you remove or cancel a wishlist track, SoulSync remembers not to re-add it automatically for this many days. Lower it (e.g. 7) to give removed tracks another chance sooner.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <button class="test-button" onclick="resetFileOrganizationTemplates()"
                                         style="background: #666;">
                                         🔄 Reset to Defaults

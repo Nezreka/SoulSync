@@ -10255,8 +10255,8 @@ class MusicDatabase:
     def is_track_ignored(self, track_id: str, profile_id: int = 1,
                          ttl_days: Optional[int] = None) -> bool:
         """Whether ``track_id`` has a non-expired ignore entry. Fail-open False."""
-        from core.wishlist.ignore import normalize_ignore_id, is_expired, IGNORE_TTL_DAYS
-        ttl = IGNORE_TTL_DAYS if ttl_days is None else ttl_days
+        from core.wishlist.ignore import normalize_ignore_id, is_expired, configured_ttl_days
+        ttl = configured_ttl_days() if ttl_days is None else ttl_days
         key = normalize_ignore_id(track_id)
         if not key:
             return False
@@ -10295,8 +10295,8 @@ class MusicDatabase:
     def get_wishlist_ignore(self, profile_id: int = 1,
                             ttl_days: Optional[int] = None) -> List[Dict[str, Any]]:
         """Active (non-expired) ignore entries, newest first; purges lapsed rows."""
-        from core.wishlist.ignore import is_expired, IGNORE_TTL_DAYS
-        ttl = IGNORE_TTL_DAYS if ttl_days is None else ttl_days
+        from core.wishlist.ignore import is_expired, configured_ttl_days
+        ttl = configured_ttl_days() if ttl_days is None else ttl_days
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()

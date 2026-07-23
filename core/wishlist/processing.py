@@ -346,6 +346,28 @@ def add_cancelled_tracks_to_failed_tracks(
     return processed_count
 
 
+def record_failed_attempt(wishlist_service, track_data, failure_reason, profile_id,
+                          *, logger=logger) -> bool:
+    """Stamp one failed cycle attempt on the track's wishlist row
+    (retry_count + 1, last_attempted = now).
+
+    Runs for fresh adds AND duplicate-skips — the duplicate-skip IS the
+    repeat-failure signal (javiavid: retry_count stayed 0 forever because the
+    only increment path, mark_track_download_result, had no callers; that also
+    left the 3.1.1 failing badge/filter dead on the music side). Best-effort:
+    a stamp failure never disturbs wishlist processing."""
+    sp_id = track_data.get('id') if isinstance(track_data, dict) else None
+    if not sp_id or str(sp_id).startswith('wing_it_'):
+        return False
+    try:
+        return bool(wishlist_service.mark_track_download_result(
+            str(sp_id), False, error_message=str(failure_reason or '') or None,
+            profile_id=profile_id))
+    except Exception as e:
+        logger.debug("wishlist attempt stamp failed for %s: %s", sp_id, e)
+        return False
+
+
 def recover_uncaptured_failed_tracks(
     batch: Dict[str, Any],
     download_tasks: Dict[str, Dict[str, Any]],
@@ -856,7 +878,8 @@ def cleanup_wishlist_against_library(
         return {"success": False, "error": str(e)}, 500
 
 
-def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, automation_id=None):
+def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, automation_id=None,
+                                   apply_backoff=None):
     """Run automatic wishlist processing outside the controller."""
     logger = runtime.logger
     logger.info("[Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
@@ -946,6 +969,30 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                     logger.info(
                         f"[Auto-Wishlist] Skipping {len(_unreleased)} unreleased track(s) "
                         f"(future release date) — they'll be searched once released")
+
+                # Progressive retry backoff (javiavid): repeatedly-failing tracks
+                # earn a growing cooldown (4h → 24h → 7d) instead of burning a
+                # search every hourly cycle forever. SCHEDULED work only — the
+                # manual "Process Wishlist Now" button retries everything (the
+                # click is the override, like Sonarr's manual search). Callers
+                # may state intent via apply_backoff; otherwise a present
+                # automation_id marks the run as scheduled.
+                _backoff = apply_backoff if apply_backoff is not None else (automation_id is not None)
+                if _backoff:
+                    from datetime import datetime as _dt
+
+                    from core.wishlist.retry_backoff import split_due_for_retry
+                    wishlist_tracks, _cooling = split_due_for_retry(
+                        wishlist_tracks, _dt.utcnow())
+                    if _cooling:
+                        logger.info(
+                            f"[Auto-Wishlist] {len(_cooling)} track(s) cooling down after "
+                            f"repeated failures (retry backoff) — skipped this cycle")
+                        runtime.update_automation_progress(
+                            automation_id, log_line=(
+                                f'{len(_cooling)} repeatedly-failing track(s) on backoff '
+                                f'cooldown — retried later automatically'),
+                            log_type='info')
 
                 # CYCLE FILTERING: Get current cycle and filter tracks by category
                 current_cycle = get_wishlist_cycle(lambda: music_database)
