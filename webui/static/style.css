@@ -58073,6 +58073,14 @@ tr.tag-diff-same {
     background: rgba(255, 255, 255, 0.05);
     color: rgba(255, 255, 255, 0.48);
 }
+/* enabled but can't run yet (e.g. usenet without Prowlarr) — kept enabled,
+   downloads skip it; the chip says why instead of silently unchecking */
+.hybrid-source-unready {
+    margin-left: 6px;
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbcd7a;
+}
 .hybrid-source-priority {
     font-size: 0.75em;
     color: rgba(255, 255, 255, 0.3);
