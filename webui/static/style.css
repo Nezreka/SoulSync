@@ -72216,3 +72216,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     border: 1px solid rgba(255, 255, 255, 0.18);
     pointer-events: none;
 }
+.discog-gap-src {
+    font-weight: 800; text-transform: uppercase; font-size: 0.85em;
+    color: rgba(255, 255, 255, 0.55);
+}

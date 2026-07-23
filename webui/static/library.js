@@ -2779,6 +2779,37 @@ async function openDiscographyModal() {
         ...(discography.singles || []).map(a => ({ ...a, _type: 'single' })),
     ];
 
+    // Gap-fill (#1067): when '+ Other sources' is on, the Download Discography
+    // modal includes those releases too — each keeps its own source, which the
+    // backend already honors per entry (entry['source']).
+    if (typeof _gapFillEnabled === 'function' && _gapFillEnabled()) {
+        try {
+            const gp = new URLSearchParams();
+            if (artist.name) gp.set('artist_name', artist.name);
+            if (artist.source) gp.set('base_source', artist.source);
+            const gres = await fetch(`/api/artist/${encodeURIComponent(artist.id)}/discography/gap-fill?${gp}`);
+            const gdata = await gres.json().catch(() => ({}));
+            if (gres.ok && gdata.success) {
+                const gaps = gdata.gaps || {};
+                const gapReleases = [
+                    ...(gaps.albums || []).map(g => ({ ...g, _type: 'album' })),
+                    ...(gaps.eps || []).map(g => ({ ...g, _type: 'ep' })),
+                    ...(gaps.singles || []).map(g => ({ ...g, _type: 'single' })),
+                ];
+                for (const g of gapReleases) {
+                    if (allReleases.some(r => _gapSameRelease(g, r))) continue;
+                    allReleases.push({
+                        ...g,
+                        name: g.title || g.name || 'Unknown Release',
+                        _gap_source: g.gap_source,
+                    });
+                }
+            }
+        } catch (e) {
+            console.debug('discog modal gap-fill skipped:', e);
+        }
+    }
+
     // Build modal
     const overlay = document.createElement('div');
     overlay.className = 'discog-modal-overlay';
@@ -2874,14 +2905,14 @@ function _renderDiscogCard(release, index, completionData) {
     const albumName = release.name || release.title || '';
     return `
         <label class="discog-card ${statusClass}" data-type="${release._type}" data-is-live="${cc.isLive}" data-is-compilation="${cc.isCompilation}" data-is-featured="${cc.isFeatured}" style="animation-delay:${index * 0.03}s">
-            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" data-gap-source="${_esc(release._gap_source || '')}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
             </div>
             <div class="discog-card-info">
                 <div class="discog-card-title">${_esc(albumName)}${release.explicit === true ? ' <span class="explicit-badge">E</span>' : ''}</div>
-                <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}</div>
+                <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}${release._gap_source ? ` · <span class="discog-gap-src">${_esc(release._gap_source)}</span>` : ''}</div>
             </div>
             <div class="discog-card-check"></div>
         </label>
@@ -2961,7 +2992,9 @@ async function startDiscographyDownload() {
             albumEntries.push({
                 id: cb.dataset.albumId,
                 name: cb.dataset.albumName || '',
-                tracks: parseInt(cb.dataset.tracks) || 0
+                tracks: parseInt(cb.dataset.tracks) || 0,
+                // gap-fill releases resolve from THEIR source (#1067)
+                gapSource: cb.dataset.gapSource || null
             });
         }
     });
@@ -3028,7 +3061,9 @@ async function startDiscographyDownload() {
         id: e.id,
         name: e.name,
         artist_name: artist.name,
-        source: sourceForBatch,
+        // a gap-fill release must resolve from ITS source, not the batch's
+        // (#1067) — the backend honors source per entry
+        source: e.gapSource || sourceForBatch,
     }));
 
     try {

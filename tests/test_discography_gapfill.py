@@ -163,3 +163,16 @@ def test_frontend_contract():
     html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     assert 'id="gapfill-toggle-btn"' in html          # static chip in the Sources group
     assert 'gapfill-section' not in html              # the separate section is gone
+
+
+def test_download_discography_modal_includes_gaps():
+    """Boulder's live catch: the Download Discography modal skipped gap-fill
+    releases. When the chip is on, the modal fetches gaps, dedups against its
+    own list, and each entry POSTs with ITS source (backend honors per-entry
+    source at entry['source'])."""
+    js = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
+    # both the page loader AND the modal call the gap-fill endpoint
+    assert js.count("discography/gap-fill") == 2
+    assert "gapSource: cb.dataset.gapSource" in js
+    assert "source: e.gapSource || sourceForBatch" in js
+    assert "data-gap-source=" in js
