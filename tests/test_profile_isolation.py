@@ -89,6 +89,37 @@ def test_delete_profile_never_touches_admin(mdb):
     assert mdb.delete_profile(1) is False
 
 
+def test_delete_profile_cascades_mirrored_playlist_tracks(mdb):
+    """The sweep deletes the profile's mirrored_playlists rows; their child
+    tracks (keyed by playlist_id, no profile_id) must go with them via the
+    FK cascade — proven here, not assumed (the pragma is per-connection)."""
+    pid = _mk_profile(mdb, "kid2")
+    conn = mdb._get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO mirrored_playlists (source, source_playlist_id, name, profile_id) "
+            "VALUES ('spotify', 'sp1', 'Kid Jams', ?)", (pid,))
+        plid = cur.lastrowid
+        conn.execute(
+            "INSERT INTO mirrored_playlist_tracks (playlist_id, position, track_name, artist_name) "
+            "VALUES (?, 1, 'Song', 'Artist')", (plid,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert mdb.delete_profile(pid) is True
+
+    conn = mdb._get_connection()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM mirrored_playlists WHERE id = ?",
+                            (plid,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM mirrored_playlist_tracks WHERE playlist_id = ?",
+                            (plid,)).fetchone()[0] == 0, \
+            "cascade did not fire — orphaned playlist tracks"
+    finally:
+        conn.close()
+
+
 # ── 2. video sweep ───────────────────────────────────────────────────────────
 
 def test_video_profile_sweep(tmp_path):
