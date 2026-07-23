@@ -7,8 +7,7 @@ export const LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS = [
   { value: 'spotify', label: 'Spotify' },
 ] as const;
 
-export type LibraryDiscographySource =
-  (typeof LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS)[number]['value'];
+export type LibraryDiscographySource = (typeof LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS)[number]['value'];
 
 type SettingsPayload = {
   metadata?: Record<string, unknown>;
@@ -26,13 +25,11 @@ const VALID_SOURCES = new Set<string>(
   LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS.map((option) => option.value),
 );
 
-export function normalizeLibraryDiscographySource(
-  value: unknown,
-): LibraryDiscographySource {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return VALID_SOURCES.has(normalized)
-    ? (normalized as LibraryDiscographySource)
-    : 'primary';
+export function normalizeLibraryDiscographySource(value: unknown): LibraryDiscographySource {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  return VALID_SOURCES.has(normalized) ? (normalized as LibraryDiscographySource) : 'primary';
 }
 
 async function loadSettings(fetchImpl: typeof fetch): Promise<SettingsPayload> {
@@ -71,9 +68,7 @@ async function saveLibraryDiscographySource(
     error?: string;
   };
   if (!response.ok || result.success !== true) {
-    throw new Error(
-      result.error || `Settings save failed with HTTP ${response.status}`,
-    );
+    throw new Error(result.error || `Settings save failed with HTTP ${response.status}`);
   }
 
   targetWindow._settingsPayload = settings;
@@ -101,8 +96,7 @@ function insertSelector(documentRef: Document): HTMLSelectElement | null {
   const primarySelect = documentRef.getElementById('metadata-fallback-source');
   if (!(primarySelect instanceof HTMLSelectElement)) return null;
 
-  const primaryGroup =
-    primarySelect.closest('.form-group') ?? primarySelect.parentElement;
+  const primaryGroup = primarySelect.closest('.form-group') ?? primarySelect.parentElement;
   if (!primaryGroup?.parentElement) return null;
 
   const group = documentRef.createElement('div');
@@ -138,12 +132,9 @@ export async function mountLibraryDiscographySourceSelector({
   if (!select) return null;
 
   try {
-    const settings =
-      targetWindow._settingsPayload ?? (await loadSettings(fetchImpl));
+    const settings = targetWindow._settingsPayload ?? (await loadSettings(fetchImpl));
     targetWindow._settingsPayload = settings;
-    select.value = normalizeLibraryDiscographySource(
-      settings.metadata?.library_discography_source,
-    );
+    select.value = normalizeLibraryDiscographySource(settings.metadata?.library_discography_source);
   } catch (error) {
     console.error('Failed to load Library discography source:', error);
     select.value = 'primary';
@@ -162,9 +153,7 @@ export async function mountLibraryDiscographySourceSelector({
     } catch (error) {
       console.error('Failed to save Library discography source:', error);
       targetWindow.showToast?.(
-        error instanceof Error
-          ? error.message
-          : 'Failed to save Library discography source',
+        error instanceof Error ? error.message : 'Failed to save Library discography source',
         'error',
       );
     } finally {
