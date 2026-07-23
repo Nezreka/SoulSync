@@ -30,6 +30,20 @@ progress_states: dict[int, dict] = {}
 progress_lock = threading.Lock()
 
 
+def _clamp_percent(value: Any) -> Any:
+    """Clamp a reported progress value to 0-100.
+
+    Callers compute `progress` from counters (processed/skipped/failed vs. a
+    precomputed grand total) that can drift past the nominal total under
+    races or double-counting, so this is the one place that guarantees the
+    polled/pushed state never shows a bar or label outside 0-100.
+    """
+    try:
+        return max(0, min(100, round(float(value))))
+    except (TypeError, ValueError):
+        return value
+
+
 def init_progress(automation_id: int, automation_name: str, action_type: str) -> None:
     """Initialize progress state when an automation starts running."""
     with progress_lock:
@@ -70,6 +84,8 @@ def update_progress(
                 state['log'].append({'type': kwargs.get('log_type', 'info'), 'text': v})
                 if len(state['log']) > 50:
                     state['log'] = state['log'][-50:]
+            elif k == 'progress':
+                state[k] = _clamp_percent(v)
             elif k != 'log_type':
                 state[k] = v
         if kwargs.get('status') in ('finished', 'error'):

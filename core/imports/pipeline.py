@@ -79,6 +79,7 @@ from core.imports.paths import (
 from core.imports.album_naming import resolve_album_group
 from core.metadata.lyrics import generate_lrc_file
 from database.music_database import get_database
+from core.tag_writer import is_placeholder_meta, write_tags_to_file
 from utils.logging_config import get_logger
 
 
@@ -149,6 +150,27 @@ def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
     if isinstance(bypass, (list, tuple, set)):
         return 'all' in bypass or check_name in bypass
     return bypass == check_name
+
+
+def _build_simple_download_tag_data(
+    search_result: dict, album_name: str | None,
+) -> dict[str, str]:
+    """Return only trustworthy metadata known by a direct/simple grab.
+
+    Simple downloads deliberately skip provider enhancement, but their request
+    still carries a title, artist and sometimes an album. Persist those values
+    without ever stamping placeholder text over useful source tags.
+    """
+    values = {
+        "title": search_result.get("title"),
+        "artist_name": search_result.get("artist"),
+        "album_title": album_name,
+    }
+    return {
+        key: str(value).strip()
+        for key, value in values.items()
+        if not is_placeholder_meta(value)
+    }
 
 
 def _resolve_context_quality_profile(context: dict) -> dict:
@@ -749,6 +771,29 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             move_companion_sidecars(file_path, destination)
             cleanup_slskd_dedup_siblings(file_path)
 
+            simple_tags = _build_simple_download_tag_data(
+                search_result, album_name)
+            if simple_tags:
+                try:
+                    tag_result = write_tags_to_file(
+                        destination, simple_tags, embed_cover=False)
+                    if tag_result.get('success'):
+                        logger.info(
+                            "Embedded direct-download metadata: %s",
+                            ', '.join(simple_tags),
+                        )
+                    else:
+                        logger.warning(
+                            "[Simple Download] Could not embed metadata: %s",
+                            tag_result.get('error', 'unknown error'),
+                        )
+                except Exception as tag_error:
+                    # The file is already safely moved. Tagging is enrichment,
+                    # so a malformed/unsupported source file remains a
+                    # successful direct download with a visible warning.
+                    logger.warning(
+                        "[Simple Download] Metadata write failed: %s", tag_error)
+
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
@@ -889,7 +934,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # See ``core/imports/track_number.py`` for the resolution
         # chain — pure function, unit-tested in isolation, single
         # place to fix the rule.
-        from core.imports.track_number import resolve_track_number, read_embedded_track_number
+        from core.imports.track_number import (
+            resolve_track_number,
+            read_embedded_track_number,
+            track_number_from_directory_order,
+        )
         track_info_for_resolve = context.get('track_info') if isinstance(context, dict) else None
         # "Track 01" bug: a single Deezer track is matched via an endpoint
         # that omits track_position, so the context never carried the real
@@ -907,8 +956,34 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             track_number,
         )
         if not isinstance(track_number, int) or track_number < 1:
-            logger.error(f"Invalid track number ({track_number}), defaulting to 1")
-            track_number = 1
+            # §16.3(a): before collapsing the WHOLE album onto track 1, fall back
+            # to this file's sorted position among its audio siblings on disk
+            # (album bundles stage all files into one directory together). This
+            # only ever replaces the constant-1 default, so it can never override
+            # a number a real source produced — it just stops every un-numbered
+            # track claiming position 1 and all-but-one showing as "missing".
+            #
+            # Restricted to genuine album-bundle downloads: a plain
+            # (non-bundle) download lands in a SHARED flat directory (e.g.
+            # Soulseek's download_path) that can hold other, unrelated
+            # in-flight downloads at the same time — applying the fallback
+            # there would compute this file's position among files from a
+            # completely different download, not a real position within
+            # its own album.
+            scan_order = (
+                track_number_from_directory_order(file_path)
+                if is_album_download else None
+            )
+            if scan_order is not None:
+                logger.warning(
+                    "No per-track number from any source; using scan-order "
+                    "position %s from directory siblings (avoids album collapse "
+                    "onto track 1)", scan_order,
+                )
+                track_number = scan_order
+            else:
+                logger.error(f"Invalid track number ({track_number}), defaulting to 1")
+                track_number = 1
 
         logger.debug(f"FINAL track_number used for filename: {track_number}")
         album_info['track_number'] = track_number
