@@ -1,5 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS,
@@ -7,7 +7,16 @@ import {
   normalizeLibraryDiscographySource,
 } from './library-discography-source';
 
+type SettingsWindow = Window & {
+  _settingsPayload?: unknown;
+};
+
 describe('Library discography source selector', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    delete (window as SettingsWindow)._settingsPayload;
+  });
+
   it('normalizes unknown values to the primary metadata source', () => {
     expect(normalizeLibraryDiscographySource('deezer')).toBe('deezer');
     expect(normalizeLibraryDiscographySource('not-valid')).toBe('primary');
