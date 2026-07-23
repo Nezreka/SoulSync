@@ -26,23 +26,82 @@ from utils.logging_config import get_logger
 
 logger = get_logger("metadata.discography.strict")
 
+LIBRARY_DISCOGRAPHY_SOURCE_PRIMARY = "primary"
+LIBRARY_DISCOGRAPHY_SOURCE_AUTOMATIC = "automatic"
+LIBRARY_DISCOGRAPHY_EXPLICIT_SOURCES = frozenset(
+    {"itunes", "deezer", "musicbrainz", "spotify"}
+)
+COMMERCIAL_DISCOGRAPHY_SOURCE_PRIORITY = ("itunes", "deezer")
 
-def _get_strict_source_chain(options: MetadataLookupOptions) -> List[str]:
-    """Return the provider chain for the user-facing strict discography path.
 
-    An explicit source is authoritative and therefore exclusive. Automatic mode
-    preserves the configured priority and may continue after confirmed EMPTY.
+def _get_configured_library_discography_source() -> str:
+    """Return the independent Library discography-source setting.
+
+    Missing or invalid values preserve the legacy behaviour: use the primary
+    metadata source and its configured fallback chain.
+    """
+
+    try:
+        from config.settings import config_manager
+
+        raw_source = config_manager.get(
+            "metadata.library_discography_source",
+            LIBRARY_DISCOGRAPHY_SOURCE_PRIMARY,
+        )
+    except Exception:
+        raw_source = LIBRARY_DISCOGRAPHY_SOURCE_PRIMARY
+
+    source = str(raw_source or LIBRARY_DISCOGRAPHY_SOURCE_PRIMARY).strip().lower()
+    valid_sources = {
+        LIBRARY_DISCOGRAPHY_SOURCE_PRIMARY,
+        LIBRARY_DISCOGRAPHY_SOURCE_AUTOMATIC,
+        *LIBRARY_DISCOGRAPHY_EXPLICIT_SOURCES,
+    }
+    if source in valid_sources:
+        return source
+
+    logger.warning(
+        "Invalid Library discography source %r; using the primary metadata source",
+        raw_source,
+    )
+    return LIBRARY_DISCOGRAPHY_SOURCE_PRIMARY
+
+
+def _get_strict_source_plan(
+    options: MetadataLookupOptions,
+) -> tuple[List[str], bool]:
+    """Return ``(source_chain, unavailable_is_error)`` for Library discography.
+
+    A per-request override remains authoritative and exclusive. The independent
+    Library setting can select one exclusive provider, the commercial automatic
+    chain (iTunes then Deezer), or the existing primary-metadata behaviour.
     """
 
     override = (options.source_override or "").strip().lower()
     if override:
-        return [override]
+        return [override], True
+
+    configured_source = _get_configured_library_discography_source()
+    if configured_source in LIBRARY_DISCOGRAPHY_EXPLICIT_SOURCES:
+        return [configured_source], True
+
+    if configured_source == LIBRARY_DISCOGRAPHY_SOURCE_AUTOMATIC:
+        source_chain = list(COMMERCIAL_DISCOGRAPHY_SOURCE_PRIORITY)
+        if not options.allow_fallback:
+            source_chain = source_chain[:1]
+        return source_chain, True
 
     primary_source = metadata_registry.get_primary_source()
     source_chain = list(metadata_registry.get_source_priority(primary_source))
     if not options.allow_fallback:
-        return source_chain[:1]
-    return source_chain
+        source_chain = source_chain[:1]
+    return source_chain, False
+
+
+def _get_strict_source_chain(options: MetadataLookupOptions) -> List[str]:
+    """Return the provider chain for the user-facing strict discography path."""
+
+    return _get_strict_source_plan(options)[0]
 
 
 def _lookup_artist_id(
@@ -84,12 +143,13 @@ def get_artist_discography(
 ) -> Dict[str, Any]:
     """Return an artist discography with results / empty / error.
 
-    Automatic mode continues only after a confirmed EMPTY. An explicit source
-    never crosses into another provider, regardless of ``allow_fallback``.
+    Automatic mode continues only after a confirmed EMPTY. An explicit request
+    or configured Library provider never crosses into another provider,
+    regardless of ``allow_fallback``.
     """
 
     options = options or MetadataLookupOptions()
-    source_priority = _get_strict_source_chain(options)
+    source_priority, unavailable_is_error = _get_strict_source_plan(options)
     source_artist_ids = options.artist_source_ids or {}
     releases: List[Any] = []
     active_source: Optional[str] = None
@@ -97,7 +157,7 @@ def get_artist_discography(
     for source in source_priority:
         client = metadata_registry.get_client_for_source(source)
         if not client:
-            if options.source_override:
+            if unavailable_is_error:
                 return _error_response(
                     source=source,
                     source_priority=source_priority,
