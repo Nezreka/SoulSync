@@ -8,6 +8,19 @@ from .auth import require_api_key
 from .helpers import api_success, api_error
 
 
+def _sweep_video_profile_data(profile_id: int) -> None:
+    """Best-effort: clear the deleted profile's video-side rows (requests,
+    issues, …) so they don't orphan. The video DB is a separate file the
+    music delete can't reach; a failure here never blocks the deletion."""
+    try:
+        from api.video import get_video_db
+        get_video_db().delete_profile_data(profile_id)
+    except Exception:   # noqa: BLE001 - sweep is additive, never fatal
+        import logging
+        logging.getLogger("api_profiles").debug(
+            "video profile sweep failed for %s", profile_id, exc_info=True)
+
+
 def register_routes(bp):
 
     @bp.route("/profiles", methods=["GET"])
@@ -124,6 +137,7 @@ def register_routes(bp):
             db = get_database()
             ok = db.delete_profile(profile_id)
             if ok:
+                _sweep_video_profile_data(profile_id)
                 return api_success({"message": f"Profile {profile_id} deleted."})
             return api_error("NOT_FOUND", f"Profile {profile_id} not found.", 404)
         except Exception as e:

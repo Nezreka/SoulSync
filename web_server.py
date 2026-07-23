@@ -744,6 +744,31 @@ def _add_discover_cache_headers(response):
     return response
 
 
+def mirrored_playlist_visible(playlist) -> bool:
+    """Owner-or-admin gate for by-id mirrored-playlist routes (IDOR fix).
+
+    Every /api/mirrored-playlists/<id>/* route used to act on any playlist id
+    regardless of who owned it — profile 2 could read, rename, re-point,
+    pipeline-run, or DELETE profile 3's playlists by iterating ids. The list
+    endpoint was always profile-scoped; the by-id ones now match it. Callers
+    answer 404 (not 403) on failure so foreign ids aren't probeable.
+
+    Background/system callers (no request context) resolve to profile 1 via
+    get_current_profile_id() and pass the admin check — automation pipelines
+    keep working exactly as before."""
+    if not playlist:
+        return False
+    try:
+        if bool(getattr(g, "is_admin", True)):
+            return True
+    except RuntimeError:
+        return True   # no request context = system caller
+    try:
+        return int(playlist.get('profile_id') or 1) == int(get_current_profile_id())
+    except (TypeError, ValueError):
+        return False
+
+
 def get_current_profile_id() -> int:
     """Get the current profile ID from Flask g context or default to 1.
 
@@ -28208,6 +28233,9 @@ def delete_profile(profile_id):
             return jsonify({'success': False, 'error': 'Profile not found'}), 404
 
         success = database.delete_profile(profile_id)
+        if success:
+            from api.profiles import _sweep_video_profile_data
+            _sweep_video_profile_data(profile_id)
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -36866,7 +36894,7 @@ def get_mirrored_playlist_endpoint(playlist_id):
         from core.playlists.naming import effective_mirrored_name
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
-        if not playlist:
+        if not mirrored_playlist_visible(playlist):
             return jsonify({"error": "Playlist not found"}), 404
         source_ref = describe_mirrored_source_ref(playlist)
         playlist['source_ref'] = source_ref.source_ref
@@ -36890,7 +36918,7 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
 
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
-        if not playlist:
+        if not mirrored_playlist_visible(playlist):
             return jsonify({"error": "Playlist not found"}), 404
 
         try:
@@ -36941,7 +36969,7 @@ def update_mirrored_playlist_custom_name_endpoint(playlist_id):
         data = request.get_json() or {}
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
-        if not playlist:
+        if not mirrored_playlist_visible(playlist):
             return jsonify({"error": "Playlist not found"}), 404
 
         # `custom_name` may be '' / null to CLEAR the alias.
@@ -36967,7 +36995,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
 
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
-        if not playlist:
+        if not mirrored_playlist_visible(playlist):
             return jsonify({"error": "Playlist not found"}), 404
 
         enabled = bool(data.get('organize_by_playlist'))
@@ -37140,7 +37168,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
     try:
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
-        if not playlist:
+        if not mirrored_playlist_visible(playlist):
             return jsonify({"error": "Playlist not found"}), 404
         if playlist.get('source') in ('file', 'beatport'):
             return jsonify({"error": "This playlist source cannot be refreshed by the pipeline"}), 400
@@ -37185,6 +37213,8 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
     """Return the latest manual pipeline progress for a mirrored playlist."""
     try:
+        if not mirrored_playlist_visible(get_database().get_mirrored_playlist(playlist_id)):
+            return jsonify({"error": "Playlist not found"}), 404
         state = _snapshot_playlist_pipeline_state(playlist_id)
         if not state:
             return jsonify({
@@ -37238,6 +37268,8 @@ def delete_mirrored_playlist_endpoint(playlist_id):
     """Delete a mirrored playlist."""
     try:
         database = get_database()
+        if not mirrored_playlist_visible(database.get_mirrored_playlist(playlist_id)):
+            return jsonify({"error": "Playlist not found"}), 404
         if database.delete_mirrored_playlist(playlist_id):
             return jsonify({"success": True})
         return jsonify({"error": "Playlist not found"}), 404
@@ -37250,6 +37282,8 @@ def clear_mirrored_discovery_endpoint(playlist_id):
     """Clear discovery data for all tracks in a mirrored playlist, including discovery cache."""
     try:
         database = get_database()
+        if not mirrored_playlist_visible(database.get_mirrored_playlist(playlist_id)):
+            return jsonify({"error": "Playlist not found"}), 404
 
         # Clear discovery cache entries for these tracks so re-discovery does fresh lookups
         try:
@@ -37486,7 +37520,7 @@ def prepare_mirrored_discovery(playlist_id):
     try:
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
-        if not playlist:
+        if not mirrored_playlist_visible(playlist):
             return jsonify({"error": "Playlist not found"}), 404
 
         tracks_data = database.get_mirrored_playlist_tracks(playlist_id)
@@ -37671,6 +37705,8 @@ def prepare_mirrored_discovery(playlist_id):
 def retry_failed_mirrored_discovery(playlist_id):
     """Re-run discovery only for tracks that failed or are pending in a mirrored playlist."""
     try:
+        if not mirrored_playlist_visible(get_database().get_mirrored_playlist(playlist_id)):
+            return jsonify({"error": "Playlist not found"}), 404
         url_hash = f"mirrored_{playlist_id}"
         state = youtube_playlist_states.get(url_hash)
         if not state:
@@ -40275,15 +40311,42 @@ def handle_download_unsubscribe(data):
 
 @socketio.on('profile:join')
 def handle_profile_join(data):
-    """Client joins a profile room for scoped WebSocket emits (watchlist/wishlist counts)."""
-    profile_id = data.get('profile_id')
-    if profile_id:
-        # Leave any previous profile rooms
-        old_id = data.get('old_profile_id')
-        if old_id:
-            leave_room(f'profile:{old_id}')
-        join_room(f'profile:{profile_id}')
-        logger.debug(f"Client joined profile room: profile:{profile_id}")
+    """Client joins a profile room for scoped WebSocket emits (watchlist/wishlist counts).
+
+    The room is derived from the SESSION, not the payload — the socket
+    handshake carries the Flask session cookie, so the server already knows
+    which profile this client is. Trusting data['profile_id'] let any
+    connected client join any profile's room and receive their scoped pushes
+    (profile-isolation audit). Admins may join any room (their UI legitimately
+    watches all); everyone else gets exactly their own."""
+    requested = data.get('profile_id')
+    pid, is_admin = _ws_session_profile()
+    target = requested if (is_admin and requested) else pid
+    if target != requested and requested:
+        logger.warning("profile:join — client asked for profile %s but session is %s; "
+                       "joining the session's room", requested, pid)
+    old_id = data.get('old_profile_id')
+    if old_id:
+        leave_room(f'profile:{old_id}')
+    join_room(f'profile:{target}')
+    logger.debug(f"Client joined profile room: profile:{target}")
+
+
+def _ws_session_profile():
+    """(profile_id, is_admin) for the CURRENT socket's session — server-side
+    truth for room joins. Fail-closed to the session profile; profile 1 or an
+    is_admin-flagged profile counts as admin."""
+    try:
+        pid = int(session.get('profile_id', 1) or 1)
+    except (TypeError, ValueError):
+        pid = 1
+    if pid == 1:
+        return pid, True
+    try:
+        profile = get_database().get_profile(pid)
+        return pid, bool((profile or {}).get('is_admin', False))
+    except Exception:
+        return pid, False
 
 # --- Phase 2: Dashboard emitters ---
 
@@ -40850,10 +40913,37 @@ def handle_logs_unsubscribe(data):
     leave_room('logs:live')
 
 
+def _playlist_room_allowed(raw_id, spid, is_admin) -> bool:
+    """May THIS session join a playlist-keyed push room (sync:/discovery:)?
+
+    Ids that resolve to a mirrored playlist get the owner-or-admin rule (the
+    push-side twin of the HTTP IDOR fix). Every other key shape — YouTube url
+    hashes, Beatport chart ids, 'mirrored_<n>' composites, ids with no row
+    behind them — joins exactly as before: those rooms carry no per-profile
+    data (or no data at all), and refusing them would break legit
+    subscriptions whose key shapes aren't numeric."""
+    s = str(raw_id)
+    if s.isdigit():
+        n = int(s)
+    elif s.startswith('mirrored_') and s[len('mirrored_'):].isdigit():
+        n = int(s[len('mirrored_'):])
+    else:
+        return True
+    try:
+        pl = get_database().get_mirrored_playlist(n)
+    except Exception:
+        return True
+    if not pl:
+        return True   # no row = empty room, nothing to leak
+    return is_admin or int(pl.get('profile_id') or 1) == spid
+
+
 @socketio.on('sync:subscribe')
 def handle_sync_subscribe(data):
+    _spid, _is_admin = _ws_session_profile()
     for pid in data.get('playlist_ids', []):
-        join_room(f'sync:{pid}')
+        if _playlist_room_allowed(pid, _spid, _is_admin):
+            join_room(f'sync:{pid}')
 
 @socketio.on('sync:unsubscribe')
 def handle_sync_unsubscribe(data):
@@ -40862,8 +40952,10 @@ def handle_sync_unsubscribe(data):
 
 @socketio.on('discovery:subscribe')
 def handle_discovery_subscribe(data):
+    _spid, _is_admin = _ws_session_profile()
     for pid in data.get('ids', []):
-        join_room(f'discovery:{pid}')
+        if _playlist_room_allowed(pid, _spid, _is_admin):
+            join_room(f'discovery:{pid}')
 
 @socketio.on('discovery:unsubscribe')
 def handle_discovery_unsubscribe(data):

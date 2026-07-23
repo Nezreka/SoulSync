@@ -5914,18 +5914,36 @@ class MusicDatabase:
             return False
 
     def delete_profile(self, profile_id: int) -> bool:
-        """Delete a profile and all its per-profile data."""
+        """Delete a profile and ALL its per-profile data.
+
+        The cleanup used to be a hardcoded 8-table list that silently fell
+        behind every time a new table gained a profile_id column — per-profile
+        service credentials, notification history, issues, blocklists and more
+        were orphaned forever. Now the sweep is DERIVED from the schema: every
+        table with a profile_id column is cleaned. Rows whose profile_id is
+        NULL (global/shared rows) are naturally untouched by the equality
+        match, and the profiles table itself is handled separately."""
         if profile_id == 1:
             return False  # Cannot delete the default admin profile
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                # Delete per-profile data from all tables
-                for table in ['watchlist_artists', 'wishlist_tracks', 'similar_artists',
-                              'discovery_pool', 'discovery_recent_albums', 'discovery_curated_playlists',
-                              'bubble_snapshots', 'recent_releases']:
+                tables = [r[0] for r in cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%'").fetchall()]
+                for table in tables:
+                    if table == 'profiles':
+                        continue
                     try:
-                        cursor.execute(f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,))
+                        cols = {c[1] for c in cursor.execute(
+                            f"PRAGMA table_info({table})").fetchall()}   # noqa: S608 - name from sqlite_master
+                        if 'profile_id' in cols:
+                            cursor.execute(
+                                f"DELETE FROM {table} WHERE profile_id = ?",   # noqa: S608
+                                (profile_id,))
+                            if cursor.rowcount:
+                                logger.info("delete_profile: removed %d row(s) from %s",
+                                            cursor.rowcount, table)
                     except Exception as e:
                         logger.debug("Failed to delete from %s for profile: %s", table, e)
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))

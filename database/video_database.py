@@ -6200,6 +6200,42 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def delete_profile_data(self, profile_id: int) -> int:
+        """Remove every video-side row belonging to a (music-side) profile —
+        called when a profile is deleted so requests/issues don't orphan.
+        Schema-derived like the music sweep: any table with an exact
+        ``profile_id`` column is cleaned (``quality_profile_id`` etc. never
+        match). Returns rows removed."""
+        if int(profile_id) == 1:
+            return 0
+        removed = 0
+        conn = self._get_connection()
+        try:
+            tables = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%'").fetchall()]
+            for table in tables:
+                try:
+                    cols = {c[1] for c in conn.execute(
+                        f"PRAGMA table_info({table})").fetchall()}   # noqa: S608 - name from sqlite_master
+                    if 'profile_id' in cols:
+                        cur = conn.execute(
+                            f"DELETE FROM {table} WHERE profile_id = ?",   # noqa: S608
+                            (int(profile_id),))
+                        removed += cur.rowcount
+                except sqlite3.Error:
+                    logger.debug("video profile sweep: %s failed", table, exc_info=True)
+            conn.commit()
+            if removed:
+                logger.info("Removed %d video-side row(s) for deleted profile %s",
+                            removed, profile_id)
+            return removed
+        except sqlite3.Error:
+            logger.exception("delete_profile_data failed")
+            return removed
+        finally:
+            conn.close()
+
     def clear_resolved_video_requests(self, profile_id=None) -> int:
         """Remove all approved/denied request rows (admin housekeeping;
         profile_id scopes to one member's history). Pending rows are never
