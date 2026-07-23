@@ -1,0 +1,482 @@
+.container {
+  margin: 20px;
+  padding: 28px 24px 30px;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(20, 20, 20, 0.55) 0%, rgba(12, 12, 12, 0.62) 100%);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -28px -24px 20px;
+  padding: 20px 24px;
+  min-height: 120px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-rgb, 139, 92, 246), 0.1) 0%,
+    rgba(var(--accent-rgb, 139, 92, 246), 0.04) 40%,
+    transparent 100%
+  );
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  position: relative;
+  overflow: hidden;
+  flex-wrap: wrap;
+}
+
+.headerTitle {
+  min-width: 0;
+}
+
+.title {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 6px 0 0;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sectionTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.cardStale {
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 18px;
+  cursor: pointer;
+  gap: 12px;
+}
+
+.cardHeader:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.7);
+  outline-offset: -2px;
+  border-radius: 16px;
+}
+
+.cardInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardNameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cardTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+  cursor: pointer;
+}
+
+.cardTitle:hover {
+  text-decoration: underline dotted rgba(255, 255, 255, 0.4);
+}
+
+.cardDesc {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
+.cardMeta {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.4);
+  margin: 6px 0 0;
+}
+
+.cardError {
+  font-size: 0.78rem;
+  color: rgba(239, 68, 68, 0.9);
+  margin: 4px 0 0;
+}
+
+.cardTags {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(139, 92, 246, 0.15);
+  color: rgba(196, 167, 255, 0.9);
+  text-transform: capitalize;
+}
+
+.staleBadge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(234, 179, 8, 0.2);
+  color: rgba(250, 204, 21, 0.9);
+}
+
+.autoRefreshBadge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.2);
+  color: rgba(74, 222, 128, 0.9);
+}
+
+.cardActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.intervalSelect {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+
+.intervalSelect:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.7);
+  outline-offset: 1px;
+}
+
+.intervalSelect option {
+  background: #1a1a2e;
+  color: #fff;
+}
+
+.btn {
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 6px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.btn:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.7);
+  outline-offset: 1px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnPrimary {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: rgba(139, 92, 246, 0.35);
+  color: rgba(196, 167, 255, 0.95);
+}
+
+.btnPrimary:hover {
+  background: rgba(139, 92, 246, 0.35);
+}
+
+.btnDanger {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgba(252, 165, 165, 0.95);
+}
+
+.btnDanger:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+.cardBody {
+  padding: 0 18px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.configSection {
+  padding-top: 14px;
+}
+
+.configSectionTitle {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.configGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.configField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.configLabel {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.configInput {
+  font-size: 0.82rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.configInput:focus {
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+.trackSection {
+  padding-top: 14px;
+}
+
+.trackList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.trackRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  transition: background 0.1s;
+}
+
+.trackRow:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.trackPos {
+  width: 28px;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.3);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.trackInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.trackName {
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackArtist {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.trackAlbum {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.35);
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackDuration {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.trackOverflow {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 8px;
+}
+
+.loadingText,
+.emptyText,
+.errorText {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 12px 0;
+}
+
+.errorText {
+  color: rgba(239, 68, 68, 0.9);
+}
+
+.loadingState,
+.errorState {
+  display: flex;
+  justify-content: center;
+  padding: 40px 0;
+}
+
+.kindGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kindGroupTitle {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+.nameForm {
+  display: flex;
+}
+
+.nameInput {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  color: #fff;
+  outline: none;
+  width: 100%;
+}
+
+.nameInput:focus {
+  border-color: rgba(139, 92, 246, 0.8);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+
+@media (max-width: 768px) {
+  .container {
+    margin: 10px;
+    padding: 20px 16px;
+  }
+
+  .header {
+    margin: -20px -16px 16px;
+    padding: 16px;
+    min-height: auto;
+  }
+
+  .title {
+    font-size: 1.3rem;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .cardHeader {
+    flex-direction: column;
+    padding: 14px 14px;
+  }
+
+  .cardActions {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .trackAlbum {
+    display: none;
+  }
+}

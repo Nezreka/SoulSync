@@ -7,7 +7,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -7141,6 +7141,16 @@ class MusicDatabase:
                 # Extract MusicBrainz recording ID from server if available (Navidrome provides this)
                 mbid = getattr(track_obj, 'musicBrainzId', None) or None
 
+                # Extract addedAt from the media server object for date_added tracking
+                added_at = getattr(track_obj, 'addedAt', None)
+                if added_at is not None:
+                    if hasattr(added_at, 'strftime'):
+                        added_at_str = added_at.strftime('%Y-%m-%d %H:%M:%S')
+                    else:
+                        added_at_str = str(added_at)
+                else:
+                    added_at_str = None
+
                 # Check if track already exists — UPDATE to preserve enrichment columns,
                 # INSERT only for genuinely new tracks
                 cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
@@ -7149,26 +7159,40 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, added_at_str or datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
                     # COALESCE(?, file_size) so a NULL from the server (e.g.
                     # Jellyfin sometimes omits Size on first sync) doesn't wipe
                     # an existing value.
-                    cursor.execute("""
-                        UPDATE tracks
-                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
-                            duration = ?, file_path = ?, bitrate = ?,
-                            file_size = COALESCE(?, file_size),
-                            server_source = ?,
-                            track_artist = COALESCE(?, track_artist),
-                            musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
+                    if added_at_str:
+                        cursor.execute("""
+                            UPDATE tracks
+                            SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
+                                duration = ?, file_path = ?, bitrate = ?,
+                                file_size = COALESCE(?, file_size),
+                                server_source = ?,
+                                track_artist = COALESCE(?, track_artist),
+                                musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
+                                created_at = CASE WHEN created_at != ? THEN ? ELSE created_at END,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, added_at_str, added_at_str, track_id))
+                    else:
+                        cursor.execute("""
+                            UPDATE tracks
+                            SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
+                                duration = ?, file_path = ?, bitrate = ?,
+                                file_size = COALESCE(?, file_size),
+                                server_source = ?,
+                                track_artist = COALESCE(?, track_artist),
+                                musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
 
@@ -16460,6 +16484,20 @@ class MusicDatabase:
                 return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting automations: {e}")
+            return []
+
+    def get_automations_by_action(self, action_type: str):
+        """Get all automations matching an action_type. Returns list of dicts."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM automations WHERE action_type = ?",
+                    (action_type,),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting automations by action {action_type}: {e}")
             return []
 
     def get_system_automation_by_action(self, action_type: str):

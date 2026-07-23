@@ -60,6 +60,9 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
 
     try:
         kinds_config = config.get('kinds') or []
+
+        manager = deps.build_personalized_manager()
+
         if not isinstance(kinds_config, list) or not kinds_config:
             deps.state.set_pipeline_running(False)
             return {
@@ -70,13 +73,11 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
         refresh_first = bool(config.get('refresh_first', False))
         skip_wishlist = bool(config.get('skip_wishlist', False))
 
-        manager = deps.build_personalized_manager()
-
         deps.update_progress(
             automation_id,
             progress=2,
-            phase=f'Personalized pipeline: {len(kinds_config)} playlist(s)',
-            log_line=f'Starting pipeline for {len(kinds_config)} playlist(s)',
+            phase=f'Auto-playlist pipeline: {len(kinds_config)} playlist(s)',
+            log_line=f'Starting auto-playlist pipeline for {len(kinds_config)} playlist(s)',
             log_type='info',
         )
 
@@ -91,19 +92,19 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
         )
 
         profile_id = deps.get_current_profile_id()
-        playload_payloads = _build_payloads_for_kinds(
+        payloads = _build_payloads_for_kinds(
             deps, manager, kinds_config, profile_id,
             automation_id=automation_id,
             refresh_first=refresh_first,
         )
 
-        if not playload_payloads:
+        if not payloads:
             deps.state.set_pipeline_running(False)
             deps.update_progress(
                 automation_id,
                 status='finished', progress=100,
                 phase='No playlists to sync',
-                log_line='No personalized playlists had tracks to sync',
+                log_line='No auto-playlists had tracks to sync',
                 log_type='warning',
             )
             return {
@@ -118,7 +119,7 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
             automation_id,
             progress=50,
             phase='Phase 1/2: Snapshot complete',
-            log_line=f'Phase 1 done: {len(playload_payloads)} playlist(s) ready to sync',
+            log_line=f'Phase 1 done: {len(payloads)} playlist(s) ready to sync',
             log_type='success',
         )
 
@@ -126,7 +127,7 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
         sync_summary = run_sync_and_wishlist(
             deps,
             automation_id,
-            playload_payloads,
+            payloads,
             sync_one_fn=lambda pl: _sync_personalized_playlist(deps, pl),
             sync_id_for_fn=lambda pl: pl['sync_id'],
             skip_wishlist=skip_wishlist,
@@ -144,7 +145,7 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
             automation_id,
             status='finished', progress=100,
             phase='Pipeline complete',
-            log_line=f'Personalized pipeline finished in {duration // 60}m {duration % 60}s',
+            log_line=f'Auto-playlist pipeline finished in {duration // 60}m {duration % 60}s',
             log_type='success',
         )
 
@@ -152,7 +153,7 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
         return {
             'status': 'completed',
             '_manages_own_progress': True,
-            'playlists_synced': str(len(playload_payloads)),
+            'playlists_synced': str(len(payloads)),
             'tracks_synced': str(sync_summary['synced']),
             'sync_skipped': str(sync_summary['skipped']),
             'wishlist_queued': str(sync_summary['wishlist_queued']),
@@ -165,7 +166,7 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
             automation_id,
             status='error', progress=100,
             phase='Pipeline error',
-            log_line=f'Personalized pipeline failed: {e}',
+            log_line=f'Auto-playlist pipeline failed: {e}',
             log_type='error',
         )
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
