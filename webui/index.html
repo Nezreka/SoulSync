@@ -4689,6 +4689,12 @@
                             </div>
                             <div class="filter-divider"></div>
                             <div class="filter-group">
+                                <span class="filter-label">Sources</span>
+                                <button class="discography-filter-btn" id="gapfill-toggle-btn"
+                                        title="Also list releases your other metadata sources know about — shown in the sections below with a source badge (#1067)">+ Other sources</button>
+                            </div>
+                            <div class="filter-divider"></div>
+                            <div class="filter-group">
                                 <span class="filter-label">View</span>
                                 <button class="enhanced-view-toggle-btn active" data-view="standard" onclick="toggleEnhancedView(false)">Standard</button>
                                 <button class="enhanced-view-toggle-btn" data-view="enhanced" onclick="toggleEnhancedView(true)">Enhanced</button>
@@ -4739,16 +4745,6 @@
                                 </div>
                             </div>
 
-                            <!-- Gap-fill (#1067): releases OTHER metadata sources know that the
-                                 base source's discography doesn't. Purely additive view option;
-                                 populated async by _loadDiscographyGapFill when enabled. -->
-                            <div class="discography-section" id="gapfill-section" style="display:none">
-                                <div class="section-header">
-                                    <h3>More from other sources</h3>
-                                    <div class="section-stats"><span id="gapfill-count"></span></div>
-                                </div>
-                                <div class="releases-grid" id="gapfill-grid"></div>
-                            </div>
                         </div>
 
                         <!-- Similar Artists Section (works for both library and source artists).

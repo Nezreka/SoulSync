@@ -1968,20 +1968,26 @@ function _gapSameRelease(a, b) {
 }
 
 function _resetGapFillSection() {
-    const section = document.getElementById('gapfill-section');
-    const grid = document.getElementById('gapfill-grid');
-    if (grid) grid.innerHTML = '';
-    if (section) section.style.display = 'none';
+    // Gap cards live INSIDE the real Album/EP/Single grids (Boulder's live
+    // feedback: a separate section felt bolted-on) — removal walks the class.
+    document.querySelectorAll('.gapfill-card').forEach(card => {
+        const grid = card.parentElement;
+        card.remove();
+        // a section that only existed because of gap cards goes back to empty
+        if (grid && grid.childElementCount === 0) {
+            const section = grid.closest('.discography-section');
+            if (section) section.style.display = 'none';
+        }
+    });
 }
 
 function _ensureGapFillChip() {
-    const container = document.getElementById('discography-filters');
-    if (!container || document.getElementById('gapfill-toggle-btn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'gapfill-toggle-btn';
-    btn.className = 'discography-filter-btn' + (_gapFillEnabled() ? ' active' : '');
-    btn.textContent = '+ Other sources';
-    btn.title = 'Also list releases your other metadata sources know about (marked with their source)';
+    // The chip is static markup in the filters row (Sources group) — just bind.
+    const btn = document.getElementById('gapfill-toggle-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', _gapFillEnabled());
+    if (btn._gapBound) return;
+    btn._gapBound = true;
     btn.addEventListener('click', () => {
         const on = !_gapFillEnabled();
         try { localStorage.setItem('discog_gapfill', on ? '1' : '0'); } catch (e) { /* ignore */ }
@@ -1993,7 +1999,17 @@ function _ensureGapFillChip() {
             _resetGapFillSection();
         }
     });
-    container.appendChild(btn);
+}
+
+// Insert a gap card into a grid at its year-sorted position (grids render
+// newest-first; unknown years sink to the end — mirrors the backend sort).
+function _insertGapCardSorted(grid, card, year) {
+    const y = year || 0;
+    for (const child of grid.children) {
+        const cy = _gapYear(child._releaseData || {}) || 0;
+        if (cy < y) { grid.insertBefore(card, child); return; }
+    }
+    grid.appendChild(card);
 }
 
 let _gapFillReqSeq = 0;
@@ -2031,34 +2047,42 @@ async function _loadDiscographyGapFill(artistId, artistName) {
         }
         if (!all.length) return;
 
-        const grid = document.getElementById('gapfill-grid');
-        const section = document.getElementById('gapfill-section');
-        const countEl = document.getElementById('gapfill-count');
-        if (!grid || !section) return;
+        // Cards slot into the REAL sections, year-sorted among the base cards
+        // (Boulder: "figured it would appear in the album/ep/single sections
+        // like others do") — the source badge is what marks them.
+        const gridFor = { album: 'albums-grid', ep: 'eps-grid', single: 'singles-grid' };
+        const touchedGrids = new Set();
         all.forEach(g => {
+            const grid = document.getElementById(gridFor[g._bucket] || 'albums-grid');
+            if (!grid) return;
             const release = {
                 id: g.id,
                 title: g.title || g.name || 'Unknown Release',
                 image_url: g.image_url || '',
                 year: g.year,
+                release_date: g.release_date,
                 album_type: g.album_type || g._bucket,
                 owned: false,
                 _gap_source: g.gap_source,
             };
             const card = createReleaseCard(release);
+            card.classList.add('gapfill-card');
             const badge = document.createElement('div');
             badge.className = 'gapfill-source-badge';
             badge.textContent = (typeof SOURCE_LABELS !== 'undefined' && SOURCE_LABELS[g.gap_source]?.text)
                 ? SOURCE_LABELS[g.gap_source].text : (g.gap_source || '');
             badge.title = `Only listed on ${badge.textContent} — opens and downloads from there`;
             card.appendChild(badge);
-            grid.appendChild(card);
+            _insertGapCardSorted(grid, card, _gapYear(release));
+            touchedGrids.add(grid);
         });
-        if (countEl) {
-            countEl.textContent = `${all.length} release${all.length !== 1 ? 's' : ''} from ${(data.sources_checked || []).join(', ')}`;
-        }
-        section.style.display = '';
-        if (typeof observeLazyBackgrounds === 'function') observeLazyBackgrounds(grid);
+        touchedGrids.forEach(grid => {
+            const section = grid.closest('.discography-section');
+            if (section && section.style.display === 'none') section.style.display = '';
+            if (typeof observeLazyBackgrounds === 'function') observeLazyBackgrounds(grid);
+        });
+        // current filter state applies to the new cards too
+        if (typeof applyDiscographyFilters === 'function') applyDiscographyFilters();
     } catch (e) {
         console.debug('gap-fill load failed:', e);
     }

@@ -154,5 +154,12 @@ def test_frontend_contract():
     # release the base source doesn't list must not return as a gap card
     assert "_renderedDiscography" in js
     assert "_gapSameRelease" in js
+    # Boulder's live feedback: cards slot into the REAL sections (no bolted-on
+    # extra section), and the toggle lives with the other filter groups
+    assert "gapfill-card" in js
+    assert "_insertGapCardSorted" in js
+    after_insert = js[js.index("_insertGapCardSorted(grid, card, _gapYear"):]
+    assert "applyDiscographyFilters" in after_insert[:800]    # filters apply to gap cards
     html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-    assert 'id="gapfill-section"' in html and 'style="display:none"' in html
+    assert 'id="gapfill-toggle-btn"' in html          # static chip in the Sources group
+    assert 'gapfill-section' not in html              # the separate section is gone
