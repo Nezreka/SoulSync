@@ -101,7 +101,10 @@ describe('Library discography source selector', () => {
     await waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(3));
 
     const [, request] = fetchImpl.mock.calls[2];
-    const payload = JSON.parse(String(request?.body));
+    if (typeof request?.body !== 'string') {
+      throw new Error('Expected JSON request body');
+    }
+    const payload = JSON.parse(request.body);
     expect(payload.metadata).toEqual({
       fallback_source: 'musicbrainz',
       spotify_free: false,
