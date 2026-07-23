@@ -961,16 +961,34 @@ def register_routes(bp):
 
     @bp.route("/downloads/retry", methods=["POST"])
     def video_downloads_retry():
-        """Re-grab the SAME release (basic retry). Auto-retry + alternate-query retry
-        come in a later phase."""
+        """Retry a download. Default: re-grab the SAME release (soulseek only —
+        that's the only source where the same-release re-grab is wired).
+        ``next: true`` — or any non-soulseek source — retries with a DIFFERENT
+        release via the monitor's candidate/requery/wishlist-search machinery
+        (blocklist-filtered). The block-and-retry button uses next; the old
+        behavior re-grabbed the exact release just blocked and 502'd on
+        torrents (Boulder's report)."""
         from . import get_video_db
-        from core.video.download_monitor import ensure_started
+        from core.video.download_monitor import ensure_started, retry_another_release
         from core.video.slskd_download import start_download
         body = request.get_json(silent=True) or {}
         db = get_video_db()
         dl = db.get_video_download(body.get("id"))
         if not dl:
             return jsonify({"ok": False, "error": "Download not found."}), 404
+        want_next = bool(body.get("next")) or \
+            str(dl.get("source") or "soulseek").lower() != "soulseek"
+        if want_next:
+            res = retry_another_release(db, dl)
+            ensure_started(get_video_db)
+            if res.get("status") in ("downloading", "searching"):
+                return jsonify({"ok": True, "mode": "next", "status": res["status"]})
+            if res.get("wishlist_search"):
+                return jsonify({"ok": True, "mode": "next", "status": "failed",
+                                "wishlist_search": True})
+            return jsonify({"ok": False,
+                            "error": "No other release available — the item is back "
+                                     "on the wishlist for the next sweep."}), 502
         if not dl.get("username") or not dl.get("filename"):
             return jsonify({"ok": False, "error": "Nothing to retry from."}), 400
         started = start_download(dl["username"], dl["filename"], dl.get("size_bytes") or 0)

@@ -701,8 +701,16 @@
                 postJSON(URL_BLOCKLIST, { download_id: bid }).then(function (res) {
                     if (!(res && res.success)) { toast((res && res.error) || 'Could not block that release', 'error'); poll(); return; }
                     if (wasFailed) {
-                        postJSON(URL_RETRY, { id: bid }).then(function (r2) {
-                            toast(r2 && r2.ok ? 'Release blocked — retrying with another' : 'Release blocked', 'success');
+                        // next:true = a DIFFERENT release (candidates → requery →
+                        // fresh wishlist search) — never the one just blocked
+                        postJSON(URL_RETRY, { id: bid, next: true }).then(function (r2) {
+                            var msg = 'Release blocked';
+                            if (r2 && r2.ok) {
+                                msg = r2.wishlist_search
+                                    ? 'Release blocked — searching for another release'
+                                    : 'Release blocked — retrying with another';
+                            }
+                            toast(msg, 'success');
                             poll();
                         });
                     } else { toast('Release blocked', 'success'); poll(); }
