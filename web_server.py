@@ -139,6 +139,7 @@ from core.wishlist.routes import (
     get_wishlist_tracks as _wishlist_get_wishlist_tracks,
     process_wishlist_api as _wishlist_process_api,
     remove_album_from_wishlist as _wishlist_remove_album_from_wishlist,
+    remove_artist_from_wishlist as _wishlist_remove_artist_from_wishlist,
     remove_batch_from_wishlist as _wishlist_remove_batch_from_wishlist,
     remove_track_from_wishlist as _wishlist_remove_track_from_wishlist,
     set_wishlist_cycle as _wishlist_set_wishlist_cycle,
@@ -18785,6 +18786,20 @@ def remove_album_from_wishlist():
         return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error removing album from wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/remove-artist', methods=['POST'])
+def remove_artist_from_wishlist():
+    """Remove every wishlist track by one artist (#1065 — one click instead
+    of unchecking a whole discography album by album)."""
+    try:
+        data = request.get_json() or {}
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_remove_artist_from_wishlist(
+            runtime, artist_name=data.get('artist_name'))
+        return jsonify(payload), status_code
+    except Exception as e:
+        logger.error(f"Error removing artist from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/wishlist/remove-batch', methods=['POST'])

@@ -22101,6 +22101,32 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     padding: 8px 0;
 }
 
+/* per-artist sections (#1065): tri-state select + remove/download the whole
+   catalog in one click */
+.wishlist-artist-section {
+    margin-bottom: 18px; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 4px 10px 8px;
+    background: rgba(255,255,255,0.015);
+}
+.wishlist-artist-header {
+    display: flex; align-items: center; gap: 10px; padding: 8px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.wishlist-artist-title {
+    font-size: 15px; font-weight: 800; color: #fff;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wishlist-artist-counts {
+    flex: 1; font-size: 12px; color: rgba(255,255,255,0.4); white-space: nowrap;
+}
+.wishlist-artist-download-btn {
+    flex: none; width: 30px; height: 28px; border-radius: 8px; cursor: pointer;
+    border: 1px solid rgba(29,185,84,0.35); background: rgba(29,185,84,0.12);
+    color: #1db954; font-size: 14px; line-height: 1;
+}
+.wishlist-artist-download-btn:hover { background: rgba(29,185,84,0.28); }
+.wishlist-delete-artist-btn { flex: none; }
+
 .wishlist-load-more-btn {
     display: block;
     width: 100%;
