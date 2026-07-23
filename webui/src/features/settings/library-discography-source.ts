@@ -66,9 +66,14 @@ async function saveLibraryDiscographySource(
     body: JSON.stringify(settings),
   });
 
-  const result = (await response.json()) as { success?: boolean; error?: string };
+  const result = (await response.json()) as {
+    success?: boolean;
+    error?: string;
+  };
   if (!response.ok || result.success !== true) {
-    throw new Error(result.error || `Settings save failed with HTTP ${response.status}`);
+    throw new Error(
+      result.error || `Settings save failed with HTTP ${response.status}`,
+    );
   }
 
   targetWindow._settingsPayload = settings;
@@ -96,7 +101,8 @@ function insertSelector(documentRef: Document): HTMLSelectElement | null {
   const primarySelect = documentRef.getElementById('metadata-fallback-source');
   if (!(primarySelect instanceof HTMLSelectElement)) return null;
 
-  const primaryGroup = primarySelect.closest('.form-group') ?? primarySelect.parentElement;
+  const primaryGroup =
+    primarySelect.closest('.form-group') ?? primarySelect.parentElement;
   if (!primaryGroup?.parentElement) return null;
 
   const group = documentRef.createElement('div');
@@ -132,7 +138,8 @@ export async function mountLibraryDiscographySourceSelector({
   if (!select) return null;
 
   try {
-    const settings = targetWindow._settingsPayload ?? (await loadSettings(fetchImpl));
+    const settings =
+      targetWindow._settingsPayload ?? (await loadSettings(fetchImpl));
     targetWindow._settingsPayload = settings;
     select.value = normalizeLibraryDiscographySource(
       settings.metadata?.library_discography_source,
@@ -155,7 +162,9 @@ export async function mountLibraryDiscographySourceSelector({
     } catch (error) {
       console.error('Failed to save Library discography source:', error);
       targetWindow.showToast?.(
-        error instanceof Error ? error.message : 'Failed to save Library discography source',
+        error instanceof Error
+          ? error.message
+          : 'Failed to save Library discography source',
         'error',
       );
     } finally {
