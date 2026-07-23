@@ -200,6 +200,11 @@ def get_album_type_display(raw_type, track_count) -> str:
     if raw == "album":
         return "Album"
     if raw in ("single", "ep"):
+        # Unknown track count must not collapse to Single: an EP whose count
+        # was lost in a handoff kept getting filed as [Single] (#1064). With
+        # no count, trust the source's own word.
+        if tc <= 0:
+            return "EP" if raw == "ep" else "Single"
         if tc <= 3:
             return "Single"
         if tc <= 6:
