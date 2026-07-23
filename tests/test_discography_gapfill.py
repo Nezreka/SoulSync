@@ -135,6 +135,12 @@ def test_endpoint_is_conservative_and_additive():
     fn = fn[:fn.index("@app.route")]
     assert "artist_source_ids.get(s)" in fn          # verified-id sources only
     assert "allow_fallback=False" in fn              # no cross-source double count
+    # other-source fetches carry NO artist name — the per-source lookup has an
+    # internal search-by-name fallback, and a stale id must mean "no gap-fill",
+    # never a name search that could pick the wrong artist
+    assert "def _fetch(source, source_artist_id, name='')" in fn
+    assert "_fetch(source, artist_source_ids[source])" in fn      # others: nameless
+    assert "name=artist_name" in fn                               # base keeps the name
     assert "fuzzy" not in fn.replace("never a fuzzy name search", "")
     # the shared id-resolver is reused by the original discography endpoint too
     assert ws.count("_resolve_artist_source_ids(") >= 3

@@ -10197,10 +10197,16 @@ def get_artist_discography_gap_fill(artist_id):
         from core.metadata.lookup import MetadataLookupOptions
         from core.metadata.discography_strict import get_artist_detail_discography
 
-        def _fetch(source, source_artist_id):
+        def _fetch(source, source_artist_id, name=''):
+            # OTHER-source fetches pass NO artist name: the per-source lookup
+            # has an internal search-by-name fallback when the id yields
+            # nothing (album_tracks.get_artist_albums_for_source), and a stale
+            # enriched id must degrade to "no gap-fill from this source" —
+            # never to a name search that could pick the wrong artist. Only
+            # the base fetch keeps the name (mirrors the page's own load).
             disc = get_artist_detail_discography(
                 source_artist_id,
-                artist_name=artist_name,
+                artist_name=name,
                 options=MetadataLookupOptions(
                     source_override=source,
                     allow_fallback=False,   # a down source must not answer from another
@@ -10217,7 +10223,7 @@ def get_artist_discography_gap_fill(artist_id):
                     'singles': disc.get('singles') or []}
 
         base_id = artist_source_ids.get(base_source) or artist_id
-        base = _fetch(base_source, base_id)
+        base = _fetch(base_source, base_id, name=artist_name)
         if base is None:
             # No base to diff against — returning gaps would duplicate the page
             return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
