@@ -10118,6 +10118,128 @@ def get_artist_top_tracks_endpoint(artist_id):
         return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 
+def _resolve_artist_source_ids(artist_id) -> dict:
+    """Per-source artist ids from the enriched library row, keyed by source.
+
+    Looks the row up by ANY id the frontend might send (library PK or any
+    provider id) and returns every stored provider id, so each source gets
+    ITS OWN id instead of someone else's (which Deezer would happily accept
+    as a different artist). Lifted from the discography endpoint; the
+    gap-fill endpoint shares it."""
+    artist_source_ids = {}
+    try:
+        _db = get_database()
+        _conn = _db._get_connection()
+        try:
+            _cur = _conn.cursor()
+            _cur.execute("""
+                SELECT spotify_artist_id, itunes_artist_id,
+                       deezer_id, musicbrainz_id
+                FROM artists
+                WHERE id = ?
+                   OR spotify_artist_id = ?
+                   OR itunes_artist_id = ?
+                   OR deezer_id = ?
+                   OR musicbrainz_id = ?
+                LIMIT 1
+            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+            _row = _cur.fetchone()
+            if _row:
+                if _row['spotify_artist_id']:
+                    artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
+                if _row['itunes_artist_id']:
+                    artist_source_ids['itunes'] = str(_row['itunes_artist_id'])
+                if _row['deezer_id']:
+                    artist_source_ids['deezer'] = str(_row['deezer_id'])
+                if _row['musicbrainz_id']:
+                    artist_source_ids['musicbrainz'] = str(_row['musicbrainz_id'])
+                logger.info(
+                    f"Discography: resolved per-source IDs for artist_id={artist_id} → "
+                    f"{artist_source_ids}"
+                )
+        finally:
+            _conn.close()
+    except Exception as _id_exc:
+        logger.debug(f"Could not resolve per-source artist IDs for {artist_id}: {_id_exc}")
+    return artist_source_ids
+
+
+@app.route('/api/artist/<artist_id>/discography/gap-fill', methods=['GET'])
+def get_artist_discography_gap_fill(artist_id):
+    """Releases OTHER metadata sources know that the base source's
+    discography doesn't (#1067 — the hybrid/gap-fill view option).
+
+    Strictly additive + conservative: only sources whose ENRICHED per-source
+    artist id we hold are consulted (never a fuzzy name search — the wrong
+    artist's discography as 'gap-fill' would be worse than no feature), each
+    source is fetched with fallback disabled so a failing source contributes
+    nothing instead of double-counting another, and the dedup shows a
+    borderline edition twice rather than merging it wrongly. The base page's
+    own load path is untouched — this endpoint only ever ADDS cards."""
+    try:
+        artist_name = request.args.get('artist_name', '').strip()
+        base_source = (request.args.get('base_source', '') or '').strip().lower()
+        if not base_source:
+            from core.metadata_service import get_primary_source
+            base_source = get_primary_source()
+
+        artist_source_ids = _resolve_artist_source_ids(artist_id)
+
+        candidates = [s for s in ('spotify', 'deezer', 'itunes', 'musicbrainz')
+                      if s != base_source and artist_source_ids.get(s)]
+        if not candidates:
+            return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
+                            "sources_checked": [], "base_source": base_source,
+                            "note": "No other sources have a verified id for this artist yet "
+                                    "(enrichment provides them)."})
+
+        from core.metadata.discography_gapfill import gap_fill_buckets
+        from core.metadata.lookup import MetadataLookupOptions
+        from core.metadata.discography_strict import get_artist_detail_discography
+
+        def _fetch(source, source_artist_id):
+            disc = get_artist_detail_discography(
+                source_artist_id,
+                artist_name=artist_name,
+                options=MetadataLookupOptions(
+                    source_override=source,
+                    allow_fallback=False,   # a down source must not answer from another
+                    skip_cache=False,
+                    max_pages=0,
+                    limit=200,
+                    artist_source_ids=artist_source_ids or None,
+                ),
+            )
+            if disc.get('state') != 'results':
+                return None
+            return {'albums': disc.get('albums') or [],
+                    'eps': disc.get('eps') or [],
+                    'singles': disc.get('singles') or []}
+
+        base_id = artist_source_ids.get(base_source) or artist_id
+        base = _fetch(base_source, base_id)
+        if base is None:
+            # No base to diff against — returning gaps would duplicate the page
+            return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
+                            "sources_checked": [], "base_source": base_source,
+                            "note": "Base discography unavailable."})
+
+        others = {}
+        checked = []
+        for source in candidates:
+            disc = _fetch(source, artist_source_ids[source])
+            if disc is not None:
+                others[source] = disc
+                checked.append(source)
+
+        gaps = gap_fill_buckets(base, others, checked)
+        return jsonify({"success": True, "gaps": gaps,
+                        "sources_checked": checked, "base_source": base_source})
+    except Exception as e:
+        logger.error(f"Discography gap-fill failed for {artist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
@@ -10164,41 +10286,7 @@ def get_artist_discography(artist_id):
         #     back to fuzzy name search → may pick wrong artist
         # With server-side resolution, every source gets its OWN stored
         # ID regardless of which one the URL carries.
-        artist_source_ids = {}
-        try:
-            _db = get_database()
-            _conn = _db._get_connection()
-            try:
-                _cur = _conn.cursor()
-                _cur.execute("""
-                    SELECT spotify_artist_id, itunes_artist_id,
-                           deezer_id, musicbrainz_id
-                    FROM artists
-                    WHERE id = ?
-                       OR spotify_artist_id = ?
-                       OR itunes_artist_id = ?
-                       OR deezer_id = ?
-                       OR musicbrainz_id = ?
-                    LIMIT 1
-                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-                _row = _cur.fetchone()
-                if _row:
-                    if _row['spotify_artist_id']:
-                        artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
-                    if _row['itunes_artist_id']:
-                        artist_source_ids['itunes'] = str(_row['itunes_artist_id'])
-                    if _row['deezer_id']:
-                        artist_source_ids['deezer'] = str(_row['deezer_id'])
-                    if _row['musicbrainz_id']:
-                        artist_source_ids['musicbrainz'] = str(_row['musicbrainz_id'])
-                    logger.info(
-                        f"Discography: resolved per-source IDs for artist_id={artist_id} → "
-                        f"{artist_source_ids}"
-                    )
-            finally:
-                _conn.close()
-        except Exception as _id_exc:
-            logger.debug(f"Could not resolve per-source artist IDs for {artist_id}: {_id_exc}")
+        artist_source_ids = _resolve_artist_source_ids(artist_id)
 
         discography = _get_artist_discography(
             artist_id,

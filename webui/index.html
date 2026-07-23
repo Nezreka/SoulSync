@@ -4738,6 +4738,17 @@
                                     <!-- Single cards will be populated here -->
                                 </div>
                             </div>
+
+                            <!-- Gap-fill (#1067): releases OTHER metadata sources know that the
+                                 base source's discography doesn't. Purely additive view option;
+                                 populated async by _loadDiscographyGapFill when enabled. -->
+                            <div class="discography-section" id="gapfill-section" style="display:none">
+                                <div class="section-header">
+                                    <h3>More from other sources</h3>
+                                    <div class="section-stats"><span id="gapfill-count"></span></div>
+                                </div>
+                                <div class="releases-grid" id="gapfill-grid"></div>
+                            </div>
                         </div>
 
                         <!-- Similar Artists Section (works for both library and source artists).

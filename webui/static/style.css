@@ -72206,3 +72206,13 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .em-retry-global:hover { transform: none; background: rgba(245, 158, 11, 0.24); }
 .em-retry-global:disabled { opacity: 0.55; cursor: default; }
+
+/* discography gap-fill (#1067): source badge on cards from other sources */
+.gapfill-source-badge {
+    position: absolute; left: 8px; top: 8px; z-index: 2;
+    padding: 3px 9px; border-radius: 999px;
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    background: rgba(12, 12, 16, 0.85); color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    pointer-events: none;
+}
