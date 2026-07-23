@@ -191,10 +191,39 @@ def test_parse_bare_numeric_id_rejected():
     assert by_id.parse_metadata_identifier('525046') == []
 
 
-def test_parse_bare_uuid_rejected():
-    assert by_id.parse_metadata_identifier(
-        'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
-    ) == []
+def test_parse_bare_uuid_is_musicbrainz():
+    # FLIPPED (was ...rejected): this pin encoded Jordan H's bug. A UUID is
+    # the ONE bare ID whose format pins its source — no supported provider
+    # except MusicBrainz uses UUIDs — so rejecting it forced users to build
+    # the musicbrainz.org URL by hand for something Lidarr accepts raw.
+    # Kind stays None: the resolver walks release → recording → artist.
+    targets = by_id.parse_metadata_identifier('a1b2c3d4-e5f6-7890-abcd-ef1234567890')
+    assert targets == [LookupTarget('musicbrainz', None, 'a1b2c3d4-e5f6-7890-abcd-ef1234567890')]
+    # case-insensitive, normalized to lowercase
+    up = by_id.parse_metadata_identifier('A1B2C3D4-E5F6-7890-ABCD-EF1234567890')
+    assert up and up[0].id == 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    # near-misses stay rejected — the format check is strict
+    assert by_id.parse_metadata_identifier('a1b2c3d4-e5f6-7890-abcd-ef123456789') == []
+    assert by_id.parse_metadata_identifier('a1b2c3d4e5f67890abcdef1234567890') == []
+
+
+def test_bare_mbid_resolves_album_then_falls_back_to_artist():
+    mbid = '29a40a80-8cbb-4421-9555-db59cef4a6c9'
+    album = {'id': mbid, 'name': 'I Love Techno 1',
+             'artists': [{'name': 'Various Artists'}], 'images': []}
+    hit = by_id.resolve_identifier(
+        mbid, deps=None,
+        client_resolver=lambda s: _FakeClient(album=album) if s == 'musicbrainz' else None)
+    assert hit['available'] is True and hit['source'] == 'musicbrainz'
+    assert hit['albums'][0]['name'] == 'I Love Techno 1'
+
+    # album + track miss → the kind-None walk reaches artist
+    artist = {'id': mbid, 'name': 'Some Artist', 'images': []}
+    hit = by_id.resolve_identifier(
+        mbid, deps=None,
+        client_resolver=lambda s: _FakeClient(artist=artist) if s == 'musicbrainz' else None)
+    assert hit['available'] is True
+    assert hit['artists'][0]['name'] == 'Some Artist'
 
 
 def test_parse_bare_base62_rejected():
