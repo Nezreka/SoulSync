@@ -26,9 +26,7 @@ const VALID_SOURCES = new Set<string>(
 );
 
 export function normalizeLibraryDiscographySource(value: unknown): LibraryDiscographySource {
-  const normalized = String(value ?? '')
-    .trim()
-    .toLowerCase();
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return VALID_SOURCES.has(normalized) ? (normalized as LibraryDiscographySource) : 'primary';
 }
 
@@ -53,7 +51,7 @@ async function saveLibraryDiscographySource(
 ): Promise<void> {
   const settings = await loadSettings(fetchImpl);
   settings.metadata = {
-    ...(settings.metadata ?? {}),
+    ...settings.metadata,
     library_discography_source: source,
   };
 
