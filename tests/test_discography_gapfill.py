@@ -150,5 +150,9 @@ def test_frontend_contract():
     # opt-in chip + persisted preference; default off
     assert "discog_gapfill" in js
     assert "gapfill-source-badge" in js
+    # client-side FINAL dedup vs the page's library-merged view: an owned
+    # release the base source doesn't list must not return as a gap card
+    assert "_renderedDiscography" in js
+    assert "_gapSameRelease" in js
     html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     assert 'id="gapfill-section"' in html and 'style="display:none"' in html

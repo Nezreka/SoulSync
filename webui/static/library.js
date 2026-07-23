@@ -1047,7 +1047,12 @@ async function loadArtistDetailData(artistId, artistName) {
         console.log(`🎨 Main content visibility:`, document.getElementById('artist-detail-main'));
         console.log(`🎨 Albums section:`, document.getElementById('albums-section'));
 
-        // Gap-fill (#1067): fire-and-forget — the base page never waits on it
+        // Gap-fill (#1067): fire-and-forget — the base page never waits on it.
+        // The rendered discography is stashed for the client-side final dedup:
+        // the server diffs against the SOURCE list, but library artists render
+        // a library-MERGED view, so an owned album the source doesn't list
+        // would otherwise reappear as a 'missing' gap card.
+        artistDetailPageState._renderedDiscography = data.discography || null;
         _loadDiscographyGapFill(artistId, artistName);
 
         // Populate the page with data (which updates the hero section and sets textContent)
@@ -1942,6 +1947,26 @@ function _gapFillEnabled() {
     try { return localStorage.getItem('discog_gapfill') === '1'; } catch (e) { return false; }
 }
 
+// JS mirror of the backend's conservative same-release rule (title normalized
+// with edition parens KEPT + year within ±1 or unknown) — used for the final
+// client-side dedup against the page's library-merged discography.
+function _gapNorm(t) {
+    return String(t || '').toLowerCase().replace(/[^\w\s()]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function _gapYear(card) {
+    let y = card.year;
+    if (y == null && card.release_date) y = String(card.release_date).slice(0, 4);
+    y = parseInt(y, 10);
+    return (y >= 1000 && y <= 3000) ? y : null;
+}
+function _gapSameRelease(a, b) {
+    const ta = _gapNorm(a.title || a.name), tb = _gapNorm(b.title || b.name);
+    if (!ta || ta !== tb) return false;
+    const ya = _gapYear(a), yb = _gapYear(b);
+    if (ya == null || yb == null) return true;
+    return Math.abs(ya - yb) <= 1;
+}
+
 function _resetGapFillSection() {
     const section = document.getElementById('gapfill-section');
     const grid = document.getElementById('gapfill-grid');
@@ -1989,11 +2014,21 @@ async function _loadDiscographyGapFill(artistId, artistName) {
         if (seq !== _gapFillReqSeq) return;   // user navigated to another artist
         if (!res.ok || !data.success) return;
         const gaps = data.gaps || {};
-        const all = [
+        let all = [
             ...(gaps.albums || []).map(g => ({ ...g, _bucket: 'album' })),
             ...(gaps.eps || []).map(g => ({ ...g, _bucket: 'ep' })),
             ...(gaps.singles || []).map(g => ({ ...g, _bucket: 'single' })),
         ];
+        // Final dedup against what the page ACTUALLY rendered (the
+        // library-merged view can contain owned releases the base source
+        // doesn't list — those must not come back as 'missing' gap cards).
+        const rendered = artistDetailPageState._renderedDiscography;
+        if (rendered) {
+            const renderedCards = [
+                ...(rendered.albums || []), ...(rendered.eps || []), ...(rendered.singles || []),
+            ];
+            all = all.filter(g => !renderedCards.some(r => _gapSameRelease(g, r)));
+        }
         if (!all.length) return;
 
         const grid = document.getElementById('gapfill-grid');
