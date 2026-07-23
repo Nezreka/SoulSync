@@ -6761,7 +6761,7 @@ class MusicDatabase:
 
         return normalized
     
-    def get_artist(self, artist_id: int) -> Optional[DatabaseArtist]:
+    def get_artist(self, artist_id) -> Optional[DatabaseArtist]:  # id is TEXT (server-native; numeric only on Plex) — #1069
         """Get artist by ID"""
         try:
             with self._get_connection() as conn:
@@ -6992,7 +6992,7 @@ class MusicDatabase:
             )
             return [dict(r) for r in cursor.fetchall()]
 
-    def get_albums_by_artist(self, artist_id: int) -> List[DatabaseAlbum]:
+    def get_albums_by_artist(self, artist_id) -> List[DatabaseAlbum]:  # id is TEXT (server-native) — #1069
         """Get all albums by artist ID"""
         try:
             conn = self._get_connection()

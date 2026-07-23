@@ -9898,18 +9898,18 @@ def write_artist_image_to_disk(artist_id):
         source_override = (data.get('source_override') or '').strip().lower() or None
 
         db = get_database()
-        try:
-            artist_id_int = int(artist_id)
-        except (TypeError, ValueError):
+        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
             return jsonify({"success": False, "error": "Invalid artist id"}), 400
 
-        artist_row = db.get_artist(artist_id_int)
+        artist_row = db.get_artist(artist_id)
         if artist_row is None:
             return jsonify({"success": False, "error": "Artist not found"}), 404
 
         # Find a track file on disk so we can derive the artist folder.
         # Walk albums in DB order; first one with a resolvable track wins.
-        albums = db.get_albums_by_artist(artist_id_int)
+        albums = db.get_albums_by_artist(artist_id)
         if not albums:
             return jsonify({"success": False,
                             "error": "No albums for this artist; cannot derive folder."}), 400
@@ -9946,7 +9946,7 @@ def write_artist_image_to_disk(artist_id):
         else:
             try:
                 image_url = _get_artist_image_url(
-                    artist_id_int,
+                    artist_id,
                     source_override=source_override,
                     artist_name=getattr(artist_row, 'name', None),
                 )
@@ -10583,8 +10583,14 @@ def get_artist_art_options(artist_id):
     the library row has one (exact), otherwise a name search on that source.
     Mirrors the album art-options endpoint."""
     try:
+        # #1069 (matvei4iz): artists.id is TEXT since the id-columns migration —
+        # Navidrome/Jellyfin ids are strings ("7dB07x8Q…"), and int() here made
+        # the whole picker 400 for every non-Plex backend. Ids are opaque.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
+            return jsonify({"error": "Invalid artist id"}), 400
         db = get_database()
-        artist_row = db.get_artist(int(artist_id))
+        artist_row = db.get_artist(artist_id)
         if artist_row is None:
             return jsonify({"error": "Artist not found"}), 404
         name = getattr(artist_row, 'name', '') or ''
@@ -10592,7 +10598,7 @@ def get_artist_art_options(artist_id):
         # Key by ROW id, not name: two artists sharing a name must not share
         # a cache slot. Empty results only stick for a minute — a transient
         # source failure used to poison the picker with 'no photos' for 15.
-        cache_key = ('artist', int(artist_id))
+        cache_key = ('artist', artist_id)
         now = time.time()
         with _ART_OPTIONS_CACHE_LOCK:
             hit = _ART_OPTIONS_CACHE.get(cache_key)
@@ -10608,9 +10614,9 @@ def get_artist_art_options(artist_id):
         with _ART_OPTIONS_CACHE_LOCK:
             _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
         return jsonify({"artist_id": artist_id, "count": len(candidates), "candidates": candidates})
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid artist id"}), 400
     except Exception as e:
+        # No blanket (TypeError, ValueError) → "Invalid artist id" anymore —
+        # it mislabeled any deep ValueError as an id problem (#1069).
         logger.error("[artist-art-options] failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
 
@@ -10634,8 +10640,12 @@ def set_artist_art(artist_id):
         if not url:
             return jsonify({"error": "url is required"}), 400
 
+        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
+            return jsonify({"error": "Invalid artist id"}), 400
         db = get_database()
-        artist_row = db.get_artist(int(artist_id))
+        artist_row = db.get_artist(artist_id)
         if artist_row is None:
             return jsonify({"error": "Artist not found"}), 404
         artist_name = getattr(artist_row, 'name', '') or ''
@@ -10656,7 +10666,7 @@ def set_artist_art(artist_id):
         if image_bytes is not None and not _looks_like_image(image_bytes):
             return jsonify({"error": "That URL doesn't point to an image"}), 400
 
-        if not db.set_artist_thumb_url(int(artist_id), url):
+        if not db.set_artist_thumb_url(artist_id, url):
             return jsonify({"error": "Could not update artist"}), 500
 
         # 2. Active media server poster (Plex/Jellyfin have APIs; Navidrome's
@@ -10682,7 +10692,7 @@ def set_artist_art(artist_id):
         disk_written = False
         try:
             from core.library.artist_image import derive_artist_folder, write_artist_jpg
-            albums = db.get_albums_by_artist(int(artist_id)) or []
+            albums = db.get_albums_by_artist(artist_id) or []
             artist_folder = None
             for album in albums:
                 for tr in (db.get_tracks_by_album(album.id) or []):
@@ -10711,13 +10721,13 @@ def set_artist_art(artist_id):
             logger.warning("[set-artist-art] disk write failed: %s", exc)
 
         # Invalidate the candidates cache so a re-open reflects reality.
+        # (#1069: this popped a NAME-keyed entry while the cache stores by ID —
+        # a dead pop, leaving stale candidates for a minute after Apply.)
         with _ART_OPTIONS_CACHE_LOCK:
-            _ART_OPTIONS_CACHE.pop(('artist', artist_name.lower()), None)
+            _ART_OPTIONS_CACHE.pop(('artist', artist_id), None)
 
         return jsonify({"success": True, "artist_id": artist_id, "thumb_url": url,
                         "server_updated": server_updated, "disk_written": disk_written})
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid artist id"}), 400
     except Exception as e:
         logger.error("[set-artist-art] failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
