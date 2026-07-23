@@ -270,7 +270,7 @@ def test_automatic_commercial_catalogue_stops_on_access_error(monkeypatch):
 
 
 def test_invalid_library_setting_falls_back_to_primary(monkeypatch):
-    primary = _StaticClient([_album("primary-album")])
+    primary = _MusicBrainzClient([_album("primary-album")])
     _configure_sources(
         monkeypatch,
         {"musicbrainz": primary},
