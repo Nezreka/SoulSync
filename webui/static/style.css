@@ -19962,64 +19962,183 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     flex-shrink: 0;
 }
 
-.playlist-quality-profile-control {
+/* ── Quality Profile selectors ───────────────────────────────────────────────
+   Two variants of one control, deliberately distinguishable at a glance
+   because they behave differently:
+
+   .playlist-quality-profile-control   persisted — writes to the mirror row
+   .acquisition-quality-profile-control  per-action — applies to this click only
+
+   Shared: native arrow replaced with an inline SVG caret (the platform arrow
+   renders near-black on these dark surfaces), the app's green accent on
+   hover/focus, and an explicitly inert disabled state — a Quality Profile
+   selector that cannot save must never look like it holds a value.
+   ------------------------------------------------------------------------- */
+
+.playlist-quality-profile-control,
+.acquisition-quality-profile-control {
+    --qp-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    color: var(--text-secondary, rgba(255, 255, 255, .72));
-    font-size: 12px;
+    gap: 9px;
+    color: rgba(255, 255, 255, .58);
+    /* Micro-label: uppercase + tracking reads as a field name at this size,
+       where sentence case just looks like stray body text next to the value. */
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    line-height: 1;
 }
+
+.playlist-quality-profile-control select,
+.acquisition-quality-profile-control select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: var(--qp-caret);
+    background-repeat: no-repeat;
+    background-position: right 11px center;
+    border-radius: 9px;
+    color: #fff;
+    font-family: inherit;
+    /* The value is the content — reset the label's uppercase micro-styling. */
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+    transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease;
+}
+
+.playlist-quality-profile-control select:hover:not(:disabled),
+.acquisition-quality-profile-control select:hover:not(:disabled) {
+    border-color: rgba(var(--accent-rgb), .5);
+}
+
+.playlist-quality-profile-control select:focus-visible,
+.acquisition-quality-profile-control select:focus-visible {
+    outline: none;
+    border-color: rgba(var(--accent-light-rgb), .85);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .18);
+}
+
+/* Firefox/Chromium honour these on Linux; elsewhere the native popup wins and
+   the defaults are already readable. */
+.playlist-quality-profile-control option,
+.acquisition-quality-profile-control option {
+    background: #17181c;
+    color: #fff;
+}
+
+/* Disabled means "nothing here is saved" — see hydrate…Unavailable() in
+   shared-helpers.js. Drop the caret so it doesn't read as openable. */
+.playlist-quality-profile-control select:disabled,
+.acquisition-quality-profile-control select:disabled {
+    background-image: none;
+    color: rgba(255, 255, 255, .42);
+    font-style: italic;
+    border-style: dashed;
+    cursor: not-allowed;
+}
+
+/* ── Persisted variant: quiet, inset, sits among other saved settings ────── */
 
 .playlist-quality-profile-control select {
     min-width: 170px;
-    padding: 7px 28px 7px 9px;
-    border: 1px solid rgba(255, 255, 255, .14);
-    border-radius: 8px;
-    background: var(--surface-2, #202126);
-    color: var(--text-primary, #fff);
+    padding: 7px 30px 7px 11px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    background-color: rgba(255, 255, 255, .045);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
 }
 
 .playlist-quality-profile-control.compact {
     flex-direction: column;
     align-items: flex-start;
-    gap: 3px;
+    gap: 5px;
 }
 
 .playlist-quality-profile-control.compact select {
     min-width: 145px;
     max-width: 190px;
+    width: 100%;
 }
 
-/* Acquisition Quality Profile selector (audit P1-01).
-   Shown in the shared "Tracks to Add to Wishlist" and Download Missing dialogs.
-   Unlike .playlist-quality-profile-control this one is NOT persisted — it is the
-   intent for a single action — so it deliberately reads as a form field rather
-   than a settings toggle. */
+/* ── Per-action variant: a form field you are filling in right now ───────── */
+
 .acquisition-quality-profile-control {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-secondary, rgba(255, 255, 255, .72));
-    font-size: 12px;
+    /* Grouped on a surface of its own so the label + value read as one field
+       rather than as two loose bits of footer text — it sits next to the action
+       buttons, where a bare label would just look like stray text. */
+    gap: 10px;
+    padding: 7px 11px 7px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, .07);
+    background: rgba(255, 255, 255, .03);
+    transition: border-color .18s ease, background-color .18s ease;
+}
+
+/* Whole field goes inert together, not just the <select>. */
+.acquisition-quality-profile-control:has(select:disabled) {
+    background: rgba(255, 255, 255, .015);
+    border-color: rgba(255, 255, 255, .05);
+    color: rgba(255, 255, 255, .32);
+}
+
+.acquisition-quality-profile-control > span {
+    position: relative;
+    padding-left: 11px;
     white-space: nowrap;
 }
 
-.acquisition-quality-profile-control select {
-    min-width: 170px;
-    max-width: 240px;
-    padding: 7px 28px 7px 9px;
-    border: 1px solid rgba(255, 255, 255, .14);
-    border-radius: 8px;
-    background: var(--surface-2, #202126);
-    color: var(--text-primary, #fff);
-    font-size: 12px;
+/* A small tick marking this as a live choice. The persisted variant has none —
+   that assignment is already decided.
+
+   It stays neutral at rest and only takes the accent on engagement: these
+   footers already carry two green action buttons, and a third resting green
+   just competes with them. Lighting up on hover/focus keeps the cue but spends
+   the colour only when the user is actually making the choice. */
+.acquisition-quality-profile-control > span::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 11px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, .26);
+    transition: background .18s ease;
 }
 
-/* A disabled selector means the choice could not be loaded or saved, so the
-   server default applies. Make that visibly inert instead of looking chosen. */
-.acquisition-quality-profile-control select:disabled {
-    opacity: .55;
-    cursor: not-allowed;
+.acquisition-quality-profile-control:hover:not(:has(select:disabled)) > span::before,
+.acquisition-quality-profile-control:focus-within > span::before {
+    background: rgba(var(--accent-light-rgb), .9);
+}
+
+.acquisition-quality-profile-control:has(select:disabled) > span::before {
+    background: rgba(255, 255, 255, .12);
+}
+
+.acquisition-quality-profile-control select {
+    min-width: 176px;
+    max-width: 240px;
+    padding: 8px 32px 8px 12px;
+    border: 1px solid rgba(255, 255, 255, .13);
+    background-color: rgba(12, 12, 14, .72);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+}
+
+@media (max-width: 640px) {
+    .acquisition-quality-profile-control {
+        width: 100%;
+        gap: 8px;
+    }
+
+    .acquisition-quality-profile-control select {
+        flex: 1;
+        min-width: 0;
+        max-width: none;
+    }
 }
 
 .playlist-modal-btn {
