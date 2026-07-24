@@ -1166,6 +1166,39 @@ def test_poll_does_not_treat_empty_incomplete_path_as_stable() -> None:
     assert 'timed out' in failed_calls[0][1].get('error', '').lower()
 
 
+def test_poll_gives_up_on_incomplete_path_after_repeated_unreadable_polls() -> None:
+    """If the in-progress path can never be READ AT ALL (e.g. no
+    usenet_path_mappings entry for a split-container deployment, not just
+    an unresolved-but-real path), snapshot_path returns None on every
+    single poll — `stable` can never become True, so without a cap the
+    gate would poll for the entire outer ``timeout`` (hours) before saying
+    anything. A handful of consecutive unreadable polls must be enough to
+    give up with the SAME error the pre-stability-gate code used, well
+    before the (long) outer deadline."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/sab/incomplete/album', progress=1.0,
+        ),
+        title='Never Readable',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        transient_miss_threshold=3,
+        completed_no_path_threshold=2,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=6 * 3600.0,   # long outer deadline (6h)
+        snapshot_path=lambda path: None,   # truly unreadable, every poll
+    )
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    assert 'never provided a save_path' in failed_calls[0][1].get('error', '').lower()
+    # Gave up long before the 6h outer deadline.
+    assert clock.monotonic() < 3600.0
+
+
 def test_poll_fails_when_no_path_and_no_incomplete_path() -> None:
     """Last resort only fires when there's actually a path to scan.
     With neither a final save_path nor an incomplete_path, the poll

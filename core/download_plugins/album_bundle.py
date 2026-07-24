@@ -543,6 +543,16 @@ def poll_album_download(
             int(get_completed_no_path_window_seconds() / max(interval, 0.001)) or 1,
         )
     completed_no_path_misses = TransientMissCounter(completed_no_path_threshold)
+    # Separate counter for "the in-progress path can't be read at all"
+    # (as opposed to "readable but still changing"), e.g. no
+    # download_source.usenet_path_mappings entry for a split-container /
+    # remote-mount deployment. snapshot_path returns None every single
+    # poll in that case, so `stable` can never become True — without a
+    # cap the stability gate above would poll for the full outer
+    # ``timeout`` (hours) before saying anything. A handful of
+    # consecutive unreadable polls is enough to conclude the path is
+    # genuinely unreachable from here, not just mid-write.
+    incomplete_path_unreadable_misses = TransientMissCounter(transient_miss_threshold)
 
     def _fail(reason: str) -> None:
         try:
@@ -647,6 +657,19 @@ def poll_album_download(
                         snapshot_path=snapshot_path,
                         resolve_path=resolve_path,
                     )
+                    if current_snapshot is None:
+                        if incomplete_path_unreadable_misses.record_miss():
+                            logger.error(
+                                "%s '%s' in-progress path %r could not be read for "
+                                "%d consecutive polls — giving up instead of waiting "
+                                "out the full timeout.",
+                                log_prefix, title, resolved_incomplete_path,
+                                incomplete_path_unreadable_misses.misses,
+                            )
+                            _fail('Client reported success but never provided a save_path')
+                            return None
+                    else:
+                        incomplete_path_unreadable_misses.reset()
                     if stable:
                         logger.warning(
                             "%s '%s' completed on the client but never exposed a "

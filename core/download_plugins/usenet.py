@@ -267,6 +267,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             max(misses.threshold,
                 int(get_completed_no_path_window_seconds() / max(_POLL_INTERVAL_SECONDS, 0.001)) or 1)
         )
+        # Sibling of the same counter in poll_album_download: caps how many
+        # consecutive polls tolerate an incomplete_path that can't be read
+        # at all (e.g. no usenet_path_mappings entry for a split-container
+        # deployment) — without it the stability gate below never becomes
+        # True and the thread would poll for the full outer deadline.
+        incomplete_path_unreadable_misses = TransientMissCounter(misses.threshold)
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -329,6 +335,22 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                             snapshot_path=snapshot_incomplete_path,
                             resolve_path=resolve_reported_save_path,
                         )
+                        if current_snapshot is None:
+                            if incomplete_path_unreadable_misses.record_miss():
+                                logger.error(
+                                    "Usenet %s: '%s' in-progress path %r could not be "
+                                    "read for %d consecutive polls — giving up instead "
+                                    "of waiting out the full timeout.",
+                                    download_id[:8], job_id, resolved_incomplete_path,
+                                    incomplete_path_unreadable_misses.misses,
+                                )
+                                self._mark_error(
+                                    download_id,
+                                    "Usenet job completed but client never reported a save_path",
+                                )
+                                return
+                        else:
+                            incomplete_path_unreadable_misses.reset()
                         if stable:
                             logger.warning(
                                 "Usenet %s: '%s' completed but no final save_path after "

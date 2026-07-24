@@ -575,6 +575,29 @@ def test_usenet_thread_resolves_incomplete_path_before_stability_check() -> None
     assert row['audio_files'] == [str(Path('/done/track1.flac'))]
 
 
+def test_usenet_thread_gives_up_when_incomplete_path_is_never_readable() -> None:
+    """Sibling of the same cap added to ``poll_album_download``: if
+    ``incomplete_path`` can never be read at all (e.g. no
+    ``usenet_path_mappings`` entry for a split-container deployment, not
+    just an unresolved-but-real path), the stability snapshot returns
+    ``None`` on every single poll and can never stabilize. After a
+    handful of consecutive unreadable polls the thread must give up with
+    the same error the pre-stability-gate code used, rather than quietly
+    retrying for the full outer deadline (6h)."""
+    plugin = UsenetDownloadPlugin()
+    completed_no_path = UsenetStatus(
+        id='job1', name='A', state='completed', progress=1.0,
+        size=100, downloaded=100, download_speed=0,
+        save_path=None, incomplete_path='/sab/incomplete/A',
+    )
+    row = _drive_download_thread(
+        plugin, [completed_no_path] * 30,
+        snapshot={'return_value': None},
+    )
+    assert row['state'] == 'Completed, Errored'
+    assert 'never reported a save_path' in (row['error'] or '').lower()
+
+
 def test_usenet_thread_errors_when_completed_with_no_path_at_all() -> None:
     """No final save_path AND no incomplete_path → there's nothing to
     scan, so the thread errors (rather than spinning or finalizing a
