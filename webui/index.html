@@ -11123,6 +11123,18 @@
                 </div>
 
                 <div class="add-to-wishlist-modal-footer">
+                    <!-- Quality Profile for THIS acquisition. Applies to both
+                         buttons below so "Add to Wishlist" and "Download Now"
+                         can never disagree about the rules (audit P1-01). -->
+                    <label class="acquisition-quality-profile-control"
+                        for="wishlist-modal-quality-profile"
+                        title="Which Quality Profile these tracks must satisfy">
+                        <span>Quality Profile</span>
+                        <select id="wishlist-modal-quality-profile"
+                            class="acquisition-quality-profile-select" disabled>
+                            <option value="">Loading&hellip;</option>
+                        </select>
+                    </label>
                     <div class="wishlist-modal-actions">
                         <button class="btn btn--secondary"
                             onclick="closeAddToWishlistModal()">

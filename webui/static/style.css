@@ -19990,6 +19990,38 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     max-width: 190px;
 }
 
+/* Acquisition Quality Profile selector (audit P1-01).
+   Shown in the shared "Tracks to Add to Wishlist" and Download Missing dialogs.
+   Unlike .playlist-quality-profile-control this one is NOT persisted — it is the
+   intent for a single action — so it deliberately reads as a form field rather
+   than a settings toggle. */
+.acquisition-quality-profile-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary, rgba(255, 255, 255, .72));
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.acquisition-quality-profile-control select {
+    min-width: 170px;
+    max-width: 240px;
+    padding: 7px 28px 7px 9px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 8px;
+    background: var(--surface-2, #202126);
+    color: var(--text-primary, #fff);
+    font-size: 12px;
+}
+
+/* A disabled selector means the choice could not be loaded or saved, so the
+   server default applies. Make that visibly inert instead of looking chosen. */
+.acquisition-quality-profile-control select:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+
 .playlist-modal-btn {
     padding: 12px 24px;
     border-radius: 10px;
@@ -30249,12 +30281,20 @@ div.artist-hero-badge {
     padding: 24px 28px;
     border-bottom-left-radius: 20px;
     border-bottom-right-radius: 20px;
+    /* Quality Profile selector on the left, actions on the right; wraps to two
+       rows on narrow screens rather than squashing the buttons. */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
 }
 
 .wishlist-modal-actions {
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+    margin-left: auto;
 }
 
 /* .wishlist-modal-btn* migrated to the shared .btn primitive

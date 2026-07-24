@@ -791,6 +791,13 @@ let wishlistModalVersion = 0;
  * @param {Array} tracks - Array of track objects
  * @param {string} albumType - Type of release (album, EP, single)
  */
+const WISHLIST_MODAL_QUALITY_PROFILE_SELECT_ID = 'wishlist-modal-quality-profile';
+
+/** The Quality Profile chosen in the shared wishlist modal, or null for "server decides". */
+function currentWishlistModalQualityProfileId() {
+    return getAcquisitionQualityProfileId(WISHLIST_MODAL_QUALITY_PROFILE_SELECT_ID);
+}
+
 async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwnership) {
     wishlistModalVersion++;
     showLoadingOverlay('Preparing wishlist...');
@@ -832,6 +839,14 @@ async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwn
         if (addToWishlistBtn) {
             addToWishlistBtn.onclick = () => handleAddToWishlist();
         }
+
+        // Quality Profile for this acquisition (P1-01). Preselects the mirror's
+        // persisted assignment when this modal was opened from a playlist, the
+        // default profile otherwise. Both footer buttons read the same control.
+        hydrateAcquisitionQualityProfileSelect(WISHLIST_MODAL_QUALITY_PROFILE_SELECT_ID, {
+            playlistRef: currentWishlistModalData?.playlistRef || null,
+            source: currentWishlistModalData?.playlistSource || null,
+        });
 
         // Show the modal
         overlay.classList.remove('hidden');
@@ -945,6 +960,9 @@ async function handleAddToWishlist() {
 
     const { album, artist, tracks, albumType } = currentWishlistModalData;
     const addToWishlistBtn = document.getElementById('confirm-add-to-wishlist-btn');
+    // Read once, before the modal can be re-rendered mid-loop, so every track in
+    // this batch gets the SAME profile (P1-01).
+    const qualityProfileId = currentWishlistModalQualityProfileId();
 
     try {
         // Show loading state
@@ -1022,6 +1040,9 @@ async function handleAddToWishlist() {
                         artist: artist,
                         album: trackAlbum,
                         source_type: 'album',
+                        // Explicit user choice for this action (P1-01); null lets
+                        // the server keep its own resolution order.
+                        quality_profile_id: qualityProfileId,
                         source_context: {
                             album_name: trackAlbum.name,
                             artist_name: artist.name,
@@ -1299,6 +1320,9 @@ async function handleWishlistDownloadNow() {
 
     // Capture data before closeAddToWishlistModal clears it
     const { album, artist, tracks, albumType } = currentWishlistModalData;
+    // Carry the user's choice into the download dialog, so "Download Now" and
+    // "Add to Wishlist" in the SAME dialog can never disagree (P1-01).
+    const qualityProfileId = currentWishlistModalQualityProfileId();
 
     // Close the wishlist modal
     closeAddToWishlistModal();
@@ -1321,6 +1345,9 @@ async function handleWishlistDownloadNow() {
     await openDownloadMissingModalForArtistAlbum(
         virtualPlaylistId, playlistName, tracks, album, artist, false
     );
+    if (qualityProfileId != null) {
+        setDownloadModalQualityProfile(virtualPlaylistId, qualityProfileId);
+    }
     hideLoadingOverlay();
 
     // Register download bubble (reuses existing artist bubble system)
@@ -1363,6 +1390,10 @@ async function addModalTracksToWishlist(playlistId) {
     // not for playlists, so we must NOT use it as a blanket default.
     const processArtist = process.artist || null;
     const album = process.album || process.playlist || { name: 'Playlist', id: playlistId };
+
+    // Same control the modal's "Begin Analysis" reads, so both buttons in this
+    // dialog agree on the Quality Profile (P1-01).
+    const qualityProfileId = getDownloadModalQualityProfileId(playlistId);
 
     console.log(`🔄 Adding ${tracks.length} tracks from "${album.name}" to wishlist (process artist: ${processArtist?.name || 'per-track'})`);
 
@@ -1470,6 +1501,7 @@ async function addModalTracksToWishlist(playlistId) {
                         artist: trackArtist,
                         album: trackAlbum,
                         source_type: 'album',
+                        quality_profile_id: qualityProfileId,
                         source_context: {
                             album_name: trackAlbum.name,
                             artist_name: trackArtist.name,

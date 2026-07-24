@@ -18831,6 +18831,14 @@ def add_album_track_to_wishlist():
         album = data.get('album')
         source_type = data.get('source_type', 'album')
         source_context = data.get('source_context', {})
+
+        # The Quality Profile the user picked in the shared acquisition dialog.
+        # Before P1-01 this field did not exist and every manual Search /
+        # Discover / Library add silently used the global default.
+        quality_profile_id, error = _parse_requested_quality_profile_id(data)
+        if error:
+            return error
+
         runtime = _build_wishlist_route_runtime()
         payload, status_code = _wishlist_add_album_track_to_wishlist(
             runtime,
@@ -18839,6 +18847,7 @@ def add_album_track_to_wishlist():
             album=album,
             source_type=source_type,
             source_context=source_context,
+            quality_profile_id=quality_profile_id,
         )
         return jsonify(payload), status_code
     except Exception as e:
@@ -19931,8 +19940,17 @@ def _tracks_with_mirrored_quality_profile(
     playlist_name,
     tracks_json,
     profile_id=1,
+    explicit_quality_profile_id=None,
+    source=None,
 ):
-    """Apply the native mirror assignment to a provider-agnostic track list.
+    """Stamp the effective Quality Profile onto a provider-agnostic track list.
+
+    Precedence, highest first:
+
+    1. ``explicit_quality_profile_id`` — the user picked one in the acquisition
+       dialog for THIS action (P1-01);
+    2. the persisted mirror assignment, when the ref resolves to a mirror;
+    3. nothing, i.e. the app-wide default is applied later.
 
     Older source-specific endpoints do not all carry ``source`` through to the
     worker.  The database resolver handles that compatibility boundary; from
@@ -19942,20 +19960,23 @@ def _tracks_with_mirrored_quality_profile(
     if not isinstance(tracks_json, list):
         return tracks_json, None
     try:
-        database = get_database()
-        mirror = database.resolve_mirrored_playlist_assignment(
-            playlist_ref,
-            playlist_name,
-            profile_id=int(profile_id or 1),
-        )
-        quality_profile_id = mirror.get('quality_profile_id') if mirror else None
+        quality_profile_id = explicit_quality_profile_id
+        if quality_profile_id is None:
+            database = get_database()
+            mirror = database.resolve_mirrored_playlist_assignment(
+                playlist_ref,
+                playlist_name,
+                profile_id=int(profile_id or 1),
+                source=source,
+            )
+            quality_profile_id = mirror.get('quality_profile_id') if mirror else None
         if quality_profile_id is None:
             return tracks_json, None
         enriched = []
         for track in tracks_json:
             if isinstance(track, dict):
                 track = dict(track)
-                # The persisted playlist assignment is authoritative.
+                # The resolved assignment is authoritative for this batch.
                 track['quality_profile_id'] = quality_profile_id
             enriched.append(track)
         return enriched, quality_profile_id
@@ -19971,6 +19992,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, seriali
         batch.get('playlist_name'),
         tracks_json,
         profile_id=batch.get('profile_id', 1),
+        explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
+        source=batch.get('playlist_source'),
     )
     if quality_profile_id is not None:
         batch['quality_profile_id'] = quality_profile_id
@@ -22252,6 +22275,17 @@ def start_missing_tracks_process(playlist_id):
     skip_acoustid = bool(data.get('skip_acoustid', False))
     # Blocklist override (Phase 2b): set by the modal's "download anyway" confirm.
     ignore_blocklist = bool(data.get('ignore_blocklist', False))
+    # Quality Profile chosen in the shared acquisition dialog. Search, Discover,
+    # Library, album, single, discography and playlist-explorer all POST here, so
+    # this one field gives every manual path the same explicit choice (P1-01).
+    # It outranks the mirror's persisted assignment for this action only; the
+    # mirror row itself is unchanged unless the user edits it on the playlist.
+    requested_quality_profile_id, quality_profile_error = _parse_requested_quality_profile_id(data)
+    if quality_profile_error:
+        return quality_profile_error
+    # Provider hint so a mirror lookup can't be defeated by two providers sharing
+    # an upstream playlist id (P2-01).
+    playlist_source = data.get('source') or data.get('playlist_source') or None
 
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
@@ -22303,6 +22337,7 @@ def start_missing_tracks_process(playlist_id):
             db_pref.set_mirrored_playlist_organize_by_playlist(
                 int(mirrored_pl['id']),
                 bool(playlist_folder_mode),
+                profile_id=profile_id,
             )
     except Exception as pref_err:
         logger.debug(f"[Playlist Folder] Could not persist mirrored preference: {pref_err}")
@@ -22355,6 +22390,10 @@ def start_missing_tracks_process(playlist_id):
             'wing_it': wing_it,
             'skip_acoustid': skip_acoustid,  # #797 per-request AcoustID bypass
             'batch_source': _downloads_history.detect_sync_source(playlist_id),
+            # Explicit user choice for this batch — travels onto every track and
+            # therefore also onto any failed-download Wishlist row (P1-01).
+            'requested_quality_profile_id': requested_quality_profile_id,
+            'playlist_source': playlist_source,
         }
 
     # Record sync history — derive source_page from context
@@ -22368,7 +22407,8 @@ def start_missing_tracks_process(playlist_id):
         _source_page = 'sync'
     _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                                is_album_download, album_context, artist_context,
-                               playlist_folder_mode, source_page=_source_page)
+                               playlist_folder_mode, source_page=_source_page,
+                               quality_profile_id=requested_quality_profile_id)
 
     # Link YouTube playlist to download process if this is a YouTube playlist
     if playlist_id.startswith('youtube_'):
@@ -22510,6 +22550,25 @@ def _save_sync_status_file(sync_statuses):
         database.set_preference('sync_statuses', json.dumps(sync_statuses))
     except Exception as e:
         logger.error(f"Error saving sync status: {e}")
+
+def _parse_requested_quality_profile_id(data):
+    """``(quality_profile_id, error_response)`` for an acquisition request.
+
+    One validator for every manual acquisition surface — Search, Discover,
+    Library, album, single, top tracks, discography, playlist explorer — so the
+    same request field means the same thing everywhere (P1-01). Absent/None
+    keeps whatever the server would have chosen (mirror assignment, then the
+    global default); an unknown id is a 400 rather than a silent downgrade.
+    """
+    if not isinstance(data, dict) or data.get('quality_profile_id') is None:
+        return None, None
+    parsed = parse_strict_int(data.get('quality_profile_id'))
+    if parsed is None or parsed <= 0:
+        return None, (jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400)
+    if not get_database().quality_profile_exists(parsed):
+        return None, (jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400)
+    return parsed, None
+
 
 def _invalidate_mirror_sync_fingerprint(playlist_id):
     """Drop the smart-skip fingerprint for a mirror so the next sync really runs.
