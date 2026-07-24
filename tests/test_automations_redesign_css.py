@@ -131,10 +131,10 @@ def test_no_page_ambient_background():
 
 
 def test_card_noise_reduction_in_renderer():
-    """System cards drop the action chip when it restates the title, the
-    last-run summary shows only non-zero facts, and names get tooltips."""
-    assert "showActionChip" in _JS
-    assert "_norm(a.name).includes(_norm(_autoFormatAction(a.action_type)))" in _JS
+    """Last-run summaries show only non-zero facts and names get tooltips.
+    (The chip-dedup experiment is REVERTED: every card, system included,
+    reads WHEN -> WHAT — a trigger-only flow line looks broken.)"""
+    assert "showActionChip" not in _JS
     assert "v !== 0" in _JS and "v !== '0'" in _JS
     assert 'title="${_escAttr(a.name)}"' in _JS
 

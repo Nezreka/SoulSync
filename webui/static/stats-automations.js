@@ -4116,11 +4116,7 @@ function renderAutomationCard(a) {
     const aIcon = _autoIcons[a.action_type] || '\u2699\uFE0F';
     const tl = tIcon + ' ' + _autoFormatTrigger(a.trigger_type, a.trigger_config);
     const al = aIcon + ' ' + _autoFormatAction(a.action_type);
-    // System cards: the title IS the action ("Auto-Scan Watchlist Studios" →
-    // chip "Scan Watchlist Studios") — restating it as a chip is pure noise.
-    // User automations keep the full pipeline (composition is the point).
-    const _norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const showActionChip = !(a.is_system && _norm(a.name).includes(_norm(_autoFormatAction(a.action_type))));
+
     const thenItems = a.then_actions || [];
     const actionDelay = a.action_config && a.action_config.delay ? a.action_config.delay : 0;
     const metaParts = [];
@@ -4156,9 +4152,9 @@ function renderAutomationCard(a) {
             <div class="automation-name" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
             <div class="automation-flow">
                 <span class="flow-trigger">${_esc(tl)}</span>
-                ${(showActionChip || actionDelay || thenItems.length) ? '<span class="flow-arrow">&rarr;</span>' : ''}
+                <span class="flow-arrow">&rarr;</span>
                 ${actionDelay ? `<span class="flow-delay">\u23F3 ${actionDelay}m</span><span class="flow-arrow">&rarr;</span>` : ''}
-                ${showActionChip ? `<span class="flow-action">${_esc(al)}</span>` : ''}
+                <span class="flow-action">${_esc(al)}</span>
                 ${thenItems.length ? thenItems.map(t => `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(_autoFormatNotify(t.type))}</span>`).join('') : ''}
             </div>
             <div class="automation-meta">${metaParts.join(' &middot; ')}</div>

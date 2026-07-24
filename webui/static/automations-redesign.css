@@ -155,11 +155,11 @@
     /* the base sheet gives cards margin: 4px 0 — grid/flex gaps own ALL
        spacing in the redesign, so zero it (audit leftover) */
     margin: 0;
-    display: flex; align-items: flex-start; gap: 13px; flex-wrap: wrap;
-    padding: 15px 16px 13px 20px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.042), rgba(255,255,255,0.018));
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px;
+    display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
+    padding: 12px 14px 11px 17px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
     transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
     overflow: hidden;
 }
@@ -213,44 +213,40 @@
 
 .automation-card .automation-info { flex: 1; min-width: 0; }
 .automation-card .automation-name {
-    font-size: 14.5px; font-weight: 650; color: #fff;
-    letter-spacing: .01em; margin-bottom: 7px;
+    font-size: 13.5px; font-weight: 620; color: #fff;
+    letter-spacing: .01em; margin-bottom: 5px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* pipeline — the flow line as tinted chips with dimmed connectors */
 .automation-card .automation-flow {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
-    margin-bottom: 8px; line-height: 1;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+    margin-bottom: 6px; line-height: 1;
 }
 .automation-card .automation-flow > span { display: inline-flex; align-items: center; }
 .automation-card .flow-trigger,
 .automation-card .flow-action,
 .automation-card .flow-notify,
 .automation-card .flow-delay {
-    font-size: 11.5px; font-weight: 550; padding: 4.5px 10px; border-radius: 999px;
-    border: 1px solid; white-space: nowrap; max-width: 260px;
+    font-size: 11px; font-weight: 550; padding: 3px 9px; border-radius: 999px;
+    border: none; white-space: nowrap; max-width: 260px;
     overflow: hidden; text-overflow: ellipsis;
 }
 .automation-card .flow-trigger {
     color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.1);
-    border-color: rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.09);
 }
 .automation-card .flow-action {
     color: rgb(216, 180, 254);
-    background: rgba(168, 85, 247, 0.1);
-    border-color: rgba(168, 85, 247, 0.22);
+    background: rgba(168, 85, 247, 0.09);
 }
 .automation-card .flow-notify {
     color: rgb(134, 239, 172);
-    background: rgba(34, 197, 94, 0.09);
-    border-color: rgba(34, 197, 94, 0.2);
+    background: rgba(34, 197, 94, 0.08);
 }
 .automation-card .flow-delay {
     color: rgb(253, 224, 71);
-    background: rgba(234, 179, 8, 0.09);
-    border-color: rgba(234, 179, 8, 0.2);
+    background: rgba(234, 179, 8, 0.08);
 }
 .automation-card .flow-arrow {
     color: rgba(255,255,255,0.22); font-size: 11px; padding: 0 1px;
@@ -264,15 +260,13 @@
 }
 .automation-card .auto-next-run {
     font-variant-numeric: tabular-nums;
-    color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.08);
-    border: 1px solid rgba(var(--accent-rgb), 0.15);
-    padding: 1px 8px; border-radius: 999px; font-size: 11px;
+    color: rgba(var(--accent-light-rgb), 0.9);
 }
 .automation-card .auto-runs-link {
-    cursor: pointer; text-decoration: none; border-bottom: 1px dotted rgba(255,255,255,0.25);
+    cursor: pointer; text-decoration: none;
     transition: color .15s ease;
 }
+.automation-card .auto-runs-link:hover { text-decoration: underline; }
 .automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
 .automation-card .auto-last-result { color: rgba(255,255,255,0.32); }
 
@@ -284,24 +278,22 @@
 .automation-card:hover .automation-actions,
 .automation-card:focus-within .automation-actions { opacity: 1; }
 .automation-card .automation-actions button {
-    width: 29px; height: 29px; display: inline-flex; align-items: center; justify-content: center;
-    background: rgba(255,255,255,0.045);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 9px; color: rgba(255,255,255,0.75);
+    width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 8px; color: rgba(255,255,255,0.65);
     cursor: pointer; font-size: 12px; line-height: 1;
-    transition: all .15s ease;
+    transition: background .15s ease, color .15s ease;
 }
 .automation-card .automation-actions button:hover {
-    background: rgba(var(--accent-rgb), 0.14);
-    border-color: rgba(var(--accent-rgb), 0.35);
-    color: #fff; transform: translateY(-1px);
+    background: rgba(255,255,255,0.08);
+    color: #fff;
 }
 .automation-card .automation-actions .automation-delete-btn:hover {
-    background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.14); color: rgb(252, 165, 165);
 }
 .automation-card .automation-actions .automation-group-btn.grouped {
-    background: rgba(var(--accent-rgb), 0.12);
-    border-color: rgba(var(--accent-rgb), 0.3);
+    color: rgb(var(--accent-light-rgb));
 }
 .automation-card .automation-toggle {
     position: relative; width: 36px; height: 20px; margin: 0 3px; cursor: pointer; flex-shrink: 0;
