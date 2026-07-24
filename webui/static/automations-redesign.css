@@ -731,3 +731,146 @@
         animation: none !important; transition: none !important;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SECOND PASS — the page's satellite surfaces
+   (history modal + group dropdown mount on document.body, so they scope by
+   their own automations-specific class names)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Run-history modal ──────────────────────────────────────────────────── */
+.automation-history-modal {
+    background: linear-gradient(180deg, rgba(30, 30, 46, 0.97), rgba(22, 22, 34, 0.97));
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px;
+    box-shadow: 0 24px 80px -20px rgba(0,0,0,0.8), 0 0 40px -20px rgba(var(--accent-rgb), 0.25);
+    backdrop-filter: blur(20px);
+    max-width: 640px; width: 92%; max-height: 78vh;
+    display: flex; flex-direction: column; overflow: hidden;
+}
+.automation-history-modal .history-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.02);
+}
+.automation-history-modal .history-modal-header h3 {
+    margin: 0; font-size: 15px; font-weight: 700; color: #fff; letter-spacing: .01em;
+}
+.automation-history-modal .history-close-btn {
+    width: 30px; height: 30px; border-radius: 9px; cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+    color: rgba(255,255,255,0.7); font-size: 16px; line-height: 1;
+    transition: all .15s ease;
+}
+.automation-history-modal .history-close-btn:hover {
+    background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.35); color: #fff;
+}
+.automation-history-modal .history-modal-body {
+    overflow-y: auto; padding: 14px 16px;
+}
+.automation-history-modal .history-entry {
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; margin-bottom: 9px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.032), rgba(255,255,255,0.012));
+    transition: border-color .15s ease;
+}
+.automation-history-modal .history-entry:hover { border-color: rgba(255,255,255,0.12); }
+.automation-history-modal .history-entry-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 13px; cursor: pointer; user-select: none;
+}
+.automation-history-modal .history-status-badge {
+    font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px;
+}
+.automation-history-modal .history-status-badge.success {
+    background: rgba(34, 197, 94, 0.13); color: rgb(134, 239, 172);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+}
+.automation-history-modal .history-status-badge.error {
+    background: rgba(239, 68, 68, 0.13); color: rgb(252, 165, 165);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.automation-history-modal .history-time {
+    font-size: 12px; color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums;
+}
+.automation-history-modal .history-duration {
+    font-size: 11px; color: rgba(255,255,255,0.35);
+    margin-left: auto; font-variant-numeric: tabular-nums;
+}
+.automation-history-modal .history-summary {
+    font-size: 11.5px; color: rgba(255,255,255,0.45); padding: 0 13px 10px;
+    display: flex; flex-wrap: wrap; gap: 5px 12px;
+}
+.automation-history-modal .history-log-section {
+    margin: 0 13px 11px; padding: 8px 11px; border-radius: 9px;
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.045);
+    font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10.5px; line-height: 1.7; max-height: 180px; overflow-y: auto;
+}
+.automation-history-modal .history-log-line { color: rgba(255,255,255,0.5); }
+.automation-history-modal .history-log-line.history-log-success { color: rgb(134, 239, 172); }
+.automation-history-modal .history-log-line.history-log-warning { color: rgb(253, 224, 71); }
+.automation-history-modal .history-log-line.history-log-error { color: rgb(252, 165, 165); }
+.automation-history-modal .history-loading,
+.automation-history-modal .history-empty {
+    text-align: center; padding: 36px 16px;
+    color: rgba(255,255,255,0.4); font-size: 13px;
+}
+
+/* ── Group-assign dropdown ──────────────────────────────────────────────── */
+.auto-group-dropdown {
+    background: linear-gradient(180deg, rgba(34, 34, 50, 0.98), rgba(24, 24, 38, 0.98));
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 13px;
+    box-shadow: 0 16px 48px -12px rgba(0,0,0,0.75);
+    backdrop-filter: blur(16px);
+    padding: 6px; min-width: 190px;
+}
+.auto-group-dropdown .auto-group-option {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 12px; border-radius: 9px; cursor: pointer;
+    background: transparent; border: none;
+    color: rgba(255,255,255,0.75); font-size: 12.5px; font-family: inherit;
+    transition: all .12s ease;
+}
+.auto-group-dropdown .auto-group-option:hover {
+    background: rgba(var(--accent-rgb), 0.12); color: #fff;
+}
+.auto-group-dropdown .auto-group-option.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb)); font-weight: 600;
+}
+.auto-group-dropdown .auto-group-option.ungroup { color: rgba(255,255,255,0.45); }
+.auto-group-dropdown .auto-group-divider {
+    height: 1px; margin: 5px 8px;
+    background: rgba(255,255,255,0.08);
+}
+.auto-group-dropdown .auto-group-input {
+    width: calc(100% - 12px); margin: 4px 6px 6px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; color: #fff; font-size: 12px; font-family: inherit;
+    padding: 7px 10px;
+}
+.auto-group-dropdown .auto-group-input:focus {
+    outline: none; border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+/* ── Variable tag chips (builder message templates) ─────────────────────── */
+.automations-builder-view .variable-tags {
+    display: flex; flex-wrap: wrap; gap: 5px; padding-top: 4px;
+}
+.automations-builder-view .variable-tag {
+    font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10.5px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    color: rgba(var(--accent-light-rgb), 0.85);
+    transition: all .13s ease;
+}
+.automations-builder-view .variable-tag:hover {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: #fff; transform: translateY(-1px);
+}

@@ -32,6 +32,9 @@ _SCOPES = (
     ".automations-stats", ".automation-card", ".automations-empty",
     ".auto-filter-bar", ".automations-section-header", ".automations-section-body",
     "#automations-stats",
+    # satellite surfaces that mount on document.body — scoped by their own
+    # automations-specific class names
+    ".automation-history-modal", ".auto-group-dropdown",
 )
 
 
@@ -72,9 +75,14 @@ def test_every_rule_is_scoped_to_automations_surfaces():
 
 def test_every_styled_class_exists_in_the_markup():
     """A selector styling a class nothing renders is a silent no-op — a typo."""
+    # Classes composed at runtime (class="history-log-" + log.type) never
+    # appear as literals in source; the composing prefix proves the family.
+    _DYNAMIC_PREFIXES = ("history-log-",)
     missing = []
     for sel in _selectors():
         for cls in re.findall(r"\.([a-zA-Z][\w-]*)", sel):
+            if any(cls.startswith(p) and p in _SOURCES for p in _DYNAMIC_PREFIXES):
+                continue
             # pseudo-selector fragments and state classes toggled by JS count
             # as present if the STRING appears anywhere in markup or JS.
             if f"{cls}" not in _SOURCES:
