@@ -97,7 +97,7 @@ def test_live_status_hooks_are_styled():
         ".automation-status.running", ".automation-card.running",
         ".automation-card.dragging", ".automation-output.visible",
         ".automation-output.finished", ".automation-output.error",
-        ".automations-section.collapsed", ".automations-section.drop-target",
+        ".automations-section.collapsed", ".automations-section-body.drop-target",
         ".automations-section.no-drop", ".auto-master-toggle.on",
         ".flow-slot.drag-over", ".automation-toggle input:checked",
     ):
@@ -106,3 +106,25 @@ def test_live_status_hooks_are_styled():
 
 def test_reduced_motion_is_respected():
     assert "prefers-reduced-motion" in _CSS
+
+
+def test_section_body_stays_a_plain_block():
+    """The layout-break regression (Boulder's morning screenshots): the card
+    grid was put on .automations-section-body, but the REAL card container
+    (.automations-grid) is NESTED inside it — so the inner grid landed in one
+    auto-fill track (dead right half of the screen) and the Hub's children
+    became stretched grid items. The body hosts non-card content and must
+    never be a grid/flex container; the grid belongs to .automations-grid."""
+    css = _strip_comments(_CSS)
+    for m in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
+        sel, body = m.group(1).strip(), m.group(2)
+        if sel.endswith(".automations-section-body") and "display" in body:
+            assert "grid" not in body and "flex" not in body, (
+                f"section body must stay a block: {sel} {{ {body.strip()} }}")
+    assert ".automations-section .automations-grid" in css
+    assert "repeat(auto-fill" in css
+
+
+def test_no_page_ambient_background():
+    """The purple container glow is gone (no other page has one)."""
+    assert ".automations-container::before" not in _CSS

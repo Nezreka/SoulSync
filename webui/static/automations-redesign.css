@@ -13,21 +13,6 @@
    WHEN → DO → THEN flow as tinted pipeline chips, live-state glow.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Page atmosphere ────────────────────────────────────────────────────── */
-.automations-list-view .automations-container {
-    position: relative;
-}
-.automations-list-view .automations-container::before {
-    content: '';
-    position: absolute; inset: -40px -20px auto -20px; height: 420px;
-    background:
-        radial-gradient(ellipse 60% 100% at 20% 0%, rgba(var(--accent-rgb), 0.07), transparent 70%),
-        radial-gradient(ellipse 40% 80% at 85% 10%, rgba(168, 85, 247, 0.05), transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-}
-.automations-list-view .automations-container > * { position: relative; z-index: 1; }
-
 /* ── Command strip: stats + master toggle ───────────────────────────────── */
 #automations-stats, .automations-stats {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -53,7 +38,7 @@
     -webkit-text-fill-color: transparent;
 }
 .automations-stats .auto-master-toggle {
-    margin-left: auto;
+    order: 99; margin-left: auto;
     display: inline-flex; align-items: center; gap: 10px;
     padding: 8px 16px; border-radius: 999px; cursor: pointer;
     font-size: 12.5px; font-weight: 600; letter-spacing: .03em;
@@ -145,12 +130,19 @@
     background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3);
 }
 .automations-section.collapsed .automations-section-body { display: none; }
-.automations-section-body {
+.automations-section-body { padding-top: 10px; }
+/* The CARD CONTAINER (nested inside section-body — the section body also
+   hosts non-card content like the Hub, so it must stay a plain block). */
+.automations-section .automations-grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
-    gap: 13px; padding-top: 10px;
+    gap: 13px;
 }
-/* drag-and-drop state (classes toggled by JS — visuals only here) */
-.automations-section.drop-target {
+.automations-section .automations-user-list {
+    display: flex; flex-direction: column; gap: 13px;
+}
+/* drag-and-drop state (classes toggled by JS — visuals only here; JS puts
+   drop-target on the section BODY, no-drop on protected sections) */
+.automations-section .automations-section-body.drop-target {
     outline: 2px dashed rgba(var(--accent-rgb), 0.5);
     outline-offset: 6px; border-radius: 12px;
     background: rgba(var(--accent-rgb), 0.03);
@@ -709,7 +701,7 @@
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
-    .automations-section-body { grid-template-columns: 1fr; }
+    .automations-section .automations-grid { grid-template-columns: 1fr; }
     .automation-card .automation-actions { opacity: 1; }   /* touch: always visible */
     .automations-builder-view .builder-content { flex-direction: column; }
     .automations-builder-view .builder-sidebar {
