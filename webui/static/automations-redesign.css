@@ -181,9 +181,6 @@
 }
 .automation-card.disabled { opacity: .62; }
 .automation-card.disabled:hover { opacity: .85; }
-.automation-card.system {
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.05), rgba(255,255,255,0.015));
-}
 .automation-card.dragging { opacity: .4; transform: scale(.98); }
 .automation-card.running {
     border-color: rgba(var(--accent-rgb), 0.3);
@@ -255,10 +252,10 @@
 /* meta line — countdown, runs, last-result */
 .automation-card .automation-meta {
     font-size: 11px; color: rgba(255,255,255,0.42);
-    display: flex; align-items: center; flex-wrap: nowrap; gap: 4px;
-    line-height: 1.7; min-width: 0;
+    display: block; line-height: 1.8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0; max-width: 100%;
 }
-.automation-card .automation-meta > * { flex-shrink: 0; }
 .automation-card .auto-next-run {
     font-variant-numeric: tabular-nums;
     color: rgba(var(--accent-light-rgb), 0.9);
@@ -269,11 +266,7 @@
 }
 .automation-card .auto-runs-link:hover { text-decoration: underline; }
 .automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
-.automation-card .auto-last-result {
-    color: rgba(255,255,255,0.30);
-    flex-shrink: 1 !important; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+.automation-card .auto-last-result { color: rgba(255,255,255,0.30); }
 
 /* actions — quiet until the card is hovered (always-on for touch, below) */
 .automation-card .automation-actions {

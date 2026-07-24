@@ -145,3 +145,16 @@ def test_one_uniform_card_design_for_all_sections():
     css = _strip_comments(_CSS)
     assert "section-protected .automation-card" not in css
     assert "section-protected .automations-grid" not in css
+
+
+def test_meta_line_is_inline_flow_not_flex():
+    """The crushed-'Last: 5d ago'-column regression: the meta line mixes raw
+    text nodes with spans, and anonymous flex items can't be protected from
+    shrinking. The meta must be block flow + nowrap + ellipsis, and no
+    system-only surface tint may exist (uniform cards, full stop)."""
+    css = _strip_comments(_CSS)
+    idx = css.index(".automation-card .automation-meta {")
+    body = css[idx:css.index("}", idx)]
+    assert "display: block" in body and "text-overflow: ellipsis" in body
+    assert "flex" not in body
+    assert ".automation-card.system {" not in css
