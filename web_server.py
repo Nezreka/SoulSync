@@ -29693,28 +29693,34 @@ def export_library_artists():
 def add_to_watchlist():
     """Add an artist to the watchlist"""
     try:
-        data = request.get_json()
-        artist_id = data.get('artist_id')
+        data = request.get_json() or {}
+        # Strict types: `artist_id` used to be truthiness-checked only, so a list
+        # or int survived until a `.isdigit()` deep in the DB raised a 500 (P3-01).
+        artist_id = parse_strict_id(data.get('artist_id'))
         artist_name = data.get('artist_name')
-        quality_profile_id = data.get('quality_profile_id')
+        artist_name = artist_name.strip() if isinstance(artist_name, str) else None
 
         if not artist_id or not artist_name:
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
-        if quality_profile_id is not None:
-            try:
-                quality_profile_id = int(quality_profile_id)
-            except (TypeError, ValueError):
+        quality_profile_id = None
+        if data.get('quality_profile_id') is not None:
+            quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
+            if quality_profile_id is None or quality_profile_id <= 0:
                 return jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400
-            if not any(p['id'] == quality_profile_id for p in database.list_quality_profiles()):
+            if not database.quality_profile_exists(quality_profile_id):
                 return jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400
         # Callers that KNOW the id's source (e.g. the Discovery Web, whose candidates carry
         # [source, id] pairs) can pass it explicitly — numeric Deezer/iTunes ids are ambiguous and
         # the detection below can otherwise mistake them for a library DB row id.
-        explicit_source = (data.get('source') or '').strip().lower()
-        if explicit_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
-            explicit_source = None
+        # An unrecognised source is a client error, not a reason to guess (P1-05).
+        from core.watchlist_sources import normalize_source
+        explicit_source = None
+        if data.get('source') is not None:
+            explicit_source = normalize_source(data.get('source'))
+            if explicit_source is None:
+                return jsonify({"success": False, "error": "Unknown source"}), 400
         # Detect source from ID — check if it's a library DB ID first
         is_numeric_id = artist_id.isdigit()
         source = explicit_source
@@ -30739,62 +30745,95 @@ def watchlist_artist_config(artist_id):
             if not data:
                 return jsonify({"success": False, "error": "No data provided"}), 400
 
-            include_albums = data.get('include_albums', True)
-            include_eps = data.get('include_eps', True)
-            include_singles = data.get('include_singles', True)
-            include_live = data.get('include_live', False)
-            include_remixes = data.get('include_remixes', False)
-            include_acoustic = data.get('include_acoustic', False)
-            include_compilations = data.get('include_compilations', False)
-            include_instrumentals = data.get('include_instrumentals', False)
-            lookback_days = data.get('lookback_days', None)  # None = use global setting
-            # Validate lookback_days if provided
-            if lookback_days is not None:
-                lookback_days = int(lookback_days) if lookback_days != '' else None
-            preferred_metadata_source = data.get('preferred_metadata_source', None)
-            # Validate — only accept known sources, empty string means clear override
-            _watchlist_meta_sources = (
-                'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
-            )
-            from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
-            _watchlist_meta_sources = _watchlist_meta_sources + tuple(
-                name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
-            )
-            if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
-                preferred_metadata_source = None
-            # Follow-only toggle: default True so an older client that omits the
-            # field keeps auto-downloading.
-            auto_download = bool(data.get('auto_download', True))
-            quality_profile_id = data.get('quality_profile_id')
-            if quality_profile_id is not None:
-                try:
-                    quality_profile_id = int(quality_profile_id)
-                except (TypeError, ValueError):
-                    return jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400
-                if not any(p['id'] == quality_profile_id for p in database.list_quality_profiles()):
-                    return jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400
-
-            # Validate at least one release type is selected
-            if not (include_albums or include_eps or include_singles):
-                return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
-
-            # Update database
+            # Read the CURRENT configuration first. This endpoint used to fill
+            # every absent field with a hardcoded default and then write the lot
+            # back, so a client sending only `quality_profile_id` silently reset
+            # release types, lookback, metadata source and auto-download (P2-03).
+            # Absent now means "keep", so a partial request really is partial
+            # while a full form request behaves exactly as before.
             conn = sqlite3.connect(str(database.database_path))
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-
-            # Check if lookback_days changed — if so, clear last_scan_timestamp to force rescan
             cursor.execute("""
-                SELECT lookback_days, quality_profile_id FROM watchlist_artists
+                SELECT include_albums, include_eps, include_singles, include_live,
+                       include_remixes, include_acoustic, include_compilations,
+                       include_instrumentals, lookback_days, preferred_metadata_source,
+                       auto_download, quality_profile_id
+                FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
                       OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
                 )
             """, (active_profile_id, artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             old_row = cursor.fetchone()
-            old_lookback = old_row[0] if old_row else None
-            if quality_profile_id is None and old_row:
-                quality_profile_id = old_row[1]
-            lookback_changed = old_lookback != lookback_days
+            if old_row is None:
+                conn.close()
+                return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
+
+            def _field(name, fallback):
+                """Sent value, or the stored one when the client omitted the field."""
+                if name not in data:
+                    return old_row[name] if old_row[name] is not None else fallback
+                parsed = parse_strict_bool(data.get(name))
+                return fallback if parsed is None else parsed
+
+            include_albums = _field('include_albums', True)
+            include_eps = _field('include_eps', True)
+            include_singles = _field('include_singles', True)
+            include_live = _field('include_live', False)
+            include_remixes = _field('include_remixes', False)
+            include_acoustic = _field('include_acoustic', False)
+            include_compilations = _field('include_compilations', False)
+            include_instrumentals = _field('include_instrumentals', False)
+
+            if 'lookback_days' in data:
+                lookback_days = data.get('lookback_days')  # None = use global setting
+                if lookback_days is not None:
+                    try:
+                        lookback_days = int(lookback_days) if lookback_days != '' else None
+                    except (TypeError, ValueError):
+                        conn.close()
+                        return jsonify({"success": False, "error": "Invalid lookback_days"}), 400
+            else:
+                lookback_days = old_row['lookback_days']
+
+            if 'preferred_metadata_source' in data:
+                preferred_metadata_source = data.get('preferred_metadata_source', None)
+                # Validate — only accept known sources, empty string means clear override
+                _watchlist_meta_sources = (
+                    'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
+                )
+                from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+                _watchlist_meta_sources = _watchlist_meta_sources + tuple(
+                    name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
+                )
+                if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
+                    preferred_metadata_source = None
+            else:
+                preferred_metadata_source = old_row['preferred_metadata_source']
+
+            # Follow-only toggle: default True so an older client that omits the
+            # field keeps auto-downloading.
+            auto_download = _field('auto_download', True)
+
+            if 'quality_profile_id' in data and data.get('quality_profile_id') is not None:
+                quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
+                if quality_profile_id is None or quality_profile_id <= 0:
+                    conn.close()
+                    return jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400
+                if not database.quality_profile_exists(quality_profile_id):
+                    conn.close()
+                    return jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400
+            else:
+                quality_profile_id = old_row['quality_profile_id']
+
+            # Validate at least one release type is selected
+            if not (include_albums or include_eps or include_singles):
+                conn.close()
+                return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
+
+            # lookback_days changed — clear last_scan_timestamp to force rescan
+            lookback_changed = old_row['lookback_days'] != lookback_days
 
             cursor.execute("""
                 UPDATE watchlist_artists

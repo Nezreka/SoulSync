@@ -263,8 +263,17 @@ def serialize_watchlist_artist(obj, fields: Optional[Set[str]] = None) -> dict:
     d = _to_dict(obj)
     result = {
         "id": d.get("id"),
+        # Every provider id column, plus the explicit source. A native client
+        # must be able to tell a Deezer artist from an iTunes one instead of
+        # inferring it from the id's shape (P1-05).
+        "source": d.get("source") or d.get("preferred_metadata_source"),
         "spotify_artist_id": d.get("spotify_artist_id"),
         "itunes_artist_id": d.get("itunes_artist_id"),
+        "deezer_artist_id": d.get("deezer_artist_id"),
+        "discogs_artist_id": d.get("discogs_artist_id"),
+        "musicbrainz_artist_id": d.get("musicbrainz_artist_id"),
+        "amazon_artist_id": d.get("amazon_artist_id"),
+        "preferred_metadata_source": d.get("preferred_metadata_source"),
         "artist_name": d.get("artist_name"),
         "image_url": d.get("image_url"),
         "date_added": _isoformat(d.get("date_added")),
@@ -328,6 +337,10 @@ def serialize_wishlist_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "source_type": d.get("source_type"),
         "source_info": source_info,
         "profile_id": d.get("profile_id"),
+        # The Quality Profile this item will be downloaded/imported against.
+        # A native client has to be able to READ BACK what was actually stored,
+        # otherwise it cannot verify its own write (P1-02).
+        "quality_profile_id": d.get("quality_profile_id"),
     }
     return filter_fields(result, fields)
 

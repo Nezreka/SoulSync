@@ -10093,6 +10093,27 @@ class MusicDatabase:
             logger.debug("blocklist guard skipped: %s", e)
             return None
 
+    def quality_profile_exists(self, quality_profile_id) -> bool:
+        """True only for an id that really names a row in ``quality_profiles``.
+
+        Write boundaries need to tell "not supplied" (use the default) from
+        "explicitly wrong" (reject). ``_resolve_quality_profile_id`` deliberately
+        cannot: it exists to always produce *something* storable. This is the
+        strict counterpart (P2-04).
+        """
+        from core.api_validation import parse_strict_int
+        parsed = parse_strict_int(quality_profile_id)
+        if parsed is None:
+            return False
+        try:
+            with self._get_connection() as conn:
+                return conn.execute(
+                    "SELECT 1 FROM quality_profiles WHERE id=?", (parsed,)
+                ).fetchone() is not None
+        except Exception as e:
+            logger.debug("Could not check quality profile %s: %s", quality_profile_id, e)
+            return False
+
     def _resolve_quality_profile_id(self, cursor, quality_profile_id: Optional[int] = None) -> Optional[int]:
         """Resolve a ``quality_profile_id`` (or ``None`` -> the app-wide
         default) into a concrete profile id to store on a wishlist row at
@@ -10151,6 +10172,16 @@ class MusicDatabase:
         try:
             if track_data is not None and spotify_track_data is None:
                 spotify_track_data = track_data
+
+            # "Not supplied" means "use the default"; an id the caller INVENTED
+            # must not silently become the default, or a typo/stale id would
+            # quietly download at the wrong quality (P2-04).
+            if quality_profile_id is not None and not self.quality_profile_exists(quality_profile_id):
+                logger.error(
+                    "Cannot add track to wishlist: unknown quality_profile_id %r",
+                    quality_profile_id,
+                )
+                return False
 
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -10679,6 +10710,25 @@ class MusicDatabase:
             logger.debug("get_wishlist_spotify_data failed: %s", e)
             return {}
 
+    def get_wishlist_track(self, track_id: str, profile_id: int = 1) -> Optional[Dict[str, Any]]:
+        """One wishlist row by provider track id, or ``None``.
+
+        Lets a native client read back what was actually stored — in particular
+        the effective ``quality_profile_id`` after an add (P1-02).
+        """
+        if not track_id:
+            return None
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
+                    (str(track_id), profile_id),
+                ).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.debug("get_wishlist_track failed: %s", e)
+            return None
+
     def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1,
                             offset: int = 0, category: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get tracks in the wishlist for the given profile, ordered by date added
@@ -10896,46 +10946,83 @@ class MusicDatabase:
     ) -> bool:
         """Add an artist to the watchlist for monitoring new releases.
 
-        Automatically detects if artist_id is a Spotify ID (alphanumeric) or iTunes/Deezer ID (numeric).
-        If the artist already exists (by name match), updates the existing row
-        with the new source ID.  An explicitly supplied Quality Profile always
-        overwrites the existing assignment; omitted values preserve an existing
-        assignment and resolve to the current global profile for a new row.
+        ``source`` names the provider explicitly and is the contract a native
+        client should use. Omitting it falls back to the documented legacy guess
+        (``core.watchlist_sources.infer_source``: digits mean iTunes), which is
+        wrong for Deezer/Discogs ids and only kept for older callers. An
+        unrecognised source is rejected rather than silently filed as Spotify.
+
+        If the artist already exists (matched by provider id, or by name when no
+        id matches), updates the existing row with the new source ID. An
+        explicitly supplied Quality Profile always overwrites the existing
+        assignment; omitted values preserve an existing assignment and resolve to
+        the current global profile for a new row. An explicitly UNKNOWN Quality
+        Profile is rejected instead of quietly becoming the default (P2-04).
         """
+        from core.watchlist_sources import (
+            ARTIST_ID_COLUMNS, artist_id_match_sql, infer_source,
+            normalize_source, source_column,
+        )
         try:
+            if quality_profile_id is not None and not self.quality_profile_exists(quality_profile_id):
+                logger.error(
+                    "Cannot add artist '%s' to watchlist: unknown quality_profile_id %r",
+                    artist_name, quality_profile_id,
+                )
+                return False
+
+            # Provider resolution happens BEFORE any write so an unknown source
+            # can never land in the wrong column (P1-05).
+            if source:
+                canonical_source = normalize_source(source)
+                if canonical_source is None:
+                    logger.error(
+                        "Cannot add artist '%s' to watchlist: unknown source %r",
+                        artist_name, source,
+                    )
+                    return False
+            else:
+                canonical_source = infer_source(artist_id)
+            source = canonical_source
+            col = source_column(source)
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 resolved_quality_profile_id = self._resolve_quality_profile_id(
                     cursor, quality_profile_id
                 )
 
-                # Check if artist already exists by name (case-insensitive) for this profile
-                cursor.execute("""
-                    SELECT id, spotify_artist_id, itunes_artist_id, deezer_artist_id,
-                           discogs_artist_id, musicbrainz_artist_id,
-                           quality_profile_id
-                    FROM watchlist_artists
-                    WHERE LOWER(artist_name) = LOWER(?) AND profile_id = ?
-                    LIMIT 1
-                """, (artist_name, profile_id))
+                # Identity first: an exact provider-id hit is the same artist,
+                # whatever it happens to be called.
+                cursor.execute(
+                    "SELECT * FROM watchlist_artists WHERE "
+                    + artist_id_match_sql() + " AND profile_id = ? LIMIT 1",
+                    [artist_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
+                )
                 existing = cursor.fetchone()
 
-                # Detect source: explicit source param, or infer from ID format
-                if not source:
-                    source = 'itunes' if artist_id.isdigit() else 'spotify'
+                if existing is None:
+                    # Fall back to the name match that makes cross-provider
+                    # linking work (add on Spotify, later add the same artist
+                    # from Deezer -> one row).
+                    cursor.execute("""
+                        SELECT * FROM watchlist_artists
+                        WHERE LOWER(artist_name) = LOWER(?) AND profile_id = ?
+                        LIMIT 1
+                    """, (artist_name, profile_id))
+                    candidate = cursor.fetchone()
+                    # …but only when it is genuinely the same artist. A row that
+                    # already holds a DIFFERENT id for THIS provider is a
+                    # different artist who merely shares a name (P1-05).
+                    if candidate is not None and col and candidate[col] and candidate[col] != artist_id:
+                        existing = None
+                    else:
+                        existing = candidate
 
                 if existing:
                     # Artist already on watchlist — update a missing provider ID
                     # and/or the explicitly requested Quality Profile in one
                     # atomic write.  This is the contract Library v2 can call.
-                    col_map = {
-                        'spotify': 'spotify_artist_id',
-                        'itunes': 'itunes_artist_id',
-                        'deezer': 'deezer_artist_id',
-                        'discogs': 'discogs_artist_id',
-                        'musicbrainz': 'musicbrainz_artist_id',
-                    }
-                    col = col_map.get(source)
                     updates = []
                     params = []
                     if col and not existing[col]:
@@ -10966,47 +11053,22 @@ class MusicDatabase:
                         logger.info(f"Artist '{artist_name}' already on watchlist (profile: {profile_id})")
                     return True
 
-                # New artist — insert with the appropriate ID column
-                if source == 'deezer':
-                    cursor.execute("""
+                # New artist — insert into the column the resolved provider owns.
+                # One registry-driven statement instead of a per-provider branch,
+                # so adding a provider can no longer be half-done (Amazon was).
+                cursor.execute(
+                    f"""
                         INSERT INTO watchlist_artists
-                        (deezer_artist_id, artist_name, quality_profile_id,
+                        ({col}, artist_name, quality_profile_id,
                          date_added, updated_at, profile_id)
                         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
-                    logger.info(f"Added artist '{artist_name}' to watchlist (Deezer ID: {artist_id}, profile: {profile_id})")
-                elif source == 'itunes':
-                    cursor.execute("""
-                        INSERT INTO watchlist_artists
-                        (itunes_artist_id, artist_name, quality_profile_id,
-                         date_added, updated_at, profile_id)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
-                    logger.info(f"Added artist '{artist_name}' to watchlist (iTunes ID: {artist_id}, profile: {profile_id})")
-                elif source == 'discogs':
-                    cursor.execute("""
-                        INSERT INTO watchlist_artists
-                        (discogs_artist_id, artist_name, quality_profile_id,
-                         date_added, updated_at, profile_id)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
-                    logger.info(f"Added artist '{artist_name}' to watchlist (Discogs ID: {artist_id}, profile: {profile_id})")
-                elif source == 'musicbrainz':
-                    cursor.execute("""
-                        INSERT INTO watchlist_artists
-                        (musicbrainz_artist_id, artist_name, quality_profile_id,
-                         date_added, updated_at, profile_id)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
-                    logger.info(f"Added artist '{artist_name}' to watchlist (MusicBrainz ID: {artist_id}, profile: {profile_id})")
-                else:
-                    cursor.execute("""
-                        INSERT INTO watchlist_artists
-                        (spotify_artist_id, artist_name, quality_profile_id,
-                         date_added, updated_at, profile_id)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                    """, (artist_id, artist_name, resolved_quality_profile_id, profile_id))
-                    logger.info(f"Added artist '{artist_name}' to watchlist (Spotify ID: {artist_id}, profile: {profile_id})")
+                    """,
+                    (artist_id, artist_name, resolved_quality_profile_id, profile_id),
+                )
+                logger.info(
+                    "Added artist '%s' to watchlist (%s ID: %s, profile: %s)",
+                    artist_name, source, artist_id, profile_id,
+                )
 
                 conn.commit()
                 return True
@@ -11068,11 +11130,12 @@ class MusicDatabase:
                 result = cursor.fetchone()
                 artist_name = result['artist_name'] if result else "Unknown"
 
-                cursor.execute("""
-                    DELETE FROM watchlist_artists
-                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                           OR discogs_artist_id = ? OR musicbrainz_artist_id = ?) AND profile_id = ?
-                """, (artist_id, artist_id, artist_id, artist_id, artist_id, profile_id))
+                from core.watchlist_sources import ARTIST_ID_COLUMNS, artist_id_match_sql
+                cursor.execute(
+                    "DELETE FROM watchlist_artists WHERE "
+                    + artist_id_match_sql() + " AND profile_id = ?",
+                    [artist_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
+                )
 
                 if cursor.rowcount > 0:
                     conn.commit()
@@ -11093,21 +11156,21 @@ class MusicDatabase:
                 cursor = conn.cursor()
 
                 # Check all ID columns and optionally artist name
+                from core.watchlist_sources import ARTIST_ID_COLUMNS, artist_id_match_sql
+                id_params = [artist_id] * len(ARTIST_ID_COLUMNS)
                 if artist_name:
-                    cursor.execute("""
-                        SELECT 1 FROM watchlist_artists
-                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                               OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
-                               OR LOWER(artist_name) = LOWER(?)) AND profile_id = ?
-                        LIMIT 1
-                    """, (artist_id, artist_id, artist_id, artist_id, artist_id, artist_name, profile_id))
+                    cursor.execute(
+                        "SELECT 1 FROM watchlist_artists WHERE ("
+                        + artist_id_match_sql()
+                        + " OR LOWER(artist_name) = LOWER(?)) AND profile_id = ? LIMIT 1",
+                        id_params + [artist_name, profile_id],
+                    )
                 else:
-                    cursor.execute("""
-                        SELECT 1 FROM watchlist_artists
-                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                               OR discogs_artist_id = ? OR musicbrainz_artist_id = ?) AND profile_id = ?
-                        LIMIT 1
-                    """, (artist_id, artist_id, artist_id, artist_id, artist_id, profile_id))
+                    cursor.execute(
+                        "SELECT 1 FROM watchlist_artists WHERE "
+                        + artist_id_match_sql() + " AND profile_id = ? LIMIT 1",
+                        id_params + [profile_id],
+                    )
                 result = cursor.fetchone()
 
                 return result is not None
