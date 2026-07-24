@@ -130,18 +130,6 @@ def test_no_page_ambient_background():
     assert ".automations-container::before" not in _CSS
 
 
-def test_system_fleet_reads_as_rows():
-    """Boulder's readability pass: the System section renders one automation
-    per line (Sonarr tasks-page shape) with an aligned name rail; user
-    automations keep cards, capped at 3 columns on wide screens."""
-    css = _strip_comments(_CSS)
-    assert ".automations-section.section-protected .automations-grid" in css
-    rows_rule = css[css.index(".automations-section.section-protected .automations-grid"):]
-    assert "grid-template-columns: 1fr" in rows_rule[:200]
-    assert "flex: 0 0 260px" in css                      # the name rail
-    assert "repeat(3, 1fr)" in css                       # wide-screen card cap
-
-
 def test_card_noise_reduction_in_renderer():
     """System cards drop the action chip when it restates the title, the
     last-run summary shows only non-zero facts, and names get tooltips."""
@@ -151,11 +139,9 @@ def test_card_noise_reduction_in_renderer():
     assert 'title="${_escAttr(a.name)}"' in _JS
 
 
-def test_row_info_declares_its_direction():
-    """The giant-empty-rows regression: the base sheet sets flex-direction:
-    column on .automation-info; the row override MUST declare row explicitly
-    or the name's 260px flex-basis becomes 260px of height."""
+def test_one_uniform_card_design_for_all_sections():
+    """Boulder: system and user automations are the same thing to the eye —
+    no per-section geometry splits. The rows experiment stays dead."""
     css = _strip_comments(_CSS)
-    idx = css.index(".automations-section.section-protected .automation-card .automation-info")
-    body = css[idx:css.index("}", idx)]
-    assert "flex-direction: row" in body
+    assert "section-protected .automation-card" not in css
+    assert "section-protected .automations-grid" not in css
