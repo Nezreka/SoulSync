@@ -10213,6 +10213,11 @@
                                         <option value="resolved">Resolved</option>
                                         <option value="dismissed">Dismissed</option>
                                     </select>
+                                    <select id="repair-page-size-select" onchange="setRepairFindingsPageSize(this.value)" title="Findings per page">
+                                        <option value="30">30 / page</option>
+                                        <option value="60">60 / page</option>
+                                        <option value="100">100 / page</option>
+                                    </select>
                                 </div>
                                 <label class="repair-select-all" title="Select all on this page">
                                     <input type="checkbox" id="repair-select-all-cb" onchange="toggleSelectAllFindings(this.checked)">

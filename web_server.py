@@ -39642,6 +39642,53 @@ def repair_findings_bulk_fix():
         logger.error(f"Error bulk fixing findings: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/repair/findings/bulk-fix-start', methods=['POST'])
+def repair_findings_bulk_fix_start():
+    """Start a background bulk-fix run (Fix All at library scale).
+
+    The synchronous /bulk-fix endpoint runs its loop inside the request,
+    which times out the browser at thousands of findings while the server
+    quietly keeps working. This returns immediately; poll
+    /api/repair/bulk-fix/status for progress."""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        data = request.get_json(silent=True) or {}
+        result = repair_worker.start_bulk_fix(
+            job_id=data.get('job_id') or None,
+            severity=data.get('severity') or None,
+            finding_ids=data.get('ids') or None,
+            fix_action=data.get('fix_action') or None,
+        )
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error starting background bulk fix: {e}")
+        return jsonify({'started': False, 'error': str(e)}), 500
+
+@app.route('/api/repair/bulk-fix/status', methods=['GET'])
+def repair_bulk_fix_status():
+    """Progress of the current (or most recent) background bulk fix."""
+    try:
+        if repair_worker is None:
+            return jsonify({'running': False}), 200
+        return jsonify(repair_worker.get_bulk_fix_status()), 200
+    except Exception as e:
+        logger.error(f"Error getting bulk fix status: {e}")
+        return jsonify({'running': False, 'error': str(e)}), 500
+
+@app.route('/api/repair/bulk-fix/stop', methods=['POST'])
+def repair_bulk_fix_stop():
+    """Stop a running background bulk fix after its current item."""
+    try:
+        if repair_worker is None:
+            return jsonify({'success': False}), 400
+        repair_worker.stop_bulk_fix()
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.error(f"Error stopping bulk fix: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/repair/findings/bulk', methods=['POST'])
 def repair_findings_bulk():
     """Bulk resolve or dismiss findings"""
