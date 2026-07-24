@@ -266,15 +266,9 @@
 }
 .automation-card .auto-runs-link:hover { text-decoration: underline; }
 .automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
-/* The facts segment SELF-trims (inline-block ellipsis inside the nowrap
-   line) so the lifecycle text before it — Last / Next / Runs — is never
-   the part that gets cut. Full facts live in the hover tooltip. */
-.automation-card .auto-last-result {
-    color: rgba(255,255,255,0.30);
-    display: inline-block; max-width: 34ch;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    vertical-align: bottom;
-}
+/* Plain inline text — truncation is done in JS at a fixed length, so no
+   layout-dependent trimming can misfire. Full facts in the hover tooltip. */
+.automation-card .auto-last-result { color: rgba(255,255,255,0.30); cursor: default; }
 
 /* actions — quiet until the card is hovered (always-on for touch, below) */
 .automation-card .automation-actions {

@@ -4129,18 +4129,19 @@ function renderAutomationCard(a) {
     else if (a.last_result && typeof a.last_result === 'object') {
         // Compact result summary: up to 3 scalar facts from the last run
         // (full detail stays in the history modal). Skips status (the dot
-        // already says it) and internal keys.
+        // already says it) and internal keys. Truncation happens HERE in JS
+        // at a fixed length — deterministic, layout-independent — after two
+        // CSS-trim attempts each failed differently. Full text in the tooltip.
         const facts = Object.entries(a.last_result)
             .filter(([k, v]) => k !== 'status' && !k.startsWith('_') &&
                 ((typeof v === 'number' && v !== 0) ||
                  (typeof v === 'string' && v.length <= 24 && v !== '' && v !== '0')))
             .slice(0, 3)
-            .map(([k, v]) => _esc(k.replace(/_/g, ' ')) + ': ' + _esc(String(v).replace(/_/g, ' ')));
+            .map(([k, v]) => k.replace(/_/g, ' ') + ': ' + String(v).replace(/_/g, ' '));
         if (facts.length) {
-            const factsText = facts.join(' \u00b7 ');
-            // The span self-trims via CSS when the line is tight — the full
-            // text always survives in the tooltip.
-            metaParts.push('<span class="auto-last-result" title="' + _escAttr('Last run \u2014 ' + factsText.replace(/<[^>]*>/g, '')) + '">' + factsText + '</span>');
+            const full = facts.join(' \u00b7 ');
+            const shown = full.length > 64 ? full.slice(0, 61).trimEnd() + '\u2026' : full;
+            metaParts.push('<span class="auto-last-result" title="' + _escAttr('Last run: ' + full) + '">' + _esc(shown) + '</span>');
         }
     }
 
