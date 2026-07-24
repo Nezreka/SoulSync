@@ -152,6 +152,9 @@
 /* ── Cards ──────────────────────────────────────────────────────────────── */
 .automation-card {
     position: relative;
+    /* the base sheet gives cards margin: 4px 0 — grid/flex gaps own ALL
+       spacing in the redesign, so zero it (audit leftover) */
+    margin: 0;
     display: flex; align-items: flex-start; gap: 13px; flex-wrap: wrap;
     padding: 15px 16px 13px 20px;
     background: linear-gradient(180deg, rgba(255,255,255,0.042), rgba(255,255,255,0.018));
