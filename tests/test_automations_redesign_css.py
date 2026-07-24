@@ -149,3 +149,13 @@ def test_card_noise_reduction_in_renderer():
     assert "_norm(a.name).includes(_norm(_autoFormatAction(a.action_type)))" in _JS
     assert "v !== 0" in _JS and "v !== '0'" in _JS
     assert 'title="${_escAttr(a.name)}"' in _JS
+
+
+def test_row_info_declares_its_direction():
+    """The giant-empty-rows regression: the base sheet sets flex-direction:
+    column on .automation-info; the row override MUST declare row explicitly
+    or the name's 260px flex-basis becomes 260px of height."""
+    css = _strip_comments(_CSS)
+    idx = css.index(".automations-section.section-protected .automation-card .automation-info")
+    body = css[idx:css.index("}", idx)]
+    assert "flex-direction: row" in body

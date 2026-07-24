@@ -886,7 +886,10 @@
 }
 .automations-section.section-protected .automation-card .automation-status { margin-top: 0; }
 .automations-section.section-protected .automation-card .automation-info {
-    display: flex; align-items: center; gap: 16px; min-width: 0;
+    /* flex-direction MUST be explicit: the base sheet declares column on
+       .automation-info, and inheriting it turned the name's 260px flex-basis
+       into 260px of HEIGHT (Boulder's giant empty rows). */
+    display: flex; flex-direction: row; align-items: center; gap: 16px; min-width: 0;
 }
 /* the name rail — one aligned column the eye runs straight down */
 .automations-section.section-protected .automation-card .automation-name {
