@@ -11577,10 +11577,17 @@ def library_completion_stream():
                         'release_date': item.get('release_date') or item.get('releaseDate'),
                     }
 
+                    # Per-item source: gap-fill ("Other Sources") cards each
+                    # belong to their OWN source — their ids only mean anything
+                    # against it (#1071). Base-discography items carry no
+                    # per-item source and keep the request-level one.
+                    item_source = (str(item.get('source') or '').strip().lower()
+                                   or source_override)
+
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
+                        result = check_single_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums)
+                        result = check_album_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums)
 
                     result['id'] = item['id']
                     result['category'] = category

@@ -2083,8 +2083,58 @@ async function _loadDiscographyGapFill(artistId, artistName) {
         });
         // current filter state applies to the new cards too
         if (typeof applyDiscographyFilters === 'function') applyDiscographyFilters();
+
+        // #1071: gap cards get REAL ownership checks like every other card —
+        // an album bought on another platform must light up OWNED here too.
+        // Each card streams against its own source (its id only means
+        // anything there); results land through the same card updater.
+        _streamGapOwnership(artistName, all, seq);
     } catch (e) {
         console.debug('gap-fill load failed:', e);
+    }
+}
+
+async function _streamGapOwnership(artistName, gapEntries, seq) {
+    const bucketKey = { album: 'albums', ep: 'eps', single: 'singles' };
+    const payload = { artist_name: artistName, albums: [], eps: [], singles: [], source: null };
+    gapEntries.forEach(g => {
+        payload[bucketKey[g._bucket] || 'albums'].push({
+            id: g.id,
+            title: g.title || g.name || '',
+            track_count: g.track_count || g.total_tracks || 0,
+            album_type: g.album_type || g._bucket,
+            year: g.year,
+            release_date: g.release_date,
+            source: g.gap_source || null,
+        });
+    });
+    try {
+        const response = await fetch('/api/library/completion-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (seq !== _gapFillReqSeq) { reader.cancel(); return; }   // navigated away
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const eventData = JSON.parse(line.slice(6));
+                    if (eventData.type === 'completion') updateLibraryReleaseCard(eventData);
+                } catch (e) { /* partial frame — next chunk completes it */ }
+            }
+        }
+    } catch (e) {
+        console.debug('gap ownership stream failed:', e);
     }
 }
 
