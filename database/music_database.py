@@ -1156,6 +1156,16 @@ class MusicDatabase:
             except Exception as qp_err:
                 logger.error(f"Could not apply quality-profile migration config write(s): {qp_err}")
 
+            # A profile deletion commits the DB and only THEN clears the matching
+            # config override; those two writes cannot be atomic. The DB is the
+            # source of truth, so retry the cleanup on every boot until it sticks
+            # (P3-02).
+            try:
+                from core.quality.migrate_to_profiles import reconcile_stale_quality_profile_config
+                reconcile_stale_quality_profile_config(self)
+            except Exception as qp_err:
+                logger.error(f"Could not reconcile stale quality-profile config: {qp_err}")
+
             logger.info("Database initialized successfully")
 
         except Exception as e:
@@ -9717,17 +9727,24 @@ class MusicDatabase:
             conn.commit()
             if cur.rowcount == 0:
                 return False, "Profile not found"
-            # Clear a matching Auto-Import override so its Settings UI doesn't
-            # show a stale id (the pipeline would fall back correctly either
-            # way). Outside the DB transaction — config is a separate store.
+            # Clear any config override that pointed at the deleted profile so
+            # the Settings UI doesn't show an id that no longer exists (the
+            # pipeline would fall back correctly either way). This is outside the
+            # DB transaction — config is a separate store, and the two cannot be
+            # atomic. The recovery contract: the DB is authoritative and this
+            # cleanup is idempotent, so a failure here is retried on the next
+            # startup by `reconcile_stale_quality_profile_config` (P3-02).
+            # Logged at WARNING, not DEBUG, so the transient inconsistency is
+            # actually visible while it lasts.
             try:
-                from config.settings import config_manager
-                current_auto_import_profile = config_manager.get('auto_import.quality_profile_id')
-                if (current_auto_import_profile is not None
-                        and str(current_auto_import_profile) == str(profile_id)):
-                    config_manager.set('auto_import.quality_profile_id', None)
+                from core.quality.migrate_to_profiles import reconcile_stale_quality_profile_config
+                reconcile_stale_quality_profile_config(self)
             except Exception as e:  # noqa: BLE001
-                logger.debug("auto-import profile reference cleanup skipped: %s", e)
+                logger.warning(
+                    "Quality profile %s was deleted but its config reference could not be "
+                    "cleared; it will be reconciled on the next startup: %s",
+                    profile_id, e,
+                )
             return True, ""
         except Exception as e:
             logger.error(f"Failed to delete quality profile {profile_id}: {e}")

@@ -1312,44 +1312,102 @@ async function fetchMirroredOrganizePreference(playlistRef, source = null) {
     return !!playlist?.organize_by_playlist;
 }
 
+/** Put a persisted selector into an explicit, visibly inert unavailable state. */
+function markPlaylistQualityProfileSelectUnavailable(select, message) {
+    select.innerHTML = `<option value="">${escapeHtml(message)}</option>`;
+    select.disabled = true;
+    select.dataset.effectiveProfileId = '';
+    select.title = message;
+}
+
+/**
+ * Fill the PERSISTED (mirror-owned) selectors for one playlist.
+ *
+ * P2-05: this control writes to the server, so it must never display a value the
+ * server does not hold. Three states are now explicit instead of silently
+ * showing option zero:
+ *
+ *  - no mirror row yet  -> disabled, "Mirror playlist first" (nothing to save to)
+ *  - load failed        -> disabled, "unavailable"
+ *  - profile deleted    -> reconciled to the real default rather than list order
+ *
+ * The last value the server confirmed is remembered in
+ * ``dataset.effectiveProfileId`` so a failed save can roll back to it.
+ */
 async function hydratePlaylistQualityProfileSelects(
     playlistRef,
     source = null,
     knownQualityProfileId = null,
 ) {
+    const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+    const matching = [...document.querySelectorAll('.playlist-quality-profile-select')].filter(
+        select => String(select.dataset.playlistRef) === String(playlistRef)
+            && String(select.dataset.playlistSource) === String(resolvedSource)
+    );
+    if (!matching.length) return;
     try {
-        const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+        // A caller that already has the mirror's quality_profile_id read it off a
+        // mirror row, so the mirror provably exists — don't spend one resolve
+        // request per card just to re-learn that (the Auto-Sync board renders
+        // dozens at once).
+        const mirrorKnown = knownQualityProfileId != null;
         const [profiles, playlist] = await Promise.all([
             fetchPlaylistQualityProfiles(),
-            knownQualityProfileId == null
-                ? fetchMirroredPlaylistPreference(playlistRef, resolvedSource)
-                : Promise.resolve(null),
+            mirrorKnown
+                ? Promise.resolve({ id: true, quality_profile_id: knownQualityProfileId })
+                : fetchMirroredPlaylistPreference(playlistRef, resolvedSource),
         ]);
-        const selectedId = knownQualityProfileId ?? playlist?.quality_profile_id;
-        document.querySelectorAll('.playlist-quality-profile-select').forEach(select => {
-            if (String(select.dataset.playlistRef) !== String(playlistRef)) return;
-            if (String(select.dataset.playlistSource) !== String(resolvedSource)) return;
+        if (!profiles.length) {
+            matching.forEach(select =>
+                markPlaylistQualityProfileSelectUnavailable(select, 'No Quality Profiles configured'));
+            return;
+        }
+        if (!playlist?.id) {
+            // Nothing to persist to yet — showing a selected profile here would
+            // be a lie, because changing it cannot be saved.
+            matching.forEach(select =>
+                markPlaylistQualityProfileSelectUnavailable(select, 'Mirror playlist first'));
+            return;
+        }
+
+        const wanted = knownQualityProfileId ?? playlist.quality_profile_id;
+        const available = profiles.some(profile => String(profile.id) === String(wanted));
+        // A profile deleted between two renders must resolve to the default the
+        // server will actually use, not to whichever option sorts first.
+        const effective = available
+            ? wanted
+            : (profiles.find(profile => profile.is_default) || profiles[0]).id;
+
+        matching.forEach(select => {
             select.innerHTML = profiles.map(profile =>
                 `<option value="${profile.id}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (Default)' : ''}</option>`
             ).join('');
-            if (selectedId != null) select.value = String(selectedId);
-            select.disabled = !profiles.length;
+            select.value = String(effective);
+            select.dataset.effectiveProfileId = String(effective);
+            select.disabled = false;
+            select.title = '';
         });
     } catch (err) {
-        console.debug('Could not load playlist Quality Profiles:', err);
+        console.warn('Could not load playlist Quality Profiles:', err);
+        matching.forEach(select =>
+            markPlaylistQualityProfileSelectUnavailable(select, 'Quality Profiles unavailable'));
     }
 }
 
 async function onPlaylistQualityProfileChange(select) {
     const playlistRef = select.dataset.playlistRef;
     const source = select.dataset.playlistSource || 'spotify';
+    const previous = select.dataset.effectiveProfileId || '';
     const qualityProfileId = parseInt(select.value, 10);
     if (!Number.isInteger(qualityProfileId)) return;
     select.disabled = true;
     try {
         const playlist = await fetchMirroredPlaylistPreference(playlistRef, source);
         if (!playlist?.id) {
+            // Roll the DOM back: an unsaved selection must not keep looking active.
             showToast('Mirror this playlist before assigning a Quality Profile', 'warning');
+            if (previous) select.value = previous;
+            await hydratePlaylistQualityProfileSelects(playlistRef, source);
             return;
         }
         const response = await fetch(`/api/mirrored-playlists/${playlist.id}/preferences`, {
@@ -1359,10 +1417,15 @@ async function onPlaylistQualityProfileChange(select) {
         });
         const data = await response.json();
         if (!response.ok || data.error) throw new Error(data.error || 'Could not save Quality Profile');
-        await hydratePlaylistQualityProfileSelects(playlistRef, source, qualityProfileId);
+        // Re-read from the response so the displayed value is the SERVER's, not
+        // ours — e.g. if it was clamped or the row moved meanwhile.
+        await hydratePlaylistQualityProfileSelects(
+            playlistRef, source, data.playlist?.quality_profile_id ?? qualityProfileId,
+        );
         showToast('Playlist Quality Profile saved', 'success');
     } catch (err) {
         showToast(`Could not save Quality Profile: ${err.message}`, 'error');
+        if (previous) select.value = previous;
         await hydratePlaylistQualityProfileSelects(playlistRef, source);
     } finally {
         select.disabled = false;
