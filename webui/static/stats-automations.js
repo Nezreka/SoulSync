@@ -4136,7 +4136,12 @@ function renderAutomationCard(a) {
                  (typeof v === 'string' && v.length <= 24 && v !== '' && v !== '0')))
             .slice(0, 3)
             .map(([k, v]) => _esc(k.replace(/_/g, ' ')) + ': ' + _esc(String(v).replace(/_/g, ' ')));
-        if (facts.length) metaParts.push('<span class="auto-last-result" title="Last run">' + facts.join(' \u00b7 ') + '</span>');
+        if (facts.length) {
+            const factsText = facts.join(' \u00b7 ');
+            // The span self-trims via CSS when the line is tight — the full
+            // text always survives in the tooltip.
+            metaParts.push('<span class="auto-last-result" title="' + _escAttr('Last run \u2014 ' + factsText.replace(/<[^>]*>/g, '')) + '">' + factsText + '</span>');
+        }
     }
 
     const dupeBtn = a.is_system ? '' :
