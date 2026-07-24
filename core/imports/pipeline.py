@@ -79,7 +79,7 @@ from core.imports.paths import (
 from core.imports.album_naming import resolve_album_group
 from core.metadata.lyrics import generate_lrc_file
 from database.music_database import get_database
-from core.tag_writer import is_placeholder_meta, write_tags_to_file
+from core.tag_writer import is_placeholder_meta, read_file_tags, write_tags_to_file
 from utils.logging_config import get_logger
 
 
@@ -170,6 +170,40 @@ def _build_simple_download_tag_data(
         key: str(value).strip()
         for key, value in values.items()
         if not is_placeholder_meta(value)
+    }
+
+
+# Maps _build_simple_download_tag_data's db_data keys to the matching
+# read_file_tags() key, so a field can be checked against the file's
+# CURRENT value before deciding to write it.
+_SIMPLE_DOWNLOAD_TAG_TO_FILE_FIELD = {
+    'title': 'title',
+    'artist_name': 'artist',
+    'album_title': 'album',
+}
+
+
+def _fill_only_simple_download_tags(destination: str, simple_tags: dict[str, str]) -> dict[str, str]:
+    """Restrict ``simple_tags`` to fields the file doesn't already have.
+
+    A simple/direct download skips provider enhancement, so its title/artist/
+    album come straight from the user's search request rather than verified
+    metadata — and Soulseek search titles are often parsed from a messy
+    filename. Unlike the enhanced-import path (which trusts DB metadata over
+    file tags), a simple download must never stamp a real existing tag with
+    a value that's merely "not a placeholder" — only fill in what's actually
+    blank or placeholder in the file today. When the file's current tags
+    can't be read at all, skip writing entirely rather than guessing.
+    """
+    if not simple_tags:
+        return {}
+    current = read_file_tags(destination)
+    if current.get('error'):
+        return {}
+    return {
+        key: value
+        for key, value in simple_tags.items()
+        if is_placeholder_meta(current.get(_SIMPLE_DOWNLOAD_TAG_TO_FILE_FIELD.get(key)))
     }
 
 
@@ -773,6 +807,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
             simple_tags = _build_simple_download_tag_data(
                 search_result, album_name)
+            simple_tags = _fill_only_simple_download_tags(destination, simple_tags)
             if simple_tags:
                 try:
                     tag_result = write_tags_to_file(

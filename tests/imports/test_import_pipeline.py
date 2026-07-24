@@ -35,6 +35,58 @@ class _ImmediateThread:
             self._target()
 
 
+def test_fill_only_simple_download_tags_skips_fields_with_real_existing_values(monkeypatch):
+    """The simple-download tagger must FILL blank/placeholder fields, never
+    overwrite a real existing tag — search titles come straight from the
+    user's request and Soulseek filenames are often messy, so the file's
+    own tag (when present) wins."""
+    monkeypatch.setattr(
+        import_pipeline, "read_file_tags",
+        lambda path: {
+            "title": "Real Title", "artist": None, "album": "[Unknown Album]",
+            "error": None,
+        },
+    )
+    result = import_pipeline._fill_only_simple_download_tags(
+        "/fake/dest.flac",
+        {"title": "Messy Filename Title", "artist_name": "Parsed Artist", "album_title": "Real Album"},
+    )
+    # title: file already has a real value → dropped.
+    # artist_name: file has no artist at all → filled.
+    # album_title: file's album is a placeholder → filled.
+    assert result == {"artist_name": "Parsed Artist", "album_title": "Real Album"}
+
+
+def test_fill_only_simple_download_tags_keeps_all_fields_when_file_is_blank(monkeypatch):
+    monkeypatch.setattr(
+        import_pipeline, "read_file_tags",
+        lambda path: {"title": None, "artist": None, "album": None, "error": None},
+    )
+    simple_tags = {"title": "Title", "artist_name": "Artist", "album_title": "Album"}
+    result = import_pipeline._fill_only_simple_download_tags("/fake/dest.flac", simple_tags)
+    assert result == simple_tags
+
+
+def test_fill_only_simple_download_tags_skips_write_when_file_unreadable(monkeypatch):
+    """When the file's current tags can't be determined at all, don't guess
+    — skip tagging entirely rather than risk clobbering an unknown value."""
+    monkeypatch.setattr(
+        import_pipeline, "read_file_tags",
+        lambda path: {"error": "Could not read file with Mutagen"},
+    )
+    result = import_pipeline._fill_only_simple_download_tags(
+        "/fake/dest.flac", {"title": "Title", "artist_name": "Artist"},
+    )
+    assert result == {}
+
+
+def test_fill_only_simple_download_tags_empty_input_short_circuits(monkeypatch):
+    calls = []
+    monkeypatch.setattr(import_pipeline, "read_file_tags", lambda path: calls.append(path) or {})
+    assert import_pipeline._fill_only_simple_download_tags("/fake/dest.flac", {}) == {}
+    assert calls == []   # never even reads the file when there's nothing to fill
+
+
 def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     transfer_root = tmp_path / "Transfer"
     transfer_root.mkdir()
