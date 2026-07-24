@@ -3482,18 +3482,18 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.4': [
-        { date: 'July 2026 · 3.1.4' },
-        { title: 'Comma Artist Splitter (jadux)', desc: 'a new Tools job finds fake combined artists like "Camellia, Toby Fox" (one comma-joined tag your server turns into an art-less dummy artist) and splits them safely: real comma-named artists like "Tyler, The Creator" are recognized via the metadata APIs and left alone, and every part must be a known artist before anything is flagged. Approving re-tags the files with a proper multi-artist tag.' },
-        { title: 'ReplayGain target loudness (#1060)', desc: 'set the loudness reference (default -18 LUFS) the ReplayGain job — and every other RG write in the app — analyzes against, plus an opt-in re-run over tracks whose stored gain used a different target so the whole library converges.' },
-        { title: 'Genre Tag Cleanup (#1057)', desc: 'strict genre filtering only gated NEW metadata — this job re-checks genres stored before you enabled it, shows exactly what would be kept vs removed per artist/album, and the fix removes only (never invents).' },
-        { title: 'Fix All actually fixes all', desc: 'the Tools bulk-fix kept a second list of fixable finding types that had drifted — some findings counted in "Fix All N" but were silently skipped. Now derived from the fix handlers, so it can never drift again. Artist pictures on findings are clickable too.' },
-        { title: 'Video Requests page, best in class', desc: 'approved requests now show "Acquiring…" until the title lands in your library, then flip to "In library". Status tabs with counts, removable history, a Clear-resolved sweep, and an honest-approve fix (no more success toast while the row still says Approve).' },
-        { title: 'Seed limits your client enforces (TheHomeGuy)', desc: 'an "Enforced by" toggle (music + video) can write your seed ratio/time goals into the torrent as native share limits, so the client stops seeding on its own even if SoulSync is down. Also: stall-pause works on qBittorrent 5.x.' },
-        { title: 'Every logo ships with the app', desc: 'all service/brand logos now load from your own server instead of 10+ external CDNs — no more broken images from rate limits, dead URLs, or LAN-only installs.' },
-        { title: 'Reported fixes', desc: 'downloads freezing mid-batch + a metadata identity guard (jadux); re-releases finally download — analysis respects release years (5BILLION); deep scan removes artists on an empty Navidrome (5BILLION); unchecking chat auto-join actually leaves the room (popwaffle9000); $year renders for TV in rename templates (musicagine); a source search timeout knob (#1056); airing shows catch up missed days.' },
-        { title: 'Community PRs', desc: 'enrichment workers idle-backoff their polling for a big idle-CPU drop (#1054, thegabriele97), and discographies fall through the provider chain instead of erroring when the primary source is down (#1032, ragnarlotus).' },
-        { title: 'Earlier versions', desc: '3.1.3 added record-label following + music torrent seeding goals. 3.1.2 brought the Soulseek chat page. 3.1.1 added Continue Watching. 3.1.0 gave the video side full Sonarr/Radarr-class acquisition.' },
+    '3.1.5': [
+        { date: 'July 2026 · 3.1.5' },
+        { title: 'Chat, best in class', desc: 'join ANY public Soulseek room — a rooms rail with a full room browser, not just the SoulSync room. The user list got a real overhaul (roles, sorting, local mute), you can browse any user\'s shared files and download right from chat, search your message history, copy any message, and the composer was redesigned.' },
+        { title: 'Choose your discography source (ragnarlotus)', desc: 'a new Library Discography Source setting decides which metadata source paints library artists\' discographies — your primary, automatic fallback, or a specific source. An artist a source genuinely doesn\'t know no longer reads as an error.' },
+        { title: 'Other sources on the discography (#1067)', desc: 'a view option on artist pages that appends releases OTHER metadata sources know but your current view doesn\'t — slotted into the real Albums/EPs/Singles sections, marked with their source, each downloadable (Download Discography includes them too). Off by default, purely additive.' },
+        { title: 'Wishlist: artist selection + smarter retries', desc: 'select, download, or remove a whole artist\'s wishlist entries at once (#1065). Failed tracks now carry REAL attempt counts, back off progressively instead of retrying every cycle, and the auto-ignore TTL is configurable (javiavid).' },
+        { title: 'Search by MusicBrainz ID (Jordan H)', desc: 'paste a bare MusicBrainz ID into search and it resolves directly to the release — Lidarr-style exact lookups.' },
+        { title: 'Tools: Fix All grew up', desc: 'Fix All runs in the background with live progress and a Stop button — a 5000-finding retag no longer times out the page while secretly still working (pertti). Album Tag Consistency now says exactly which albums were excluded and why, and warns when files weren\'t readable from SoulSync\'s side (clouddead89). Findings page size is adjustable, and Genre Tag Cleanup scans (and counts) the whole library (#1066).' },
+        { title: 'Multi-user hardening', desc: 'a profile-isolation audit: profile-scoped APIs verify ownership, deleting a profile sweeps every table that references it, and socket rooms derive from the session — one profile can\'t see or touch another\'s data.' },
+        { title: 'Reported fixes', desc: 'singles/EPs no longer file as Albums when the source has no type signal (#1064); the artist photo picker works on Navidrome/Jellyfin (#1069); enabling Usenet in source priority survives reload (Fl3m); the music Manage Workers modal gets Retry All Failed; video\'s "block release and retry" actually retries with another release.' },
+        { title: 'Community PRs', desc: 'the Library Discography Source setting and the typed provider-outcome rework behind it are ragnarlotus\'s work (#1068).' },
+        { title: 'Earlier versions', desc: '3.1.4 added the Comma Artist Splitter + ReplayGain targets and grew up the video Requests page. 3.1.3 added record-label following. 3.1.2 brought the Soulseek chat page. 3.1.1 added Continue Watching.' },
     ],
 };
 
@@ -3524,7 +3524,22 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.4: the tools + requests release",
+        title: "3.1.5: the chat + discography release",
+        description: "chat goes best-in-class (any public room, user shares, history search), you choose which source paints your discographies — and see what the others know — the wishlist learns artists and smarter retries, Fix All runs in the background, and multi-user gets a security hardening pass.",
+        features: [
+            "chat, best in class: join ANY public soulseek room via a rooms rail + full room browser, a real user list (roles, sorting, local mute), browse any user's shared files and download them right from chat, search your message history, copy any message, and a redesigned composer",
+            "choose your discography source (thanks ragnarlotus, #1068): a Library Discography Source setting — primary, automatic fallback, or a specific source — decides what paints library artists' discographies, and an artist a source genuinely doesn't know no longer reads as an error",
+            "see what other sources know (#1067): an 'Other sources' view option appends releases your current view is missing, slotted into the real Albums/EPs/Singles sections with their source marked — each downloadable, Download Discography includes them, off by default and purely additive",
+            "wishlist: select/download/remove a whole artist's entries at once (#1065), real attempt counts, progressive retry backoff instead of hammering every cycle, and a configurable auto-ignore TTL (thanks javiavid)",
+            "search by musicbrainz id (thanks Jordan H): paste a bare MBID and it resolves straight to the release, lidarr-style",
+            "tools: Fix All runs in the background with live progress + a Stop button so a 5000-finding retag can't time out the page (thanks pertti), Album Tag Consistency explains exactly which albums it excluded and why + warns when files weren't readable from soulsync's side (thanks clouddead89), adjustable findings page size, and Genre Tag Cleanup scans the whole library (#1066)",
+            "multi-user hardening: profile-scoped APIs verify ownership, deleting a profile sweeps every referencing table, and socket rooms derive from the session — one profile can't see or touch another's data",
+            "reported fixes: singles/EPs no longer file as Albums when the source has no type signal (#1064), the artist photo picker works on Navidrome/Jellyfin (#1069), enabling Usenet in source priority survives reload (thanks Fl3m), Retry All Failed on the music workers modal, and video's 'block release and retry' actually retries with another release",
+        ],
+        usage_note: "the discography source lives in Settings → Metadata; 'Other sources' is a toggle in the artist page's filter row. rooms + user shares are on the Chat page. wishlist artist tools appear when you group by artist.",
+    },
+    {
+        title: "Earlier in 3.1.4 — the tools + requests release",
         description: "two new library-maintenance jobs (comma artist splitter + genre cleanup), ReplayGain loudness targets, the video Requests page grown up, seed limits your torrent client can enforce itself, every logo shipping with the app, and a big stack of reported fixes.",
         features: [
             "comma artist splitter (thanks jadux): a Tools job that finds fake combined artists like 'Camellia, Toby Fox' and splits their tags safely — real comma artists like 'Tyler, The Creator' are recognized via the metadata APIs and left alone, every part must be a known artist before anything is flagged, and each finding shows exactly how it will split with clickable chips to the real artists. approving re-tags the files with a proper multi-artist tag and your server dissolves the dummy on its next scan",
