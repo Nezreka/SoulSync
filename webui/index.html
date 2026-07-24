@@ -10072,15 +10072,9 @@
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
-                            <!-- room jukebox: shared YouTube listening, votes pick what's next.
-                                 Static skeleton — the submit input and the player iframe must
-                                 survive the 4s poll (renderJukebox only rewrites now/queue). -->
-                            <div class="chat-jukebox" data-chat-jukebox hidden>
-                                <div class="chat-jbx-now" data-chat-jbx-now></div>
-                                <div class="chat-jbx-player" data-chat-jbx-player hidden></div>
-                                <div class="chat-jbx-queue" data-chat-jbx-queue></div>
-                            </div>
-                            <!-- pinned messages + the room poll: pure folds over the protocol bus -->
+                            <!-- pinned messages popover (📌 in the room head) + the room
+                                 poll — both pure folds over the protocol bus. The poll stays
+                                 inline: a live poll SHOULD interrupt the room's attention. -->
                             <div class="chat-pinbar" data-chat-pinbar hidden></div>
                             <div class="chat-pollcard" data-chat-poll hidden></div>
                             <!-- user popover card (click any username) -->
@@ -10236,7 +10230,18 @@
                                 </div>
                             </form>
                         </main>
-                        <aside class="chat-users" data-chat-users></aside>
+                        <div class="chat-rail">
+                            <!-- room jukebox (queue/player) — a rail card above the user
+                                 list, Discord-activity style. Static skeleton: the player
+                                 iframe must survive the 4s poll (renderJukebox only
+                                 rewrites now/queue). -->
+                            <div class="chat-jukebox" data-chat-jukebox hidden>
+                                <div class="chat-jbx-now" data-chat-jbx-now></div>
+                                <div class="chat-jbx-player" data-chat-jbx-player hidden></div>
+                                <div class="chat-jbx-queue" data-chat-jbx-queue></div>
+                            </div>
+                            <aside class="chat-users" data-chat-users></aside>
+                        </div>
                     </div>
                 </div>
             </div>

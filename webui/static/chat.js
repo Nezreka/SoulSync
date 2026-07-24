@@ -708,6 +708,12 @@
                       'placeholder="Search history…" autocomplete="off"' +
                       (state.searchMode ? '' : ' hidden') + '>' +
               '</span>' +
+              '<button class="chat-filter-btn' + (state.pinsOpen ? ' chat-filter-btn--on' : '') +
+              '" type="button" data-chat-pins-toggle title="Pinned messages">📌' +
+              (function () {
+                  var n = window.ChatProtocol ? window.ChatProtocol.reducePins(_roomEvents()).length : 0;
+                  return n ? ' ' + n : '';
+              })() + '</button>' +
               '<button class="chat-filter-btn' + (state.jukebox.open ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-jukebox-btn title="Room jukebox — listen together, vote on what plays next">♫ Jukebox</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
@@ -1747,6 +1753,12 @@
                     !e.target.closest('[data-chat-poll-pop]')) {
                 togglePollPop(true);
             }
+            if (state.pinsOpen && !e.target.closest('[data-chat-pins-toggle]') &&
+                    !e.target.closest('[data-chat-pinbar]')) {
+                state.pinsOpen = false;
+                renderPinbar();
+                if (!state.searchMode) renderHead();
+            }
             if (!e.target.closest('[data-chat-gif-btn]') &&
                     !e.target.closest('[data-chat-gif-pop]')) {
                 toggleGifPicker(true);
@@ -1833,7 +1845,12 @@
             t = e.target.closest('[data-chat-browse-retry]');
             if (t) { if (_browse.user) openBrowse(_browse.user); return; }
             t = e.target.closest('[data-chat-pins-toggle]');
-            if (t) { state.pinsOpen = !state.pinsOpen; renderPinbar(); return; }
+            if (t) {
+                state.pinsOpen = !state.pinsOpen;
+                renderPinbar();
+                if (!state.searchMode) renderHead();
+                return;
+            }
             t = e.target.closest('[data-chat-pin-del-u]');
             if (t) {
                 sendProtocol('pin.del', { u: t.getAttribute('data-chat-pin-del-u'),
@@ -2248,28 +2265,28 @@
 
     // ── pinned messages (pin.add / pin.del on the bus) ──────────────────
     function renderPinbar() {
+        // A POPOVER, not a standing bar (Boulder): pins are look-up-occasionally,
+        // so they cost zero message height until the head 📌 button opens them.
         var host = q('[data-chat-pinbar]');
         if (!host) return;
+        var show = state.pinsOpen && state.view === 'room';
+        host.hidden = !show;
+        if (!show) { host.innerHTML = ''; return; }
         var CP = window.ChatProtocol;
-        var pins = (CP && state.view === 'room') ? CP.reducePins(_roomEvents()) : [];
-        if (!pins.length) { host.hidden = true; host.innerHTML = ''; return; }
-        host.hidden = false;
-        var head = '<button class="chat-pinbar-head" type="button" data-chat-pins-toggle>📌 ' +
-            pins.length + ' pinned' + (state.pinsOpen ? ' ▾' : ' ▸') + '</button>';
-        var rows = '';
-        if (state.pinsOpen) {
-            rows = pins.slice().reverse().map(function (pin) {
-                return '<div class="chat-pin-row">' +
-                    '<span class="chat-pin-text"><b>' + esc(pin.u) + '</b> ' + esc(pin.x) + '</span>' +
-                    '<span class="chat-pin-by">pinned by ' + esc(pin.by) + '</span>' +
-                    (state.canSend
-                        ? '<button class="chat-pin-del" type="button" title="Unpin" ' +
-                          'data-chat-pin-del-u="' + attr(pin.u) + '" data-chat-pin-del-ts="' + attr(pin.ts) + '">×</button>'
-                        : '') +
-                '</div>';
-            }).join('');
-        }
-        host.innerHTML = head + rows;
+        var pins = CP ? CP.reducePins(_roomEvents()) : [];
+        host.innerHTML = '<div class="chat-pins-title">📌 Pinned messages</div>' +
+            (pins.length
+                ? pins.slice().reverse().map(function (pin) {
+                    return '<div class="chat-pin-row">' +
+                        '<span class="chat-pin-text"><b>' + esc(pin.u) + '</b> ' + esc(pin.x) + '</span>' +
+                        '<span class="chat-pin-by">pinned by ' + esc(pin.by) + '</span>' +
+                        (state.canSend
+                            ? '<button class="chat-pin-del" type="button" title="Unpin" ' +
+                              'data-chat-pin-del-u="' + attr(pin.u) + '" data-chat-pin-del-ts="' + attr(pin.ts) + '">×</button>'
+                            : '') +
+                    '</div>';
+                }).join('')
+                : '<div class="chat-side-none">Nothing pinned yet — hover a message and hit 📌</div>');
     }
 
     // ── the room poll (poll.start / poll.vote / poll.end on the bus) ────
@@ -2557,7 +2574,7 @@
             host.innerHTML = '<div data-chat-jbx-yt></div>';
             state.jukebox.playingId = now.id;
             state.jukebox.player = new window.YT.Player(host.firstChild, {
-                width: '100%', height: '180', videoId: now.id,
+                width: '100%', height: '158', videoId: now.id,
                 playerVars: { autoplay: 1, start: offset, rel: 0, playsinline: 1 },
                 events: {
                     onReady: function () {

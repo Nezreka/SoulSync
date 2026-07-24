@@ -160,5 +160,25 @@ class TestChatModalStandard:
         for hook in ("data-chat-jbx-headbar", "data-chat-jbx-form",
                      "data-chat-jbx-listeners", "data-chat-jbx-results"):
             assert hook in header, hook
-        panel = _HTML[_HTML.index('data-chat-jukebox hidden'):_HTML.index('data-chat-pinbar')]
-        assert "data-chat-jbx-form" not in panel
+        rail = _HTML[_HTML.index('class="chat-rail"'):_HTML.index('data-chat-users')]
+        assert "data-chat-jukebox" in rail             # queue/player card in the right rail
+        assert "data-chat-jbx-form" not in rail        # ...without a second add-song form
+
+
+class TestBusSurfacePlacement:
+    """Boulder's layout round 2: jukebox queue/player = right-rail card,
+    pins = head-button popover (zero standing height), poll stays inline."""
+
+    def test_pins_are_a_popover_not_a_bar(self):
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(
+            encoding="utf-8", errors="replace")
+        bar = css[css.index(".chat-pinbar {"):css.index(".chat-pins-title")]
+        assert "position: absolute" in bar
+        # the head button carries the count; outside clicks close the popover
+        assert "data-chat-pins-toggle" in _CHAT_JS
+        assert "state.pinsOpen && !e.target.closest('[data-chat-pins-toggle]')" in _CHAT_JS
+
+    def test_poll_card_stays_inline_in_the_main_column(self):
+        main = _HTML[_HTML.index('class="chat-main"'):_HTML.index('class="chat-rail"')]
+        assert "data-chat-poll" in main
+        assert "data-chat-jukebox" not in main         # the panel left the main column

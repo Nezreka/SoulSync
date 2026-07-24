@@ -71626,9 +71626,11 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
    ═══════════════════════════════════════════════════════════════════════════ */
 .chat-page-container { display: flex; flex-direction: column; height: 100%; }
 .chat-shell {
-    display: grid; grid-template-columns: 220px 1fr 180px; gap: 16px;
+    display: grid; grid-template-columns: 220px 1fr 250px; gap: 16px;
     flex: 1; min-height: 0; height: calc(100vh - 210px);
 }
+.chat-rail { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
+.chat-rail .chat-users { flex: 1 1 auto; }
 .chat-side, .chat-users {
     background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
     border-radius: 14px; padding: 12px; overflow-y: auto; min-height: 0;
@@ -71828,7 +71830,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     .chat-side-label { display: none; }
     .chat-side-list { display: flex; gap: 6px; }
     .chat-side-item { width: auto; white-space: nowrap; }
-    .chat-users { display: none; }
+    .chat-rail { display: none; }
 }
 
 /* message-this-user links (chat P4) — any surface can render one */
@@ -72298,15 +72300,14 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 /* ── chat jukebox (shared room listening) ─────────────────────────────── */
 .chat-jukebox {
     flex: 0 0 auto;
-    margin: 0 16px 8px;
     padding: 10px 12px;
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
+    border-radius: 14px;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 46vh;
+    max-height: 52%;
     overflow-y: auto;
 }
 /* the jukebox control bar rides the page header's right side */
@@ -72339,7 +72340,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 100%; min-width: 0; flex: 1 1 auto;
 }
-.chat-jbx-meta { font-size: 11.5px; color: rgba(255,255,255,0.45); white-space: nowrap; }
+.chat-jbx-meta { font-size: 11.5px; color: rgba(255,255,255,0.45); }
 .chat-jbx-tune { flex: 0 0 auto; }
 .chat-jbx-player { border-radius: 10px; overflow: hidden; line-height: 0; }
 .chat-jbx-player iframe { border: 0; }
@@ -72373,19 +72374,24 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-jbx-result:hover { background: rgba(255,255,255,0.05); }
 
 /* ── chat pin board + room poll + topic (protocol-bus surfaces) ───────── */
+.chat-pinbar[hidden] { display: none !important; }
 .chat-pinbar {
-    flex: 0 0 auto;
-    margin: 0 16px 6px;
-    padding: 4px 8px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 10px;
+    position: absolute; top: 54px; right: 14px; z-index: 35;   /* under the modal overlay (40) */
+    width: min(400px, calc(100% - 28px));
+    max-height: 50%;
+    overflow-y: auto;
+    padding: 8px;
+    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.6);
 }
-.chat-pinbar-head {
-    background: none; border: 0; cursor: pointer;
-    color: rgba(255,255,255,0.65); font-size: 12px; padding: 3px 4px;
+.chat-pins-title {
+    font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.85);
+    padding: 4px 6px 8px;
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
+    margin-bottom: 4px;
 }
-.chat-pinbar-head:hover { color: rgba(255,255,255,0.9); }
 .chat-pin-row {
     display: flex; align-items: center; gap: 10px;
     padding: 4px 6px; border-radius: 8px; font-size: 12.5px;
