@@ -966,7 +966,10 @@
             if (!res.ok) {
                 if (body) {
                     body.innerHTML = '<div class="chat-gif-hint">' +
-                        esc(res.body && res.body.error || 'Could not browse') + '</div>';
+                        esc(res.body && res.body.error || 'Could not browse') + '</div>' +
+                        '<div class="chat-browse-retry-row">' +
+                        '<button type="button" class="modal-button modal-button--primary" ' +
+                            'data-chat-browse-retry>Try again</button></div>';
                 }
                 return;
             }
@@ -1827,6 +1830,8 @@
                 renderHead(); refresh();
                 return;
             }
+            t = e.target.closest('[data-chat-browse-retry]');
+            if (t) { if (_browse.user) openBrowse(_browse.user); return; }
             t = e.target.closest('[data-chat-pins-toggle]');
             if (t) { state.pinsOpen = !state.pinsOpen; renderPinbar(); return; }
             t = e.target.closest('[data-chat-pin-del-u]');
@@ -2390,6 +2395,11 @@
         var show = state.jukebox.open && state.view === 'room';
         panel.hidden = !show;
         if (!show) return;
+        var lc = q('[data-chat-jbx-listeners]');
+        if (lc && window.ChatProtocol) {
+            var nTuned = Object.keys(window.ChatProtocol.reduceTuned(_roomEvents())).length;
+            lc.textContent = nTuned ? '♪ ' + nTuned + ' listening' : '';
+        }
         // fingerprint: skip DOM writes when nothing visible changed (the
         // elapsed clock ticks via its own cheap textContent update below)
         var fp = JSON.stringify([now && now.id, ended, st.queue, state.jukebox.tunedIn, state.canSend]);

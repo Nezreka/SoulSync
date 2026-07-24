@@ -123,3 +123,36 @@ class TestMessageUserHooks:
         assert dl.count("escapeHtml(result.username || '').replace(/\"/g, '&quot;')") == 2
         # candidates: only SOULSEEK peers are messageable (torrent rows aren't users)
         assert "/soulseek/i.test(String(c.source))" in dl
+
+
+class TestChatModalStandard:
+    """Boulder's design feedback (Jul 24): chat modals must follow the app's
+    modal standard — accent-var chrome + modal-button actions, no hardcoded
+    Spotify green — and browse failures must be honest + retryable."""
+
+    def test_modal_actions_use_the_standard_buttons(self):
+        # all four chat modals' action rows ride modal-button, not chat-*-btn
+        import re
+        for anchor in ("data-chat-card-message", "data-chat-browse-dl",
+                       "data-chat-rooms-close", "data-chat-settings-save"):
+            btn = re.search(r'<button[^>]*' + anchor + r'[^>]*>', _HTML)
+            assert btn and 'modal-button' in btn.group(0), anchor
+
+    def test_modal_css_is_accent_var_not_green(self):
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(
+            encoding="utf-8", errors="replace")
+        block = css[css.index(".chat-settings-overlay {"):css.index(".chat-input--area")]
+        assert "#1db954" not in block                  # the green is gone
+        assert "var(--accent-rgb)" in block            # themeable accent chrome
+        assert "linear-gradient(135deg, #1a1a1a" in block   # the standard card
+
+    def test_browse_failure_offers_retry(self):
+        assert "data-chat-browse-retry" in _CHAT_JS
+        py = (_ROOT / "api" / "chat.py").read_text(encoding="utf-8", errors="replace")
+        assert "Trying again often works" in py
+        assert "offline or not sharing" not in py      # the victim-blaming line
+
+    def test_jukebox_add_song_lives_in_the_panel_head(self):
+        head = _HTML[_HTML.index('class="chat-jbx-head"'):_HTML.index('data-chat-jbx-results')]
+        assert "data-chat-jbx-form" in head            # add-song docked in the head row
+        assert "data-chat-jbx-listeners" in head

@@ -465,7 +465,13 @@ def create_blueprint() -> Blueprint:
             logger.exception("chat: browse failed for %r", username)
             return jsonify({"error": str(e)}), 502
         if dirs is None:
-            return jsonify({"error": "%s is offline or not sharing right now" % username}), 502
+            # Not necessarily "offline": most browse failures are slskd being
+            # unable to open a direct/indirect peer connection (NAT/firewall).
+            # Retries often succeed once the route is warmed up.
+            return jsonify({"error": "Couldn't connect to %s — they may be "
+                            "offline, or their client couldn't accept a "
+                            "connection. Trying again often works." % username,
+                            "retryable": True}), 502
         return jsonify({"username": username, "directories": dirs})
 
     @bp.route("/api/chat/user/<path:username>/shares/files", methods=["GET"])

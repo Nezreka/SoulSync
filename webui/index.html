@@ -10064,15 +10064,19 @@
                                  Static skeleton — the submit input and the player iframe must
                                  survive the 4s poll (renderJukebox only rewrites now/queue). -->
                             <div class="chat-jukebox" data-chat-jukebox hidden>
+                                <div class="chat-jbx-head">
+                                    <span class="chat-jbx-brand">♫ Jukebox</span>
+                                    <span class="chat-jbx-listeners" data-chat-jbx-listeners></span>
+                                    <form class="chat-jbx-form" data-chat-jbx-form>
+                                        <input class="chat-input chat-jbx-input" data-chat-jbx-input type="text" maxlength="200"
+                                               placeholder="Add a song or paste a YouTube link…" autocomplete="off">
+                                        <button type="submit" class="chat-fmt-btn chat-jbx-add">Add</button>
+                                    </form>
+                                </div>
+                                <div class="chat-jbx-results" data-chat-jbx-results hidden></div>
                                 <div class="chat-jbx-now" data-chat-jbx-now></div>
                                 <div class="chat-jbx-player" data-chat-jbx-player hidden></div>
                                 <div class="chat-jbx-queue" data-chat-jbx-queue></div>
-                                <form class="chat-jbx-form" data-chat-jbx-form>
-                                    <input class="chat-input chat-jbx-input" data-chat-jbx-input type="text" maxlength="200"
-                                           placeholder="Add a song — paste a YouTube link or search…" autocomplete="off">
-                                    <button type="submit" class="chat-fmt-btn chat-jbx-add">Add</button>
-                                </form>
-                                <div class="chat-jbx-results" data-chat-jbx-results hidden></div>
                             </div>
                             <!-- pinned messages + the room poll: pure folds over the protocol bus -->
                             <div class="chat-pinbar" data-chat-pinbar hidden></div>
@@ -10082,10 +10086,10 @@
                                 <div class="chat-settings-modal chat-user-card">
                                     <div data-chat-user-card-body></div>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-card-close>Close</button>
-                                        <button type="button" class="chat-fmt-btn" data-chat-card-ignore>Mute</button>
-                                        <button type="button" class="chat-fmt-btn" data-chat-card-browse>Browse files</button>
-                                        <button type="button" class="chat-send-btn" data-chat-card-message>Message</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-ignore>Mute</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-browse>Browse files</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-card-message>Message</button>
                                     </div>
                                 </div>
                             </div>
@@ -10097,9 +10101,9 @@
                                            placeholder="Filter folders…" autocomplete="off">
                                     <div class="chat-browse-body" data-chat-browse-body></div>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-browse-back hidden>&larr; Folders</button>
-                                        <button type="button" class="chat-fmt-btn" data-chat-browse-close>Close</button>
-                                        <button type="button" class="chat-send-btn" data-chat-browse-dl hidden>Download selected</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-browse-back hidden>&larr; Folders</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-browse-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-browse-dl hidden>Download selected</button>
                                     </div>
                                 </div>
                             </div>
@@ -10111,7 +10115,7 @@
                                            placeholder="Search rooms…" autocomplete="off">
                                     <div class="chat-rooms-list" data-chat-rooms-list></div>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-rooms-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-rooms-close>Close</button>
                                     </div>
                                 </div>
                             </div>
@@ -10149,8 +10153,8 @@
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
                                         Auto-answer "prove you're human" download challenges</label>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-settings-cancel>Cancel</button>
-                                        <button type="button" class="chat-send-btn" data-chat-settings-save>Save</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-settings-cancel>Cancel</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-settings-save>Save</button>
                                     </div>
                                 </div>
                             </div>
