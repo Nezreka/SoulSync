@@ -979,11 +979,14 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 # automation_id marks the run as scheduled.
                 _backoff = apply_backoff if apply_backoff is not None else (automation_id is not None)
                 if _backoff:
-                    from datetime import datetime as _dt
+                    from datetime import datetime as _dt, timezone as _tz
 
                     from core.wishlist.retry_backoff import split_due_for_retry
+                    # NAIVE UTC on purpose: last_attempted is SQLite's naive-UTC
+                    # CURRENT_TIMESTAMP and the parser yields naive datetimes —
+                    # an aware 'now' would TypeError on comparison.
                     wishlist_tracks, _cooling = split_due_for_retry(
-                        wishlist_tracks, _dt.utcnow())
+                        wishlist_tracks, _dt.now(_tz.utc).replace(tzinfo=None))
                     if _cooling:
                         logger.info(
                             f"[Auto-Wishlist] {len(_cooling)} track(s) cooling down after "
