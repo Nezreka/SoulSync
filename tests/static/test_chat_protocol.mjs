@@ -177,6 +177,42 @@ describe('reduceJukebox — the pure fold every client agrees on', () => {
         assert.equal(st.now.d, 7200);                       // capped, not trusted
     });
 
+    test('unsub: only the submitter can pull a track, and its votes die', () => {
+        const st = P.reduceJukebox([
+            ev('a', { k: 'jbx.sub', id: 'aaaaaaaaaaa', ti: 'A' }),
+            ev('b', { k: 'jbx.sub', id: 'bbbbbbbbbbb', ti: 'B' }),
+            ev('x', { k: 'jbx.vote', o: 'aaaaaaaaaaa' }),
+            ev('mallory', { k: 'jbx.unsub', id: 'aaaaaaaaaaa' }),   // not the submitter
+            ev('a', { k: 'jbx.unsub', id: 'aaaaaaaaaaa' }),         // the submitter
+        ]);
+        assert.equal(st.queue.length, 1);
+        assert.equal(st.queue[0].id, 'bbbbbbbbbbb');
+        assert.equal(st.tally.winner, null);            // the pulled track's vote vanished
+    });
+
+    test('skip votes count unique users for the CURRENT track and reset on handoff', () => {
+        const base = [
+            ev('dj', { k: 'jbx.now', id: 'aaaaaaaaaaa', ti: 'A', at: 1 }),
+            ev('x', { k: 'jbx.skip', o: 'aaaaaaaaaaa' }),
+            ev('x', { k: 'jbx.skip', o: 'aaaaaaaaaaa' }),           // same user twice = 1
+            ev('y', { k: 'jbx.skip', o: 'zzzzzzzzzzz' }),           // wrong target ignored
+        ];
+        assert.equal(P.reduceJukebox(base).skips, 1);
+        const after = base.concat([ev('dj', { k: 'jbx.now', id: 'bbbbbbbbbbb', ti: 'B', at: 2 })]);
+        assert.equal(P.reduceJukebox(after).skips, 0);              // skips die with the track
+    });
+
+    test('history keeps the last plays newest-first, double-starts excluded', () => {
+        const st = P.reduceJukebox([
+            ev('dj', { k: 'jbx.now', id: 'aaaaaaaaaaa', ti: 'A', at: 1 }),
+            ev('dj', { k: 'jbx.now', id: 'aaaaaaaaaaa', ti: 'A', at: 2 }),  // double-start
+            ev('dj', { k: 'jbx.now', id: 'bbbbbbbbbbb', ti: 'B', at: 3 }),
+            ev('dj', { k: 'jbx.now', id: 'ccccccccccc', ti: 'C', at: 4 }),
+        ]);
+        assert.equal(st.now.id, 'ccccccccccc');
+        shapeEqual(st.history.map(h => h.id), ['bbbbbbbbbbb', 'aaaaaaaaaaa']);
+    });
+
     test('queue cap holds at 25', () => {
         const evs = [];
         for (let i = 0; i < 30; i++) {

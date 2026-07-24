@@ -213,5 +213,32 @@ def test_watchdog_polls_the_player_not_just_the_event():
     js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
     wd = js[js.index("function _jbxWatchdog"):js.index("function _jbxAdvance")]
     assert "getPlayerState() === 0" in wd
-    assert "getDuration()" in wd
     assert "playerEnded" in wd
+    # the player-truth duration lives in the shared helper the watchdog calls
+    assert "_jbxEffDuration(st.now)" in wd
+    eff = js[js.index("function _jbxEffDuration"):js.index("function _jbxSkipNeeded")]
+    assert "getDuration()" in eff
+
+
+def test_jukebox_level_up_wiring():
+    """The polish pass: thumbnails, progress bar, skip votes, pull-your-own,
+    history with replay, audio-only, local volume — all reduced from the
+    same stream (three new verbs: jbx.skip / jbx.unsub, history from
+    jbx.now handoffs), still zero server surface."""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    # free YouTube thumbnails, no API
+    assert "i.ytimg.com/vi/" in js
+    # skip is majority-of-listeners, deterministic from the tuned set
+    assert "_jbxSkipNeeded" in js and "Math.ceil(n / 2)" in js
+    assert "'jbx.skip'" in js and "'jbx.unsub'" in js
+    # the watchdog treats a skip majority as end-of-track
+    wd = js[js.index("function _jbxWatchdog"):js.index("function _jbxAdvance")]
+    assert "st.skips >= _jbxSkipNeeded()" in wd
+    # audio-only collapses the container but never kills the iframe
+    assert "chat-jbx-player--audio" in js
+    css = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8")
+    assert "height: 0 !important" in css.split(".chat-jbx-player--audio", 1)[1][:120]
+    # volume is local-only (player.setVolume, persisted, never a protocol event)
+    assert "chat_jbx_vol" in js and "setVolume" in js
+    proto = (_ROOT / "webui" / "static" / "chat-protocol.js").read_text(encoding="utf-8")
+    assert "skipVotes" in proto and "history" in proto

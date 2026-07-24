@@ -46,6 +46,9 @@
             lastRendered: '',    //   reduced-state fingerprint (skip no-op renders)
             lastAdvanceAt: 0,    //   DJ double-fire guard (ms)
             starvedAt: 0,        //   queue-waiting-with-no-DJ clock (ms)
+            histOpen: false,     //   recently-played list expanded
+            videoHidden: false,  //   audio-only mode (iframe hidden, audio plays)
+            vol: 100,            //   local player volume (persisted)
             timer: null,         //   elapsed clock + DJ watchdog while open
             ytLoading: false, ytCbs: [],
         },
@@ -54,6 +57,11 @@
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
+    try {
+        state.jukebox.videoHidden = localStorage.getItem('chat_jbx_audio') === '1';
+        var _v = parseInt(localStorage.getItem('chat_jbx_vol') || '100', 10);
+        if (_v >= 0 && _v <= 100) state.jukebox.vol = _v;
+    } catch (e) { /* ignore */ }
 
     function q(sel) {
         var page = document.getElementById('chat-page');
@@ -1906,6 +1914,36 @@
             if (t) { sendProtocol('jbx.vote', { o: t.getAttribute('data-chat-jbx-vote') }); return; }
             t = e.target.closest('[data-chat-jbx-pick]');
             if (t) { _jbxPick(state.jukebox.results[parseInt(t.getAttribute('data-chat-jbx-pick'), 10)]); return; }
+            t = e.target.closest('[data-chat-jbx-skip]');
+            if (t) { sendProtocol('jbx.skip', { o: t.getAttribute('data-chat-jbx-skip') }); return; }
+            t = e.target.closest('[data-chat-jbx-unsub]');
+            if (t) { sendProtocol('jbx.unsub', { id: t.getAttribute('data-chat-jbx-unsub') }); return; }
+            t = e.target.closest('[data-chat-jbx-resub]');
+            if (t) {
+                var rp = { id: t.getAttribute('data-chat-jbx-resub'),
+                           title: t.getAttribute('data-chat-jbx-resub-ti') || '' };
+                var rd = parseInt(t.getAttribute('data-chat-jbx-resub-d') || '', 10);
+                if (rd > 0) rp.duration = rd;
+                _jbxPick(rp);
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-hist]');
+            if (t) {
+                state.jukebox.histOpen = !state.jukebox.histOpen;
+                state.jukebox.lastRendered = '';
+                renderJukebox();
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-video]');
+            if (t) {
+                state.jukebox.videoHidden = !state.jukebox.videoHidden;
+                try { localStorage.setItem('chat_jbx_audio', state.jukebox.videoHidden ? '1' : '0'); } catch (err) { /* ignore */ }
+                var ph = q('[data-chat-jbx-player]');
+                if (ph) ph.classList.toggle('chat-jbx-player--audio', state.jukebox.videoHidden);
+                state.jukebox.lastRendered = '';
+                renderJukebox();
+                return;
+            }
             t = e.target.closest('[data-chat-search-btn]');
             if (t) { state.searchMode ? exitSearch() : enterSearch(); return; }
             t = e.target.closest('[data-chat-search-exit]');
@@ -2053,6 +2091,16 @@
             if (e.target && e.target.matches('[data-chat-user-search]')) {
                 state.userFilter = e.target.value.trim();
                 renderUsersList();
+            }
+            if (e.target && e.target.matches('[data-chat-jbx-vol]')) {
+                var vv = parseInt(e.target.value, 10);
+                if (vv >= 0 && vv <= 100) {
+                    state.jukebox.vol = vv;
+                    try { localStorage.setItem('chat_jbx_vol', String(vv)); } catch (err) { /* ignore */ }
+                    if (state.jukebox.player && state.jukebox.playerAlive) {
+                        try { state.jukebox.player.setVolume(vv); } catch (err) { /* gone */ }
+                    }
+                }
             }
             if (e.target && e.target.matches('[data-chat-browse-search]')) {
                 var v = e.target.value.trim();
@@ -2403,13 +2451,41 @@
         return m + ':' + (r < 10 ? '0' : '') + r;
     }
 
+    function _jbxThumb(id) {
+        return 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg';
+    }
+
+    function _jbxEffDuration(now) {
+        // the protocol event's duration when it has one, else a live player's
+        // truth (pasted links resolve via oEmbed, which has no duration)
+        if (!now) return null;
+        if (now.d) return now.d;
+        if (state.jukebox.tunedIn && state.jukebox.playerAlive &&
+                state.jukebox.player && state.jukebox.playingId === now.id) {
+            try {
+                var pd = state.jukebox.player.getDuration();
+                if (pd > 0) return Math.floor(pd);
+            } catch (e) { /* mid-teardown */ }
+        }
+        return null;
+    }
+
+    function _jbxSkipNeeded() {
+        // majority of tuned-in listeners (deterministic — derived from the
+        // same event stream everywhere); floor of 1 when nobody's tuned
+        var CP = window.ChatProtocol;
+        var n = CP ? Object.keys(CP.reduceTuned(_roomEvents())).length : 0;
+        return Math.max(1, Math.ceil(n / 2));
+    }
+
     function renderJukebox() {
         var panel = q('[data-chat-jukebox]');
         if (!panel) return;
         var st = _jbxState();
         var now = st.now;
         var elapsed = _jbxElapsed(now);
-        var ended = !!(now && now.d && elapsed !== null && elapsed > now.d + 5);
+        var effD = _jbxEffDuration(now);
+        var ended = !!(now && effD && elapsed !== null && elapsed > effD + 5);
         // the player follows the ROOM, not the panel — a tuned-in listener
         // reading PMs must still hear the DJ's advances (panel merely hides)
         _jbxSyncPlayer(now && !ended ? now : null);
@@ -2430,49 +2506,113 @@
         var show = state.jukebox.open && inRoom;
         panel.hidden = !show;
         if (!show) return;
+        var needed = _jbxSkipNeeded();
+        var nextId = (st.queue.length > 1 && window.ChatProtocol)
+            ? (window.ChatProtocol.nextTrack(st) || {}).id : null;
         // fingerprint: skip DOM writes when nothing visible changed (the
-        // elapsed clock ticks via its own cheap textContent update below)
-        var fp = JSON.stringify([now && now.id, ended, st.queue, state.jukebox.tunedIn, state.canSend]);
+        // clock + progress bar tick via cheap updates below)
+        var fp = JSON.stringify([now && now.id, ended, st.queue, state.jukebox.tunedIn,
+                                 state.canSend, st.skips, needed, nextId,
+                                 state.jukebox.histOpen, st.history.length,
+                                 st.history[0] && st.history[0].id,   // cap rotation changes content, not length
+                                 state.jukebox.videoHidden]);
         if (fp !== state.jukebox.lastRendered) {
             state.jukebox.lastRendered = fp;
             var nowHost = q('[data-chat-jbx-now]');
             if (nowHost) {
                 if (now && !ended) {
+                    var pct = (effD && elapsed !== null)
+                        ? Math.min(100, 100 * elapsed / effD) : 0;
                     nowHost.innerHTML =
-                        '<span class="chat-jbx-live">▶</span>' +
-                        '<span class="chat-jbx-title" title="' + attr(now.ti || now.id) + '">' +
-                            esc(now.ti || now.id) + '</span>' +
-                        '<span class="chat-jbx-meta">added by ' + esc(now.by || '?') +
-                            (elapsed !== null ? ' · <span data-chat-jbx-clock>' + _fmtSecs(elapsed) + '</span>' +
-                                (now.d ? ' / ' + _fmtSecs(now.d) : '') : '') + '</span>' +
-                        (state.jukebox.tunedIn
-                            ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>'
-                            : '<button class="chat-send-btn chat-jbx-tune" type="button" data-chat-jbx-tunein>▶ Tune in</button>');
+                        '<div class="chat-jbx-nowcard">' +
+                            '<img class="chat-jbx-art" src="' + attr(_jbxThumb(now.id)) + '" alt="">' +
+                            '<div class="chat-jbx-nowmain">' +
+                                '<div class="chat-jbx-titlerow">' +
+                                    '<span class="chat-jbx-eq"><i></i><i></i><i></i></span>' +
+                                    '<a class="chat-jbx-title" href="https://youtu.be/' + attr(now.id) +
+                                        '" target="_blank" rel="noopener" title="' + attr(now.ti || now.id) + '">' +
+                                        esc(now.ti || now.id) + '</a>' +
+                                '</div>' +
+                                '<div class="chat-jbx-meta">added by ' + esc(now.by || '?') +
+                                    (elapsed !== null ? ' · <span data-chat-jbx-clock>' + _fmtSecs(elapsed) + '</span>' +
+                                        (effD ? ' / ' + _fmtSecs(effD) : '') : '') + '</div>' +
+                                '<div class="chat-jbx-progress"><span class="chat-jbx-progbar" ' +
+                                    'data-chat-jbx-bar style="width:' + pct.toFixed(1) + '%"></span></div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="chat-jbx-controls">' +
+                            (state.jukebox.tunedIn
+                                ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>'
+                                : '<button class="chat-send-btn chat-jbx-tune" type="button" data-chat-jbx-tunein>▶ Tune in</button>') +
+                            '<button class="chat-fmt-btn" type="button" data-chat-jbx-skip="' + attr(now.id) + '"' +
+                                (state.canSend ? '' : ' disabled') +
+                                ' title="Vote to skip this track (majority of listeners)">⏭ Skip' +
+                                (st.skips ? ' ' + st.skips + '/' + needed : '') + '</button>' +
+                            (state.jukebox.tunedIn
+                                ? '<button class="chat-fmt-btn" type="button" data-chat-jbx-video title="' +
+                                      (state.jukebox.videoHidden ? 'Show the video' : 'Audio only — hide the video') + '">' +
+                                      (state.jukebox.videoHidden ? '🎬 Video' : '🎧 Audio only') + '</button>' +
+                                  '<input class="chat-jbx-vol" data-chat-jbx-vol type="range" min="0" max="100" ' +
+                                      'value="' + state.jukebox.vol + '" title="Volume (just yours)">'
+                                : '') +
+                        '</div>';
                 } else {
                     // tuned-in users keep their exit even between tracks
-                    nowHost.innerHTML = '<span class="chat-jbx-meta">' +
+                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' +
                         (st.queue.length ? 'Waiting for the next track…'
-                                         : 'Nothing playing — add a song below and get the room voting.') +
-                        '</span>' +
+                                         : 'Nothing playing — add a song above and get the room voting.') +
+                        '</div>' +
                         (state.jukebox.tunedIn
                             ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>' : '');
                 }
             }
             var qHost = q('[data-chat-jbx-queue]');
             if (qHost) {
-                qHost.innerHTML = st.queue.map(function (e) {
-                    return '<div class="chat-jbx-row">' +
+                var rows = st.queue.map(function (e) {
+                    var mine = state.selfName && e.by === state.selfName;
+                    return '<div class="chat-jbx-row' + (e.id === nextId ? ' chat-jbx-row--next' : '') + '">' +
+                        '<img class="chat-jbx-qthumb" src="' + attr(_jbxThumb(e.id)) + '" alt="" loading="lazy">' +
+                        '<div class="chat-jbx-qmain">' +
+                            '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
+                            '<span class="chat-jbx-meta">' +
+                                (e.id === nextId ? '<b class="chat-jbx-next">up next</b> · ' : '') +
+                                (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
+                        '</div>' +
                         '<button class="chat-jbx-vote" type="button" data-chat-jbx-vote="' + attr(e.id) + '"' +
                             (state.canSend ? '' : ' disabled') + ' title="Vote to play this next">▲ ' +
                             (e.votes || 0) + '</button>' +
-                        '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
-                        '<span class="chat-jbx-meta">' + (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
+                        (mine && state.canSend
+                            ? '<button class="chat-jbx-unsub" type="button" data-chat-jbx-unsub="' + attr(e.id) +
+                              '" title="Remove your submission">×</button>' : '') +
                     '</div>';
-                }).join('') || '';
+                }).join('');
+                if (st.history.length) {
+                    rows += '<button class="chat-jbx-histbtn" type="button" data-chat-jbx-hist>' +
+                        (state.jukebox.histOpen ? '▾' : '▸') + ' Recently played (' + st.history.length + ')</button>';
+                    if (state.jukebox.histOpen) {
+                        rows += st.history.map(function (h) {
+                            return '<div class="chat-jbx-row chat-jbx-row--hist">' +
+                                '<img class="chat-jbx-qthumb" src="' + attr(_jbxThumb(h.id)) + '" alt="" loading="lazy">' +
+                                '<div class="chat-jbx-qmain">' +
+                                    '<span class="chat-jbx-title" title="' + attr(h.ti || h.id) + '">' + esc(h.ti || h.id) + '</span>' +
+                                    '<span class="chat-jbx-meta">' + esc(h.by || '') + '</span>' +
+                                '</div>' +
+                                (state.canSend
+                                    ? '<button class="chat-jbx-vote" type="button" data-chat-jbx-resub="' + attr(h.id) +
+                                      '" data-chat-jbx-resub-ti="' + attr(h.ti || '') + '"' +
+                                      (h.d ? ' data-chat-jbx-resub-d="' + attr(String(h.d)) + '"' : '') +
+                                      ' title="Queue it again">↻</button>' : '') +
+                            '</div>';
+                        }).join('');
+                    }
+                }
+                qHost.innerHTML = rows;
             }
         } else if (elapsed !== null) {
             var clock = q('[data-chat-jbx-clock]');
             if (clock) clock.textContent = _fmtSecs(elapsed);
+            var bar = q('[data-chat-jbx-bar]');
+            if (bar && effD) bar.style.width = Math.min(100, 100 * elapsed / effD).toFixed(1) + '%';
         }
     }
 
@@ -2505,18 +2645,15 @@
         // A tuned-in client asks the PLAYER for the truth — pasted links have
         // no duration (oEmbed doesn't give one), and the iframe's ENDED event
         // is best-effort, so poll instead of trusting either.
-        var effD = st.now ? st.now.d : null;
+        var effD = _jbxEffDuration(st.now);
         var playerEnded = false;
         if (state.jukebox.tunedIn && state.jukebox.playerAlive && state.jukebox.player) {
             try {
-                if (!effD) {
-                    var pd = state.jukebox.player.getDuration();
-                    if (pd > 0) effD = pd;
-                }
                 playerEnded = state.jukebox.player.getPlayerState() === 0;   // YT ENDED
             } catch (e) { /* player mid-teardown */ }
         }
-        var stale = !st.now || playerEnded ||
+        var skipped = !!(st.now && st.skips >= _jbxSkipNeeded());
+        var stale = !st.now || playerEnded || skipped ||
             (effD && elapsed !== null && elapsed > effD + 8) ||
             (!effD && elapsed !== null && elapsed > 900);   // untuned + unknown length: 15-min cap
         if (!st.queue.length || !stale) { state.jukebox.starvedAt = 0; return; }
@@ -2596,6 +2733,7 @@
         var host = q('[data-chat-jbx-player]');
         if (!host) return;
         var offset = Math.max(0, _jbxElapsed(now) || 0);
+        host.classList.toggle('chat-jbx-player--audio', state.jukebox.videoHidden);
         if (!state.jukebox.player) {
             host.hidden = false;
             host.innerHTML = '<div data-chat-jbx-yt></div>';
@@ -2606,6 +2744,7 @@
                 events: {
                     onReady: function () {
                         state.jukebox.playerAlive = true;
+                        try { state.jukebox.player.setVolume(state.jukebox.vol); } catch (e) { /* gone */ }
                         _jbxSyncPlayer(_jbxState().now);   // catch a now-change during boot
                     },
                     onStateChange: _jbxOnPlayerState,

@@ -131,6 +131,8 @@
         var queue = [];          // [{id, ti, by}]
         var inQueue = {};        // id → queue entry
         var votes = [];          // raw votes since last round
+        var skipVotes = [];      // votes to skip the CURRENT track
+        var history = [];        // previously played, newest first (cap 10)
         var now = null;
 
         (events || []).forEach(function (ev) {
@@ -148,9 +150,24 @@
             } else if (p.k === 'jbx.vote') {
                 var o = String(p.o || '');
                 if (inQueue[o]) votes.push({ username: ev.username, option: o });
+            } else if (p.k === 'jbx.unsub') {
+                // only the submitter can pull their own track
+                var uid = String(p.id || '');
+                var ent = inQueue[uid];
+                if (ent && ent.by === ev.username) {
+                    queue = queue.filter(function (e) { return e.id !== uid; });
+                    delete inQueue[uid];
+                }
+            } else if (p.k === 'jbx.skip') {
+                var so = String(p.o || '');
+                if (now && so === now.id) skipVotes.push({ username: ev.username, option: so });
             } else if (p.k === 'jbx.now') {
                 var nid = String(p.id || '');
                 if (!_YT_ID_RE.test(nid)) return;
+                if (now && now.id !== nid) {          // a real handoff, not a double-start
+                    history.unshift(now);
+                    if (history.length > 10) history.pop();
+                }
                 now = { id: nid, ti: String(p.ti || '').slice(0, 120),
                         at: (typeof p.at === 'number' && isFinite(p.at)) ? p.at : null,
                         d: _saneDuration(p.d), by: ev.username };
@@ -159,12 +176,15 @@
                     delete inQueue[nid];
                 }
                 votes = [];                                // new round
+                skipVotes = [];                            // skips die with the track
             }
         });
 
+        votes = votes.filter(function (v) { return inQueue[v.option]; });   // unsub'd ids drop out
         var tally = tallyVotes(votes);
         queue.forEach(function (e) { e.votes = tally.counts[e.id] || 0; });
-        return { queue: queue, now: now, tally: tally };
+        return { queue: queue, now: now, tally: tally,
+                 skips: tallyVotes(skipVotes).total, history: history };
     }
 
     // ── Pins / poll / topic / tuned-presence reducers ───────────────────
