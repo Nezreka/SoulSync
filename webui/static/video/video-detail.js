@@ -2690,8 +2690,12 @@
         return s ? (s.episodes || []).filter(function (e) { return !e.owned; }) : [];
     }
     function _grabParams(en, src) {
+        // poster travels with the grab → the downloads page rows (and the season
+        // group header, which borrows its first row's art) render real posters
+        // instead of the placeholder TV orb. Same resolver the wishlist writes use.
         return { title: data.title, source: src, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year };
+            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+            poster: _showPoster() };
     }
     // Optimistic per-episode state for the search phase — the grab has no row in
     // /downloads/active yet. The live tracker takes over once it appears.
@@ -2810,7 +2814,8 @@
         VideoGrab.pickSource().then(function (src) {
             return VideoGrab.season({ title: data.title, source: src, season: selectedSeason,
                 episodes: missing.map(function (e) { return e.episode_number; }),
-                mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year },
+                mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+                poster: _showPoster() },
                 function (en, state) { _setEpSynthetic(en, state); });
         }).then(function (res) {
             btn.disabled = false; _btnLabel(btn, 'Grab season'); startDlTracking();
