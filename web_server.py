@@ -2782,6 +2782,15 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+def _m3u_entry_path(path):
+    """An m3u entry line must never START with '#' — players parse that as a
+    comment and silently skip the track. Relative paths can start with '#'
+    now that $artistletter has the '#' catch-all folder (#1072); './#/...'
+    is the same path, minus the ambiguity."""
+    p = str(path or '')
+    return './' + p if p.startswith('#') else p
+
+
 def _regenerate_batch_m3u(batch, tracks):
     """Regenerate M3U file for a completed batch using real library DB paths.
     Called from batch completion handler after all post-processing is done."""
@@ -2844,7 +2853,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = f'{entry_base_path}/{fp}' if entry_base_path else fp
+                path = f'{entry_base_path}/{fp}' if entry_base_path else _m3u_entry_path(fp)
                 lines.append(path)
                 found += 1
             else:
@@ -3032,7 +3041,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = f'{entry_base_path}/{file_path}' if entry_base_path else file_path
+                entry = f'{entry_base_path}/{file_path}' if entry_base_path else _m3u_entry_path(file_path)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1

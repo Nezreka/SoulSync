@@ -64,7 +64,13 @@ def build_m3u(entries: Iterable[Dict[str, Any]], entry_base_path: str = "") -> s
             path,
         )
         lines.append(f"#EXTINF:{secs},{label}")
-        lines.append(f"{base}/{path}" if base else path)
+        # An entry line must never START with '#' — players parse that as a
+        # comment and silently skip the track ($artistletter's '#' catch-all
+        # folder makes relative './#/...' paths a real case, #1072).
+        entry_line = f"{base}/{path}" if base else path
+        if entry_line.startswith("#"):
+            entry_line = "./" + entry_line
+        lines.append(entry_line)
     return "\n".join(lines) + "\n"
 
 

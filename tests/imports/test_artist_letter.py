@@ -97,3 +97,24 @@ def test_settings_ui_round_trip_wiring():
     assert 'id="artistletter-symbol-fallback"' in html
     assert "artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked" in js
     assert "settings.file_organization?.artistletter_symbol_fallback === true" in js
+
+
+# ── the '#' folder can't poison m3u playlists ───────────────────────────────
+
+def test_m3u_entries_never_start_with_hash():
+    """An m3u line starting with '#' is a COMMENT — players silently skip the
+    track. With the '#' catch-all folder, relative entries can start with
+    '#/', so every writer guards with a './' prefix."""
+    from core.library.m3u_export import build_m3u
+    out = build_m3u([{'path': '#/365 Days/song.flac', 'artist': '365 Days',
+                      'title': 'Song', 'duration': 100}])
+    lines = [l for l in out.splitlines() if l and not l.startswith('#EXT')]
+    assert lines == ['./#/365 Days/song.flac']
+    # base-path entries never start with '#' anyway — unchanged
+    out2 = build_m3u([{'path': '#/A/s.flac', 'artist': 'A', 'title': 'S', 'duration': 1}],
+                     entry_base_path='/music')
+    assert '/music/#/A/s.flac' in out2
+
+    import web_server
+    assert web_server._m3u_entry_path('#/X/y.flac') == './#/X/y.flac'
+    assert web_server._m3u_entry_path('P/x.flac') == 'P/x.flac'
