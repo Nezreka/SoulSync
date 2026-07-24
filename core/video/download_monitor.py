@@ -257,6 +257,41 @@ def _apply_candidate(db, dl_id, row, cand, rest) -> bool:
     return True
 
 
+def retry_another_release(db, dl) -> dict:
+    """User-facing 'try a DIFFERENT release' (the block-and-retry button — which
+    used to call the same-release retry, i.e. re-grab the exact release just
+    blocked, and 502 outright on torrent grabs).
+
+    Still-active rows reuse the failure path: next ranked candidate
+    (blocklist-filtered) → slskd requery → honest failed-plus-wishlist.
+    Already-FAILED rows (auto-retry ran dry — the button's normal case) skip
+    straight to a fresh wishlist indexer search for the item: new results,
+    blocklist filters the just-blocked release, next best gets grabbed. That
+    makes 'retry with another' mean NOW for torrent grabs too, which have no
+    slskd candidates to walk."""
+    already_failed = (dl.get("status") or "") == "failed"
+    if not already_failed:
+        _fail_or_retry(db, dl, "Trying another release")
+        row = db.get_video_download(dl["id"]) or {}
+        if (row.get("status") or "failed") != "failed":
+            return {"status": row.get("status"), "wishlist_search": False}
+    # Ranked candidates are dry (or were never there) — go around again via the
+    # wishlist search machinery, which owns indexer re-search + blocklist.
+    kicked = False
+    try:
+        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if tmdb_id:
+            if already_failed:
+                _wishlist_failed(db, dl)   # make sure the row is back on the wishlist
+            from core.video.wishlist_search import manual_search
+            scope = "movie" if kind == "movie" else ("episode" if en is not None else "show")
+            manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en)
+            kicked = True
+    except Exception:
+        logger.exception("video download %s: wishlist search kick failed", dl.get("id"))
+    return {"status": "failed", "wishlist_search": kicked}
+
+
 def _archive_history(db, dl, upd) -> None:
     """Snapshot a terminal download into the permanent history. Best-effort — a
     history failure must never disturb the download pipeline."""

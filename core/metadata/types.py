@@ -57,6 +57,16 @@ def _int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _infer_type_from_count(track_count: int) -> str:
+    """1-3 → single, 4-6 → ep, else album — for sources that carry no
+    album-type signal (SpotipyFree, #1064). Unknown count → album."""
+    if 0 < track_count <= 3:
+        return 'single'
+    if 3 < track_count <= 6:
+        return 'ep'
+    return 'album'
+
+
 def _strip_discogs_disambiguation(name: str) -> str:
     """Discogs appends ``(N)`` to artist names when there are multiple
     artists with the same name. Strip so cross-provider matches work."""
@@ -148,7 +158,11 @@ class Album:
             artists=artist_names or ['Unknown Artist'],
             release_date=_str(raw.get('release_date')),
             total_tracks=_int(raw.get('total_tracks')),
-            album_type=_str(raw.get('album_type'), default='album'),
+            # Official Spotify always sends album_type; SpotipyFree (the
+            # no-auth fallback) NEVER does (#1064) — infer from the track
+            # count like the iTunes converter rather than fabricating 'album'.
+            album_type=_str(raw.get('album_type'))
+                or _infer_type_from_count(_int(raw.get('total_tracks'))),
             image_url=image_url,
             artist_id=primary_artist_id or None,
             genres=list(raw.get('genres') or []),

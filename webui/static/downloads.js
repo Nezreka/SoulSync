@@ -1626,9 +1626,17 @@ async function selectWishlistCategory(category) {
                 });
             });
 
-            // Render album cards
-            let albumsHTML = '<div class="wishlist-album-grid">';
+            // Render album cards grouped under per-artist sections (#1065):
+            // one tri-state checkbox / delete / download per ARTIST, so a
+            // 30-album discography is one click instead of thirty.
+            const artistGroups = new Map();
             Object.entries(albumGroups).forEach(([albumId, albumData]) => {
+                const key = albumData.artistName || 'Unknown Artist';
+                if (!artistGroups.has(key)) artistGroups.set(key, []);
+                artistGroups.get(key).push([albumId, albumData]);
+            });
+
+            const cardHTML = ([albumId, albumData]) => {
                 // Sort tracks by track number
                 albumData.tracks.sort((a, b) => a.trackNumber - b.trackNumber);
 
@@ -1660,7 +1668,7 @@ async function selectWishlistCategory(category) {
                     : `background: linear-gradient(135deg, rgba(30, 30, 30, 0.9) 0%, rgba(50, 50, 50, 0.9) 100%); display: flex; align-items: center; justify-content: center; font-size: 40px;`;
                 const albumImageContent = albumData.albumImage ? '' : '<span style="opacity: 0.3;">💿</span>';
 
-                albumsHTML += `
+                return `
                     <div class="wishlist-album-card">
                         <div class="wishlist-album-header" data-album-id="${safeAlbumId}">
                             <label class="wishlist-checkbox-wrapper">
@@ -1684,8 +1692,29 @@ async function selectWishlistCategory(category) {
                         </div>
                     </div>
                 `;
-            });
-            albumsHTML += '</div>';
+            };
+
+            let albumsHTML = '';
+            for (const [artistName, entries] of artistGroups) {
+                const trackTotal = entries.reduce((s, [, a]) => s + a.tracks.length, 0);
+                const safeArtist = escapeHtml(artistName);
+                const artistKey = artistName.replace(/[^a-zA-Z0-9\s_-]/g, '').replace(/\s+/g, '_').toLowerCase() || 'unknown';
+                albumsHTML += `
+                    <div class="wishlist-artist-section" data-artist-name="${safeArtist}">
+                        <div class="wishlist-artist-header">
+                            <label class="wishlist-checkbox-wrapper">
+                                <input type="checkbox" class="wishlist-artist-select-all-cb"
+                                       data-artist-key="${escapeHtml(artistKey)}">
+                                <span class="wishlist-checkbox-custom"></span>
+                            </label>
+                            <span class="wishlist-artist-title">${safeArtist}</span>
+                            <span class="wishlist-artist-counts">${entries.length} album${entries.length !== 1 ? 's' : ''} · ${trackTotal} track${trackTotal !== 1 ? 's' : ''}</span>
+                            <button class="wishlist-artist-download-btn" data-artist-name="${safeArtist}" title="Download only ${safeArtist}">⬇</button>
+                            <button class="wishlist-delete-btn wishlist-delete-artist-btn" data-artist-name="${safeArtist}" title="Remove ${safeArtist} and all their releases from the wishlist">🗑️</button>
+                        </div>
+                        <div class="wishlist-album-grid">${entries.map(cardHTML).join('')}</div>
+                    </div>`;
+            }
 
             tracksList.innerHTML = albumsHTML;
             if (totalAvailable > tracks.length) {
@@ -1695,7 +1724,9 @@ async function selectWishlistCategory(category) {
             _attachWishlistDelegation(tracksList);
 
         } else {
-            // For Singles, show list with album images
+            // For Singles, show list with album images — grouped per artist
+            // (#1065: one checkbox/delete/download per artist, same as albums)
+            const singleArtistRows = new Map();
             let tracksHTML = '';
             tracks.forEach((track, index) => {
                 const trackName = track.name || 'Unknown Track';
@@ -1737,7 +1768,7 @@ async function selectWishlistCategory(category) {
                 const safeAlbumName = escapeHtml(albumName);
                 const safeAlbumImage = escapeHtml(albumImage).replace(/'/g, '&#39;');
 
-                tracksHTML += `
+                const rowHTML = `
                     <div class="playlist-track-item-with-image wishlist-track-item">
                         <label class="wishlist-checkbox-wrapper">
                             <input type="checkbox" class="wishlist-select-cb"
@@ -1754,7 +1785,27 @@ async function selectWishlistCategory(category) {
                         </button>
                     </div>
                 `;
+                if (!singleArtistRows.has(artistName)) singleArtistRows.set(artistName, []);
+                singleArtistRows.get(artistName).push(rowHTML);
             });
+
+            for (const [artistName, rows] of singleArtistRows) {
+                const safeArtist = escapeHtml(artistName);
+                tracksHTML += `
+                    <div class="wishlist-artist-section" data-artist-name="${safeArtist}">
+                        <div class="wishlist-artist-header">
+                            <label class="wishlist-checkbox-wrapper">
+                                <input type="checkbox" class="wishlist-artist-select-all-cb">
+                                <span class="wishlist-checkbox-custom"></span>
+                            </label>
+                            <span class="wishlist-artist-title">${safeArtist}</span>
+                            <span class="wishlist-artist-counts">${rows.length} single${rows.length !== 1 ? 's' : ''}</span>
+                            <button class="wishlist-artist-download-btn" data-artist-name="${safeArtist}" title="Download only ${safeArtist}">⬇</button>
+                            <button class="wishlist-delete-btn wishlist-delete-artist-btn" data-artist-name="${safeArtist}" title="Remove ${safeArtist} and all their singles from the wishlist">🗑️</button>
+                        </div>
+                        ${rows.join('')}
+                    </div>`;
+            }
 
             tracksList.innerHTML = tracksHTML;
             if (totalAvailable > tracks.length) {
@@ -1795,6 +1846,21 @@ function _attachWishlistDelegation(container) {
             return;
         }
 
+        // Artist-level actions (#1065) — before the generic delete handler,
+        // since the artist buttons share the .wishlist-delete-btn styling class
+        const artistDelBtn = target.closest('.wishlist-delete-artist-btn');
+        if (artistDelBtn) {
+            e.stopPropagation();
+            removeArtistFromWishlist(artistDelBtn.dataset.artistName);
+            return;
+        }
+        const artistDlBtn = target.closest('.wishlist-artist-download-btn');
+        if (artistDlBtn) {
+            e.stopPropagation();
+            downloadArtistFromWishlist(artistDlBtn.closest('.wishlist-artist-section'));
+            return;
+        }
+
         // Album delete button
         const albumDelBtn = target.closest('.wishlist-delete-album-btn');
         if (albumDelBtn) {
@@ -1815,12 +1881,83 @@ function _attachWishlistDelegation(container) {
     // Separate change handler for checkboxes (more reliable than click for inputs)
     container.addEventListener('change', (e) => {
         const target = e.target;
-        if (target.classList.contains('wishlist-album-select-all-cb')) {
+        if (target.classList.contains('wishlist-artist-select-all-cb')) {
+            // #1065: one click selects/deselects the artist's whole catalog
+            toggleWishlistArtistSelection(target.closest('.wishlist-artist-section'), target.checked);
+        } else if (target.classList.contains('wishlist-album-select-all-cb')) {
             toggleWishlistAlbumSelection(target.dataset.albumId, target.checked);
+            _updateArtistTriState(target.closest('.wishlist-artist-section'));
         } else if (target.classList.contains('wishlist-select-cb')) {
             updateWishlistBatchBar();
+            _updateArtistTriState(target.closest('.wishlist-artist-section'));
         }
     });
+}
+
+// ── artist-level selection + actions (#1065) ────────────────────────────────
+
+function toggleWishlistArtistSelection(section, checked) {
+    if (!section) return;
+    section.querySelectorAll('.wishlist-select-cb, .wishlist-album-select-all-cb').forEach(cb => {
+        cb.checked = checked;
+        cb.indeterminate = false;
+    });
+    updateWishlistBatchBar();
+}
+
+function _updateArtistTriState(section) {
+    if (!section) return;
+    const artistCb = section.querySelector('.wishlist-artist-select-all-cb');
+    if (!artistCb) return;
+    const total = section.querySelectorAll('.wishlist-select-cb').length;
+    const checked = section.querySelectorAll('.wishlist-select-cb:checked').length;
+    artistCb.checked = total > 0 && checked === total;
+    artistCb.indeterminate = checked > 0 && checked < total;
+}
+
+async function removeArtistFromWishlist(artistName) {
+    if (!artistName) return;
+    const go = async () => {
+        try {
+            const response = await fetch('/api/wishlist/remove-artist', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_name: artistName })
+            });
+            const data = await response.json();
+            if (data.success) {
+                showToast(`Removed ${data.removed_count} track(s) by ${artistName}`, 'success');
+                if (window.selectedWishlistCategory) {
+                    await selectWishlistCategory(window.selectedWishlistCategory);
+                }
+                await updateWishlistCount();
+            } else {
+                showToast(data.error || 'Failed to remove artist', 'error');
+            }
+        } catch (error) {
+            console.error('Error removing artist from wishlist:', error);
+            showToast('Failed to remove artist from wishlist', 'error');
+        }
+    };
+    if (typeof showConfirmDialog === 'function') {
+        const yes = await showConfirmDialog({
+            title: 'Remove Artist from Wishlist',
+            message: `Remove every wishlist track by ${artistName}? They won't be re-added automatically for a while (the removed-track window in Settings).`,
+            confirmText: 'Remove All',
+            destructive: true
+        });
+        if (yes) await go();
+    } else {
+        await go();
+    }
+}
+
+async function downloadArtistFromWishlist(section) {
+    if (!section) return;
+    const ids = Array.from(section.querySelectorAll('.wishlist-select-cb'))
+        .map(cb => cb.dataset.trackId).filter(Boolean);
+    if (!ids.length) { showToast('No tracks under this artist', 'info'); return; }
+    await openDownloadMissingWishlistModal(window.selectedWishlistCategory, new Set(ids));
 }
 
 function backToCategories() {

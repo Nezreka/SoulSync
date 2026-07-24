@@ -59,6 +59,9 @@ class GenreCleanupJob(RepairJob):
         'whitelist the entity is left with none.\n\n'
         'After cleaning, your normal metadata sync pushes the cleaned genres to your server, '
         'and "Write Tags" writes them into the files.\n\n'
+        'Every artist and album in your library counts as scanned; entries that have no '
+        'stored genres yet (genres arrive via the enrichment workers, or from a media '
+        'server that provides them) are skipped — there is nothing to clean on them.\n\n'
         'When strict genre filtering is disabled this job does nothing.'
     )
     icon = 'repair-icon-consistency'
@@ -80,24 +83,29 @@ class GenreCleanupJob(RepairJob):
 
         from core.genre_filter import filter_genres
 
+        # EVERY artist + album is fetched, not just the ones carrying genres —
+        # #1066 (carlosjfcasero): the old genre-carrying-only query made the
+        # card read 'Scanned: 16' against a 1,056-artist library, which looks
+        # exactly like an incomplete scan. Genre-less rows are cheap skips, and
+        # counting them makes the number mean what users think it means. The
+        # skip breakdown is logged so 'most of my library has no stored genres'
+        # is a diagnosis, not a mystery.
         rows = []
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
-            # Artists with stored genres. ar.id doubles as the clickable-card id.
+            # ar.id doubles as the clickable-card id.
             cursor.execute("""
                 SELECT 'artist', ar.id, ar.name, ar.genres, ar.thumb_url, NULL, ar.id, ar.name, ar.thumb_url
                 FROM artists ar
-                WHERE ar.genres IS NOT NULL AND ar.genres != '' AND ar.genres != '[]'
             """)
             rows.extend(cursor.fetchall())
-            # Albums with stored genres (+ their artist for the finding card).
+            # Albums (+ their artist for the finding card).
             cursor.execute("""
                 SELECT 'album', al.id, al.title, al.genres, al.thumb_url, al.thumb_url, ar.id, ar.name, ar.thumb_url
                 FROM albums al
                 LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE al.genres IS NOT NULL AND al.genres != '' AND al.genres != '[]'
             """)
             rows.extend(cursor.fetchall())
         except Exception as e:
@@ -109,10 +117,12 @@ class GenreCleanupJob(RepairJob):
                 conn.close()
 
         total = len(rows)
+        no_genres = 0
+        with_genres = 0
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
-            context.report_progress(phase=f'Checking {total} genre lists...', total=total)
+            context.report_progress(phase=f'Checking {total} artists + albums...', total=total)
 
         for i, row in enumerate(rows):
             if context.check_stop():
@@ -125,7 +135,9 @@ class GenreCleanupJob(RepairJob):
 
             original = parse_stored_genres(raw_genres)
             if not original:
+                no_genres += 1
                 continue
+            with_genres += 1
             kept = filter_genres(list(original), cfgm)
             if kept == original:
                 continue
@@ -180,4 +192,12 @@ class GenreCleanupJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
+        if context.report_progress:
+            context.report_progress(
+                phase=f'Done — {result.findings_created} genre list(s) need cleaning',
+                log_line=(f'{total} artists + albums checked: {with_genres} carry stored genres, '
+                          f'{no_genres} have none (genres only land in the database via '
+                          f'enrichment workers or a media server that provides them — '
+                          f'rows without stored genres have nothing to clean)'),
+                log_type='info')
         return result

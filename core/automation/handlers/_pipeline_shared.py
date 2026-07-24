@@ -234,7 +234,9 @@ def run_wishlist_phase(
 
     try:
         if not deps.is_wishlist_actually_processing():
-            deps.process_wishlist_automatically(automation_id=None)
+            # Scheduled pipeline work — repeatedly-failing tracks respect
+            # their retry backoff here, same as the hourly wishlist cycle.
+            deps.process_wishlist_automatically(automation_id=None, apply_backoff=True)
             deps.update_progress(
                 automation_id,
                 log_line='Wishlist processing triggered',

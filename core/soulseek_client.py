@@ -2070,6 +2070,26 @@ class SoulseekClient(DownloadSourcePlugin):
         res = await self._make_request('PUT', f'conversations/{self._quote(username)}')
         return res is not None
 
+    async def browse_user_shares(self, username: str) -> Optional[List[Dict[str, Any]]]:
+        """Full share listing for a peer: their directory tree as a flat list
+        of ``{'name': path, 'file_count': n}`` (files fetched per-directory via
+        ``browse_user_directory`` — a big share is tens of thousands of files,
+        the caller drills in lazily). None = peer offline / refused."""
+        res = await self._make_request('GET', f'users/{self._quote(username)}/browse')
+        if not res:
+            return None
+        dirs = res.get('directories') if isinstance(res, dict) else res
+        out = []
+        for d in (dirs or []):
+            if isinstance(d, dict) and d.get('name') is not None:
+                files = d.get('files') or []
+                try:
+                    count = int(d.get('fileCount') or len(files))
+                except (TypeError, ValueError):
+                    count = len(files)
+                out.append({'name': str(d['name']), 'file_count': count})
+        return out
+
     async def get_user_status(self, username: str) -> Optional[Dict[str, Any]]:
         """A peer's presence (online/away) — shape varies by slskd version."""
         return await self._make_request('GET', f'users/{self._quote(username)}/status')

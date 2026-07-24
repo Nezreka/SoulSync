@@ -179,8 +179,68 @@ class AlbumTagConsistencyJob(RepairJob):
             albums = cursor.fetchall()
             total = len(albums)
 
+            # Eligibility breakdown — users compare the scanned count to their
+            # server's album count ("only scans 1300 of my 4000 albums") and
+            # read the gap as a truncation bug. Say up front what was excluded
+            # and why instead of reporting a bare, smaller number.
+            total_albums = single_track = missing_paths = no_artist = 0
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) AS total_albums,
+                           SUM(CASE WHEN track_total < 2 THEN 1 ELSE 0 END) AS single_track,
+                           SUM(CASE WHEN track_total >= 2 AND with_path < 2 THEN 1 ELSE 0 END) AS missing_paths
+                    FROM (
+                        SELECT al.id,
+                               COUNT(t.id) AS track_total,
+                               SUM(CASE WHEN t.file_path IS NOT NULL AND t.file_path != ''
+                                        THEN 1 ELSE 0 END) AS with_path
+                        FROM albums al
+                        LEFT JOIN tracks t ON t.album_id = al.id
+                        GROUP BY al.id
+                    )
+                """)
+                row = cursor.fetchone()
+                if row:
+                    total_albums = row['total_albums'] or 0
+                    single_track = row['single_track'] or 0
+                    missing_paths = row['missing_paths'] or 0
+                cursor.execute("""
+                    SELECT COUNT(*) FROM albums al
+                    LEFT JOIN artists ar ON ar.id = al.artist_id
+                    WHERE ar.id IS NULL
+                """)
+                no_artist = cursor.fetchone()[0] or 0
+            except Exception as e:
+                logger.debug("eligibility breakdown query failed: %s", e)
+
             if context.report_progress:
-                context.report_progress(phase=f'Scanning {total} albums for tag consistency...', total=total)
+                context.report_progress(
+                    phase=f'Scanning {total} of {total_albums} albums for tag consistency...',
+                    total=total,
+                )
+                if total_albums > total:
+                    reasons = []
+                    if single_track:
+                        reasons.append(f'{single_track} single-track')
+                    if missing_paths:
+                        reasons.append(f'{missing_paths} without stored file paths (re-run a library scan to populate)')
+                    if no_artist:
+                        reasons.append(f'{no_artist} without an artist link')
+                    context.report_progress(
+                        log_line=(
+                            f'{total_albums} albums in the database, {total} eligible '
+                            f'(need 2+ tracks with file paths)'
+                            + (f' — excluded: {", ".join(reasons)}' if reasons else '')
+                        ),
+                        log_type='info',
+                    )
+
+            # Albums that were eligible but had <2 files actually readable from
+            # SoulSync's filesystem — a scanned album silently producing no
+            # finding is indistinguishable from a healthy one to the user, so
+            # count these and say so at the end (Docker mount mismatch is the
+            # usual cause: the server's "/music/..." path isn't mounted here).
+            unreadable_albums = 0
 
             for idx, album_row in enumerate(albums):
                 if context.check_stop():
@@ -237,6 +297,9 @@ class AlbumTagConsistencyJob(RepairJob):
                         continue
 
                 if len(tag_data) < 2:
+                    # Eligible on paper (2+ tracks with paths) but the files
+                    # themselves weren't readable/parseable from here.
+                    unreadable_albums += 1
                     continue
 
                 # Check for inconsistencies
@@ -317,6 +380,17 @@ class AlbumTagConsistencyJob(RepairJob):
                             log_line=f'Found: {album_title} — {fields_affected}',
                             log_type='warning'
                         )
+
+            if unreadable_albums and context.report_progress:
+                context.report_progress(
+                    log_line=(
+                        f'{unreadable_albums} album(s) skipped: their audio files '
+                        f'could not be read from SoulSync\'s filesystem — if your '
+                        f'media server runs elsewhere (e.g. Docker), mount the music '
+                        f'folder here at the same path the server reports'
+                    ),
+                    log_type='warning',
+                )
 
             conn.close()
 

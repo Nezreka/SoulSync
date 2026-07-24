@@ -28,6 +28,7 @@ logger = get_logger("chat.api")
 _MAX_MESSAGE_LEN = 1000
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
 _SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
+_AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-min TTL)
 
 
 def _self_username(client) -> str:
@@ -83,6 +84,32 @@ def _room_name() -> str:
         return str(_config_get("soulseek.chat_room", "SoulSync") or "SoulSync")
     except Exception:
         return "SoulSync"
+
+
+def _extra_rooms() -> list:
+    """Extra Soulseek rooms the admin joined (beyond the community room).
+    Persisted in config because slskd forgets its rooms on restart — the
+    room hydrate re-joins on demand, same as the home room."""
+    try:
+        rooms = _config_get("soulseek.chat_rooms", []) or []
+    except Exception:
+        return []
+    out = []
+    for r in rooms if isinstance(rooms, list) else []:
+        r = str(r or "").strip()
+        if r and r != _room_name() and r not in out:
+            out.append(r)
+    return out
+
+
+def _resolve_room(requested) -> str | None:
+    """Map a client-supplied room name to a room we serve: the home room
+    (default) or a joined extra room. Unknown names → None (404) — the API
+    never joins arbitrary rooms just because a request named one."""
+    requested = str(requested or "").strip()
+    if not requested or requested == _room_name():
+        return _room_name()
+    return requested if requested in _extra_rooms() else None
 
 
 def _can_send() -> bool:
@@ -252,7 +279,9 @@ def create_blueprint() -> Blueprint:
         if not react:
             return jsonify({"error": "bad reaction"}), 400
         wrapped = chat_codec.encode("", {"re": react})
-        room = _room_name()
+        room = _resolve_room(body.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
         try:
             if not _ensure_joined(client, room):
                 return jsonify({"error": "Could not join room '%s'" % room}), 502
@@ -288,6 +317,81 @@ def create_blueprint() -> Blueprint:
             logger.debug("chat: user info failed", exc_info=True)
         return jsonify(out)
 
+    @bp.route("/api/chat/user/<path:username>/shares", methods=["GET"])
+    def chat_user_shares(username):
+        """Browse a peer's shares: their directory list (names + file counts).
+        Files are fetched per-directory — big shares are tens of thousands of
+        files and nobody needs them all at once."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        try:
+            dirs = _run_async(client.browse_user_shares(username))
+        except Exception as e:
+            logger.exception("chat: browse failed for %r", username)
+            return jsonify({"error": str(e)}), 502
+        if dirs is None:
+            return jsonify({"error": "%s is offline or not sharing right now" % username}), 502
+        return jsonify({"username": username, "directories": dirs})
+
+    @bp.route("/api/chat/user/<path:username>/shares/files", methods=["GET"])
+    def chat_user_share_files(username):
+        """One directory of a peer's share: [{filename, size}]."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        directory = str(request.args.get("dir") or "").strip()
+        if not directory:
+            return jsonify({"error": "dir required"}), 400
+        try:
+            files = _run_async(client.browse_user_directory(username, directory))
+        except Exception as e:
+            logger.exception("chat: directory browse failed for %r", username)
+            return jsonify({"error": str(e)}), 502
+        if files is None:
+            return jsonify({"error": "Could not read that folder"}), 502
+        out = []
+        for f in files:
+            if isinstance(f, dict) and f.get("filename"):
+                try:
+                    size = int(f.get("size") or 0)
+                except (TypeError, ValueError):
+                    size = 0
+                out.append({"filename": str(f["filename"]), "size": size})
+        return jsonify({"username": username, "directory": directory, "files": out})
+
+    @bp.route("/api/chat/user/<path:username>/download", methods=["POST"])
+    def chat_user_download(username):
+        """Queue files from a peer's share into the normal slskd download
+        pipeline (they land in the downloads folder and import like any other
+        grab). Gated on the profile's download permission."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        if not (bool(getattr(g, "is_admin", True)) or bool(getattr(g, "can_download", True))):
+            return jsonify({"error": "Your profile can't start downloads"}), 403
+        files = (request.get_json(silent=True) or {}).get("files")
+        if not isinstance(files, list) or not files:
+            return jsonify({"error": "files required"}), 400
+        files = files[:100]   # one click, one sane batch
+        queued = 0
+        for f in files:
+            if not (isinstance(f, dict) and f.get("filename")):
+                continue
+            try:
+                size = int(f.get("size") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            try:
+                if _run_async(client.download(username, str(f["filename"]), size)):
+                    queued += 1
+            except Exception:
+                logger.debug("chat: enqueue failed for %r from %r",
+                             f.get("filename"), username, exc_info=True)
+        if not queued:
+            return jsonify({"error": "slskd accepted none of the files"}), 502
+        return jsonify({"ok": True, "queued": queued, "failed": len(files) - queued})
+
     @bp.route("/api/chat/gifs", methods=["GET"])
     def chat_gifs():
         """GIF search (GIPHY — Tenor's API was shut down June 2026), proxied so
@@ -321,6 +425,98 @@ def create_blueprint() -> Blueprint:
                 gifs.append({"url": full, "preview": tiny})
         return jsonify({"gifs": gifs})
 
+    @bp.route("/api/chat/rooms", methods=["GET"])
+    def chat_rooms():
+        """The rooms rail: home room + joined extras. Any profile can read;
+        managing the set is admin-only (the account's room memberships are
+        visible to the whole Soulseek network)."""
+        return jsonify({
+            "home": _room_name(),
+            "rooms": [{"name": _room_name(), "home": True}] +
+                     [{"name": r, "home": False} for r in _extra_rooms()],
+            "can_manage": bool(getattr(g, "is_admin", True)),
+        })
+
+    @bp.route("/api/chat/rooms/available", methods=["GET"])
+    def chat_rooms_available():
+        """The room browser: every public Soulseek room with its user count.
+        The full list is a few thousand rooms — cached 5 minutes; the page
+        filters client-side."""
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        import time as _time
+        now = _time.time()
+        if _AVAILABLE["rooms"] is None or now - _AVAILABLE["at"] > 300:
+            try:
+                raw = _run_async(client.get_available_rooms()) or []
+            except Exception as e:
+                logger.exception("chat: available rooms failed")
+                return jsonify({"error": str(e)}), 502
+            rooms = []
+            for r in raw:
+                if isinstance(r, dict) and r.get("name"):
+                    rooms.append({"name": str(r["name"]),
+                                  "users": int(r.get("userCount") or r.get("users") or 0),
+                                  "private": bool(r.get("isPrivate") or r.get("private"))})
+            rooms.sort(key=lambda r: -r["users"])
+            _AVAILABLE.update(rooms=rooms, at=now)
+        joined = {_room_name(), *_extra_rooms()}
+        return jsonify({"rooms": _AVAILABLE["rooms"],
+                        "joined": sorted(joined),
+                        "can_manage": bool(getattr(g, "is_admin", True))})
+
+    @bp.route("/api/chat/rooms/join", methods=["POST"])
+    def chat_rooms_join():
+        """Admin joins a public room: persisted to config (slskd forgets rooms
+        on restart; the hydrate re-joins on demand) + joined now."""
+        if not bool(getattr(g, "is_admin", True)):
+            return jsonify({"error": "Only the admin can join rooms — the app is one "
+                                     "shared Soulseek account"}), 403
+        if _config_set is None:
+            return jsonify({"error": "settings backend not wired"}), 500
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        room = str((request.get_json(silent=True) or {}).get("room") or "").strip()[:64]
+        if not room:
+            return jsonify({"error": "room name required"}), 400
+        if room != _room_name():
+            rooms = _extra_rooms()
+            if room not in rooms:
+                _config_set("soulseek.chat_rooms", rooms + [room])
+        try:
+            if not _ensure_joined(client, room):
+                return jsonify({"error": "Could not join room '%s'" % room}), 502
+        except Exception as e:
+            logger.exception("chat: room join failed")
+            return jsonify({"error": str(e)}), 502
+        return jsonify({"ok": True, "room": room})
+
+    @bp.route("/api/chat/rooms/leave", methods=["POST"])
+    def chat_rooms_leave():
+        """Admin leaves an extra room (config + slskd). The home room is left
+        via the auto-join setting, not here — one obvious path each."""
+        if not bool(getattr(g, "is_admin", True)):
+            return jsonify({"error": "Only the admin can leave rooms"}), 403
+        if _config_set is None:
+            return jsonify({"error": "settings backend not wired"}), 500
+        room = str((request.get_json(silent=True) or {}).get("room") or "").strip()
+        if not room or room == _room_name():
+            return jsonify({"error": "Leave the community room by turning auto-join off "
+                                     "in chat settings"}), 400
+        rooms = _extra_rooms()
+        if room not in rooms:
+            return jsonify({"error": "Not in that room"}), 404
+        _config_set("soulseek.chat_rooms", [r for r in rooms if r != room])
+        client = _client()
+        if client is not None:
+            try:
+                _run_async(client.leave_room(room))
+            except Exception:
+                logger.debug("chat: could not leave room %r", room, exc_info=True)
+        return jsonify({"ok": True})
+
     @bp.route("/api/chat/status", methods=["GET"])
     def chat_status():
         """Cheap page hydrate: is chat usable, which room, may I send."""
@@ -336,22 +532,27 @@ def create_blueprint() -> Blueprint:
 
     @bp.route("/api/chat/room", methods=["GET"])
     def chat_room():
-        """The community room: ensure joined, then messages + user list."""
+        """A joined room (?room=…, default the community room): ensure joined,
+        then messages + user list."""
         client = _client()
         if client is None:
             return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
-        room = _room_name()
+        room = _resolve_room(request.args.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
         # popwaffle9000: auto-join OFF must mean OUT. This endpoint used to
         # _ensure_joined unconditionally, so the page's 4s poll silently
         # re-joined within seconds of the settings cog walking you out —
         # "uncheck auto-join to leave" simply didn't work. With the opt-out
         # set, return a not-joined payload; the page renders a join gate,
         # and Join = the settings POST flipping auto_join back on.
+        # (Home room only — extra rooms are explicit admin joins; leaving
+        # them removes them from the rail entirely.)
         try:
             _auto_join = bool(_config_get("soulseek.chat_auto_join", True)) if _config_get else True
         except Exception:
             _auto_join = True
-        if not _auto_join:
+        if room == _room_name() and not _auto_join:
             return jsonify({"room": room, "joined": False, "messages": [],
                             "users": [], "can_send": _can_send()})
         try:
@@ -400,8 +601,26 @@ def create_blueprint() -> Blueprint:
             limit = max(1, min(int(request.args.get("limit", 100)), 200))
         except (TypeError, ValueError):
             limit = 100
-        msgs = db.get_chat_messages(_room_name(), before=before or None, limit=limit)
+        room = _resolve_room(request.args.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
+        msgs = db.get_chat_messages(room, before=before or None, limit=limit)
         return jsonify({"messages": msgs, "done": len(msgs) < limit})
+
+    @bp.route("/api/chat/room/search", methods=["GET"])
+    def chat_room_search():
+        """Archive search: ?room=&q= → newest-first matches (message text or
+        sender). Local archive only — Soulseek has no server-side history."""
+        db = _db()
+        if db is None:
+            return jsonify({"messages": []})
+        room = _resolve_room(request.args.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
+        qstr = str(request.args.get("q") or "").strip()[:200]
+        if not qstr:
+            return jsonify({"messages": []})
+        return jsonify({"messages": db.search_chat_messages(room, qstr), "q": qstr})
 
     @bp.route("/api/chat/room/message", methods=["POST"])
     def chat_room_send():
@@ -425,7 +644,9 @@ def create_blueprint() -> Blueprint:
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400
-        room = _room_name()
+        room = _resolve_room(body.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
         try:
             if not _ensure_joined(client, room):
                 return jsonify({"error": "Could not join room '%s'" % room}), 502

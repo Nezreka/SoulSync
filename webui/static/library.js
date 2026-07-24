@@ -1047,6 +1047,14 @@ async function loadArtistDetailData(artistId, artistName) {
         console.log(`🎨 Main content visibility:`, document.getElementById('artist-detail-main'));
         console.log(`🎨 Albums section:`, document.getElementById('albums-section'));
 
+        // Gap-fill (#1067): fire-and-forget — the base page never waits on it.
+        // The rendered discography is stashed for the client-side final dedup:
+        // the server diffs against the SOURCE list, but library artists render
+        // a library-MERGED view, so an owned album the source doesn't list
+        // would otherwise reappear as a 'missing' gap card.
+        artistDetailPageState._renderedDiscography = data.discography || null;
+        _loadDiscographyGapFill(artistId, artistName);
+
         // Populate the page with data (which updates the hero section and sets textContent)
         populateArtistDetailPage(data);
 
@@ -1928,6 +1936,158 @@ function populateReleaseSection(sectionType, releases) {
     console.log(`📀 Populated ${sectionType} section: ${ownedCount} owned, ${missingCount} missing`);
 }
 
+// ── discography gap-fill (#1067): "show me what my source is missing" ───────
+// A VIEW option (on-page chip, persisted per browser — same pattern as the
+// chat SoulSync-only filter). The base discography renders untouched; this
+// only ever APPENDS a section of releases other sources know, each card
+// carrying its owning source so clicks flow through the existing per-source
+// machinery (see the _gap_source override in the card click handler).
+
+function _gapFillEnabled() {
+    try { return localStorage.getItem('discog_gapfill') === '1'; } catch (e) { return false; }
+}
+
+// JS mirror of the backend's conservative same-release rule (title normalized
+// with edition parens KEPT + year within ±1 or unknown) — used for the final
+// client-side dedup against the page's library-merged discography.
+function _gapNorm(t) {
+    return String(t || '').toLowerCase().replace(/[^\w\s()]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function _gapYear(card) {
+    let y = card.year;
+    if (y == null && card.release_date) y = String(card.release_date).slice(0, 4);
+    y = parseInt(y, 10);
+    return (y >= 1000 && y <= 3000) ? y : null;
+}
+function _gapSameRelease(a, b) {
+    const ta = _gapNorm(a.title || a.name), tb = _gapNorm(b.title || b.name);
+    if (!ta || ta !== tb) return false;
+    const ya = _gapYear(a), yb = _gapYear(b);
+    if (ya == null || yb == null) return true;
+    return Math.abs(ya - yb) <= 1;
+}
+
+function _resetGapFillSection() {
+    // Gap cards live INSIDE the real Album/EP/Single grids (Boulder's live
+    // feedback: a separate section felt bolted-on) — removal walks the class.
+    document.querySelectorAll('.gapfill-card').forEach(card => {
+        const grid = card.parentElement;
+        card.remove();
+        // a section that only existed because of gap cards goes back to empty
+        if (grid && grid.childElementCount === 0) {
+            const section = grid.closest('.discography-section');
+            if (section) section.style.display = 'none';
+        }
+    });
+}
+
+function _ensureGapFillChip() {
+    // The chip is static markup in the filters row (Sources group) — just bind.
+    const btn = document.getElementById('gapfill-toggle-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', _gapFillEnabled());
+    if (btn._gapBound) return;
+    btn._gapBound = true;
+    btn.addEventListener('click', () => {
+        const on = !_gapFillEnabled();
+        try { localStorage.setItem('discog_gapfill', on ? '1' : '0'); } catch (e) { /* ignore */ }
+        btn.classList.toggle('active', on);
+        if (on) {
+            _loadDiscographyGapFill(artistDetailPageState.currentArtistId,
+                                    artistDetailPageState.currentArtistName);
+        } else {
+            _resetGapFillSection();
+        }
+    });
+}
+
+// Insert a gap card into a grid at its year-sorted position (grids render
+// newest-first; unknown years sink to the end — mirrors the backend sort).
+function _insertGapCardSorted(grid, card, year) {
+    const y = year || 0;
+    for (const child of grid.children) {
+        const cy = _gapYear(child._releaseData || {}) || 0;
+        if (cy < y) { grid.insertBefore(card, child); return; }
+    }
+    grid.appendChild(card);
+}
+
+let _gapFillReqSeq = 0;
+
+async function _loadDiscographyGapFill(artistId, artistName) {
+    _resetGapFillSection();
+    _ensureGapFillChip();
+    if (!_gapFillEnabled() || !artistId) return;
+    const seq = ++_gapFillReqSeq;
+    try {
+        const params = new URLSearchParams();
+        if (artistName) params.set('artist_name', artistName);
+        if (artistDetailPageState.currentArtistSource) {
+            params.set('base_source', artistDetailPageState.currentArtistSource);
+        }
+        const res = await fetch(`/api/artist/${encodeURIComponent(artistId)}/discography/gap-fill?${params}`);
+        const data = await res.json().catch(() => ({}));
+        if (seq !== _gapFillReqSeq) return;   // user navigated to another artist
+        if (!res.ok || !data.success) return;
+        const gaps = data.gaps || {};
+        let all = [
+            ...(gaps.albums || []).map(g => ({ ...g, _bucket: 'album' })),
+            ...(gaps.eps || []).map(g => ({ ...g, _bucket: 'ep' })),
+            ...(gaps.singles || []).map(g => ({ ...g, _bucket: 'single' })),
+        ];
+        // Final dedup against what the page ACTUALLY rendered (the
+        // library-merged view can contain owned releases the base source
+        // doesn't list — those must not come back as 'missing' gap cards).
+        const rendered = artistDetailPageState._renderedDiscography;
+        if (rendered) {
+            const renderedCards = [
+                ...(rendered.albums || []), ...(rendered.eps || []), ...(rendered.singles || []),
+            ];
+            all = all.filter(g => !renderedCards.some(r => _gapSameRelease(g, r)));
+        }
+        if (!all.length) return;
+
+        // Cards slot into the REAL sections, year-sorted among the base cards
+        // (Boulder: "figured it would appear in the album/ep/single sections
+        // like others do") — the source badge is what marks them.
+        const gridFor = { album: 'albums-grid', ep: 'eps-grid', single: 'singles-grid' };
+        const touchedGrids = new Set();
+        all.forEach(g => {
+            const grid = document.getElementById(gridFor[g._bucket] || 'albums-grid');
+            if (!grid) return;
+            const release = {
+                id: g.id,
+                title: g.title || g.name || 'Unknown Release',
+                image_url: g.image_url || '',
+                year: g.year,
+                release_date: g.release_date,
+                album_type: g.album_type || g._bucket,
+                owned: false,
+                _gap_source: g.gap_source,
+            };
+            const card = createReleaseCard(release);
+            card.classList.add('gapfill-card');
+            const badge = document.createElement('div');
+            badge.className = 'gapfill-source-badge';
+            badge.textContent = (typeof SOURCE_LABELS !== 'undefined' && SOURCE_LABELS[g.gap_source]?.text)
+                ? SOURCE_LABELS[g.gap_source].text : (g.gap_source || '');
+            badge.title = `Only listed on ${badge.textContent} — opens and downloads from there`;
+            card.appendChild(badge);
+            _insertGapCardSorted(grid, card, _gapYear(release));
+            touchedGrids.add(grid);
+        });
+        touchedGrids.forEach(grid => {
+            const section = grid.closest('.discography-section');
+            if (section && section.style.display === 'none') section.style.display = '';
+            if (typeof observeLazyBackgrounds === 'function') observeLazyBackgrounds(grid);
+        });
+        // current filter state applies to the new cards too
+        if (typeof applyDiscographyFilters === 'function') applyDiscographyFilters();
+    } catch (e) {
+        console.debug('gap-fill load failed:', e);
+    }
+}
+
 function createReleaseCard(release) {
     const card = document.createElement("div");
     const isChecking = release.owned === null;
@@ -2092,6 +2252,11 @@ function createReleaseCard(release) {
             const _aat2 = new URLSearchParams({ name: albumData.name || '', artist: currentArtist.name || '' });
             if (currentArtist.source) {
                 _aat2.set('source', currentArtist.source);
+            }
+            // Gap-fill cards (#1067) belong to ANOTHER source — fetch their
+            // tracks from it, exactly as if that source were selected.
+            if (rel._gap_source) {
+                _aat2.set('source', rel._gap_source);
             }
             const response = await fetch(`/api/album/${albumData.id}/tracks?${_aat2}`);
             if (!response.ok) {
@@ -2614,6 +2779,37 @@ async function openDiscographyModal() {
         ...(discography.singles || []).map(a => ({ ...a, _type: 'single' })),
     ];
 
+    // Gap-fill (#1067): when '+ Other sources' is on, the Download Discography
+    // modal includes those releases too — each keeps its own source, which the
+    // backend already honors per entry (entry['source']).
+    if (typeof _gapFillEnabled === 'function' && _gapFillEnabled()) {
+        try {
+            const gp = new URLSearchParams();
+            if (artist.name) gp.set('artist_name', artist.name);
+            if (artist.source) gp.set('base_source', artist.source);
+            const gres = await fetch(`/api/artist/${encodeURIComponent(artist.id)}/discography/gap-fill?${gp}`);
+            const gdata = await gres.json().catch(() => ({}));
+            if (gres.ok && gdata.success) {
+                const gaps = gdata.gaps || {};
+                const gapReleases = [
+                    ...(gaps.albums || []).map(g => ({ ...g, _type: 'album' })),
+                    ...(gaps.eps || []).map(g => ({ ...g, _type: 'ep' })),
+                    ...(gaps.singles || []).map(g => ({ ...g, _type: 'single' })),
+                ];
+                for (const g of gapReleases) {
+                    if (allReleases.some(r => _gapSameRelease(g, r))) continue;
+                    allReleases.push({
+                        ...g,
+                        name: g.title || g.name || 'Unknown Release',
+                        _gap_source: g.gap_source,
+                    });
+                }
+            }
+        } catch (e) {
+            console.debug('discog modal gap-fill skipped:', e);
+        }
+    }
+
     // Build modal
     const overlay = document.createElement('div');
     overlay.className = 'discog-modal-overlay';
@@ -2709,14 +2905,14 @@ function _renderDiscogCard(release, index, completionData) {
     const albumName = release.name || release.title || '';
     return `
         <label class="discog-card ${statusClass}" data-type="${release._type}" data-is-live="${cc.isLive}" data-is-compilation="${cc.isCompilation}" data-is-featured="${cc.isFeatured}" style="animation-delay:${index * 0.03}s">
-            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" data-gap-source="${_esc(release._gap_source || '')}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
             </div>
             <div class="discog-card-info">
                 <div class="discog-card-title">${_esc(albumName)}${release.explicit === true ? ' <span class="explicit-badge">E</span>' : ''}</div>
-                <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}</div>
+                <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}${release._gap_source ? ` · <span class="discog-gap-src">${_esc(release._gap_source)}</span>` : ''}</div>
             </div>
             <div class="discog-card-check"></div>
         </label>
@@ -2796,7 +2992,9 @@ async function startDiscographyDownload() {
             albumEntries.push({
                 id: cb.dataset.albumId,
                 name: cb.dataset.albumName || '',
-                tracks: parseInt(cb.dataset.tracks) || 0
+                tracks: parseInt(cb.dataset.tracks) || 0,
+                // gap-fill releases resolve from THEIR source (#1067)
+                gapSource: cb.dataset.gapSource || null
             });
         }
     });
@@ -2863,7 +3061,9 @@ async function startDiscographyDownload() {
         id: e.id,
         name: e.name,
         artist_name: artist.name,
-        source: sourceForBatch,
+        // a gap-fill release must resolve from ITS source, not the batch's
+        // (#1067) — the backend honors source per entry
+        source: e.gapSource || sourceForBatch,
     }));
 
     try {

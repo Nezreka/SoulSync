@@ -179,6 +179,13 @@ class RepairWorker:
         self._force_run_queue: List[str] = []
         self._force_run_lock = threading.Lock()
 
+        # Background bulk fix ("Fix All" at library scale runs on its own
+        # thread so the HTTP request that starts it returns immediately)
+        self._bulk_fix_thread = None
+        self._bulk_fix_lock = threading.Lock()
+        self._bulk_fix_stop_event = threading.Event()
+        self._bulk_fix_state: Dict[str, Any] = {'running': False}
+
         # Config manager (set externally after init)
         self._config_manager = None
 
@@ -451,6 +458,7 @@ class RepairWorker:
         self.should_stop = True
         self.running = False
         self._stop_event.set()
+        self._bulk_fix_stop_event.set()  # halt a background Fix All too
         if self.thread:
             self.thread.join(timeout=2)
         logger.info("Repair worker stopped")
@@ -4103,22 +4111,17 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def bulk_fix_findings(self, job_id: str = None, severity: str = None,
-                          finding_ids: List[int] = None, fix_action: str = None) -> dict:
-        """Fix all pending fixable findings matching filters. Returns {fixed, failed, skipped}.
+    def _pending_fixable_ids(self, job_id: str = None, severity: str = None,
+                             finding_ids: List[int] = None) -> List[int]:
+        """IDs of pending findings the fix loop can actually fix.
 
-        Args:
-            fix_action: Optional action for findings that need user choice (e.g. orphan files)
-        """
+        Fixable = has a fix handler — derived from the dispatch map so the
+        two can never drift apart again (a stale copy of this list silently
+        skipped genre_cleanup / replaygain_retag findings in Fix All)."""
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-
-            # Build query for pending fixable findings. Fixable = has a fix
-            # handler — derived from the dispatch map so the two can never
-            # drift apart again (a stale copy of this list silently skipped
-            # genre_cleanup / replaygain_retag findings in Fix All).
             fixable_types = tuple(self._fix_handlers().keys())
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
@@ -4137,9 +4140,21 @@ class RepairWorker:
 
             where = f"WHERE {' AND '.join(where_parts)}"
             cursor.execute(f"SELECT id FROM repair_findings {where}", params)
-            ids_to_fix = [row[0] for row in cursor.fetchall()]
-            conn.close()
-            conn = None
+            return [row[0] for row in cursor.fetchall()]
+        finally:
+            if conn:
+                conn.close()
+
+    def bulk_fix_findings(self, job_id: str = None, severity: str = None,
+                          finding_ids: List[int] = None, fix_action: str = None) -> dict:
+        """Fix all pending fixable findings matching filters. Returns {fixed, failed, skipped}.
+
+        Args:
+            fix_action: Optional action for findings that need user choice (e.g. orphan files)
+        """
+        try:
+            ids_to_fix = self._pending_fixable_ids(
+                job_id=job_id, severity=severity, finding_ids=finding_ids)
 
             fixed = 0
             failed = 0
@@ -4158,9 +4173,101 @@ class RepairWorker:
         except Exception as e:
             logger.error("Error bulk fixing findings: %s", e, exc_info=True)
             return {'fixed': 0, 'failed': 0, 'total': 0, 'error': str(e)}
+
+    # ------------------------------------------------------------------
+    # Background bulk fix — "Fix All" at library scale
+    # ------------------------------------------------------------------
+    # bulk_fix_findings() runs its whole loop inside the caller's thread,
+    # which is fine for a page of selected findings but not for "Fix All
+    # 5000" — inside an HTTP request that means the browser gives up long
+    # before the loop ends while the server quietly keeps fixing, so the
+    # user is told it failed while it's actually still working. These run
+    # the same loop on a worker thread instead; the UI polls for progress.
+
+    def start_bulk_fix(self, job_id: str = None, severity: str = None,
+                       finding_ids: List[int] = None, fix_action: str = None) -> dict:
+        """Start a background bulk-fix run. Only one runs at a time.
+
+        Returns ``{'started': True, 'total': N}`` or
+        ``{'started': False, 'error': ..., 'already_running': bool}``."""
+        with self._bulk_fix_lock:
+            if self._bulk_fix_thread is not None and self._bulk_fix_thread.is_alive():
+                return {'started': False, 'already_running': True,
+                        'error': 'A bulk fix is already running'}
+            try:
+                ids = self._pending_fixable_ids(
+                    job_id=job_id, severity=severity, finding_ids=finding_ids)
+            except Exception as e:
+                logger.error("Error starting bulk fix: %s", e, exc_info=True)
+                return {'started': False, 'error': str(e)}
+            if not ids:
+                return {'started': False, 'error': 'No pending fixable findings match'}
+
+            self._bulk_fix_stop_event.clear()
+            # Every key the runner will ever touch is seeded here so later
+            # writes are value updates, never key insertions — get_bulk_fix_status
+            # copies this dict from another thread, and a concurrent key insert
+            # could make that copy raise mid-iteration.
+            self._bulk_fix_state = {
+                'running': True,
+                'total': len(ids),
+                'done': 0,
+                'fixed': 0,
+                'failed': 0,
+                'stopped': False,
+                'job_id': job_id,
+                'errors': [],
+                'error': None,
+            }
+            self._bulk_fix_thread = threading.Thread(
+                target=self._run_bulk_fix, args=(list(ids), fix_action),
+                daemon=True, name='repair-bulk-fix')
+            self._bulk_fix_thread.start()
+            logger.info("Background bulk fix started: %d finding(s)%s",
+                        len(ids), f" for {job_id}" if job_id else "")
+            return {'started': True, 'total': len(ids)}
+
+    def _run_bulk_fix(self, ids: List[int], fix_action: str = None):
+        state = self._bulk_fix_state
+        try:
+            for fid in ids:
+                if self._bulk_fix_stop_event.is_set() or self.should_stop:
+                    state['stopped'] = True
+                    logger.info("Background bulk fix stopped at %d/%d",
+                                state['done'], state['total'])
+                    break
+                try:
+                    result = self.fix_finding(fid, fix_action=fix_action)
+                except Exception as e:  # fix_finding shouldn't raise, but never kill the run
+                    result = {'success': False, 'error': str(e)}
+                state['done'] += 1
+                if result.get('success'):
+                    state['fixed'] += 1
+                else:
+                    state['failed'] += 1
+                    error_msg = result.get('error', 'unknown error')
+                    logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
+                    if len(state['errors']) < 20:
+                        state['errors'].append({'id': fid, 'error': error_msg})
+        except Exception as e:
+            logger.error("Background bulk fix crashed: %s", e, exc_info=True)
+            state['error'] = str(e)
         finally:
-            if conn:
-                conn.close()
+            state['running'] = False
+            logger.info("Background bulk fix finished: %d fixed, %d failed of %d",
+                        state['fixed'], state['failed'], state['total'])
+
+    def get_bulk_fix_status(self) -> dict:
+        """Progress of the current (or most recent) background bulk fix."""
+        with self._bulk_fix_lock:
+            state = dict(self._bulk_fix_state)
+            state['errors'] = list(state.get('errors', []))
+            return state
+
+    def stop_bulk_fix(self) -> bool:
+        """Ask a running background bulk fix to stop after its current fix."""
+        self._bulk_fix_stop_event.set()
+        return True
 
     def bulk_update_findings(self, finding_ids: List[int], action: str) -> int:
         """Bulk resolve or dismiss findings. Returns count updated."""

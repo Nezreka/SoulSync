@@ -5914,18 +5914,36 @@ class MusicDatabase:
             return False
 
     def delete_profile(self, profile_id: int) -> bool:
-        """Delete a profile and all its per-profile data."""
+        """Delete a profile and ALL its per-profile data.
+
+        The cleanup used to be a hardcoded 8-table list that silently fell
+        behind every time a new table gained a profile_id column — per-profile
+        service credentials, notification history, issues, blocklists and more
+        were orphaned forever. Now the sweep is DERIVED from the schema: every
+        table with a profile_id column is cleaned. Rows whose profile_id is
+        NULL (global/shared rows) are naturally untouched by the equality
+        match, and the profiles table itself is handled separately."""
         if profile_id == 1:
             return False  # Cannot delete the default admin profile
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                # Delete per-profile data from all tables
-                for table in ['watchlist_artists', 'wishlist_tracks', 'similar_artists',
-                              'discovery_pool', 'discovery_recent_albums', 'discovery_curated_playlists',
-                              'bubble_snapshots', 'recent_releases']:
+                tables = [r[0] for r in cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%'").fetchall()]
+                for table in tables:
+                    if table == 'profiles':
+                        continue
                     try:
-                        cursor.execute(f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,))
+                        cols = {c[1] for c in cursor.execute(
+                            f"PRAGMA table_info({table})").fetchall()}   # noqa: S608 - name from sqlite_master
+                        if 'profile_id' in cols:
+                            cursor.execute(
+                                f"DELETE FROM {table} WHERE profile_id = ?",   # noqa: S608
+                                (profile_id,))
+                            if cursor.rowcount:
+                                logger.info("delete_profile: removed %d row(s) from %s",
+                                            cursor.rowcount, table)
                     except Exception as e:
                         logger.debug("Failed to delete from %s for profile: %s", table, e)
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
@@ -6743,7 +6761,7 @@ class MusicDatabase:
 
         return normalized
     
-    def get_artist(self, artist_id: int) -> Optional[DatabaseArtist]:
+    def get_artist(self, artist_id) -> Optional[DatabaseArtist]:  # id is TEXT (server-native; numeric only on Plex) — #1069
         """Get artist by ID"""
         try:
             with self._get_connection() as conn:
@@ -6974,7 +6992,7 @@ class MusicDatabase:
             )
             return [dict(r) for r in cursor.fetchall()]
 
-    def get_albums_by_artist(self, artist_id: int) -> List[DatabaseAlbum]:
+    def get_albums_by_artist(self, artist_id) -> List[DatabaseAlbum]:  # id is TEXT (server-native) — #1069
         """Get all albums by artist ID"""
         try:
             conn = self._get_connection()
@@ -10237,8 +10255,8 @@ class MusicDatabase:
     def is_track_ignored(self, track_id: str, profile_id: int = 1,
                          ttl_days: Optional[int] = None) -> bool:
         """Whether ``track_id`` has a non-expired ignore entry. Fail-open False."""
-        from core.wishlist.ignore import normalize_ignore_id, is_expired, IGNORE_TTL_DAYS
-        ttl = IGNORE_TTL_DAYS if ttl_days is None else ttl_days
+        from core.wishlist.ignore import normalize_ignore_id, is_expired, configured_ttl_days
+        ttl = configured_ttl_days() if ttl_days is None else ttl_days
         key = normalize_ignore_id(track_id)
         if not key:
             return False
@@ -10277,8 +10295,8 @@ class MusicDatabase:
     def get_wishlist_ignore(self, profile_id: int = 1,
                             ttl_days: Optional[int] = None) -> List[Dict[str, Any]]:
         """Active (non-expired) ignore entries, newest first; purges lapsed rows."""
-        from core.wishlist.ignore import is_expired, IGNORE_TTL_DAYS
-        ttl = IGNORE_TTL_DAYS if ttl_days is None else ttl_days
+        from core.wishlist.ignore import is_expired, configured_ttl_days
+        ttl = configured_ttl_days() if ttl_days is None else ttl_days
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -10432,6 +10450,28 @@ class MusicDatabase:
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)
+            return []
+
+    def search_chat_messages(self, room: str, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Archive search: messages in ``room`` whose text OR sender matches
+        ``query`` (case-insensitive substring), newest first."""
+        query = str(query or '').strip()
+        if not query:
+            return []
+        like = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        try:
+            with self._get_connection() as conn:
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT username, message, rich, timestamp, reply FROM chat_room_messages "
+                    "WHERE room = ? AND (message LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\') "
+                    "ORDER BY timestamp DESC, id DESC LIMIT ?",
+                    (str(room), like, like, max(1, min(int(limit), 200)))).fetchall()]
+            for r in rows:
+                r['rich'] = bool(r['rich'])
+                r.pop('reply', None)   # search results render flat
+            return rows
+        except Exception as e:
+            logger.error("Error searching chat archive: %s", e)
             return []
 
     def get_notification_history(self, profile_id: int = 1, type_filter: str = None,

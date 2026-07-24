@@ -315,6 +315,33 @@ def create_blueprint() -> Blueprint:
         return jsonify({'success': True, 'reset': count, 'service': service_id,
                         'entity_type': entity_type, 'scope': scope}), 200
 
+    @bp.route('/api/enrichment/retry-all-failed', methods=['POST'])
+    def enrichment_retry_all_failed():
+        """The hub-level sweep (video parity): re-queue every not_found item
+        across ALL workers and ALL entity types in one shot. Per-service
+        failures are skipped, not fatal — one broken worker must not block
+        the rest of the sweep."""
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+        db = _db_getter()
+        total = 0
+        per_service: dict = {}
+        for service_id, entities in SERVICE_ENTITY_SUPPORT.items():
+            svc_total = 0
+            for entity_type in entities:
+                try:
+                    svc_total += int(db.reset_enrichment(service_id, entity_type,
+                                                         'failed', None) or 0)
+                except Exception as e:
+                    logger.warning("retry-all sweep: %s/%s failed: %s",
+                                   service_id, entity_type, e)
+            if svc_total:
+                per_service[service_id] = svc_total
+            total += svc_total
+        logger.info("Enrichment retry-all sweep re-queued %d item(s) across %d worker(s)",
+                    total, len(per_service))
+        return jsonify({'success': True, 'reset': total, 'services': per_service}), 200
+
     @bp.route('/api/enrichment/<service_id>/priority', methods=['GET'])
     def enrichment_get_priority(service_id: str):
         """Return the pinned 'process this group first' entity for a worker."""
