@@ -150,8 +150,13 @@ def test_frontend_jukebox_wiring():
     # room-tagged protocol log: jukebox events must never mix rooms
     assert "e.room === room" in js
     assert "room: room, p: p" in js
-    # DJ pool = PROVEN SoulSync users only (assumed could be vanilla)
-    assert "cls[n] === 'soulsync'" in js
+    # DJ pool = PROTOCOL-CAPABLE clients only (live-test catch: envelope
+    # messages also come from pre-jukebox versions — electing one of those
+    # gets a DJ that can never press play, and the queue starves forever)
+    assert "emitters[e.username] = 1" in js
+    assert "cls[n] === 'soulsync'" not in js
+    # starvation fallback: any capable client kicks a DJ-less queue
+    assert "starvedAt" in js and "45000" in js
     # playback is opt-in (autoplay-with-sound needs the tune-in gesture)
     assert "data-chat-jbx-tunein" in js and "_jbxTuneOut" in js
     # DJ double-fire guard + watchdog for stale/absent now-playing

@@ -45,6 +45,7 @@
             resolving: false,
             lastRendered: '',    //   reduced-state fingerprint (skip no-op renders)
             lastAdvanceAt: 0,    //   DJ double-fire guard (ms)
+            starvedAt: 0,        //   queue-waiting-with-no-DJ clock (ms)
             timer: null,         //   elapsed clock + DJ watchdog while open
             ytLoading: false, ytCbs: [],
         },
@@ -2376,13 +2377,16 @@
     }
 
     function _jbxIsDj() {
-        // Only PROVEN SoulSync users (they beaconed / spoke enveloped) are DJ
-        // candidates — electing an assumed user could elect a vanilla client
-        // that will never advance the queue. We're always in our own pool.
+        // DJ candidates are PROTOCOL-CAPABLE clients only: users who have
+        // emitted protocol events (hello beacon, jukebox chatter) in this
+        // room. Envelope messages are NOT enough — every pre-jukebox
+        // SoulSync version speaks envelopes, and electing one of those gets
+        // a DJ that can never press play. We're always in our own pool.
         var CP = window.ChatProtocol;
         if (!CP || !state.canSend || !state.selfName) return false;
-        var cls = _userClassification();
-        var pool = (state.users || []).filter(function (n) { return cls[n] === 'soulsync'; });
+        var emitters = {};
+        _roomEvents().forEach(function (e) { emitters[e.username] = 1; });
+        var pool = (state.users || []).filter(function (n) { return emitters[n]; });
         if (pool.indexOf(state.selfName) === -1) pool.push(state.selfName);
         return CP.electCoordinator(pool) === state.selfName;
     }
@@ -2491,15 +2495,24 @@
 
     // DJ duties: kick the queue when nothing is playing, or when the current
     // track has provably run out (duration known) and nobody advanced it.
+    // Starvation fallback: if the elected DJ went away mid-session (closed
+    // tab, network), ANY capable client kicks the queue after 45s — a rare
+    // double-start converges (latest now wins, same track either way).
     function _jbxWatchdog() {
-        if (!state.jukebox.open || !_jbxIsDj()) return;
+        if (!state.jukebox.open) return;
         var st = _jbxState();
-        if (!st.queue.length) return;
         var elapsed = _jbxElapsed(st.now);
         var stale = !st.now ||
             (st.now.d && elapsed !== null && elapsed > st.now.d + 8) ||
             (!st.now.d && elapsed !== null && elapsed > 900);   // unknown length: 15-min cap
-        if (stale) _jbxAdvance(st);
+        if (!st.queue.length || !stale) { state.jukebox.starvedAt = 0; return; }
+        if (_jbxIsDj()) { _jbxAdvance(st); return; }
+        if (!state.jukebox.starvedAt) {
+            state.jukebox.starvedAt = Date.now();
+        } else if (Date.now() - state.jukebox.starvedAt > 45000) {
+            state.jukebox.starvedAt = 0;
+            _jbxAdvance(st);
+        }
     }
 
     function _jbxAdvance(st) {
