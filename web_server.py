@@ -2783,12 +2783,17 @@ def fix_navidrome_urls():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 def _m3u_entry_path(path):
-    """An m3u entry line must never START with '#' — players parse that as a
-    comment and silently skip the track. Relative paths can start with '#'
-    now that $artistletter has the '#' catch-all folder (#1072); './#/...'
-    is the same path, minus the ambiguity."""
-    p = str(path or '')
-    return './' + p if p.startswith('#') else p
+    """Final transforms for one m3u entry line: the prefix hot-swap
+    (m3u_export.rewrite_from → rewrite_to, wolf39us — container path in,
+    playback-machine path out) and the '#' comment-guard (#1072). Shared
+    logic lives in core.library.m3u_export.finalize_m3u_entry; this wrapper
+    just feeds it the configured mapping. Empty settings = '#'-guard only."""
+    from core.library.m3u_export import finalize_m3u_entry
+    return finalize_m3u_entry(
+        path,
+        rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+        rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+    )
 
 
 def _regenerate_batch_m3u(batch, tracks):
@@ -2853,7 +2858,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = f'{entry_base_path}/{fp}' if entry_base_path else _m3u_entry_path(fp)
+                path = _m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)
                 lines.append(path)
                 found += 1
             else:
@@ -3041,7 +3046,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = f'{entry_base_path}/{file_path}' if entry_base_path else _m3u_entry_path(file_path)
+                entry = _m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1
@@ -11049,7 +11054,10 @@ def export_library_m3u():
         db = get_database()
         entries = db.get_all_library_tracks_for_export()
         from core.library.m3u_export import build_m3u
-        content = build_m3u(entries, entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '')
+        content = build_m3u(entries,
+                            entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '',
+                            rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+                            rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
         return Response(
             content,
             mimetype='audio/x-mpegurl',
@@ -17987,7 +17995,10 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
                 or config_manager.get('soulseek.transfer_path', './Transfer')
             _dest = docker_resolve_path(_dest)
             _base = config_manager.get('m3u_export.entry_base_path', '') or ''
-            _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
+            _written = write_library_m3u(
+                _entries, _dest, entry_base_path=_base,
+                rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
                 m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"

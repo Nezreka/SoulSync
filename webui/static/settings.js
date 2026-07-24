@@ -1746,6 +1746,8 @@ async function loadSettingsData() {
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
+        document.getElementById('m3u-rewrite-from').value = settings.m3u_export?.rewrite_from || '';
+        document.getElementById('m3u-rewrite-to').value = settings.m3u_export?.rewrite_to || '';
         const _libM3uEn = document.getElementById('library-m3u-enabled');
         if (_libM3uEn) _libM3uEn.checked = settings.m3u_export?.library_enabled === true;
         const _libM3uPath = document.getElementById('library-m3u-path');
@@ -4625,6 +4627,8 @@ async function saveSettings(quiet = false) {
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
+            rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
+            rewrite_to: document.getElementById('m3u-rewrite-to').value || '',
             library_enabled: document.getElementById('library-m3u-enabled')?.checked === true,
             library_path: document.getElementById('library-m3u-path')?.value || ''
         },

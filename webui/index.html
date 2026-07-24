@@ -8669,6 +8669,18 @@
                                         Optional prefix added to every track path in exported M3U files. Use this when your media server needs absolute paths (e.g. <code>/mnt/music</code>).
                                     </div>
                                 </div>
+
+                                <div class="form-group" data-music-only>
+                                    <label>M3U Path Prefix Rewrite:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="m3u-rewrite-from" placeholder="replace this prefix, e.g. /data/media">
+                                        <input type="text" id="m3u-rewrite-to" placeholder="with this, e.g. M:/media">
+                                    </div>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        Hot-swaps a path prefix on every entry when M3Us are generated, so a playlist written inside a container (<code>/data/media/&hellip;</code>) plays directly on the machine that mounts the same storage elsewhere (<code>M:/media/&hellip;</code>). Entries that don't start with the prefix pass through unchanged. Leave both empty to disable.
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- File Organization Settings -->
