@@ -72309,10 +72309,29 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     max-height: 46vh;
     overflow-y: auto;
 }
-.chat-jbx-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* the jukebox control bar rides the page header's right side */
+.chat-page-head { display: flex; align-items: center; justify-content: space-between;
+    gap: 18px; flex-wrap: wrap; }
+.chat-jbx-headbar[hidden] { display: none !important; }
+.chat-jbx-headbar {
+    position: relative;
+    display: flex; align-items: center; gap: 12px;
+    flex: 0 1 460px; min-width: 260px;
+}
 .chat-jbx-brand { font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.9); white-space: nowrap; }
 .chat-jbx-listeners { font-size: 11.5px; color: rgba(var(--accent-light-rgb), 0.85); white-space: nowrap; }
-.chat-jbx-head .chat-jbx-form { margin-left: auto; flex: 0 1 340px; min-width: 200px; }
+.chat-jbx-headbar .chat-jbx-form { margin-left: auto; flex: 1 1 auto; min-width: 180px; }
+.chat-jbx-headbar .chat-jbx-input { padding: 8px 12px; font-size: 13px; }
+/* search results float under the header input */
+.chat-jbx-headbar .chat-jbx-results {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+    width: min(420px, 92vw);
+    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+    padding: 6px;
+}
 .chat-jbx-now { display: flex; align-items: center; gap: 8px; min-height: 26px; flex-wrap: wrap; }
 .chat-jbx-live { color: rgb(var(--accent-light-rgb)); font-size: 12px; }
 .chat-jbx-title {

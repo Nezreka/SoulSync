@@ -152,7 +152,13 @@ class TestChatModalStandard:
         assert "Trying again often works" in py
         assert "offline or not sharing" not in py      # the victim-blaming line
 
-    def test_jukebox_add_song_lives_in_the_panel_head(self):
-        head = _HTML[_HTML.index('class="chat-jbx-head"'):_HTML.index('data-chat-jbx-results')]
-        assert "data-chat-jbx-form" in head            # add-song docked in the head row
-        assert "data-chat-jbx-listeners" in head
+    def test_jukebox_controls_live_in_the_page_header(self):
+        # Boulder: the jukebox bar (brand + listeners + add-a-song) rides
+        # tools-page-header, not the panel; the panel below is queue-only
+        header = _HTML[_HTML.index('class="tools-page-header chat-page-head"'):
+                       _HTML.index('class="chat-shell"')]
+        for hook in ("data-chat-jbx-headbar", "data-chat-jbx-form",
+                     "data-chat-jbx-listeners", "data-chat-jbx-results"):
+            assert hook in header, hook
+        panel = _HTML[_HTML.index('data-chat-jukebox hidden'):_HTML.index('data-chat-pinbar')]
+        assert "data-chat-jbx-form" not in panel

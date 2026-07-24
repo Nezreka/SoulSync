@@ -2392,14 +2392,23 @@
         // the player follows the ROOM, not the panel — a tuned-in listener
         // reading PMs must still hear the DJ's advances (panel merely hides)
         _jbxSyncPlayer(now && !ended ? now : null);
-        var show = state.jukebox.open && state.view === 'room';
+        // the header bar (brand + listeners + add-a-song) lives in the page
+        // header and shows whenever a room is on screen — panel open or not
+        var inRoom = state.view === 'room';
+        var headbar = q('[data-chat-jbx-headbar]');
+        if (headbar) {
+            headbar.hidden = !inRoom;
+            var form = q('[data-chat-jbx-form]');
+            if (form) form.hidden = !state.canSend;
+            var lc = q('[data-chat-jbx-listeners]');
+            if (lc && window.ChatProtocol) {
+                var nTuned = Object.keys(window.ChatProtocol.reduceTuned(_roomEvents())).length;
+                lc.textContent = nTuned ? '♪ ' + nTuned + ' listening' : '';
+            }
+        }
+        var show = state.jukebox.open && inRoom;
         panel.hidden = !show;
         if (!show) return;
-        var lc = q('[data-chat-jbx-listeners]');
-        if (lc && window.ChatProtocol) {
-            var nTuned = Object.keys(window.ChatProtocol.reduceTuned(_roomEvents())).length;
-            lc.textContent = nTuned ? '♪ ' + nTuned + ' listening' : '';
-        }
         // fingerprint: skip DOM writes when nothing visible changed (the
         // elapsed clock ticks via its own cheap textContent update below)
         var fp = JSON.stringify([now && now.id, ended, st.queue, state.jukebox.tunedIn, state.canSend]);
@@ -2440,8 +2449,6 @@
                     '</div>';
                 }).join('') || '';
             }
-            var form = q('[data-chat-jbx-form]');
-            if (form) form.hidden = !state.canSend;
         } else if (elapsed !== null) {
             var clock = q('[data-chat-jbx-clock]');
             if (clock) clock.textContent = _fmtSecs(elapsed);
@@ -2613,6 +2620,7 @@
         var p = { id: r.id, ti: String(r.title || '').slice(0, 120) };
         if (r.duration) p.d = r.duration;
         sendProtocol('jbx.sub', p);
+        if (!state.jukebox.open && state.view === 'room') toggleJukebox();
         var input = q('[data-chat-jbx-input]');
         if (input) input.value = '';
         var resHost = q('[data-chat-jbx-results]');
