@@ -6891,6 +6891,46 @@ def stream_enhanced_search_track():
 
 _music_video_downloads = {}  # {video_id: {status, progress, path, error}}
 
+
+def _clean_music_video_title(raw_title):
+    """Strip YouTube noise from a video title for metadata search + filing.
+
+    Handles the suffix both parenthesized — "(Official Music Video)" — and
+    BARE at the end of the title ("... Fat Official Music Video", the shape
+    fan uploads use constantly; the old parenthesized-only strip left the
+    noise in the search query, which is half of how a video ends up filed
+    under the uploader's channel name). Bare stripping is deliberately
+    conservative: only unambiguous multi-word forms ('official …', 'music
+    video', 'lyric video', 'visualizer'), so a song genuinely titled
+    "Video" or "Video Games" is never eaten."""
+    import re as _re
+    s = _re.sub(
+        r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio'
+        r'|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]',
+        '', raw_title or '', flags=_re.IGNORECASE).strip()
+    s = _re.sub(
+        r'[\s\-–—|]*\b(official\s+(music\s+|lyric\s+)?(video|audio)'
+        r'|music\s+video|lyric\s+video|visualizer)\s*$',
+        '', s, flags=_re.IGNORECASE).strip()
+    return _re.sub(r'\s*-\s*$', '', s).strip()
+
+
+def _parse_music_video_artist_title(raw_title, raw_channel):
+    """Artist/title for filing a music video, from the video's own name.
+
+    'Artist - Title' (hyphen, en or em dash) parses to the real artist —
+    the UPLOADER's channel name is only the last resort for titles with no
+    separator at all, because fan-channel uploads ("Bad Boy Edd") are the
+    norm and filing under them scatters one artist's videos across folders."""
+    import re as _re
+    for sep in (' - ', ' – ', ' — '):
+        if sep in (raw_title or ''):
+            artist, title = raw_title.split(sep, 1)
+            title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
+            title = _clean_music_video_title(title) or title
+            return artist.strip(), title
+    return raw_channel, (_clean_music_video_title(raw_title) or raw_title)
+
 @app.route('/api/music-video/download', methods=['POST'])
 def download_music_video():
     """Download a YouTube video as a music video file to the configured music videos folder."""
@@ -6935,11 +6975,10 @@ def download_music_video():
             artist_name = raw_channel
             track_title = raw_title
             year = ''
+            matched = False
 
-            # Strip common YouTube suffixes for cleaner search
             import re as _re
-            clean_search = _re.sub(r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]', '', raw_title, flags=_re.IGNORECASE).strip()
-            clean_search = _re.sub(r'\s*-\s*$', '', clean_search).strip()
+            clean_search = _clean_music_video_title(raw_title)
 
             try:
                 fallback_client = _get_metadata_fallback_client()
@@ -6956,25 +6995,25 @@ def download_music_video():
                         if name_sim > best_score:
                             best_score = name_sim
                             best = r
-                    if best and best_score >= 0.5:
-                        artist_name = best.artists[0] if best.artists else raw_channel
+                    if best and best_score >= 0.5 and best.artists:
+                        matched = True
+                        artist_name = best.artists[0]
                         track_title = best.name
                         if hasattr(best, 'release_date') and best.release_date:
                             year = str(best.release_date)[:4]
                         logger.info(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
-                    else:
-                        # Parse artist from video title: "Artist - Title" pattern
-                        if ' - ' in raw_title:
-                            parts = raw_title.split(' - ', 1)
-                            artist_name = parts[0].strip()
-                            track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
-                        logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
             except Exception as e:
                 logger.error(f"[Music Video] Metadata lookup failed: {e}")
-                if ' - ' in raw_title:
-                    parts = raw_title.split(' - ', 1)
-                    artist_name = parts[0].strip()
-                    track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
+
+            if not matched:
+                # No confident metadata match — parse 'Artist - Title' from the
+                # video's own name. This must cover EVERY unmatched path
+                # (weak match, lookup crash, and crucially an EMPTY result
+                # list — the old code skipped the parse entirely on zero
+                # results, so the video filed under the uploader's channel:
+                # the '"Weird Al" Yankovic - Fat' → 'bad boy edd/' bug).
+                artist_name, track_title = _parse_music_video_artist_title(raw_title, raw_channel)
+                logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
 
             # Sanitize for filesystem
             def _sanitize(s):
