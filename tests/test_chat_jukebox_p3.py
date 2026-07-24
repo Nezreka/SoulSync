@@ -202,3 +202,16 @@ def test_review_catches_pinned():
     assert "_jbxSyncPlayer(_jbxState().now)" in sync
     # (4) roundtrip-proof guard
     assert "15000" in js[js.index("function _jbxAdvance"):js.index("function _jbxLoadYT")]
+
+
+def test_watchdog_polls_the_player_not_just_the_event():
+    """Live-test catch #2 (Boulder): a pasted-link track has NO duration
+    (oEmbed doesn't provide one), so when the iframe's ENDED event goes
+    missing the queue sat until the 15-minute unknown-length cap. The
+    watchdog must ask a tuned-in player directly — getPlayerState() for
+    ended, getDuration() for the real length."""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    wd = js[js.index("function _jbxWatchdog"):js.index("function _jbxAdvance")]
+    assert "getPlayerState() === 0" in wd
+    assert "getDuration()" in wd
+    assert "playerEnded" in wd

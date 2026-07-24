@@ -2502,9 +2502,23 @@
         if (!state.jukebox.open) return;
         var st = _jbxState();
         var elapsed = _jbxElapsed(st.now);
-        var stale = !st.now ||
-            (st.now.d && elapsed !== null && elapsed > st.now.d + 8) ||
-            (!st.now.d && elapsed !== null && elapsed > 900);   // unknown length: 15-min cap
+        // A tuned-in client asks the PLAYER for the truth — pasted links have
+        // no duration (oEmbed doesn't give one), and the iframe's ENDED event
+        // is best-effort, so poll instead of trusting either.
+        var effD = st.now ? st.now.d : null;
+        var playerEnded = false;
+        if (state.jukebox.tunedIn && state.jukebox.playerAlive && state.jukebox.player) {
+            try {
+                if (!effD) {
+                    var pd = state.jukebox.player.getDuration();
+                    if (pd > 0) effD = pd;
+                }
+                playerEnded = state.jukebox.player.getPlayerState() === 0;   // YT ENDED
+            } catch (e) { /* player mid-teardown */ }
+        }
+        var stale = !st.now || playerEnded ||
+            (effD && elapsed !== null && elapsed > effD + 8) ||
+            (!effD && elapsed !== null && elapsed > 900);   // untuned + unknown length: 15-min cap
         if (!st.queue.length || !stale) { state.jukebox.starvedAt = 0; return; }
         if (_jbxIsDj()) { _jbxAdvance(st); return; }
         if (!state.jukebox.starvedAt) {
