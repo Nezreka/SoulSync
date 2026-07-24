@@ -149,6 +149,30 @@ def protocol_of(payload) -> dict | None:
     return p
 
 
+def file_of(payload) -> dict | None:
+    """The validated file-card metadata from a decoded envelope ({'n' name,
+    's' size, 'm' mime}), or None. The URL itself travels as the message
+    TEXT (so the link survives archives and copy); this object only dresses
+    the card. REMOTE input — caps everywhere."""
+    f = (payload or {}).get("f") if isinstance(payload, dict) else None
+    if not isinstance(f, dict):
+        return None
+    n = str(f.get("n") or "").strip()[:200]
+    if not n:
+        return None
+    out = {"n": n}
+    try:
+        size = int(f.get("s") or 0)
+        if 0 < size < 10 ** 12:
+            out["s"] = size
+    except (TypeError, ValueError):
+        pass
+    m = str(f.get("m") or "").strip()[:80]
+    if m:
+        out["m"] = m
+    return out
+
+
 def reply_of(payload) -> dict | None:
     """The validated reply reference from a decoded envelope, or None.
     Everything here is REMOTE input — strict shape, hard caps."""

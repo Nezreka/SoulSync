@@ -72235,3 +72235,24 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-card-note-input:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.45); }
 .chat-card-note-save { align-self: flex-end; }
+
+/* ── chat file sharing (filepost.dev, chat P2) ── */
+.chat-file-card {
+    display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+    padding: 9px 12px; margin: 2px 0; max-width: 460px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 11px;
+}
+.chat-file-icon { font-size: 18px; }
+.chat-file-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.chat-file-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-file-size { font-size: 10.5px; color: rgba(255,255,255,0.4); }
+.chat-file-dl { text-decoration: none; }
+.chat-file-slot { flex-basis: 100%; }
+.chat-file-player { width: 100%; margin-top: 6px; }
+.chat-file-player--video { max-height: 260px; border-radius: 8px; }
+.chat-attach-tabs { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.chat-attach-or { font-size: 11px; color: rgba(255,255,255,0.4); }
+.chat-attach-results { max-height: 220px; overflow-y: auto; }
+.chat-attach-status { font-size: 11.5px; color: rgba(var(--accent-light-rgb), 0.9); padding: 6px 2px; }
+.chat-attach-status--err { color: rgb(252, 165, 165); }

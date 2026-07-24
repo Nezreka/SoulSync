@@ -40421,6 +40421,9 @@ def _emit_chat_push_loop():
                             rep = chat_codec.reply_of(dec)
                             if rep:
                                 out['reply'] = rep
+                            _f = chat_codec.file_of(dec)
+                            if _f:
+                                out['file'] = _f
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:

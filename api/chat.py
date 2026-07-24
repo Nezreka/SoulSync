@@ -179,6 +179,9 @@ def _unwrap_room_messages(messages):
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
+            f = chat_codec.file_of(dec)
+            if f:
+                m["file"] = f
         out.append(m)
     return out, reactions, protocol
 
@@ -206,6 +209,53 @@ def _gif_fetch(url: str, params: dict) -> dict:
     return r.json()
 
 
+def _resolve_track_path(db, track_id):
+    """A library track's on-disk path, tried at the usual roots (as-stored,
+    transfer folder, download folder). None when unreachable."""
+    import os as _os
+    conn = None
+    try:
+        conn = db._get_connection()
+        row = conn.execute("SELECT file_path FROM tracks WHERE id = ?",
+                           (str(track_id),)).fetchone()
+    except Exception:
+        return None
+    finally:
+        if conn:
+            conn.close()
+    fp = row["file_path"] if row else None
+    if not fp:
+        return None
+    candidates = [fp]
+    try:
+        base = str(_config_get("soulseek.transfer_path", "") or "")
+        if base:
+            candidates.append(_os.path.join(base, fp))
+        dl = str(_config_get("soulseek.download_path", "") or "")
+        if dl:
+            candidates.append(_os.path.join(dl, fp))
+    except Exception:
+        logger.debug("chat: path candidates from config failed", exc_info=True)
+    for c in candidates:
+        if c and _os.path.isfile(c):
+            return c
+    return None
+
+
+def _filepost_upload(api_key, name, stream, expiry=None):
+    """One seam for the filepost.dev HTTP call (monkeypatched in tests)."""
+    import requests
+    data = {}
+    if expiry:
+        data["expires_in"] = expiry
+    r = requests.post("https://filepost.dev/v1/upload",
+                      headers={"X-API-Key": api_key},
+                      files={"file": (name, stream)},
+                      data=data, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
@@ -227,6 +277,8 @@ def create_blueprint() -> Blueprint:
             "auto_join": bool(_cfg("soulseek.chat_auto_join", True)),
             "auto_prove": bool(_cfg("soulseek.chat_auto_prove", True)),
             "giphy_key_set": bool(_cfg("soulseek.chat_giphy_key", "")),
+            "filepost_key_set": bool(_cfg("soulseek.chat_filepost_key", "")),
+            "filepost_expiry": str(_cfg("soulseek.chat_filepost_expiry", "") or ""),
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
@@ -252,6 +304,12 @@ def create_blueprint() -> Blueprint:
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
+        if "filepost_key" in body:
+            _config_set("soulseek.chat_filepost_key", str(body.get("filepost_key") or "").strip())
+        if "filepost_expiry" in body:
+            exp = str(body.get("filepost_expiry") or "").strip()
+            if exp in ("", "24h", "7d", "30d"):
+                _config_set("soulseek.chat_filepost_expiry", exp)
         # Renaming the room: walk slskd out of the old one, best-effort —
         # otherwise the account sits in both forever. Same for turning
         # auto-join OFF: an opt-out that leaves you sitting in the room until
@@ -460,6 +518,121 @@ def create_blueprint() -> Blueprint:
             if full:
                 gifs.append({"url": full, "preview": tiny})
         return jsonify({"gifs": gifs})
+
+    @bp.route("/api/chat/files/library-search", methods=["GET"])
+    def chat_files_library_search():
+        """Pick-a-track-from-your-library search for the share flow: title or
+        artist match, only tracks with a stored file path, 20 max."""
+        db = _db()
+        if db is None:
+            return jsonify({"tracks": []})
+        query = str(request.args.get("q") or "").strip()
+        if len(query) < 2:
+            return jsonify({"tracks": []})
+        conn = None
+        try:
+            conn = db._get_connection()
+            like = "%" + query.replace("%", "\\%") + "%"
+            rows = conn.execute(
+                """SELECT t.id, t.title, t.file_path, t.file_size,
+                          COALESCE(t.track_artist, ar.name, '') AS artist,
+                          COALESCE(al.title, '') AS album
+                   FROM tracks t
+                   LEFT JOIN artists ar ON ar.id = t.artist_id
+                   LEFT JOIN albums al ON al.id = t.album_id
+                   WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                     AND (t.title LIKE ? OR ar.name LIKE ? OR t.track_artist LIKE ?)
+                   ORDER BY t.title LIMIT 20""",
+                (like, like, like)).fetchall()
+            return jsonify({"tracks": [
+                {"id": r["id"], "title": r["title"], "artist": r["artist"],
+                 "album": r["album"], "size": r["file_size"]}
+                for r in rows]})
+        except Exception as e:
+            logger.debug("chat: library search failed: %s", e)
+            return jsonify({"tracks": []})
+        finally:
+            if conn:
+                conn.close()
+
+    @bp.route("/api/chat/files/upload", methods=["POST"])
+    def chat_files_upload():
+        """Upload to filepost.dev and hand back the CDN link + metadata.
+
+        Two sources: a browser file (multipart 'file') or a LIBRARY track
+        (json {track_id} — the file path resolves server-side, so sharing a
+        track is search → click, no filesystem browsing). Requires the
+        user's filepost API key (Settings → chat cog); size-capped at 50MB
+        (filepost free tier). Same gate as talking — this SENDS content."""
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+        try:
+            api_key = str(_config_get("soulseek.chat_filepost_key", "") or "").strip()
+        except Exception:
+            api_key = ""
+        if not api_key:
+            return jsonify({"error": "No filepost.dev API key configured "
+                                     "(chat settings cog)"}), 503
+
+        max_bytes = 50 * 1024 * 1024
+        name = None
+        stream = None
+        size = None
+        if "file" in request.files:
+            # REVIEW CATCH: the cap must hold server-side for browser uploads
+            # too — content_length covers the whole multipart body (slightly
+            # over the file size, never under), so this rejects before any
+            # bytes stream to filepost or hang the worker.
+            if (request.content_length or 0) > max_bytes + 1024 * 1024:
+                return jsonify({"error": "File is too big — filepost.dev caps "
+                                         "uploads at 50 MB"}), 413
+            fs = request.files["file"]
+            name = str(fs.filename or "file")[:200]
+            stream = fs.stream
+        else:
+            body = request.get_json(silent=True) or {}
+            track_id = body.get("track_id")
+            if not track_id:
+                return jsonify({"error": "No file or track_id given"}), 400
+            db = _db()
+            path = _resolve_track_path(db, track_id) if db is not None else None
+            if not path:
+                return jsonify({"error": "That track's file isn't reachable "
+                                         "from SoulSync"}), 404
+            import os as _os
+            size = _os.path.getsize(path)
+            if size > max_bytes:
+                return jsonify({"error": "File is %.0f MB — filepost.dev caps "
+                                         "uploads at 50 MB" % (size / 1048576)}), 413
+            name = _os.path.basename(path)
+            stream = open(path, "rb")
+
+        try:
+            expiry = str(_config_get("soulseek.chat_filepost_expiry", "") or "").strip()
+        except Exception:
+            expiry = ""
+        try:
+            result = _filepost_upload(api_key, name, stream, expiry or None)
+        except Exception as e:
+            logger.exception("chat: filepost upload failed")
+            return jsonify({"error": "Upload failed: %s" % e}), 502
+        finally:
+            try:
+                if stream is not None and hasattr(stream, "close"):
+                    stream.close()
+            except Exception:
+                logger.debug("chat: upload stream close failed", exc_info=True)
+        url = None
+        if isinstance(result, dict):
+            url = result.get("url") or result.get("cdn_url") or result.get("link")
+            if not url and isinstance(result.get("file"), dict):
+                url = result["file"].get("url")
+        if not url:
+            return jsonify({"error": "filepost.dev returned no URL"}), 502
+        import mimetypes as _mt
+        mime = _mt.guess_type(name)[0] or ""
+        return jsonify({"ok": True, "url": url, "name": name,
+                        "size": size, "mime": mime})
 
     @bp.route("/api/chat/rooms", methods=["GET"])
     def chat_rooms():
@@ -714,6 +887,10 @@ def create_blueprint() -> Blueprint:
         rep = chat_codec.reply_of({"r": body.get("reply")})
         if rep:
             extra = {"r": rep}
+        fmeta = chat_codec.file_of({"f": body.get("file")})
+        if fmeta:
+            extra = dict(extra or {})
+            extra["f"] = fmeta
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

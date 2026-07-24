@@ -341,10 +341,53 @@
                     (r.n > 1 ? ' <b>' + r.n + '</b>' : '') + '</span>';
             }).join('') + '</div>';
         }
+        var bodyHtml = (m.file && m.file.n)
+            ? _fileCardHtml(m)
+            : (m.rich ? renderRich(m.message) : renderPlain(m.message));
         return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
             attr(_fullTs(m.timestamp)) + '">' + replyRef +
-            (m.rich ? renderRich(m.message) : renderPlain(m.message)) +
-            actions + chips + '</div>';
+            bodyHtml + actions + chips + '</div>';
+    }
+
+    // ── shared file card (filepost.dev links dressed by envelope 'f') ────
+    var _AUDIO_EXT = /\.(flac|mp3|m4a|ogg|opus|wav|aiff?)$/i;
+    var _VIDEO_EXT = /\.(mp4|mkv|webm|mov)$/i;
+    var _IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+
+    function _fileCardHtml(m) {
+        var url = String(m.message || '').trim();
+        var f = m.file || {};
+        var name = String(f.n || 'file');
+        var mime = String(f.m || '');
+        var isAudio = mime.indexOf('audio/') === 0 || _AUDIO_EXT.test(name);
+        var isVideo = mime.indexOf('video/') === 0 || _VIDEO_EXT.test(name);
+        var isImage = mime.indexOf('image/') === 0 || _IMAGE_EXT.test(name);
+        if (!/^https:\/\//i.test(url)) {
+            // hostile envelope: card metadata on a non-https 'link' — render
+            // as plain text instead of a clickable trap
+            return m.rich ? renderRich(m.message) : renderPlain(m.message);
+        }
+        var icon = isAudio ? '🎵' : isVideo ? '🎬' : isImage ? '🖼' : '📄';
+        var preview = '';
+        if (isAudio) {
+            preview = '<button type="button" class="chat-embed-chip" data-chat-file-audio="' +
+                attr(url) + '">▶ preview</button>';
+        } else if (isVideo) {
+            preview = '<button type="button" class="chat-embed-chip" data-chat-file-video="' +
+                attr(url) + '">▶ preview</button>';
+        } else if (isImage) {
+            preview = '<button type="button" class="chat-embed-chip" data-chat-embed-img="' +
+                attr(url) + '">🖼 show</button>';
+        }
+        return '<div class="chat-file-card">' +
+            '<span class="chat-file-icon">' + icon + '</span>' +
+            '<span class="chat-file-meta"><b class="chat-file-name">' + esc(name) + '</b>' +
+            (f.s ? '<span class="chat-file-size">' + esc(_fmtBytes(f.s)) + '</span>' : '') +
+            '</span>' +
+            preview +
+            '<a class="chat-embed-chip chat-file-dl" href="' + attr(url) +
+                '" target="_blank" rel="noopener noreferrer" download>⬇ download</a>' +
+            '<div class="chat-file-slot"></div></div>';
     }
 
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
@@ -1060,6 +1103,9 @@
             if (el) el.value = b.room || '';
             el = q('[data-chat-set-giphy]');
             if (el) { el.value = ''; el.placeholder = b.giphy_key_set ? '••••••••  (configured)' : 'not set'; }
+            el = q('[data-chat-set-filepost]');
+            if (el) { el.value = ''; el.placeholder = b.filepost_key_set ? '••••••••  (configured)' : 'not set'; }
+            el = q('[data-chat-set-filepost-expiry]'); if (el) el.value = b.filepost_expiry || '';
             el = q('[data-chat-set-autojoin]'); if (el) el.checked = !!b.auto_join;
             el = q('[data-chat-set-membersend]'); if (el) el.checked = !!b.member_send;
             el = q('[data-chat-set-autoprove]'); if (el) el.checked = !!b.auto_prove;
@@ -1079,6 +1125,10 @@
         // blank must never clear a configured key
         var kEl = q('[data-chat-set-giphy]');
         if (kEl && kEl.value.trim()) payload.giphy_key = kEl.value.trim();
+        var fEl = q('[data-chat-set-filepost]');
+        if (fEl && fEl.value.trim()) payload.filepost_key = fEl.value.trim();
+        var xEl = q('[data-chat-set-filepost-expiry]');
+        if (xEl) payload.filepost_expiry = xEl.value || '';
         postJSON('/api/chat/settings', payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -1098,6 +1148,104 @@
             refresh();
             if (typeof showToast === 'function') showToast('Chat settings saved', 'success');
         });
+    }
+
+    // ── file sharing (filepost.dev) ─────────────────────────────────────
+    function toggleAttachPanel(forceClose) {
+        var pop = q('[data-chat-attach-pop]');
+        if (!pop) return;
+        if (forceClose === true) { pop.hidden = true; return; }
+        pop.hidden = !pop.hidden;
+        if (!pop.hidden) {
+            toggleGifPicker(true); toggleEmojiPicker(true);
+            var inp = q('[data-chat-attach-search]');
+            if (inp) inp.focus();
+        }
+    }
+
+    function _attachStatus(text, isError) {
+        var el = q('[data-chat-attach-status]');
+        if (!el) return;
+        el.hidden = !text;
+        el.textContent = text || '';
+        el.classList.toggle('chat-attach-status--err', !!isError);
+    }
+
+    function _sendFileMessage(meta) {
+        var url = String(meta.url || '');
+        if (!url) return;
+        var done = function (res) {
+            _attachStatus('');
+            toggleAttachPanel(true);
+            if (res.ok) refresh();
+            else if (typeof showToast === 'function') {
+                showToast(res.body && res.body.error || 'Could not send the file link', 'error');
+            }
+        };
+        if (state.view === 'room') {
+            postJSON('/api/chat/room/message', {
+                message: url, room: state.room,
+                file: { n: meta.name || 'file', s: meta.size || 0, m: meta.mime || '' },
+            }).then(done);
+        } else if (state.pmUser) {
+            // PMs are plaintext by design — the recipient gets a usable URL
+            postJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser),
+                     { message: url }).then(done);
+        }
+    }
+
+    function attachUploadFile(file) {
+        if (!file) return;
+        if (file.size > 50 * 1024 * 1024) {
+            _attachStatus('Too big — filepost.dev caps uploads at 50 MB', true);
+            return;
+        }
+        _attachStatus('Uploading ' + file.name + '\u2026');
+        var fd = new FormData();
+        fd.append('file', file, file.name);
+        fetch('/api/chat/files/upload', { method: 'POST', body: fd })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                if (!res.ok || !res.body.ok) {
+                    _attachStatus(res.body && res.body.error || 'Upload failed', true);
+                    return;
+                }
+                _sendFileMessage(res.body);
+            })
+            .catch(function () { _attachStatus('Upload failed', true); });
+    }
+
+    function attachSendTrack(trackId, label) {
+        _attachStatus('Uploading ' + (label || 'track') + '\u2026');
+        postJSON('/api/chat/files/upload', { track_id: trackId }).then(function (res) {
+            if (!res.ok || !res.body.ok) {
+                _attachStatus(res.body && res.body.error || 'Upload failed', true);
+                return;
+            }
+            _sendFileMessage(res.body);
+        });
+    }
+
+    var _attachSearchTimer = null;
+    function attachLibrarySearch(qstr) {
+        var host = q('[data-chat-attach-results]');
+        if (!host) return;
+        if (!qstr || qstr.length < 2) { host.innerHTML = ''; return; }
+        getJSON('/api/chat/files/library-search?q=' + encodeURIComponent(qstr))
+            .then(function (res) {
+                if (!res.ok) return;
+                var tracks = res.body.tracks || [];
+                host.innerHTML = tracks.length ? tracks.map(function (t) {
+                    var label = (t.artist ? t.artist + ' — ' : '') + t.title;
+                    return '<button type="button" class="chat-browse-row" ' +
+                        'data-chat-attach-track="' + attr(String(t.id)) + '" ' +
+                        'data-chat-attach-label="' + attr(label) + '">' +
+                        '<span class="chat-browse-icon">🎵</span>' +
+                        '<span class="chat-browse-name">' + esc(label) + '</span>' +
+                        (t.size ? '<span class="chat-browse-meta">' + esc(_fmtBytes(t.size)) + '</span>' : '') +
+                        '</button>';
+                }).join('') : '<div class="chat-side-none">No matches with files on disk</div>';
+            });
     }
 
     function toggleGifPicker(forceClose) {
@@ -1563,6 +1711,31 @@
                     'onerror="this.replaceWith(document.createTextNode(\'(image failed to load)\'))">';
                 return;
             }
+            t = e.target.closest('[data-chat-file-audio]');
+            if (t) {
+                var card = t.closest('.chat-file-card');
+                var slot = card && card.querySelector('.chat-file-slot');
+                if (slot) {
+                    slot.innerHTML = '<audio class="chat-file-player" controls preload="none" src="' +
+                        t.getAttribute('data-chat-file-audio').replace(/"/g, '&quot;') + '"></audio>';
+                    slot.querySelector('audio').play().catch(function () {});
+                    t.remove();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-file-video]');
+            if (t) {
+                var vcard = t.closest('.chat-file-card');
+                var vslot = vcard && vcard.querySelector('.chat-file-slot');
+                if (vslot) {
+                    vslot.innerHTML = '<video class="chat-file-player chat-file-player--video" controls preload="metadata" src="' +
+                        t.getAttribute('data-chat-file-video').replace(/"/g, '&quot;') + '"></video>';
+                    t.remove();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-attach-btn]');
+            if (t) { toggleAttachPanel(); return; }
             t = e.target.closest('[data-chat-spoiler]');
             if (t) { t.classList.add('chat-spoiler--shown'); return; }
             t = e.target.closest('[data-chat-fmt]');
@@ -1756,6 +1929,32 @@
                 _gifTimer = setTimeout(function () { gifSearch(gifIn.value.trim()); }, 400);
             });
         }
+
+        var attIn = q('[data-chat-attach-search]');
+        if (attIn) {
+            attIn.addEventListener('input', function () {
+                if (_attachSearchTimer) clearTimeout(_attachSearchTimer);
+                _attachSearchTimer = setTimeout(function () {
+                    attachLibrarySearch(attIn.value.trim());
+                }, 350);
+            });
+        }
+        var attFile = q('[data-chat-attach-file]');
+        if (attFile) {
+            attFile.addEventListener('change', function () {
+                if (attFile.files && attFile.files[0]) attachUploadFile(attFile.files[0]);
+                attFile.value = '';
+            });
+        }
+        document.addEventListener('click', function (e) {
+            var up = e.target.closest('[data-chat-attach-upload]');
+            if (up) { var fi = q('[data-chat-attach-file]'); if (fi) fi.click(); return; }
+            var tr = e.target.closest('[data-chat-attach-track]');
+            if (tr) {
+                attachSendTrack(tr.getAttribute('data-chat-attach-track'),
+                                tr.getAttribute('data-chat-attach-label'));
+            }
+        });
 
         var scroller = q('[data-chat-messages]');
         if (scroller) {
