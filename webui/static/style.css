@@ -72220,3 +72220,18 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-weight: 800; text-transform: uppercase; font-size: 0.85em;
     color: rgba(255, 255, 255, 0.55);
 }
+
+/* ── chat user card: history + private note (chat P1) ── */
+.chat-card-hist {
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+}
+.chat-card-note { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.chat-card-note-input {
+    width: 100%; resize: vertical; min-height: 40px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; color: #fff; font-size: 12px; font-family: inherit;
+    padding: 7px 9px;
+}
+.chat-card-note-input:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.45); }
+.chat-card-note-save { align-self: flex-end; }

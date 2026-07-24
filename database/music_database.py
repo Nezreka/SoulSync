@@ -422,6 +422,15 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_messages_room "
                            "ON chat_room_messages (room, timestamp)")
+            # Local, private notes on Soulseek users ("great jazz rips") —
+            # shown on the chat user card. Never leaves this install.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_user_notes (
+                    username TEXT PRIMARY KEY,
+                    note TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # the table shipped one commit before the reply column — live dbs
             # already created it, so the column rides a tolerant ALTER
             try:
@@ -10422,6 +10431,77 @@ class MusicDatabase:
             return 0
 
     _CHAT_ARCHIVE_KEEP = 5000     # per room — plenty of scrollback, bounded disk
+
+    def get_chat_user_note(self, username: str) -> str:
+        """The local note for a Soulseek username ('' when none)."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute("SELECT note FROM chat_user_notes WHERE username = ?",
+                               (str(username),)).fetchone()
+            return row[0] if row else ''
+        except Exception as e:
+            logger.debug("get_chat_user_note failed: %s", e)
+            return ''
+        finally:
+            if conn:
+                conn.close()
+
+    def set_chat_user_note(self, username: str, note: str) -> bool:
+        """Upsert (empty note deletes the row — no tombstones)."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            if str(note or '').strip():
+                conn.execute(
+                    "INSERT INTO chat_user_notes (username, note, updated_at) "
+                    "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(username) DO UPDATE SET note = excluded.note, "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (str(username), str(note).strip()))
+            else:
+                conn.execute("DELETE FROM chat_user_notes WHERE username = ?",
+                             (str(username),))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error("set_chat_user_note failed: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def get_user_download_stats(self, username: str) -> Dict[str, Any]:
+        """Our HISTORY with a Soulseek peer, from track_downloads — the user
+        card differentiator no other client has: how many tracks we've pulled
+        from them, how reliably, and when we last did."""
+        out = {'downloads': 0, 'completed': 0, 'failed': 0,
+               'success_rate': None, 'last_download': None, 'total_bytes': 0}
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT COUNT(*) AS n,
+                           SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS ok,
+                           SUM(CASE WHEN status NOT IN ('completed') THEN 1 ELSE 0 END) AS bad,
+                           MAX(created_at) AS last,
+                           COALESCE(SUM(CASE WHEN status = 'completed'
+                                             THEN COALESCE(source_size, 0) ELSE 0 END), 0) AS bytes
+                    FROM track_downloads WHERE source_username = ?""",
+                (str(username),)).fetchone()
+            if row and row['n']:
+                out['downloads'] = row['n']
+                out['completed'] = row['ok'] or 0
+                out['failed'] = row['bad'] or 0
+                out['success_rate'] = round(100.0 * (row['ok'] or 0) / row['n'], 1)
+                out['last_download'] = row['last']
+                out['total_bytes'] = row['bytes'] or 0
+        except Exception as e:
+            logger.debug("get_user_download_stats failed: %s", e)
+        finally:
+            if conn:
+                conn.close()
+        return out
 
     def add_chat_messages(self, room: str, messages) -> int:
         """Archive a batch of DECODED room messages ({username, message, rich,

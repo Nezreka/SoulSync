@@ -40396,10 +40396,23 @@ def _emit_chat_push_loop():
                 if fresh:
                     # live pushes carry the same DECODED view the API serves
                     from core import chat_codec
-                    def _unwrap(m):
+                    proto_events = []
+                    def _unwrap(m, _sink=proto_events):   # bound at def (B023)
                         dec = chat_codec.decode(m.get('message'))
                         if dec is not None and chat_codec.reaction_of(dec):
                             return None      # reaction carriers never render/badge
+                        if dec is not None:
+                            _p = chat_codec.protocol_of(dec)
+                            if _p:
+                                # machine coordination: never archived, pushed
+                                # on its own channel for real-time handling.
+                                # Only PURE carriers (empty text) vanish —
+                                # piggybacked text still renders/archives.
+                                _sink.append({
+                                    'username': m.get('username'),
+                                    'timestamp': m.get('timestamp'), 'p': _p})
+                                if not dec.get('t'):
+                                    return None
                         out = {'username': m.get('username'),
                                'message': dec['t'] if dec else m.get('message'),
                                'timestamp': m.get('timestamp')}
@@ -40410,6 +40423,9 @@ def _emit_chat_push_loop():
                                 out['reply'] = rep
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
+                    if proto_events:
+                        socketio.emit('chat:room_protocol', {
+                            'room': room, 'events': proto_events[-40:]})
                     if decoded:      # a reaction-only tick still tracks PMs below
                         try:
                             get_database().add_chat_messages(room, decoded)

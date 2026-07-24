@@ -24,6 +24,8 @@
         stickBottom: true,       // autoscroll unless the user scrolled up
         started: false,
         ssOnly: false,           // room filter: show only SoulSync-app messages
+        protocolLog: [],         // recent machine-coordination events (bounded)
+        beaconed: {},            // rooms we've announced ourselves in this session
         isAdmin: false,          // shows the settings cog (from /status)
         newMarker: null,         // frozen last-seen ts for the NEW divider (per room open)
         renderedCount: 0,        // for the new-messages pill delta
@@ -500,12 +502,22 @@
     // Users who spoke through SoulSync (the envelope is the app signature) —
     // sourced from the loaded messages, so it's an approximation of "runs
     // SoulSync", not a directory.
-    function _soulsyncUsers() {
-        var set = {};
+    function _userClassification() {
+        // {name: 'soulsync'|'vanilla'} — the assume-SoulSync flip: names
+        // absent from this map never spoke and are treated as SoulSync.
+        // Built with ChatProtocol.classifyUser (envelope conclusive forever,
+        // protocol events count as envelopes; only bare text marks vanilla).
+        var cls = {};
+        var CP = window.ChatProtocol;
         (state.msgs || []).forEach(function (m) {
-            if (m.rich && m.username) set[m.username] = 1;
+            if (!m.username) return;
+            cls[m.username] = CP ? CP.classifyUser(cls[m.username], !!m.rich)
+                                 : (m.rich ? 'soulsync' : (cls[m.username] || 'vanilla'));
         });
-        return set;
+        (state.protocolLog || []).forEach(function (ev) {
+            if (ev && ev.username) cls[ev.username] = 'soulsync';
+        });
+        return cls;
     }
 
     function _userBtn(n, extraClass) {
@@ -542,11 +554,12 @@
             return a.toLowerCase().localeCompare(b.toLowerCase());
         });
         if (f) names = names.filter(function (n) { return n.toLowerCase().indexOf(f) > -1; });
-        var ss = _soulsyncUsers();
+        var cls = _userClassification();
         var self = [], apps = [], rest = [];
         names.forEach(function (n) {
             if (state.selfName && n === state.selfName) self.push(n);
-            else if (ss[n]) apps.push(n);
+            // the flip: unknown (never spoke) = assumed SoulSync
+            else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
         });
         var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
@@ -557,7 +570,7 @@
         }
         if (rest.length) {
             html += (apps.length || self.length
-                        ? '<div class="chat-users-label chat-users-label--sub">Everyone</div>' : '') +
+                        ? '<div class="chat-users-label chat-users-label--sub">Other clients</div>' : '') +
                 rest.map(function (n) { return _userBtn(n); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
@@ -757,6 +770,8 @@
             if (overlay.getAttribute('data-chat-user-card-for') !== name) return;
             var info = (res.ok && res.body.info) || {};
             var status = (res.ok && res.body.status) || {};
+            var hist = (res.ok && res.body.history) || null;
+            var note = (res.ok && typeof res.body.note === 'string') ? res.body.note : '';
             var rows = [];
             var pres = status.presence || status.status ||
                 (status.isOnline === true ? 'Online' : (status.isOnline === false ? 'Offline' : null));
@@ -769,14 +784,62 @@
             }
             var infoHost = overlay.querySelector('.chat-card-info');
             if (infoHost) {
-                infoHost.innerHTML = rows.length
+                var html = rows.length
                     ? rows.map(function (r) {
                         return '<div class="chat-card-row"><span>' + esc(r[0]) +
                             '</span><b>' + esc(r[1]) + '</b></div>';
                     }).join('')
                     : '<div class="chat-card-row chat-card-none">No info available</div>';
+                // OUR history with this peer — the card no other client has
+                if (hist && hist.downloads > 0) {
+                    html += '<div class="chat-card-hist">' +
+                        '<div class="chat-card-row"><span>Downloads from them</span><b>' +
+                            esc(String(hist.downloads)) + '</b></div>' +
+                        (hist.success_rate != null
+                            ? '<div class="chat-card-row"><span>Success rate</span><b>' +
+                                esc(String(hist.success_rate)) + '%</b></div>' : '') +
+                        (hist.total_bytes > 0
+                            ? '<div class="chat-card-row"><span>Data pulled</span><b>' +
+                                esc(_fmtBytes(hist.total_bytes)) + '</b></div>' : '') +
+                        (hist.last_download
+                            ? '<div class="chat-card-row"><span>Last download</span><b>' +
+                                esc(String(hist.last_download).slice(0, 16)) + '</b></div>' : '') +
+                        '</div>';
+                }
+                // private local note ("great jazz rips") — never leaves this install
+                html += '<div class="chat-card-note">' +
+                    '<textarea class="chat-card-note-input" data-chat-card-note ' +
+                        'placeholder="Private note about ' + attr(name) + '\u2026" ' +
+                        'maxlength="2000" rows="2">' + esc(note) + '</textarea>' +
+                    '<button class="chat-fmt-btn chat-card-note-save" type="button" ' +
+                        'data-chat-card-note-save hidden>Save note</button></div>';
+                infoHost.innerHTML = html;
+                var ta = infoHost.querySelector('[data-chat-card-note]');
+                var saveBtn = infoHost.querySelector('[data-chat-card-note-save]');
+                if (ta && saveBtn) {
+                    ta.addEventListener('input', function () { saveBtn.hidden = false; });
+                    saveBtn.addEventListener('click', function () {
+                        postJSON('/api/chat/user/' + encodeURIComponent(name) + '/note',
+                                 { note: ta.value }).then(function (r2) {
+                            if (r2.ok) {
+                                saveBtn.hidden = true;
+                                if (typeof showToast === 'function') showToast('Note saved', 'success');
+                            } else if (typeof showToast === 'function') {
+                                showToast('Could not save note', 'error');
+                            }
+                        });
+                    });
+                }
             }
         });
+    }
+
+    function _fmtBytes(n) {
+        n = Number(n) || 0;
+        if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+        if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+        return n + ' B';
     }
 
     function closeUserCard() {
@@ -1251,6 +1314,8 @@
                 mergeMessages(res.body.messages);
                 renderMessages(state.msgs);
                 renderUsers(res.body.users);
+                _ingestProtocol(res.body.protocol);
+                _sendJoinBeacon();
             });
         } else {
             work = getJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser))
@@ -1789,6 +1854,57 @@
         });
     }
 
+    // ── protocol bus (the hidden coordination channel) ──────────────────
+    function _ingestProtocol(events) {
+        if (!events || !events.length) return;
+        var log = state.protocolLog;
+        var seen = {};
+        log.forEach(function (e) { seen[e.username + '|' + e.timestamp + '|' + (e.p && e.p.k)] = 1; });
+        var fresh = [];
+        events.forEach(function (ev) {
+            if (!ev || !ev.p || !window.ChatProtocol) return;
+            var p = window.ChatProtocol.parseProtocol({ p: ev.p });
+            if (!p) return;
+            var key = ev.username + '|' + ev.timestamp + '|' + p.k;
+            if (seen[key]) return;
+            seen[key] = 1;
+            var entry = { username: String(ev.username || ''), timestamp: ev.timestamp, p: p };
+            log.push(entry);
+            fresh.push(entry);
+        });
+        if (log.length > 300) state.protocolLog = log.slice(-300);
+        if (fresh.length) {
+            // presence: a protocol event proves SoulSync — refresh buckets
+            renderUsersList();
+            try {
+                document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
+                    { detail: { events: fresh } }));
+            } catch (e) { /* older browsers: features just poll the log */ }
+        }
+    }
+
+    function sendProtocol(kind, fields) {
+        // One-liner for features: fire a coordination event into the room.
+        // Respects the send gate server-side; failures are silent (fun-grade).
+        var p = Object.assign({ k: kind }, fields || {});
+        return postJSON('/api/chat/room/protocol', { room: state.room, p: p });
+    }
+
+    function _sendJoinBeacon() {
+        // Announce capability ONCE per room per session — powers the
+        // assume-SoulSync presence for users who haven't typed anything.
+        if (!state.canSend || !state.room || state.beaconed[state.room]) return;
+        state.beaconed[state.room] = 1;
+        sendProtocol('hello', {}).then(function (r) {
+            if (!r.ok) state.beaconed[state.room] = 0;   // retry next refresh
+        });
+    }
+
+    function onRoomProtocol(d) {
+        if (!d || d.room !== state.room) return;
+        _ingestProtocol(d.events || []);
+    }
+
     function onRoomMessages(d) {
         _ensureSelf();
         // a mention pings you wherever you are in the app (Discord behavior)
@@ -1856,6 +1972,7 @@
 
     window.ChatPage = { open: open, openPm: openPm, messageUser: messageUser,
                         onRoomMessages: onRoomMessages, onUnread: onUnread,
+                        onRoomProtocol: onRoomProtocol, sendProtocol: sendProtocol,
                         // exported for the node render harness (XSS contract tests)
                         renderRich: renderRich, renderPlain: renderPlain,
                         renderGroups: renderGroups,

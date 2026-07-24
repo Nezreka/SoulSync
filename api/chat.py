@@ -144,10 +144,13 @@ def _unwrap_room_messages(messages):
     their text swapped for the payload + rich=True; reply refs are validated
     and attached. REACTION carriers (empty-text envelopes with 're') are
     pulled OUT of the visible list into a {target_key: {emoji: [users]}} map.
-    Returns (messages, reactions_map)."""
+    PROTOCOL carriers (envelopes with 'p' — jukebox votes, beacons, pins) are
+    pulled out into an event list: machine coordination, never rendered,
+    never archived. Returns (messages, reactions_map, protocol_events)."""
     from core import chat_codec
     out = []
     reactions: dict = {}
+    protocol: list = []
     for m in (messages or []):
         m = dict(m)
         dec = chat_codec.decode(m.get("message"))
@@ -160,13 +163,24 @@ def _unwrap_room_messages(messages):
                 if u and u not in users:
                     users.append(u)
                 continue                     # carriers never render as messages
+            proto = chat_codec.protocol_of(dec)
+            if proto:
+                protocol.append({"username": str(m.get("username") or ""),
+                                 "timestamp": m.get("timestamp"),
+                                 "p": proto})
+                # PURE carriers (empty text) vanish like reaction carriers.
+                # A message with BOTH text and 'p' (piggybacked state, e.g.
+                # now-playing) must still render — swallowing it would let
+                # any client vanish its own text from SoulSync views.
+                if not dec.get("t"):
+                    continue
             m["message"] = dec["t"]
             m["rich"] = True
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
         out.append(m)
-    return out, reactions
+    return out, reactions, protocol
 
 
 def _attach_reactions(messages, reactions) -> list:
@@ -315,7 +329,29 @@ def create_blueprint() -> Blueprint:
                                if isinstance(v, (str, int, float, bool)) and k != "picture"}
         except Exception:
             logger.debug("chat: user info failed", exc_info=True)
+        # OUR history with this peer — the card no other Soulseek client has:
+        # download count, success rate, last pull, bytes moved. Plus the local
+        # private note. Both best-effort; the card renders without them.
+        try:
+            db = _db()
+            if db is not None:
+                out["history"] = db.get_user_download_stats(username)
+                out["note"] = db.get_chat_user_note(username)
+        except Exception:
+            logger.debug("chat: user history/note failed", exc_info=True)
         return jsonify(out)
+
+    @bp.route("/api/chat/user/<path:username>/note", methods=["POST"])
+    def chat_user_note_set(username):
+        """Save the local, private note for a user ('' clears it)."""
+        db = _db()
+        if db is None:
+            return jsonify({"error": "database unavailable"}), 503
+        payload = request.get_json(silent=True) or {}
+        note = str(payload.get("note") or "")[:2000]
+        if not db.set_chat_user_note(username, note):
+            return jsonify({"error": "could not save note"}), 500
+        return jsonify({"ok": True, "note": note.strip()})
 
     @bp.route("/api/chat/user/<path:username>/shares", methods=["GET"])
     def chat_user_shares(username):
@@ -564,7 +600,7 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.exception("chat: room hydrate failed")
             return jsonify({"error": str(e)}), 502
-        live, reactions = _unwrap_room_messages(messages)
+        live, reactions, protocol_events = _unwrap_room_messages(messages)
         # Archive-first (chatbic P2): slskd forgets the room on restart, the
         # archive doesn't. Top it up from the live buffer (idempotent), then
         # serve the archive tail; live is only the fallback when the archive
@@ -587,7 +623,44 @@ def create_blueprint() -> Blueprint:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
         return jsonify({"room": room, "joined": True,
                         "messages": _attach_reactions(out, reactions),
-                        "users": users or [], "can_send": _can_send()})
+                        "users": users or [], "can_send": _can_send(),
+                        # machine coordination events (jukebox/polls/beacons)
+                        # from the live buffer — the page's protocol feed
+                        "protocol": protocol_events})
+
+    @bp.route("/api/chat/room/protocol", methods=["POST"])
+    def chat_room_protocol_send():
+        """Send a PROTOCOL carrier into the room: an empty-text envelope whose
+        'p' object coordinates SoulSync clients (a vote, a beacon, a pin).
+        Vanilla clients see one line of envelope noise; SoulSync clients
+        intercept it before render. Same send gate as talking — a client that
+        can't speak can't emit machine chatter either."""
+        from core import chat_codec
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+        payload = request.get_json(silent=True) or {}
+        proto = chat_codec.protocol_of({"p": payload.get("p")})
+        if proto is None:
+            return jsonify({"error": "Malformed protocol payload"}), 400
+        room = _resolve_room(payload.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
+        encoded = chat_codec.encode("", {"p": proto})
+        if encoded is None:
+            return jsonify({"error": "Protocol payload too large"}), 400
+        try:
+            if not _ensure_joined(client, room):
+                return jsonify({"error": "Could not join room"}), 502
+            ok = _run_async(client.send_room_message(room, encoded))
+        except Exception as e:
+            logger.exception("chat: protocol send failed")
+            return jsonify({"error": str(e)}), 502
+        if not ok:
+            return jsonify({"error": "slskd refused the message"}), 502
+        return jsonify({"ok": True})
 
     @bp.route("/api/chat/room/history", methods=["GET"])
     def chat_room_history():
