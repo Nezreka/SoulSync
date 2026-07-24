@@ -110,10 +110,81 @@
         return pool[0];
     }
 
+    // ── Jukebox reducer ─────────────────────────────────────────────────
+    // The whole room jukebox is a PURE FOLD over the protocol event stream:
+    // every client reduces the same events to the same state — queue, votes,
+    // now-playing — with zero coordination chatter. Rules:
+    //   jbx.sub  {id, ti}      → append to queue (dedupe by id, cap 25,
+    //                            first submitter keeps attribution)
+    //   jbx.vote {o: id}       → latest vote per user among CURRENTLY queued
+    //   jbx.now  {id, ti, at}  → becomes now-playing; its id leaves the queue
+    //                            and ALL votes reset (new round)
+    // Event order is the slskd stream order — identical on every client.
+    var _YT_ID_RE = /^[A-Za-z0-9_-]{6,16}$/;
+
+    function _saneDuration(v) {
+        return (typeof v === 'number' && isFinite(v) && v > 0)
+            ? Math.min(Math.floor(v), 7200) : null;
+    }
+
+    function reduceJukebox(events) {
+        var queue = [];          // [{id, ti, by}]
+        var inQueue = {};        // id → queue entry
+        var votes = [];          // raw votes since last round
+        var now = null;
+
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            if (p.k === 'jbx.sub') {
+                var id = String(p.id || '');
+                if (!_YT_ID_RE.test(id) || inQueue[id]) return;
+                if (now && now.id === id) return;          // already playing
+                if (queue.length >= 25) return;            // cap: no queue bombs
+                var entry = { id: id, ti: String(p.ti || '').slice(0, 120),
+                              d: _saneDuration(p.d), by: ev.username };
+                queue.push(entry);
+                inQueue[id] = entry;
+            } else if (p.k === 'jbx.vote') {
+                var o = String(p.o || '');
+                if (inQueue[o]) votes.push({ username: ev.username, option: o });
+            } else if (p.k === 'jbx.now') {
+                var nid = String(p.id || '');
+                if (!_YT_ID_RE.test(nid)) return;
+                now = { id: nid, ti: String(p.ti || '').slice(0, 120),
+                        at: (typeof p.at === 'number' && isFinite(p.at)) ? p.at : null,
+                        d: _saneDuration(p.d), by: ev.username };
+                if (inQueue[nid]) {
+                    queue = queue.filter(function (e) { return e.id !== nid; });
+                    delete inQueue[nid];
+                }
+                votes = [];                                // new round
+            }
+        });
+
+        var tally = tallyVotes(votes);
+        queue.forEach(function (e) { e.votes = tally.counts[e.id] || 0; });
+        return { queue: queue, now: now, tally: tally };
+    }
+
+    // The next track every client agrees on: most votes (lexicographic tie),
+    // FIFO head when nobody voted. Null when the queue is empty.
+    function nextTrack(state) {
+        if (!state || !state.queue || !state.queue.length) return null;
+        if (state.tally && state.tally.winner) {
+            for (var i = 0; i < state.queue.length; i++) {
+                if (state.queue[i].id === state.tally.winner) return state.queue[i];
+            }
+        }
+        return state.queue[0];
+    }
+
     window.ChatProtocol = {
         classifyUser: classifyUser,
         parseProtocol: parseProtocol,
         tallyVotes: tallyVotes,
         electCoordinator: electCoordinator,
+        reduceJukebox: reduceJukebox,
+        nextTrack: nextTrack,
     };
 })();

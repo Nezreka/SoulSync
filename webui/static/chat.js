@@ -35,6 +35,19 @@
         selfName: '',            // our slskd username (@mention highlighting)
         users: [],               // room user names (mention autocomplete)
         replyTo: null,           // {u, x} while composing a reply
+        jukebox: {               // shared room listening (reduced from protocolLog)
+            open: false,         //   panel visible
+            tunedIn: false,      //   player exists (requires a user gesture)
+            player: null,        //   YT.Player instance while tuned in
+            playingId: null,     //   video id the player was last pointed at
+            playerAlive: false,  //   iframe API fired onReady (safe to call methods)
+            results: [],         //   resolve results awaiting a pick
+            resolving: false,
+            lastRendered: '',    //   reduced-state fingerprint (skip no-op renders)
+            lastAdvanceAt: 0,    //   DJ double-fire guard (ms)
+            timer: null,         //   elapsed clock + DJ watchdog while open
+            ytLoading: false, ytCbs: [],
+        },
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
 
@@ -671,6 +684,8 @@
                       'placeholder="Search history…" autocomplete="off"' +
                       (state.searchMode ? '' : ' hidden') + '>' +
               '</span>' +
+              '<button class="chat-filter-btn' + (state.jukebox.open ? ' chat-filter-btn--on' : '') +
+              '" type="button" data-chat-jukebox-btn title="Room jukebox — listen together, vote on what plays next">♫ Jukebox</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
@@ -1496,7 +1511,13 @@
     function openRoom(name) {
         state.view = 'room'; state.pmUser = null; state.lastStamp = null; state.stickBottom = true;
         state.renderedCount = 0; hideJumpPill();
+        var prevRoom = state.room;
         state.room = name || state.room || state.homeRoom || 'SoulSync';
+        if (prevRoom && prevRoom !== state.room) {
+            _jbxTuneOut();               // never keep playing another room's track
+            state.jukebox.lastRendered = '';
+        }
+        renderJukebox();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
         cancelReply();
         try {
@@ -1622,7 +1643,7 @@
         state.searchMode = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
-        renderHead(); renderComposer();
+        renderHead(); renderComposer(); renderJukebox();   // hides the panel (audio keeps playing)
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
         refresh();
@@ -1771,6 +1792,16 @@
                 renderHead(); refresh();
                 return;
             }
+            t = e.target.closest('[data-chat-jukebox-btn]');
+            if (t) { toggleJukebox(); return; }
+            t = e.target.closest('[data-chat-jbx-tunein]');
+            if (t) { _jbxTuneIn(); return; }
+            t = e.target.closest('[data-chat-jbx-tuneout]');
+            if (t) { _jbxTuneOut(); renderJukebox(); return; }
+            t = e.target.closest('[data-chat-jbx-vote]');
+            if (t) { sendProtocol('jbx.vote', { o: t.getAttribute('data-chat-jbx-vote') }); return; }
+            t = e.target.closest('[data-chat-jbx-pick]');
+            if (t) { _jbxPick(state.jukebox.results[parseInt(t.getAttribute('data-chat-jbx-pick'), 10)]); return; }
             t = e.target.closest('[data-chat-search-btn]');
             if (t) { state.searchMode ? exitSearch() : enterSearch(); return; }
             t = e.target.closest('[data-chat-search-exit]');
@@ -1867,6 +1898,8 @@
 
         var form = q('[data-chat-composer]');
         if (form) form.addEventListener('submit', function (e) { e.preventDefault(); send(); });
+        var jbxForm = q('[data-chat-jbx-form]');
+        if (jbxForm) jbxForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSubmit(); });
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -2057,17 +2090,20 @@
     function _ingestProtocol(events) {
         if (!events || !events.length) return;
         var log = state.protocolLog;
+        var room = state.room || '';
         var seen = {};
-        log.forEach(function (e) { seen[e.username + '|' + e.timestamp + '|' + (e.p && e.p.k)] = 1; });
+        log.forEach(function (e) { seen[e.room + '|' + e.username + '|' + e.timestamp + '|' + (e.p && e.p.k)] = 1; });
         var fresh = [];
         events.forEach(function (ev) {
             if (!ev || !ev.p || !window.ChatProtocol) return;
             var p = window.ChatProtocol.parseProtocol({ p: ev.p });
             if (!p) return;
-            var key = ev.username + '|' + ev.timestamp + '|' + p.k;
+            var key = room + '|' + ev.username + '|' + ev.timestamp + '|' + p.k;
             if (seen[key]) return;
             seen[key] = 1;
-            var entry = { username: String(ev.username || ''), timestamp: ev.timestamp, p: p };
+            // room-tagged: reducers (jukebox) must never mix rooms' events
+            var entry = { username: String(ev.username || ''), timestamp: ev.timestamp,
+                          room: room, p: p };
             log.push(entry);
             fresh.push(entry);
         });
@@ -2075,6 +2111,7 @@
         if (fresh.length) {
             // presence: a protocol event proves SoulSync — refresh buckets
             renderUsersList();
+            renderJukebox();
             try {
                 document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
                     { detail: { events: fresh } }));
@@ -2102,6 +2139,278 @@
     function onRoomProtocol(d) {
         if (!d || d.room !== state.room) return;
         _ingestProtocol(d.events || []);
+    }
+
+    // ── jukebox (shared room listening — a pure fold over the bus) ──────
+    // State lives in the protocol stream (jbx.sub / jbx.vote / jbx.now);
+    // every client reduces the same events to the same queue + now-playing.
+    // Playback is an OPT-IN YouTube embed ("Tune in" = the user gesture
+    // browsers require for audible autoplay); joiners seek to the live
+    // position from now.at. The DJ (deterministic election, no chatter) is
+    // the one client that emits jbx.now when a track ends or the queue waits.
+    function _jbxState() {
+        var CP = window.ChatProtocol;
+        if (!CP) return { queue: [], now: null, tally: { counts: {}, winner: null, total: 0 } };
+        var room = state.room || '';
+        return CP.reduceJukebox((state.protocolLog || []).filter(function (e) {
+            return e.room === room;
+        }));
+    }
+
+    function _jbxIsDj() {
+        // Only PROVEN SoulSync users (they beaconed / spoke enveloped) are DJ
+        // candidates — electing an assumed user could elect a vanilla client
+        // that will never advance the queue. We're always in our own pool.
+        var CP = window.ChatProtocol;
+        if (!CP || !state.canSend || !state.selfName) return false;
+        var cls = _userClassification();
+        var pool = (state.users || []).filter(function (n) { return cls[n] === 'soulsync'; });
+        if (pool.indexOf(state.selfName) === -1) pool.push(state.selfName);
+        return CP.electCoordinator(pool) === state.selfName;
+    }
+
+    function _jbxElapsed(now) {
+        if (!now || typeof now.at !== 'number') return null;
+        var s = Math.floor(Date.now() / 1000 - now.at);
+        return (s >= 0 && s < 86400) ? s : null;
+    }
+
+    function _fmtSecs(s) {
+        if (s === null || isNaN(s)) return '';
+        var m = Math.floor(s / 60), r = s % 60;
+        return m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    function renderJukebox() {
+        var panel = q('[data-chat-jukebox]');
+        if (!panel) return;
+        var st = _jbxState();
+        var now = st.now;
+        var elapsed = _jbxElapsed(now);
+        var ended = !!(now && now.d && elapsed !== null && elapsed > now.d + 5);
+        // the player follows the ROOM, not the panel — a tuned-in listener
+        // reading PMs must still hear the DJ's advances (panel merely hides)
+        _jbxSyncPlayer(now && !ended ? now : null);
+        var show = state.jukebox.open && state.view === 'room';
+        panel.hidden = !show;
+        if (!show) return;
+        // fingerprint: skip DOM writes when nothing visible changed (the
+        // elapsed clock ticks via its own cheap textContent update below)
+        var fp = JSON.stringify([now && now.id, ended, st.queue, state.jukebox.tunedIn, state.canSend]);
+        if (fp !== state.jukebox.lastRendered) {
+            state.jukebox.lastRendered = fp;
+            var nowHost = q('[data-chat-jbx-now]');
+            if (nowHost) {
+                if (now && !ended) {
+                    nowHost.innerHTML =
+                        '<span class="chat-jbx-live">▶</span>' +
+                        '<span class="chat-jbx-title" title="' + attr(now.ti || now.id) + '">' +
+                            esc(now.ti || now.id) + '</span>' +
+                        '<span class="chat-jbx-meta">added by ' + esc(now.by || '?') +
+                            (elapsed !== null ? ' · <span data-chat-jbx-clock>' + _fmtSecs(elapsed) + '</span>' +
+                                (now.d ? ' / ' + _fmtSecs(now.d) : '') : '') + '</span>' +
+                        (state.jukebox.tunedIn
+                            ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>'
+                            : '<button class="chat-send-btn chat-jbx-tune" type="button" data-chat-jbx-tunein>▶ Tune in</button>');
+                } else {
+                    // tuned-in users keep their exit even between tracks
+                    nowHost.innerHTML = '<span class="chat-jbx-meta">' +
+                        (st.queue.length ? 'Waiting for the next track…'
+                                         : 'Nothing playing — add a song below and get the room voting.') +
+                        '</span>' +
+                        (state.jukebox.tunedIn
+                            ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>' : '');
+                }
+            }
+            var qHost = q('[data-chat-jbx-queue]');
+            if (qHost) {
+                qHost.innerHTML = st.queue.map(function (e) {
+                    return '<div class="chat-jbx-row">' +
+                        '<button class="chat-jbx-vote" type="button" data-chat-jbx-vote="' + attr(e.id) + '"' +
+                            (state.canSend ? '' : ' disabled') + ' title="Vote to play this next">▲ ' +
+                            (e.votes || 0) + '</button>' +
+                        '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
+                        '<span class="chat-jbx-meta">' + (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
+                    '</div>';
+                }).join('') || '';
+            }
+            var form = q('[data-chat-jbx-form]');
+            if (form) form.hidden = !state.canSend;
+        } else if (elapsed !== null) {
+            var clock = q('[data-chat-jbx-clock]');
+            if (clock) clock.textContent = _fmtSecs(elapsed);
+        }
+    }
+
+    function toggleJukebox() {
+        state.jukebox.open = !state.jukebox.open;
+        if (!state.jukebox.open) _jbxTuneOut();
+        state.jukebox.lastRendered = '';
+        renderHead();
+        renderJukebox();
+        if (state.jukebox.open && !state.jukebox.timer) {
+            state.jukebox.timer = setInterval(function () {
+                renderJukebox();
+                _jbxWatchdog();
+            }, 5000);
+        } else if (!state.jukebox.open && state.jukebox.timer) {
+            clearInterval(state.jukebox.timer);
+            state.jukebox.timer = null;
+        }
+    }
+
+    // DJ duties: kick the queue when nothing is playing, or when the current
+    // track has provably run out (duration known) and nobody advanced it.
+    function _jbxWatchdog() {
+        if (!state.jukebox.open || !_jbxIsDj()) return;
+        var st = _jbxState();
+        if (!st.queue.length) return;
+        var elapsed = _jbxElapsed(st.now);
+        var stale = !st.now ||
+            (st.now.d && elapsed !== null && elapsed > st.now.d + 8) ||
+            (!st.now.d && elapsed !== null && elapsed > 900);   // unknown length: 15-min cap
+        if (stale) _jbxAdvance(st);
+    }
+
+    function _jbxAdvance(st) {
+        var CP = window.ChatProtocol;
+        if (!CP || !state.canSend) return;
+        if (Date.now() - state.jukebox.lastAdvanceAt < 15000) return;  // outlast a slow slskd roundtrip
+        var next = CP.nextTrack(st || _jbxState());
+        if (!next) return;
+        state.jukebox.lastAdvanceAt = Date.now();
+        var p = { id: next.id, ti: next.ti, at: Math.floor(Date.now() / 1000) };
+        if (next.d) p.d = next.d;
+        sendProtocol('jbx.now', p);
+    }
+
+    // ── jukebox playback (YouTube iframe API, loaded on first tune-in) ──
+    function _jbxLoadYT(cb) {
+        if (window.YT && window.YT.Player) { cb(); return; }
+        state.jukebox.ytCbs.push(cb);
+        if (state.jukebox.ytLoading) return;
+        state.jukebox.ytLoading = true;
+        var prev = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = function () {
+            if (typeof prev === 'function') { try { prev(); } catch (e) { /* theirs */ } }
+            var cbs = state.jukebox.ytCbs;
+            state.jukebox.ytCbs = [];
+            cbs.forEach(function (f) { try { f(); } catch (e) { /* one bad cb */ } });
+        };
+        var s = document.createElement('script');
+        s.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(s);
+    }
+
+    function _jbxTuneIn() {
+        var st = _jbxState();
+        if (!st.now) return;
+        state.jukebox.tunedIn = true;
+        state.jukebox.lastRendered = '';
+        renderJukebox();
+        _jbxLoadYT(function () {
+            if (!state.jukebox.tunedIn) return;        // tuned out while loading
+            _jbxSyncPlayer(_jbxState().now);
+        });
+    }
+
+    function _jbxTuneOut() {
+        state.jukebox.tunedIn = false;
+        if (state.jukebox.player) {
+            try { state.jukebox.player.destroy(); } catch (e) { /* already gone */ }
+        }
+        state.jukebox.player = null;
+        state.jukebox.playingId = null;
+        state.jukebox.playerAlive = false;
+        var host = q('[data-chat-jbx-player]');
+        if (host) { host.innerHTML = ''; host.hidden = true; }
+        state.jukebox.lastRendered = '';
+    }
+
+    function _jbxSyncPlayer(now) {
+        // Point the player at `now`, seeking to the live position. Never
+        // touches the DOM outside [data-chat-jbx-player] — renderJukebox
+        // depends on that so the iframe survives queue re-renders.
+        if (!state.jukebox.tunedIn) return;
+        if (!now) return;   // between tracks: keep the player, never kick the listener
+        if (!(window.YT && window.YT.Player)) return;  // tune-in cb will land here again
+        var host = q('[data-chat-jbx-player]');
+        if (!host) return;
+        var offset = Math.max(0, _jbxElapsed(now) || 0);
+        if (!state.jukebox.player) {
+            host.hidden = false;
+            host.innerHTML = '<div data-chat-jbx-yt></div>';
+            state.jukebox.playingId = now.id;
+            state.jukebox.player = new window.YT.Player(host.firstChild, {
+                width: '100%', height: '180', videoId: now.id,
+                playerVars: { autoplay: 1, start: offset, rel: 0, playsinline: 1 },
+                events: {
+                    onReady: function () {
+                        state.jukebox.playerAlive = true;
+                        _jbxSyncPlayer(_jbxState().now);   // catch a now-change during boot
+                    },
+                    onStateChange: _jbxOnPlayerState,
+                },
+            });
+        } else if (state.jukebox.playingId !== now.id && state.jukebox.playerAlive) {
+            state.jukebox.playingId = now.id;
+            try {
+                state.jukebox.player.loadVideoById({ videoId: now.id, startSeconds: offset });
+            } catch (e) { _jbxTuneOut(); }
+        }
+    }
+
+    function _jbxOnPlayerState(e) {
+        // ENDED (0): the tuned-in DJ advances the room. Non-DJs just wait —
+        // their player moves when the DJ's jbx.now arrives.
+        if (e && e.data === 0 && _jbxIsDj()) _jbxAdvance(null);
+    }
+
+    function _jbxSubmit() {
+        var input = q('[data-chat-jbx-input]');
+        var resHost = q('[data-chat-jbx-results]');
+        if (!input || state.jukebox.resolving) return;
+        var qtext = String(input.value || '').trim();
+        if (!qtext) return;
+        state.jukebox.resolving = true;
+        if (resHost) { resHost.hidden = false; resHost.innerHTML = '<div class="chat-jbx-meta">Looking that up…</div>'; }
+        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+            state.jukebox.resolving = false;
+            if (!res.ok || !(res.body.results || []).length) {
+                if (resHost) resHost.innerHTML = '<div class="chat-jbx-meta">' +
+                    esc((res.body && res.body.error) || 'Nothing found — try a link or a different search.') + '</div>';
+                return;
+            }
+            var results = res.body.results;
+            if (results.length === 1) {                 // pasted link → straight in
+                _jbxPick(results[0]);
+                return;
+            }
+            state.jukebox.results = results;
+            if (resHost) resHost.innerHTML = results.map(function (r, i) {
+                return '<button class="chat-jbx-result" type="button" data-chat-jbx-pick="' + i + '">' +
+                    '<span class="chat-jbx-title">' + esc(r.title || r.id) + '</span>' +
+                    '<span class="chat-jbx-meta">' + esc(r.channel || '') +
+                        (r.duration ? ' · ' + _fmtSecs(r.duration) : '') + '</span>' +
+                '</button>';
+            }).join('');
+        }).catch(function () {
+            state.jukebox.resolving = false;
+            if (resHost) resHost.innerHTML = '<div class="chat-jbx-meta">Lookup failed — try again.</div>';
+        });
+    }
+
+    function _jbxPick(r) {
+        if (!r || !r.id) return;
+        var p = { id: r.id, ti: String(r.title || '').slice(0, 120) };
+        if (r.duration) p.d = r.duration;
+        sendProtocol('jbx.sub', p);
+        var input = q('[data-chat-jbx-input]');
+        if (input) input.value = '';
+        var resHost = q('[data-chat-jbx-results]');
+        if (resHost) { resHost.hidden = true; resHost.innerHTML = ''; }
+        state.jukebox.results = [];
+        if (typeof showToast === 'function') showToast('♫ Added to the room queue', 'success');
     }
 
     function onRoomMessages(d) {

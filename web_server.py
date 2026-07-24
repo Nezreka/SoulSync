@@ -40892,12 +40892,21 @@ app.register_blueprint(_create_enrichment_blueprint())
 # Soulseek chat (rooms + PMs through slskd) — side-neutral, absolute /api/chat
 # paths, mounted OUTSIDE the video blueprint so music-only profiles reach it.
 from api.chat import configure as _configure_chat_api, create_blueprint as _create_chat_blueprint
+def _chat_youtube_search(query, max_results):
+    """Jukebox search seam: the shared yt-dlp client, or None → paste-only."""
+    yt = download_orchestrator.client("youtube")
+    if yt is None:
+        return []
+    return run_async(yt.search_videos(query, max_results=max_results))
+
+
 _configure_chat_api(
     client_getter=lambda: download_orchestrator.client("soulseek"),
     run_async=run_async,
     config_get=lambda key, default=None: config_manager.get(key, default),
     config_set=lambda key, value: config_manager.set(key, value),
     db_getter=get_database,
+    youtube_search=_chat_youtube_search,
 )
 app.register_blueprint(_create_chat_blueprint())
 

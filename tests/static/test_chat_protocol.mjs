@@ -106,3 +106,82 @@ describe('electCoordinator — chatter-free agreement', () => {
         assert.equal(P.electCoordinator(null), null);
     });
 });
+
+describe('reduceJukebox — the pure fold every client agrees on', () => {
+    const ev = (user, p) => ({ username: user, timestamp: 't', p });
+
+    test('submissions queue, dedupe, and keep first attribution', () => {
+        const st = P.reduceJukebox([
+            ev('a', { k: 'jbx.sub', id: 'dQw4w9WgXcQ', ti: 'Song A' }),
+            ev('b', { k: 'jbx.sub', id: 'dQw4w9WgXcQ', ti: 'Dupe' }),
+            ev('b', { k: 'jbx.sub', id: 'oHg5SJYRHA0', ti: 'Song B' }),
+        ]);
+        assert.equal(st.queue.length, 2);
+        assert.equal(st.queue[0].by, 'a');
+        assert.equal(st.queue[0].ti, 'Song A');
+    });
+
+    test('votes count only for queued ids, latest per user', () => {
+        const st = P.reduceJukebox([
+            ev('a', { k: 'jbx.sub', id: 'aaaaaaaaaaa', ti: 'A' }),
+            ev('b', { k: 'jbx.sub', id: 'bbbbbbbbbbb', ti: 'B' }),
+            ev('x', { k: 'jbx.vote', o: 'aaaaaaaaaaa' }),
+            ev('x', { k: 'jbx.vote', o: 'bbbbbbbbbbb' }),   // changed mind
+            ev('y', { k: 'jbx.vote', o: 'zzzzzzzzzzz' }),   // not queued → ignored
+        ]);
+        assert.equal(st.queue.find(e => e.id === 'bbbbbbbbbbb').votes, 1);
+        assert.equal(st.queue.find(e => e.id === 'aaaaaaaaaaa').votes, 0);
+    });
+
+    test('now removes the track from the queue and resets the round', () => {
+        const st = P.reduceJukebox([
+            ev('a', { k: 'jbx.sub', id: 'aaaaaaaaaaa', ti: 'A' }),
+            ev('b', { k: 'jbx.sub', id: 'bbbbbbbbbbb', ti: 'B' }),
+            ev('x', { k: 'jbx.vote', o: 'bbbbbbbbbbb' }),
+            ev('dj', { k: 'jbx.now', id: 'bbbbbbbbbbb', ti: 'B', at: 1000 }),
+        ]);
+        assert.equal(st.now.id, 'bbbbbbbbbbb');
+        assert.equal(st.now.at, 1000);
+        assert.equal(st.queue.length, 1);
+        assert.equal(st.tally.total, 0);                    // votes reset
+    });
+
+    test('nextTrack: winner beats FIFO, FIFO when no votes', () => {
+        const base = [
+            ev('a', { k: 'jbx.sub', id: 'aaaaaaaaaaa', ti: 'A' }),
+            ev('b', { k: 'jbx.sub', id: 'bbbbbbbbbbb', ti: 'B' }),
+        ];
+        assert.equal(P.nextTrack(P.reduceJukebox(base)).id, 'aaaaaaaaaaa');
+        const voted = base.concat([ev('x', { k: 'jbx.vote', o: 'bbbbbbbbbbb' })]);
+        assert.equal(P.nextTrack(P.reduceJukebox(voted)).id, 'bbbbbbbbbbb');
+        assert.equal(P.nextTrack(P.reduceJukebox([])), null);
+    });
+
+    test('hostile ids never enter state', () => {
+        const st = P.reduceJukebox([
+            ev('a', { k: 'jbx.sub', id: '<script>', ti: 'x' }),
+            ev('a', { k: 'jbx.now', id: 'javascript:x', ti: 'x' }),
+        ]);
+        assert.equal(st.queue.length, 0);
+        assert.equal(st.now, null);
+    });
+
+    test('duration rides sub and now, hostile durations dropped', () => {
+        const st = P.reduceJukebox([
+            ev('a', { k: 'jbx.sub', id: 'aaaaaaaaaaa', ti: 'A', d: 213 }),
+            ev('b', { k: 'jbx.sub', id: 'bbbbbbbbbbb', ti: 'B', d: -5 }),
+            ev('dj', { k: 'jbx.now', id: 'ccccccccccc', ti: 'C', at: 1, d: 1e9 }),
+        ]);
+        assert.equal(st.queue[0].d, 213);
+        assert.equal(st.queue[1].d, null);
+        assert.equal(st.now.d, 7200);                       // capped, not trusted
+    });
+
+    test('queue cap holds at 25', () => {
+        const evs = [];
+        for (let i = 0; i < 30; i++) {
+            evs.push(ev('u' + i, { k: 'jbx.sub', id: 'id' + String(i).padStart(9, '0'), ti: 'T' + i }));
+        }
+        assert.equal(P.reduceJukebox(evs).queue.length, 25);
+    });
+});

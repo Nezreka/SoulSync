@@ -72256,3 +72256,57 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-attach-results { max-height: 220px; overflow-y: auto; }
 .chat-attach-status { font-size: 11.5px; color: rgba(var(--accent-light-rgb), 0.9); padding: 6px 2px; }
 .chat-attach-status--err { color: rgb(252, 165, 165); }
+
+/* ── chat jukebox (shared room listening) ─────────────────────────────── */
+.chat-jukebox {
+    flex: 0 0 auto;
+    margin: 0 16px 8px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 46vh;
+    overflow-y: auto;
+}
+.chat-jbx-now { display: flex; align-items: center; gap: 8px; min-height: 26px; flex-wrap: wrap; }
+.chat-jbx-live { color: rgb(var(--accent-light-rgb)); font-size: 12px; }
+.chat-jbx-title {
+    font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.92);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 100%; min-width: 0; flex: 1 1 auto;
+}
+.chat-jbx-meta { font-size: 11.5px; color: rgba(255,255,255,0.45); white-space: nowrap; }
+.chat-jbx-tune { flex: 0 0 auto; }
+.chat-jbx-player { border-radius: 10px; overflow: hidden; line-height: 0; }
+.chat-jbx-player iframe { border: 0; }
+.chat-jbx-queue { display: flex; flex-direction: column; gap: 2px; }
+.chat-jbx-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 4px 6px; border-radius: 8px;
+}
+.chat-jbx-row:hover { background: rgba(255,255,255,0.04); }
+.chat-jbx-vote {
+    flex: 0 0 auto;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.8);
+    border-radius: 8px; padding: 2px 9px; font-size: 12px; cursor: pointer;
+}
+.chat-jbx-vote:hover:not(:disabled) {
+    background: rgba(var(--accent-light-rgb), 0.18);
+    border-color: rgba(var(--accent-light-rgb), 0.4);
+}
+.chat-jbx-vote:disabled { opacity: 0.4; cursor: default; }
+.chat-jbx-form { display: flex; gap: 8px; }
+.chat-jbx-input { flex: 1 1 auto; min-width: 0; }
+.chat-jbx-add { flex: 0 0 auto; }
+.chat-jbx-results { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
+.chat-jbx-result {
+    display: flex; align-items: center; gap: 10px; text-align: left;
+    background: none; border: 0; cursor: pointer;
+    padding: 5px 6px; border-radius: 8px; width: 100%;
+}
+.chat-jbx-result:hover { background: rgba(255,255,255,0.05); }

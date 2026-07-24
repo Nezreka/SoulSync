@@ -19,6 +19,8 @@ when actually needed.
 
 from __future__ import annotations
 
+import re as _re
+
 from flask import Blueprint, g, jsonify, request
 
 from utils.logging_config import get_logger
@@ -49,19 +51,22 @@ def _self_username(client) -> str:
 # web_server, same pattern as core/enrichment/api.py.
 _client_getter = None      # () -> SoulseekClient | None (configured or None)
 _run_async = None          # coroutine -> result (the shared slskd event loop)
+_youtube_search = None     # (query, max_results) -> [YouTubeSearchResult] | None
 _config_get = None         # (key, default) -> value
 _config_set = None         # (key, value) -> None
 _db_getter = None          # () -> MusicDatabase (the chat archive lives there)
 
 
 def configure(*, client_getter, run_async, config_get, config_set=None,
-              db_getter=None) -> None:
-    global _client_getter, _run_async, _config_get, _config_set, _db_getter
+              db_getter=None, youtube_search=None) -> None:
+    global _client_getter, _run_async, _config_get, _config_set, _db_getter, \
+        _youtube_search
     _client_getter = client_getter
     _run_async = run_async
     _config_get = config_get
     _config_set = config_set
     _db_getter = db_getter
+    _youtube_search = youtube_search
 
 
 def _db():
@@ -252,6 +257,41 @@ def _filepost_upload(api_key, name, stream, expiry=None):
                       headers={"X-API-Key": api_key},
                       files={"file": (name, stream)},
                       data=data, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+
+_YT_ID_RE = _re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YT_URL_RES = (
+    _re.compile(r"(?:youtube\.com/watch\?(?:[^#\s]*&)?v=)([A-Za-z0-9_-]{11})"),
+    _re.compile(r"(?:youtu\.be/)([A-Za-z0-9_-]{11})"),
+    _re.compile(r"(?:youtube\.com/(?:shorts|embed|live)/)([A-Za-z0-9_-]{11})"),
+)
+
+
+def _parse_youtube_id(q: str):
+    """Extract an 11-char video id from a URL or a bare id; None otherwise."""
+    q = (q or "").strip()
+    if _YT_ID_RE.match(q):
+        return q
+    for rx in _YT_URL_RES:
+        m = rx.search(q)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _oembed_fetch(video_id):
+    """One seam for the keyless YouTube oEmbed lookup (monkeypatched in tests).
+
+    Returns {"title", "author_name"} or raises — never called with an
+    unvalidated id (the caller regex-gates it first)."""
+    import requests
+    r = requests.get(
+        "https://www.youtube.com/oembed",
+        params={"url": f"https://www.youtube.com/watch?v={video_id}",
+                "format": "json"},
+        timeout=10)
     r.raise_for_status()
     return r.json()
 
@@ -834,6 +874,54 @@ def create_blueprint() -> Blueprint:
         if not ok:
             return jsonify({"error": "slskd refused the message"}), 502
         return jsonify({"ok": True})
+
+    @bp.route("/api/chat/jukebox/resolve", methods=["POST"])
+    def chat_jukebox_resolve():
+        """Turn a user's jukebox input into candidate tracks.
+
+        A YouTube URL or bare 11-char id resolves via keyless oEmbed (one
+        exact result); anything else goes through yt-dlp search when wired
+        (up to 5 picks). Gated like sending — submitting to the queue IS
+        sending protocol chatter, so a client that can't speak can't make
+        the server fetch on its behalf either."""
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+        payload = request.get_json(silent=True) or {}
+        q = str(payload.get("q") or "").strip()
+        if not q or len(q) > 200:
+            return jsonify({"error": "Give me a YouTube link or a search"}), 400
+
+        vid = _parse_youtube_id(q)
+        if vid:
+            try:
+                meta = _oembed_fetch(vid) or {}
+            except Exception:
+                return jsonify({"error": "That video could not be resolved"}), 404
+            return jsonify({"results": [{
+                "id": vid,
+                "title": str(meta.get("title") or "")[:120] or vid,
+                "channel": str(meta.get("author_name") or "")[:80],
+            }]})
+
+        if _youtube_search is None:
+            return jsonify({"error": "Search is unavailable — paste a YouTube link"}), 503
+        try:
+            found = _youtube_search(q, 5) or []
+        except Exception:
+            logger.exception("chat: jukebox search failed")
+            return jsonify({"error": "YouTube search failed"}), 502
+        results = []
+        for v in found[:5]:
+            vid2 = str(getattr(v, "video_id", "") or "")
+            if not _YT_ID_RE.match(vid2):
+                continue
+            results.append({
+                "id": vid2,
+                "title": str(getattr(v, "title", "") or "")[:120],
+                "channel": str(getattr(v, "channel", "") or "")[:80],
+                "duration": int(getattr(v, "duration", 0) or 0),
+            })
+        return jsonify({"results": results})
 
     @bp.route("/api/chat/room/history", methods=["GET"])
     def chat_room_history():

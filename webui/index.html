@@ -10060,6 +10060,20 @@
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
+                            <!-- room jukebox: shared YouTube listening, votes pick what's next.
+                                 Static skeleton — the submit input and the player iframe must
+                                 survive the 4s poll (renderJukebox only rewrites now/queue). -->
+                            <div class="chat-jukebox" data-chat-jukebox hidden>
+                                <div class="chat-jbx-now" data-chat-jbx-now></div>
+                                <div class="chat-jbx-player" data-chat-jbx-player hidden></div>
+                                <div class="chat-jbx-queue" data-chat-jbx-queue></div>
+                                <form class="chat-jbx-form" data-chat-jbx-form>
+                                    <input class="chat-input chat-jbx-input" data-chat-jbx-input type="text" maxlength="200"
+                                           placeholder="Add a song — paste a YouTube link or search…" autocomplete="off">
+                                    <button type="submit" class="chat-fmt-btn chat-jbx-add">Add</button>
+                                </form>
+                                <div class="chat-jbx-results" data-chat-jbx-results hidden></div>
+                            </div>
                             <!-- user popover card (click any username) -->
                             <div class="chat-settings-overlay" data-chat-user-card hidden>
                                 <div class="chat-settings-modal chat-user-card">
