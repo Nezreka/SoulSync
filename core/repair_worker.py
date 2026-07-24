@@ -769,9 +769,10 @@ class RepairWorker:
         # Record job completion
         self._record_job_finish(run_id, job_id, result, duration)
 
-        if self._event_emit:
+        _emit = getattr(self, '_event_emit', None)
+        if _emit:
             try:      # 'Maintenance Scan Done' automation trigger
-                self._event_emit('music_repair_scan_completed', {
+                _emit('music_repair_scan_completed', {
                     'job_id': job_id, 'job_name': job.display_name,
                     'status': 'error' if result.errors > 0 and result.auto_fixed == 0 else 'finished',
                     'scanned': result.scanned,
@@ -879,9 +880,12 @@ class RepairWorker:
                 json.dumps(details) if details else '{}'
             ))
             conn.commit()
-            if self._event_emit:
+            # getattr, not attribute access: tests build workers via __new__
+            # (no __init__), and the emit must NEVER break a finding write.
+            _emit = getattr(self, '_event_emit', None)
+            if _emit:
                 try:      # 'Maintenance Finding Raised' automation trigger
-                    self._event_emit('music_repair_finding_created', {
+                    _emit('music_repair_finding_created', {
                         'job_id': job_id, 'finding_type': finding_type,
                         'severity': severity or 'info', 'title': title or ''})
                 except Exception:   # noqa: BLE001 - events never disturb the scan

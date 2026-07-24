@@ -157,6 +157,12 @@ def test_music_finding_emit_fires_and_never_raises(tmp_path):
     w._event_emit = lambda *a: (_ for _ in ()).throw(RuntimeError('down'))
     assert w._create_finding('genre_cleanup', 'genre_cleanup', 'info',
                              'artist', 'AR2', None, 'Title Y', 'desc')
+    # ...and neither may a MISSING attribute: test fixtures build workers via
+    # __new__ (no __init__) — the CI-caught regression. getattr, not self._x.
+    bare = RepairWorker.__new__(RepairWorker)
+    bare.db = db
+    assert bare._create_finding('genre_cleanup', 'genre_cleanup', 'info',
+                                'artist', 'AR3', None, 'Title Z', 'desc')
 
 
 # ── blocks registry ─────────────────────────────────────────────────────────
