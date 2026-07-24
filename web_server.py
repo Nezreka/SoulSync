@@ -166,6 +166,7 @@ from core.wishlist.state import (
     reset_flag_if_stuck as _reset_wishlist_flag_if_stuck,
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
+from core.imports.paths import artist_letter as _shared_artist_letter
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -7058,7 +7059,7 @@ def download_music_video():
                 video_template = '$artist/$title-video'
             safe_artist = _sanitize(artist_name)
             video_path = video_template
-            video_path = video_path.replace('$artistletter', safe_artist[0].upper() if safe_artist else 'A')
+            video_path = video_path.replace('$artistletter', _shared_artist_letter(safe_artist) if safe_artist else 'A')
             video_path = video_path.replace('$artist', safe_artist)
             video_path = video_path.replace('$title', _sanitize(track_title))
             video_path = video_path.replace('$year', str(year) if year else '')
@@ -17222,7 +17223,7 @@ def _apply_path_template(template: str, context: dict) -> str:
         'albumartist': album_artist_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
         'playlist': clean_context.get('playlist_name', ''),
-        'artistletter': (clean_context.get('artist', 'U') or 'U')[0].upper(),
+        'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
         'artist': clean_context.get('artist', 'Unknown Artist'),
         'album': clean_context.get('album', 'Unknown Album'),
         'title': clean_context.get('title', 'Unknown Track'),
@@ -17241,7 +17242,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
-    result = result.replace('$artistletter', (clean_context.get('artist', 'U') or 'U')[0].upper())
+    result = result.replace('$artistletter', _shared_artist_letter(clean_context.get('artist', 'U')))
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))

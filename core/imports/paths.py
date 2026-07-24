@@ -25,6 +25,40 @@ from core.imports.context import (
 logger = logging.getLogger("imports.paths")
 
 
+def artist_letter(artist, symbol_fallback=None):
+    """The $artistletter value — the ONE implementation all four call sites
+    share (both template engines + the music-video path builder).
+
+    Literal mode (default, historical behavior byte-for-byte): the raw first
+    character uppercased — '365 Days' → '3', 'Édith Piaf' → 'É'.
+
+    Symbol-fallback mode (file_organization.artistletter_symbol_fallback,
+    #1072 QT3496): diacritics fold to their base letter first (Édith → E —
+    the iTunes/Plex shelving convention; É belongs under E, not #), then
+    anything that doesn't resolve to A-Z (digits, symbols, CJK, Cyrillic,
+    ...) lands in one '#' catch-all instead of fragmenting the library into
+    per-character folders.
+
+    ``symbol_fallback=None`` reads the config; pass a bool to force either
+    mode (tests, previews).
+    """
+    literal = (artist or "U")[0].upper()
+    if symbol_fallback is None:
+        try:
+            from config.settings import config_manager
+            symbol_fallback = bool(config_manager.get(
+                "file_organization.artistletter_symbol_fallback", False))
+        except Exception:   # config unavailable → historical behavior
+            symbol_fallback = False
+    if not symbol_fallback:
+        return literal
+    import unicodedata
+    folded = unicodedata.normalize("NFKD", str(artist or ""))
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    lead = folded[:1].upper()
+    return lead if "A" <= lead <= "Z" else "#"
+
+
 def _get_config_manager():
     try:
         from config.settings import config_manager
@@ -256,7 +290,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "albumartist": album_artist_value,
         "albumtype": clean_context.get("albumtype", "Album"),
         "playlist": clean_context.get("playlist_name", ""),
-        "artistletter": (clean_context.get("artist", "U") or "U")[0].upper(),
+        "artistletter": artist_letter(clean_context.get("artist", "U")),
         "artist": clean_context.get("artist", "Unknown Artist"),
         "album": clean_context.get("album", "Unknown Album"),
         "title": clean_context.get("title", "Unknown Track"),
@@ -275,7 +309,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
-    result = result.replace("$artistletter", (clean_context.get("artist", "U") or "U")[0].upper())
+    result = result.replace("$artistletter", artist_letter(clean_context.get("artist", "U")))
     result = result.replace("$artist", clean_context.get("artist", "Unknown Artist"))
     result = result.replace("$album", clean_context.get("album", "Unknown Album"))
     result = result.replace("$title", clean_context.get("title", "Unknown Track"))

@@ -1679,6 +1679,7 @@ async function loadSettingsData() {
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
+        document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
         document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
@@ -4549,6 +4550,7 @@ async function saveSettings(quiet = false) {
             enabled: document.getElementById('file-organization-enabled').checked,
             disc_label: document.getElementById('disc-label').value,
             collab_artist_mode: document.getElementById('collab-artist-mode').value,
+            artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked,
             templates: {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,

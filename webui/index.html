@@ -8747,6 +8747,15 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>
+                                        <input type="checkbox" id="artistletter-symbol-fallback">
+                                        Group numbers &amp; symbols under "#"
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>When <code>$artistletter</code> is used in templates: artists starting with digits, symbols or non-Latin scripts all sort into a single <code>#</code> folder instead of one folder per character ("365 Days" → <code>#/</code>, "北京" → <code>#/</code>). Accented letters fold to their base letter (Édith Piaf → <code>E/</code>). Off = the literal first character, exactly as before.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Artist Tag Separator:</label>
                                     <select id="artist-separator" class="form-select">
                                         <option value=", ">, (comma)</option>
