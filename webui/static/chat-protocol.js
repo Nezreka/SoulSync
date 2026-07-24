@@ -167,6 +167,90 @@
         return { queue: queue, now: now, tally: tally };
     }
 
+    // ── Pins / poll / topic / tuned-presence reducers ───────────────────
+    // Same discipline as the jukebox: each is a pure fold over the room's
+    // protocol events, so every SoulSync client shows the same board.
+
+    // pin.add {u, ts, x} / pin.del {u, ts} → rolling board of pinned
+    // messages (dedupe by author|timestamp, cap 8 — oldest falls off).
+    function reducePins(events) {
+        var pins = [];
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            if (p.k !== 'pin.add' && p.k !== 'pin.del') return;
+            var u = String(p.u || ''), ts = String(p.ts || '');
+            if (!u || !ts || u.length > 64 || ts.length > 64) return;
+            var key = u + '|' + ts;
+            pins = pins.filter(function (e) { return e.key !== key; });
+            if (p.k === 'pin.add') {
+                pins.push({ key: key, u: u, ts: ts,
+                            x: String(p.x || '').slice(0, 140), by: ev.username });
+                if (pins.length > 8) pins.shift();
+            }
+        });
+        return pins;
+    }
+
+    // poll.start {q, o1..o4} / poll.vote {o: '1'..'4'} / poll.end {} →
+    // ONE active poll per room, latest start wins and resets votes; only
+    // the starter's poll.end closes it. Votes ride tallyVotes (latest per
+    // user), restricted to the poll's real option indices.
+    function reducePoll(events) {
+        var poll = null;
+        var votes = [];
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            if (p.k === 'poll.start') {
+                var opts = [];
+                for (var i = 1; i <= 4; i++) {
+                    var o = p['o' + i];
+                    if (typeof o === 'string' && o.trim()) opts.push(o.trim().slice(0, 80));
+                }
+                var qq = String(p.q || '').trim().slice(0, 160);
+                if (!qq || opts.length < 2) return;
+                poll = { q: qq, options: opts, by: ev.username,
+                         at: ev.timestamp, closed: false };
+                votes = [];
+            } else if (p.k === 'poll.vote' && poll && !poll.closed) {
+                var idx = String(p.o || '');
+                if (/^[1-4]$/.test(idx) && parseInt(idx, 10) <= poll.options.length) {
+                    votes.push({ username: ev.username, option: idx });
+                }
+            } else if (p.k === 'poll.end' && poll && ev.username === poll.by) {
+                poll.closed = true;
+            }
+        });
+        if (!poll) return null;
+        poll.tally = tallyVotes(votes);
+        return poll;
+    }
+
+    // topic.set {t} → latest wins; empty clears.
+    function reduceTopic(events) {
+        var topic = null;
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            if (ev.p.k !== 'topic.set') return;
+            var t = String(ev.p.t || '').trim().slice(0, 160);
+            topic = t ? { t: t, by: ev.username } : null;
+        });
+        return topic;
+    }
+
+    // jbx.tune {on: 1|0} → who is listening right now (latest per user).
+    function reduceTuned(events) {
+        var tuned = {};
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            if (ev.p.k !== 'jbx.tune') return;
+            if (ev.p.on) tuned[ev.username] = 1;
+            else delete tuned[ev.username];
+        });
+        return tuned;
+    }
+
     // The next track every client agrees on: most votes (lexicographic tie),
     // FIFO head when nobody voted. Null when the queue is empty.
     function nextTrack(state) {
@@ -186,5 +270,9 @@
         electCoordinator: electCoordinator,
         reduceJukebox: reduceJukebox,
         nextTrack: nextTrack,
+        reducePins: reducePins,
+        reducePoll: reducePoll,
+        reduceTopic: reduceTopic,
+        reduceTuned: reduceTuned,
     };
 })();

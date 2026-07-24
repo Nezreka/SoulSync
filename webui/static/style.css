@@ -72310,3 +72310,71 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     padding: 5px 6px; border-radius: 8px; width: 100%;
 }
 .chat-jbx-result:hover { background: rgba(255,255,255,0.05); }
+
+/* ── chat pin board + room poll + topic (protocol-bus surfaces) ───────── */
+.chat-pinbar {
+    flex: 0 0 auto;
+    margin: 0 16px 6px;
+    padding: 4px 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px;
+}
+.chat-pinbar-head {
+    background: none; border: 0; cursor: pointer;
+    color: rgba(255,255,255,0.65); font-size: 12px; padding: 3px 4px;
+}
+.chat-pinbar-head:hover { color: rgba(255,255,255,0.9); }
+.chat-pin-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 4px 6px; border-radius: 8px; font-size: 12.5px;
+}
+.chat-pin-row:hover { background: rgba(255,255,255,0.04); }
+.chat-pin-text {
+    color: rgba(255,255,255,0.85); min-width: 0; flex: 1 1 auto;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-pin-by { font-size: 11px; color: rgba(255,255,255,0.35); white-space: nowrap; }
+.chat-pin-del {
+    background: none; border: 0; cursor: pointer;
+    color: rgba(255,255,255,0.4); font-size: 14px; padding: 0 4px;
+}
+.chat-pin-del:hover { color: rgb(252, 165, 165); }
+.chat-pollcard {
+    flex: 0 0 auto;
+    margin: 0 16px 8px;
+    padding: 10px 12px;
+    background: rgba(var(--accent-light-rgb), 0.05);
+    border: 1px solid rgba(var(--accent-light-rgb), 0.18);
+    border-radius: 12px;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.chat-poll-head { display: flex; align-items: center; gap: 10px; font-size: 13px; flex-wrap: wrap; }
+.chat-poll-head b { color: rgba(255,255,255,0.92); }
+.chat-poll-opt {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    padding: 5px 8px; border-radius: 8px; overflow: hidden;
+}
+.chat-poll-opt--win { outline: 1px solid rgba(var(--accent-light-rgb), 0.5); }
+.chat-poll-vote {
+    background: none; border: 0; cursor: pointer; text-align: left;
+    color: rgba(255,255,255,0.85); font-size: 12.5px; padding: 0;
+    flex: 1 1 auto; min-width: 0; position: relative; z-index: 1;
+}
+.chat-poll-vote:hover { color: rgb(var(--accent-light-rgb)); }
+.chat-poll-label { flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: rgba(255,255,255,0.85); position: relative; z-index: 1; }
+.chat-poll-n { font-size: 11.5px; color: rgba(255,255,255,0.5); white-space: nowrap; position: relative; z-index: 1; }
+.chat-poll-bar {
+    position: absolute; left: 0; top: 0; bottom: 0; z-index: 0;
+    background: rgba(var(--accent-light-rgb), 0.14);
+    border-radius: 8px; transition: width 0.3s ease;
+}
+.chat-poll-pop .chat-input { margin-bottom: 6px; }
+.chat-topic-edit {
+    background: none; border: 0; cursor: pointer;
+    color: rgba(255,255,255,0.35); font-size: 11px; padding: 0 2px;
+}
+.chat-topic-edit:hover { color: rgba(255,255,255,0.8); }
+.chat-head-sub--topic { color: rgba(var(--accent-light-rgb), 0.9); }
+.chat-topic-in { max-width: 420px; margin-left: 12px; }
+.chat-user-tuned { color: rgb(var(--accent-light-rgb)); margin-left: 5px; font-size: 11px; }

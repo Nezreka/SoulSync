@@ -10074,6 +10074,9 @@
                                 </form>
                                 <div class="chat-jbx-results" data-chat-jbx-results hidden></div>
                             </div>
+                            <!-- pinned messages + the room poll: pure folds over the protocol bus -->
+                            <div class="chat-pinbar" data-chat-pinbar hidden></div>
+                            <div class="chat-pollcard" data-chat-poll hidden></div>
                             <!-- user popover card (click any username) -->
                             <div class="chat-settings-overlay" data-chat-user-card hidden>
                                 <div class="chat-settings-modal chat-user-card">
@@ -10190,6 +10193,21 @@
                                             <div class="chat-attach-results" data-chat-attach-results></div>
                                             <div class="chat-attach-status" data-chat-attach-status hidden></div>
                                         </div>
+                                        <div class="chat-gif-pop chat-poll-pop" data-chat-poll-pop hidden>
+                                            <input class="chat-input" data-chat-poll-q type="text" maxlength="160"
+                                                   placeholder="Ask the room something…" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o1 type="text" maxlength="80"
+                                                   placeholder="Option 1" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o2 type="text" maxlength="80"
+                                                   placeholder="Option 2" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o3 type="text" maxlength="80"
+                                                   placeholder="Option 3 (optional)" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o4 type="text" maxlength="80"
+                                                   placeholder="Option 4 (optional)" autocomplete="off">
+                                            <div class="chat-settings-actions">
+                                                <button type="button" class="chat-send-btn" data-chat-poll-start>Start poll</button>
+                                            </div>
+                                        </div>
                                         <div class="chat-gif-pop" data-chat-gif-pop hidden>
                                             <input class="chat-input chat-gif-search" data-chat-gif-search type="text"
                                                    placeholder="Search GIPHY…" autocomplete="off">
@@ -10203,6 +10221,8 @@
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
                                         <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-attach-btn title="Share a file (filepost.dev)">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-poll-btn title="Start a room poll">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="20" x2="6" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="14"/></svg></button>
                                         <button type="button" class="chat-tbtn chat-tbtn--side chat-gif-btn" data-chat-gif-btn title="Send a GIF">GIF</button>
                                         <button class="chat-send-fab" type="submit" title="Send">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>

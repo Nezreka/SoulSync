@@ -48,6 +48,9 @@
             timer: null,         //   elapsed clock + DJ watchdog while open
             ytLoading: false, ytCbs: [],
         },
+        pinsOpen: false,         // pin board expanded
+        topicEditing: false,     // head shows the topic input (renderHead pauses)
+        pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
 
@@ -345,6 +348,12 @@
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
                 'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
         }
+        if (state.view === 'room' && state.canSend) {
+            acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
+                'data-chat-pin-user="' + attr(m.username || '') + '" ' +
+                'data-chat-pin-ts="' + attr(String(m.timestamp || '')) + '" ' +
+                'data-chat-pin-x="' + attr(String(m.message || '').slice(0, 140)) + '">📌</button>';
+        }
         var actions = '<span class="chat-line-acts">' + acts + '</span>';
         var chips = '';
         if (m.reactions && m.reactions.length) {
@@ -576,11 +585,14 @@
         return cls;
     }
 
-    function _userBtn(n, extraClass) {
+    function _userBtn(n, extraClass, tunedMap) {
         var ign = isIgnored(n);
+        var tuned = tunedMap && tunedMap[n];
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
-            '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) + '">' +
+            '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
+            (tuned ? ' — listening to the room jukebox' : '') + '">' +
             '<span class="chat-user-dot"></span>' + esc(n) +
+            (tuned ? '<span class="chat-user-tuned">♫</span>' : '') +
             (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
     }
 
@@ -618,16 +630,18 @@
             else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
         });
+        var tunedMap = window.ChatProtocol
+            ? window.ChatProtocol.reduceTuned(_roomEvents()) : {};   // once, not per user
         var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
-        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self'); }).join('');
+        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap); }).join('');
         if (apps.length) {
             html += '<div class="chat-users-label chat-users-label--sub">SoulSync users</div>' +
-                apps.map(function (n) { return _userBtn(n); }).join('');
+                apps.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
         }
         if (rest.length) {
             html += (apps.length || self.length
                         ? '<div class="chat-users-label chat-users-label--sub">Other clients</div>' : '') +
-                rest.map(function (n) { return _userBtn(n); }).join('');
+                rest.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
@@ -672,12 +686,22 @@
     function renderHead() {
         var head = q('[data-chat-head]');
         if (!head) return;
+        if (state.topicEditing) return;   // don't clobber the open topic input
         var isHome = !state.homeRoom || state.room === state.homeRoom;
+        var topic = (window.ChatProtocol && state.view === 'room')
+            ? window.ChatProtocol.reduceTopic(_roomEvents()) : null;
+        var subText = topic
+            ? esc(topic.t)
+            : (isHome ? 'the SoulSync community room on Soulseek'
+                      : 'a public Soulseek room');
         head.innerHTML = state.view === 'room'
             ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
-              '<span class="chat-head-sub">' + (isHome
-                  ? 'the SoulSync community room on Soulseek'
-                  : 'a public Soulseek room') + '</span>' +
+              '<span class="chat-head-sub' + (topic ? ' chat-head-sub--topic' : '') + '"' +
+                  (topic ? ' title="topic set by ' + attr(topic.by) + '"' : '') + '>' + subText +
+                  (state.canSend
+                      ? ' <button class="chat-topic-edit" type="button" data-chat-topic-edit ' +
+                        'title="Set the room topic (SoulSync clients only)">✎</button>'
+                      : '') + '</span>' +
               '<span class="chat-head-search' + (state.searchMode ? ' chat-head-search--on' : '') + '">' +
                   '<button class="chat-filter-btn" type="button" data-chat-search-btn title="Search this room\'s history">🔍</button>' +
                   '<input class="chat-head-search-in" data-chat-search-input type="text" ' +
@@ -716,7 +740,10 @@
         // emoji button stays everywhere (plain unicode is fine in PMs).
         var gifBtn = q('[data-chat-gif-btn]');
         if (gifBtn) gifBtn.hidden = !(state.view === 'room' && state.canSend);
-        if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); }
+        // polls are a room thing (bus events mean nothing in a PM)
+        var pollBtn = q('[data-chat-poll-btn]');
+        if (pollBtn) pollBtn.hidden = !(state.view === 'room' && state.canSend);
+        if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); togglePollPop(true); }
     }
 
     // ── composer toolbar (room only) ─────────────────────────────────────────
@@ -1511,13 +1538,16 @@
     function openRoom(name) {
         state.view = 'room'; state.pmUser = null; state.lastStamp = null; state.stickBottom = true;
         state.renderedCount = 0; hideJumpPill();
-        var prevRoom = state.room;
-        state.room = name || state.room || state.homeRoom || 'SoulSync';
-        if (prevRoom && prevRoom !== state.room) {
-            _jbxTuneOut();               // never keep playing another room's track
+        var nextRoom = name || state.room || state.homeRoom || 'SoulSync';
+        if (state.room && state.room !== nextRoom) {
+            _jbxTuneOut();               // BEFORE the flip: the off event goes to the OLD room
             state.jukebox.lastRendered = '';
+            state.pinsOpen = false;
+            state.pollDismissedAt = null;
         }
-        renderJukebox();
+        state.room = nextRoom;
+        state.topicEditing = false;
+        renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
         cancelReply();
         try {
@@ -1643,7 +1673,8 @@
         state.searchMode = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
-        renderHead(); renderComposer(); renderJukebox();   // hides the panel (audio keeps playing)
+        state.topicEditing = false;
+        renderHead(); renderComposer(); renderBusUI();   // hides the panels (audio keeps playing)
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
         refresh();
@@ -1708,6 +1739,10 @@
             if (!e.target.closest('[data-chat-emoji-btn]') &&
                     !e.target.closest('[data-chat-emoji-pop]')) {
                 toggleEmojiPicker(true);
+            }
+            if (!e.target.closest('[data-chat-poll-btn]') &&
+                    !e.target.closest('[data-chat-poll-pop]')) {
+                togglePollPop(true);
             }
             if (!e.target.closest('[data-chat-gif-btn]') &&
                     !e.target.closest('[data-chat-gif-pop]')) {
@@ -1790,6 +1825,52 @@
                 state.lastStamp = null;
                 state.renderedCount = 0; hideJumpPill();   // a filter flip isn't 'new messages'
                 renderHead(); refresh();
+                return;
+            }
+            t = e.target.closest('[data-chat-pins-toggle]');
+            if (t) { state.pinsOpen = !state.pinsOpen; renderPinbar(); return; }
+            t = e.target.closest('[data-chat-pin-del-u]');
+            if (t) {
+                sendProtocol('pin.del', { u: t.getAttribute('data-chat-pin-del-u'),
+                                          ts: t.getAttribute('data-chat-pin-del-ts') });
+                return;
+            }
+            t = e.target.closest('[data-chat-pin-user]');
+            if (t) {
+                sendProtocol('pin.add', { u: t.getAttribute('data-chat-pin-user'),
+                                          ts: t.getAttribute('data-chat-pin-ts'),
+                                          x: t.getAttribute('data-chat-pin-x') });
+                if (typeof showToast === 'function') showToast('📌 Pinned for the room', 'success');
+                return;
+            }
+            t = e.target.closest('[data-chat-poll-btn]');
+            if (t) { togglePollPop(); return; }
+            t = e.target.closest('[data-chat-poll-start]');
+            if (t) { _pollStart(); return; }
+            t = e.target.closest('[data-chat-poll-vote]');
+            if (t) { sendProtocol('poll.vote', { o: t.getAttribute('data-chat-poll-vote') }); return; }
+            t = e.target.closest('[data-chat-poll-end]');
+            if (t) { sendProtocol('poll.end', {}); return; }
+            t = e.target.closest('[data-chat-poll-dismiss]');
+            if (t) {
+                var pd = window.ChatProtocol ? window.ChatProtocol.reducePoll(_roomEvents()) : null;
+                state.pollDismissedAt = pd ? pd.at : null;
+                renderPoll();
+                return;
+            }
+            t = e.target.closest('[data-chat-topic-edit]');
+            if (t) {
+                state.topicEditing = true;
+                var headEl = q('[data-chat-head]');
+                var cur = (window.ChatProtocol ? window.ChatProtocol.reduceTopic(_roomEvents()) : null);
+                if (headEl) {
+                    headEl.innerHTML = '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
+                        '<input class="chat-input chat-topic-in" data-chat-topic-input type="text" maxlength="160" ' +
+                        'placeholder="Set a room topic… (Enter to save, Esc to cancel)" autocomplete="off" value="' +
+                        attr(cur ? cur.t : '') + '">';
+                    var ti = q('[data-chat-topic-input]');
+                    if (ti) { ti.focus(); ti.select(); }
+                }
                 return;
             }
             t = e.target.closest('[data-chat-jukebox-btn]');
@@ -1933,6 +2014,15 @@
             if (e.target && e.target.matches('[data-chat-search-input]')) {
                 if (e.key === 'Enter') { e.preventDefault(); runSearch(e.target.value); }
                 if (e.key === 'Escape') exitSearch();
+            }
+            if (e.target && e.target.matches('[data-chat-topic-input]')) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    sendProtocol('topic.set', { t: String(e.target.value || '').trim() });
+                    state.topicEditing = false;
+                    renderHead();
+                }
+                if (e.key === 'Escape') { state.topicEditing = false; renderHead(); }
             }
         });
 
@@ -2111,7 +2201,7 @@
         if (fresh.length) {
             // presence: a protocol event proves SoulSync — refresh buckets
             renderUsersList();
-            renderJukebox();
+            renderBusUI();
             try {
                 document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
                     { detail: { events: fresh } }));
@@ -2141,6 +2231,110 @@
         _ingestProtocol(d.events || []);
     }
 
+    // Every surface reduced from the protocol bus, painted together.
+    function renderBusUI() {
+        renderJukebox();
+        renderPinbar();
+        renderPoll();
+        // topic lives in the head sub-line — but search mode freezes the
+        // head (its input would be clobbered mid-typing by a socket event)
+        if (!state.searchMode) renderHead();
+    }
+
+    // ── pinned messages (pin.add / pin.del on the bus) ──────────────────
+    function renderPinbar() {
+        var host = q('[data-chat-pinbar]');
+        if (!host) return;
+        var CP = window.ChatProtocol;
+        var pins = (CP && state.view === 'room') ? CP.reducePins(_roomEvents()) : [];
+        if (!pins.length) { host.hidden = true; host.innerHTML = ''; return; }
+        host.hidden = false;
+        var head = '<button class="chat-pinbar-head" type="button" data-chat-pins-toggle>📌 ' +
+            pins.length + ' pinned' + (state.pinsOpen ? ' ▾' : ' ▸') + '</button>';
+        var rows = '';
+        if (state.pinsOpen) {
+            rows = pins.slice().reverse().map(function (pin) {
+                return '<div class="chat-pin-row">' +
+                    '<span class="chat-pin-text"><b>' + esc(pin.u) + '</b> ' + esc(pin.x) + '</span>' +
+                    '<span class="chat-pin-by">pinned by ' + esc(pin.by) + '</span>' +
+                    (state.canSend
+                        ? '<button class="chat-pin-del" type="button" title="Unpin" ' +
+                          'data-chat-pin-del-u="' + attr(pin.u) + '" data-chat-pin-del-ts="' + attr(pin.ts) + '">×</button>'
+                        : '') +
+                '</div>';
+            }).join('');
+        }
+        host.innerHTML = head + rows;
+    }
+
+    // ── the room poll (poll.start / poll.vote / poll.end on the bus) ────
+    function renderPoll() {
+        var host = q('[data-chat-poll]');
+        if (!host) return;
+        var CP = window.ChatProtocol;
+        var poll = (CP && state.view === 'room') ? CP.reducePoll(_roomEvents()) : null;
+        if (!poll || (poll.closed && state.pollDismissedAt === poll.at)) {
+            host.hidden = true; host.innerHTML = ''; return;
+        }
+        host.hidden = false;
+        var total = poll.tally.total;
+        var rows = poll.options.map(function (opt, i) {
+            var idx = String(i + 1);
+            var n = poll.tally.counts[idx] || 0;
+            var pct = total ? Math.round(n * 100 / total) : 0;
+            var winner = poll.closed && poll.tally.winner === idx;
+            return '<div class="chat-poll-opt' + (winner ? ' chat-poll-opt--win' : '') + '">' +
+                (poll.closed || !state.canSend
+                    ? '<span class="chat-poll-label">' + esc(opt) + '</span>'
+                    : '<button class="chat-poll-vote" type="button" data-chat-poll-vote="' + idx + '">' +
+                          esc(opt) + '</button>') +
+                '<span class="chat-poll-n">' + n + (total ? ' · ' + pct + '%' : '') + '</span>' +
+                '<span class="chat-poll-bar" style="width:' + pct + '%"></span>' +
+            '</div>';
+        }).join('');
+        host.innerHTML =
+            '<div class="chat-poll-head">📊 <b>' + esc(poll.q) + '</b>' +
+                '<span class="chat-jbx-meta">' + (poll.closed ? 'final — ' : '') +
+                    total + ' vote' + (total === 1 ? '' : 's') + ' · by ' + esc(poll.by) + '</span>' +
+                (!poll.closed && state.selfName && poll.by === state.selfName
+                    ? '<button class="chat-fmt-btn" type="button" data-chat-poll-end>End poll</button>' : '') +
+                (poll.closed
+                    ? '<button class="chat-pin-del" type="button" title="Dismiss" data-chat-poll-dismiss>×</button>' : '') +
+            '</div>' + rows;
+    }
+
+    function _pollStart() {
+        var qEl = q('[data-chat-poll-q]');
+        if (!qEl) return;
+        var fields = { q: String(qEl.value || '').trim() };
+        var opts = 0;
+        for (var i = 1; i <= 4; i++) {
+            var o = q('[data-chat-poll-o' + i + ']');
+            var v = o ? String(o.value || '').trim() : '';
+            if (v) { opts += 1; fields['o' + opts] = v; }   // compact gaps
+        }
+        if (!fields.q || opts < 2) {
+            if (typeof showToast === 'function') showToast('A poll needs a question and at least 2 options', 'error');
+            return;
+        }
+        sendProtocol('poll.start', fields);
+        [qEl].concat([1, 2, 3, 4].map(function (i2) { return q('[data-chat-poll-o' + i2 + ']'); }))
+            .forEach(function (el) { if (el) el.value = ''; });
+        togglePollPop(true);
+        state.pollDismissedAt = null;
+    }
+
+    function togglePollPop(forceClose) {
+        var pop = q('[data-chat-poll-pop]');
+        if (!pop) return;
+        pop.hidden = forceClose === true ? true : !pop.hidden;
+        if (!pop.hidden) {
+            toggleEmojiPicker(true); toggleGifPicker(true); toggleAttachPanel(true);
+            var qEl = q('[data-chat-poll-q]');
+            if (qEl) qEl.focus();
+        }
+    }
+
     // ── jukebox (shared room listening — a pure fold over the bus) ──────
     // State lives in the protocol stream (jbx.sub / jbx.vote / jbx.now);
     // every client reduces the same events to the same queue + now-playing.
@@ -2148,13 +2342,15 @@
     // browsers require for audible autoplay); joiners seek to the live
     // position from now.at. The DJ (deterministic election, no chatter) is
     // the one client that emits jbx.now when a track ends or the queue waits.
+    function _roomEvents() {
+        var room = state.room || '';
+        return (state.protocolLog || []).filter(function (e) { return e.room === room; });
+    }
+
     function _jbxState() {
         var CP = window.ChatProtocol;
         if (!CP) return { queue: [], now: null, tally: { counts: {}, winner: null, total: 0 } };
-        var room = state.room || '';
-        return CP.reduceJukebox((state.protocolLog || []).filter(function (e) {
-            return e.room === room;
-        }));
+        return CP.reduceJukebox(_roomEvents());
     }
 
     function _jbxIsDj() {
@@ -2306,6 +2502,7 @@
         var st = _jbxState();
         if (!st.now) return;
         state.jukebox.tunedIn = true;
+        sendProtocol('jbx.tune', { on: 1 });
         state.jukebox.lastRendered = '';
         renderJukebox();
         _jbxLoadYT(function () {
@@ -2315,6 +2512,7 @@
     }
 
     function _jbxTuneOut() {
+        if (state.jukebox.tunedIn) sendProtocol('jbx.tune', { on: 0 });
         state.jukebox.tunedIn = false;
         if (state.jukebox.player) {
             try { state.jukebox.player.destroy(); } catch (e) { /* already gone */ }

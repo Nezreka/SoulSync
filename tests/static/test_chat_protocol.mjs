@@ -185,3 +185,109 @@ describe('reduceJukebox — the pure fold every client agrees on', () => {
         assert.equal(P.reduceJukebox(evs).queue.length, 25);
     });
 });
+
+describe('reducePins — the shared pin board', () => {
+    const ev = (user, p) => ({ username: user, timestamp: 't', p });
+    const add = (by, u, ts, x) => ev(by, { k: 'pin.add', u, ts, x });
+
+    test('add, dedupe (re-pin moves to newest), delete', () => {
+        const pins = P.reducePins([
+            add('a', 'bob', 't1', 'first'),
+            add('a', 'sue', 't2', 'second'),
+            add('b', 'bob', 't1', 'again'),          // re-pin same message
+            ev('c', { k: 'pin.del', u: 'sue', ts: 't2' }),
+        ]);
+        assert.equal(pins.length, 1);
+        assert.equal(pins[0].u, 'bob');
+        assert.equal(pins[0].by, 'b');               // latest pinner wins
+    });
+
+    test('board caps at 8 — oldest falls off', () => {
+        const evs = [];
+        for (let i = 0; i < 10; i++) evs.push(add('a', 'u' + i, 't' + i, 'x'));
+        const pins = P.reducePins(evs);
+        assert.equal(pins.length, 8);
+        assert.equal(pins[0].u, 'u2');
+    });
+
+    test('garbage never lands', () => {
+        assert.equal(P.reducePins([ev('a', { k: 'pin.add', u: '', ts: 't' })]).length, 0);
+        assert.equal(P.reducePins([ev('a', { k: 'pin.add', u: 'x'.repeat(99), ts: 't' })]).length, 0);
+    });
+});
+
+describe('reducePoll — one active poll, latest start wins', () => {
+    const ev = (user, p, ts) => ({ username: user, timestamp: ts || 't', p });
+
+    test('start + votes + tally, latest vote per user', () => {
+        const poll = P.reducePoll([
+            ev('op', { k: 'poll.start', q: 'best daft punk album?', o1: 'Discovery', o2: 'RAM' }),
+            ev('x', { k: 'poll.vote', o: '1' }),
+            ev('y', { k: 'poll.vote', o: '2' }),
+            ev('x', { k: 'poll.vote', o: '2' }),
+        ]);
+        assert.equal(poll.q, 'best daft punk album?');
+        shapeEqual(poll.tally.counts, { '2': 2 });
+        assert.equal(poll.closed, false);
+    });
+
+    test('a new start resets everything', () => {
+        const poll = P.reducePoll([
+            ev('op', { k: 'poll.start', q: 'old?', o1: 'a', o2: 'b' }),
+            ev('x', { k: 'poll.vote', o: '1' }),
+            ev('op2', { k: 'poll.start', q: 'new?', o1: 'c', o2: 'd' }),
+        ]);
+        assert.equal(poll.q, 'new?');
+        assert.equal(poll.tally.total, 0);
+    });
+
+    test('only the starter can end it; votes stop after close', () => {
+        const poll = P.reducePoll([
+            ev('op', { k: 'poll.start', q: 'q?', o1: 'a', o2: 'b' }),
+            ev('mallory', { k: 'poll.end' }),
+            ev('x', { k: 'poll.vote', o: '1' }),
+            ev('op', { k: 'poll.end' }),
+            ev('y', { k: 'poll.vote', o: '2' }),      // too late
+        ]);
+        assert.equal(poll.closed, true);
+        shapeEqual(poll.tally.counts, { '1': 1 });
+    });
+
+    test('out-of-range and hostile votes are ignored', () => {
+        const poll = P.reducePoll([
+            ev('op', { k: 'poll.start', q: 'q?', o1: 'a', o2: 'b' }),
+            ev('x', { k: 'poll.vote', o: '3' }),      // only 2 options exist
+            ev('y', { k: 'poll.vote', o: 'zz' }),
+        ]);
+        assert.equal(poll.tally.total, 0);
+    });
+
+    test('degenerate starts are refused', () => {
+        assert.equal(P.reducePoll([ev('op', { k: 'poll.start', q: 'q?', o1: 'only' })]), null);
+        assert.equal(P.reducePoll([ev('op', { k: 'poll.start', q: '', o1: 'a', o2: 'b' })]), null);
+        assert.equal(P.reducePoll([]), null);
+    });
+});
+
+describe('reduceTopic + reduceTuned', () => {
+    const ev = (user, p) => ({ username: user, timestamp: 't', p });
+
+    test('latest topic wins, empty clears', () => {
+        shapeEqual(P.reduceTopic([
+            ev('a', { k: 'topic.set', t: 'share your vinyl finds' }),
+            ev('b', { k: 'topic.set', t: 'friday listening party' }),
+        ]), { t: 'friday listening party', by: 'b' });
+        assert.equal(P.reduceTopic([
+            ev('a', { k: 'topic.set', t: 'x' }),
+            ev('b', { k: 'topic.set', t: '' }),
+        ]), null);
+    });
+
+    test('tuned presence follows the latest on/off per user', () => {
+        shapeEqual(P.reduceTuned([
+            ev('a', { k: 'jbx.tune', on: 1 }),
+            ev('b', { k: 'jbx.tune', on: 1 }),
+            ev('a', { k: 'jbx.tune', on: 0 }),
+        ]), { b: 1 });
+    });
+});
