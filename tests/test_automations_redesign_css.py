@@ -128,3 +128,24 @@ def test_section_body_stays_a_plain_block():
 def test_no_page_ambient_background():
     """The purple container glow is gone (no other page has one)."""
     assert ".automations-container::before" not in _CSS
+
+
+def test_system_fleet_reads_as_rows():
+    """Boulder's readability pass: the System section renders one automation
+    per line (Sonarr tasks-page shape) with an aligned name rail; user
+    automations keep cards, capped at 3 columns on wide screens."""
+    css = _strip_comments(_CSS)
+    assert ".automations-section.section-protected .automations-grid" in css
+    rows_rule = css[css.index(".automations-section.section-protected .automations-grid"):]
+    assert "grid-template-columns: 1fr" in rows_rule[:200]
+    assert "flex: 0 0 260px" in css                      # the name rail
+    assert "repeat(3, 1fr)" in css                       # wide-screen card cap
+
+
+def test_card_noise_reduction_in_renderer():
+    """System cards drop the action chip when it restates the title, the
+    last-run summary shows only non-zero facts, and names get tooltips."""
+    assert "showActionChip" in _JS
+    assert "_norm(a.name).includes(_norm(_autoFormatAction(a.action_type)))" in _JS
+    assert "v !== 0" in _JS and "v !== '0'" in _JS
+    assert 'title="${_escAttr(a.name)}"' in _JS

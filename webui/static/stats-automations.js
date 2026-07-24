@@ -4116,6 +4116,11 @@ function renderAutomationCard(a) {
     const aIcon = _autoIcons[a.action_type] || '\u2699\uFE0F';
     const tl = tIcon + ' ' + _autoFormatTrigger(a.trigger_type, a.trigger_config);
     const al = aIcon + ' ' + _autoFormatAction(a.action_type);
+    // System cards: the title IS the action ("Auto-Scan Watchlist Studios" →
+    // chip "Scan Watchlist Studios") — restating it as a chip is pure noise.
+    // User automations keep the full pipeline (composition is the point).
+    const _norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const showActionChip = !(a.is_system && _norm(a.name).includes(_norm(_autoFormatAction(a.action_type))));
     const thenItems = a.then_actions || [];
     const actionDelay = a.action_config && a.action_config.delay ? a.action_config.delay : 0;
     const metaParts = [];
@@ -4131,7 +4136,8 @@ function renderAutomationCard(a) {
         // already says it) and internal keys.
         const facts = Object.entries(a.last_result)
             .filter(([k, v]) => k !== 'status' && !k.startsWith('_') &&
-                (typeof v === 'number' || (typeof v === 'string' && v.length <= 24 && v !== '')))
+                ((typeof v === 'number' && v !== 0) ||
+                 (typeof v === 'string' && v.length <= 24 && v !== '' && v !== '0')))
             .slice(0, 3)
             .map(([k, v]) => _esc(k.replace(/_/g, ' ')) + ': ' + _esc(String(v)));
         if (facts.length) metaParts.push('<span class="auto-last-result" title="Last run">' + facts.join(' \u00b7 ') + '</span>');
@@ -4147,12 +4153,12 @@ function renderAutomationCard(a) {
     card.innerHTML = `
         <div class="automation-status ${a.enabled ? 'enabled' : 'disabled'}"></div>
         <div class="automation-info">
-            <div class="automation-name">${_esc(a.name)}</div>
+            <div class="automation-name" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
             <div class="automation-flow">
                 <span class="flow-trigger">${_esc(tl)}</span>
-                <span class="flow-arrow">&rarr;</span>
+                ${(showActionChip || actionDelay || thenItems.length) ? '<span class="flow-arrow">&rarr;</span>' : ''}
                 ${actionDelay ? `<span class="flow-delay">\u23F3 ${actionDelay}m</span><span class="flow-arrow">&rarr;</span>` : ''}
-                <span class="flow-action">${_esc(al)}</span>
+                ${showActionChip ? `<span class="flow-action">${_esc(al)}</span>` : ''}
                 ${thenItems.length ? thenItems.map(t => `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(_autoFormatNotify(t.type))}</span>`).join('') : ''}
             </div>
             <div class="automation-meta">${metaParts.join(' &middot; ')}</div>

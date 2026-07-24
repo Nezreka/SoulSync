@@ -866,3 +866,61 @@
     border-color: rgba(var(--accent-rgb), 0.45);
     color: #fff; transform: translateY(-1px);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THIRD PASS — the System fleet reads as ROWS (Sonarr's tasks-page shape)
+   Fixed tasks want vertical scanning: one line each — orb, name rail,
+   schedule chip, right-aligned live status. Same DOM as the cards; only
+   the section-protected geometry changes. User automations stay cards
+   (their trigger → action → notify composition is the point there).
+   ═══════════════════════════════════════════════════════════════════════════ */
+.automations-section.section-protected .automations-grid {
+    grid-template-columns: 1fr;
+    gap: 7px;
+}
+.automations-section.section-protected .automation-card {
+    padding: 10px 14px 10px 18px;
+    border-radius: 11px;
+    align-items: center;
+    gap: 13px;
+}
+.automations-section.section-protected .automation-card .automation-status { margin-top: 0; }
+.automations-section.section-protected .automation-card .automation-info {
+    display: flex; align-items: center; gap: 16px; min-width: 0;
+}
+/* the name rail — one aligned column the eye runs straight down */
+.automations-section.section-protected .automation-card .automation-name {
+    flex: 0 0 260px; margin-bottom: 0;
+    font-size: 13.5px;
+}
+.automations-section.section-protected .automation-card .automation-flow {
+    margin-bottom: 0; flex-wrap: nowrap; overflow: hidden;
+    min-width: 0; flex-shrink: 1;
+}
+.automations-section.section-protected .automation-card .automation-meta {
+    margin-left: auto; flex-shrink: 0; max-width: 46%;
+    justify-content: flex-end; text-align: right;
+}
+/* progress panel still drops below the row (the card wraps) */
+.automations-section.section-protected .automation-card .automation-output.visible { margin-top: 8px; }
+
+/* user-automation cards: breathe at 3 columns max on wide screens */
+@media (min-width: 1700px) {
+    .automations-section:not(.section-protected) .automations-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+/* rows fold back toward card geometry on narrow screens */
+@media (max-width: 1250px) {
+    .automations-section.section-protected .automation-card .automation-name { flex-basis: 190px; }
+}
+@media (max-width: 950px) {
+    .automations-section.section-protected .automation-card .automation-info {
+        flex-wrap: wrap; gap: 7px 14px;
+    }
+    .automations-section.section-protected .automation-card .automation-name { flex-basis: 100%; }
+    .automations-section.section-protected .automation-card .automation-meta {
+        margin-left: 0; max-width: none; justify-content: flex-start; text-align: left;
+    }
+}
