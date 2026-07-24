@@ -250,11 +250,13 @@
 }
 
 /* meta line — countdown, runs, last-result */
+/* Wraps naturally — nothing on the card is ever hidden (Boulder's call:
+   a second line beats invisible information). The 64-char JS cap on the
+   facts keeps the wrap to one extra line at most. */
 .automation-card .automation-meta {
     font-size: 11px; color: rgba(255,255,255,0.42);
     display: block; line-height: 1.8;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    min-width: 0; max-width: 100%;
+    overflow-wrap: anywhere;
 }
 .automation-card .auto-next-run {
     font-variant-numeric: tabular-nums;
