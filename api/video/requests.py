@@ -52,6 +52,14 @@ def register_routes(bp):
             monitor=monitor)
         if rid is None:
             return jsonify({"success": False, "error": "Could not file the request."}), 500
+        if created:
+            try:      # 'Request Filed' automation trigger
+                from core.video.download_events import publish
+                publish("video_request_created", {
+                    "kind": kind, "title": title,
+                    "requester": getattr(g, "profile_name", None) or ""})
+            except Exception:   # noqa: BLE001 - events never disturb the request
+                logger.exception("request-created event publish failed")
         return jsonify({"success": True, "id": rid, "already": not created})
 
     @bp.route("/requests", methods=["GET"])
@@ -128,6 +136,13 @@ def register_routes(bp):
                                         admin_response=(body.get("response") or "")[:500] or None):
             return jsonify({"success": False,
                             "error": "Title added, but the request could not be marked approved — try again."}), 500
+        try:      # 'Request Approved' automation trigger
+            from core.video.download_events import publish
+            publish("video_request_approved", {
+                "kind": req["kind"], "title": req["title"],
+                "requester": req.get("requester_name") or ""})
+        except Exception:   # noqa: BLE001 - events never disturb the approval
+            logger.exception("request-approved event publish failed")
         return jsonify({"success": True, "wished": wished, "kind": req["kind"]})
 
     @bp.route("/requests/<int:request_id>/deny", methods=["POST"])

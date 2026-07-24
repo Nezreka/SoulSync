@@ -792,6 +792,15 @@ def register_routes(bp):
                                            "client_ref": res["ref"],
                                            "candidates": _json.dumps([]), "tried_queries": _json.dumps([]),
                                            "tried_files": _json.dumps([])})
+        try:      # 'Release Grabbed' automation trigger (Sonarr's On Grab)
+            from core.video.download_events import publish
+            publish("video_grab_started", {
+                "kind": common["kind"], "title": common["title"] or "",
+                "release_title": common["release_title"] or "",
+                "quality": common["quality_label"] or "", "source": source,
+                "season": ctx.get("season"), "episode": ctx.get("episode")})
+        except Exception:   # noqa: BLE001 - events never disturb the grab
+            logger.exception("grab event publish failed")
         ensure_started(get_video_db)
         return jsonify({"ok": True, "id": dl_id})
 

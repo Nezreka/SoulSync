@@ -4278,6 +4278,39 @@ def get_automation_blocks():
     scoped['known_signals'] = _collect_known_signals()
     return jsonify(scoped)
 
+@app.route('/api/automations/test-notify', methods=['POST'])
+def test_automation_notify():
+    """Fire ONE notification step with sample variables — the builder's Test
+    button. Sends for real (that's the point: prove the webhook/token works)
+    but against sample data, without running any automation."""
+    try:
+        if automation_engine is None:
+            return jsonify({'success': False, 'error': 'Automation engine not running'}), 400
+        data = request.get_json(silent=True) or {}
+        ntype = str(data.get('type') or '')
+        config = data.get('config') or {}
+        variables = {
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'name': 'Test Automation',
+            'run_count': '1',
+            'status': 'completed',
+            'artist': 'Test Artist', 'title': 'Test Track', 'album': 'Test Album',
+            'kind': 'movie', 'quality': '1080p', 'error': 'sample error text',
+        }
+        senders = {
+            'discord_webhook': automation_engine._send_discord_notification,
+            'pushbullet': automation_engine._send_pushbullet_notification,
+            'telegram': automation_engine._send_telegram_notification,
+            'webhook': automation_engine._send_webhook,
+        }
+        sender = senders.get(ntype)
+        if sender is None:
+            return jsonify({'success': False, 'error': f'Cannot test {ntype or "this step"}'}), 400
+        sender(config, variables)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 200
+
 @app.route('/api/mirrored-playlists/list', methods=['GET'])
 def get_mirrored_playlists_list():
     """Return simple list of mirrored playlists for automation config dropdowns."""
@@ -39410,6 +39443,10 @@ try:
     # Store refs for WebSocket push loop
     repair_worker._progress_lock_ref = repair_job_progress_lock
     repair_worker._progress_states_ref = repair_job_progress_states
+    # Bridge repair events into the automation engine ('Maintenance Finding
+    # Raised' / 'Maintenance Scan Done' triggers — music parity with video)
+    if automation_engine is not None:
+        repair_worker._event_emit = automation_engine.emit
     repair_worker.start()
     logger.info("Repair worker initialized and started")
 except Exception as e:

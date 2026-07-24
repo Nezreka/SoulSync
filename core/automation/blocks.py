@@ -46,7 +46,9 @@ TRIGGERS: list[dict] = [
      "description": "Run once a month on a chosen day", "available": True,
      "config_fields": [
          {"key": "time", "type": "time", "label": "Time", "default": "03:00"},
-         {"key": "day_of_month", "type": "number", "label": "Day of month", "default": 1, "min": 1, "max": 31}
+         {"key": "day_of_month", "type": "number", "label": "Day of month", "default": 1, "min": 1, "max": 31},
+         {"key": "tz", "type": "text", "label": "Timezone (optional)",
+          "placeholder": "IANA name, e.g. America/Los_Angeles \u2014 blank = server default"}
      ]},
     {"type": "app_started", "label": "App Started", "icon": "power", "scope": "both", "description": "When SoulSync starts up", "available": True},
     {"type": "track_downloaded", "label": "Track Downloaded", "icon": "download", "description": "When a track finishes downloading", "available": True,
@@ -120,6 +122,17 @@ TRIGGERS: list[dict] = [
     {"type": "duplicate_scan_completed", "label": "Duplicate Scan Done", "icon": "layers",
      "description": "When duplicate cleaner finishes", "available": True,
      "variables": ["files_scanned", "duplicates_found", "space_freed"]},
+    # Library Maintenance (music Tools page) — parity with the video repair triggers.
+    {"type": "music_repair_finding_created", "label": "Maintenance Finding Raised", "icon": "tool",
+     "description": "When a Library Maintenance job raises a NEW finding (dead file, missing lyrics, comma artist, ...) — condition on severity or job for targeted alerts", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["job_id", "finding_type", "severity", "title"],
+     "variables": ["job_id", "finding_type", "severity", "title"]},
+    {"type": "music_repair_scan_completed", "label": "Maintenance Scan Done", "icon": "tool",
+     "description": "When a Library Maintenance job finishes a scan", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["job_id", "status"],
+     "variables": ["job_id", "job_name", "status", "scanned", "findings_created", "errors"]},
     # Signal trigger
     {"type": "signal_received", "label": "Signal Received", "icon": "zap", "scope": "both",
      "description": "When another automation fires a named signal", "available": True,
@@ -141,6 +154,24 @@ TRIGGERS: list[dict] = [
      "variables": ["server"]},
     # Per-item download lifecycle (movies, episodes AND YouTube — filter with
     # conditions on `kind`: movie / show / youtube).
+    # Sonarr's On Grab: the moment a release is SENT to a download client —
+    # fires with the release name/quality, long before it lands in the library.
+    {"type": "video_grab_started", "label": "Release Grabbed", "icon": "download", "scope": "video",
+     "description": "When a release is handed to a download client (Soulseek/torrent/usenet) — fires at grab time with the release name, before anything downloads", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind", "quality", "source"],
+     "variables": ["kind", "title", "release_title", "quality", "source", "season", "episode"]},
+    # Requests-system lifecycle.
+    {"type": "video_request_created", "label": "Request Filed", "icon": "plus-circle", "scope": "video",
+     "description": "When a user files a request on the Requests page", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind", "requester"],
+     "variables": ["kind", "title", "requester"]},
+    {"type": "video_request_approved", "label": "Request Approved", "icon": "check-circle", "scope": "video",
+     "description": "When an admin approves a request and the title enters acquisition", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind", "requester"],
+     "variables": ["kind", "title", "requester"]},
     {"type": "video_download_completed", "label": "Video Downloaded", "icon": "download", "scope": "video",
      "description": "When one movie, episode or YouTube video finishes downloading and lands in the library", "available": True,
      "has_conditions": True,

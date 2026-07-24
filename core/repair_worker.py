@@ -179,6 +179,12 @@ class RepairWorker:
         self._force_run_queue: List[str] = []
         self._force_run_lock = threading.Lock()
 
+        # Automation-engine emit hook (set by web_server to engine.emit).
+        # Fire-and-forget: repair events power the 'Maintenance Finding
+        # Raised' / 'Maintenance Scan Done' music triggers, same as the
+        # video repair worker's publish() bridge. None = no engine, no-op.
+        self._event_emit = None
+
         # Background bulk fix ("Fix All" at library scale runs on its own
         # thread so the HTTP request that starts it returns immediately)
         self._bulk_fix_thread = None
@@ -763,6 +769,17 @@ class RepairWorker:
         # Record job completion
         self._record_job_finish(run_id, job_id, result, duration)
 
+        if self._event_emit:
+            try:      # 'Maintenance Scan Done' automation trigger
+                self._event_emit('music_repair_scan_completed', {
+                    'job_id': job_id, 'job_name': job.display_name,
+                    'status': 'error' if result.errors > 0 and result.auto_fixed == 0 else 'finished',
+                    'scanned': result.scanned,
+                    'findings_created': result.findings_created,
+                    'errors': result.errors})
+            except Exception:   # noqa: BLE001 - events never disturb the scan
+                logger.debug("repair scan event emit failed", exc_info=True)
+
         # Notify rich progress system of completion
         if self._on_job_finish:
             try:
@@ -862,6 +879,13 @@ class RepairWorker:
                 json.dumps(details) if details else '{}'
             ))
             conn.commit()
+            if self._event_emit:
+                try:      # 'Maintenance Finding Raised' automation trigger
+                    self._event_emit('music_repair_finding_created', {
+                        'job_id': job_id, 'finding_type': finding_type,
+                        'severity': severity or 'info', 'title': title or ''})
+                except Exception:   # noqa: BLE001 - events never disturb the scan
+                    logger.debug("repair finding event emit failed", exc_info=True)
             return True
         except Exception as e:
             logger.debug("Error creating finding: %s", e)

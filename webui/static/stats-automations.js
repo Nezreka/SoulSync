@@ -3878,6 +3878,7 @@ function _promptNotifyConfig(groupName) {
                         <option value="discord_webhook">Discord Webhook</option>
                         <option value="telegram">Telegram</option>
                         <option value="pushbullet">Pushbullet</option>
+                        <option value="webhook">Webhook (POST)</option>
                         <option value="none">Skip Notifications</option>
                     </select>
                     <div id="deploy-notify-fields"></div>
@@ -3902,6 +3903,8 @@ function _promptNotifyConfig(groupName) {
                 fieldsDiv.innerHTML = '<input id="deploy-notify-token" type="text" placeholder="Bot Token" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;"><input id="deploy-notify-chat" type="text" placeholder="Chat ID" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;"><input id="deploy-notify-thread" type="text" placeholder="Thread ID" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
             } else if (type === 'pushbullet') {
                 fieldsDiv.innerHTML = '<input id="deploy-notify-token" type="text" placeholder="Access Token" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
+            } else if (type === 'webhook') {
+                fieldsDiv.innerHTML = '<input id="deploy-notify-url" type="text" placeholder="Webhook URL (POST)" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
             } else {
                 fieldsDiv.innerHTML = '';
             }
@@ -3923,6 +3926,8 @@ function _promptNotifyConfig(groupName) {
                 config = { bot_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim(), chat_id: (overlay.querySelector('#deploy-notify-chat')?.value || '').trim(), thread_id: (overlay.querySelector('#deploy-notify-thread')?.value || '').trim() };
             } else if (type === 'pushbullet') {
                 config = { access_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim() };
+            } else if (type === 'webhook') {
+                config = { url: (overlay.querySelector('#deploy-notify-url')?.value || '').trim() };
             } else {
                 document.body.removeChild(overlay);
                 resolve(false); // Skip notifications but still deploy
@@ -4115,11 +4120,22 @@ function renderAutomationCard(a) {
     const actionDelay = a.action_config && a.action_config.delay ? a.action_config.delay : 0;
     const metaParts = [];
     if (a.last_run) metaParts.push('Last: ' + _autoTimeAgo(a.last_run));
-    const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
+    const _timerTriggers = ['schedule', 'daily_time', 'weekly_time', 'monthly_time'];
     if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('<span class="auto-next-run" data-next="' + _escAttr(a.next_run) + '">Next: ' + _autoTimeUntil(a.next_run) + '</span>');
     if (!_timerTriggers.includes(a.trigger_type) && a.enabled) metaParts.push('Listening');
     if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escJs(a.name) + '\', \'' + _escJs(a.action_type || '') + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
     if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
+    else if (a.last_result && typeof a.last_result === 'object') {
+        // Compact result summary: up to 3 scalar facts from the last run
+        // (full detail stays in the history modal). Skips status (the dot
+        // already says it) and internal keys.
+        const facts = Object.entries(a.last_result)
+            .filter(([k, v]) => k !== 'status' && !k.startsWith('_') &&
+                (typeof v === 'number' || (typeof v === 'string' && v.length <= 24 && v !== '')))
+            .slice(0, 3)
+            .map(([k, v]) => _esc(k.replace(/_/g, ' ')) + ': ' + _esc(String(v)));
+        if (facts.length) metaParts.push('<span class="auto-last-result" title="Last run">' + facts.join(' \u00b7 ') + '</span>');
+    }
 
     const dupeBtn = a.is_system ? '' :
         `<button class="automation-dupe-btn" title="Duplicate" onclick="event.stopPropagation(); duplicateAutomation(${a.id})">&#128203;</button>`;
@@ -4179,7 +4195,10 @@ function _autoFormatTrigger(type, config) {
         quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done',
         library_scan_completed: 'Library Scan Done', signal_received: 'Signal Received'
     };
-    let label = labels[type] || type || 'Unknown';
+    // Video triggers, monthly_time, webhook_received — anything not in the
+    // map above — read their label from the fetched block definitions instead
+    // of showing the raw type identifier. Mapped labels always win (unchanged).
+    let label = labels[type] || _findBlockDef(type)?.label || type || 'Unknown';
     if (config && config.conditions && config.conditions.length) {
         const first = config.conditions[0];
         label += ' (' + first.field + ' ' + first.operator + ' "' + first.value + '"' +
@@ -4224,13 +4243,35 @@ function _autoFormatAction(type) {
         video_rss_sync: 'RSS Release Sync',
         video_seeding_sweep: 'Seeding Goal Sweep',
         video_import_lists: 'Sync Import Lists',
+        search_and_download: 'Search & Download',
     };
-    return labels[type] || type || 'Unknown';
+    return labels[type] || _findBlockDef(type)?.label || type || 'Unknown';
 }
+async function _autoTestNotify(slotKey) {
+    // Fire this ONE step with sample variables — proves the URL/token works
+    // without running the automation. Reads the config exactly as Save would.
+    const idx = parseInt(slotKey.split('-')[1], 10);
+    const item = _autoBuilder.then[idx];
+    if (!item) return;
+    const resEl = document.getElementById('cfg-' + slotKey + '-test-result');
+    if (resEl) resEl.textContent = 'Sending\u2026';
+    try {
+        const resp = await fetch('/api/automations/test-notify', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: item.type, config: _readPlacedConfig(slotKey) })
+        });
+        const d = await resp.json();
+        if (resEl) resEl.textContent = d.success ? '\u2713 Sent' : ('\u2717 ' + (d.error || 'failed'));
+    } catch (e) {
+        if (resEl) resEl.textContent = '\u2717 request failed';
+    }
+}
+
 function _autoFormatNotify(type) {
     if (type === 'discord_webhook') return 'Discord';
     if (type === 'pushbullet') return 'Pushbullet';
     if (type === 'telegram') return 'Telegram';
+    if (type === 'webhook') return 'Webhook';
     if (type === 'fire_signal') return '\u26A1 Signal';
     if (type === 'run_script') return '\uD83D\uDCBB Script';
     return type || '';
@@ -4590,10 +4631,14 @@ async function saveAutomation() {
     const actionConfig = _readPlacedConfig('do');
 
     // Read THEN actions (multi-slot)
-    const thenActions = _autoBuilder.then.map((item, i) => ({
-        type: item.type,
-        config: _readPlacedConfig('then-' + i),
-    }));
+    const thenActions = _autoBuilder.then.map((item, i) => {
+        const out = { type: item.type, config: _readPlacedConfig('then-' + i) };
+        const cf = document.getElementById('cfg-then-' + i + '-condfield')?.value?.trim();
+        const co = document.getElementById('cfg-then-' + i + '-condop')?.value;
+        const cv = document.getElementById('cfg-then-' + i + '-condvalue')?.value ?? '';
+        if (cf && co) out.conditions = [{ field: cf, operator: co, value: cv }];
+        return out;
+    });
 
     // Read optional delay from DO slot
     const delayEl = document.getElementById('cfg-do-delay');
@@ -4687,7 +4732,8 @@ async function _openAutomationBuilder(editId) {
             _autoBuilder.do = { type: a.action_type, config: a.action_config || {} };
             // Load then_actions array
             _autoBuilder.then = (a.then_actions || []).map(item => ({
-                type: item.type, config: item.config || {}
+                type: item.type, config: item.config || {},
+                conditions: item.conditions || null, match: item.match || undefined
             }));
             // Backward compat: if no then_actions but has notify_type
             if (!_autoBuilder.then.length && a.notify_type) {
@@ -4762,6 +4808,15 @@ function _renderBuilderCanvas() {
     if (!canvas) return;
 
     let html = '';
+
+    // Datalist backing the per-step "Only when" field inputs: the selected
+    // trigger's event variables + the base run variables.
+    {
+        const base = ['status', 'name', 'time', 'run_count'];
+        const trigDef = _autoBuilder.when ? _findBlockDef(_autoBuilder.when.type) : null;
+        const vars = [...new Set([...base, ...((trigDef && trigDef.variables) || [])])];
+        html += '<datalist id="auto-var-list">' + vars.map(v => `<option value="${_escAttr(v)}">`).join('') + '</datalist>';
+    }
 
     // WHEN slot
     const whenData = _autoBuilder.when;
@@ -4846,6 +4901,31 @@ function _renderPlacedBlock(slotKey, data) {
     const label = blockDef ? blockDef.label : data.type;
     const configHtml = _renderBlockConfigFields(slotKey, data.type, data.config || {});
 
+    // THEN steps: optional per-step condition ("Only run when …") + a Test
+    // button for the four real notification channels. Absent condition =
+    // always run (every pre-existing automation).
+    let thenExtraHtml = '';
+    if (slotKey.startsWith('then')) {
+        const cond = (data.conditions && data.conditions[0]) || {};
+        const ops = [['', 'always'], ['equals', 'equals'], ['not_equals', 'not equals'],
+                     ['contains', 'contains'], ['not_contains', 'not contains'],
+                     ['starts_with', 'starts with'], ['ends_with', 'ends with'],
+                     ['greater_than', '&gt;'], ['less_than', '&lt;']];
+        const opts = ops.map(([v, l]) => `<option value="${v}"${(cond.operator || '') === v ? ' selected' : ''}>${l}</option>`).join('');
+        thenExtraHtml = `<div class="placed-block-config"><div class="config-row" title="Only run this step when the condition matches — leave on 'always' to run every time">
+            <label>Only when</label>
+            <input type="text" id="cfg-${slotKey}-condfield" value="${_escAttr(cond.field || '')}" placeholder="status" style="width:110px;" list="auto-var-list">
+            <select id="cfg-${slotKey}-condop">${opts}</select>
+            <input type="text" id="cfg-${slotKey}-condvalue" value="${_escAttr(cond.value || '')}" placeholder="error" style="width:110px;">
+        </div></div>`;
+        if (['discord_webhook', 'pushbullet', 'telegram', 'webhook'].includes(data.type)) {
+            thenExtraHtml += `<div class="placed-block-config"><div class="config-row">
+                <button type="button" class="btn btn--sm btn--secondary" onclick="_autoTestNotify('${slotKey}')">Send test</button>
+                <span id="cfg-${slotKey}-test-result" style="font-size:11px;opacity:0.6;"></span>
+            </div></div>`;
+        }
+    }
+
     // Add optional delay field for action blocks
     let delayHtml = '';
     if (slotKey === 'do') {
@@ -4867,6 +4947,7 @@ function _renderPlacedBlock(slotKey, data) {
             ${removeBtn}
         </div>
         ${configHtml ? '<div class="placed-block-config">' + configHtml + '</div>' : ''}
+        ${thenExtraHtml}
         ${delayHtml}
     </div>`;
 }
@@ -4890,6 +4971,9 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         return `<div class="config-row">
             <label>At</label>
             <input type="time" id="cfg-${slotKey}-time" value="${timeVal}">
+        </div><div class="config-row">
+            <label>Timezone <span style="opacity:0.4;font-weight:400">(optional)</span></label>
+            <input type="text" id="cfg-${slotKey}-tz" value="${_escAttr(config.tz || '')}" placeholder="e.g. America/Los_Angeles" style="width:200px;" title="IANA timezone — blank uses the server default">
         </div>`;
     }
     if (blockType === 'weekly_time') {
@@ -4905,7 +4989,10 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         return `<div class="config-row">
             <label>At</label>
             <input type="time" id="cfg-${slotKey}-time" value="${timeVal}">
-        </div>${dayHtml}`;
+        </div>${dayHtml}<div class="config-row">
+            <label>Timezone <span style="opacity:0.4;font-weight:400">(optional)</span></label>
+            <input type="text" id="cfg-${slotKey}-tz" value="${_escAttr(config.tz || '')}" placeholder="e.g. America/Los_Angeles" style="width:200px;" title="IANA timezone — blank uses the server default">
+        </div>`;
     }
 
     // Event triggers with conditions
@@ -5139,16 +5226,24 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
             <label>Custom Message <span style="opacity:0.4;font-weight:400">(optional)</span></label>
             <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || ''}</textarea>
         </div>
+        <div class="config-row">
+            <label>Custom Payload <span style="opacity:0.4;font-weight:400">(optional — overrides the default body)</span></label>
+            <textarea id="cfg-${slotKey}-payload_template" placeholder='{"title": "{name}", "message": "{status}", "priority": 5}' style="font-family:monospace;font-size:11px;min-height:64px;">${(config.payload_template || '').replace(/</g, '&lt;')}</textarea>
+        </div>
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">
-            Sends a JSON POST with all event variables. Custom message added as "message" field if set.
+            Default: a JSON POST with all event variables (custom message added as "message" field).
+            A custom payload replaces the whole body — write the exact JSON your service wants
+            (gotify, ntfy, Slack, Home Assistant, &hellip;) with {variable} tags, or any raw text for non-JSON receivers.
         </div>
         ${_notifyVarHtml(slotKey)}`;
     }
     // Generic config_fields renderer — drives the VIDEO builder only (gated on
-    // the video context) so the music side keeps its bespoke renderers above and
-    // is byte-identical. Any video block that declares config_fields in
-    // core/automation/blocks.py (select / text / number / checkbox) renders here.
-    if (_autoBuilderCtx.ownedBy) {
+    // BOTH sides fall through to the generic renderer now: the hardcoded
+    // branches above all return early, so every block that worked keeps its
+    // bespoke renderer byte-identical — the generic path only catches blocks
+    // that previously rendered NOTHING on music (monthly_time,
+    // start_database_update's full_refresh, search_and_download's query).
+    {
         const def = _findBlockDef(blockType);
         if (def && Array.isArray(def.config_fields) && def.config_fields.length) {
             return def.config_fields.map(f => _renderGenericConfigField(slotKey, f, config)).join('');
@@ -5172,7 +5267,11 @@ function _renderGenericConfigField(slotKey, f, config) {
     }
     if (f.type === 'number') {
         const min = (f.min !== undefined) ? ` min="${f.min}"` : '';
-        return `<div class="config-row"><label>${label}</label><input type="number" id="${id}" value="${_escAttr(cur != null ? cur : '')}"${min} style="width:90px;"></div>`;
+        const max = (f.max !== undefined) ? ` max="${f.max}"` : '';
+        return `<div class="config-row"><label>${label}</label><input type="number" id="${id}" value="${_escAttr(cur != null ? cur : '')}"${min}${max} style="width:90px;"></div>`;
+    }
+    if (f.type === 'time') {
+        return `<div class="config-row"><label>${label}</label><input type="time" id="${id}" value="${_escAttr(cur != null ? cur : '03:00')}"></div>`;
     }
     return `<div class="config-row"><label>${label}</label><input type="text" id="${id}" value="${_escAttr(cur != null ? cur : '')}" placeholder="${_escAttr(f.placeholder || '')}"></div>`;
 }
@@ -5241,7 +5340,11 @@ function _renderConditionRow(slotKey, index, fields, cond) {
             <option value="equals"${operator === 'equals' ? ' selected' : ''}>equals</option>
             <option value="contains"${operator === 'contains' ? ' selected' : ''}>contains</option>
             <option value="starts_with"${operator === 'starts_with' ? ' selected' : ''}>starts with</option>
+            <option value="ends_with"${operator === 'ends_with' ? ' selected' : ''}>ends with</option>
             <option value="not_contains"${operator === 'not_contains' ? ' selected' : ''}>not contains</option>
+            <option value="not_equals"${operator === 'not_equals' ? ' selected' : ''}>not equals</option>
+            <option value="greater_than"${operator === 'greater_than' ? ' selected' : ''}>&gt; (number)</option>
+            <option value="less_than"${operator === 'less_than' ? ' selected' : ''}>&lt; (number)</option>
         </select>
         ${valueHtml}
         <button class="remove-condition-btn" onclick="_autoRemoveCondition('${slotKey}',${index})">\u2715</button>
@@ -5442,15 +5545,21 @@ function _readPlacedConfig(slotKey) {
         };
     }
     if (type === 'daily_time') {
-        return { time: document.getElementById('cfg-' + slotKey + '-time')?.value || '03:00' };
+        const out = { time: document.getElementById('cfg-' + slotKey + '-time')?.value || '03:00' };
+        const tz = document.getElementById('cfg-' + slotKey + '-tz')?.value?.trim();
+        if (tz) out.tz = tz;
+        return out;
     }
     if (type === 'weekly_time') {
         const daysEl = document.getElementById('cfg-' + slotKey + '-days');
         const days = daysEl ? Array.from(daysEl.querySelectorAll('.day-btn.active')).map(b => b.dataset.day) : [];
-        return {
+        const out = {
             time: document.getElementById('cfg-' + slotKey + '-time')?.value || '03:00',
             days,
         };
+        const tz = document.getElementById('cfg-' + slotKey + '-tz')?.value?.trim();
+        if (tz) out.tz = tz;
+        return out;
     }
     // Event triggers with conditions
     const blockDef = _findBlockDef(type);
@@ -5545,11 +5654,12 @@ function _readPlacedConfig(slotKey) {
             url: document.getElementById('cfg-' + slotKey + '-url')?.value?.trim() || '',
             headers: document.getElementById('cfg-' + slotKey + '-headers')?.value || '',
             message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+            payload_template: document.getElementById('cfg-' + slotKey + '-payload_template')?.value || '',
         };
     }
-    // Generic config_fields read — video builder only (mirror of the generic
-    // renderer above); music keeps its bespoke readers, untouched.
-    if (_autoBuilderCtx.ownedBy) {
+    // Generic config_fields read — mirror of the generic renderer above.
+    // Same early-return structure: only blocks with no bespoke reader land here.
+    {
         const def = _findBlockDef(type);
         if (def && Array.isArray(def.config_fields) && def.config_fields.length) {
             const out = {};
@@ -5598,7 +5708,7 @@ function _autoDrop(e, slotKey) {
         // Handle THEN slot (append to array)
         if (slotKey === 'then') {
             if (data.slot !== 'then') { showToast('Wrong slot — drop ' + data.slot + ' blocks here', 'error'); return; }
-            if (_autoBuilder.then.length >= 3) { showToast('Maximum 3 then-actions', 'error'); return; }
+            if (_autoBuilder.then.length >= 5) { showToast('Maximum 5 then-actions', 'error'); return; }
             _autoBuilder.then.push({ type: data.type, config: {} });
         } else {
             if (data.slot !== slotKey) { showToast('Wrong slot — drop ' + data.slot + ' blocks here', 'error'); return; }
@@ -5612,7 +5722,7 @@ function _autoDrop(e, slotKey) {
 function _autoClickBlock(blockType, slotCategory) {
     if (_autoBuilder.isSystem && (slotCategory === 'when' || slotCategory === 'do')) return;
     if (slotCategory === 'then') {
-        if (_autoBuilder.then.length >= 3) { showToast('Maximum 3 then-actions', 'error'); return; }
+        if (_autoBuilder.then.length >= 5) { showToast('Maximum 5 then-actions', 'error'); return; }
         _autoBuilder.then.push({ type: blockType, config: {} });
     } else {
         _autoBuilder[slotCategory] = { type: blockType, config: {} };
