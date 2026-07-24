@@ -4135,7 +4135,7 @@ function renderAutomationCard(a) {
                 ((typeof v === 'number' && v !== 0) ||
                  (typeof v === 'string' && v.length <= 24 && v !== '' && v !== '0')))
             .slice(0, 3)
-            .map(([k, v]) => _esc(k.replace(/_/g, ' ')) + ': ' + _esc(String(v)));
+            .map(([k, v]) => _esc(k.replace(/_/g, ' ')) + ': ' + _esc(String(v).replace(/_/g, ' ')));
         if (facts.length) metaParts.push('<span class="auto-last-result" title="Last run">' + facts.join(' \u00b7 ') + '</span>');
     }
 
@@ -4174,6 +4174,16 @@ function renderAutomationCard(a) {
     return card;
 }
 
+function _autoHumanizeType(type) {
+    // Last-resort display form for an unmapped type: 'deep_scan_library' →
+    // 'Deep Scan Library'. Raw snake_case must never reach a card.
+    return String(type || '')
+        .replace(/^(video|music)_/, '')
+        .split('_').filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ') || 'Unknown';
+}
+
 function _autoFormatTrigger(type, config) {
     if (type === 'schedule' && config) return 'Every ' + (config.interval || 1) + ' ' + (config.unit || 'hours');
     if (type === 'daily_time' && config) return 'Daily at ' + (config.time || '00:00');
@@ -4200,7 +4210,7 @@ function _autoFormatTrigger(type, config) {
     // Video triggers, monthly_time, webhook_received — anything not in the
     // map above — read their label from the fetched block definitions instead
     // of showing the raw type identifier. Mapped labels always win (unchanged).
-    let label = labels[type] || _findBlockDef(type)?.label || type || 'Unknown';
+    let label = labels[type] || _findBlockDef(type)?.label || _autoHumanizeType(type);
     if (config && config.conditions && config.conditions.length) {
         const first = config.conditions[0];
         label += ' (' + first.field + ' ' + first.operator + ' "' + first.value + '"' +
@@ -4246,8 +4256,10 @@ function _autoFormatAction(type) {
         video_seeding_sweep: 'Seeding Goal Sweep',
         video_import_lists: 'Sync Import Lists',
         search_and_download: 'Search & Download',
+        seeding_sweep: 'Seeding Sweep',
+        deep_scan_library: 'Deep Scan Library',
     };
-    return labels[type] || _findBlockDef(type)?.label || type || 'Unknown';
+    return labels[type] || _findBlockDef(type)?.label || _autoHumanizeType(type);
 }
 async function _autoTestNotify(slotKey) {
     // Fire this ONE step with sample variables — proves the URL/token works

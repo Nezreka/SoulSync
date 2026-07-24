@@ -254,10 +254,11 @@
 
 /* meta line — countdown, runs, last-result */
 .automation-card .automation-meta {
-    font-size: 11.5px; color: rgba(255,255,255,0.42);
-    display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
-    line-height: 1.7;
+    font-size: 11px; color: rgba(255,255,255,0.42);
+    display: flex; align-items: center; flex-wrap: nowrap; gap: 4px;
+    line-height: 1.7; min-width: 0;
 }
+.automation-card .automation-meta > * { flex-shrink: 0; }
 .automation-card .auto-next-run {
     font-variant-numeric: tabular-nums;
     color: rgba(var(--accent-light-rgb), 0.9);
@@ -268,7 +269,11 @@
 }
 .automation-card .auto-runs-link:hover { text-decoration: underline; }
 .automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
-.automation-card .auto-last-result { color: rgba(255,255,255,0.32); }
+.automation-card .auto-last-result {
+    color: rgba(255,255,255,0.30);
+    flex-shrink: 1 !important; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* actions — quiet until the card is hovered (always-on for touch, below) */
 .automation-card .automation-actions {

@@ -195,7 +195,10 @@ def test_monthly_gets_a_countdown_not_listening():
 
 
 def test_label_fallbacks_and_webhook_label():
-    assert "_findBlockDef(type)?.label || type || 'Unknown'" in _JS   # trigger + action maps
+    # Fallback chain hardened: map → block definition → HUMANIZED type
+    # (raw snake_case can never render — 'deep_scan_library' on live cards).
+    assert "_findBlockDef(type)?.label || _autoHumanizeType(type)" in _JS
+    assert "function _autoHumanizeType" in _JS
     assert "if (type === 'webhook') return 'Webhook';" in _JS
 
 
