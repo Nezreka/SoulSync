@@ -163,6 +163,8 @@ def run_playlist_organize_download(
                 None,
                 True,
                 source_page='automation',
+                profile_id=profile_id,
+                quality_profile_id=pl.get('quality_profile_id'),
             )
         except Exception as hist_err:
             logger.debug("organize download sync history: %s", hist_err)

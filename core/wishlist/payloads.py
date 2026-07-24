@@ -215,7 +215,7 @@ def build_cancelled_task_wishlist_payload(task, profile_id: int = 1):
         'added_from': 'modal_cancellation_v2',
     }
 
-    return {
+    payload = {
         'spotify_track_data': track_data,
         'track_data': track_data,
         'failure_reason': 'Download cancelled by user (v2)',
@@ -223,6 +223,38 @@ def build_cancelled_task_wishlist_payload(task, profile_id: int = 1):
         'source_context': source_context,
         'profile_id': profile_id,
     }
+    # Cancel→re-add must not silently downgrade (or upgrade) the request: keep
+    # the Quality Profile the task was started with (P2-06). Absent means
+    # "the receiver decides", exactly as for a track that never had one.
+    quality_profile_id = resolve_task_quality_profile_id(task)
+    if quality_profile_id is not None:
+        payload['quality_profile_id'] = quality_profile_id
+        track_data['quality_profile_id'] = quality_profile_id
+    return payload
+
+
+def resolve_task_quality_profile_id(task):
+    """The Quality Profile a download task was started under, or ``None``.
+
+    A task can carry the assignment in three places depending on which surface
+    created it: on the task itself (batch-level stamp), on the embedded
+    ``track_info`` (mirror/watchlist stamp), or on the batch context that was
+    copied onto the task. Checking all three keeps cancel/retry consistent with
+    the regular failed-download path no matter where the download came from.
+    """
+    if not isinstance(task, dict):
+        return None
+    candidates = (
+        task.get('quality_profile_id'),
+        (task.get('track_info') or {}).get('quality_profile_id')
+        if isinstance(task.get('track_info'), dict) else None,
+        (task.get('batch_context') or {}).get('quality_profile_id')
+        if isinstance(task.get('batch_context'), dict) else None,
+    )
+    for value in candidates:
+        if value is not None:
+            return value
+    return None
 
 
 def build_failed_track_wishlist_context(
@@ -457,6 +489,7 @@ __all__ = [
     "ensure_wishlist_track_format",
     "ensure_spotify_track_format",
     "build_cancelled_task_wishlist_payload",
+    "resolve_task_quality_profile_id",
     "build_failed_track_wishlist_context",
     "track_object_to_dict",
     "spotify_track_object_to_dict",

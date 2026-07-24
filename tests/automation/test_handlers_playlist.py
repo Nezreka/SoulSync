@@ -933,6 +933,90 @@ class TestSyncPlaylist:
         assert len(sync_calls) == 1
         assert new_mirror_hash != old_hash
 
+    def test_quality_profile_change_alone_bypasses_unchanged_skip(self):
+        """P1-03: the mirror's Quality Profile changed, the track list did not.
+
+        An authoritative profile change must still re-stamp the existing
+        Wishlist rows. Before the fix the whole sync short-circuited because the
+        fingerprint only covered track ids.
+        """
+        discovered_track = {
+            'source_track_id': 'spot-1',
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'T', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'A'}, 'duration_ms': 0,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(
+            playlists=[{'id': 1, 'name': 'P', 'quality_profile_id': 23}],
+            playlist_tracks={1: [discovered_track]},
+        )
+        import hashlib
+        expected_hash = hashlib.md5('spot-1'.encode()).hexdigest()
+        sync_statuses = {
+            'auto_mirror_1': {
+                'tracks_hash': expected_hash,
+                'mirror_tracks_hash': expected_hash,
+                'matched_tracks': 1,
+                'quality_profile_id': 7,   # the profile it was LAST synced with
+            }
+        }
+        sync_calls: List[tuple] = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            load_sync_status_file=lambda: sync_statuses,
+            run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+        )
+
+        result = auto_sync_playlist({'playlist_id': '1'}, deps)
+
+        assert result['status'] == 'started'
+        import time
+        for _ in range(50):
+            if sync_calls:
+                break
+            time.sleep(0.01)
+        assert len(sync_calls) == 1
+        # And the tracks it syncs carry the NEW assignment.
+        assert sync_calls[0][0][2][0]['quality_profile_id'] == 23
+
+    def test_same_quality_profile_still_skips(self):
+        discovered_track = {
+            'source_track_id': 'spot-1',
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'T', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'A'}, 'duration_ms': 0,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(
+            playlists=[{'id': 1, 'name': 'P', 'quality_profile_id': 23}],
+            playlist_tracks={1: [discovered_track]},
+        )
+        import hashlib
+        expected_hash = hashlib.md5('spot-1'.encode()).hexdigest()
+        sync_statuses = {
+            'auto_mirror_1': {
+                'tracks_hash': expected_hash,
+                'mirror_tracks_hash': expected_hash,
+                'matched_tracks': 1,
+                'quality_profile_id': 23,
+            }
+        }
+        deps = _build_deps(
+            get_database=lambda: db,
+            load_sync_status_file=lambda: sync_statuses,
+        )
+        result = auto_sync_playlist({'playlist_id': '1'}, deps)
+        assert result['status'] == 'skipped'
+
 
 # ─── playlist_pipeline ───────────────────────────────────────────────
 

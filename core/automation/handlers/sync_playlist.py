@@ -177,9 +177,20 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         last_matched = last_status.get('matched_tracks', -1)
 
         mirror_changed = bool(mirror_tracks_hash) and mirror_tracks_hash != last_mirror_hash
+        # An authoritative Quality Profile change is a state change even when
+        # not a single track id moved: the existing Wishlist rows still have to
+        # be re-stamped. The fingerprint used to cover only the track list, so
+        # a profile-only edit was silently skipped forever (P1-03).
+        #
+        # A status written before this key existed reads as None. After the
+        # Foundation backfill every mirror HAS a profile, so an upgraded install
+        # forces exactly one extra sync per mirror and is then self-consistent.
+        last_quality_profile_id = last_status.get('quality_profile_id')
+        quality_profile_changed = last_quality_profile_id != quality_profile_id
         if (
             not force_sync
             and not mirror_changed
+            and not quality_profile_changed
             and last_hash == tracks_hash
             and last_matched >= len(tracks_json)
         ):
@@ -206,6 +217,15 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             deps.update_progress(
                 auto_id,
                 log_line='Mirror track list changed — running sync',
+                log_type='info',
+            )
+        elif quality_profile_changed:
+            deps.update_progress(
+                auto_id,
+                log_line=(
+                    f'Quality Profile changed ({last_quality_profile_id} → '
+                    f'{quality_profile_id}) — re-running sync'
+                ),
                 log_type='info',
             )
     except Exception as e:

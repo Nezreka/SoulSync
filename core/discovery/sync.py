@@ -299,7 +299,11 @@ def run_sync_task(
             album_context=None,
             artist_context=None,
             playlist_folder_mode=False,
-            source_page='sync'
+            source_page='sync',
+            # Whose sync this is, so the history stays per-profile and a later
+            # re-add reproduces the same owner + Quality Profile (P1-04). The
+            # per-track stamp is filled in by record_sync_history_start.
+            profile_id=profile_id,
         )
 
     try:
@@ -660,11 +664,19 @@ def run_sync_task(
             except Exception as e:
                 logger.debug("mirror_tracks_hash for sync status: %s", e)
         snapshot_id = getattr(playlist, 'snapshot_id', None)
+        # Remember which Quality Profile this run used, so the next scheduled
+        # run can tell "nothing changed" from "same tracks, new profile" (P1-03).
+        _synced_quality_profile_id = None
+        for _t in tracks_json or []:
+            if isinstance(_t, dict) and _t.get('quality_profile_id') is not None:
+                _synced_quality_profile_id = _t['quality_profile_id']
+                break
         _status_kwargs = dict(
             matched_tracks=getattr(result, 'matched_tracks', 0),
             total_tracks=getattr(result, 'total_tracks', 0),
             discovered_tracks=len(tracks_json),
             tracks_hash=_tracks_hash,
+            quality_profile_id=_synced_quality_profile_id,
         )
         if _mirror_tracks_hash is not None:
             _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash

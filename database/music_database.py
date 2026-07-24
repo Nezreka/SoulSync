@@ -913,7 +913,9 @@ class MusicDatabase:
                     playlist_folder_mode INTEGER DEFAULT 0,
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
-                    track_results TEXT
+                    track_results TEXT,
+                    profile_id INTEGER,
+                    quality_profile_id INTEGER
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sh_started_at ON sync_history (started_at DESC)")
@@ -938,6 +940,24 @@ class MusicDatabase:
                     logger.info("Added source_page column to sync_history table")
                 except Exception as e:
                     logger.debug("Failed to add source_page column: %s", e)
+
+            # Migration: give sync_history a SoulSync profile and a Quality
+            # Profile (P1-04). Without them every profile saw and could delete
+            # every other profile's runs, and a "re-add to wishlist" recreated
+            # the track as admin with the global default quality. Existing rows
+            # keep NULL, which reads as "legacy / admin" — see get_sync_history.
+            for _sh_col, _sh_type in (('profile_id', 'INTEGER'),
+                                      ('quality_profile_id', 'INTEGER')):
+                try:
+                    cursor.execute(f"SELECT {_sh_col} FROM sync_history LIMIT 1")
+                except Exception:
+                    try:
+                        cursor.execute(
+                            f"ALTER TABLE sync_history ADD COLUMN {_sh_col} {_sh_type}"
+                        )
+                        logger.info("Added %s column to sync_history table", _sh_col)
+                    except Exception as e:
+                        logger.debug("Failed to add %s column: %s", _sh_col, e)
 
             # Migration: add track_artist column for per-track artist on compilations/DJ mixes
             try:
@@ -15826,19 +15846,29 @@ class MusicDatabase:
     def add_sync_history_entry(self, batch_id, playlist_id, playlist_name, source, sync_type,
                                tracks_json, artist_context=None, album_context=None,
                                thumb_url=None, total_tracks=0, is_album_download=False,
-                               playlist_folder_mode=False, source_page=None):
-        """Record a new sync operation to sync_history."""
+                               playlist_folder_mode=False, source_page=None,
+                               profile_id=None, quality_profile_id=None):
+        """Record a new sync operation to sync_history.
+
+        ``profile_id``/``quality_profile_id`` capture WHO ran the sync and under
+        which Quality Profile, so a later re-add from the history reproduces the
+        original request instead of falling back to admin + global default
+        (P1-04).
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO sync_history (batch_id, playlist_id, playlist_name, source, sync_type,
                     tracks_json, artist_context, album_context, thumb_url, total_tracks,
-                    is_album_download, playlist_folder_mode, source_page)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_album_download, playlist_folder_mode, source_page,
+                    profile_id, quality_profile_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (batch_id, playlist_id, playlist_name, source, sync_type,
                   tracks_json, artist_context, album_context, thumb_url, total_tracks,
-                  int(is_album_download), int(playlist_folder_mode), source_page))
+                  int(is_album_download), int(playlist_folder_mode), source_page,
+                  int(profile_id) if profile_id is not None else None,
+                  int(quality_profile_id) if quality_profile_id is not None else None))
             conn.commit()
             # Cap at 100 entries
             cursor.execute("""
@@ -15899,13 +15929,34 @@ class MusicDatabase:
             logger.debug(f"Error refreshing sync history entry: {e}")
             return False
 
-    def get_sync_history(self, source=None, page=1, limit=20):
+    @staticmethod
+    def _sync_history_owner_conditions(profile_id):
+        """``(conditions, params)`` restricting sync_history to one owner.
+
+        Rows written before the P1-04 migration have ``profile_id IS NULL``.
+        Treating those as belonging to admin keeps an upgraded install's history
+        visible where it has always been, without exposing it to other profiles.
+        """
+        if profile_id is None:
+            return [], []
+        if int(profile_id) == 1:
+            return ["(profile_id = ? OR profile_id IS NULL)"], [1]
+        return ["profile_id = ?"], [int(profile_id)]
+
+    def get_sync_history(self, source=None, page=1, limit=20, profile_id=None):
         """Return (entries, total) for sync_history, newest first. Full tracks_json excluded from list."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = "WHERE source = ?" if source else ""
-            params = [source] if source else []
+            conditions = []
+            params = []
+            if source:
+                conditions.append("source = ?")
+                params.append(source)
+            owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
+            conditions += owner_conditions
+            params += owner_params
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
             cursor.execute(f"SELECT COUNT(*) as cnt FROM sync_history {where}", params)
             total = cursor.fetchone()['cnt']
@@ -15915,7 +15966,8 @@ class MusicDatabase:
                 SELECT id, batch_id, playlist_id, playlist_name, source, sync_type,
                        artist_context, album_context, thumb_url, total_tracks,
                        tracks_found, tracks_downloaded, tracks_failed,
-                       is_album_download, playlist_folder_mode, started_at, completed_at
+                       is_album_download, playlist_folder_mode, started_at, completed_at,
+                       profile_id, quality_profile_id
                 FROM sync_history {where}
                 ORDER BY started_at DESC
                 LIMIT ? OFFSET ?
@@ -15926,63 +15978,86 @@ class MusicDatabase:
             logger.error(f"Error querying sync history: {e}")
             return [], 0
 
-    def get_latest_sync_history_by_playlist(self, playlist_id):
+    def get_latest_sync_history_by_playlist(self, playlist_id, profile_id=None):
         """Return the most recent sync_history row for a given playlist_id."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
+            owner_sql = (" AND " + " AND ".join(owner_conditions)) if owner_conditions else ""
             cursor.execute("""
                 SELECT * FROM sync_history
                 WHERE playlist_id = ?
-                ORDER BY started_at DESC LIMIT 1
-            """, (playlist_id,))
+            """.rstrip() + owner_sql + " ORDER BY started_at DESC LIMIT 1",
+                [playlist_id, *owner_params])
             row = cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:
             logger.debug(f"Error getting latest sync history by playlist: {e}")
             return None
 
-    def get_sync_history_entry(self, entry_id):
+    def get_sync_history_entry(self, entry_id, profile_id=None):
         """Return a single sync_history row with full tracks_json (for re-trigger)."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sync_history WHERE id = ?", (entry_id,))
+            owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
+            owner_sql = (" AND " + " AND ".join(owner_conditions)) if owner_conditions else ""
+            cursor.execute(
+                "SELECT * FROM sync_history WHERE id = ?" + owner_sql,
+                [entry_id, *owner_params],
+            )
             row = cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:
             logger.error(f"Error getting sync history entry: {e}")
             return None
 
-    def delete_sync_history_entry(self, entry_id):
+    def delete_sync_history_entry(self, entry_id, profile_id=None):
         """Delete a single sync_history entry."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM sync_history WHERE id = ?", (entry_id,))
+            owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
+            owner_sql = (" AND " + " AND ".join(owner_conditions)) if owner_conditions else ""
+            cursor.execute(
+                "DELETE FROM sync_history WHERE id = ?" + owner_sql,
+                [entry_id, *owner_params],
+            )
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
             logger.debug(f"Error deleting sync history entry: {e}")
             return False
 
-    def get_sync_history_playlist_names(self):
+    def get_sync_history_playlist_names(self, profile_id=None):
         """Return distinct playlist names ever synced (for server playlist filtering)."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT playlist_name FROM sync_history WHERE playlist_name != ''")
+            owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
+            owner_sql = (" AND " + " AND ".join(owner_conditions)) if owner_conditions else ""
+            cursor.execute(
+                "SELECT DISTINCT playlist_name FROM sync_history WHERE playlist_name != ''"
+                + owner_sql,
+                owner_params,
+            )
             return [row[0] for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting sync history playlist names: {e}")
             return []
 
-    def get_sync_history_stats(self):
+    def get_sync_history_stats(self, profile_id=None):
         """Return counts grouped by source."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT source, COUNT(*) as cnt FROM sync_history GROUP BY source")
+            owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
+            owner_sql = ("WHERE " + " AND ".join(owner_conditions)) if owner_conditions else ""
+            cursor.execute(
+                f"SELECT source, COUNT(*) as cnt FROM sync_history {owner_sql} GROUP BY source",
+                owner_params,
+            )
             return {row['source']: row['cnt'] for row in cursor.fetchall()}
         except Exception as e:
             logger.debug(f"Error getting sync history stats: {e}")
@@ -16202,14 +16277,35 @@ class MusicDatabase:
             logger.error(f"Error getting mirrored playlists: {e}")
             return []
 
-    def mark_mirrored_playlist_explored(self, playlist_id: int) -> bool:
+    @staticmethod
+    def _mirror_owner_clause(profile_id: Optional[int], column: str = "profile_id"):
+        """``(sql_fragment, params)`` restricting a mirror statement to one owner.
+
+        Passing ``profile_id=None`` keeps the historic unscoped behaviour for
+        trusted internal callers that already resolved the mirror (automation
+        handlers, pipeline steps). Every request-facing caller MUST pass the
+        active SoulSync profile so a foreign mirror is indistinguishable from a
+        missing one — see the P0-01 audit finding.
+        """
+        if profile_id is None:
+            return "", []
+        return f" AND {column}=?", [int(profile_id)]
+
+    def mark_mirrored_playlist_explored(
+        self,
+        playlist_id: int,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> bool:
         """Set explored_at to now for a mirrored playlist."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
-                    "UPDATE mirrored_playlists SET explored_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (playlist_id,)
+                    "UPDATE mirrored_playlists SET explored_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [playlist_id, *owner_params],
                 )
                 conn.commit()
                 return cursor.rowcount > 0
@@ -16217,12 +16313,20 @@ class MusicDatabase:
             logger.error(f"Error marking playlist {playlist_id} as explored: {e}")
             return False
 
-    def get_mirrored_playlist(self, playlist_id: int) -> Optional[Dict]:
-        """Return a single mirrored playlist by id."""
+    def get_mirrored_playlist(
+        self,
+        playlist_id: int,
+        profile_id: Optional[int] = None,
+    ) -> Optional[Dict]:
+        """Return a single mirrored playlist by id, optionally owner-scoped."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT * FROM mirrored_playlists WHERE id = ?", (playlist_id,))
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "SELECT * FROM mirrored_playlists WHERE id = ?" + owner_sql,
+                    [playlist_id, *owner_params],
+                )
                 row = cursor.fetchone()
                 return self._normalize_mirrored_playlist_row(row)
         except Exception as e:
@@ -16289,7 +16393,9 @@ class MusicDatabase:
         from core.playlists.source_refs import extract_mirrored_pk
         pk = extract_mirrored_pk(ref)
         if pk is not None:
-            return self.get_mirrored_playlist(pk)
+            # Owner-scoped: a bare/synthetic PK from another profile must look
+            # like a missing mirror, not like someone else's playlist (P0-01).
+            return self.get_mirrored_playlist(pk, profile_id=profile_id)
         return None
 
     def resolve_mirrored_playlist_assignment(
@@ -16297,6 +16403,8 @@ class MusicDatabase:
         playlist_ref: Any,
         playlist_name: Optional[str] = None,
         profile_id: int = 1,
+        *,
+        source: Optional[str] = None,
     ) -> Optional[Dict]:
         """Resolve the durable mirror behind a provider-agnostic sync request.
 
@@ -16305,8 +16413,15 @@ class MusicDatabase:
         an explicit synthetic mirror id and finally an unambiguous name.  This
         lets Spotify, iTunes, Deezer, file imports and future providers share
         the same persisted Quality Profile without Library v2 involvement.
+
+        ``source`` removes the remaining ambiguity (P2-01): two providers may
+        legitimately use the same upstream playlist id, and the heuristics below
+        cannot tell them apart.  Callers that know the provider should always
+        pass it; the heuristic path stays as the documented legacy fallback for
+        endpoints that never carried provider metadata.
         """
         ref = str(playlist_ref or '').strip()
+        provider = (str(source).strip() or None) if source else None
         try:
             with self._get_connection() as conn:
                 rows = []
@@ -16317,6 +16432,15 @@ class MusicDatabase:
                         "ORDER BY updated_at DESC",
                         (ref, int(profile_id)),
                     ).fetchall()
+                if provider and len(rows) > 1:
+                    # Exact provider match wins outright; a provider that matches
+                    # nothing falls through to the shared heuristics rather than
+                    # failing a legacy alias like 'spotify_public' vs 'spotify'.
+                    exact = [r for r in rows if str(r['source'] or '') == provider]
+                    if len(exact) == 1:
+                        return self._normalize_mirrored_playlist_row(exact[0])
+                    if len(exact) > 1:
+                        rows = exact
                 if len(rows) == 1:
                     return self._normalize_mirrored_playlist_row(rows[0])
                 if len(rows) > 1 and playlist_name:
@@ -16360,18 +16484,21 @@ class MusicDatabase:
         self,
         playlist_id: int,
         enabled: bool,
+        *,
+        profile_id: Optional[int] = None,
     ) -> bool:
         """Persist whether downloads for this playlist use playlist-folder layout."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
                     """
                     UPDATE mirrored_playlists
                     SET organize_by_playlist = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                    """,
-                    (1 if enabled else 0, playlist_id),
+                    """.rstrip() + owner_sql,
+                    [1 if enabled else 0, playlist_id, *owner_params],
                 )
                 conn.commit()
                 return cursor.rowcount > 0
@@ -16412,7 +16539,69 @@ class MusicDatabase:
             )
             return False
 
-    def set_mirrored_playlist_custom_name(self, playlist_id: int, custom_name) -> bool:
+    def update_mirrored_playlist_preferences(
+        self,
+        playlist_id: int,
+        *,
+        profile_id: Optional[int] = None,
+        organize_by_playlist: Optional[bool] = None,
+        quality_profile_id: Optional[int] = None,
+    ) -> str:
+        """Atomically update the per-playlist download preferences.
+
+        Returns ``'ok'``, ``'not_found'``, ``'unknown_quality_profile'`` or
+        ``'error'``.  Both fields are validated BEFORE anything is written and
+        applied in a single statement, so a rejected Quality Profile can no
+        longer leave a half-applied ``organize_by_playlist`` behind (P2-02).
+        """
+        assignments: List[str] = []
+        params: List[Any] = []
+        try:
+            with self._get_connection() as conn:
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                if conn.execute(
+                    "SELECT 1 FROM mirrored_playlists WHERE id=?" + owner_sql,
+                    [int(playlist_id), *owner_params],
+                ).fetchone() is None:
+                    return 'not_found'
+
+                if quality_profile_id is not None:
+                    if conn.execute(
+                        "SELECT 1 FROM quality_profiles WHERE id=?",
+                        (int(quality_profile_id),),
+                    ).fetchone() is None:
+                        return 'unknown_quality_profile'
+                    assignments.append("quality_profile_id=?")
+                    params.append(int(quality_profile_id))
+
+                if organize_by_playlist is not None:
+                    assignments.append("organize_by_playlist=?")
+                    params.append(1 if organize_by_playlist else 0)
+
+                if not assignments:
+                    return 'ok'
+
+                conn.execute(
+                    "UPDATE mirrored_playlists SET "
+                    + ", ".join(assignments)
+                    + ", updated_at=CURRENT_TIMESTAMP WHERE id=?" + owner_sql,
+                    [*params, int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return 'ok'
+        except Exception as e:
+            logger.error(
+                "Error updating preferences for mirrored playlist %s: %s", playlist_id, e
+            )
+            return 'error'
+
+    def set_mirrored_playlist_custom_name(
+        self,
+        playlist_id: int,
+        custom_name,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> bool:
         """Set or clear a user alias for a mirrored playlist.
 
         A blank/None value CLEARS the alias (display + sync fall back to the
@@ -16424,13 +16613,14 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
                     """
                     UPDATE mirrored_playlists
                     SET custom_name = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                    """,
-                    (value, playlist_id),
+                    """.rstrip() + owner_sql,
+                    [value, playlist_id, *owner_params],
                 )
                 conn.commit()
                 return cursor.rowcount > 0
@@ -16474,16 +16664,28 @@ class MusicDatabase:
             logger.debug(f"set_playlist_export_target failed: {e}")
             return False
 
-    def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:
+    def get_mirrored_playlist_tracks(
+        self,
+        playlist_id: int,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> List[Dict]:
         """Return all tracks for a mirrored playlist ordered by position."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                owner_sql = ""
+                owner_params: List[Any] = []
+                if profile_id is not None:
+                    owner_sql = (
+                        " AND playlist_id IN (SELECT id FROM mirrored_playlists WHERE profile_id=?)"
+                    )
+                    owner_params = [int(profile_id)]
                 cursor.execute("""
                     SELECT * FROM mirrored_playlist_tracks
                     WHERE playlist_id = ?
-                    ORDER BY position
-                """, (playlist_id,))
+                """.rstrip() + owner_sql + " ORDER BY position",
+                    [playlist_id, *owner_params])
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
@@ -16494,6 +16696,8 @@ class MusicDatabase:
         playlist_id: int,
         source_playlist_id: str,
         description: Optional[str] = None,
+        *,
+        profile_id: Optional[int] = None,
     ) -> bool:
         """Update a mirrored playlist's upstream source reference.
 
@@ -16504,18 +16708,20 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 if description is None:
                     cursor.execute("""
                         UPDATE mirrored_playlists
                         SET source_playlist_id = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (source_playlist_id, playlist_id))
+                    """.rstrip() + owner_sql, [source_playlist_id, playlist_id, *owner_params])
                 else:
                     cursor.execute("""
                         UPDATE mirrored_playlists
                         SET source_playlist_id = ?, description = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (source_playlist_id, description, playlist_id))
+                    """.rstrip() + owner_sql,
+                        [source_playlist_id, description, playlist_id, *owner_params])
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
@@ -16566,14 +16772,27 @@ class MusicDatabase:
             logger.error(f"Error getting extra_data map: {e}")
             return {}
 
-    def clear_mirrored_playlist_discovery(self, playlist_id: int) -> int:
+    def clear_mirrored_playlist_discovery(
+        self,
+        playlist_id: int,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> int:
         """Clear extra_data for all tracks in a mirrored playlist (resets discovery)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                owner_sql = ""
+                owner_params: List[Any] = []
+                if profile_id is not None:
+                    owner_sql = (
+                        " AND playlist_id IN (SELECT id FROM mirrored_playlists WHERE profile_id=?)"
+                    )
+                    owner_params = [int(profile_id)]
                 cursor.execute(
-                    "UPDATE mirrored_playlist_tracks SET extra_data = NULL WHERE playlist_id = ?",
-                    (playlist_id,)
+                    "UPDATE mirrored_playlist_tracks SET extra_data = NULL "
+                    "WHERE playlist_id = ?" + owner_sql,
+                    [playlist_id, *owner_params],
                 )
                 conn.commit()
                 return cursor.rowcount
@@ -16736,12 +16955,21 @@ class MusicDatabase:
             logger.error(f"Error getting mirrored playlist status counts: {e}")
         return result
 
-    def delete_mirrored_playlist(self, playlist_id: int) -> bool:
+    def delete_mirrored_playlist(
+        self,
+        playlist_id: int,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> bool:
         """Delete a mirrored playlist and its tracks (CASCADE)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM mirrored_playlists WHERE id = ?", (playlist_id,))
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "DELETE FROM mirrored_playlists WHERE id = ?" + owner_sql,
+                    [playlist_id, *owner_params],
+                )
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:

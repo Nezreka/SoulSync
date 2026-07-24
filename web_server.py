@@ -87,6 +87,7 @@ if not pp_logger.handlers:
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
+from core.api_validation import parse_strict_bool, parse_strict_id, parse_strict_int
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited, SPOTIFY_OAUTH_SCOPE
 from core.plex_client import PlexClient
 from core.ui_appearance import is_firefox_user_agent, resolve_worker_orbs_default
@@ -125,6 +126,7 @@ from core.imports.context import (
 )
 from core.wishlist.payloads import (
     build_cancelled_task_wishlist_payload as _build_cancelled_task_wishlist_payload,
+    resolve_task_quality_profile_id,
     build_failed_track_wishlist_context as _build_failed_track_wishlist_context,
     ensure_wishlist_track_format as _ensure_wishlist_track_format,
     get_track_artist_name as _get_track_artist_name,
@@ -20779,12 +20781,16 @@ def cancel_download_task():
 
             # Add to wishlist, treating cancellation as a failure
             # Pass the spotify data directly instead of creating a fake Track object
+            # A cancel/retry must not silently change the requested quality: carry
+            # the task's Quality Profile through, exactly like the regular
+            # failed-download path already does (P2-06).
             success = wishlist_service.add_spotify_track_to_wishlist(
                 spotify_track_data=spotify_track_data,
                 failure_reason="Download cancelled by user",
                 source_type="playlist",
                 source_context=source_context,
-                profile_id=get_current_profile_id()
+                profile_id=get_current_profile_id(),
+                quality_profile_id=resolve_task_quality_profile_id(task),
             )
 
             if success:
@@ -21184,8 +21190,11 @@ def get_sync_history():
         source = request.args.get('source') or None
 
         db = MusicDatabase()
-        entries, total = db.get_sync_history(source=source, page=page, limit=limit)
-        stats = db.get_sync_history_stats()
+        profile_id = get_current_profile_id()
+        entries, total = db.get_sync_history(
+            source=source, page=page, limit=limit, profile_id=profile_id
+        )
+        stats = db.get_sync_history_stats(profile_id=profile_id)
 
         # Parse artist/album names from JSON context for display
         for entry in entries:
@@ -21220,7 +21229,7 @@ def get_sync_history_entry(entry_id):
     """Get a single sync history entry with full cached data for re-trigger."""
     try:
         db = MusicDatabase()
-        entry = db.get_sync_history_entry(entry_id)
+        entry = db.get_sync_history_entry(entry_id, profile_id=get_current_profile_id())
         if not entry:
             return jsonify({"success": False, "error": "Entry not found"}), 404
 
@@ -21243,7 +21252,8 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
     behaves identically to the auto-add. Only 'wishlist'-status rows are eligible."""
     try:
         db = MusicDatabase()
-        entry = db.get_sync_history_entry(entry_id)
+        profile_id = get_current_profile_id()
+        entry = db.get_sync_history_entry(entry_id, profile_id=profile_id)
         if not entry:
             return jsonify({"success": False, "error": "Sync entry not found"}), 404
 
@@ -21254,6 +21264,16 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
         spotify_track_data = reconstruct_sync_track_data(track_results, tracks, track_index)
         if not spotify_track_data:
             return jsonify({"success": False, "error": "This track can't be re-added to the wishlist"}), 400
+
+        # A retry must reproduce the ORIGINAL request, not the caller's defaults:
+        # the run's own SoulSync profile and Quality Profile, falling back to the
+        # per-track stamp the payload carries (P1-04).
+        readd_profile_id = int(entry.get('profile_id') or profile_id)
+        readd_quality_profile_id = (
+            entry.get('quality_profile_id')
+            if entry.get('quality_profile_id') is not None
+            else spotify_track_data.get('quality_profile_id')
+        )
 
         from core.wishlist_service import get_wishlist_service
         added = get_wishlist_service().add_spotify_track_to_wishlist(
@@ -21266,6 +21286,8 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
                 'sync_type': 'automatic_sync',
                 'timestamp': datetime.now().isoformat(),
             },
+            profile_id=readd_profile_id,
+            quality_profile_id=readd_quality_profile_id,
         )
         return jsonify({"success": True, "added": bool(added),
                         "name": spotify_track_data.get('name', '')})
@@ -21279,7 +21301,7 @@ def delete_sync_history_entry_api(entry_id):
     """Delete a sync history entry."""
     try:
         db = MusicDatabase()
-        deleted = db.delete_sync_history_entry(entry_id)
+        deleted = db.delete_sync_history_entry(entry_id, profile_id=get_current_profile_id())
         return jsonify({"success": deleted})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -21289,7 +21311,7 @@ def get_sync_history_playlist_names():
     """Return distinct playlist names ever synced, for server playlist cross-reference."""
     try:
         db = MusicDatabase()
-        names = db.get_sync_history_playlist_names()
+        names = db.get_sync_history_playlist_names(profile_id=get_current_profile_id())
         return jsonify(names)
     except Exception as e:
         return jsonify([])
@@ -21310,13 +21332,24 @@ def _detect_sync_source(playlist_id):
 
 def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                                 is_album_download, album_context, artist_context,
-                                playlist_folder_mode, source_page=None):
+                                playlist_folder_mode, source_page=None,
+                                profile_id=None, quality_profile_id=None):
     """Record a sync start to the database."""
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    if quality_profile_id is None:
+        # Every track in a batch carries the same assignment; take the first one
+        # present so a re-add from the history reproduces it (P1-04).
+        for track in tracks or []:
+            if isinstance(track, dict) and track.get('quality_profile_id') is not None:
+                quality_profile_id = track['quality_profile_id']
+                break
     _downloads_history.record_sync_history_start(
         MusicDatabase(),
         batch_id, playlist_id, playlist_name, tracks,
         is_album_download, album_context, artist_context,
         playlist_folder_mode, source_page=source_page,
+        profile_id=profile_id, quality_profile_id=quality_profile_id,
     )
 
 
@@ -21530,10 +21563,11 @@ def get_server_playlist_tracks(playlist_id):
         elif playlist_name:
             # Legacy fallback: cross-reference with sync history
             db = get_database()
-            entries, _ = db.get_sync_history(page=1, limit=50)
+            _hist_profile_id = get_current_profile_id()
+            entries, _ = db.get_sync_history(page=1, limit=50, profile_id=_hist_profile_id)
             for entry in entries:
                 if entry.get('playlist_name', '').lower() == playlist_name.lower():
-                    full_entry = db.get_sync_history_entry(entry['id'])
+                    full_entry = db.get_sync_history_entry(entry['id'], profile_id=_hist_profile_id)
                     if full_entry:
                         try:
                             tr = json.loads(full_entry.get('track_results') or '[]')
@@ -22477,6 +22511,30 @@ def _save_sync_status_file(sync_statuses):
     except Exception as e:
         logger.error(f"Error saving sync status: {e}")
 
+def _invalidate_mirror_sync_fingerprint(playlist_id):
+    """Drop the smart-skip fingerprint for a mirror so the next sync really runs.
+
+    Auto-Sync short-circuits when the track list is byte-identical to the last
+    run. That is right for a provider refresh but wrong for an authoritative
+    Quality Profile change, which must re-stamp the existing Wishlist rows even
+    though not a single track id moved (P1-03). Clearing the stored hashes is
+    the smallest change that makes the very next scheduled run authoritative,
+    and it degrades safely: a lost preference write only costs one extra sync.
+    """
+    key = f"auto_mirror_{int(playlist_id)}"
+    try:
+        sync_statuses = _load_sync_status_file()
+        status = sync_statuses.get(key)
+        if not status:
+            return
+        for field in ('tracks_hash', 'mirror_tracks_hash', 'matched_tracks'):
+            status.pop(field, None)
+        sync_statuses[key] = status
+        _save_sync_status_file(sync_statuses)
+    except Exception as e:
+        logger.debug("Could not invalidate sync fingerprint for %s: %s", key, e)
+
+
 def _sync_status_timestamp(status_info):
     """Return comparable timestamp for a persisted sync-status record."""
     if not status_info or 'last_synced' not in status_info:
@@ -22543,7 +22601,11 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
             'last_synced': now.isoformat()
         }
         # Store match counts and track hash for smart-skip on scheduled syncs
-        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash', 'mirror_tracks_hash'):
+        # `quality_profile_id` is part of the smart-skip fingerprint: an
+        # authoritative profile change must re-run the sync even when the track
+        # list is byte-identical (P1-03).
+        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
+                    'mirror_tracks_hash', 'quality_profile_id'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -29468,7 +29530,9 @@ def start_playlist_export_listenbrainz(playlist_id):
         body = request.get_json(silent=True) or {}
         mode = 'push' if body.get('mode') == 'push' else 'download'
         db = get_database()
-        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        meta = _owned_mirrored_playlist(db, int(playlist_id))
+        if not meta:
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
         title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
 
         import uuid
@@ -29510,7 +29574,9 @@ def start_playlist_export_service(playlist_id, service):
         body = request.get_json(silent=True) or {}
         backfill = bool(body.get('backfill'))
         db = get_database()
-        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        meta = _owned_mirrored_playlist(db, int(playlist_id))
+        if not meta:
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
         title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
 
         import uuid
@@ -36970,6 +37036,18 @@ def get_mirrored_playlists_endpoint():
         logger.error(f"Error getting mirrored playlists: {e}")
         return jsonify({"error": str(e)}), 500
 
+def _owned_mirrored_playlist(database, playlist_id):
+    """The mirror ``playlist_id`` IF it belongs to the active SoulSync profile.
+
+    Request handlers must never look a mirror up by primary key alone: the ids
+    are small integers and the synthetic ``auto_mirror_<pk>`` form is guessable,
+    so an unscoped lookup let any profile read, rename, re-point, run, clear or
+    delete another profile's mirror — and read its Quality Profile (P0-01).
+    A foreign mirror is reported exactly like a missing one.
+    """
+    return database.get_mirrored_playlist(playlist_id, profile_id=get_current_profile_id())
+
+
 @app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
@@ -36977,7 +37055,7 @@ def get_mirrored_playlist_endpoint(playlist_id):
         from core.playlists.source_refs import describe_mirrored_source_ref
         from core.playlists.naming import effective_mirrored_name
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
+        playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
         source_ref = describe_mirrored_source_ref(playlist)
@@ -37001,7 +37079,7 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
         source_ref = data.get('source_ref') or data.get('source_playlist_id') or data.get('url')
 
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
+        playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
@@ -37032,11 +37110,12 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
             playlist_id,
             normalized.source_playlist_id,
             normalized.description,
+            profile_id=get_current_profile_id(),
         )
         if not ok:
             return jsonify({"error": "Failed to update source reference"}), 500
 
-        updated = database.get_mirrored_playlist(playlist_id) or {}
+        updated = _owned_mirrored_playlist(database, playlist_id) or {}
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
         logger.error(f"Error updating mirrored playlist source reference: {e}")
@@ -37052,16 +37131,18 @@ def update_mirrored_playlist_custom_name_endpoint(playlist_id):
         from core.playlists.naming import effective_mirrored_name
         data = request.get_json() or {}
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
+        playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
         # `custom_name` may be '' / null to CLEAR the alias.
-        ok = database.set_mirrored_playlist_custom_name(playlist_id, data.get('custom_name'))
+        ok = database.set_mirrored_playlist_custom_name(
+            playlist_id, data.get('custom_name'), profile_id=get_current_profile_id()
+        )
         if not ok:
             return jsonify({"error": "Failed to update name"}), 500
 
-        updated = database.get_mirrored_playlist(playlist_id) or {}
+        updated = _owned_mirrored_playlist(database, playlist_id) or {}
         updated['display_name'] = effective_mirrored_name(updated)
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
@@ -37078,31 +37159,48 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
+        profile_id = get_current_profile_id()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
-        if int(playlist.get('profile_id') or 1) != int(get_current_profile_id()):
-            return jsonify({"error": "Playlist not found"}), 404
-
+        organize_by_playlist = None
         if 'organize_by_playlist' in data:
-            enabled = bool(data.get('organize_by_playlist'))
-            if not database.set_mirrored_playlist_organize_by_playlist(playlist_id, enabled):
-                return jsonify({"error": "Failed to update preferences"}), 500
+            organize_by_playlist = parse_strict_bool(data.get('organize_by_playlist'))
+            if organize_by_playlist is None:
+                return jsonify({"error": "Invalid organize_by_playlist"}), 400
 
+        quality_profile_id = None
         if 'quality_profile_id' in data:
-            try:
-                quality_profile_id = int(data.get('quality_profile_id'))
-            except (TypeError, ValueError):
+            quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
+            if quality_profile_id is None:
                 return jsonify({"error": "Invalid quality_profile_id"}), 400
-            if not database.set_mirrored_playlist_quality_profile(
-                playlist_id,
-                quality_profile_id,
-                profile_id=get_current_profile_id(),
-            ):
-                return jsonify({"error": "Unknown quality_profile_id"}), 400
 
-        updated = database.get_mirrored_playlist(playlist_id) or {}
+        # Both fields are validated and written in ONE transaction: a rejected
+        # Quality Profile used to leave the already-committed organize toggle
+        # behind while the response said 400 (P2-02).
+        outcome = database.update_mirrored_playlist_preferences(
+            playlist_id,
+            profile_id=profile_id,
+            organize_by_playlist=organize_by_playlist,
+            quality_profile_id=quality_profile_id,
+        )
+        if outcome == 'not_found':
+            return jsonify({"error": "Playlist not found"}), 404
+        if outcome == 'unknown_quality_profile':
+            return jsonify({"error": "Unknown quality_profile_id"}), 400
+        if outcome != 'ok':
+            return jsonify({"error": "Failed to update preferences"}), 500
+
+        if (
+            quality_profile_id is not None
+            and quality_profile_id != playlist.get('quality_profile_id')
+        ):
+            # A profile-only change must not be swallowed by the auto-sync
+            # "tracks unchanged" fast path (P1-03).
+            _invalidate_mirror_sync_fingerprint(playlist_id)
+
+        updated = _owned_mirrored_playlist(database, playlist_id) or {}
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
         logger.error(f"Error updating mirrored playlist preferences: {e}")
@@ -37127,32 +37225,44 @@ def resolve_mirrored_playlist_endpoint():
         )
         if not playlist:
             return jsonify({"found": False, "playlist": None})
+        # Belt and braces: the resolver is owner-scoped, but this endpoint is the
+        # one that hands a persisted quality_profile_id to the browser (P0-01).
+        if int(playlist.get('profile_id') or 1) != int(profile_id):
+            return jsonify({"found": False, "playlist": None})
         return jsonify({"found": True, "playlist": playlist})
     except Exception as e:
         logger.error(f"Error resolving mirrored playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-def _playlist_pipeline_state_key(playlist_id):
-    return f"mirrored_{int(playlist_id)}"
+def _playlist_pipeline_state_key(playlist_id, profile_id=None):
+    """Progress-state key for a manual pipeline run.
+
+    Keyed by ``(profile, mirror)``: two profiles running a pipeline against
+    mirrors that happen to share a primary key must not read or overwrite each
+    other's progress, log lines or result (P0-01).
+    """
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    return f"p{int(profile_id)}:mirrored_{int(playlist_id)}"
 
 
-def _snapshot_playlist_pipeline_state(playlist_id):
-    key = _playlist_pipeline_state_key(playlist_id)
+def _snapshot_playlist_pipeline_state(playlist_id, profile_id=None):
+    key = _playlist_pipeline_state_key(playlist_id, profile_id)
     with playlist_pipeline_progress_lock:
         state = playlist_pipeline_progress_states.get(key)
         return dict(state) if state else None
 
 
-def _replace_playlist_pipeline_state(playlist_id, state):
-    key = _playlist_pipeline_state_key(playlist_id)
+def _replace_playlist_pipeline_state(playlist_id, state, profile_id=None):
+    key = _playlist_pipeline_state_key(playlist_id, profile_id)
     with playlist_pipeline_progress_lock:
         playlist_pipeline_progress_states[key] = dict(state)
         return dict(playlist_pipeline_progress_states[key])
 
 
-def _update_playlist_pipeline_progress(playlist_id, **kwargs):
-    key = _playlist_pipeline_state_key(playlist_id)
+def _update_playlist_pipeline_progress(playlist_id, profile_id=None, **kwargs):
+    key = _playlist_pipeline_state_key(playlist_id, profile_id)
     with playlist_pipeline_progress_lock:
         state = playlist_pipeline_progress_states.setdefault(key, {
             'run_id': key,
@@ -37184,18 +37294,27 @@ def _update_playlist_pipeline_progress(playlist_id, **kwargs):
 class _PlaylistPipelineDepsProxy:
     """Forward automation deps while routing progress into playlist UI state."""
 
-    def __init__(self, base_deps, playlist_id):
+    def __init__(self, base_deps, playlist_id, profile_id):
         self._base_deps = base_deps
         self._playlist_id = playlist_id
+        self._profile_id = profile_id
 
     def __getattr__(self, name):
         return getattr(self._base_deps, name)
 
     def update_progress(self, _automation_id, **kwargs):
-        _update_playlist_pipeline_progress(self._playlist_id, **kwargs)
+        _update_playlist_pipeline_progress(
+            self._playlist_id, profile_id=self._profile_id, **kwargs
+        )
 
 
-def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
+def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, profile_id=1):
+    # The caller is a bare thread, so neither Flask's `g` nor the request-scoped
+    # profile survives. Without this the whole pipeline — sync, organize batch,
+    # failed-track Wishlist writes — silently ran as admin (profile 1) for every
+    # non-default user (P0-01). Declare the owner for the whole unit of work.
+    from core.profile_context import set_background_profile, reset_background_profile
+    profile_token = set_background_profile(int(profile_id))
     try:
         if _automation_deps is None:
             raise RuntimeError("Automation dependencies are not available")
@@ -37205,13 +37324,14 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
         from core.playlists.pipeline import run_mirrored_playlist_pipeline
 
-        deps = _PlaylistPipelineDepsProxy(_automation_deps, playlist_id)
+        deps = _PlaylistPipelineDepsProxy(_automation_deps, playlist_id, profile_id)
         result = run_mirrored_playlist_pipeline(
             {
                 'playlist_id': str(playlist_id),
                 'all': False,
                 'skip_wishlist': bool(skip_wishlist),
-                '_automation_id': _playlist_pipeline_state_key(playlist_id),
+                'profile_id': int(profile_id),
+                '_automation_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             },
             deps,
             refresh_fn=auto_refresh_mirrored,
@@ -37223,6 +37343,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         if status == 'completed':
             _update_playlist_pipeline_progress(
                 playlist_id,
+                profile_id=profile_id,
                 status='finished',
                 progress=100,
                 phase='Pipeline complete',
@@ -37231,6 +37352,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         elif status == 'skipped':
             _update_playlist_pipeline_progress(
                 playlist_id,
+                profile_id=profile_id,
                 status='skipped',
                 progress=100,
                 phase='Pipeline already running',
@@ -37242,6 +37364,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         else:
             _update_playlist_pipeline_progress(
                 playlist_id,
+                profile_id=profile_id,
                 status='error',
                 progress=100,
                 phase='Pipeline error',
@@ -37252,6 +37375,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         logger.error(f"Manual mirrored playlist pipeline failed for {playlist_id}: {e}")
         _update_playlist_pipeline_progress(
             playlist_id,
+            profile_id=profile_id,
             status='error',
             progress=100,
             phase='Pipeline error',
@@ -37259,6 +37383,8 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
             log_line=f'Pipeline failed: {e}',
             log_type='error',
         )
+    finally:
+        reset_background_profile(profile_token)
 
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/run', methods=['POST'])
@@ -37266,7 +37392,8 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
     """Run the all-in-one mirrored playlist pipeline from the playlist UI."""
     try:
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
+        profile_id = get_current_profile_id()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
         if playlist.get('source') in ('file', 'beatport'):
@@ -37278,7 +37405,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 
         data = request.get_json(silent=True) or {}
         state = _replace_playlist_pipeline_state(playlist_id, {
-            'run_id': _playlist_pipeline_state_key(playlist_id),
+            'run_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             'playlist_id': int(playlist_id),
             'playlist_name': playlist.get('name') or '',
             'status': 'running',
@@ -37293,11 +37420,11 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
             'finished_at': None,
             'result': None,
             'error': None,
-        })
+        }, profile_id=profile_id)
 
         threading.Thread(
             target=_run_mirrored_playlist_pipeline_for_ui,
-            args=(playlist_id, bool(data.get('skip_wishlist', False))),
+            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id)),
             daemon=True,
             name=f"playlist-pipeline-{playlist_id}",
         ).start()
@@ -37316,6 +37443,8 @@ def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
         if not state:
             return jsonify({
                 "run_id": _playlist_pipeline_state_key(playlist_id),
+                # The key is profile-scoped, so a foreign run reads as idle here
+                # rather than leaking another profile's phase/log/result.
                 "playlist_id": int(playlist_id),
                 "status": "idle",
                 "progress": 0,
@@ -37365,7 +37494,7 @@ def delete_mirrored_playlist_endpoint(playlist_id):
     """Delete a mirrored playlist."""
     try:
         database = get_database()
-        if database.delete_mirrored_playlist(playlist_id):
+        if database.delete_mirrored_playlist(playlist_id, profile_id=get_current_profile_id()):
             return jsonify({"success": True})
         return jsonify({"error": "Playlist not found"}), 404
     except Exception as e:
@@ -37377,10 +37506,13 @@ def clear_mirrored_discovery_endpoint(playlist_id):
     """Clear discovery data for all tracks in a mirrored playlist, including discovery cache."""
     try:
         database = get_database()
+        profile_id = get_current_profile_id()
+        if not _owned_mirrored_playlist(database, playlist_id):
+            return jsonify({"error": "Playlist not found"}), 404
 
         # Clear discovery cache entries for these tracks so re-discovery does fresh lookups
         try:
-            tracks = database.get_mirrored_playlist_tracks(playlist_id)
+            tracks = database.get_mirrored_playlist_tracks(playlist_id, profile_id=profile_id)
             if tracks:
                 conn = database._get_connection()
                 cursor = conn.cursor()
@@ -37395,7 +37527,7 @@ def clear_mirrored_discovery_endpoint(playlist_id):
         except Exception as cache_err:
             logger.warning(f"Error clearing discovery cache: {cache_err}")
 
-        cleared = database.clear_mirrored_playlist_discovery(playlist_id)
+        cleared = database.clear_mirrored_playlist_discovery(playlist_id, profile_id=profile_id)
         return jsonify({"success": True, "cleared": cleared})
     except Exception as e:
         logger.error(f"Error clearing mirrored discovery: {e}")
@@ -37612,11 +37744,12 @@ def prepare_mirrored_discovery(playlist_id):
     """Register a mirrored playlist into youtube_playlist_states so the YouTube discovery pipeline can run."""
     try:
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
+        profile_id = get_current_profile_id()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
-        tracks_data = database.get_mirrored_playlist_tracks(playlist_id)
+        tracks_data = database.get_mirrored_playlist_tracks(playlist_id, profile_id=profile_id)
         url_hash = f"mirrored_{playlist_id}"
 
         # Build track list in the format the YouTube discovery worker expects
