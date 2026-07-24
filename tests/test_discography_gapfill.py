@@ -141,6 +141,11 @@ def test_endpoint_is_conservative_and_additive():
     assert "def _fetch(source, source_artist_id, name='')" in fn
     assert "_fetch(source, artist_source_ids[source])" in fn      # others: nameless
     assert "name=artist_name" in fn                               # base keeps the name
+    # #1068 follow-up: with no explicit base_source, the base resolves the way
+    # the PAGE does (no override → ragnarlotus's library-source setting picks),
+    # and the answering source is read back and excluded from gap candidates
+    assert "resolved_base = str(disc.get('source')" in fn
+    assert "s != resolved_base" in fn
     assert "fuzzy" not in fn.replace("never a fuzzy name search", "")
     # the shared id-resolver is reused by the original discography endpoint too
     assert ws.count("_resolve_artist_source_ids(") >= 3

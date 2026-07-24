@@ -10179,19 +10179,8 @@ def get_artist_discography_gap_fill(artist_id):
     try:
         artist_name = request.args.get('artist_name', '').strip()
         base_source = (request.args.get('base_source', '') or '').strip().lower()
-        if not base_source:
-            from core.metadata_service import get_primary_source
-            base_source = get_primary_source()
 
         artist_source_ids = _resolve_artist_source_ids(artist_id)
-
-        candidates = [s for s in ('spotify', 'deezer', 'itunes', 'musicbrainz')
-                      if s != base_source and artist_source_ids.get(s)]
-        if not candidates:
-            return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
-                            "sources_checked": [], "base_source": base_source,
-                            "note": "No other sources have a verified id for this artist yet "
-                                    "(enrichment provides them)."})
 
         from core.metadata.discography_gapfill import gap_fill_buckets
         from core.metadata.lookup import MetadataLookupOptions
@@ -10222,13 +10211,45 @@ def get_artist_discography_gap_fill(artist_id):
                     'eps': disc.get('eps') or [],
                     'singles': disc.get('singles') or []}
 
-        base_id = artist_source_ids.get(base_source) or artist_id
-        base = _fetch(base_source, base_id, name=artist_name)
+        # Resolve the BASE the same way the page did. An explicit base_source
+        # (source-only artist pages) pins it; otherwise fetch with NO override
+        # so ragnarlotus's Library-discography-source setting (#1068 — primary /
+        # automatic / explicit) picks the source exactly like the page's own
+        # load, and read back which source actually answered.
+        if base_source:
+            base = _fetch(base_source, artist_source_ids.get(base_source) or artist_id,
+                          name=artist_name)
+            resolved_base = base_source
+        else:
+            disc = get_artist_detail_discography(
+                artist_id,
+                artist_name=artist_name,
+                options=MetadataLookupOptions(
+                    skip_cache=False, max_pages=0, limit=200,
+                    artist_source_ids=artist_source_ids or None,
+                ),
+            )
+            if disc.get('state') == 'results':
+                base = {'albums': disc.get('albums') or [],
+                        'eps': disc.get('eps') or [],
+                        'singles': disc.get('singles') or []}
+                resolved_base = str(disc.get('source') or '').lower()
+            else:
+                base, resolved_base = None, ''
+
         if base is None:
             # No base to diff against — returning gaps would duplicate the page
             return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
-                            "sources_checked": [], "base_source": base_source,
+                            "sources_checked": [], "base_source": resolved_base,
                             "note": "Base discography unavailable."})
+
+        candidates = [s for s in ('spotify', 'deezer', 'itunes', 'musicbrainz')
+                      if s != resolved_base and artist_source_ids.get(s)]
+        if not candidates:
+            return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
+                            "sources_checked": [], "base_source": resolved_base,
+                            "note": "No other sources have a verified id for this artist yet "
+                                    "(enrichment provides them)."})
 
         others = {}
         checked = []
@@ -10240,7 +10261,7 @@ def get_artist_discography_gap_fill(artist_id):
 
         gaps = gap_fill_buckets(base, others, checked)
         return jsonify({"success": True, "gaps": gaps,
-                        "sources_checked": checked, "base_source": base_source})
+                        "sources_checked": checked, "base_source": resolved_base})
     except Exception as e:
         logger.error(f"Discography gap-fill failed for {artist_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
