@@ -17,10 +17,12 @@ without touching disk. Isolated — sibling video modules + stdlib only; no musi
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
 import shutil
+import uuid
 from typing import Any, Callable
 
 from core.video import organization
@@ -390,6 +392,62 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
             "_upgraded": plan["action"] == "upgrade"}
 
 
+def atomic_verified_copy(src: str, dst: str) -> None:
+    """Copy ``src`` to ``dst`` without ever exposing a partial file at the
+    final name, and refuse to accept a short copy.
+
+    The library folders are watched by Plex/Jellyfin: a bare
+    ``shutil.copy2(src, final_name)`` leaves the final ``.mkv`` name as a
+    growing partial file for the whole multi-GB copy (minutes over SMB), so
+    the server can index/analyze a truncated file — playback then skips
+    like corruption even after the copy finished — and an interrupted copy
+    leaves a permanently truncated file that looks complete. Same disease
+    the music side cured with ``atomic_copy_to_staging``.
+
+    The in-flight file is ``<dest>.tmp.<random>`` in the DESTINATION
+    directory (so the final ``os.replace`` is a same-filesystem atomic
+    rename, and the random suffix means media servers never index it).
+    The byte count is verified before the rename — a silently short copy
+    (SMB hiccup that didn't raise) must never be promoted to the real name.
+    """
+    d = str(dst)
+    tmp = os.path.join(os.path.dirname(d) or ".",
+                       os.path.basename(d) + ".tmp." + uuid.uuid4().hex[:8])
+    try:
+        shutil.copy2(src, tmp)
+        src_size = os.path.getsize(src)
+        tmp_size = os.path.getsize(tmp)
+        if src_size != tmp_size:
+            raise OSError(
+                f"short copy: {tmp_size} of {src_size} bytes for {os.path.basename(d)}")
+        os.replace(tmp, d)
+    except BaseException:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_verified_move(src: str, dst: str) -> None:
+    """Move with the same guarantees as ``atomic_verified_copy``.
+
+    Same filesystem → one atomic ``os.replace`` (instant, nothing partial
+    ever exists). Cross-device (download drive → SMB library) → verified
+    copy to a temp name + atomic rename, and the source is removed only
+    AFTER the destination verified — never lose the only good copy."""
+    os.makedirs(os.path.dirname(str(dst)) or ".", exist_ok=True)
+    try:
+        os.replace(str(src), str(dst))
+        return
+    except OSError as e:
+        if getattr(e, "errno", None) != errno.EXDEV:
+            raise            # real error (perms/space/missing) — not cross-device
+    atomic_verified_copy(src, dst)
+    os.remove(str(src))
+
+
 class _RealFS:
     """The production filesystem facade for ``run_import`` (os/shutil)."""
 
@@ -406,11 +464,11 @@ class _RealFS:
 
     @staticmethod
     def copy(src, dst):
-        shutil.copy2(src, dst)
+        atomic_verified_copy(src, dst)
 
     @staticmethod
     def move(src, dst):
-        shutil.move(src, dst)
+        atomic_verified_move(src, dst)
 
     @staticmethod
     def save_url(url, dst):
