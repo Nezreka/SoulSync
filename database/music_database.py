@@ -8297,6 +8297,49 @@ class MusicDatabase:
             logger.error(f"Error fetching candidate tracks for {len(album_ids)} album IDs: {e}")
             return []
 
+    # Per-source enrichment id columns on `albums` — the columns that can PROVE
+    # a discography card and a local album are the same release regardless of
+    # how the viewing source titles or dates it (#1071). Both spellings are
+    # listed where migrations created duplicates (id-column naming spaghetti).
+    ALBUM_SOURCE_ID_COLUMNS = (
+        'spotify_album_id', 'deezer_id', 'album_deezer_id', 'itunes_album_id',
+        'album_itunes_id', 'musicbrainz_release_id', 'qobuz_id', 'tidal_id',
+        'amazon_id', 'audiodb_id', 'jiosaavn_id',
+    )
+
+    def get_album_source_ids(self, album_ids):
+        """{album_db_id: {column: value}} for the per-source enrichment id
+        columns, one indexed query. Columns missing from an older schema are
+        skipped (PRAGMA intersection), so this never throws on column drift."""
+        if not album_ids:
+            return {}
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(albums)")
+            have = {row[1] for row in cursor.fetchall()}
+            cols = [c for c in self.ALBUM_SOURCE_ID_COLUMNS if c in have]
+            if not cols:
+                return {}
+            placeholders = ','.join(['?'] * len(album_ids))
+            cursor.execute(
+                f"SELECT id, {', '.join(cols)} FROM albums WHERE id IN ({placeholders})",
+                [str(a) for a in album_ids])
+            out = {}
+            for row in cursor.fetchall():
+                vals = {c: str(row[c]).strip() for c in cols
+                        if row[c] is not None and str(row[c]).strip()}
+                if vals:
+                    out[row['id']] = vals
+            return out
+        except Exception as e:
+            logger.debug("get_album_source_ids failed: %s", e)
+            return {}
+        finally:
+            if conn:
+                conn.close()
+
     def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.

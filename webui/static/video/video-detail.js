@@ -2690,8 +2690,12 @@
         return s ? (s.episodes || []).filter(function (e) { return !e.owned; }) : [];
     }
     function _grabParams(en, src) {
+        // poster travels with the grab → the downloads page rows (and the season
+        // group header, which borrows its first row's art) render real posters
+        // instead of the placeholder TV orb. Same resolver the wishlist writes use.
         return { title: data.title, source: src, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year };
+            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+            poster: _showPoster() };
     }
     // Optimistic per-episode state for the search phase — the grab has no row in
     // /downloads/active yet. The live tracker takes over once it appears.
@@ -2810,7 +2814,8 @@
         VideoGrab.pickSource().then(function (src) {
             return VideoGrab.season({ title: data.title, source: src, season: selectedSeason,
                 episodes: missing.map(function (e) { return e.episode_number; }),
-                mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year },
+                mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+                poster: _showPoster() },
                 function (en, state) { _setEpSynthetic(en, state); });
         }).then(function (res) {
             btn.disabled = false; _btnLabel(btn, 'Grab season'); startDlTracking();
@@ -2949,10 +2954,10 @@
                 cur[key] = dl;
                 if (dl.status === 'completed') {
                     // YouTube: /downloads/active includes ~100 HISTORIC completed
-                    // rows — marking those 'done' hid the re-grab button on every
-                    // recently-downloaded episode (the done-state CSS hides the
-                    // getbtns). Only a grab we actually watched run this session
-                    // paints ✓ Downloaded; history speaks through ep.owned instead.
+                    // rows — painting those 'done' would stamp ✓ Downloaded on
+                    // every recently-downloaded episode. Only a grab we actually
+                    // watched run this session paints ✓ Downloaded; history
+                    // speaks through ep.owned instead.
                     if (!isYt || _dlActive[key]) _dlDone[key] = 1;
                     delete _dlActive[key];
                 }
@@ -2983,6 +2988,11 @@
             if (_dlDone[key]) {
                 box.classList.add('vd-ep-get--done');
                 if (stEl) stEl.innerHTML = '<span class="vd-ep-dl-txt vd-ep-dl-txt--done">✓ Downloaded</span>';
+                // The action buttons stay visible AND usable on a downloaded row
+                // (grabEpisodeInline disabled the grab button for its in-flight
+                // window; the grab is over, so give it back — e.g. for a re-grab).
+                var doneBtns = box.querySelectorAll('.vd-ep-getbtn');
+                for (var b = 0; b < doneBtns.length; b++) doneBtns[b].disabled = false;
             } else if (_dlActive[key]) {
                 var dl = _dlActive[key], pct = Math.max(0, Math.min(100, dl.progress || 0));
                 var label = dl.status === 'downloading' ? (pct + '%') : (dl.status === 'searching' ? 'Searching' : 'Queued');

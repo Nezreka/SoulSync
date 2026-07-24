@@ -12,6 +12,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='basic-search-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
+    <!-- Automations visual redesign — a pure reskin loaded after style/mobile so it
+         wins by cascade; no JS-referenced selectors change (see file header). -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='automations-redesign.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
@@ -8666,6 +8669,18 @@
                                         Optional prefix added to every track path in exported M3U files. Use this when your media server needs absolute paths (e.g. <code>/mnt/music</code>).
                                     </div>
                                 </div>
+
+                                <div class="form-group" data-music-only>
+                                    <label>M3U Path Prefix Rewrite:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="m3u-rewrite-from" placeholder="replace this prefix, e.g. /data/media">
+                                        <input type="text" id="m3u-rewrite-to" placeholder="with this, e.g. M:/media">
+                                    </div>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        Hot-swaps a path prefix on every entry when M3Us are generated, so a playlist written inside a container (<code>/data/media/&hellip;</code>) plays directly on the machine that mounts the same storage elsewhere (<code>M:/media/&hellip;</code>). Entries that don't start with the prefix pass through unchanged. Leave both empty to disable.
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- File Organization Settings -->
@@ -8741,6 +8756,15 @@
                                     </select>
                                     <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     <small class="settings-hint setting-help-body" hidden>How <code>$albumartist</code> resolves when a release has multiple artists — this governs the FOLDER your music sorts into for both albums and singles (the default templates use <code>$albumartist</code>). "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y &amp; The Alchemist"). Full artist list is always preserved in file metadata tags.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>
+                                        <input type="checkbox" id="artistletter-symbol-fallback">
+                                        Group numbers &amp; symbols under "#"
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>When <code>$artistletter</code> is used in templates: artists starting with digits, symbols or non-Latin scripts all sort into a single <code>#</code> folder instead of one folder per character ("365 Days" → <code>#/</code>, "北京" → <code>#/</code>). Accented letters fold to their base letter (Édith Piaf → <code>E/</code>). Off = the literal first character, exactly as before.</small>
                                 </div>
 
                                 <div class="form-group">

@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.5"
+_SOULSYNC_BASE_VERSION = "3.1.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -166,6 +166,7 @@ from core.wishlist.state import (
     reset_flag_if_stuck as _reset_wishlist_flag_if_stuck,
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
+from core.imports.paths import artist_letter as _shared_artist_letter
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -2781,6 +2782,20 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+def _m3u_entry_path(path):
+    """Final transforms for one m3u entry line: the prefix hot-swap
+    (m3u_export.rewrite_from → rewrite_to, wolf39us — container path in,
+    playback-machine path out) and the '#' comment-guard (#1072). Shared
+    logic lives in core.library.m3u_export.finalize_m3u_entry; this wrapper
+    just feeds it the configured mapping. Empty settings = '#'-guard only."""
+    from core.library.m3u_export import finalize_m3u_entry
+    return finalize_m3u_entry(
+        path,
+        rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+        rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+    )
+
+
 def _regenerate_batch_m3u(batch, tracks):
     """Regenerate M3U file for a completed batch using real library DB paths.
     Called from batch completion handler after all post-processing is done."""
@@ -2843,7 +2858,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = f'{entry_base_path}/{fp}' if entry_base_path else fp
+                path = _m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)
                 lines.append(path)
                 found += 1
             else:
@@ -3031,7 +3046,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = f'{entry_base_path}/{file_path}' if entry_base_path else file_path
+                entry = _m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1
@@ -4277,6 +4292,39 @@ def get_automation_blocks():
     scoped = _auto_blocks.blocks_for_scope('music')
     scoped['known_signals'] = _collect_known_signals()
     return jsonify(scoped)
+
+@app.route('/api/automations/test-notify', methods=['POST'])
+def test_automation_notify():
+    """Fire ONE notification step with sample variables — the builder's Test
+    button. Sends for real (that's the point: prove the webhook/token works)
+    but against sample data, without running any automation."""
+    try:
+        if automation_engine is None:
+            return jsonify({'success': False, 'error': 'Automation engine not running'}), 400
+        data = request.get_json(silent=True) or {}
+        ntype = str(data.get('type') or '')
+        config = data.get('config') or {}
+        variables = {
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'name': 'Test Automation',
+            'run_count': '1',
+            'status': 'completed',
+            'artist': 'Test Artist', 'title': 'Test Track', 'album': 'Test Album',
+            'kind': 'movie', 'quality': '1080p', 'error': 'sample error text',
+        }
+        senders = {
+            'discord_webhook': automation_engine._send_discord_notification,
+            'pushbullet': automation_engine._send_pushbullet_notification,
+            'telegram': automation_engine._send_telegram_notification,
+            'webhook': automation_engine._send_webhook,
+        }
+        sender = senders.get(ntype)
+        if sender is None:
+            return jsonify({'success': False, 'error': f'Cannot test {ntype or "this step"}'}), 400
+        sender(config, variables)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 200
 
 @app.route('/api/mirrored-playlists/list', methods=['GET'])
 def get_mirrored_playlists_list():
@@ -6891,6 +6939,46 @@ def stream_enhanced_search_track():
 
 _music_video_downloads = {}  # {video_id: {status, progress, path, error}}
 
+
+def _clean_music_video_title(raw_title):
+    """Strip YouTube noise from a video title for metadata search + filing.
+
+    Handles the suffix both parenthesized — "(Official Music Video)" — and
+    BARE at the end of the title ("... Fat Official Music Video", the shape
+    fan uploads use constantly; the old parenthesized-only strip left the
+    noise in the search query, which is half of how a video ends up filed
+    under the uploader's channel name). Bare stripping is deliberately
+    conservative: only unambiguous multi-word forms ('official …', 'music
+    video', 'lyric video', 'visualizer'), so a song genuinely titled
+    "Video" or "Video Games" is never eaten."""
+    import re as _re
+    s = _re.sub(
+        r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio'
+        r'|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]',
+        '', raw_title or '', flags=_re.IGNORECASE).strip()
+    s = _re.sub(
+        r'[\s\-–—|]*\b(official\s+(music\s+|lyric\s+)?(video|audio)'
+        r'|music\s+video|lyric\s+video|visualizer)\s*$',
+        '', s, flags=_re.IGNORECASE).strip()
+    return _re.sub(r'\s*-\s*$', '', s).strip()
+
+
+def _parse_music_video_artist_title(raw_title, raw_channel):
+    """Artist/title for filing a music video, from the video's own name.
+
+    'Artist - Title' (hyphen, en or em dash) parses to the real artist —
+    the UPLOADER's channel name is only the last resort for titles with no
+    separator at all, because fan-channel uploads ("Bad Boy Edd") are the
+    norm and filing under them scatters one artist's videos across folders."""
+    import re as _re
+    for sep in (' - ', ' – ', ' — '):
+        if sep in (raw_title or ''):
+            artist, title = raw_title.split(sep, 1)
+            title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
+            title = _clean_music_video_title(title) or title
+            return artist.strip(), title
+    return raw_channel, (_clean_music_video_title(raw_title) or raw_title)
+
 @app.route('/api/music-video/download', methods=['POST'])
 def download_music_video():
     """Download a YouTube video as a music video file to the configured music videos folder."""
@@ -6935,11 +7023,10 @@ def download_music_video():
             artist_name = raw_channel
             track_title = raw_title
             year = ''
+            matched = False
 
-            # Strip common YouTube suffixes for cleaner search
             import re as _re
-            clean_search = _re.sub(r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]', '', raw_title, flags=_re.IGNORECASE).strip()
-            clean_search = _re.sub(r'\s*-\s*$', '', clean_search).strip()
+            clean_search = _clean_music_video_title(raw_title)
 
             try:
                 fallback_client = _get_metadata_fallback_client()
@@ -6956,25 +7043,25 @@ def download_music_video():
                         if name_sim > best_score:
                             best_score = name_sim
                             best = r
-                    if best and best_score >= 0.5:
-                        artist_name = best.artists[0] if best.artists else raw_channel
+                    if best and best_score >= 0.5 and best.artists:
+                        matched = True
+                        artist_name = best.artists[0]
                         track_title = best.name
                         if hasattr(best, 'release_date') and best.release_date:
                             year = str(best.release_date)[:4]
                         logger.info(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
-                    else:
-                        # Parse artist from video title: "Artist - Title" pattern
-                        if ' - ' in raw_title:
-                            parts = raw_title.split(' - ', 1)
-                            artist_name = parts[0].strip()
-                            track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
-                        logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
             except Exception as e:
                 logger.error(f"[Music Video] Metadata lookup failed: {e}")
-                if ' - ' in raw_title:
-                    parts = raw_title.split(' - ', 1)
-                    artist_name = parts[0].strip()
-                    track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
+
+            if not matched:
+                # No confident metadata match — parse 'Artist - Title' from the
+                # video's own name. This must cover EVERY unmatched path
+                # (weak match, lookup crash, and crucially an EMPTY result
+                # list — the old code skipped the parse entirely on zero
+                # results, so the video filed under the uploader's channel:
+                # the '"Weird Al" Yankovic - Fat' → 'bad boy edd/' bug).
+                artist_name, track_title = _parse_music_video_artist_title(raw_title, raw_channel)
+                logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
 
             # Sanitize for filesystem
             def _sanitize(s):
@@ -6986,7 +7073,7 @@ def download_music_video():
                 video_template = '$artist/$title-video'
             safe_artist = _sanitize(artist_name)
             video_path = video_template
-            video_path = video_path.replace('$artistletter', safe_artist[0].upper() if safe_artist else 'A')
+            video_path = video_path.replace('$artistletter', _shared_artist_letter(safe_artist) if safe_artist else 'A')
             video_path = video_path.replace('$artist', safe_artist)
             video_path = video_path.replace('$title', _sanitize(track_title))
             video_path = video_path.replace('$year', str(year) if year else '')
@@ -10967,7 +11054,10 @@ def export_library_m3u():
         db = get_database()
         entries = db.get_all_library_tracks_for_export()
         from core.library.m3u_export import build_m3u
-        content = build_m3u(entries, entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '')
+        content = build_m3u(entries,
+                            entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '',
+                            rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+                            rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
         return Response(
             content,
             mimetype='audio/x-mpegurl',
@@ -11505,10 +11595,17 @@ def library_completion_stream():
                         'release_date': item.get('release_date') or item.get('releaseDate'),
                     }
 
+                    # Per-item source: gap-fill ("Other Sources") cards each
+                    # belong to their OWN source — their ids only mean anything
+                    # against it (#1071). Base-discography items carry no
+                    # per-item source and keep the request-level one.
+                    item_source = (str(item.get('source') or '').strip().lower()
+                                   or source_override)
+
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
+                        result = check_single_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums)
+                        result = check_album_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums)
 
                     result['id'] = item['id']
                     result['category'] = category
@@ -17143,7 +17240,7 @@ def _apply_path_template(template: str, context: dict) -> str:
         'albumartist': album_artist_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
         'playlist': clean_context.get('playlist_name', ''),
-        'artistletter': (clean_context.get('artist', 'U') or 'U')[0].upper(),
+        'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
         'artist': clean_context.get('artist', 'Unknown Artist'),
         'album': clean_context.get('album', 'Unknown Album'),
         'title': clean_context.get('title', 'Unknown Track'),
@@ -17162,7 +17259,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
-    result = result.replace('$artistletter', (clean_context.get('artist', 'U') or 'U')[0].upper())
+    result = result.replace('$artistletter', _shared_artist_letter(clean_context.get('artist', 'U')))
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
@@ -17898,7 +17995,10 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
                 or config_manager.get('soulseek.transfer_path', './Transfer')
             _dest = docker_resolve_path(_dest)
             _base = config_manager.get('m3u_export.entry_base_path', '') or ''
-            _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
+            _written = write_library_m3u(
+                _entries, _dest, entry_base_path=_base,
+                rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
                 m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"
@@ -39371,6 +39471,10 @@ try:
     # Store refs for WebSocket push loop
     repair_worker._progress_lock_ref = repair_job_progress_lock
     repair_worker._progress_states_ref = repair_job_progress_states
+    # Bridge repair events into the automation engine ('Maintenance Finding
+    # Raised' / 'Maintenance Scan Done' triggers — music parity with video)
+    if automation_engine is not None:
+        repair_worker._event_emit = automation_engine.emit
     repair_worker.start()
     logger.info("Repair worker initialized and started")
 except Exception as e:

@@ -5134,8 +5134,12 @@ body[data-side="video"] #gsearch-aura {
 /* ── Live download status on episode rows ── */
 .vd-ep-dl { display: none; align-items: center; gap: 8px; min-width: 108px; }
 .vd-ep-get--busy .vd-ep-dl, .vd-ep-get--done .vd-ep-dl { display: inline-flex; }
-/* while a grab is in flight / finished, the action buttons give way to status */
-.vd-ep-get--busy .vd-ep-getbtn, .vd-ep-get--done .vd-ep-getbtn { display: none; }
+/* The action buttons NEVER disappear — a finished or in-flight grab shows its
+   status BESIDE auto search / manual search / wishlist, not instead of them
+   (a "✓ Downloaded" row used to lose all three for the rest of the session).
+   While a grab is actually in flight only the auto-grab button goes inert so
+   it can't be double-fired; manual search + wishlist stay live throughout. */
+.vd-ep-get--busy .vd-ep-grab { opacity: .35; pointer-events: none; }
 .vd-ep-dl-bar {
     position: relative; width: 54px; height: 5px; border-radius: 3px; overflow: hidden;
     background: rgba(255,255,255,0.12);

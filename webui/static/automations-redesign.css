@@ -1,0 +1,865 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTOMATIONS — visual redesign (music + video, shared classes)
+
+   Loaded AFTER style.css + mobile.css and wins by cascade: a pure reskin.
+   ZERO selectors are referenced from JS that don't already exist — this file
+   introduces no new class names and changes no markup, so every handler,
+   live-status hook (.automation-status/.automation-output/.auto-next-run),
+   drag-drop state (.dragging/.drop-target/.no-drop) and collapse behavior
+   keeps working untouched. Every rule is scoped under the automations
+   containers so nothing leaks into other pages.
+
+   Design language: layered dark glass, a status rail per card, the
+   WHEN → DO → THEN flow as tinted pipeline chips, live-state glow.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Command strip: stats + master toggle ───────────────────────────────── */
+#automations-stats, .automations-stats {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 14px 18px; margin-bottom: 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 16px;
+    backdrop-filter: blur(12px);
+}
+.automations-stats .auto-stat {
+    display: inline-flex; align-items: baseline; gap: 7px;
+    padding: 7px 14px; border-radius: 10px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    font-size: 12px; font-weight: 500; letter-spacing: .04em;
+    color: rgba(255,255,255,0.55); text-transform: uppercase;
+}
+.automations-stats .auto-stat strong {
+    font-size: 19px; font-weight: 700; letter-spacing: 0;
+    color: #fff;
+    background: linear-gradient(135deg, #fff 30%, rgba(var(--accent-light-rgb), 0.9));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.automations-stats .auto-master-toggle {
+    order: 99; margin-left: auto;
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 8px 16px; border-radius: 999px; cursor: pointer;
+    font-size: 12.5px; font-weight: 600; letter-spacing: .03em;
+    color: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.09);
+    transition: all .25s ease;
+}
+.automations-stats .auto-master-toggle.on {
+    color: rgb(134, 239, 172);
+    background: rgba(34, 197, 94, 0.09);
+    border-color: rgba(34, 197, 94, 0.35);
+    box-shadow: 0 0 18px rgba(34, 197, 94, 0.12), inset 0 0 12px rgba(34, 197, 94, 0.05);
+}
+.automations-stats .auto-master-toggle:hover { transform: translateY(-1px); }
+.automations-stats .auto-master-sw {
+    width: 34px; height: 18px; border-radius: 999px; position: relative;
+    background: rgba(255,255,255,0.12); transition: background .25s ease;
+}
+.automations-stats .auto-master-toggle.on .auto-master-sw { background: rgba(34, 197, 94, 0.55); }
+.automations-stats .auto-master-sw::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; transition: transform .25s cubic-bezier(.4, 1.6, .4, 1);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+.automations-stats .auto-master-toggle.on .auto-master-sw::after { transform: translateX(16px); }
+
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+.auto-filter-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 4px 2px 14px; flex-wrap: wrap;
+}
+.auto-filter-bar .auto-filter-search,
+.auto-filter-bar .auto-filter-select {
+    background: rgba(255,255,255,0.045);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; color: #fff;
+    padding: 9px 13px; font-size: 13px; font-family: inherit;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+.auto-filter-bar .auto-filter-search { flex: 1; min-width: 200px; }
+.auto-filter-bar .auto-filter-search:focus,
+.auto-filter-bar .auto-filter-select:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+.auto-filter-bar .auto-filter-count { font-size: 12px; color: rgba(255,255,255,0.35); }
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+.automations-section { margin-bottom: 26px; }
+.automations-section-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 4px; cursor: pointer; user-select: none;
+    border-radius: 8px;
+    transition: background .15s ease;
+}
+.automations-section-header:hover { background: rgba(255,255,255,0.025); }
+.automations-section-header .section-chevron {
+    font-size: 9px; color: rgba(255,255,255,0.35);
+    transition: transform .25s ease;
+}
+.automations-section.collapsed .automations-section-header .section-chevron { transform: rotate(-90deg); }
+.automations-section-header .section-label {
+    font-size: 12.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: rgba(255,255,255,0.65);
+}
+.automations-section-header .section-count {
+    font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.14);
+    color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+}
+.automations-section-header .section-line {
+    flex: 1; height: 1px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.09), transparent);
+}
+.automations-section-header .section-actions { display: flex; gap: 4px; }
+.automations-section-header .section-action-btn {
+    background: transparent; border: 1px solid transparent; border-radius: 7px;
+    padding: 3px 7px; cursor: pointer; font-size: 12px; opacity: .5;
+    transition: all .15s ease;
+}
+.automations-section-header .section-action-btn:hover {
+    opacity: 1; background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08);
+}
+.automations-section-header .section-action-btn.section-action-danger:hover {
+    background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3);
+}
+.automations-section.collapsed .automations-section-body { display: none; }
+.automations-section-body { padding-top: 10px; }
+/* The CARD CONTAINER (nested inside section-body — the section body also
+   hosts non-card content like the Hub, so it must stay a plain block). */
+.automations-section .automations-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
+    gap: 13px;
+}
+.automations-section .automations-user-list {
+    display: flex; flex-direction: column; gap: 13px;
+}
+/* drag-and-drop state (classes toggled by JS — visuals only here; JS puts
+   drop-target on the section BODY, no-drop on protected sections) */
+.automations-section .automations-section-body.drop-target {
+    outline: 2px dashed rgba(var(--accent-rgb), 0.5);
+    outline-offset: 6px; border-radius: 12px;
+    background: rgba(var(--accent-rgb), 0.03);
+}
+.automations-section.no-drop { opacity: .35; filter: saturate(.4); }
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+.automation-card {
+    position: relative;
+    /* the base sheet gives cards margin: 4px 0 — grid/flex gaps own ALL
+       spacing in the redesign, so zero it (audit leftover) */
+    margin: 0;
+    display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
+    padding: 12px 14px 11px 17px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    overflow: hidden;
+}
+/* status rail — the card's left edge carries its state */
+.automation-card::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.85), rgba(34, 197, 94, 0.25));
+    transition: background .3s ease, box-shadow .3s ease;
+}
+.automation-card.disabled::before { background: rgba(255,255,255,0.1); }
+.automation-card.running::before {
+    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb), 0.4));
+    box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.55);
+}
+.automation-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255,255,255,0.13);
+    box-shadow: 0 10px 30px -12px rgba(0,0,0,0.6);
+}
+.automation-card.disabled { opacity: .62; }
+.automation-card.disabled:hover { opacity: .85; }
+.automation-card.dragging { opacity: .4; transform: scale(.98); }
+.automation-card.running {
+    border-color: rgba(var(--accent-rgb), 0.3);
+    box-shadow: 0 0 24px -8px rgba(var(--accent-rgb), 0.35);
+}
+
+/* status orb — className is swapped wholesale by live updates; style all */
+.automation-card .automation-status {
+    width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
+}
+.automation-card .automation-status.enabled {
+    background: rgb(74, 222, 128);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+}
+.automation-card .automation-status.disabled {
+    background: rgba(255,255,255,0.18); box-shadow: none;
+}
+.automation-card .automation-status.running {
+    background: rgb(var(--accent-light-rgb));
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.8);
+    animation: auto-orb-pulse 1.2s ease-in-out infinite;
+}
+@keyframes auto-orb-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.35); opacity: .7; }
+}
+
+.automation-card .automation-info { flex: 1; min-width: 0; }
+.automation-card .automation-name {
+    font-size: 13.5px; font-weight: 620; color: #fff;
+    letter-spacing: .01em; margin-bottom: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* pipeline — the flow line as tinted chips with dimmed connectors */
+.automation-card .automation-flow {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+    margin-bottom: 6px; line-height: 1;
+}
+.automation-card .automation-flow > span { display: inline-flex; align-items: center; }
+.automation-card .flow-trigger,
+.automation-card .flow-action,
+.automation-card .flow-notify,
+.automation-card .flow-delay {
+    font-size: 11px; font-weight: 550; padding: 3px 9px; border-radius: 999px;
+    border: none; white-space: nowrap; max-width: 260px;
+    overflow: hidden; text-overflow: ellipsis;
+}
+.automation-card .flow-trigger {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.09);
+}
+.automation-card .flow-action {
+    color: rgb(216, 180, 254);
+    background: rgba(168, 85, 247, 0.09);
+}
+.automation-card .flow-notify {
+    color: rgb(134, 239, 172);
+    background: rgba(34, 197, 94, 0.08);
+}
+.automation-card .flow-delay {
+    color: rgb(253, 224, 71);
+    background: rgba(234, 179, 8, 0.08);
+}
+.automation-card .flow-arrow {
+    color: rgba(255,255,255,0.22); font-size: 11px; padding: 0 1px;
+}
+
+/* meta line — countdown, runs, last-result */
+/* Wraps naturally — nothing on the card is ever hidden (Boulder's call:
+   a second line beats invisible information). The 64-char JS cap on the
+   facts keeps the wrap to one extra line at most. */
+.automation-card .automation-meta {
+    font-size: 11px; color: rgba(255,255,255,0.42);
+    display: block; line-height: 1.8;
+    overflow-wrap: anywhere;
+}
+.automation-card .auto-next-run {
+    font-variant-numeric: tabular-nums;
+    color: rgba(var(--accent-light-rgb), 0.9);
+}
+.automation-card .auto-runs-link {
+    cursor: pointer; text-decoration: none;
+    transition: color .15s ease;
+}
+.automation-card .auto-runs-link:hover { text-decoration: underline; }
+.automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
+/* Plain inline text — truncation is done in JS at a fixed length, so no
+   layout-dependent trimming can misfire. Full facts in the hover tooltip. */
+.automation-card .auto-last-result { color: rgba(255,255,255,0.30); cursor: default; }
+
+/* actions — quiet until the card is hovered (always-on for touch, below) */
+.automation-card .automation-actions {
+    display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+    opacity: .45; transition: opacity .18s ease;
+}
+.automation-card:hover .automation-actions,
+.automation-card:focus-within .automation-actions { opacity: 1; }
+.automation-card .automation-actions button {
+    width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 8px; color: rgba(255,255,255,0.65);
+    cursor: pointer; font-size: 12px; line-height: 1;
+    transition: background .15s ease, color .15s ease;
+}
+.automation-card .automation-actions button:hover {
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+}
+.automation-card .automation-actions .automation-delete-btn:hover {
+    background: rgba(239, 68, 68, 0.14); color: rgb(252, 165, 165);
+}
+.automation-card .automation-actions .automation-group-btn.grouped {
+    color: rgb(var(--accent-light-rgb));
+}
+.automation-card .automation-toggle {
+    position: relative; width: 36px; height: 20px; margin: 0 3px; cursor: pointer; flex-shrink: 0;
+}
+.automation-card .automation-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.automation-card .automation-toggle .toggle-slider {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: rgba(255,255,255,0.12);
+    transition: background .25s ease;
+}
+.automation-card .automation-toggle .toggle-slider::before {
+    content: ''; position: absolute; top: 2.5px; left: 2.5px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+    transition: transform .25s cubic-bezier(.4, 1.6, .4, 1);
+}
+.automation-card .automation-toggle input:checked + .toggle-slider {
+    background: rgba(34, 197, 94, 0.6);
+}
+.automation-card .automation-toggle input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+}
+
+/* ── Live progress panel (appended by JS as the card's last child) ──────── */
+.automation-card .automation-output {
+    flex-basis: 100%; width: 100%;
+    max-height: 0; opacity: 0; overflow: hidden;
+    transition: max-height .35s ease, opacity .3s ease, margin .3s ease;
+    margin: 0;
+}
+.automation-card .automation-output.visible {
+    max-height: 300px; opacity: 1; margin-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding-top: 11px;
+}
+.automation-card .auto-progress-bar-wrap {
+    height: 4px; border-radius: 999px; overflow: hidden;
+    background: rgba(255,255,255,0.07); margin-bottom: 7px;
+}
+.automation-card .auto-progress-bar {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.85), rgb(var(--accent-light-rgb)));
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.5);
+    transition: width .5s ease;
+    position: relative;
+}
+.automation-card .auto-progress-bar::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.35) 50%, transparent 70%);
+    background-size: 200% 100%;
+    animation: auto-bar-sheen 1.6s linear infinite;
+}
+@keyframes auto-bar-sheen {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+}
+.automation-card .automation-output.finished .auto-progress-bar {
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.8), rgb(74, 222, 128));
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
+}
+.automation-card .automation-output.finished .auto-progress-bar::after,
+.automation-card .automation-output.error .auto-progress-bar::after { animation: none; content: none; }
+.automation-card .automation-output.error .auto-progress-bar {
+    background: linear-gradient(90deg, rgba(239, 68, 68, 0.8), rgb(248, 113, 113));
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+.automation-card .auto-progress-phase {
+    font-size: 11.5px; font-weight: 550; color: rgba(var(--accent-light-rgb), 0.9);
+    margin-bottom: 5px;
+}
+.automation-card .automation-output.finished .auto-progress-phase { color: rgb(134, 239, 172); }
+.automation-card .automation-output.error .auto-progress-phase { color: rgb(252, 165, 165); }
+.automation-card .auto-progress-log {
+    font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10.5px; line-height: 1.65; color: rgba(255,255,255,0.45);
+    max-height: 110px; overflow-y: auto;
+    padding: 7px 10px; border-radius: 9px;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid rgba(255,255,255,0.045);
+    mask-image: linear-gradient(180deg, transparent, #000 12px);
+    -webkit-mask-image: linear-gradient(180deg, transparent, #000 12px);
+}
+.automation-card .auto-progress-log:empty { display: none; }
+
+/* ── Empty state ────────────────────────────────────────────────────────── */
+.automations-empty {
+    text-align: center; padding: 70px 20px;
+}
+.automations-empty .automations-empty-icon {
+    width: 76px; height: 76px; margin: 0 auto 18px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 34px; border-radius: 24px;
+    background: radial-gradient(circle at 30% 25%, rgba(var(--accent-rgb), 0.25), rgba(var(--accent-rgb), 0.06));
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    box-shadow: 0 0 40px -8px rgba(var(--accent-rgb), 0.35);
+}
+.automations-empty .automations-empty-title {
+    font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 7px;
+}
+.automations-empty .automations-empty-text {
+    font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 22px;
+    max-width: 380px; margin-left: auto; margin-right: auto; line-height: 1.6;
+}
+
+/* "+ New Automation" — the page's primary action */
+.automations-list-view .auto-new-btn, .automations-empty .auto-new-btn {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.65));
+    border: 1px solid rgba(var(--accent-light-rgb), 0.4);
+    color: #fff; font-weight: 650; font-size: 13px; font-family: inherit;
+    padding: 10px 18px; border-radius: 11px; cursor: pointer;
+    box-shadow: 0 4px 18px -4px rgba(var(--accent-rgb), 0.5);
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.automations-list-view .auto-new-btn:hover, .automations-empty .auto-new-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 26px -4px rgba(var(--accent-rgb), 0.6);
+}
+
+/* ── Automation Hub (templates / recipes / guides) ──────────────────────── */
+.automations-section .auto-hub-tabs {
+    display: flex; gap: 6px; padding: 4px 0 10px; flex-wrap: wrap;
+}
+.automations-section .auto-hub-tab {
+    padding: 7px 15px; border-radius: 999px; cursor: pointer;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.55); font-size: 12.5px; font-weight: 600; font-family: inherit;
+    transition: all .18s ease;
+}
+.automations-section .auto-hub-tab:hover { color: #fff; border-color: rgba(255,255,255,0.16); }
+.automations-section .auto-hub-tab.active {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
+.automations-section .auto-hub-filter-pill {
+    border-radius: 999px; font-size: 11.5px;
+    transition: all .15s ease;
+}
+.automations-section .auto-hub-badge {
+    border-radius: 999px; font-size: 10px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px;
+}
+.automations-section .auto-hub-badge.beginner { background: rgba(34,197,94,.14); color: rgb(134,239,172); }
+.automations-section .auto-hub-badge.intermediate { background: rgba(234,179,8,.14); color: rgb(253,224,71); }
+.automations-section .auto-hub-badge.advanced { background: rgba(239,68,68,.14); color: rgb(252,165,165); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BUILDER
+   ═══════════════════════════════════════════════════════════════════════════ */
+.automations-builder-view .builder-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; margin-bottom: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 16px 16px 0 0; border-bottom: none;
+}
+.automations-builder-view .builder-back-btn {
+    width: 34px; height: 34px; border-radius: 10px; cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+    color: #fff; font-size: 15px;
+    transition: all .15s ease;
+}
+.automations-builder-view .builder-back-btn:hover { background: rgba(255,255,255,0.1); transform: translateX(-2px); }
+.automations-builder-view .builder-name-input {
+    flex: 1; min-width: 160px;
+    background: transparent; border: none; border-bottom: 2px solid rgba(255,255,255,0.1);
+    color: #fff; font-size: 17px; font-weight: 650; font-family: inherit;
+    padding: 7px 4px; border-radius: 0;
+    transition: border-color .2s ease;
+}
+.automations-builder-view .builder-name-input:focus {
+    outline: none; border-bottom-color: rgba(var(--accent-rgb), 0.7);
+}
+.automations-builder-view .builder-group-input {
+    width: 170px;
+    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; color: rgba(255,255,255,0.8); font-size: 12.5px; font-family: inherit;
+    padding: 8px 12px;
+}
+.automations-builder-view .builder-group-input:focus {
+    outline: none; border-color: rgba(var(--accent-rgb), 0.5);
+}
+.automations-builder-view .btn-cancel {
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.7); padding: 9px 16px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
+    transition: all .15s ease;
+}
+.automations-builder-view .btn-cancel:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.automations-builder-view .btn-save {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.65));
+    border: 1px solid rgba(var(--accent-light-rgb), 0.4);
+    color: #fff; padding: 9px 20px; border-radius: 10px;
+    font-size: 13px; font-weight: 650; font-family: inherit; cursor: pointer;
+    box-shadow: 0 4px 16px -4px rgba(var(--accent-rgb), 0.5);
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.automations-builder-view .btn-save:hover {
+    transform: translateY(-1px); box-shadow: 0 7px 22px -4px rgba(var(--accent-rgb), 0.65);
+}
+
+.automations-builder-view .builder-content {
+    display: flex; gap: 0; align-items: stretch;
+    border: 1px solid rgba(255,255,255,0.07); border-radius: 0 0 16px 16px;
+    overflow: hidden; min-height: 520px;
+}
+
+/* sidebar — the block palette */
+.automations-builder-view .builder-sidebar {
+    width: 300px; flex-shrink: 0; overflow-y: auto; max-height: 72vh;
+    padding: 16px 14px;
+    background: rgba(255,255,255,0.025);
+    border-right: 1px solid rgba(255,255,255,0.06);
+}
+.automations-builder-view .sidebar-section { margin-bottom: 20px; }
+.automations-builder-view .sidebar-section-title {
+    font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: rgba(var(--accent-light-rgb), 0.75);
+    padding: 0 4px 8px;
+}
+.automations-builder-view .block-item {
+    display: flex; align-items: flex-start; gap: 10px; position: relative;
+    padding: 10px 11px; margin-bottom: 7px; border-radius: 11px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.07);
+    cursor: grab;
+    transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.automations-builder-view .block-item:hover {
+    transform: translateX(3px);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    box-shadow: -3px 0 0 0 rgba(var(--accent-rgb), 0.5), 0 6px 16px -8px rgba(0,0,0,0.5);
+}
+.automations-builder-view .block-item:active { cursor: grabbing; transform: scale(.985); }
+.automations-builder-view .block-item.coming-soon { opacity: .38; cursor: default; }
+.automations-builder-view .block-item.coming-soon:hover { transform: none; box-shadow: none; border-color: rgba(255,255,255,0.07); }
+.automations-builder-view .block-item-icon {
+    width: 30px; height: 30px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; border-radius: 9px;
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
+}
+.automations-builder-view .block-item-label {
+    font-size: 12.5px; font-weight: 620; color: #fff; margin-bottom: 2px;
+}
+.automations-builder-view .block-item-desc {
+    font-size: 10.5px; line-height: 1.45; color: rgba(255,255,255,0.4);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.automations-builder-view .coming-soon-badge {
+    position: absolute; top: 8px; right: 8px;
+    font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(234, 179, 8, 0.15); color: rgb(253, 224, 71);
+}
+.automations-builder-view .block-help-btn { opacity: .35; transition: opacity .15s ease; }
+.automations-builder-view .block-item:hover .block-help-btn { opacity: .9; }
+
+/* canvas — the pipeline */
+.automations-builder-view .builder-canvas {
+    flex: 1; overflow-y: auto; max-height: 72vh;
+    padding: 26px 28px;
+    background:
+        radial-gradient(circle at 50% 0%, rgba(var(--accent-rgb), 0.05), transparent 60%),
+        radial-gradient(rgba(255,255,255,0.045) 1px, transparent 1.5px);
+    background-size: auto, 22px 22px;
+}
+.automations-builder-view .flow-slot {
+    border-radius: 14px; position: relative;
+    transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+.automations-builder-view .flow-slot.empty {
+    border: 2px dashed rgba(255,255,255,0.13);
+    background: rgba(255,255,255,0.015);
+    padding: 20px; text-align: center;
+}
+.automations-builder-view .flow-slot.empty:hover,
+.automations-builder-view .flow-slot.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    background: rgba(var(--accent-rgb), 0.05);
+    box-shadow: 0 0 24px -6px rgba(var(--accent-rgb), 0.35), inset 0 0 20px rgba(var(--accent-rgb), 0.04);
+}
+.automations-builder-view .flow-slot.filled {
+    border: 1px solid rgba(255,255,255,0.09);
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+}
+.automations-builder-view .flow-slot-prompt {
+    font-size: 12.5px; color: rgba(255,255,255,0.35);
+}
+.automations-builder-view .flow-slot-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+    padding: 3px 11px; border-radius: 999px; margin-bottom: 8px;
+}
+.automations-builder-view .flow-slot-label.when {
+    color: rgb(var(--accent-light-rgb)); background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+}
+.automations-builder-view .flow-slot-label.do {
+    color: rgb(216, 180, 254); background: rgba(168, 85, 247, 0.12);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+}
+.automations-builder-view .flow-slot-label.then {
+    color: rgb(134, 239, 172); background: rgba(34, 197, 94, 0.11);
+    border: 1px solid rgba(34, 197, 94, 0.22);
+}
+.automations-builder-view .flow-connector {
+    width: 2px; height: 26px; margin: 4px auto;
+    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.5), rgba(var(--accent-rgb), 0.12));
+    border-radius: 2px; position: relative;
+}
+.automations-builder-view .flow-connector::after {
+    content: ''; position: absolute; bottom: -3px; left: 50%; transform: translateX(-50%);
+    border: 4px solid transparent; border-top-color: rgba(var(--accent-rgb), 0.45);
+}
+.automations-builder-view .flow-connector.small { height: 16px; }
+
+/* placed blocks inside slots */
+.automations-builder-view .placed-block { padding: 13px 15px; }
+.automations-builder-view .placed-block-header {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 4px;
+}
+.automations-builder-view .placed-block-icon {
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.11); border: 1px solid rgba(var(--accent-rgb), 0.18);
+}
+.automations-builder-view .placed-block-label { font-size: 13.5px; font-weight: 650; color: #fff; flex: 1; }
+.automations-builder-view .placed-block-remove {
+    width: 24px; height: 24px; border-radius: 7px; cursor: pointer;
+    background: transparent; border: 1px solid transparent;
+    color: rgba(255,255,255,0.35); font-size: 11px;
+    transition: all .15s ease;
+}
+.automations-builder-view .placed-block-remove:hover {
+    background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3); color: rgb(252, 165, 165);
+}
+.automations-builder-view .placed-block.locked { opacity: .92; }
+.automations-builder-view .placed-block-config {
+    margin-top: 9px; padding-top: 9px;
+    border-top: 1px solid rgba(255,255,255,0.055);
+}
+.automations-builder-view .placed-block-config .config-row {
+    display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+    margin-bottom: 8px; font-size: 12.5px;
+}
+.automations-builder-view .placed-block-config .config-row:last-child { margin-bottom: 0; }
+.automations-builder-view .placed-block-config .config-row > label {
+    font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.55);
+    min-width: 52px;
+}
+.automations-builder-view .placed-block-config input[type="text"],
+.automations-builder-view .placed-block-config input[type="number"],
+.automations-builder-view .placed-block-config input[type="time"],
+.automations-builder-view .placed-block-config select,
+.automations-builder-view .placed-block-config textarea {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 9px; color: #fff; font-size: 12.5px; font-family: inherit;
+    padding: 7px 10px;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+.automations-builder-view .placed-block-config input:focus,
+.automations-builder-view .placed-block-config select:focus,
+.automations-builder-view .placed-block-config textarea:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+}
+.automations-builder-view .placed-block-config textarea { width: 100%; min-height: 54px; resize: vertical; }
+.automations-builder-view .day-picker { display: flex; gap: 4px; flex-wrap: wrap; }
+.automations-builder-view .day-btn {
+    padding: 5px 10px; border-radius: 8px; cursor: pointer;
+    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.09);
+    color: rgba(255,255,255,0.5); font-size: 11.5px; font-weight: 600; font-family: inherit;
+    transition: all .15s ease;
+}
+.automations-builder-view .day-btn.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+}
+.automations-builder-view .condition-builder {
+    margin-top: 6px; padding: 10px; border-radius: 10px;
+    background: rgba(0,0,0,0.16); border: 1px solid rgba(255,255,255,0.05);
+}
+.automations-builder-view .condition-row {
+    display: flex; align-items: center; gap: 7px; margin-bottom: 7px; flex-wrap: wrap;
+}
+.automations-builder-view .remove-condition-btn {
+    width: 22px; height: 22px; border-radius: 6px; cursor: pointer;
+    background: transparent; border: 1px solid transparent;
+    color: rgba(255,255,255,0.3); font-size: 10px;
+    transition: all .15s ease;
+}
+.automations-builder-view .remove-condition-btn:hover {
+    background: rgba(239, 68, 68, 0.12); color: rgb(252, 165, 165);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+    .automations-section .automations-grid { grid-template-columns: 1fr; }
+    .automation-card .automation-actions { opacity: 1; }   /* touch: always visible */
+    .automations-builder-view .builder-content { flex-direction: column; }
+    .automations-builder-view .builder-sidebar {
+        width: 100%; max-height: 240px;
+        border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+}
+@media (max-width: 560px) {
+    .automations-stats .auto-master-toggle { margin-left: 0; width: 100%; justify-content: center; }
+    .automations-builder-view .builder-header { flex-wrap: wrap; }
+    .automations-builder-view .builder-group-input { width: 100%; }
+}
+
+/* ── Motion preferences ─────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+    .automation-card, .automation-card .automation-status.running,
+    .automation-card .auto-progress-bar::after,
+    .automations-builder-view .block-item, .automations-stats .auto-master-sw::after {
+        animation: none !important; transition: none !important;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SECOND PASS — the page's satellite surfaces
+   (history modal + group dropdown mount on document.body, so they scope by
+   their own automations-specific class names)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Run-history modal ──────────────────────────────────────────────────── */
+.automation-history-modal {
+    background: linear-gradient(180deg, rgba(30, 30, 46, 0.97), rgba(22, 22, 34, 0.97));
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px;
+    box-shadow: 0 24px 80px -20px rgba(0,0,0,0.8), 0 0 40px -20px rgba(var(--accent-rgb), 0.25);
+    backdrop-filter: blur(20px);
+    max-width: 640px; width: 92%; max-height: 78vh;
+    display: flex; flex-direction: column; overflow: hidden;
+}
+.automation-history-modal .history-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.02);
+}
+.automation-history-modal .history-modal-header h3 {
+    margin: 0; font-size: 15px; font-weight: 700; color: #fff; letter-spacing: .01em;
+}
+.automation-history-modal .history-close-btn {
+    width: 30px; height: 30px; border-radius: 9px; cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+    color: rgba(255,255,255,0.7); font-size: 16px; line-height: 1;
+    transition: all .15s ease;
+}
+.automation-history-modal .history-close-btn:hover {
+    background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.35); color: #fff;
+}
+.automation-history-modal .history-modal-body {
+    overflow-y: auto; padding: 14px 16px;
+}
+.automation-history-modal .history-entry {
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; margin-bottom: 9px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.032), rgba(255,255,255,0.012));
+    transition: border-color .15s ease;
+}
+.automation-history-modal .history-entry:hover { border-color: rgba(255,255,255,0.12); }
+.automation-history-modal .history-entry-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 13px; cursor: pointer; user-select: none;
+}
+.automation-history-modal .history-status-badge {
+    font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px;
+}
+.automation-history-modal .history-status-badge.success {
+    background: rgba(34, 197, 94, 0.13); color: rgb(134, 239, 172);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+}
+.automation-history-modal .history-status-badge.error {
+    background: rgba(239, 68, 68, 0.13); color: rgb(252, 165, 165);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.automation-history-modal .history-time {
+    font-size: 12px; color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums;
+}
+.automation-history-modal .history-duration {
+    font-size: 11px; color: rgba(255,255,255,0.35);
+    margin-left: auto; font-variant-numeric: tabular-nums;
+}
+.automation-history-modal .history-summary {
+    font-size: 11.5px; color: rgba(255,255,255,0.45); padding: 0 13px 10px;
+    display: flex; flex-wrap: wrap; gap: 5px 12px;
+}
+.automation-history-modal .history-log-section {
+    margin: 0 13px 11px; padding: 8px 11px; border-radius: 9px;
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.045);
+    font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10.5px; line-height: 1.7; max-height: 180px; overflow-y: auto;
+}
+.automation-history-modal .history-log-line { color: rgba(255,255,255,0.5); }
+.automation-history-modal .history-log-line.history-log-success { color: rgb(134, 239, 172); }
+.automation-history-modal .history-log-line.history-log-warning { color: rgb(253, 224, 71); }
+.automation-history-modal .history-log-line.history-log-error { color: rgb(252, 165, 165); }
+.automation-history-modal .history-loading,
+.automation-history-modal .history-empty {
+    text-align: center; padding: 36px 16px;
+    color: rgba(255,255,255,0.4); font-size: 13px;
+}
+
+/* ── Group-assign dropdown ──────────────────────────────────────────────── */
+.auto-group-dropdown {
+    background: linear-gradient(180deg, rgba(34, 34, 50, 0.98), rgba(24, 24, 38, 0.98));
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 13px;
+    box-shadow: 0 16px 48px -12px rgba(0,0,0,0.75);
+    backdrop-filter: blur(16px);
+    padding: 6px; min-width: 190px;
+}
+.auto-group-dropdown .auto-group-option {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 12px; border-radius: 9px; cursor: pointer;
+    background: transparent; border: none;
+    color: rgba(255,255,255,0.75); font-size: 12.5px; font-family: inherit;
+    transition: all .12s ease;
+}
+.auto-group-dropdown .auto-group-option:hover {
+    background: rgba(var(--accent-rgb), 0.12); color: #fff;
+}
+.auto-group-dropdown .auto-group-option.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb)); font-weight: 600;
+}
+.auto-group-dropdown .auto-group-option.ungroup { color: rgba(255,255,255,0.45); }
+.auto-group-dropdown .auto-group-divider {
+    height: 1px; margin: 5px 8px;
+    background: rgba(255,255,255,0.08);
+}
+.auto-group-dropdown .auto-group-input {
+    width: calc(100% - 12px); margin: 4px 6px 6px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; color: #fff; font-size: 12px; font-family: inherit;
+    padding: 7px 10px;
+}
+.auto-group-dropdown .auto-group-input:focus {
+    outline: none; border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+/* ── Variable tag chips (builder message templates) ─────────────────────── */
+.automations-builder-view .variable-tags {
+    display: flex; flex-wrap: wrap; gap: 5px; padding-top: 4px;
+}
+.automations-builder-view .variable-tag {
+    font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10.5px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    color: rgba(var(--accent-light-rgb), 0.85);
+    transition: all .13s ease;
+}
+.automations-builder-view .variable-tag:hover {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: #fff; transform: translateY(-1px);
+}

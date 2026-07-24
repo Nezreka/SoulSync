@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import threading
 import time
 
@@ -90,8 +89,11 @@ def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mo
 
 
 def _move(src: str, dest: str) -> None:
-    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    shutil.move(src, dest)
+    # Atomic + size-verified: the destination is a Plex/Jellyfin-watched
+    # library folder, so a partial file must never exist at the final name
+    # (see atomic_verified_move — the music side's staging guarantee).
+    from core.video.importer import atomic_verified_move
+    atomic_verified_move(src, dest)
 
 
 def _make_organizer(db):

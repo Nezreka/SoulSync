@@ -88,14 +88,15 @@ def test_open_clears_both_builders_to_avoid_id_collision():
 
 
 def test_generic_config_renderer_is_video_gated():
-    # The generic config_fields renderer/reader must only run in the video
-    # context so the music side keeps its bespoke renderers (byte-identical).
+    # CONTRACT FLIPPED (39a688a96): the generic config_fields renderer/reader
+    # now serves BOTH sides — music's bespoke branches all return early, so
+    # the generic path only catches blocks that previously rendered nothing
+    # (monthly_time, full_refresh, search_and_download). The un-gating is
+    # pinned from the other side in tests/automation/test_builder_bic.py.
     assert 'function _renderGenericConfigField(' in _STATS
     assert 'function _readGenericConfigField(' in _STATS
-    assert 'if (_autoBuilderCtx.ownedBy) {' in _STATS
+    assert 'if (_autoBuilderCtx.ownedBy) {' not in _STATS
 
-
-# --- the video page exposes its reload hook -------------------------------
 
 def test_video_page_exposes_reload_hook():
     assert 'window._reloadVideoAutomations = load' in _VAUTO

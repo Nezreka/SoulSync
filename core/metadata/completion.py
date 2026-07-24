@@ -110,6 +110,58 @@ def _release_year_of(release: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+# Which enrichment columns on `albums` hold a given source's album id — the
+# identity proof for #1071. A discography card whose id equals the local
+# album's stored id FOR THAT SOURCE is the same release, no matter how the
+# viewing source titles or dates it: the year gate (re-releases-as-owned fix)
+# hard-rejects cross-source edition dating (library copy tagged with the 2014
+# remaster year vs a card dated 1989), which read as "ownership is locked to
+# the source I searched". Id equality beats both the year gate and title
+# drift — and can never credit a sibling edition, because a re-release card
+# carries a DIFFERENT id than the one enrichment stored.
+_SOURCE_ID_COLUMNS = {
+    'spotify': ('spotify_album_id',),
+    'deezer': ('deezer_id', 'album_deezer_id'),
+    'itunes': ('itunes_album_id', 'album_itunes_id'),
+    'musicbrainz': ('musicbrainz_release_id',),
+    'qobuz': ('qobuz_id',),
+    'tidal': ('tidal_id',),
+    'amazon': ('amazon_id',),
+    'audiodb': ('audiodb_id',),
+    'jiosaavn': ('jiosaavn_id',),
+}
+
+
+def _library_album_by_source_id(db, card_source, card_id, candidate_albums):
+    """The candidate library album whose stored enrichment id for the card's
+    source equals the card's id — or None. Scoped strictly to the pre-fetched
+    artist candidates so a global id collision can't cross artists."""
+    if not card_source or not card_id or not candidate_albums:
+        return None
+    cols = _SOURCE_ID_COLUMNS.get(str(card_source).strip().lower())
+    if not cols:
+        return None
+    get_ids = getattr(db, 'get_album_source_ids', None)
+    if not callable(get_ids):
+        return None
+    try:
+        id_map = get_ids([a.id for a in candidate_albums])
+    except Exception:
+        return None
+    want = str(card_id).strip()
+    if not want:
+        return None
+    for album in candidate_albums:
+        vals = id_map.get(album.id) or {}
+        for col in cols:
+            if vals.get(col) == want:
+                logger.debug(
+                    "Id-proof ownership: card %s (%s) == local album %s.%s",
+                    want, card_source, album.id, col)
+                return album
+    return None
+
+
 def _canonical_pin_denies_card(db, db_album: Any, card_source: Optional[str],
                                card_id: Any) -> bool:
     """True when the matched local album is PINNED to a different release of the
@@ -235,6 +287,21 @@ def check_album_completion(
                 strict_discography_match=True,
                 expected_year=_release_year_of(album_data),
             )
+
+            # #1071: the fuzzy match failed (usually the year gate rejecting a
+            # cross-source edition date, sometimes title drift) — but if the
+            # card's id IS a candidate album's stored enrichment id for this
+            # source, that's identity proof. Runs BEFORE the pin deny so a
+            # canonical pin stays authoritative over everything.
+            if db_album is None:
+                _proven = _library_album_by_source_id(
+                    db, source_chain[0] if source_chain else None,
+                    album_id, candidate_albums)
+                if _proven is not None:
+                    db_album = _proven
+                    confidence = 1.0
+                    owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
+                        _proven.id, total_tracks if total_tracks > 0 else None)
 
             # Canonical pin deny: the files are pinned to a specific release of
             # this card's source, and this card is a different one — a name
@@ -380,6 +447,17 @@ def check_single_completion(
                 logger.error(f"Database error for EP '{single_name}': {db_error}")
                 owned_tracks, expected_tracks, confidence = 0, total_tracks, 0.0
                 db_album = None
+
+            # #1071 identity proof — same rescue as the album path.
+            if db_album is None:
+                _proven = _library_album_by_source_id(
+                    db, source_chain[0] if source_chain else None,
+                    single_id, candidate_albums)
+                if _proven is not None:
+                    db_album = _proven
+                    confidence = 1.0
+                    owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
+                        _proven.id, total_tracks if total_tracks > 0 else None)
 
             if expected_tracks > 0:
                 completion_percentage = (owned_tracks / expected_tracks) * 100

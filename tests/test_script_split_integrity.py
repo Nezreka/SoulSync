@@ -72,13 +72,9 @@ KNOWN_CROSS_FILE_DUPES = {
 }
 
 # Pre-existing same-file duplicates (two filter UIs reuse the same names).
-KNOWN_SAME_FILE_DUPES = {
-    "applyFiltersAndSort",
-    "calculateRelevanceScore",
-    "handleFilterClick",
-    "initializeFilters",
-    "resetFilters",
-}
+# (the wishlist-tools double-pasted filter block was removed — c5a8bf241 —
+# so this set is empty; new same-file dupes should be FIXED, not listed.)
+KNOWN_SAME_FILE_DUPES = set()
 
 # ---------------------------------------------------------------------------
 # Helpers
