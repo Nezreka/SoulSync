@@ -268,3 +268,139 @@ def test_media_server_path_resolves_via_music_paths(files_app, tmp_path, monkeyp
         assert uploads[-1]["bytes"] == 2048
     finally:
         config_manager.set("library.music_paths", prev)
+
+
+# ── save-to-library (import a shared audio file into staging) ────────────────
+
+def test_url_safety_guard():
+    assert chat_api._is_safe_filepost_url("https://cdn.filepost.dev/a.flac")
+    assert chat_api._is_safe_filepost_url("https://filepost.dev/x.mp3")
+    # SSRF / spoof attempts all rejected
+    assert not chat_api._is_safe_filepost_url("http://cdn.filepost.dev/a.flac")   # not https
+    assert not chat_api._is_safe_filepost_url("https://evil.com/a.flac")
+    assert not chat_api._is_safe_filepost_url("https://filepost.dev.evil.com/a.flac")
+    assert not chat_api._is_safe_filepost_url("https://notfilepost.dev/a.flac")
+    assert not chat_api._is_safe_filepost_url("file:///etc/passwd")
+    assert not chat_api._is_safe_filepost_url("")
+
+
+@pytest.fixture()
+def import_app(files_app, tmp_path, monkeypatch):
+    http, state, client, uploads = files_app
+    staging = tmp_path / "staging"
+    state["config"]["import.staging_path"] = str(staging)
+    fetches = []
+
+    def fake_fetch(url, dest, max_bytes):
+        fetches.append({"url": url, "dest": dest, "max": max_bytes})
+        with open(dest, "wb") as fh:
+            fh.write(b"AUDIODATA")
+        return 9
+
+    monkeypatch.setattr(chat_api, "_fetch_url_to_file", fake_fetch)
+    return http, state, fetches, staging
+
+
+def test_save_audio_to_staging(import_app):
+    http, state, fetches, staging = import_app
+    r = http.post("/api/chat/files/import",
+                  json={"url": "https://cdn.filepost.dev/x/song.flac",
+                        "name": "song.flac", "mime": "audio/flac"})
+    body = r.get_json()
+    assert body["ok"] is True and body["name"] == "song.flac"
+    assert (staging / "song.flac").read_bytes() == b"AUDIODATA"
+    assert fetches[0]["url"] == "https://cdn.filepost.dev/x/song.flac"
+
+
+def test_save_reports_auto_import_state(import_app):
+    http, state, fetches, staging = import_app
+    state["config"]["auto_import.enabled"] = True
+    body = http.post("/api/chat/files/import",
+                     json={"url": "https://cdn.filepost.dev/x/s.mp3", "name": "s.mp3",
+                           "mime": "audio/mpeg"}).get_json()
+    assert body["auto_import"] is True
+
+
+def test_save_rejects_non_filepost_url(import_app):
+    http, state, fetches, staging = import_app
+    r = http.post("/api/chat/files/import",
+                  json={"url": "https://evil.com/s.flac", "name": "s.flac", "mime": "audio/flac"})
+    assert r.status_code == 400
+    assert fetches == []                       # never fetched
+
+
+def test_save_rejects_video(import_app):
+    http, state, fetches, staging = import_app
+    r = http.post("/api/chat/files/import",
+                  json={"url": "https://cdn.filepost.dev/x/clip.mp4", "name": "clip.mp4",
+                        "mime": "video/mp4"})
+    assert r.status_code == 400
+    assert fetches == []
+
+
+def test_save_duplicate_name_409(import_app):
+    http, state, fetches, staging = import_app
+    staging.mkdir(parents=True, exist_ok=True)
+    (staging / "dup.flac").write_bytes(b"x")
+    r = http.post("/api/chat/files/import",
+                  json={"url": "https://cdn.filepost.dev/x/dup.flac", "name": "dup.flac",
+                        "mime": "audio/flac"})
+    assert r.status_code == 409
+    assert fetches == []
+
+
+def test_save_is_admin_only(import_app):
+    http, state, fetches, staging = import_app
+    state["admin"] = False
+    r = http.post("/api/chat/files/import",
+                  json={"url": "https://cdn.filepost.dev/x/s.flac", "name": "s.flac",
+                        "mime": "audio/flac"})
+    assert r.status_code == 403
+    assert fetches == []
+
+
+def test_save_basename_strips_path_traversal(import_app):
+    http, state, fetches, staging = import_app
+    http.post("/api/chat/files/import",
+              json={"url": "https://cdn.filepost.dev/x/e.flac",
+                    "name": "../../etc/evil.flac", "mime": "audio/flac"})
+    # landed as a plain basename inside staging, never escaped it
+    assert (staging / "evil.flac").exists()
+    assert fetches[0]["dest"] == str(staging / "evil.flac")
+
+
+def test_fetch_seam_enforces_size_cap(tmp_path):
+    """The real fetch seam streams to a .part temp and aborts + cleans up when
+    the byte cap is exceeded — a partial file never lands where auto-import
+    would grab it."""
+    import types
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def raise_for_status(self): pass
+        def iter_content(self, chunk_size=0):
+            yield b"0" * 1000
+            yield b"0" * 1000
+    monkeypatch_requests = types.SimpleNamespace(get=lambda *a, **k: _Resp())
+    import sys
+    real = sys.modules.get("requests")
+    sys.modules["requests"] = monkeypatch_requests
+    try:
+        dest = tmp_path / "big.flac"
+        with pytest.raises(ValueError):
+            chat_api._fetch_url_to_file("https://cdn.filepost.dev/big.flac", str(dest), 1500)
+        assert not dest.exists()
+        assert not (tmp_path / "big.flac.part").exists()   # temp cleaned up
+    finally:
+        if real is not None:
+            sys.modules["requests"] = real
+
+
+def test_frontend_save_wiring():
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    assert "data-chat-file-save" in js and "_saveFileToLibrary" in js
+    assert "'/api/chat/files/import'" in js
+    # only audio cards get the save chip
+    card = js[js.index("function _fileCardHtml"):js.index("function renderGroups")]
+    assert "isAudio\n" in card or "(isAudio" in card

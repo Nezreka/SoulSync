@@ -72544,3 +72544,12 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     background: rgba(var(--accent-rgb), 0.2);
     color: rgb(var(--accent-light-rgb));
 }
+
+/* chat: save-shared-file-to-library chip */
+.chat-file-save {
+    background: rgba(var(--accent-rgb), 0.14);
+    color: rgb(var(--accent-light-rgb));
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+.chat-file-save:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.26); color: #fff; }
+.chat-file-save:disabled { opacity: 0.65; cursor: default; }

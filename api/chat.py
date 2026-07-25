@@ -257,6 +257,47 @@ def _filepost_upload(api_key, name, stream, expiry=None):
     return r.json()
 
 
+_AUDIO_EXTS = (".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav",
+               ".wma", ".alac", ".aiff", ".ape")
+
+
+def _is_safe_filepost_url(url: str) -> bool:
+    """SSRF guard: only https links on filepost.dev (or a subdomain) may be
+    fetched server-side. Everything else is refused before any network call."""
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(str(url or ""))
+        host = (p.hostname or "").lower()
+        return p.scheme == "https" and (host == "filepost.dev" or host.endswith(".filepost.dev"))
+    except Exception:
+        return False
+
+
+def _fetch_url_to_file(url, dest_path, max_bytes):
+    """One seam for the file fetch (monkeypatched in tests). Streams the URL
+    to a hidden temp file next to dest, enforcing the byte cap mid-stream, then
+    atomically renames into place — a partial download is never left where the
+    auto-importer would pick it up. Raises on any failure / oversize."""
+    import os as _os
+    import requests
+    tmp = dest_path + ".part"
+    got = 0
+    with requests.get(url, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(tmp, "wb") as fh:
+            for chunk in r.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                got += len(chunk)
+                if got > max_bytes:
+                    fh.close()
+                    _os.remove(tmp)
+                    raise ValueError("file exceeds the size cap")
+                fh.write(chunk)
+    _os.replace(tmp, dest_path)
+    return got
+
+
 _YT_ID_RE = _re.compile(r"^[A-Za-z0-9_-]{11}$")
 _YT_URL_RES = (
     _re.compile(r"(?:youtube\.com/watch\?(?:[^#\s]*&)?v=)([A-Za-z0-9_-]{11})"),
@@ -677,6 +718,62 @@ def create_blueprint() -> Blueprint:
         mime = _mt.guess_type(name)[0] or ""
         return jsonify({"ok": True, "url": url, "name": name,
                         "size": size, "mime": mime})
+
+    @bp.route("/api/chat/files/import", methods=["POST"])
+    def chat_files_import():
+        """Save a shared audio file into YOUR library: fetch the filepost link
+        into the auto-import staging folder, where the import pipeline picks it
+        up (automatically if Auto-Import is on, else it's waiting on the Import
+        page). Audio only — video needs library matching, a separate flow.
+        Admin-only: it writes a file into your library's intake folder."""
+        import os as _os
+        if not bool(getattr(g, "is_admin", True)):
+            return jsonify({"error": "Saving to the library is admin-only"}), 403
+        body = request.get_json(silent=True) or {}
+        url = str(body.get("url") or "").strip()
+        name = _os.path.basename(str(body.get("name") or "").strip())
+        mime = str(body.get("mime") or "").lower()
+
+        if not _is_safe_filepost_url(url):
+            return jsonify({"error": "Only filepost.dev links can be saved"}), 400
+        is_audio = mime.startswith("audio/") or name.lower().endswith(_AUDIO_EXTS)
+        if not is_audio:
+            return jsonify({"error": "Only audio files can be saved to your "
+                                     "library right now"}), 400
+        if not name or name in (".", ".."):
+            name = "shared-track"
+            for ext in _AUDIO_EXTS:
+                if mime.endswith(ext.lstrip(".")):
+                    name += ext
+                    break
+
+        try:
+            from core.imports.paths import docker_resolve_path
+            staging = docker_resolve_path(
+                str(_config_get("import.staging_path", "./Staging") or "./Staging"))
+            _os.makedirs(staging, exist_ok=True)
+        except Exception as e:
+            logger.exception("chat: staging dir unavailable")
+            return jsonify({"error": "Couldn't reach the import staging folder: %s" % e}), 500
+
+        dest = _os.path.join(staging, name)
+        if _os.path.exists(dest):
+            return jsonify({"error": "A file named %r is already waiting to "
+                                     "import" % name}), 409
+
+        # 60MB ceiling — a little above the 50MB filepost upload cap, room for
+        # the encoding overhead a re-hosted file can carry.
+        max_bytes = 60 * 1024 * 1024
+        try:
+            got = _fetch_url_to_file(url, dest, max_bytes)
+        except Exception as e:
+            logger.warning("chat: library import fetch failed: %s", e)
+            return jsonify({"error": "Couldn't fetch that file (%s)" % e}), 502
+
+        auto = bool(_config_get("auto_import.enabled", False))
+        logger.info("chat: saved shared file to staging (%s, %d bytes, auto=%s)",
+                    name, got, auto)
+        return jsonify({"ok": True, "name": name, "bytes": got, "auto_import": auto})
 
     @bp.route("/api/chat/rooms", methods=["GET"])
     def chat_rooms():

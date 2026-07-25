@@ -422,9 +422,49 @@
             (f.s ? '<span class="chat-file-size">' + esc(_fmtBytes(f.s)) + '</span>' : '') +
             '</span>' +
             preview +
+            (isAudio
+                ? '<button type="button" class="chat-embed-chip chat-file-save" ' +
+                    'data-chat-file-save="' + attr(url) + '" data-chat-file-name="' + attr(name) +
+                    '" data-chat-file-mime="' + attr(mime) + '">➕ save to library</button>'
+                : '') +
             '<a class="chat-embed-chip chat-file-dl" href="' + attr(url) +
                 '" target="_blank" rel="noopener noreferrer" download>⬇ download</a>' +
             '<div class="chat-file-slot"></div></div>';
+    }
+
+    // Save a shared audio file into the library: hand the filepost link to the
+    // server, which drops it in the import staging folder for the pipeline.
+    function _saveFileToLibrary(btn) {
+        if (!btn || btn.disabled) return;
+        var url = btn.getAttribute('data-chat-file-save');
+        var name = btn.getAttribute('data-chat-file-name') || '';
+        var mime = btn.getAttribute('data-chat-file-mime') || '';
+        btn.disabled = true;
+        var was = btn.textContent;
+        btn.textContent = 'saving…';
+        postJSON('/api/chat/files/import', { url: url, name: name, mime: mime })
+            .then(function (res) {
+                if (res.ok && res.body && res.body.ok) {
+                    btn.textContent = '✓ saved';
+                    if (typeof showToast === 'function') {
+                        showToast(res.body.auto_import
+                            ? '➕ Saved — auto-import will pick it up'
+                            : '➕ Saved to your Staging folder — import it from the Import page',
+                            'success');
+                    }
+                    return;
+                }
+                btn.disabled = false;
+                btn.textContent = was;
+                if (typeof showToast === 'function') {
+                    showToast((res.body && res.body.error) || 'Could not save that file', 'error');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.textContent = was;
+                if (typeof showToast === 'function') showToast('Could not save that file', 'error');
+            });
     }
 
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
@@ -2028,6 +2068,8 @@
                 }
                 return;
             }
+            t = e.target.closest('[data-chat-file-save]');
+            if (t) { _saveFileToLibrary(t); return; }
             t = e.target.closest('[data-chat-attach-btn]');
             if (t) { toggleAttachPanel(); return; }
             t = e.target.closest('[data-chat-spoiler]');
