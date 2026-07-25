@@ -128,6 +128,36 @@ Der Picker zeigt die aktuelle Auswahl, Provider-Kandidaten und eine Paste-URL-
 Option. Signierte externe URLs dürfen nicht durch pauschal angehängte Query-
 Parameter beschädigt werden.
 
+#### Kaltstart-Vertrag (offen, 25. Juli 2026)
+
+Seit der Entkopplung des kalten Pfads (§10 Finding 2 im Status) antwortet der
+Endpoint für ein noch nicht gecachtes Bild sofort mit dem Placeholder-Vertrag
+(404, `no-store`, `X-Artwork-Pending`) und baut im Hintergrund. Damit ist die
+Zusage „Cover erscheinen zuverlässig" nur noch dann erfüllt, wenn das fertige
+Bild den bereits gerenderten Client auch erreicht. Der Branch-Review vom
+25. Juli zeigt, dass genau das derzeit nicht garantiert ist
+([issues rev25-02](library-v2-issues.md#rev25-02),
+[rev25-10](library-v2-issues.md#rev25-10)). Zu entscheiden ist:
+
+- **Nachlieferung:** Wie erfährt eine gerenderte Seite, dass ihr Cover fertig
+  ist — Polling gegen den Endpoint, Auswertung von `X-Artwork-Pending`, oder
+  ein Refetch der sichtbaren Seite nach abgeschlossenem Build? Ein festes
+  Retry-Budget im Client ist keine Zusage, solange der Build länger dauern
+  darf als das Budget.
+- **Endgültiges Nein:** Für eine Entity, deren Artwork nachweislich nirgends
+  auflösbar ist, braucht es einen persistierten Negativzustand mit Backoff.
+  Ohne ihn ist der Placeholder korrekt, kostet aber bei jedem Seitenbesuch
+  erneut einen vollständigen Provider-Walk.
+
+Die bestehende Zusage aus „Verhalten beim Cover-Pick" — mutable Artwork-URLs
+nie ohne korrekten Versionsparameter als `immutable` ausliefern — bleibt
+unverändert gültig; die Race im Versions-Snapshot, die sie verletzbar machte,
+ist am 25. Juli behoben (Generation-Marker pro Entity statt
+Directory-Mtime-Vergleich, [issues rev25-09](library-v2-issues.md#rev25-09)).
+Die beiden Punkte oben (Nachlieferung, endgültiges Nein) bleiben offen — sie
+sind reine Produktentscheidungen, keine Bugs, und deshalb bewusst nicht Teil
+derselben Umsetzung.
+
 #### Sicherheit
 
 Remote Artwork wird nicht als beliebiges SSRF-Ziel akzeptiert. Scheme,
@@ -696,6 +726,18 @@ Ein richtiges Options-Modal persistiert Einstellungen pro Profil:
 Track-Tabellen sind clientseitig sortierbar. Resizable Columns wurden bewusst
 aufgeschoben; eine spätere Umsetzung braucht Pointer-Capture, Tastaturzugang,
 Min/Max-Breiten, Doppelklick-Reset und persistierte Breiten.
+
+Eine Spalten-Preference darf steuern, **was gerendert wird**, nicht **was die
+API liefert**. Die opt-in Size-Spalte der Artist-Tabelle verletzte das bis zum
+25. Juli: Der Server leitete aus der gespeicherten Preference ab, ob
+`total_size_bytes` überhaupt berechnet wird, sodass jede andere Ansicht und
+jeder andere Konsument still `0` bekam und die Spalte nach dem Einschalten
+„—" zeigte, bis die Liste zufällig neu geholt wurde
+([issues rev25-06](library-v2-issues.md#rev25-06),
+[rev25-11](library-v2-issues.md#rev25-11), behoben). Teure optionale Felder
+gehören an einen expliziten Request-Parameter, den die rendernde Komponente
+setzt — `GET /api/library/v2/artists?include=size`, gesetzt von der
+Tabellenansicht und Teil des React-Query-Keys.
 
 ### <a name="ui-bulk"></a> UI-04 — Bulk-Aktionen
 

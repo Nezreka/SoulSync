@@ -1430,3 +1430,321 @@ existiert — plus einen Regressionstest für genau den Fall ohne
 | Reorganize | Multi-File-Track | nur konkretes File erhält neuen Pfad |
 | Bundle-Import | zwei konkurrierende Caller | exakt ein Import-Dispatcher |
 | Artist-Seite | viele Releases | eine gemeinsame Queue-Status-Abfrage |
+
+---
+
+## 12. Branch-Review-Findings vom 25. Juli 2026 (Nacharbeit zu §9/§10)
+
+Review des Branch-Diffs `library-overhaul` gegen `main` nach den Commits
+`1a6758b5`, `d51e85d8`, `78bf84c9`, `a965e829`, `bca2ec04` und `d82ad12b` —
+also genau der Korrekturen aus §9 und §10. Fünfzehn Findings, nummeriert nach
+Schwere. Findings 1, 5, 6, 7 und 12 wurden zusätzlich direkt am Code
+nachgeprüft; die übrigen sind Review-Aussagen ohne eigene Reproduktion.
+
+Sammelaussage: Die §9/§10-Korrekturen wirken, verschieben die Arbeit aber in
+einen Hintergrundpfad, dessen Fehler-, Lebenszyklus- und
+Aktualisierungssemantik noch unvollständig ist (Findings 1, 2, 8, 9, 10), und
+die neue Namensverknüpfung aus §10 ist über abgeschnittenen Ergebnisfenstern zu
+großzügig (Findings 5, 7). Zwei Perf-Korrekturen kehren sich auf großen
+Bibliotheken ins Gegenteil (Findings 3, 4).
+
+**Status (25. Juli 2026, Nachtrag):** 13 der 15 Findings sind im selben
+Aufwasch behoben — siehe die Statuszeile in jeder Finding-Überschrift unten
+und die Zusammenfassung in [status §13](library-v2-status.md#13-branch-review-findings-vom-25-juli).
+Offen bleiben Finding 2 und 10; beide brauchen zuerst die
+Kaltstart-Vertrags-Entscheidung aus
+[features F-01](library-v2-features.md#feat-artwork) und sind bewusst nicht
+mitimplementiert.
+
+### <a name="rev25-01"></a> Finding 1 — `_background_inflight` leakt beim Verbindungsfehler und sperrt die Entity dauerhaft — Behoben, 25. Juli 2026
+
+**Ort:** `core/library2/artwork.py:645-668` (`schedule_artwork_build._run`).
+
+Der `except`-Zweig um `database._get_connection()` macht `return False`, bevor
+der zweite `try`-Block mit `finally: _background_inflight.discard(key)`
+überhaupt betreten wird. Ein einzelner transienter Verbindungsfehler (SQLite
+„unable to open database file" auf einem Docker-Bind-Mount, `EMFILE` unter
+Last) lässt den Key dauerhaft in `_background_inflight`; jeder spätere
+`schedule_artwork_build` für dieselbe Entity liefert `None`. Da der
+HTTP-Kaltpfad seit `78bf84c9` nur noch plant und nichts mehr inline auflöst,
+bleibt dieses Cover für die gesamte Prozesslaufzeit Placeholder.
+
+**Testlücke:** `test_build_failure_does_not_pin_the_entity` deckt nur die
+`build_artwork`-Exception ab — die erreicht das `finally` ja gerade.
+
+**Korrekturvertrag:** Freigabe des Keys in genau einem `finally`, das den
+gesamten `_run`-Körper inklusive Verbindungsaufbau umschließt, plus
+Regressionstest mit fehlschlagendem `_get_connection`.
+
+### <a name="rev25-02"></a> Finding 2 — Kaltes Cover kann dauerhaft Placeholder bleiben — Offen (Produktentscheidung)
+
+**Ort:** `api/library_v2.py:2053-2065` und
+`webui/src/routes/library-v2/-ui/library-v2-page.tsx:314-345`.
+
+Beim ersten Besuch einer ungecachten Library liefert `_apply_artwork_urls` eine
+URL ohne `?v=` (`artwork_version` gibt 0), der Endpoint antwortet 404 und plant.
+Der Client versucht es nach 1,5 s / 4 s / 9 s erneut (`ARTWORK_RETRY_DELAYS_MS`,
+zusammen 14,5 s) und gibt dann endgültig auf. Ein kalter Build (Provider-Walk +
+HTTP-Download + zwei Pillow-Encodes) liegt regelmäßig darüber, und 75 Zeilen
+serialisieren hinter ~6 Workern — die meisten Zeilen verbrauchen ihr
+Retry-Budget, bevor ihr Build fertig ist. Die URL ändert sich erst mit einem
+Listen-Refetch (dann mit `?v=<mtime>`), die Artists-Query hat kein
+`refetchInterval`; `X-Artwork-Pending` hat im gesamten Repo null Konsumenten.
+Das ist eine Regression gegenüber dem alten synchronen Pfad, der langsam war,
+aber immer irgendwann gemalt hat.
+
+**Korrekturvertrag:** Das Ergebnis des Hintergrund-Builds muss den Client
+erreichen: entweder den Pending-Header tatsächlich auswerten und gezielt
+nachfragen (Polling gegen den Endpoint statt drei fixer Versuche) oder nach
+abgeschlossenem Build einen Refetch der sichtbaren Seite auslösen. Das
+Retry-Budget an die reale Build-Dauer koppeln, nicht an eine Konstante. Die
+Produktseite dieser Entscheidung gehört nach
+[library-v2-features.md F-01](library-v2-features.md#feat-artwork).
+
+### <a name="rev25-03"></a> Finding 3 — `_artwork_versions` kostet auf großen Bibliotheken mehr Syscalls als die 75 `stat()`, die es ersetzt — Behoben, 25. Juli 2026
+
+**Ort:** `core/library2/artwork.py:100-130`.
+
+`lib2_artwork/` hält zwei Dateien pro Artist und zwei pro Album (voll + `_t`).
+Bei 20.000 Alben sind das ~80.000 Einträge; `DirEntry.stat()` ist unter Linux
+ein echter Syscall pro Eintrag. Ein kalter Aufruf kostet also ~80.000 Syscalls,
+um eine 75-Zeilen-Seite zu beantworten, die vorher 75 gekostet hat. Amortisiert
+wird das nur, solange der Verzeichnis-mtime stabil bleibt — aber jeder
+erfolgreiche `_build_artwork_unlocked` ruft `forget_artwork_versions()`, und
+derselbe Branch stößt Hintergrund-Builds jetzt aus Listenrendering
+(`api/library_v2.py:2059`), Autolink (`autolink.py:553`) und Discography-Expand
+(`discography.py:611`) an. Auf einem importierenden oder Artwork-wärmenden
+System wird der Snapshot laufend verworfen, der Listenrequest zahlt den vollen
+Verzeichnis-Scan also nahezu bei jedem Aufruf. Der Snapshot-Dict bleibt zudem
+für die Prozesslaufzeit im Speicher (in dieser Größenordnung zweistellige MB).
+
+**Korrekturvertrag:** Nur die ~75 tatsächlich benötigten Dateinamen stat'en
+oder pro Entity per LRU cachen — das behält den beabsichtigten Gewinn ohne die
+Inversion.
+
+### <a name="rev25-04"></a> Finding 4 — Voller Artwork-Verzeichnis-Scan auf dem Per-Download-Importpfad — Behoben, 25. Juli 2026
+
+**Ort:** `core/library2/autolink.py:553` (`_warm_new_artwork`).
+
+`link_download_into_library_v2` läuft einmal pro fertigem Download
+(`core/imports/pipeline.py:529`, `core/imports/side_effects.py:398`).
+`_warm_new_artwork` → `schedule_missing_artwork` → `_artwork_versions`
+re-scandirt das komplette Cache-Verzeichnis, sobald der Snapshot verworfen war —
+und jeder gleichzeitige Hintergrund-Build verwirft ihn. N Downloads gegen M
+gecachte Bilder kosten grob O(N·M) `stat()`-Syscalls, synchron im
+Import-Worker nach dem Commit. Auf einem NAS-Datenverzeichnis ist das exakt die
+blockierende I/O, die §9 aus dem Weg räumen wollte.
+
+**Korrekturvertrag:** `schedule_missing_artwork` prüft nur die zwei Dateinamen
+der Zielentity oder bekommt den bereits bekannten Cache-Zustand übergeben.
+
+### <a name="rev25-05"></a> Finding 5 — Namens-Backfill persistiert eine Identität aus einer Eindeutigkeitsprüfung über abgeschnittenen Fenstern — Behoben, 25. Juli 2026
+
+**Ort:** `core/search/orchestrator.py:265-276` (Namensmatch) und `:130-148`
+(`_backfill_legacy_link`).
+
+`legacy_by_name` entsteht aus `deps.database.search_artists(query, limit=5)`,
+`v2_ids_by_name` aus einer lib2-Query mit `LIMIT 10`. `len(candidates) == 1 and
+len(v2_ids_by_name[name_key]) == 1` belegt Eindeutigkeit deshalb nur
+**innerhalb dieser Fenster**, nicht in der Datenbank. Beispiel: drei Artists
+„John Williams" in der Library, Suche „john" — die Fenster können problemlos
+genau einen je Seite zeigen, der Code erklärt das Paar für eindeutig, und
+`_backfill_legacy_link` schreibt `lib2_artists.legacy_artist_id` dauerhaft
+fest. Der `NOT EXISTS`-Guard verhindert nur, eine **bereits belegte**
+Legacy-ID zu stehlen — nicht, die falsche **freie** zu belegen. Der Diff hat
+den Kommentar „names alone are deliberately not a dedup key" entfernt, ohne
+eine gleichwertige Invariante zu setzen; die neuen Tests decken nur den
+Einzeltreffer- und den Zwei-identische-lib2-Zeilen-Fall ab, nicht die
+Truncation.
+
+**Korrekturvertrag:** Eindeutigkeit vor dem Persistieren gegen die Datenbank
+prüfen (`COUNT(*)` über den normalisierten Namen auf beiden Seiten, ohne
+LIMIT). Der reine In-Memory-Merge darf großzügiger bleiben als der geschriebene
+Link — nur das Schreiben braucht die harte Invariante.
+
+### <a name="rev25-06"></a> Finding 6 — Eingeschaltete Size-Spalte zeigt „—" für jeden Artist — Behoben, 25. Juli 2026
+
+**Ort:** `api/library_v2.py:1343-1350` (Ableitung von `include_size`),
+`library-v2-page.tsx:5490-5498` (`useUiPreferencesMutation`) und `:4358-4363`
+(Zelle).
+
+`include_size` kommt aus `artist_table.columns.size`, Default `False`.
+`useUiPreferencesMutation` macht ausschließlich `setQueryData` auf dem
+`ui-preferences`-Key und invalidiert `LIBRARY_V2_QUERY_KEY` nie. Das Einschalten
+der Spalte rendert deshalb sofort aus der gecachten Payload, in der jede Zeile
+`total_size_bytes: 0` trägt — `total_size_bytes > 0 ? … : '—'` zeigt für alle
+Artists „—", bis zufällig eine andere Mutation oder ein Window-Refocus die
+Liste neu holt.
+
+**Korrekturvertrag:** Entweder invalidiert die Preference-Mutation die
+Artist-Liste, oder — besser, siehe Finding 11 — die Payload hängt gar nicht
+erst an einer Preference.
+
+### <a name="rev25-07"></a> Finding 7 — Der Such-Lesepfad schreibt und committet jetzt — Behoben, 25. Juli 2026
+
+**Ort:** `core/search/orchestrator.py:130-148`, aufgerufen aus
+`_build_db_artists` (GET Global Search).
+
+Auf einer WAL-Datenbank mit aktivem Importer/Scanner blockiert das `UPDATE` bis
+zum `busy_timeout` der Verbindung (30 s, `database/music_database.py:259`),
+bevor der `except` es schluckt — eine Nutzer-Suche hängt an einer Reparatur,
+die niemand angefordert hat. Der Versuch wiederholt sich außerdem bei jeder
+Suche erneut, solange die Guard-Bedingungen weiter scheitern.
+
+**Korrekturvertrag:** Die Reparatur gehört in einen Reconcile-/Maintenance-Job
+— das Muster existiert im Codebase bereits — und nicht in den Request. Die
+Suche bleibt lesend.
+
+### <a name="rev25-08"></a> Finding 8 — Modulglobaler Executor: eingefrorene Konfiguration, kein Shutdown, unbegrenzte Queue — Behoben, 25. Juli 2026
+
+**Ort:** `core/library2/artwork.py:615-640`.
+
+`max_workers` wird beim ersten Aufruf aus dem zuerst eintreffenden
+`config_manager` eingefroren — Caller ohne `config_manager` (Tests,
+`schedule_missing_artwork`) bekommen den hartkodierten Default 6 —, spätere
+Änderungen an `library_v2.artwork_cache_workers` bzw. `auto_import.max_workers`
+wirken für diesen Pool nie, anders als bei `precache_all_artwork`, das pro Lauf
+neu liest. Der Pool wird außerdem nie heruntergefahren: `concurrent.futures`
+registriert einen threading-atexit-Hook, der die Non-Daemon-Worker joint — ein
+an einem langsamen Socket hängender Provider-Download verzögert den
+Interpreter-Exit und damit den Container-Shutdown nach SIGTERM. Und `submit`
+hat keine Queue-Grenze: ein Client, der `/api/library/v2/artwork/artist/<n>`
+über fortlaufende IDs abklappert, oder wiederholte Renders einer Seite mit
+ungecachten Covern füllen die Queue schneller, als sechs Worker sie leeren —
+jeder wartende Eintrag öffnet beim Lauf seine eigene DB-Verbindung.
+
+**Korrekturvertrag:** Worker-Zahl pro Lauf aus der Config auflösen, Pool an den
+App-Shutdown hängen, Queue begrenzen (Verwerfen statt unbegrenztem Wachstum).
+
+### <a name="rev25-09"></a> Finding 9 — `forget_artwork_versions` kann von einem parallel laufenden Scan still zurückgenommen werden — Behoben, 25. Juli 2026
+
+**Ort:** `core/library2/artwork.py:100-130`.
+
+`_artwork_versions` liest `directory.stat().st_mtime_ns` **vor** dem `scandir`
+und speichert das Ergebnis unter diesem Vorher-Stempel. Thread A liest Stempel
+S und beginnt zu scannen; Thread B schreibt ein Cover und ruft
+`forget_artwork_versions()` — ein No-op, weil A noch nichts gespeichert hat; A
+speichert anschließend (S, Versionen ohne Bs Änderung). Auf einem Dateisystem
+mit Sekundenauflösung für Verzeichnisstempel ist der mtime weiterhin S, der
+stale Snapshot validiert, `artwork_version` liefert das alte Token,
+`_apply_artwork_urls` das alte `?v=` — und der Endpoint liefert es mit
+`Cache-Control: public, max-age=604800, immutable` aus. Der Browser behält das
+überholte Cover damit eine Woche. Das verletzt direkt die Zusage aus F-01,
+mutable Artwork-URLs nicht ohne korrekten Versionsparameter als `immutable`
+auszuliefern.
+
+**Korrekturvertrag:** Generationszähler, den `forget_artwork_versions` erhöht
+und den der Store unter demselben Lock gegenprüft.
+
+### <a name="rev25-10"></a> Finding 10 — Kein Negativ-Cache: Entities ohne auflösbares Bild werden bei jedem Render neu gewalkt — Offen (Produktentscheidung)
+
+**Ort:** `api/library_v2.py:2053-2065` in Verbindung mit
+`library-v2-page.tsx:317`.
+
+`build_artwork` liefert `None` für eine Entity ohne embedded Cover und ohne
+Providerbild — es wird nichts geschrieben, der nächste Request ist wieder ein
+Kalt-Miss und plant erneut einen vollen Provider-Walk. `_background_inflight`
+bündelt nur **gleichzeitige** Duplikate, nicht Wiederholungen über Renders
+hinweg. Bei 75 bildlosen Artists auf einer Seite kostet ein Seitenbesuch bis zu
+4 × 75 = 300 404-Requests (Erstversuch plus drei Client-Retries) und 75
+Provider-Walks — bei jedem Besuch aufs Neue. Der alte synchrone Pfad hatte
+denselben fehlenden Negativ-Cache, war aber natürlich auf einen Versuch pro
+Request gedrosselt; die Retry-Schleife hebt diese Drosselung auf.
+
+**Korrekturvertrag:** Kurzlebiger Negativmarker oder persistiertes „artwork
+resolution failed at T" mit Backoff, bevor erneut gewalkt wird.
+
+### <a name="rev25-11"></a> Finding 11 — Altitude: eine Tabellen-Preference entscheidet die Payload der gesamten Artist-Response — Behoben, 25. Juli 2026
+
+**Ort:** `api/library_v2.py:1343-1350`.
+
+`artist_table.columns.size` steuert genau eine Tabellenspalte, `include_size`
+schaltet das Feld aber für die komplette `/api/library/v2/artists`-Response.
+Die Card-/Grid-Ansicht, der Typ in `-library-v2.types.ts` (deklariert
+`total_size_bytes: number`, nicht optional), künftige Exporte und jedes Skript
+gegen den Endpoint bekommen still `0` — ununterscheidbar von einem Artist ohne
+Dateien — ohne Möglichkeit, den echten Wert anzufordern. Zusätzlich zahlt jeder
+Listenrequest einen `get_ui_preferences`-Read plus JSON-Parse.
+
+**Korrekturvertrag:** Expliziter Request-Parameter (z. B. `?include=size`),
+gesetzt von der Komponente, die die Spalte rendert. Das macht den
+React-Query-Key vom Parameter abhängig und löst Finding 6 gleich mit.
+
+### <a name="rev25-12"></a> Finding 12 — Beim `src`-Wechsel wird ein Frame mit altem Retry-Zähler committet — Behoben, 25. Juli 2026
+
+**Ort:** `webui/src/routes/library-v2/-ui/library-v2-page.tsx:341-348`.
+
+`url` wird im Render aus `attempt` berechnet, `attempt` aber erst im
+`useEffect(…, [base])` zurückgesetzt — also nach dem Commit dieses Renders.
+Steht eine Zeile auf `/artwork/artist/7` mit `attempt=2` und ändert ein Refetch
+die Prop auf `/artwork/artist/7?v=1699`, committet React einmal
+`…?v=1699&retry=2`; der Browser fordert eine garantiert HTTP-Cache-missende URL
+an (dasselbe Bild wird zweimal geladen), erst danach setzt der Effect zurück und
+rendert die saubere URL. Wird `src` stattdessen `''`, ist `''.includes('?')`
+false, `url` wird der truthy String `'?retry=2'` — das `<img>` löst ihn gegen
+das aktuelle Dokument auf und lädt die HTML-Seite als Bild, sichtbar als kurz
+aufblitzendes Broken-Image vor dem Placeholder.
+
+**Korrekturvertrag:** Retry-State an `base` koppeln (Reset im Render beim
+Base-Wechsel oder State-Key), und das `retry`-Suffix nur an ein nicht-leeres
+`base` hängen.
+
+### <a name="rev25-13"></a> Finding 13 — Weggefallenes `optimize=True` vergrößert auch die Variante, die die Detailseiten ausliefern — Behoben, 25. Juli 2026
+
+**Ort:** `core/library2/artwork.py:320-330`.
+
+Die Begründung im Kommentar („a file the list view never requests") beschreibt
+nicht die tatsächliche Nutzung: `<Artwork>` ohne `thumb`-Prop liefert die
+Vollvariante im Album-Detail-Header (`library-v2-page.tsx:4481`), im
+Artist-Detail-Header (`:4916`) und in den Match-Dialogen (`:960`, `:1054`) —
+also bei jedem Detailseitenaufruf. Die ~5-10 % Mehrbytes fallen zusätzlich
+dauerhaft auf Platte an, für jedes gecachte Cover der Bibliothek.
+
+**Korrekturvertrag:** Entweder `optimize` auf der Vollvariante behalten und
+stattdessen auf dem (kleineren, billiger zu kodierenden) Thumbnail weglassen,
+oder den Mehrverbrauch auf Detailseiten ausdrücklich als akzeptiert
+dokumentieren und den Kommentar korrigieren.
+
+### <a name="rev25-14"></a> Finding 14 — Zwei Implementierungen von „ist dieses Artwork gecacht?" — Behoben, 25. Juli 2026
+
+**Ort:** `core/library2/artwork.py:761` (`precache_all_artwork`) gegenüber
+`:694` (`schedule_missing_artwork`).
+
+`precache_all_artwork` prüft weiterhin per Entity mit
+`(cache_dir / f"{kind}_{eid}.jpg").exists()`, während `schedule_missing_artwork`
+den neuen Verzeichnis-Snapshot nutzt. Zwei Antworten auf dieselbe Frage im
+selben Modul: ~40.000 `exists()`-Syscalls bei 20.000 Alben, die der Snapshot in
+einem Durchgang beantworten könnte, plus Driftrisiko, sobald sich Namensschema
+oder `is_cached_jpeg`-Behandlung ändern.
+
+**Korrekturvertrag:** Eine Implementierung — abhängig von der in Finding 3
+gewählten Lösung.
+
+### <a name="rev25-15"></a> Finding 15 — Globaler PIL-Patch im neuen Formattest, Verbindungsfehlerpfad ungetestet — Behoben, 25. Juli 2026
+
+**Ort:** `tests/library2/test_artwork_format.py:105` und
+`tests/library2/test_artwork_background_build.py`.
+
+`test_full_variant_skips_the_extra_huffman_optimize_pass` weist
+`Image.Image.save` direkt auf der geteilten PIL-Klasse zu, statt die
+`monkeypatch`-Fixture zu nutzen, die alle anderen Tests derselben Datei
+verwenden: unter pytest-xdist oder jeder parallelen Ausführung schreibt ein
+fremder JPEG-Encode in `saves` und `full, thumbnail = saves` bricht mit
+`ValueError`. Unabhängig davon gelingt `_shim._get_connection` in
+`test_artwork_background_build.py` immer, sodass der Verbindungsfehler-Pfad aus
+Finding 1 — der einzige, der wirklich leakt — von keinem Test abgedeckt wird.
+
+**Korrekturvertrag:** `monkeypatch` verwenden; Test mit fehlschlagendem
+`_get_connection`.
+
+**Priorität (Schwere/Aufwand):** Finding 1 (dauerhafter Fehlzustand, trivialer
+Fix) → 6 und 12 (sichtbare UI-Fehler, klein) → 5 und 7 (persistierte
+Fehlverknüpfung bzw. Write auf dem Lesepfad) → 2 und 10 (Kaltstart-Semantik,
+braucht die Produktentscheidung aus F-01) → 3 und 4 (Perf-Inversion auf großen
+Bibliotheken) → 8 und 9 → 11, 13, 14, 15.
+
+**Nachtrag 25. Juli 2026:** In dieser Reihenfolge abgearbeitet bis auf 2 und
+10, die weiterhin auf die F-01-Produktentscheidung warten. 3/4/8/9/14 wurden
+im selben Umbau gelöst (ein Per-Entity-Mtime-Cache mit Generation-Marker statt
+des Whole-Directory-Snapshots), 6 im selben Umbau wie 11 (expliziter
+`?include=size`-Parameter).

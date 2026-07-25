@@ -402,7 +402,12 @@ vollständige WebUI-Suite 252 Tests in 43 Dateien; `oxlint --type-check`,
 Production Build und Ruff über alle geänderten Dateien bestanden.
 
 **Einstufung:** Alle fünf Findings implementiert und gezielt geprüft; ein
-Messvergleich gegen die produktive große DB steht noch aus.
+Messvergleich gegen die produktive große DB steht noch aus. Der Branch-Review
+vom 25. Juli hat auf genau diesen Commits dreizehn Nacharbeiten gefunden
+(§13) — darunter zwei, die den Perf-Gewinn auf großen Bibliotheken umkehren
+(Findings 3, 4), und eine, die ein Cover dauerhaft als Placeholder festnagelt
+(Finding 1). Die Findings gelten deshalb als implementiert, aber **nicht** als
+abgenommen.
 
 ---
 
@@ -423,7 +428,11 @@ repariert; mehrdeutige Namen bleiben bewusst unverknüpft), `tests/search`
 vollständig grün.
 
 **Einstufung:** Fix implementiert und gezielt geprüft; produktive Bestätigung
-am realen Suchergebnis steht noch aus.
+am realen Suchergebnis steht noch aus. Der Branch-Review vom 25. Juli hat zwei
+Nacharbeiten an genau diesem Commit gefunden (§13, Findings 5 und 7): die
+Eindeutigkeitsprüfung vor dem persistierten Backfill läuft über abgeschnittenen
+Ergebnisfenstern, und der Backfill macht den Such-Lesepfad zum Writer. Der Fix
+gilt deshalb als implementiert, aber **nicht** als abgenommen.
 
 ---
 
@@ -447,3 +456,49 @@ Pending-Tabellen zurückwandern:
 | Track Redownload Modal | Deferred |
 | Reidentify / I Have This | Deferred |
 | Resizable Columns | Deferred |
+
+---
+
+## 13. Branch-Review-Findings vom 25. Juli
+
+Review des Branch-Diffs `library-overhaul` gegen `main` über genau die Commits
+aus §10 und §11. Root-Cause-Diagnosen stehen in
+[library-v2-issues.md §12](library-v2-issues.md#rev25-01); diese Tabelle
+enthält ausschließlich den Bearbeitungsstatus. Dreizehn der fünfzehn Findings
+sind am 25. Juli im selben Aufwasch behoben worden; die zwei verbleibenden
+(2, 10) brauchen zuerst die in
+[features F-01](library-v2-features.md#feat-artwork) skizzierte
+Produktentscheidung zum Kaltstart-Vertrag und bleiben bewusst offen.
+
+| # | Finding | Betroffener Commit | Status | Bemerkung |
+|---:|---|---|---|---|
+| [1](library-v2-issues.md#rev25-01) | `_background_inflight` leakt beim Verbindungsfehler, Entity bleibt dauerhaft Placeholder | `78bf84c9` | Fixed | Ein `finally` um den gesamten `_run`-Körper inkl. Verbindungsaufbau; Regressionstest mit fehlschlagendem `_get_connection` |
+| [2](library-v2-issues.md#rev25-02) | Kaltes Cover kann dauerhaft Placeholder bleiben: 14,5 s Retry-Budget < kalter Build, kein Refetch, `X-Artwork-Pending` ohne Konsument | `78bf84c9` | **Open** | Braucht weiterhin die Produktentscheidung zum Kaltstart-Vertrag, siehe [features F-01](library-v2-features.md#feat-artwork) |
+| [3](library-v2-issues.md#rev25-03) | Verzeichnis-Snapshot kostet auf großen Bibliotheken mehr Syscalls als die 75 `stat()`, die er ersetzt | `1a6758b5` | Fixed | Whole-Directory-Snapshot ersetzt durch Per-Entity-Mtime-Cache mit Generation-Marker (löst auch Finding 9) |
+| [4](library-v2-issues.md#rev25-04) | Voller Artwork-Verzeichnis-Scan auf dem Per-Download-Importpfad | `a965e829` | Fixed | `schedule_missing_artwork` prüft nur noch die eigenen Targets über `artwork_version`, kein Verzeichnis-Scan mehr |
+| [5](library-v2-issues.md#rev25-05) | Namens-Backfill persistiert Identität aus Eindeutigkeitsprüfung über `LIMIT 5`/`LIMIT 10` | `d82ad12b` | Fixed | Reconcile prüft Eindeutigkeit ohne `LIMIT` gegen die volle Tabelle, bevor geschrieben wird |
+| [6](library-v2-issues.md#rev25-06) | Eingeschaltete Size-Spalte zeigt „—" für jeden Artist | `bca2ec04` | Fixed | Behoben durch Finding 11 (expliziter Parameter statt Preference-Ableitung) |
+| [7](library-v2-issues.md#rev25-07) | Such-Lesepfad schreibt und committet | `d82ad12b` | Fixed | Backfill läuft jetzt off-thread mit eigener Verbindung (gleiches Dispatch-Muster wie der MB-Release-Group-Reconcile, §62.6 Stufe 3); die Suche selbst bleibt lesend |
+| [8](library-v2-issues.md#rev25-08) | Modulglobaler Executor: eingefrorene Worker-Zahl, kein Shutdown, unbegrenzte Queue | `78bf84c9` | Fixed | Worker-Zahl wird beim nächsten Leerlauf neu gelesen, `shutdown_background_executor()` in `web_server.py`s Shutdown-Pfad verdrahtet, Queue bei 500 gedeckelt |
+| [9](library-v2-issues.md#rev25-09) | `forget_artwork_versions` durch parallelen Scan still rücknehmbar | `1a6758b5` | Fixed | Generation-Marker pro Entity statt Directory-Mtime-Vergleich; ein Write kann von einem racenden Read nicht mehr überschrieben werden |
+| [10](library-v2-issues.md#rev25-10) | Kein Negativ-Cache; Retries vervierfachen die Last für bildlose Entities | `78bf84c9` | **Open** | Hängt an derselben Kaltstart-Vertrags-Entscheidung wie Finding 2 |
+| [11](library-v2-issues.md#rev25-11) | Altitude: UI-Preference entscheidet die Payload der gesamten Artist-Response | `bca2ec04` | Fixed | Expliziter `?include=size`-Parameter, gesetzt von der Tabellen-Ansicht; Query-Key hängt jetzt vom Parameter ab |
+| [12](library-v2-issues.md#rev25-12) | `src`-Wechsel committet einen Frame mit altem Retry-Zähler | `78bf84c9` | Fixed | Retry-State wird während des Renders auf `base` synchronisiert (React-Pattern, kein Effect-Delay mehr); leeres `base` bleibt falsy |
+| [13](library-v2-issues.md#rev25-13) | Weggefallenes `optimize=True` trifft auch die Detailseiten-Variante | `d51e85d8` | Fixed | `optimize=True` für die Vollvariante wiederhergestellt — einmaliger Build-Zeit-Kosten, dauerhafter Bytegewinn auf jeder Detailseiten-Auslieferung |
+| [14](library-v2-issues.md#rev25-14) | Zwei Implementierungen von „ist dieses Artwork gecacht?" | `a965e829` | Fixed | `_cached_artwork_filenames` ist die einzige verbleibende Directory-Scan-Implementierung, nur noch von `precache_all_artwork` genutzt |
+| [15](library-v2-issues.md#rev25-15) | Globaler PIL-Patch im Formattest; Verbindungsfehlerpfad ungetestet | `d51e85d8`/`78bf84c9` | Fixed | Test nutzt jetzt die `monkeypatch`-Fixture; Verbindungsfehlerpfad hat einen eigenen Regressionstest (siehe Finding 1) |
+
+Verifikation des Reviews selbst: Findings 1, 5, 6, 7 und 12 wurden zusätzlich
+direkt am Code nachgeprüft; die übrigen zehn waren Review-Aussagen ohne eigene
+Reproduktion — bei der Umsetzung von 3/4/8/9/14 hat das TDD-Vorgehen einen
+zusätzlichen Bug im ersten Entwurf des Generation-Markers gefangen (ein
+einzelner globaler statt ein Per-Entity-Zähler hätte jede Invalidierung einer
+Entity die Caches aller anderen mit-invalidiert).
+
+**Einstufung:** §10 und §11 bleiben implementiert; 13 von 15 Nacharbeiten aus
+dieser Liste sind jetzt ebenfalls umgesetzt und mit gezielten Tests
+abgesichert (`tests/library2/test_artwork_*`, `tests/search/test_search_orchestrator.py`,
+`tests/library2/test_api_routes.py`, `webui/.../artwork-retry.test.tsx`).
+Offen bleiben ausschließlich Finding 2 und 10 — beide warten auf die
+Kaltstart-Vertrags-Entscheidung aus [features F-01](library-v2-features.md#feat-artwork)
+und sind bewusst nicht mitimplementiert.
