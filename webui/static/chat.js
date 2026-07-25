@@ -694,7 +694,7 @@
                 // the shared jukebox wins the line — it's what the room is doing
                 // together; a personal now-playing shows otherwise
                 (tuned
-                    ? '<span class="chat-user-act">♫ Listening to the jukebox</span>'
+                    ? '<span class="chat-user-act chat-user-tuned">♫ Listening to the jukebox</span>'
                     : (np && np.t
                         ? '<span class="chat-user-act" title="' + attr(np.t + (np.a ? ' — ' + np.a : '')) +
                             '">♪ ' + esc(np.t) + (np.a ? ' · ' + esc(np.a) : '') + '</span>'
@@ -753,7 +753,10 @@
                 apps.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
         }
         if (rest.length) {
-            html += '<div class="chat-users-label chat-users-label--sub">Online &mdash; ' + rest.length + '</div>' +
+            // NOT "Online" — the SoulSync bucket above is online too; this one
+            // is specifically everyone on a non-SoulSync client.
+            html += '<div class="chat-users-label chat-users-label--sub">Other clients &mdash; ' +
+                rest.length + '</div>' +
                 rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
