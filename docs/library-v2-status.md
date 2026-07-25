@@ -380,7 +380,44 @@ noch nicht belegt.
 
 ---
 
-## 10. Fest entschiedene Nicht-Features
+## 10. Performance-Findings vom 25. Juli
+
+Nutzerbeobachtung: Artist-Liste/Artwork lädt in Library V2 spürbar langsamer
+als in der Legacy-Library, auch bei warmem Artwork-Cache. Root-Cause-Diagnose
+steht in [library-v2-issues.md §9](library-v2-issues.md#perf25-01); diese
+Tabelle enthält ausschließlich den Bearbeitungsstatus.
+
+| # | Finding | Status | Referenz / Bemerkung |
+|---:|---|---|---|
+| [1](library-v2-issues.md#perf25-01) | `os.stat()` pro Artist im List-Endpoint | Pending | einfachster Fix, keine Verhaltensänderung |
+| [2](library-v2-issues.md#perf25-02) | Kalte Artist-Artwork-Resolution synchron/sequenziell | Pending | größter Effekt; Preis für Media-Server-Unabhängigkeit (§2.1) |
+| [3](library-v2-issues.md#perf25-03) | `list_artists`-CTEs berechnen live Aggregate, die Legacy nicht kennt | Pending | prüfen, ob auf der eingeklappten Liste überhaupt nötig |
+| [4](library-v2-issues.md#perf25-04) | Precache deckt nicht jeden ersten Seitenbesuch ab | Pending | Precache nach jeder Discography-/Library-Änderung anstoßen |
+| [5](library-v2-issues.md#perf25-05) | Kein Virtualisierungsproblem; Pillow-Doppel-Encode im kalten Pfad, den Legacys eigenständiger Cache nicht macht | Pending | DOM-Virtualisierung nicht nötig (Pagination begrenzt bereits); Encode-Overhead prüfen |
+
+**Einstufung:** Root Cause identifiziert und dokumentiert, noch keine Fixes
+implementiert oder verifiziert.
+
+---
+
+## 11. Search-Ergebnis „In Your Library" verlinkt auf alte Library statt Library V2
+
+Nutzerbeobachtung: Klick auf einen bereits vorhandenen Artist im
+Search-Ergebnis führt zur alten Library-Detailseite. Root-Cause-Diagnose
+steht in [library-v2-issues.md §10](library-v2-issues.md#find25-search-01);
+diese Tabelle enthält ausschließlich den Bearbeitungsstatus.
+
+| # | Finding | Status | Referenz / Bemerkung |
+|---:|---|---|---|
+| [1](library-v2-issues.md#find25-search-01) | Frontend-Link-Logik ist bereits korrekt | No fix needed | Fällt nur zurück, wenn Backend keine `library_v2_id` liefert |
+| [2](library-v2-issues.md#find25-search-02) | Orchestrator-Merge verknüpft Legacy- und lib2-Artist nicht zuverlässig | Pending | lib2-Artists ohne `legacy_artist_id` (via `autolink._find_or_create_artist`) fallen durchs Raster; kein Regressionstest für diesen Fall |
+
+**Einstufung:** Root Cause identifiziert und dokumentiert, noch kein Fix
+implementiert oder verifiziert.
+
+---
+
+## 12. Fest entschiedene Nicht-Features
 
 Diese Einträge sind nicht „offen“ und dürfen deshalb nicht in Issue- oder
 Pending-Tabellen zurückwandern:

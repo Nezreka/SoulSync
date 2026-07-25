@@ -1206,7 +1206,215 @@ demselben Stand laufen.
 
 ---
 
-## 9. Abnahmeinvarianten für den Bug-Cluster
+## 9. Performance-Findings: Artist-Liste/Artwork spürbar langsamer als Legacy (25. Juli 2026)
+
+Nutzerbeobachtung: Die Legacy-Library rendert die Artist-Liste inkl. Bildern
+merklich schneller als Library V2 — auch dann, wenn der Artwork-Cache bereits
+warm ist. Vergleich von Endpunkten und Query-Pfaden ergab vier unabhängige
+Ursachen; keine ist reines Bild-Fetching allein.
+
+### <a name="perf25-01"></a> Finding 1 — `os.stat()` pro Artist bei jedem List-Request
+
+**Ort:** `api/library_v2.py:264-277` (`_artwork_url`), aufgerufen aus
+`lib2_list_artists()` für jede Zeile der Seite.
+
+Der Cache-Busting-Parameter `?v=<mtime>` wird durch einen synchronen
+`Path.stat()`-Syscall pro Artist pro Listenaufruf gebaut. Bei 75 Artists pro
+Seite sind das 75 Dateisystemzugriffe im Request-Thread, bevor überhaupt JSON
+zurückgeht — unabhängig davon, ob das Artwork selbst schon gecacht ist.
+Legacy macht in seinem List-Handler keinerlei Dateisystemarbeit; `thumb_url`
+ist eine bereits befüllte DB-Spalte.
+
+**Korrekturvertrag:** mtime/Version in-memory oder als DB-Spalte cachen und
+nur beim (Re-)Schreiben des Artwork-Files aktualisieren, statt bei jedem
+List-Request zu stat'en; alternativ Versions-Parameter entfernen und stattdessen
+auf `ETag`/`If-Modified-Since` am Artwork-Endpoint selbst setzen (der bereits
+`conditional=True` nutzt).
+
+### <a name="perf25-02"></a> Finding 2 — Kalte Artist-Artworks lösen synchron, sequenziell und blockierend auf
+
+**Ort:** `core/library2/provider_adapters.py:791-832` → `fetch_artwork_url` →
+`core/metadata/artist_image.py:48-197` (`_get_artist_image_from_source`),
+aufgerufen aus `build_artwork`/`_build_artwork_unlocked`
+(`core/library2/artwork.py:455-548`) im kalten Pfad von
+`GET /api/library/v2/artwork/<kind>/<id>` (`api/library_v2.py:1996-2052`).
+
+Anders als der Artwork-Picker, der Quellen parallel über einen
+`ThreadPoolExecutor` befragt (`core/metadata/art_lookup.py:601-613`), probiert
+dieser Fallback-Pfad die konfigurierten Provider-Quellen **sequenziell**, mit
+je einem blockierenden HTTP-Call pro Quelle. Bei Treffer folgt zusätzlich ein
+synchroner Download plus vollständiger Pillow-Decode/Resize/Re-Encode zweier
+JPEG-Varianten — alles im Request-Thread. Ein Single-Flight-Lock pro Entity
+verhindert Doppelarbeit für denselben Artist, aber nicht über mehrere kalte
+Artists auf einer Seite hinweg.
+
+Das ist der Preis für das ausdrückliche Designziel „kein Mediaserver nötig“
+(§2.1): Legacy lässt bei Plex/Jellyfin/Navidrome-Installationen den Browser
+das Bild direkt vom Mediaserver laden und macht serverseitig nichts.
+
+**Korrekturvertrag:** Erste Ansicht eines Artists darf nicht auf Live-Provider-
+Resolution blockieren. Placeholder sofort ausliefern, Auflösung/Caching im
+Hintergrund anstoßen (bestehenden Precache-Mechanismus eager pro
+Artist bei Add/Import triggern statt nur im großen Batch-Job), und den
+sequenziellen Provider-Fallback wie im Picker parallelisieren.
+
+### <a name="perf25-03"></a> Finding 3 — Artist-Listen-Query berechnet Aggregate live, die Legacy gar nicht kennt
+
+**Ort:** `core/library2/queries.py:124-253` (`list_artists`).
+
+Mehrere gejointe/materialisierte CTEs pro Seitenaufruf: Album-/Single-Counts
+über eine `UNION` aus `lib2_album_artists`/`lib2_track_artists`, Wanted-/
+Monitored-Counts über einen Join mit `lib2_wanted_tracks`, eine
+Window-Function (`ROW_NUMBER() OVER (PARTITION BY tf.track_id ...)`) über
+alle Dateien der Seiten-Artists sowie ein `SUM`-Größen-Rollup darüber. Legacy
+(`database/music_database.py:13073-13114`) ist eine flache
+`WHERE/ORDER/LIMIT`-Query; Album-/Track-Counts werden dort nur einmal
+batched für die sichtbare Seite nachgeladen, keine Wanted-/Monitoring-Kaskade
+und kein Datei-Größen-Rollup auf der Listenansicht.
+
+**Korrekturvertrag:** Prüfen, ob Wanted-/Monitored-/Size-Rollups in der
+eingeklappten Listenansicht überhaupt gebraucht werden; wenn ja, pro Zeile
+lazy nachladen oder als invalidierbaren Cache statt bei jedem Request live
+per CTE zu berechnen.
+
+### <a name="perf25-04"></a> Finding 4 — Precache läuft nicht zuverlässig vor dem ersten Seitenbesuch
+
+**Ort:** `core/library2/precache_all_artwork` (`core/library2/artwork.py:571-646`).
+
+Der Background-Precache-Job existiert bereits und ist für genau dieses
+Problem gebaut, deckt aber nur den Zustand nach dem letzten Lauf ab. Neu
+hinzugefügte Artists, frische oder teilmigrierte Installationen laufen kalt,
+wenn die Seite besucht wird, bevor der Precache durchgelaufen ist — dann
+greift Finding 2 in voller Härte.
+
+**Korrekturvertrag:** Precache nach jeder Discography-/Library-Änderung
+prompt anstoßen (nicht nur nach vollständigen Imports), damit der kalte Pfad
+im Alltag selten getroffen wird.
+
+### <a name="perf25-05"></a> Finding 5 — Keine Virtualisierung nötig; Vergleich mit Lidarr/Sonarr ist kein Frontend-Rendering-Problem, sondern Server-Roundtrip pro Seite plus unnötige Bildverarbeitung
+
+**Ort:** `webui/src/routes/library-v2/-ui/library-v2-page.tsx:4243-4256` (`ArtistCards`)
+vs. `webui/static/library.js` (Legacy-Grid); `core/image_cache.py:169-230`
+vs. `core/library2/artwork.py:222-267` (`_normalize_jpeg_variants`).
+
+Nutzerbeobachtung: Lidarr/Sonarr scrollen tausende Einträge praktisch
+instant. Geprüft, ob das an fehlender DOM-Virtualisierung liegt: **Nein** —
+weder Legacy noch V2 virtualisieren, aber beide begrenzen die DOM-Größe
+bereits serverseitig auf eine Page (75–100 Einträge, Prev/Next-Pagination,
+kein Infinite-Scroll). Das Rendering selbst ist in beiden identisch schnell.
+
+Der reale Unterschied zu Lidarr/Sonarr ist architektonisch: Diese Apps laden
+die komplette (kleine) Metadatenliste einmal und virtualisieren rein
+client-seitig — kein Server-Roundtrip pro Scroll/Seitenwechsel. SoulSync
+(Legacy wie V2) macht bei jedem Seitenwechsel einen vollen Request; V2s
+Roundtrip ist zusätzlich durch Finding 1+3 schwerer als Legacys.
+
+Zusätzlich, unabhängig vom Mediaserver-Vergleich aus Finding 2: Selbst im
+„eigenständigen“ Legacy-Pfad ohne Plex/Jellyfin/Navidrome
+(`core/image_cache.py:169-230`, `/api/image-cache/<hash>`) werden
+Originalbytes 1:1 auf Platte gestreamt — **keine** Bildverarbeitung. V2s
+`_normalize_jpeg_variants` (`core/library2/artwork.py:222-267`) dekodiert
+dagegen bei jedem kalten Cache-Miss das Bild vollständig mit Pillow,
+EXIF-transponiert es, konvertiert nach RGB und kodiert zwei
+JPEG-Varianten (voll + Thumbnail) mit `optimize=True` neu — das ist
+zusätzlich zur Netzwerk-Latenz aus Finding 2 spürbare CPU-Zeit pro Bild, die
+Legacys eigener Cache gar nicht aufwendet.
+
+**Korrekturvertrag:** Keine Virtualisierung nötig (DOM-Größe ist bereits
+begrenzt). Statt: (a) prüfen, ob `optimize=True` und die doppelte
+Encode-Pass wirklich nötig sind oder ob ein günstigerer Pfad (z. B. nur
+Thumbnail sofort, volle Variante lazy) reicht; (b) den Seitenwechsel selbst
+beschleunigen (Finding 1+3), damit der unvermeidbare Server-Roundtrip so
+leicht wie möglich bleibt.
+
+**Priorität (Aufwand/Nutzen):** Finding 1 (sofort, keine Verhaltensänderung)
+→ Finding 2 (größter Effekt, Designziel-bedingt) → Finding 5b (Pillow-Overhead
+im kalten Pfad) → Finding 3 → Finding 4.
+
+---
+
+## 10. Search-Ergebnis „In Your Library" verlinkt auf die alte Library statt auf Library V2 (25. Juli 2026)
+
+Nutzerbeobachtung: Sucht man auf der Search-Seite einen Artist, der bereits
+in der Library ist ("In Your Library"-Badge), führt ein Klick auf das
+Ergebnis zur **alten** Library-Detailseite statt zu Library V2.
+
+### <a name="find25-search-01"></a> Finding 1 — Frontend-Logik ist korrekt; der fehlende Link kommt vom Backend-Merge
+
+**Ort:** `webui/static/search.js:460-476` (`renderDropdownResults`, DB-Artists-
+Sektion) und identisch `webui/static/downloads.js:6626` (globales
+Such-Widget).
+
+Der Klick-Handler ist bereits richtig geschrieben:
+
+```js
+href: artist.library_v2_id
+    ? `/library-v2?artist=${encodeURIComponent(artist.library_v2_id)}`
+    : buildArtistDetailPath(artist.id),
+```
+
+Das Problem liegt nicht im Frontend, sondern darin, dass `artist.library_v2_id`
+oft gar nicht gesetzt ankommt — dann greift der Fallback
+`buildArtistDetailPath(artist.id)` (`webui/static/init.js:2988-3001`), der auf
+die alte `/artist-detail/library/<legacy_artist_id>`-Route
+(`webui/static/library.js:812`) verweist.
+
+### <a name="find25-search-02"></a> Finding 2 — Root Cause: Legacy↔lib2-Verknüpfung schlägt beim Merge fehl
+
+**Ort:** `core/search/orchestrator.py` `_build_db_artists()` (Zeilen 121-235).
+
+`db_artists` wird aus der **Legacy**-`artists`-Tabelle gebaut
+(`deps.database.search_artists(...)`, Zeile 123) und versucht anschließend,
+`library_v2_id` nachträglich zu mergen — entweder über
+`lib2_artists.legacy_artist_id` (Zeile 196-197) oder über eine gemeinsame
+Provider-ID (Spotify/iTunes/Deezer/MusicBrainz/Amazon/Tidal/Qobuz, Zeilen
+148-172, 212-217). Gelingt keins von beidem, bleibt der Eintrag ohne
+`library_v2_id`, und der Merge kann sogar einen zweiten, separaten
+V2-native-Pseudo-Eintrag für denselben Artist anhängen (Zeilen 224-229).
+
+Ursache, warum der Merge scheitert: `core/library2/autolink.py
+_find_or_create_artist()` (Zeilen 118-183) legt bei jedem normalen
+Download-Abschluss ohne bereits vorhandenen lib2-Artist eine neue
+`lib2_artists`-Zeile an — der `INSERT` (Zeile 181-183) setzt bewusst **kein**
+`legacy_artist_id` (bleibt `NULL`), nur eine Provider-ID, falls dieser
+konkrete Download eine mitgebracht hat. Das deckt sich mit dem dokumentierten
+Verhalten in `core/library2/native_enrich.py:1-10`: „Artists born inside
+lib2 … carry `legacy_artist_id = NULL`."
+
+Der einmalige Startup-Bootstrap (`core/library2/bootstrap.py`, angestoßen von
+`web_server.py:31974-31996`) importiert die Legacy-Library nur **einmal**
+und läuft danach nie wieder. Jeder Artist, der **nach** diesem einen Lauf zum
+ersten Mal über einen normalen Download in die Library kommt, bekommt also
+eine lib2-Zeile ohne `legacy_artist_id`. Existiert daneben eine
+Legacy-`artists`-Zeile für denselben Artist (z. B. aus einem
+Mediaserver-Scan) ohne dieselbe Provider-ID, verbindet der Merge in
+`_build_db_artists` beide Zeilen nicht — der Legacy-Eintrag bleibt ohne
+`library_v2_id`, und `search.js` fällt korrekt, aber unerwünscht auf den
+Legacy-Link zurück.
+
+**Kein dedizierter Lookup-Endpoint** „gegebene Legacy-ID → lib2-ID" existiert
+im Backend (kein Treffer für `legacy_artist_id`/`by-legacy` als Route in
+`web_server.py`). Die korrekte V2-URL-Form ist bereits an anderer Stelle
+etabliert: `/library-v2?artist=<lib2_artists.id>`
+(`webui/src/routes/library-v2/-ui/library-v2-page.tsx:4254`) — exakt das,
+was `search.js:473` schon voraussetzt, wenn die ID vorhanden ist.
+
+**Testlücke:** `tests/search/test_search_orchestrator.py:283-324` deckt nur
+den Fall ab, in dem der Provider-ID-Match gelingt. Kein Test prüft den Fall
+„Legacy-Zeile existiert, lib2-Zeile existiert, aber weder
+`legacy_artist_id` noch eine gemeinsame Provider-ID verbinden beide" — genau
+der hier beschriebene Fehlerfall.
+
+**Korrekturvertrag:** Der Fix gehört in den Orchestrator-Merge, nicht ins
+Frontend (das ist bereits korrekt). Kandidat: `lib2_artists.legacy_artist_id`
+nachträglich befüllen, sobald `_build_db_artists` einen Namens-/Fuzzy-Match
+zwischen Legacy- und lib2-Zeile findet und noch keine andere Verknüpfung
+existiert — plus einen Regressionstest für genau den Fall ohne
+`legacy_artist_id` und ohne gemeinsame Provider-ID.
+
+---
+
+## 11. Abnahmeinvarianten für den Bug-Cluster
 
 | Aktion | Ausgang | Erwartung |
 |---|---|---|
