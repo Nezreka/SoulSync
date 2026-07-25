@@ -277,6 +277,22 @@
         return tuned;
     }
 
+    // np.set {t, a} → what each user is playing in SoulSync's OWN player
+    // (latest per user; an empty title means they stopped). Opt-in on the
+    // sender's side — this is a public room, so nothing is broadcast unless
+    // the user turned it on.
+    function reduceNowPlaying(events) {
+        var np = {};
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            if (ev.p.k !== 'np.set') return;
+            var t = String(ev.p.t || '').slice(0, 120);
+            if (!t) { delete np[ev.username]; return; }
+            np[ev.username] = { t: t, a: String(ev.p.a || '').slice(0, 80) };
+        });
+        return np;
+    }
+
     // The next track every client agrees on: most votes (lexicographic tie),
     // FIFO head when nobody voted. Null when the queue is empty.
     function nextTrack(state) {
@@ -294,6 +310,7 @@
         parseProtocol: parseProtocol,
         tallyVotes: tallyVotes,
         electCoordinator: electCoordinator,
+        reduceNowPlaying: reduceNowPlaying,
         reduceJukebox: reduceJukebox,
         nextTrack: nextTrack,
         reducePins: reducePins,

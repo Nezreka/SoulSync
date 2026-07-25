@@ -676,11 +676,12 @@
         return cls;
     }
 
-    function _userBtn(n, extraClass, tunedMap) {
+    function _userBtn(n, extraClass, tunedMap, npMap) {
         // Discord-style member row: circular avatar + presence dot, name, and an
         // activity subline (the jukebox listen state doubles as "playing a game").
         var ign = isIgnored(n);
         var tuned = tunedMap && tunedMap[n];
+        var np = npMap && npMap[n];
         var initials = String(n || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
             '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
@@ -690,7 +691,14 @@
             '</span>' +
             '<span class="chat-user-main">' +
                 '<span class="chat-user-name">' + esc(n) + '</span>' +
-                (tuned ? '<span class="chat-user-act">♫ Listening to the jukebox</span>' : '') +
+                // the shared jukebox wins the line — it's what the room is doing
+                // together; a personal now-playing shows otherwise
+                (tuned
+                    ? '<span class="chat-user-act">♫ Listening to the jukebox</span>'
+                    : (np && np.t
+                        ? '<span class="chat-user-act" title="' + attr(np.t + (np.a ? ' — ' + np.a : '')) +
+                            '">♪ ' + esc(np.t) + (np.a ? ' · ' + esc(np.a) : '') + '</span>'
+                        : '')) +
             '</span>' +
             (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
     }
@@ -729,21 +737,24 @@
             else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
         });
+        var _evs = window.ChatProtocol ? _roomEvents() : [];
         var tunedMap = window.ChatProtocol
-            ? window.ChatProtocol.reduceTuned(_roomEvents()) : {};   // once, not per user
+            ? window.ChatProtocol.reduceTuned(_evs) : {};            // once, not per user
+        var npMap = (window.ChatProtocol && window.ChatProtocol.reduceNowPlaying)
+            ? window.ChatProtocol.reduceNowPlaying(_evs) : {};
         // Discord groups members by role with a "NAME — count" header.
         var html = '';
         if (self.length) {
             html += '<div class="chat-users-label chat-users-label--sub">You</div>' +
-                self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap); }).join('');
+                self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap, npMap); }).join('');
         }
         if (apps.length) {
             html += '<div class="chat-users-label chat-users-label--sub">SoulSync &mdash; ' + apps.length + '</div>' +
-                apps.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
+                apps.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
         }
         if (rest.length) {
             html += '<div class="chat-users-label chat-users-label--sub">Online &mdash; ' + rest.length + '</div>' +
-                rest.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
+                rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
@@ -1653,6 +1664,12 @@
                 try { pOn = localStorage.getItem('chat_ping') === '1'; } catch (err) { /* ignore */ }
                 el.checked = pOn;
             }
+            el = q('[data-chat-set-np]');
+            if (el) {
+                var nOn = false;
+                try { nOn = localStorage.getItem('chat_np') === '1'; } catch (err) { /* ignore */ }
+                el.checked = nOn;
+            }
             overlay.hidden = false;
         });
     }
@@ -1677,6 +1694,14 @@
         var pEl = q('[data-chat-set-ping]');
         if (pEl) {
             try { localStorage.setItem('chat_ping', pEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+        }
+        var nEl = q('[data-chat-set-np]');
+        if (nEl) {
+            try { localStorage.setItem('chat_np', nEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+            // Turning it OFF must retract what the room already sees.
+            if (!nEl.checked && state.canSend && state.view === 'room') {
+                try { sendProtocol('np.set', {}); } catch (err) { /* not in a room */ }
+            }
         }
         postJSON('/api/chat/settings', payload).then(function (res) {
             if (!res.ok) {
@@ -1903,6 +1928,30 @@
     function _msgKey(m) {
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
     }
+
+    // ── now-playing sharing (opt-in) ───────────────────────────────────────
+    // The media player calls this whenever the local track changes; we relay it
+    // to the room as np.set so the member list can show what everyone's on.
+    // OFF by default and gated behind chat_np — this is a PUBLIC Soulseek room,
+    // and what you listen to is nobody's business unless you say so.
+    var _npLast = '';
+    var _npLastAt = 0;
+
+    function _npEnabled() {
+        try { return localStorage.getItem('chat_np') === '1'; } catch (e) { return false; }
+    }
+
+    window.__ssNowPlaying = function (track) {
+        if (!_npEnabled() || !state.canSend || state.view !== 'room') return;
+        var t = String((track && (track.title || track.name)) || '').slice(0, 120);
+        var a = String((track && track.artist) || '').slice(0, 80);
+        var sig = t + ' | ' + a;
+        if (sig === _npLast) return;                       // same track, no chatter
+        if (t && Date.now() - _npLastAt < 5000) return;    // rapid skipping: don't spam
+        _npLast = sig;
+        _npLastAt = Date.now();
+        sendProtocol('np.set', t ? { t: t, a: a } : {});    // empty payload = stopped
+    };
 
     // ── mention/reply ping (opt-in) ────────────────────────────────────────
     // Fires only for someone ELSE @-mentioning us or replying to one of our
