@@ -266,7 +266,7 @@ class CommaArtistSplitterJob(RepairJob):
                         finding_type='comma_artist_split',
                         severity='warning',
                         entity_type='track',
-                        entity_id=None,
+                        entity_id=combined_name,  # Stable ID for dedup
                         file_path=None,
                         title=f'Combined artist: {combined_name}',
                         description=(
