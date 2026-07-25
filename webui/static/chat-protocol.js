@@ -147,6 +147,8 @@
                 var entry = { id: id, ti: String(p.ti || '').slice(0, 120),
                               d: _saneDuration(p.d), by: ev.username };
                 if (p.a) entry.auto = true;        // queued by the auto-DJ
+                // why the auto-DJ chose it ("similar to X") — display credit only
+                if (p.w) entry.why = String(p.w).slice(0, 60);
                 queue.push(entry);
                 inQueue[id] = entry;
             } else if (p.k === 'jbx.vote') {

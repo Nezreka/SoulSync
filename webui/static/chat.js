@@ -3380,7 +3380,7 @@
                             '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
                             '<span class="chat-jbx-meta">' +
                                 (e.id === nextId ? '<b class="chat-jbx-next">up next</b> · ' : '') +
-                                (e.auto ? '📻 auto · ' : '') +
+                                (e.auto ? '📻 ' + (e.why ? esc(e.why) : 'auto') + ' · ' : '') +
                                 (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
                         '</div>' +
                         '<button class="chat-jbx-vote" type="button" data-chat-jbx-vote="' + attr(e.id) + '"' +
@@ -3490,22 +3490,50 @@
         if (!seed || !seed.ti) return;
         state.jukebox.lastAutoAt = Date.now();
         // strip (Official Video)-style noise so the search finds neighbors
-        var qtext = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
-            .replace(/\s+/g, ' ').trim().slice(0, 150);
-        if (!qtext) return;
+        // Video ids we must not repeat, plus the artist/title STRINGS the room
+        // just heard — the server uses those to steer away from what's been on.
         var avoid = {};
-        if (st.now) avoid[st.now.id] = 1;
-        (st.history || []).forEach(function (h) { avoid[h.id] = 1; });
-        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
-            if (!res.ok) return;                   // paste-only servers: radio just idles
-            var pick = (res.body.results || []).filter(function (r) {
-                return r && r.id && !avoid[r.id];
-            })[0];
-            if (!pick) return;
-            var p = { id: pick.id, ti: pick.title, a: 1 };
-            if (pick.duration) p.d = pick.duration;
-            sendProtocol('jbx.sub', p);
+        var avoidText = [];
+        if (st.now) { avoid[st.now.id] = 1; avoidText.push(st.now.ti || ''); }
+        (st.history || []).forEach(function (h) {
+            avoid[h.id] = 1;
+            if (h.ti) avoidText.push(h.ti);
         });
+        // Send the raw titles too — the server splits "Artist - Track" itself.
+        avoidText = avoidText.concat(avoidText.map(function (t) {
+            var i = String(t).indexOf(' - ');
+            return i > 0 ? String(t).slice(0, i) : '';
+        })).filter(Boolean).slice(0, 80);
+
+        var fallbackQ = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
+            .replace(/\s+/g, ' ').trim().slice(0, 150);
+
+        function _queueFrom(qtext, why) {
+            if (!qtext) return;
+            postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+                if (!res.ok) return;               // paste-only servers: radio idles
+                var pick = (res.body.results || []).filter(function (r) {
+                    return r && r.id && !avoid[r.id];
+                })[0];
+                if (!pick) return;
+                var p = { id: pick.id, ti: pick.title, a: 1 };
+                if (pick.duration) p.d = pick.duration;
+                if (why) p.w = String(why).slice(0, 60);   // "similar to X" credit
+                sendProtocol('jbx.sub', p);
+            });
+        }
+
+        // Ask the radio brain for a genuinely DIFFERENT next track (Last.fm
+        // similar-tracks → similar-artists → the local graph). Only if it has
+        // nothing do we fall back to the old behaviour of re-searching this
+        // track's title, which tends to surface the same song again.
+        postJSON('/api/chat/jukebox/radio', { title: seed.ti, avoid: avoidText })
+            .then(function (res) {
+                var q = res.ok && res.body && res.body.query;
+                if (q) _queueFrom(q, res.body.why);
+                else _queueFrom(fallbackQ, '');
+            })
+            .catch(function () { _queueFrom(fallbackQ, ''); });
     }
 
     function _jbxAdvance(st) {

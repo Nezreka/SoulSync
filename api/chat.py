@@ -1040,6 +1040,114 @@ def create_blueprint() -> Blueprint:
             })
         return jsonify({"results": results})
 
+    # ── Auto-DJ radio brain ────────────────────────────────────────────────
+    # The old radio searched YouTube for the PLAYING TRACK'S OWN TITLE, so the
+    # top surviving hit was usually the same song again (another upload, a live
+    # cut, a cover). This picks a genuinely different NEXT track using the
+    # similarity data SoulSync already owns, best source first:
+    #   1. Last.fm similar TRACKS  — a real track-level radio graph
+    #   2. Last.fm similar ARTISTS — neighbour artist, let YouTube pick the song
+    #   3. the local similar_artists graph (built by watchlist scans)
+    # `avoid` (artist/track strings the room heard recently) is honoured at
+    # every tier, so radio keeps moving instead of circling. Returns a search
+    # QUERY; the client resolves it through /jukebox/resolve like any add.
+    _RADIO_NOISE = _re.compile(
+        r"\((?:[^)]*\b(?:official|lyric|lyrics|audio|video|visualizer|hd|4k|mv|remaster[^)]*)\b[^)]*)\)"
+        r"|\[[^\]]*\]", _re.I)
+
+    def _radio_split(raw):
+        """('artist', 'track') from a YouTube-style title. Artist may be ''."""
+        t = _RADIO_NOISE.sub(" ", str(raw or ""))
+        t = _re.sub(r"\s+", " ", t).strip()
+        for sep in (" - ", " – ", " — ", " | ", " ~ "):
+            if sep in t:
+                left, right = t.split(sep, 1)
+                return left.strip()[:80], right.strip()[:80]
+        return "", t[:80]
+
+    @bp.route("/api/chat/jukebox/radio", methods=["POST"])
+    def chat_jukebox_radio():
+        if not _can_send():
+            return jsonify({"error": "Chat sending is admin-only on this server"}), 403
+        body = request.get_json(silent=True) or {}
+        artist, track = _radio_split(body.get("title"))
+        avoid = set()
+        for x in (body.get("avoid") or [])[:80]:
+            s = str(x or "").strip().lower()
+            if s:
+                avoid.add(s)
+        if not artist and not track:
+            return jsonify({"query": None, "why": "no seed"})
+
+        def _fresh(a, t=""):
+            """Skip anything the room just heard (either field matching)."""
+            al, tl = str(a or "").strip().lower(), str(t or "").strip().lower()
+            if al and al in avoid:
+                return False
+            if tl and tl in avoid:
+                return False
+            return bool(al or tl)
+
+        lastfm = None
+        try:
+            from core.lastfm_client import LastFMClient
+            from config.settings import config_manager as _cfg
+            _key = _cfg.get("lastfm.api_key", "")
+            if _key:
+                lastfm = LastFMClient(api_key=_key)
+        except Exception:   # noqa: BLE001 - radio degrades, never breaks the room
+            logger.debug("chat radio: lastfm unavailable", exc_info=True)
+
+        # 1) similar TRACKS — the closest thing to a real station
+        if lastfm and artist and track:
+            try:
+                for cand in (lastfm.get_similar_tracks(artist, track, limit=30) or []):
+                    ca = str((cand.get("artist") or {}).get("name")
+                             if isinstance(cand.get("artist"), dict) else cand.get("artist") or "")
+                    ct = str(cand.get("name") or cand.get("title") or "")
+                    if _fresh(ca, ct):
+                        return jsonify({"query": ("%s %s" % (ca, ct)).strip(),
+                                        "why": "similar to %s" % (track or artist)})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: similar-tracks failed", exc_info=True)
+
+        # 2) similar ARTISTS — hand YouTube a neighbour and let it choose
+        if lastfm and artist:
+            try:
+                for cand in (lastfm.get_similar_artists(artist, limit=30) or []):
+                    ca = str(cand.get("name") or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "similar to %s" % artist})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: similar-artists failed", exc_info=True)
+
+        # 3) the local similar-artist graph the watchlist scan already built.
+        # It's keyed by the user's OWN artist ids, so join through artists to
+        # match on the playing artist's name (only hits when they own them).
+        if artist:
+            conn = None
+            try:
+                conn = _db()._get_connection()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT sa.similar_artist_name FROM similar_artists sa "
+                    "JOIN artists a ON a.id = sa.source_artist_id "
+                    "WHERE LOWER(a.name) = LOWER(?) "
+                    "ORDER BY sa.similarity_rank LIMIT 30",
+                    (artist,),
+                )
+                for row in cur.fetchall():
+                    ca = str(row[0] or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "similar to %s" % artist})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: local graph unavailable", exc_info=True)
+            finally:
+                if conn:
+                    conn.close()
+
+        return jsonify({"query": None, "why": "no similar data"})
+
     @bp.route("/api/chat/room/history", methods=["GET"])
     def chat_room_history():
         """Scrollback: a page of archived messages strictly OLDER than
