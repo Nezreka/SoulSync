@@ -187,6 +187,15 @@ def _unwrap_room_messages(messages):
             _c = dec.get("c")
             if isinstance(_c, str) and _c.strip():
                 m["chan"] = _c.strip()[:24]
+            # Thread membership: `th` is the parent message key (user|timestamp),
+            # `tn` the display name carried so the sidebar still has a title when
+            # the parent has scrolled out of the loaded archive.
+            _th = dec.get("th")
+            if isinstance(_th, str) and _th.strip():
+                m["th"] = _th.strip()[:160]
+                _tn = dec.get("tn")
+                if isinstance(_tn, str) and _tn.strip():
+                    m["tn"] = _tn.strip()[:80]
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
@@ -1094,6 +1103,14 @@ def create_blueprint() -> Blueprint:
         if chan and chan != "general" and _re.fullmatch(r"[a-z0-9][a-z0-9-]*", chan):
             extra = dict(extra or {})
             extra["c"] = chan
+        # Thread membership (parent message key + carried display name).
+        thread = str(body.get("thread") or "").strip()[:160]
+        if thread:
+            extra = dict(extra or {})
+            extra["th"] = thread
+            tname = str(body.get("thread_name") or "").strip()[:80]
+            if tname:
+                extra["tn"] = tname
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

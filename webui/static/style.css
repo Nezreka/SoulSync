@@ -71972,6 +71972,29 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     color: rgba(255,255,255,0.4); text-align: left;
 }
 .chat-cat:hover { color: rgba(255,255,255,0.75); }
+
+/* forum-style threads nested under their channel */
+.chat-thread {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 4px 8px 4px 22px; border-radius: 6px; border: none; background: none;
+    color: rgba(255,255,255,0.4); font-size: 13px; cursor: pointer;
+    text-align: left; margin-bottom: 1px; position: relative;
+}
+.chat-thread:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); }
+.chat-thread--on { background: rgba(255,255,255,0.09); color: #fff; }
+.chat-thread-branch {
+    position: absolute; left: 12px; top: 0; bottom: 50%; width: 8px;
+    border-left: 2px solid rgba(255,255,255,0.14);
+    border-bottom: 2px solid rgba(255,255,255,0.14);
+    border-bottom-left-radius: 6px;
+}
+.chat-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-thread-back {
+    border: none; background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7);
+    width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+    font-size: 15px; margin-right: 8px; flex: 0 0 auto;
+}
+.chat-thread-back:hover { background: rgba(255,255,255,0.14); color: #fff; }
 .chat-cat-caret { transition: transform .15s ease; display: inline-block; }
 .chat-cat--closed .chat-cat-caret { transform: rotate(-90deg); }
 

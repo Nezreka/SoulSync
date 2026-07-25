@@ -39,6 +39,7 @@
         chanSeen: {},            // channel slug → newest ts read there (unread badges)
         chanCatClosed: {},       // sidebar category → collapsed
         pingArmed: false,        // suppress mention pings while the archive loads
+        thread: null,            // {id, name} while viewing a thread (null = channel)
         replyTo: null,           // {u, x} while composing a reply
         pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
         jukebox: {               // shared room listening (reduced from protocolLog)
@@ -374,6 +375,11 @@
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
                 'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
         }
+        if (state.view === 'room' && state.canSend && !state.thread) {
+            acts += '<button type="button" class="chat-line-reply" title="Start a thread on this message" ' +
+                'data-chat-thread-start="' + attr(_msgKey(m)) + '" ' +
+                'data-chat-thread-title="' + attr(String(m.message || '').slice(0, 60)) + '">🧵</button>';
+        }
         if (state.view === 'room' && state.canSend) {
             acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
                 'data-chat-pin-user="' + attr(m.username || '') + '" ' +
@@ -573,6 +579,16 @@
             // messages fold into the default channel (never hidden everywhere),
             // so vanilla-Soulseek and old-client traffic still reads in #general.
             shown = shown.filter(function (m) { return _msgChannel(m) === state.channel; });
+            // Inside a thread: only its parent + its replies. Outside: thread
+            // replies fold away so the channel stays readable (Discord-style).
+            if (state.thread) {
+                var tid = state.thread.id;
+                shown = shown.filter(function (m) {
+                    return _msgThread(m) === tid || _msgKey(m) === tid;
+                });
+            } else {
+                shown = shown.filter(function (m) { return !_msgThread(m); });
+            }
         }
         // NEW divider: split at the frozen last-seen marker (set on room open).
         // Groups deliberately break at the divider, like Discord's red line.
@@ -866,13 +882,26 @@
             var rows = isClosed ? '' : group.items.map(function (ch) {
                 var on = state.channel === ch.slug;
                 var n = unread[ch.slug] || 0;
-                return '<button class="chat-chan' + (on ? ' chat-chan--on' : '') +
+                var row = '<button class="chat-chan' + (on ? ' chat-chan--on' : '') +
                     (n ? ' chat-chan--unread' : '') + '" type="button" ' +
                     'data-chat-chan="' + attr(ch.slug) + '">' +
                     '<span class="chat-chan-hash">#</span>' +
                     '<span class="chat-chan-name">' + esc(ch.name) + '</span>' +
                     (n ? '<span class="chat-chan-unread">' + (n > 99 ? '99+' : n) + '</span>' : '') +
                 '</button>';
+                // Forum-style: the active channel's threads hang beneath it.
+                if (on) {
+                    row += _threadsForChannel().map(function (t) {
+                        var tOn = state.thread && state.thread.id === t.id;
+                        return '<button class="chat-thread' + (tOn ? ' chat-thread--on' : '') +
+                            '" type="button" data-chat-thread="' + attr(t.id) + '" ' +
+                            'data-chat-thread-name="' + attr(t.name) + '" title="' + attr(t.name) + '">' +
+                            '<span class="chat-thread-branch"></span>' +
+                            '<span class="chat-thread-name">' + esc(t.name) + '</span>' +
+                        '</button>';
+                    }).join('');
+                }
+                return row;
             }).join('');
             return '<button class="chat-cat' + (isClosed ? ' chat-cat--closed' : '') + '" type="button" ' +
                     'data-chat-cat="' + attr(group.cat) + '">' +
@@ -881,7 +910,67 @@
         }).join('');
     }
 
+    // ── threads ─────────────────────────────────────────────────────────────
+    // A thread is messages tagged with a parent message key (`th`), folded out
+    // of the channel stream. Same discipline as channels: purely a view over
+    // the one room, and a thread's replies never vanish — they're still in the
+    // room for vanilla clients, just grouped here.
+    function _msgThread(m) {
+        return (m && typeof m.th === 'string' && m.th) ? m.th : null;
+    }
+
+    // Threads that belong to the ACTIVE channel, newest activity first.
+    function _threadsForChannel() {
+        var byId = {};
+        (state.msgs || []).forEach(function (m) {
+            var th = _msgThread(m);
+            if (!th) return;
+            if (_msgChannel(m) !== state.channel) return;
+            var t = byId[th] || (byId[th] = { id: th, name: '', count: 0, last: '' });
+            t.count++;
+            var ts = String(m.timestamp || '');
+            if (ts > t.last) t.last = ts;
+            if (!t.name && typeof m.tn === 'string' && m.tn) t.name = m.tn;
+        });
+        // Fall back to the parent message's text when no carried name survived.
+        var out = [];
+        for (var id in byId) {
+            if (!Object.prototype.hasOwnProperty.call(byId, id)) continue;
+            var t = byId[id];
+            if (!t.name) {
+                var parent = (state.msgs || []).filter(function (m) { return _msgKey(m) === id; })[0];
+                t.name = parent ? String(parent.message || '').slice(0, 60) : 'Thread';
+            }
+            out.push(t);
+        }
+        out.sort(function (a, b) { return b.last.localeCompare(a.last); });
+        return out;
+    }
+
+    function openThread(id, name) {
+        if (!id) return;
+        state.thread = { id: id, name: name || 'Thread' };
+        state.lastStamp = null;
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function closeThread() {
+        if (!state.thread) return;
+        state.thread = null;
+        state.lastStamp = null;
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
     function switchChannel(slug) {
+        state.thread = null;      // leaving the channel leaves its thread
         if (!slug || !_chanKnown(slug) || slug === state.channel) return;
         state.channel = slug;
         try { localStorage.setItem('chat_channel', slug); } catch (e) { /* private mode */ }
@@ -935,7 +1024,11 @@
         // view — snap back to the default before anything renders against it.
         if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
         head.innerHTML = state.view === 'room'
-            ? '<span class="chat-head-title">#' + esc(state.channel) + '</span>' +
+            ? (state.thread
+                ? '<button class="chat-thread-back" type="button" data-chat-thread-close ' +
+                      'title="Back to #' + attr(state.channel) + '">&larr;</button>' +
+                  '<span class="chat-head-title">🧵 ' + esc(state.thread.name || 'Thread') + '</span>'
+                : '<span class="chat-head-title">#' + esc(state.channel) + '</span>') +
               '<span class="chat-head-sub' + (topic ? ' chat-head-sub--topic' : '') + '"' +
                   (topic ? ' title="topic set by ' + attr(topic.by) + '"' : '') + '>' + subText +
                   (state.canSend
@@ -2211,6 +2304,10 @@
         if (state.view === 'room') {
             payload.room = state.room || '';
             payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;   // virtual channel tag
+            if (state.thread) {
+                payload.thread = state.thread.id;
+                payload.thread_name = state.thread.name || '';
+            }
         }
         var sentReply = null;
         if (state.view === 'room' && state.replyTo) {
@@ -2343,6 +2440,20 @@
             t = e.target.closest('[data-chat-settings-btn]');
             if (t) { openSettings(); return; }
             // ── Discord shell: channel switch, category collapse, DM puck ──
+            t = e.target.closest('[data-chat-thread]');
+            if (t) {
+                openThread(t.getAttribute('data-chat-thread'),
+                           t.getAttribute('data-chat-thread-name'));
+                return;
+            }
+            t = e.target.closest('[data-chat-thread-start]');
+            if (t) {
+                openThread(t.getAttribute('data-chat-thread-start'),
+                           t.getAttribute('data-chat-thread-title') || 'Thread');
+                return;
+            }
+            t = e.target.closest('[data-chat-thread-close]');
+            if (t) { closeThread(); return; }
             t = e.target.closest('[data-chat-chan]');
             if (t) { switchChannel(t.getAttribute('data-chat-chan')); return; }
             t = e.target.closest('[data-chat-cat]');
