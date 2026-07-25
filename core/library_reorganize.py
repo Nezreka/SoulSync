@@ -996,6 +996,28 @@ def plan_album_reorganize(
                 'reason': None,
             })
 
+    # #1080 (QT3496): a SINGLE-disc user album re-matched against a MULTI-disc
+    # source edition (deluxe / 2-disc) picks up disc-2 track numbers and stamps
+    # a bogus disc prefix ("11" -> "0211"). Read the user's REAL layout from
+    # their own track numbers and, when it's unambiguously single-disc, organize
+    # by that instead of the source's disc structure. Conservative on purpose —
+    # only caps when BOTH hold, so genuine multi-disc is never flattened:
+    #   * the user's track numbers don't repeat  → single disc (a box set
+    #     numbers per-disc, so 1..13 / 1..14 REPEAT → left multi-disc, #1009);
+    #   * every user track fits within the source's disc 1  → a continuously-
+    #     numbered 2-disc set (1..25) spills past disc 1 → left multi-disc.
+    # Gated on the same preserve-my-organization setting as casing/year.
+    if total_discs > 1 and _preserve_casing_enabled():
+        user_nums = [int(t.get('track_number') or 0) for t in tracks if t.get('track_number')]
+        api_disc1 = sum(1 for t in api_tracks if int(t.get('disc_number') or 1) == 1)
+        if (user_nums and len(user_nums) == len(set(user_nums))
+                and api_disc1 and max(user_nums) <= api_disc1):
+            total_discs = 1
+            for item in items:
+                if item.get('matched') and item.get('api_track'):
+                    # shallow copy — override only the disc, keep name/track/artists
+                    item['api_track'] = {**item['api_track'], 'disc_number': 1}
+
     return {
         'status': 'planned',
         'source': source,
