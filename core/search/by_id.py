@@ -13,7 +13,10 @@ Design notes
   too since it's equally explicit. Bare IDs are intentionally rejected: a
   bare number like ``525046`` carries no source and no entity type, so it
   would resolve to whatever album/track happens to own that id on some
-  source — often an unrelated entity. Paste the link instead.
+  source — often an unrelated entity. Paste the link instead. ONE exception:
+  a bare MusicBrainz UUID (Jordan H, Lidarr parity) — the UUID format itself
+  pins the source, so only the entity kind is open and the resolver walks
+  release → recording → artist.
 
 - **Reuses existing per-source get-by-id.** Spotify/iTunes/MusicBrainz all
   expose ``get_album``; Deezer exposes ``get_album_metadata``; all four
@@ -51,6 +54,12 @@ _KNOWN_HOSTS = (
     'open.spotify.com', 'music.apple.com', 'itunes.apple.com',
     'musicbrainz.org', 'deezer.com', 'discogs.com',
 )
+
+
+# A bare MusicBrainz id: UUIDs are format-unique among our sources, so a raw
+# MBID is the one bare ID that carries its own source (see parse notes).
+_MBID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
 
 
 class LookupTarget(NamedTuple):
@@ -170,6 +179,14 @@ def parse_metadata_identifier(raw: str) -> list[LookupTarget]:
     if looks_like_url:
         url = raw if '://' in raw else f'https://{raw}'
         return _parse_url(url)
+
+    # THE exception to links-only: a bare MusicBrainz UUID (Jordan H, Lidarr
+    # parity). Unlike a bare number, a UUID pins its source by FORMAT — no
+    # other supported provider uses UUIDs — so "29a40a80-8cbb-…" is
+    # unambiguously MusicBrainz. Only the entity kind is open, and the
+    # resolver's kind-None fallback tries release → recording → artist.
+    if _MBID_RE.match(raw):
+        return [LookupTarget('musicbrainz', None, lowered)]
 
     # Bare ID (or anything we don't recognize as a link) — rejected.
     return []
@@ -369,7 +386,9 @@ def resolve_identifier(
         if client is None:
             continue
 
-        kinds = (target.kind,) if target.kind else ('album', 'track')
+        # Kind-less targets (bare MBIDs) walk release → recording → artist;
+        # links always arrive kind-pinned.
+        kinds = (target.kind,) if target.kind else ('album', 'track', 'artist')
         for kind in kinds:
             try:
                 if kind == 'album':

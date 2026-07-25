@@ -1891,7 +1891,20 @@ let _repairFindingsPage = 0;
 let _repairSelectedFindings = new Set();
 let _repairFindingsTotal = 0;
 let _repairFindingsAutoSwitched = false;  // Set after auto-switching to "All Status" so we don't loop
-const REPAIR_FINDINGS_PAGE_SIZE = 30;
+// Findings per page — user-adjustable (pertti: 30 was the only option besides
+// Fix All). Persisted per browser.
+let REPAIR_FINDINGS_PAGE_SIZE = (() => {
+    const saved = parseInt(localStorage.getItem('repairFindingsPageSize') || '30', 10);
+    return [30, 60, 100].includes(saved) ? saved : 30;
+})();
+
+function setRepairFindingsPageSize(value) {
+    const size = parseInt(value, 10);
+    REPAIR_FINDINGS_PAGE_SIZE = [30, 60, 100].includes(size) ? size : 30;
+    try { localStorage.setItem('repairFindingsPageSize', String(REPAIR_FINDINGS_PAGE_SIZE)); } catch (e) {}
+    _repairFindingsPage = 0;
+    loadRepairFindings();
+}
 let _repairJobsCache = {}; // Cache job data for help modal
 
 /**
@@ -2437,6 +2450,11 @@ function updateRepairJobProgressFromData(data) {
 async function loadRepairFindingsDashboard() {
     const dashboard = document.getElementById('repair-findings-dashboard');
     if (!dashboard) return;
+
+    _checkBulkFixResume();   // reload mid-Fix-All picks the progress back up
+
+    const pageSizeSelect = document.getElementById('repair-page-size-select');
+    if (pageSizeSelect) pageSizeSelect.value = String(REPAIR_FINDINGS_PAGE_SIZE);
 
     try {
         const response = await fetch('/api/repair/findings/counts');
@@ -3056,7 +3074,8 @@ async function loadRepairFindings() {
             empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
             quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip',
-            genre_cleanup: 'Genres'
+            genre_cleanup: 'Genres',
+            comma_artist_split: 'Comma Artist'
         };
 
         // Finding types that have an automated fix action
@@ -3080,6 +3099,7 @@ async function loadRepairFindings() {
             library_retag: 'Apply Tags',
             short_preview_track: 'Re-download',
             genre_cleanup: 'Clean Genres',
+            comma_artist_split: 'Split Artists',
         };
 
         container.innerHTML = items.map(f => {
@@ -3088,6 +3108,7 @@ async function loadRepairFindings() {
             const actionLabels = {
                 removed_db_entry: 'Entry Removed', added_to_wishlist: 'Wishlisted', deleted_file: 'File Deleted',
                 genres_cleaned: 'Genres Cleaned',
+                artists_split: 'Artists Split',
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
                 applied_lyrics: 'Lyrics Applied',
@@ -3220,8 +3241,10 @@ function _renderFindingMedia(d) {
         // Clickable → the artist's page. New findings store the library
         // artist_id (exact, ambiguity-proof); older findings predate it and
         // resolve by exact name at click time instead.
+        // Ids are opaque server keys — numeric on Plex but alphanumeric on
+        // Navidrome/Jellyfin, so never coerce with Number() (→ "NaN").
         const idAttr = (d.artist_id != null && d.artist_id !== '')
-            ? ` data-artist-id="${Number(d.artist_id)}"` : '';
+            ? ` data-artist-id="${_escFinding(String(d.artist_id))}"` : '';
         const clickAttrs = hasName
             ? `${idAttr} data-artist-name="${_escFinding(artistLabel)}" onclick="event.stopPropagation(); openFindingArtist(this)"
                 title="Open ${_escFinding(artistLabel)}'s page" role="link"`
@@ -3246,7 +3269,9 @@ async function openFindingArtist(el) {
     // immune to same-name ambiguity.
     const storedId = el.getAttribute('data-artist-id');
     if (storedId && typeof navigateToArtistDetail === 'function') {
-        navigateToArtistDetail(parseInt(storedId, 10), name);
+        // navigateToArtistDetail treats the id as opaque; only parse when it
+        // really is numeric (Plex) — Navidrome/Jellyfin ids are alphanumeric.
+        navigateToArtistDetail(/^\d+$/.test(storedId) ? parseInt(storedId, 10) : storedId, name);
         return;
     }
     try {
@@ -3282,6 +3307,51 @@ function _renderFindingDetail(f) {
             rows.push(['Removed', removed.join(', ')]);
             if (d.entity) rows.push(['Applies to', d.entity === 'artist' ? 'Artist genres' : 'Album genres']);
             return media + _gridRows(rows);
+        }
+
+        case 'comma_artist_split': {
+            // jadux — the contract: exactly what the artist tag becomes.
+            const parts = Array.isArray(d.split_artists) ? d.split_artists : [];
+            const res = Array.isArray(d.parts_resolution) ? d.parts_resolution : [];
+            rows.push(['Current artist tag', d.combined_name || '']);
+            rows.push(['New artist tag', d.new_display_artist || parts.join('; ')]);
+            if (d.primary_artist) rows.push(['Album artist', `becomes "${d.primary_artist}" (only where it was the combined name)`]);
+            if (Array.isArray(d.checked_sources) && d.checked_sources.length) {
+                rows.push(['Checked against', d.checked_sources.join(', ')]);
+            }
+            if (d.track_count != null) rows.push(['Tracks affected', String(d.track_count)]);
+            let html = media + _gridRows(rows);
+            // "Splits into" chips — parts already in the library are clickable
+            // and jump to that artist's page (same resolver as the artist card).
+            const chipSrc = res.length ? res : parts.map(p => ({ name: p }));
+            html += `<div style="margin:8px 0 2px;font-weight:600">Splits into</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">` +
+                chipSrc.map(p => {
+                    const mark = p.in_library ? ' ✓ in your library' : (p.verified_via ? ` ✓ ${p.verified_via}` : '');
+                    const base = `padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.07);font-size:12px`;
+                    if (p.in_library) {
+                        const idAttr = (p.library_artist_id != null && p.library_artist_id !== '')
+                            ? ` data-artist-id="${_escFinding(String(p.library_artist_id))}"` : '';
+                        return `<span style="${base};cursor:pointer;text-decoration:underline"${idAttr}
+                            data-artist-name="${_escFinding(p.name)}" role="link"
+                            title="Open ${_escFinding(p.name)}'s page"
+                            onclick="event.stopPropagation(); openFindingArtist(this)">${_escFinding(p.name)}${mark}</span>`;
+                    }
+                    return `<span style="${base}">${_escFinding(p.name)}${mark}</span>`;
+                }).join('') + '</div>';
+            const tracks = Array.isArray(d.tracks) ? d.tracks : [];
+            if (tracks.length) {
+                html += `<div style="margin:8px 0 2px;font-weight:600">Tracks</div>`;
+                tracks.slice(0, 40).forEach(t => {
+                    const label = [t.title, t.album].filter(Boolean).join(' — ');
+                    html += `<div class="repair-finding-meta" style="margin:0 0 2px">${_escFinding(label || (t.file_path || '').split(/[\\/]/).pop() || 'Unknown')}</div>`;
+                });
+                if ((d.track_count || 0) > tracks.length) {
+                    html += `<div class="repair-finding-meta" style="margin-top:6px">…and ${(d.track_count || 0) - tracks.length} more track(s)</div>`;
+                }
+            }
+            html += `<div class="repair-finding-meta" style="margin-top:8px">Your media server picks up the split on its next scan.</div>`;
+            return html;
         }
 
         case 'dead_file':
@@ -3720,38 +3790,100 @@ async function fixAllMatchingFindings() {
         })) return;
     }
 
-    showToast(`Fixing ${_repairFindingsTotal} findings...`, 'info');
-
+    // Fix All runs in the BACKGROUND: at library scale (thousands of tag
+    // writes) a synchronous request outlives every browser/proxy timeout, so
+    // the user was told it failed while the server quietly kept fixing. The
+    // start endpoint returns immediately and we poll for progress instead.
     try {
         const body = {};
         if (jobId) body.job_id = jobId;
         if (severity) body.severity = severity;
         if (fixAction) body.fix_action = fixAction;
 
-        const response = await fetch('/api/repair/findings/bulk-fix', {
+        const response = await fetch('/api/repair/findings/bulk-fix-start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
         const result = await response.json();
-        if (result.success) {
-            let msg = `Fixed ${result.fixed}${result.failed ? `, ${result.failed} failed` : ''} of ${result.total}`;
-            if (result.errors && result.errors.length > 0) {
-                msg += `: ${result.errors[0].error}`;
-            }
-            showToast(msg, result.fixed > 0 ? 'success' : 'error');
+        if (result.started) {
+            showToast(`Fixing ${result.total} findings in the background...`, 'info');
+            _watchBulkFixRun();
+        } else if (result.already_running) {
+            showToast('A bulk fix is already running — showing its progress', 'info');
+            _watchBulkFixRun();
         } else {
-            showToast(result.error || 'Bulk fix failed', 'error');
+            showToast(result.error || 'Bulk fix failed to start', 'error');
         }
     } catch (error) {
-        console.error('Error in bulk fix:', error);
-        showToast('Error applying bulk fix', 'error');
+        console.error('Error starting bulk fix:', error);
+        showToast('Error starting bulk fix', 'error');
     }
 
     _repairSelectedFindings.clear();
-    loadRepairFindingsDashboard();
-    loadRepairFindings();
-    updateRepairStatus();
+    _updateFindingsBulkBar();
+}
+
+let _bulkFixPollTimer = null;
+
+function _watchBulkFixRun() {
+    if (_bulkFixPollTimer) return;   // already watching
+
+    const poll = async () => {
+        let st;
+        try {
+            const resp = await fetch('/api/repair/bulk-fix/status');
+            st = await resp.json();
+        } catch (e) {
+            return;   // transient — keep polling
+        }
+
+        const bulkBar = document.getElementById('repair-findings-bulk');
+        const countEl = document.getElementById('repair-bulk-count');
+
+        if (st.running) {
+            // Surface live progress in the bulk bar (kept visible for the run)
+            if (bulkBar) bulkBar.style.display = '';
+            if (countEl) {
+                countEl.innerHTML = `Fixing ${st.done} / ${st.total}&hellip; ` +
+                    `<button class="btn btn--sm btn--secondary" onclick="stopBulkFixRun()">Stop</button>`;
+            }
+            return;
+        }
+
+        // Finished (or nothing ever ran on this server)
+        clearInterval(_bulkFixPollTimer);
+        _bulkFixPollTimer = null;
+        if (countEl) countEl.textContent = '';
+        if (st.total) {
+            let msg = `Fixed ${st.fixed}${st.failed ? `, ${st.failed} failed` : ''} of ${st.total}`;
+            if (st.stopped) msg = `Bulk fix stopped — ${msg.charAt(0).toLowerCase()}${msg.slice(1)}`;
+            if (st.errors && st.errors.length > 0) msg += `: ${st.errors[0].error}`;
+            showToast(msg, st.fixed > 0 ? 'success' : 'error');
+        }
+        _repairSelectedFindings.clear();
+        loadRepairFindingsDashboard();
+        loadRepairFindings();
+        updateRepairStatus();
+    };
+
+    _bulkFixPollTimer = setInterval(poll, 2000);
+    poll();
+}
+
+function stopBulkFixRun() {
+    fetch('/api/repair/bulk-fix/stop', { method: 'POST' }).catch(() => {});
+    showToast('Stopping after the current fix...', 'info');
+}
+
+async function _checkBulkFixResume() {
+    // A reload mid-run should pick the progress display back up.
+    if (_bulkFixPollTimer) return;
+    try {
+        const resp = await fetch('/api/repair/bulk-fix/status');
+        const st = await resp.json();
+        if (st.running) _watchBulkFixRun();
+    } catch (e) { /* not fatal */ }
 }
 
 function renderRepairFindingsPagination(total, currentPage) {

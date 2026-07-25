@@ -29,6 +29,18 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 IGNORE_TTL_DAYS = 30
 
+
+def configured_ttl_days() -> int:
+    """The ignore TTL, honoring the user's ``wishlist.ignore_ttl_days`` config
+    (javiavid: 30 was hardcoded; some users want a weekly re-try window).
+    Clamped to [1, 365]; anything unreadable falls back to the default."""
+    try:
+        from config.settings import config_manager
+        raw = config_manager.get('wishlist.ignore_ttl_days', IGNORE_TTL_DAYS)
+        return max(1, min(int(raw), 365))
+    except Exception:
+        return IGNORE_TTL_DAYS
+
 # Recognised reasons (free-text tolerated; these are the canonical two).
 REASON_REMOVED = "removed"
 REASON_CANCELLED = "cancelled"

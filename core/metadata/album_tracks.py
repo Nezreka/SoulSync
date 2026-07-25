@@ -421,6 +421,41 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
     }
 
 
+_RAW_TYPE_KEYS = ('album_type', 'record_type', 'type', 'primary-type', 'collectionType')
+
+
+def _has_explicit_type_signal(album_data: Any) -> bool:
+    """Did the SOURCE actually say what kind of release this is? SpotipyFree
+    (the no-auth Spotify fallback most installs ride) emits NO type key at
+    all — and the converters' 'album' default then poisoned every
+    discography single/EP into the Albums bucket (#1064). Absence must stay
+    distinguishable from a real 'album'."""
+    if not isinstance(album_data, dict):
+        album_data = getattr(album_data, '__dict__', None) or {}
+    for key in _RAW_TYPE_KEYS:
+        v = album_data.get(key)
+        if v is not None and str(v).strip():
+            return True
+    return False
+
+
+def derive_album_type_from_count(track_count: Any) -> str:
+    """1-3 tracks → single, 4-6 → ep, more → album — the same inference the
+    iTunes converter has always used (iTunes doesn't tag types either).
+    Unknown count → album (never guess without a signal)."""
+    try:
+        tc = int(track_count or 0)
+    except (TypeError, ValueError):
+        tc = 0
+    if tc <= 0:
+        return 'album'
+    if tc <= 3:
+        return 'single'
+    if tc <= 6:
+        return 'ep'
+    return 'album'
+
+
 def _build_album_tracks_payload(
     album_data: Any,
     tracks_data: Any,
@@ -438,6 +473,15 @@ def _build_album_tracks_payload(
     album_info['provider'] = source
     track_items = _extract_album_track_items(album_data, tracks_data)
     tracks = [_build_album_track_entry(track, album_info, source) for track in track_items]
+
+    # #1064: when the source carried no type signal, the builders defaulted the
+    # type to a CONFIDENT 'album' — and by now we know the real track count, so
+    # derive instead. Only fires on signal-less raws; explicit types are kept.
+    if tracks and not _has_explicit_type_signal(album_data):
+        if not album_info.get('total_tracks'):
+            album_info['total_tracks'] = len(tracks)
+        album_info['album_type'] = derive_album_type_from_count(
+            album_info.get('total_tracks') or len(tracks))
 
     return {
         'success': bool(tracks),

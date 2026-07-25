@@ -102,7 +102,7 @@ class TestUnreadAffordances:
 
     def test_composer_is_a_real_textarea(self):
         html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
-        assert '<textarea class="chat-input chat-input--area" data-chat-input' in html
+        assert '<textarea class="chat-input chat-input--area chat-input--bare" data-chat-input' in html   # composer redesign: bare input inside the fused panel
         # Enter sends, Shift+Enter newlines — block syntax needs real newlines
         assert "e.key === 'Enter' && !e.shiftKey" in _CHAT_JS
 

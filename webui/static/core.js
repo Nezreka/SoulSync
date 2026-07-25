@@ -775,17 +775,17 @@ function handleDashboardWishlistCount(data) {
 // ===============================
 
 // --- Service Integration Logo Constants ---
-const MUSICBRAINZ_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
-const DEEZER_LOGO_URL = 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610';
-const SPOTIFY_LOGO_URL = 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png';
-const ITUNES_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png';
-const LASTFM_LOGO_URL = 'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png';
-const GENIUS_LOGO_URL = 'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png';
-const TIDAL_LOGO_URL = 'https://www.svgrepo.com/show/519734/tidal.svg';
-const QOBUZ_LOGO_URL = 'https://www.svgrepo.com/show/504778/qobuz.svg';
-const DISCOGS_LOGO_URL = 'https://www.svgrepo.com/show/305957/discogs.svg';
+const MUSICBRAINZ_LOGO_URL = '/static/img/brands/musicbrainz.png';
+const DEEZER_LOGO_URL = '/static/img/brands/deezer.png';
+const SPOTIFY_LOGO_URL = '/static/img/brands/spotify.png';
+const ITUNES_LOGO_URL = '/static/img/brands/itunes.png';
+const LASTFM_LOGO_URL = '/static/img/brands/lastfm.png';
+const GENIUS_LOGO_URL = '/static/img/brands/genius.png';
+const TIDAL_LOGO_URL = '/static/img/brands/tidal.svg';
+const QOBUZ_LOGO_URL = '/static/img/brands/qobuz.svg';
+const DISCOGS_LOGO_URL = '/static/img/brands/discogs.svg';
 const AMAZON_LOGO_URL = '/static/amazon.svg';
-const BANDCAMP_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg';
+const BANDCAMP_LOGO_URL = '/static/img/brands/bandcamp.svg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---

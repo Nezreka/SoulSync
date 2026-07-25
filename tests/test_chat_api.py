@@ -123,6 +123,19 @@ class _FakeChatClient:
         self.acked.append(username)
         return True
 
+    def leave_room(self, room):
+        self.left = getattr(self, "left", [])
+        self.left.append(room)
+        if room in self.joined:
+            self.joined.remove(room)
+        return True
+
+    def get_available_rooms(self):
+        self.available_calls = getattr(self, "available_calls", 0) + 1
+        return [{"name": "indie", "userCount": 300},
+                {"name": "SoulSync", "userCount": 42},
+                {"name": "secret", "userCount": 9, "isPrivate": True}]
+
 
 @pytest.fixture()
 def chat_app():
@@ -132,7 +145,9 @@ def chat_app():
         client_getter=lambda: state["client"],
         run_async=lambda v: v,
         config_get=lambda key, default=None: state["config"].get(key, default),
+        config_set=lambda key, value: state["config"].__setitem__(key, value),
     )
+    chat_api._AVAILABLE.update(rooms=None, at=0.0)   # module cache: isolate tests
     app = Flask(__name__)
 
     @app.before_request
@@ -458,3 +473,177 @@ def test_join_gate_wired_in_frontend():
     assert "renderJoinGate" in js
     assert "auto_join: true" in js               # the gate's Join button opts back in
     assert "form.hidden = false" in js           # composer restored after rejoin
+
+
+# ── multi-room (chat best-in-class P1) ───────────────────────────────────────
+
+class TestRooms:
+    def test_rooms_rail_home_plus_extras(self, chat_app):
+        http, state = chat_app
+        res = http.get("/api/chat/rooms").get_json()
+        assert res["home"] == "SoulSync"
+        assert res["rooms"] == [{"name": "SoulSync", "home": True}]
+        state["config"]["soulseek.chat_rooms"] = ["indie", "SoulSync", "indie"]
+        res = http.get("/api/chat/rooms").get_json()
+        # home dedup + duplicate dedup
+        assert res["rooms"] == [{"name": "SoulSync", "home": True},
+                                {"name": "indie", "home": False}]
+        assert res["can_manage"] is True
+
+    def test_available_rooms_cached_and_sorted(self, chat_app):
+        http, state = chat_app
+        res = http.get("/api/chat/rooms/available").get_json()
+        names = [r["name"] for r in res["rooms"]]
+        assert names[0] == "indie"                      # sorted by users desc
+        assert "SoulSync" in res["joined"]
+        http.get("/api/chat/rooms/available")
+        assert state["client"].available_calls == 1     # second hit = cache
+
+    def test_join_persists_config_and_joins_slskd(self, chat_app):
+        http, state = chat_app
+        res = http.post("/api/chat/rooms/join", json={"room": "indie"})
+        assert res.status_code == 200
+        assert state["config"]["soulseek.chat_rooms"] == ["indie"]
+        assert "indie" in state["client"].joined
+
+    def test_join_leave_admin_only(self, chat_app):
+        http, state = chat_app
+        state["admin"] = False
+        assert http.post("/api/chat/rooms/join", json={"room": "indie"}).status_code == 403
+        assert http.post("/api/chat/rooms/leave", json={"room": "indie"}).status_code == 403
+
+    def test_leave_removes_config_and_slskd(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_rooms"] = ["indie", "vinyl"]
+        res = http.post("/api/chat/rooms/leave", json={"room": "indie"})
+        assert res.status_code == 200
+        assert state["config"]["soulseek.chat_rooms"] == ["vinyl"]
+        assert state["client"].left == ["indie"]
+
+    def test_leave_home_room_is_redirected_to_autojoin(self, chat_app):
+        http, state = chat_app
+        assert http.post("/api/chat/rooms/leave", json={"room": "SoulSync"}).status_code == 400
+
+    def test_leave_unknown_room_404(self, chat_app):
+        http, state = chat_app
+        assert http.post("/api/chat/rooms/leave", json={"room": "nope"}).status_code == 404
+
+    def test_room_endpoint_serves_joined_extra_room(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_rooms"] = ["indie"]
+        res = http.get("/api/chat/room?room=indie").get_json()
+        assert res["room"] == "indie"
+        assert res["messages"][0]["roomName"] == "indie"
+        assert "indie" in state["client"].joined         # hydrate re-joins on demand
+
+    def test_room_endpoint_refuses_unlisted_room(self, chat_app):
+        http, state = chat_app
+        assert http.get("/api/chat/room?room=randomroom").status_code == 404
+
+    def test_autojoin_off_gates_home_room_only(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_auto_join"] = False
+        state["config"]["soulseek.chat_rooms"] = ["indie"]
+        home = http.get("/api/chat/room").get_json()
+        assert home["joined"] is False                   # home: the leave fix holds
+        extra = http.get("/api/chat/room?room=indie").get_json()
+        assert extra["joined"] is True                   # extras: explicit joins
+
+    def test_send_routes_to_named_room(self, chat_app):
+        http, state = chat_app
+        state["config"]["soulseek.chat_rooms"] = ["indie"]
+        res = http.post("/api/chat/room/message", json={"message": "hi", "room": "indie"})
+        assert res.status_code == 200
+        assert state["client"].sent_room[-1][0] == "indie"
+        assert http.post("/api/chat/room/message",
+                         json={"message": "hi", "room": "nope"}).status_code == 404
+
+
+# ── browse & grab (chat best-in-class P3) ────────────────────────────────────
+
+class _BrowsingClient(_FakeChatClient):
+    def __init__(self):
+        super().__init__()
+        self.downloads = []
+
+    def browse_user_shares(self, username):
+        if username == "ghost":
+            return None
+        return [{"name": "Music\\Meshuggah\\Chaosphere", "file_count": 8}]
+
+    def browse_user_directory(self, username, directory):
+        return [{"filename": directory + "\\01 - Concatenation.flac", "size": 31457280},
+                {"filename": directory + "\\cover.jpg", "size": 900000},
+                {"junk": True}]
+
+    def download(self, username, filename, file_size=0):
+        if "cover" in filename:
+            return None                       # peer refused one file
+        self.downloads.append((username, filename, file_size))
+        return "transfer-id"
+
+
+@pytest.fixture()
+def browse_app(chat_app):
+    http, state = chat_app
+    state["client"] = _BrowsingClient()
+    return http, state
+
+
+class TestBrowseAndGrab:
+    def test_shares_lists_directories(self, browse_app):
+        http, state = browse_app
+        res = http.get("/api/chat/user/pal/shares").get_json()
+        assert res["directories"] == [{"name": "Music\\Meshuggah\\Chaosphere",
+                                       "file_count": 8}]
+
+    def test_offline_peer_is_a_clean_error(self, browse_app):
+        http, state = browse_app
+        r = http.get("/api/chat/user/ghost/shares")
+        assert r.status_code == 502
+        assert "offline" in r.get_json()["error"]
+
+    def test_directory_files_normalized(self, browse_app):
+        http, state = browse_app
+        res = http.get("/api/chat/user/pal/shares/files?dir=Music").get_json()
+        assert len(res["files"]) == 2                       # junk row dropped
+        assert res["files"][0]["size"] == 31457280
+        assert http.get("/api/chat/user/pal/shares/files").status_code == 400
+
+    def test_download_queues_and_reports_failures(self, browse_app):
+        http, state = browse_app
+        res = http.post("/api/chat/user/pal/download", json={"files": [
+            {"filename": "a\\01.flac", "size": 5},
+            {"filename": "a\\cover.jpg", "size": 1},
+        ]})
+        body = res.get_json()
+        assert res.status_code == 200
+        assert body["queued"] == 1 and body["failed"] == 1
+        assert state["client"].downloads == [("pal", "a\\01.flac", 5)]
+
+    def test_download_respects_profile_permission(self):
+        # a fresh app whose profile hook mirrors web_server: non-admin with
+        # can_download=False must be refused; admin always allowed
+        client = _BrowsingClient()
+        perms = {"admin": False, "can_download": False}
+        chat_api.configure(
+            client_getter=lambda: client, run_async=lambda v: v,
+            config_get=lambda k, d=None: d)
+        app = Flask(__name__)
+
+        @app.before_request
+        def _profile():
+            g.is_admin = perms["admin"]
+            g.can_download = perms["can_download"]
+        app.register_blueprint(chat_api.create_blueprint())
+        http = app.test_client()
+        body = {"files": [{"filename": "a\\01.flac", "size": 5}]}
+        assert http.post("/api/chat/user/pal/download", json=body).status_code == 403
+        perms["can_download"] = True
+        assert http.post("/api/chat/user/pal/download", json=body).status_code == 200
+        perms.update(admin=True, can_download=False)   # admin overrides
+        assert http.post("/api/chat/user/pal/download", json=body).status_code == 200
+
+    def test_download_requires_files(self, browse_app):
+        http, state = browse_app
+        assert http.post("/api/chat/user/pal/download", json={}).status_code == 400

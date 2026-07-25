@@ -4,6 +4,11 @@
 // shared-helpers.js so the Search page and the global widget share the same
 // implementations.
 
+// A bare MusicBrainz UUID — the one bare ID whose FORMAT pins its source
+// (no other provider uses UUIDs). The main search bar routes these to the
+// direct by-id resolver instead of fuzzy search (Jordan H, Lidarr parity).
+const MBID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function initializeSearch() {
     // --- FIX: Corrected the element IDs to match the HTML ---
     const searchInput = document.getElementById('downloads-search-input');
@@ -252,6 +257,9 @@ function initializeSearchModeToggle() {
             // external-API search per letter (#751). Enter still triggers an
             // immediate search via the keypress handler below.
             debounceTimer = setTimeout(() => {
+                // A pasted MusicBrainz UUID is an exact identifier, not a name —
+                // route it to the direct by-id resolver (Jordan H, Lidarr parity).
+                if (MBID_RE.test(query)) { submitIdLookup(query); return; }
                 searchController.submitQuery(query);
             }, 600);
         });
@@ -261,6 +269,7 @@ function initializeSearchModeToggle() {
                 const query = e.target.value.trim();
                 if (query.length >= 2) {
                     clearTimeout(debounceTimer);
+                    if (MBID_RE.test(query)) { submitIdLookup(query); return; }
                     searchController.submitQuery(query);
                 }
             }
@@ -284,9 +293,10 @@ function initializeSearchModeToggle() {
     const idInput = document.getElementById('enh-id-input');
     const idBtn = document.getElementById('enh-id-btn');
 
-    async function submitIdLookup() {
-        if (!idInput) return;
-        const raw = idInput.value.trim();
+    async function submitIdLookup(rawOverride) {
+        // rawOverride: the MAIN search bar routes bare MusicBrainz UUIDs here
+        // (they're exact identifiers, not names); otherwise read the Link/ID box.
+        const raw = (typeof rawOverride === 'string' ? rawOverride : (idInput ? idInput.value : '')).trim();
         if (!raw) return;
 
         // Show the controller's loading UI while resolving.

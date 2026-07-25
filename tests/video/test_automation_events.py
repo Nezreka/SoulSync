@@ -100,7 +100,9 @@ def test_monthly_time_is_unlocked_on_both_sides():
         blocks = {b["type"]: b for b in blocks_for_scope(scope)["triggers"]}
         assert "monthly_time" in blocks, scope
         keys = [f["key"] for f in blocks["monthly_time"]["config_fields"]]
-        assert keys == ["time", "day_of_month"]     # what schedule.py reads
+        # what schedule.py reads — tz included (schedule.py documents
+        # {time, day_of_month, tz}; the builder exposes all three now)
+        assert keys == ["time", "day_of_month", "tz"]
     assert "'monthly_time'" in _ENGINE_SRC          # engine trigger registry
 
 

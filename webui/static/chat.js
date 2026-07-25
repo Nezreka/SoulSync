@@ -13,7 +13,10 @@
     var state = {
         view: 'room',            // 'room' | 'pm'
         pmUser: null,            // active conversation username
-        room: null,              // configured room name (from /status)
+        room: null,              // the ACTIVE room name
+        homeRoom: null,          // the community room (from /status)
+        rooms: [],               // joined rooms rail [{name, home}]
+        canManage: false,        // admin: may join/leave rooms
         canSend: false,
         configured: null,        // null = unknown yet
         timer: null,
@@ -317,16 +320,17 @@
             ? '<div class="chat-reply-ref">↩ <b>' + esc(m.reply.u) + '</b> ' +
               '<span>' + esc(m.reply.x || '') + '</span></div>'
             : '';
-        var actions = '';
+        var acts = '<button type="button" class="chat-line-reply" title="Copy text" ' +
+            'data-chat-copy="' + attr(String(m.message || '')) + '">⧉</button>';
         if (state.view === 'room' && state.canSend && !self) {
-            actions = '<span class="chat-line-acts">' +
-                '<button type="button" class="chat-line-reply" title="React" ' +
+            acts = '<button type="button" class="chat-line-reply" title="React" ' +
                 'data-chat-react-user="' + attr(m.username || '') + '" ' +
-                'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>'   // FULL text — the react key is a hash of it +
+                'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>' +   // FULL text — the react key is a hash of it
                 '<button type="button" class="chat-line-reply" title="Reply" ' +
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
-                'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button></span>';
+                'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
         }
+        var actions = '<span class="chat-line-acts">' + acts + '</span>';
         var chips = '';
         if (m.reactions && m.reactions.length) {
             chips = '<div class="chat-react-row">' + m.reactions.map(function (r) {
@@ -417,10 +421,21 @@
         var newest = String(msgs[msgs.length - 1].timestamp || '') + ':' + msgs.length;
         if (newest === state.lastStamp && host.childElementCount) return;   // nothing new
         state.lastStamp = newest;
-        var shown = msgs, hidden = 0;
-        if (state.view === 'room' && state.ssOnly) {
-            shown = msgs.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
-            hidden = msgs.length - shown.length;
+        var shown = msgs, hidden = 0, muted = 0;
+        if (state.view === 'room') {
+            var ign = ignoredSet();
+            if (ign.length) {
+                shown = shown.filter(function (m) {
+                    if (ign.indexOf(String(m.username || '')) > -1 &&
+                            !(m.self === true || m.direction === 'Out')) { muted++; return false; }
+                    return true;
+                });
+            }
+            if (state.ssOnly) {
+                var before = shown.length;
+                shown = shown.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
+                hidden = before - shown.length;
+            }
         }
         // NEW divider: split at the frozen last-seen marker (set on room open).
         // Groups deliberately break at the divider, like Discord's red line.
@@ -438,8 +453,10 @@
             body = renderGroups(shown);
         }
         host.innerHTML = body +
-            (hidden ? '<div class="chat-hidden-note">' + hidden +
-                ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden</div>' : '');
+            (hidden ? '<button type="button" class="chat-hidden-note" data-chat-filter>' + hidden +
+                ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden — show</button>' : '') +
+            (muted ? '<div class="chat-hidden-note">' + muted +
+                ' message' + (muted === 1 ? '' : 's') + ' from muted users hidden</div>' : '');
         if (state.stickBottom) {
             host.scrollTop = host.scrollHeight;
             // deep-scrollback cleanup: once the reader is back at the bottom,
@@ -463,31 +480,111 @@
         }
     }
 
+    // ── ignore list (local mute — per browser, hides messages + greys the user) ──
+    function ignoredSet() {
+        try { return JSON.parse(localStorage.getItem('chat_ignored') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isIgnored(name) { return ignoredSet().indexOf(name) > -1; }
+    function toggleIgnored(name) {
+        if (!name) return;
+        var list = ignoredSet();
+        var i = list.indexOf(name);
+        if (i > -1) list.splice(i, 1); else list.push(name);
+        try { localStorage.setItem('chat_ignored', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderUsersList();
+    }
+
+    // Users who spoke through SoulSync (the envelope is the app signature) —
+    // sourced from the loaded messages, so it's an approximation of "runs
+    // SoulSync", not a directory.
+    function _soulsyncUsers() {
+        var set = {};
+        (state.msgs || []).forEach(function (m) {
+            if (m.rich && m.username) set[m.username] = 1;
+        });
+        return set;
+    }
+
+    function _userBtn(n, extraClass) {
+        var ign = isIgnored(n);
+        return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
+            '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) + '">' +
+            '<span class="chat-user-dot"></span>' + esc(n) +
+            (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
+    }
+
     function renderUsers(users) {
         var host = q('[data-chat-users]');
         if (!host) return;
         if (state.view !== 'room' || !users || !users.length) {
-            host.innerHTML = ''; host.hidden = true; return;
+            host.innerHTML = ''; host.hidden = true; state.userFilter = ''; return;
         }
         host.hidden = false;
         state.users = users.map(function (u) { return String(u.username || u || ''); }).filter(Boolean);
-        var names = users.map(function (u) { return u.username || u; })
-            .filter(Boolean).sort(function (a, b) {
-                return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
-            });
-        host.innerHTML = '<div class="chat-users-label">' + names.length + ' online</div>' +
-            names.map(function (n) {
-                return '<button class="chat-user" type="button" data-chat-user="' + attr(n) + '" ' +
-                    'title="Message ' + attr(n) + '">' + esc(n) + '</button>';
-            }).join('');
+        // static skeleton once — the search input must survive the 4s poll
+        if (!host.querySelector('[data-chat-user-search]')) {
+            host.innerHTML =
+                '<input class="chat-user-search" data-chat-user-search type="text" ' +
+                    'placeholder="Find a user…" autocomplete="off">' +
+                '<div data-chat-user-list></div>';
+        }
+        renderUsersList();
+    }
+
+    function renderUsersList() {
+        var listHost = q('[data-chat-user-list]');
+        if (!listHost) return;
+        var f = String(state.userFilter || '').toLowerCase();
+        var names = state.users.slice().sort(function (a, b) {
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+        });
+        if (f) names = names.filter(function (n) { return n.toLowerCase().indexOf(f) > -1; });
+        var ss = _soulsyncUsers();
+        var self = [], apps = [], rest = [];
+        names.forEach(function (n) {
+            if (state.selfName && n === state.selfName) self.push(n);
+            else if (ss[n]) apps.push(n);
+            else rest.push(n);
+        });
+        var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
+        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self'); }).join('');
+        if (apps.length) {
+            html += '<div class="chat-users-label chat-users-label--sub">SoulSync users</div>' +
+                apps.map(function (n) { return _userBtn(n); }).join('');
+        }
+        if (rest.length) {
+            html += (apps.length || self.length
+                        ? '<div class="chat-users-label chat-users-label--sub">Everyone</div>' : '') +
+                rest.map(function (n) { return _userBtn(n); }).join('');
+        }
+        if (!self.length && !apps.length && !rest.length) {
+            html += '<div class="chat-side-none">No users match</div>';
+        }
+        listHost.innerHTML = html;
     }
 
     function renderSide(convos) {
         var rooms = q('[data-chat-rooms]');
         if (rooms) {
-            rooms.innerHTML = '<button class="chat-side-item' +
-                (state.view === 'room' ? ' chat-side-item--on' : '') +
-                '" type="button" data-chat-open-room># ' + esc(state.room || 'SoulSync') + '</button>';
+            var list = (state.rooms.length ? state.rooms
+                : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
+            rooms.innerHTML = list.map(function (r) {
+                var on = state.view === 'room' && state.room === r.name;
+                return '<div class="chat-side-room' + (on ? ' chat-side-item--on' : '') + '">' +
+                    '<button class="chat-side-item" type="button" data-chat-open-room="' +
+                        attr(r.name) + '" title="' + attr(r.name) + '"># ' + esc(r.name) + '</button>' +
+                    (!r.home && state.canManage
+                        ? '<button class="chat-side-leave" type="button" data-chat-leave-room="' +
+                            attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
+                        : '') +
+                '</div>';
+            }).join('') +
+            (state.canManage
+                ? '<button class="chat-side-item chat-side-add" type="button" data-chat-browse-rooms>+ Browse rooms</button>'
+                : '');
         }
         var host = q('[data-chat-convos]');
         if (!host) return;
@@ -506,9 +603,18 @@
     function renderHead() {
         var head = q('[data-chat-head]');
         if (!head) return;
+        var isHome = !state.homeRoom || state.room === state.homeRoom;
         head.innerHTML = state.view === 'room'
             ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
-              '<span class="chat-head-sub">the SoulSync community room on Soulseek</span>' +
+              '<span class="chat-head-sub">' + (isHome
+                  ? 'the SoulSync community room on Soulseek'
+                  : 'a public Soulseek room') + '</span>' +
+              '<span class="chat-head-search' + (state.searchMode ? ' chat-head-search--on' : '') + '">' +
+                  '<button class="chat-filter-btn" type="button" data-chat-search-btn title="Search this room\'s history">🔍</button>' +
+                  '<input class="chat-head-search-in" data-chat-search-input type="text" ' +
+                      'placeholder="Search history…" autocomplete="off"' +
+                      (state.searchMode ? '' : ' hidden') + '>' +
+              '</span>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
@@ -535,6 +641,10 @@
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
         var bar = q('[data-chat-toolbar]');
         if (bar) bar.hidden = !(state.view === 'room' && state.canSend);
+        // GIF = sending a CDN URL through the room pipeline — room-only. The
+        // emoji button stays everywhere (plain unicode is fine in PMs).
+        var gifBtn = q('[data-chat-gif-btn]');
+        if (gifBtn) gifBtn.hidden = !(state.view === 'room' && state.canSend);
         if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); }
     }
 
@@ -609,6 +719,7 @@
         if (!target || !emoji) return;
         postJSON('/api/chat/room/react', {
             target_user: target.user, target_text: target.text, e: emoji,
+            room: state.room || '',
         }).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -634,6 +745,14 @@
         }
         overlay.hidden = false;
         overlay.setAttribute('data-chat-user-card-for', name);
+        var ignBtn = overlay.querySelector('[data-chat-card-ignore]');
+        if (ignBtn) {
+            ignBtn.hidden = state.selfName && name === state.selfName;
+            ignBtn.textContent = isIgnored(name) ? 'Unmute' : 'Mute';
+            ignBtn.title = isIgnored(name)
+                ? 'Show this user’s messages again'
+                : 'Hide this user’s messages (this browser only)';
+        }
         getJSON('/api/chat/user/' + encodeURIComponent(name)).then(function (res) {
             if (overlay.getAttribute('data-chat-user-card-for') !== name) return;
             var info = (res.ok && res.body.info) || {};
@@ -663,6 +782,162 @@
     function closeUserCard() {
         var overlay = q('[data-chat-user-card]');
         if (overlay) overlay.hidden = true;
+    }
+
+    // ── share browser: a peer's files, downloadable in place ─────────────────
+    var _browse = { user: null, dirs: [], dir: null, files: [] };
+
+    function _fmtSize(bytes) {
+        if (!bytes) return '';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+        return (bytes / 1073741824).toFixed(2) + ' GB';
+    }
+
+    function _baseName(path) {
+        var parts = String(path || '').split(/[\\/]/);
+        return parts[parts.length - 1] || path;
+    }
+
+    function openBrowse(name) {
+        if (!name) return;
+        closeUserCard();
+        var overlay = q('[data-chat-browse-modal]');
+        if (!overlay) return;
+        _browse = { user: name, dirs: [], dir: null, files: [] };
+        overlay.hidden = false;
+        var title = q('[data-chat-browse-title]');
+        if (title) title.textContent = name + '’s files';
+        var inp = q('[data-chat-browse-search]');
+        if (inp) { inp.value = ''; inp.placeholder = 'Filter folders…'; }
+        _browseChrome();
+        var body = q('[data-chat-browse-body]');
+        if (body) body.innerHTML = '<div class="chat-gif-hint">Browsing ' + esc(name) + '’s shares…</div>';
+        getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares').then(function (res) {
+            if (_browse.user !== name) return;
+            if (!res.ok) {
+                if (body) {
+                    body.innerHTML = '<div class="chat-gif-hint">' +
+                        esc(res.body && res.body.error || 'Could not browse') + '</div>';
+                }
+                return;
+            }
+            _browse.dirs = res.body.directories || [];
+            renderBrowseDirs('');
+        });
+    }
+
+    function _browseChrome() {
+        var back = q('[data-chat-browse-back]');
+        var dl = q('[data-chat-browse-dl]');
+        var inp = q('[data-chat-browse-search]');
+        var inFiles = _browse.dir != null;
+        if (back) back.hidden = !inFiles;
+        if (dl) dl.hidden = !inFiles;
+        if (inp) inp.placeholder = inFiles ? 'Filter files…' : 'Filter folders…';
+    }
+
+    function renderBrowseDirs(filter) {
+        var body = q('[data-chat-browse-body]');
+        if (!body) return;
+        _browse.dir = null; _browse.files = [];
+        _browseChrome();
+        var f = String(filter || '').toLowerCase();
+        var dirs = _browse.dirs.filter(function (d) {
+            return !f || d.name.toLowerCase().indexOf(f) > -1;
+        }).slice(0, 400);
+        if (!dirs.length) {
+            body.innerHTML = '<div class="chat-gif-hint">' +
+                (_browse.dirs.length ? 'No folders match' : 'Nothing shared') + '</div>';
+            return;
+        }
+        body.innerHTML = dirs.map(function (d) {
+            return '<button type="button" class="chat-browse-row" data-chat-browse-dir="' +
+                attr(d.name) + '" title="' + attr(d.name) + '">' +
+                '<span class="chat-browse-icon">📁</span>' +
+                '<span class="chat-browse-name">' + esc(_baseName(d.name)) + '</span>' +
+                '<span class="chat-browse-meta">' + d.file_count + ' file' +
+                    (d.file_count === 1 ? '' : 's') + '</span></button>';
+        }).join('');
+    }
+
+    function openBrowseDir(dirName) {
+        var body = q('[data-chat-browse-body]');
+        if (!body) return;
+        _browse.dir = dirName;
+        _browseChrome();
+        body.innerHTML = '<div class="chat-gif-hint">Loading files…</div>';
+        var name = _browse.user;
+        getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' +
+                encodeURIComponent(dirName)).then(function (res) {
+            if (_browse.user !== name || _browse.dir !== dirName) return;
+            if (!res.ok) {
+                body.innerHTML = '<div class="chat-gif-hint">' +
+                    esc(res.body && res.body.error || 'Could not read that folder') + '</div>';
+                return;
+            }
+            _browse.files = res.body.files || [];
+            renderBrowseFiles('');
+        });
+    }
+
+    function renderBrowseFiles(filter) {
+        var body = q('[data-chat-browse-body]');
+        if (!body) return;
+        var f = String(filter || '').toLowerCase();
+        var files = _browse.files.filter(function (x) {
+            return !f || x.filename.toLowerCase().indexOf(f) > -1;
+        }).slice(0, 500);
+        if (!files.length) {
+            body.innerHTML = '<div class="chat-gif-hint">No files here</div>';
+            return;
+        }
+        body.innerHTML =
+            '<label class="chat-browse-row chat-browse-row--all">' +
+                '<input type="checkbox" data-chat-browse-all checked>' +
+                '<span class="chat-browse-name">Select all (' + files.length + ')</span>' +
+            '</label>' +
+            files.map(function (x, i) {
+                return '<label class="chat-browse-row">' +
+                    '<input type="checkbox" data-chat-browse-file="' + i + '" checked>' +
+                    '<span class="chat-browse-name" title="' + attr(x.filename) + '">' +
+                        esc(_baseName(x.filename)) + '</span>' +
+                    '<span class="chat-browse-meta">' + _fmtSize(x.size) + '</span></label>';
+            }).join('');
+        body._files = files;
+    }
+
+    function browseDownloadSelected() {
+        var body = q('[data-chat-browse-body]');
+        var dl = q('[data-chat-browse-dl]');
+        if (!body || !body._files) return;
+        var picked = [];
+        body.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
+            if (cb.checked) {
+                var x = body._files[Number(cb.getAttribute('data-chat-browse-file'))];
+                if (x) picked.push({ filename: x.filename, size: x.size });
+            }
+        });
+        if (!picked.length) {
+            if (typeof showToast === 'function') showToast('Nothing selected', 'info');
+            return;
+        }
+        if (dl) { dl.disabled = true; dl.textContent = 'Queueing…'; }
+        postJSON('/api/chat/user/' + encodeURIComponent(_browse.user) + '/download',
+                 { files: picked }).then(function (res) {
+            if (dl) { dl.disabled = false; dl.textContent = 'Download selected'; }
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not queue downloads', 'error');
+                }
+                return;
+            }
+            var n = res.body.queued || 0;
+            if (typeof showToast === 'function') {
+                showToast('Queued ' + n + ' file' + (n === 1 ? '' : 's') + ' from ' +
+                          _browse.user + ' — check Downloads', 'success');
+            }
+        });
     }
 
     // ── @mention autocomplete ────────────────────────────────────────────────
@@ -749,8 +1024,13 @@
                 return;
             }
             if (overlay) overlay.hidden = true;
-            state.room = res.body.room || state.room;
+            // a home-room rename moves the active view with it when the home
+            // room WAS the active room; an extra room stays put
+            var wasHome = state.room === state.homeRoom;
+            state.homeRoom = res.body.room || state.homeRoom;
+            if (wasHome) state.room = state.homeRoom;
             state.lastStamp = null;
+            loadRooms();
             renderHead();
             refresh();
             if (typeof showToast === 'function') showToast('Chat settings saved', 'success');
@@ -793,7 +1073,7 @@
     function sendGif(url) {
         if (!url || !state.canSend || state.view !== 'room') return;
         toggleGifPicker(true);
-        postJSON('/api/chat/room/message', { message: url }).then(function (res) {
+        postJSON('/api/chat/room/message', { message: url, room: state.room || '' }).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'GIF not sent', 'error');
@@ -883,7 +1163,8 @@
         if (state.view !== 'room' || state.loadingOlder || state.historyDone || !state.msgs.length) return;
         state.loadingOlder = true;
         var oldest = String(state.msgs[0].timestamp || '');
-        getJSON('/api/chat/room/history?before=' + encodeURIComponent(oldest) + '&limit=100')
+        getJSON('/api/chat/room/history?room=' + encodeURIComponent(state.room || '') +
+                '&before=' + encodeURIComponent(oldest) + '&limit=100')
             .then(function (res) {
                 state.loadingOlder = false;
                 if (!res.ok) return;
@@ -902,19 +1183,63 @@
             .catch(function () { state.loadingOlder = false; });
     }
 
+    // ── archive search (local history — Soulseek has no server-side search) ──
+    function enterSearch() {
+        state.searchMode = true;
+        renderHead();
+        var inp = q('[data-chat-search-input]');
+        if (inp) { inp.hidden = false; inp.focus(); }
+    }
+
+    function exitSearch() {
+        if (!state.searchMode) return;
+        state.searchMode = false;
+        state.lastStamp = null;
+        renderHead();
+        renderMessages(state.msgs);
+        var host = q('[data-chat-messages]');
+        if (host) host.scrollTop = host.scrollHeight;
+    }
+
+    function runSearch(qstr) {
+        qstr = String(qstr || '').trim();
+        var host = q('[data-chat-messages]');
+        if (!qstr || !host) return;
+        host.innerHTML = '<div class="chat-empty">Searching…</div>';
+        getJSON('/api/chat/room/search?room=' + encodeURIComponent(state.room || '') +
+                '&q=' + encodeURIComponent(qstr)).then(function (res) {
+            if (!state.searchMode || !res.ok) return;
+            var msgs = (res.body.messages || []).slice().reverse();   // oldest-first for render
+            host.innerHTML =
+                '<div class="chat-search-banner">' + msgs.length + ' result' +
+                    (msgs.length === 1 ? '' : 's') + ' for “' + esc(qstr) + '”' +
+                    '<button type="button" class="chat-filter-btn" data-chat-search-exit>Back to live</button>' +
+                '</div>' +
+                (msgs.length ? renderGroups(msgs)
+                             : '<div class="chat-empty">Nothing in the archive matches.</div>');
+            host.scrollTop = 0;
+        });
+    }
+
     // ── refresh loop ─────────────────────────────────────────────────────────
     function refresh() {
         if (!pageVisible()) return Promise.resolve();
+        if (state.searchMode && state.view === 'room') {
+            // search results are a frozen snapshot — don't repaint over them;
+            // the side rails still refresh below
+            return getJSON('/api/chat/conversations').then(function (res) {
+                if (res.ok) renderSide(res.body.conversations);
+            }).catch(function () { /* next tick retries */ });
+        }
         var work;
         if (state.view === 'room') {
-            work = getJSON('/api/chat/room').then(function (res) {
+            work = getJSON('/api/chat/room?room=' + encodeURIComponent(state.room || '')).then(function (res) {
                 if (!res.ok) {
                     renderProblem(res.body && res.body.error
                         ? res.body.error
                         : 'Chat is unavailable right now.');
                     return;
                 }
-                state.room = res.body.room || state.room;
                 state.canSend = !!res.body.can_send;
                 // auto-join OFF → the server no longer joins for us; show the
                 // join gate instead of the room (popwaffle9000's leave fix).
@@ -955,22 +1280,133 @@
     }
 
     // ── actions ──────────────────────────────────────────────────────────────
-    function openRoom() {
+    function openRoom(name) {
         state.view = 'room'; state.pmUser = null; state.lastStamp = null; state.stickBottom = true;
         state.renderedCount = 0; hideJumpPill();
+        state.room = name || state.room || state.homeRoom || 'SoulSync';
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
+        cancelReply();
         try {
             state.newMarker = localStorage.getItem('chat_seen_' + (state.room || '')) || null;
         } catch (e) { state.newMarker = null; }
-        renderHead(); renderComposer();
+        renderHead(); renderComposer(); renderSide(null);
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
         refresh();
     }
 
+    function loadRooms() {
+        return getJSON('/api/chat/rooms').then(function (res) {
+            if (!res.ok) return;
+            state.homeRoom = res.body.home || state.homeRoom;
+            state.rooms = res.body.rooms || [];
+            state.canManage = !!res.body.can_manage;
+            renderSide(null);
+        });
+    }
+
+    // ── room browser (join any public Soulseek room) ─────────────────────────
+    var _availRooms = null;
+
+    function openRoomBrowser() {
+        var overlay = q('[data-chat-rooms-modal]');
+        if (!overlay) return;
+        overlay.hidden = false;
+        var listEl = q('[data-chat-rooms-list]');
+        if (listEl) listEl.innerHTML = '<div class="chat-gif-hint">Loading rooms…</div>';
+        var inp = q('[data-chat-rooms-search]');
+        if (inp) { inp.value = ''; inp.focus(); }
+        getJSON('/api/chat/rooms/available').then(function (res) {
+            if (!res.ok) {
+                if (listEl) {
+                    listEl.innerHTML = '<div class="chat-gif-hint">' +
+                        esc(res.body && res.body.error || 'Room list unavailable') + '</div>';
+                }
+                return;
+            }
+            _availRooms = { rooms: res.body.rooms || [], joined: res.body.joined || [] };
+            renderRoomBrowser('');
+        });
+    }
+
+    function renderRoomBrowser(filter) {
+        var listEl = q('[data-chat-rooms-list]');
+        if (!listEl || !_availRooms) return;
+        var f = String(filter || '').toLowerCase();
+        var joined = {};
+        _availRooms.joined.forEach(function (r) { joined[r] = 1; });
+        var rooms = _availRooms.rooms.filter(function (r) {
+            return !r.private && (!f || r.name.toLowerCase().indexOf(f) > -1);
+        }).slice(0, 200);
+        if (!rooms.length) {
+            listEl.innerHTML = '<div class="chat-gif-hint">No rooms match</div>';
+            return;
+        }
+        listEl.innerHTML = rooms.map(function (r) {
+            var isJoined = !!joined[r.name];
+            return '<div class="chat-room-row">' +
+                '<span class="chat-room-name" title="' + attr(r.name) + '"># ' + esc(r.name) + '</span>' +
+                '<span class="chat-room-count">' + r.users + ' online</span>' +
+                (isJoined
+                    ? '<span class="chat-room-joined">joined</span>'
+                    : (state.canManage
+                        ? '<button type="button" class="chat-room-join" data-chat-join-room="' +
+                            attr(r.name) + '">Join</button>'
+                        : '')) +
+            '</div>';
+        }).join('');
+    }
+
+    function joinRoom(name, btn) {
+        if (!name) return;
+        if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+        postJSON('/api/chat/rooms/join', { room: name }).then(function (res) {
+            if (!res.ok) {
+                if (btn) { btn.disabled = false; btn.textContent = 'Join'; }
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not join', 'error');
+                }
+                return;
+            }
+            if (_availRooms && _availRooms.joined.indexOf(name) < 0) _availRooms.joined.push(name);
+            var overlay = q('[data-chat-rooms-modal]');
+            if (overlay) overlay.hidden = true;
+            loadRooms().then(function () { openRoom(name); });
+            if (typeof showToast === 'function') showToast('Joined # ' + name, 'success');
+        });
+    }
+
+    function leaveRoom(name) {
+        if (!name) return;
+        var go = function () {
+            postJSON('/api/chat/rooms/leave', { room: name }).then(function (res) {
+                if (!res.ok) {
+                    if (typeof showToast === 'function') {
+                        showToast(res.body && res.body.error || 'Could not leave', 'error');
+                    }
+                    return;
+                }
+                if (_availRooms) {
+                    _availRooms.joined = _availRooms.joined.filter(function (r) { return r !== name; });
+                }
+                loadRooms().then(function () {
+                    if (state.view === 'room' && state.room === name) openRoom(state.homeRoom);
+                });
+            });
+        };
+        if (typeof showConfirmDialog === 'function') {
+            showConfirmDialog({
+                title: 'Leave Room',
+                message: 'Leave # ' + name + '? You can rejoin any time from Browse rooms.',
+                confirmText: 'Leave', destructive: false,
+            }).then(function (yes) { if (yes) go(); });
+        } else { go(); }
+    }
+
     function openPm(username) {
         if (!username) return;
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
+        state.searchMode = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
         renderHead(); renderComposer();
@@ -990,6 +1426,7 @@
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
         var payload = { message: text };
+        if (state.view === 'room') payload.room = state.room || '';
         var sentReply = null;
         if (state.view === 'room' && state.replyTo) {
             payload.reply = state.replyTo;
@@ -1096,8 +1533,32 @@
                 renderHead(); refresh();
                 return;
             }
+            t = e.target.closest('[data-chat-search-btn]');
+            if (t) { state.searchMode ? exitSearch() : enterSearch(); return; }
+            t = e.target.closest('[data-chat-search-exit]');
+            if (t) { exitSearch(); return; }
+            t = e.target.closest('[data-chat-copy]');
+            if (t) {
+                var txt = t.getAttribute('data-chat-copy') || '';
+                try {
+                    navigator.clipboard.writeText(txt).then(function () {
+                        if (typeof showToast === 'function') showToast('Copied', 'success');
+                    });
+                } catch (err) { /* clipboard unavailable */ }
+                return;
+            }
             t = e.target.closest('[data-chat-open-room]');
-            if (t) { openRoom(); return; }
+            if (t) { state.searchMode = false; openRoom(t.getAttribute('data-chat-open-room') || undefined); return; }
+            t = e.target.closest('[data-chat-browse-rooms]');
+            if (t) { openRoomBrowser(); return; }
+            t = e.target.closest('[data-chat-join-room]');
+            if (t) { joinRoom(t.getAttribute('data-chat-join-room'), t); return; }
+            t = e.target.closest('[data-chat-leave-room]');
+            if (t) { leaveRoom(t.getAttribute('data-chat-leave-room')); return; }
+            t = e.target.closest('[data-chat-rooms-close]');
+            if (t) { var rm = q('[data-chat-rooms-modal]'); if (rm) rm.hidden = true; return; }
+            var rmo = e.target.closest('[data-chat-rooms-modal]');
+            if (rmo && e.target === rmo) { rmo.hidden = true; return; }
             t = e.target.closest('[data-chat-open-pm]');
             if (t) { openPm(t.getAttribute('data-chat-open-pm')); return; }
             t = e.target.closest('[data-chat-react-user]');
@@ -1118,6 +1579,44 @@
                 var ov = q('[data-chat-user-card]');
                 closeUserCard();
                 if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
+                return;
+            }
+            t = e.target.closest('[data-chat-card-browse]');
+            if (t) {
+                var bOv = q('[data-chat-user-card]');
+                openBrowse(bOv && bOv.getAttribute('data-chat-user-card-for'));
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-dir]');
+            if (t) { openBrowseDir(t.getAttribute('data-chat-browse-dir')); return; }
+            t = e.target.closest('[data-chat-browse-back]');
+            if (t) {
+                var bsIn = q('[data-chat-browse-search]');
+                if (bsIn) bsIn.value = '';
+                renderBrowseDirs('');
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-dl]');
+            if (t) { browseDownloadSelected(); return; }
+            t = e.target.closest('[data-chat-browse-close]');
+            if (t) { var bm = q('[data-chat-browse-modal]'); if (bm) bm.hidden = true; return; }
+            var bmo = e.target.closest('[data-chat-browse-modal]');
+            if (bmo && e.target === bmo) { bmo.hidden = true; return; }
+            t = e.target.closest('[data-chat-browse-all]');
+            if (t) {
+                var bBody = q('[data-chat-browse-body]');
+                if (bBody) {
+                    bBody.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
+                        cb.checked = t.checked;
+                    });
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-ignore]');
+            if (t) {
+                var cardOv = q('[data-chat-user-card]');
+                toggleIgnored(cardOv && cardOv.getAttribute('data-chat-user-card-for'));
+                closeUserCard();
                 return;
             }
             t = e.target.closest('[data-chat-card-close]');
@@ -1153,6 +1652,35 @@
                 inputEl.style.height = 'auto';
                 inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px';
                 updateMentionPop(inputEl);
+            });
+        }
+
+        // user-list search: delegated ('input' bubbles; the input is re-created
+        // only when the whole panel resets, so direct binding would go stale)
+        // history-search input is re-created by every renderHead → delegate
+        page.addEventListener('keydown', function (e) {
+            if (e.target && e.target.matches('[data-chat-search-input]')) {
+                if (e.key === 'Enter') { e.preventDefault(); runSearch(e.target.value); }
+                if (e.key === 'Escape') exitSearch();
+            }
+        });
+
+        page.addEventListener('input', function (e) {
+            if (e.target && e.target.matches('[data-chat-user-search]')) {
+                state.userFilter = e.target.value.trim();
+                renderUsersList();
+            }
+            if (e.target && e.target.matches('[data-chat-browse-search]')) {
+                var v = e.target.value.trim();
+                if (_browse.dir != null) renderBrowseFiles(v);
+                else renderBrowseDirs(v);
+            }
+        });
+
+        var roomsIn = q('[data-chat-rooms-search]');
+        if (roomsIn) {
+            roomsIn.addEventListener('input', function () {
+                renderRoomBrowser(roomsIn.value.trim());
             });
         }
 
@@ -1194,11 +1722,13 @@
         if (state.configured !== true) {
             getJSON('/api/chat/status').then(function (res) {
                 state.configured = !!(res.ok && res.body.configured);
-                state.room = (res.body && res.body.room) || 'SoulSync';
+                state.homeRoom = (res.body && res.body.room) || 'SoulSync';
+                state.room = state.room || state.homeRoom;
                 state.canSend = !!(res.body && res.body.can_send);
                 state.isAdmin = !!(res.body && res.body.is_admin);
                 state.selfName = String((res.body && res.body.username) || '');
                 renderSide([]); renderHead(); renderComposer();
+                loadRooms();
                 if (!state.configured) {
                     renderProblem('Soulseek (slskd) isn\'t configured — set it up in Settings ' +
                                   'to join the chat.');

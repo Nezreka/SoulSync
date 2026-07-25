@@ -175,9 +175,18 @@ def test_endpoint_cache_is_id_keyed_and_forgives_empties():
     ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(
         encoding="utf-8", errors="replace")
     handler = ws.split("def get_artist_art_options")[1].split("\n@app.route")[0]
-    assert "cache_key = ('artist', int(artist_id))" in handler
+    # FLIPPED (#1069, matvei4iz): this pin used to assert int(artist_id) — the
+    # bug itself. artists.id is TEXT since the id-columns migration; Navidrome/
+    # Jellyfin ids are strings and int() 400'd the whole picker for them.
+    assert "cache_key = ('artist', artist_id)" in handler
+    assert "int(artist_id)" not in handler
     assert "_ART_OPTIONS_EMPTY_TTL_S" in handler
     assert "_ART_OPTIONS_EMPTY_TTL_S = 60" in ws
+    # the apply endpoint: no casts either, and the cache invalidation pops the
+    # ID-keyed slot (it used to pop a NAME-keyed one — a dead pop)
+    apply_h = ws.split("def set_artist_art")[1].split("\n@app.route")[0]
+    assert "int(artist_id)" not in apply_h
+    assert "_ART_OPTIONS_CACHE.pop(('artist', artist_id), None)" in apply_h
 
 
 def test_picker_grid_never_goes_silently_blank():
@@ -294,3 +303,25 @@ def test_current_photo_leads_the_grid_as_reference():
     assert "createElement('div');\n                cur.className = 'art-picker-tile art-picker-tile--current'" \
         .replace("\n                ", "") in js.replace("\n                ", "")
     assert "art-picker-badge--current" in js
+
+
+
+def test_text_artist_ids_work_end_to_end(tmp_path):
+    """#1069: the exact Navidrome shape from the report — a TEXT primary key.
+    Every db call the art endpoints make must take the string id verbatim."""
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(database_path=str(tmp_path / "m.db"))
+    conn = db._get_connection()
+    conn.execute("INSERT INTO artists (id, name, server_source) VALUES "
+                 "('7dB07x8Q2P9jPvGeDHxIFa', 'Ed Sheeran', 'navidrome')")
+    conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES "
+                 "('al-x', '7dB07x8Q2P9jPvGeDHxIFa', 'Divide', 'navidrome')")
+    conn.commit()
+    conn.close()
+
+    artist = db.get_artist('7dB07x8Q2P9jPvGeDHxIFa')
+    assert artist is not None and artist.name == 'Ed Sheeran'
+    assert db.set_artist_thumb_url('7dB07x8Q2P9jPvGeDHxIFa', 'https://x/p.jpg') is True
+    assert db.get_artist('7dB07x8Q2P9jPvGeDHxIFa').thumb_url == 'https://x/p.jpg'
+    albums = db.get_albums_by_artist('7dB07x8Q2P9jPvGeDHxIFa')
+    assert [a.title for a in albums] == ['Divide']

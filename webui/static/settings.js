@@ -825,15 +825,15 @@ function toggleAllServiceAccordions(btn) {
 
 // ── Hybrid source priority list (drag-and-drop) ──
 const HYBRID_SOURCES = [
-    { id: 'soulseek', name: 'Soulseek', icon: 'https://raw.githubusercontent.com/slskd/slskd/master/docs/icon.png', emoji: '🎵' },
-    { id: 'youtube', name: 'YouTube', icon: 'https://www.svgrepo.com/show/13671/youtube.svg', emoji: '▶️' },
-    { id: 'tidal', name: 'Tidal', icon: 'https://www.svgrepo.com/show/519734/tidal.svg', emoji: '🌊' },
-    { id: 'qobuz', name: 'Qobuz', icon: 'https://www.svgrepo.com/show/504778/qobuz.svg', emoji: '🎧' },
+    { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
+    { id: 'youtube', name: 'YouTube', icon: '/static/img/brands/youtube.svg', emoji: '▶️' },
+    { id: 'tidal', name: 'Tidal', icon: '/static/img/brands/tidal.svg', emoji: '🌊' },
+    { id: 'qobuz', name: 'Qobuz', icon: '/static/img/brands/qobuz.svg', emoji: '🎧' },
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
-    { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
+    { id: 'deezer_dl', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
     { id: 'amazon', name: 'Amazon Music', icon: null, emoji: '🛒' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
-    { id: 'soundcloud', name: 'SoundCloud', icon: 'https://www.svgrepo.com/show/452219/soundcloud.svg', emoji: '☁️' },
+    { id: 'soundcloud', name: 'SoundCloud', icon: '/static/img/brands/soundcloud.png', emoji: '☁️' },
     { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
     { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
@@ -841,6 +841,9 @@ const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
 let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
+// Enabled-but-not-fully-configured sources (per the server's status):
+// shown with a "needs setup" chip instead of being silently unchecked.
+let _hybridSourceUnready = {};
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 // In hybrid mode, only one source's config panel is shown at a time (clicked
 // open from its row), so the long per-source config blocks don't all stack up.
@@ -992,6 +995,16 @@ function buildHybridSourceList() {
             ? 'This first source can download a whole album release before per-track fallback.'
             : 'This source runs as per-track fallback in the current hybrid order.';
         const sourceLevelBadge = `<span class="hybrid-source-badge hybrid-source-badge-${sourceLevelClass}" title="${sourceLevelTitle}">${sourceLevel}</span>`;
+        // Enabled but the server says it can't run yet (e.g. usenet/torrent
+        // need Prowlarr AND a download client). Stays enabled — downloads
+        // skip unready sources — but the row says why it won't fire.
+        const unreadyHints = {
+            usenet: 'Usenet needs Prowlarr (indexers) AND a usenet client (e.g. SABnzbd) configured. Downloads skip this source until both are set up — click ⚙ to finish.',
+            torrent: 'Torrents need Prowlarr (indexers) AND a torrent client configured. Downloads skip this source until both are set up — click ⚙ to finish.',
+        };
+        const unreadyBadge = (enabled && _hybridSourceUnready[srcId])
+            ? `<span class="hybrid-source-badge hybrid-source-unready" title="${unreadyHints[srcId] || 'This source is not fully configured yet — downloads skip it until it is. Click ⚙ to configure.'}">⚠ needs setup</span>`
+            : '';
 
         const item = document.createElement('div');
         const isExpanded = enabled && _expandedHybridSource === srcId;
@@ -1013,7 +1026,7 @@ function buildHybridSourceList() {
                 : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
             }
             <span class="hybrid-source-name" ${clickConfig} style="${enabled ? 'cursor:pointer;' : ''}">${src.name}</span>
-            ${sourceLevelBadge}
+            ${sourceLevelBadge}${unreadyBadge}
             <span class="hybrid-source-priority">${priorityNum}</span>
             <span class="hybrid-source-status hss-${_hybridSourceStatus[srcId] || 'unknown'}" title="${({ unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected', fail: 'Connection failed', na: 'No connection test for this source' })[_hybridSourceStatus[srcId] || 'unknown']}"></span>
             ${enabled ? `<button class="hybrid-source-config-btn" ${clickConfig} title="Configure ${src.name}">⚙</button>` : ''}
@@ -1124,10 +1137,10 @@ function getHybridOrder() {
 
 // ---- Preferred album-art sources (reuses the hybrid-source-list styling) ----
 const ART_SOURCES = [
-    { id: 'caa', name: 'Cover Art Archive', icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png', emoji: '🎨' },
-    { id: 'deezer', name: 'Deezer', icon: 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610', emoji: '🎧' },
-    { id: 'itunes', name: 'iTunes', icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png', emoji: '🍎' },
-    { id: 'spotify', name: 'Spotify', icon: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png', emoji: '🟢' },
+    { id: 'caa', name: 'Cover Art Archive', icon: '/static/img/brands/musicbrainz.png', emoji: '🎨' },
+    { id: 'deezer', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
+    { id: 'itunes', name: 'iTunes', icon: '/static/img/brands/itunes.png', emoji: '🍎' },
+    { id: 'spotify', name: 'Spotify', icon: '/static/img/brands/spotify.png', emoji: '🟢' },
     { id: 'audiodb', name: 'TheAudioDB', icon: null, emoji: '💿' },
 ];
 let _artSourceEnabled = {};   // id -> bool
@@ -1253,16 +1266,19 @@ function loadHybridSourceOrder(settings) {
         }
     }
 
-    // Auto-disable sources that aren't configured on the server
-    let changed = false;
+    // Sources the server reports as not-fully-configured are NOT silently
+    // unchecked anymore (Fl3m: enabling Usenet "didn't save" — the save
+    // worked; THIS loader erased it on every page load, and the next save
+    // then persisted the loss). Usenet/torrent need Prowlarr on top of the
+    // download client, so a half-configured source was constantly re-disabled
+    // with zero explanation. Keep the user's saved intent and mark the row
+    // unready instead — the backend's configured_clients() already skips
+    // unready sources at download time, so an enabled toggle is harmless.
+    _hybridSourceUnready = {};
     for (const src of HYBRID_SOURCES) {
         if (_hybridSourceEnabled[src.id] && sourceStatus[src.id] === false) {
-            _hybridSourceEnabled[src.id] = false;
-            changed = true;
+            _hybridSourceUnready[src.id] = true;
         }
-    }
-    if (changed) {
-        _hybridSourceOrder = _hybridSourceOrder.filter(id => _hybridSourceEnabled[id] !== false);
     }
 
     _hybridVisualOrder = null; // Reset so buildHybridSourceList rebuilds it
@@ -1663,10 +1679,13 @@ async function loadSettingsData() {
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
+        document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
         document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
+        const _wlTtl = document.getElementById('wishlist-ignore-ttl');
+        if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
@@ -1727,6 +1746,8 @@ async function loadSettingsData() {
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
+        document.getElementById('m3u-rewrite-from').value = settings.m3u_export?.rewrite_from || '';
+        document.getElementById('m3u-rewrite-to').value = settings.m3u_export?.rewrite_to || '';
         const _libM3uEn = document.getElementById('library-m3u-enabled');
         if (_libM3uEn) _libM3uEn.checked = settings.m3u_export?.library_enabled === true;
         const _libM3uPath = document.getElementById('library-m3u-path');
@@ -4547,6 +4568,7 @@ async function saveSettings(quiet = false) {
             enabled: document.getElementById('file-organization-enabled').checked,
             disc_label: document.getElementById('disc-label').value,
             collab_artist_mode: document.getElementById('collab-artist-mode').value,
+            artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked,
             templates: {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,
@@ -4556,7 +4578,9 @@ async function saveSettings(quiet = false) {
             }
         },
         wishlist: {
-            allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked
+            allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
+            ignore_ttl_days: Math.max(1, Math.min(365,
+                parseInt(document.getElementById('wishlist-ignore-ttl')?.value, 10) || 30)),
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,
@@ -4619,6 +4643,8 @@ async function saveSettings(quiet = false) {
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
+            rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
+            rewrite_to: document.getElementById('m3u-rewrite-to').value || '',
             library_enabled: document.getElementById('library-m3u-enabled')?.checked === true,
             library_path: document.getElementById('library-m3u-path')?.value || ''
         },

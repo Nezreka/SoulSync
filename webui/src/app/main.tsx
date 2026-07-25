@@ -1,6 +1,7 @@
 import '@vitejs/plugin-react/preamble';
 import { createRoot } from 'react-dom/client';
 
+import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
 import { bindWindowWebRouter } from '@/platform/shell/bridge';
 import { ROUTER_ROOT_ID } from '@/platform/shell/route-controllers';
 
@@ -20,4 +21,5 @@ export async function bootstrapApp() {
   return { queryClient, router };
 }
 
+void mountLibraryDiscographySourceSelector();
 void bootstrapApp();

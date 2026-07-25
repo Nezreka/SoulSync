@@ -17,6 +17,7 @@ from core.runtime_state import (
 from core.wishlist.processing import (
     add_cancelled_tracks_to_failed_tracks as _add_cancelled_tracks_to_failed_tracks,
     build_wishlist_source_context as _build_wishlist_source_context,
+    record_failed_attempt as _record_failed_attempt,
     recover_uncaptured_failed_tracks as _recover_uncaptured_failed_tracks,
     remove_completed_tracks_from_wishlist as _remove_completed_tracks_from_wishlist,
     resolve_wishlist_source_type_for_batch as _resolve_wishlist_source_type_for_batch,
@@ -138,6 +139,15 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                             source_context=source_context,
                             profile_id=batch.get('profile_id', 1)
                         )
+                        # Count the attempt EITHER way — a fresh add becomes
+                        # attempt 1; a duplicate-skip (track already wishlisted,
+                        # i.e. it failed again this cycle) accumulates. This is
+                        # what feeds the failing badge + retry backoff.
+                        _record_failed_attempt(
+                            wishlist_service, track_data,
+                            failed_track_info.get('failure_reason', ''),
+                            batch.get('profile_id', 1))
+
                         if success:
                             wishlist_added_count += 1
                             logger.info(f"[Wishlist Processing] Added {track_name} to wishlist")

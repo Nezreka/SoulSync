@@ -612,3 +612,44 @@ def test_add_album_track_adds_owned_when_duplicates_on(monkeypatch):
     assert status == 200
     assert len(service.add_calls) == 1                         # added anyway (user wants dupes)
     assert called == []                                        # ownership check skipped entirely
+
+
+# ── per-artist removal (#1065) ───────────────────────────────────────────────
+
+def _artist_tracks():
+    return [
+        {"wishlist_id": 1, "spotify_track_id": "qt-1", "id": "qt-1",
+         "spotify_data": json.dumps({"album": {"name": "A1"},
+                                     "artists": [{"name": "Big Discography"}]})},
+        {"wishlist_id": 2, "spotify_track_id": "qt-2", "id": "qt-2",
+         "spotify_data": {"album": {"name": "A2"},
+                          "artists": [{"name": "big discography"}]}},   # case differs
+        {"wishlist_id": 3, "spotify_track_id": "keep-1", "id": "keep-1",
+         "spotify_data": {"album": {"name": "B1"},
+                          "artists": [{"name": "Keep Me"}]}},
+        {"wishlist_id": 4, "spotify_track_id": "feat-1", "id": "feat-1",
+         # Big Discography only FEATURES here — primary artist is someone else,
+         # so a per-artist purge must NOT take it
+         "spotify_data": {"album": {"name": "C1"},
+                          "artists": [{"name": "Keep Me"}, {"name": "Big Discography"}]}},
+    ]
+
+
+def test_remove_artist_takes_whole_catalog_case_insensitively():
+    from core.wishlist.routes import remove_artist_from_wishlist
+    runtime, service, _db, _logger, _a = _build_runtime(tracks=_artist_tracks())
+
+    payload, status = remove_artist_from_wishlist(runtime, artist_name="  Big Discography ")
+
+    assert status == 200
+    assert payload["removed_count"] == 2
+    assert [t for t, _p in service.removed] == ["qt-1", "qt-2"]   # feature + others kept
+
+
+def test_remove_artist_unknown_404_and_missing_400():
+    from core.wishlist.routes import remove_artist_from_wishlist
+    runtime, service, _db, _logger, _a = _build_runtime(tracks=_artist_tracks())
+    payload, status = remove_artist_from_wishlist(runtime, artist_name="Nobody Here")
+    assert status == 404 and service.removed == []
+    payload, status = remove_artist_from_wishlist(runtime, artist_name="   ")
+    assert status == 400

@@ -929,10 +929,22 @@ class AutomationEngine:
                 results.append(value in event_value)
             elif operator == 'equals':
                 results.append(value == event_value)
+            elif operator == 'not_equals':
+                results.append(value != event_value)
             elif operator == 'starts_with':
                 results.append(event_value.startswith(value))
+            elif operator == 'ends_with':
+                results.append(event_value.endswith(value))
             elif operator == 'not_contains':
                 results.append(value not in event_value)
+            elif operator in ('greater_than', 'less_than'):
+                # Numeric compare — "failed_tracks greater than 0". Either
+                # side not parsing as a number = no match (never a crash).
+                try:
+                    ev, cv = float(event_value), float(value)
+                    results.append(ev > cv if operator == 'greater_than' else ev < cv)
+                except (TypeError, ValueError):
+                    results.append(False)
             else:
                 results.append(False)
 
@@ -1419,6 +1431,18 @@ class AutomationEngine:
             try:
                 t = item.get('type', '')
                 c = item.get('config', {})
+                # Per-step conditions — "only ping Discord when status is
+                # error". Absent conditions = always run (every pre-existing
+                # automation). Evaluated against the same variable set the
+                # step's templates see, so anything usable in a message is
+                # usable as a filter.
+                step_conditions = item.get('conditions') or c.get('conditions')
+                if step_conditions:
+                    gate = {'conditions': step_conditions,
+                            'match': item.get('match') or c.get('match', 'all')}
+                    if not self._evaluate_conditions(gate, variables):
+                        logger.debug("Then-action '%s' skipped by its conditions", t)
+                        continue
                 if t == 'discord_webhook':
                     self._send_discord_notification(c, variables)
                 elif t == 'pushbullet':
@@ -1594,6 +1618,31 @@ class AutomationEngine:
                         value = value.replace('{' + vk + '}', vv)
                     headers[key.strip()] = value.strip()
 
+        # Custom payload template — the "works with anything" mode. The user
+        # writes the exact body (JSON for gotify/ntfy/Slack/Home Assistant, or
+        # any raw text) with {variable} tags. JSON substitution escapes each
+        # value so a title containing quotes can't break the document. A
+        # template that fails to produce anything sendable falls back to the
+        # default payload below — a bad template must degrade, never drop the
+        # notification.
+        template = (config.get('payload_template') or '').strip()
+        if template:
+            try:
+                body, is_json = self._render_webhook_template(template, variables)
+                if is_json:
+                    resp = requests.post(url, json=body, headers=headers, timeout=15)
+                else:
+                    if headers.get('Content-Type') == 'application/json':
+                        headers['Content-Type'] = 'text/plain; charset=utf-8'
+                    resp = requests.post(url, data=body.encode('utf-8'), headers=headers, timeout=15)
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"Webhook returned {resp.status_code}: {resp.text[:200]}")
+                return
+            except RuntimeError:
+                raise                       # HTTP failure is real — surface it
+            except Exception as e:          # template itself broke → default body
+                logger.warning("Webhook payload template failed (%s) — sending default payload", e)
+
         # Build JSON payload with all variables
         payload = dict(variables)
 
@@ -1607,3 +1656,22 @@ class AutomationEngine:
         resp = requests.post(url, json=payload, headers=headers, timeout=15)
         if resp.status_code >= 400:
             raise RuntimeError(f"Webhook returned {resp.status_code}: {resp.text[:200]}")
+
+    @staticmethod
+    def _render_webhook_template(template, variables):
+        """Render a payload template. Returns ``(body, is_json)``.
+
+        JSON-first: substitute each {var} with its JSON-ESCAPED value and try
+        to parse — valid JSON posts as JSON. Anything unparseable posts as raw
+        text with plain substitution (ntfy's plain-text bodies, form-ish
+        payloads, whatever the receiver wants)."""
+        json_sub = template
+        for k, v in variables.items():
+            json_sub = json_sub.replace('{' + k + '}', json.dumps(str(v))[1:-1])
+        try:
+            return json.loads(json_sub), True
+        except (json.JSONDecodeError, ValueError):
+            plain = template
+            for k, v in variables.items():
+                plain = plain.replace('{' + k + '}', str(v))
+            return plain, False

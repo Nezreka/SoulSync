@@ -16,6 +16,13 @@ def setup_function(_):
     events._reset_for_tests()
 
 
+def teardown_function(_):
+    # Reset AFTER each test too — without this, the LAST test's forwarders
+    # leaked into every later file in the suite, reacting to their db writes
+    # (any wishlist/watchlist add publishes to this registry).
+    events._reset_for_tests()
+
+
 def _batches(fired):
     return [d for t, d in fired if t == "video_batch_complete"]
 

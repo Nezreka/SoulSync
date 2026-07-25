@@ -165,3 +165,24 @@ def test_write_tags_payload_untouched_when_strict_off(monkeypatch):
         {'title': 'T', 'artist_name': 'A', 'album_title': 'Al'},
         ['Rock', 'seen live'])
     assert payload['genres'] == ['Rock', 'seen live']
+
+
+def test_scanned_counts_the_whole_library_not_just_genre_rows(db):
+    """#1066 (carlosjfcasero): 1,056 artists but 'Scanned: 16' — the scan only
+    fetched genre-carrying rows, so the card looked like an incomplete scan.
+    Every artist + album now counts as scanned; genre-less rows are skips."""
+    conn = db._get_connection()
+    cur = conn.cursor()
+    for i in range(5):
+        cur.execute("INSERT INTO artists (id, name) VALUES (?, ?)",
+                    (f'BARE{i}', f'No Genres {i}'))
+    conn.commit()
+    conn.close()
+
+    findings = []
+    res = GenreCleanupJob().scan(_ctx(db, _Cfg(), findings))
+    # 2 seeded artists + 5 bare artists + 1 seeded album = 8 examined
+    assert res.scanned == 8
+    # findings unchanged by the counting fix: only the dirty rows raise them
+    assert {f['title'] for f in findings} == {
+        'Off-whitelist genres: Dirty Artist', 'Off-whitelist genres: Dirty Album'}

@@ -15,17 +15,17 @@
 const _MA_SERVICES = [
     {
         id: 'spotify', name: 'Spotify', brand: '#1db954',
-        logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+        logo: '/static/img/brands/spotify.png',
         connect: (pid) => `/auth/spotify?profile_id=${pid}`,
     },
     {
         id: 'tidal', name: 'Tidal', brand: '#00cfe8',
-        logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/tidal.png',
+        logo: '/static/img/brands/tidal.png',
         connect: (pid) => `/auth/tidal?profile_id=${pid}`,
     },
     {
         id: 'listenbrainz', name: 'ListenBrainz', brand: '#eb743b', dark: true,
-        logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/listenbrainz.png',
+        logo: '/static/img/brands/listenbrainz.png',
         type: 'token',
         saveUrl: '/api/profiles/me/listenbrainz',
         hint: 'Paste your token from listenbrainz.org/profile',

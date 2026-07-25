@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.3"
+_SOULSYNC_BASE_VERSION = "3.1.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -141,6 +141,7 @@ from core.wishlist.routes import (
     get_wishlist_tracks as _wishlist_get_wishlist_tracks,
     process_wishlist_api as _wishlist_process_api,
     remove_album_from_wishlist as _wishlist_remove_album_from_wishlist,
+    remove_artist_from_wishlist as _wishlist_remove_artist_from_wishlist,
     remove_batch_from_wishlist as _wishlist_remove_batch_from_wishlist,
     remove_track_from_wishlist as _wishlist_remove_track_from_wishlist,
     set_wishlist_cycle as _wishlist_set_wishlist_cycle,
@@ -167,6 +168,7 @@ from core.wishlist.state import (
     reset_flag_if_stuck as _reset_wishlist_flag_if_stuck,
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
+from core.imports.paths import artist_letter as _shared_artist_letter
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -744,6 +746,31 @@ def _add_discover_cache_headers(response):
         # a 500 — log and ship the response without the cache header.
         logger.warning(f"[discover-cache-headers] failed for {request.path}: {exc}")
     return response
+
+
+def mirrored_playlist_visible(playlist) -> bool:
+    """Owner-or-admin gate for by-id mirrored-playlist routes (IDOR fix).
+
+    Every /api/mirrored-playlists/<id>/* route used to act on any playlist id
+    regardless of who owned it — profile 2 could read, rename, re-point,
+    pipeline-run, or DELETE profile 3's playlists by iterating ids. The list
+    endpoint was always profile-scoped; the by-id ones now match it. Callers
+    answer 404 (not 403) on failure so foreign ids aren't probeable.
+
+    Background/system callers (no request context) resolve to profile 1 via
+    get_current_profile_id() and pass the admin check — automation pipelines
+    keep working exactly as before."""
+    if not playlist:
+        return False
+    try:
+        if bool(getattr(g, "is_admin", True)):
+            return True
+    except RuntimeError:
+        return True   # no request context = system caller
+    try:
+        return int(playlist.get('profile_id') or 1) == int(get_current_profile_id())
+    except (TypeError, ValueError):
+        return False
 
 
 def get_current_profile_id() -> int:
@@ -2757,6 +2784,20 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+def _m3u_entry_path(path):
+    """Final transforms for one m3u entry line: the prefix hot-swap
+    (m3u_export.rewrite_from → rewrite_to, wolf39us — container path in,
+    playback-machine path out) and the '#' comment-guard (#1072). Shared
+    logic lives in core.library.m3u_export.finalize_m3u_entry; this wrapper
+    just feeds it the configured mapping. Empty settings = '#'-guard only."""
+    from core.library.m3u_export import finalize_m3u_entry
+    return finalize_m3u_entry(
+        path,
+        rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+        rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+    )
+
+
 def _regenerate_batch_m3u(batch, tracks):
     """Regenerate M3U file for a completed batch using real library DB paths.
     Called from batch completion handler after all post-processing is done."""
@@ -2819,7 +2860,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = f'{entry_base_path}/{fp}' if entry_base_path else fp
+                path = _m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)
                 lines.append(path)
                 found += 1
             else:
@@ -3007,7 +3048,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = f'{entry_base_path}/{file_path}' if entry_base_path else file_path
+                entry = _m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1
@@ -4253,6 +4294,39 @@ def get_automation_blocks():
     scoped = _auto_blocks.blocks_for_scope('music')
     scoped['known_signals'] = _collect_known_signals()
     return jsonify(scoped)
+
+@app.route('/api/automations/test-notify', methods=['POST'])
+def test_automation_notify():
+    """Fire ONE notification step with sample variables — the builder's Test
+    button. Sends for real (that's the point: prove the webhook/token works)
+    but against sample data, without running any automation."""
+    try:
+        if automation_engine is None:
+            return jsonify({'success': False, 'error': 'Automation engine not running'}), 400
+        data = request.get_json(silent=True) or {}
+        ntype = str(data.get('type') or '')
+        config = data.get('config') or {}
+        variables = {
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'name': 'Test Automation',
+            'run_count': '1',
+            'status': 'completed',
+            'artist': 'Test Artist', 'title': 'Test Track', 'album': 'Test Album',
+            'kind': 'movie', 'quality': '1080p', 'error': 'sample error text',
+        }
+        senders = {
+            'discord_webhook': automation_engine._send_discord_notification,
+            'pushbullet': automation_engine._send_pushbullet_notification,
+            'telegram': automation_engine._send_telegram_notification,
+            'webhook': automation_engine._send_webhook,
+        }
+        sender = senders.get(ntype)
+        if sender is None:
+            return jsonify({'success': False, 'error': f'Cannot test {ntype or "this step"}'}), 400
+        sender(config, variables)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 200
 
 @app.route('/api/mirrored-playlists/list', methods=['GET'])
 def get_mirrored_playlists_list():
@@ -6867,6 +6941,46 @@ def stream_enhanced_search_track():
 
 _music_video_downloads = {}  # {video_id: {status, progress, path, error}}
 
+
+def _clean_music_video_title(raw_title):
+    """Strip YouTube noise from a video title for metadata search + filing.
+
+    Handles the suffix both parenthesized — "(Official Music Video)" — and
+    BARE at the end of the title ("... Fat Official Music Video", the shape
+    fan uploads use constantly; the old parenthesized-only strip left the
+    noise in the search query, which is half of how a video ends up filed
+    under the uploader's channel name). Bare stripping is deliberately
+    conservative: only unambiguous multi-word forms ('official …', 'music
+    video', 'lyric video', 'visualizer'), so a song genuinely titled
+    "Video" or "Video Games" is never eaten."""
+    import re as _re
+    s = _re.sub(
+        r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio'
+        r'|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]',
+        '', raw_title or '', flags=_re.IGNORECASE).strip()
+    s = _re.sub(
+        r'[\s\-–—|]*\b(official\s+(music\s+|lyric\s+)?(video|audio)'
+        r'|music\s+video|lyric\s+video|visualizer)\s*$',
+        '', s, flags=_re.IGNORECASE).strip()
+    return _re.sub(r'\s*-\s*$', '', s).strip()
+
+
+def _parse_music_video_artist_title(raw_title, raw_channel):
+    """Artist/title for filing a music video, from the video's own name.
+
+    'Artist - Title' (hyphen, en or em dash) parses to the real artist —
+    the UPLOADER's channel name is only the last resort for titles with no
+    separator at all, because fan-channel uploads ("Bad Boy Edd") are the
+    norm and filing under them scatters one artist's videos across folders."""
+    import re as _re
+    for sep in (' - ', ' – ', ' — '):
+        if sep in (raw_title or ''):
+            artist, title = raw_title.split(sep, 1)
+            title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
+            title = _clean_music_video_title(title) or title
+            return artist.strip(), title
+    return raw_channel, (_clean_music_video_title(raw_title) or raw_title)
+
 @app.route('/api/music-video/download', methods=['POST'])
 def download_music_video():
     """Download a YouTube video as a music video file to the configured music videos folder."""
@@ -6911,11 +7025,10 @@ def download_music_video():
             artist_name = raw_channel
             track_title = raw_title
             year = ''
+            matched = False
 
-            # Strip common YouTube suffixes for cleaner search
             import re as _re
-            clean_search = _re.sub(r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]', '', raw_title, flags=_re.IGNORECASE).strip()
-            clean_search = _re.sub(r'\s*-\s*$', '', clean_search).strip()
+            clean_search = _clean_music_video_title(raw_title)
 
             try:
                 fallback_client = _get_metadata_fallback_client()
@@ -6932,25 +7045,25 @@ def download_music_video():
                         if name_sim > best_score:
                             best_score = name_sim
                             best = r
-                    if best and best_score >= 0.5:
-                        artist_name = best.artists[0] if best.artists else raw_channel
+                    if best and best_score >= 0.5 and best.artists:
+                        matched = True
+                        artist_name = best.artists[0]
                         track_title = best.name
                         if hasattr(best, 'release_date') and best.release_date:
                             year = str(best.release_date)[:4]
                         logger.info(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
-                    else:
-                        # Parse artist from video title: "Artist - Title" pattern
-                        if ' - ' in raw_title:
-                            parts = raw_title.split(' - ', 1)
-                            artist_name = parts[0].strip()
-                            track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
-                        logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
             except Exception as e:
                 logger.error(f"[Music Video] Metadata lookup failed: {e}")
-                if ' - ' in raw_title:
-                    parts = raw_title.split(' - ', 1)
-                    artist_name = parts[0].strip()
-                    track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
+
+            if not matched:
+                # No confident metadata match — parse 'Artist - Title' from the
+                # video's own name. This must cover EVERY unmatched path
+                # (weak match, lookup crash, and crucially an EMPTY result
+                # list — the old code skipped the parse entirely on zero
+                # results, so the video filed under the uploader's channel:
+                # the '"Weird Al" Yankovic - Fat' → 'bad boy edd/' bug).
+                artist_name, track_title = _parse_music_video_artist_title(raw_title, raw_channel)
+                logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
 
             # Sanitize for filesystem
             def _sanitize(s):
@@ -6962,7 +7075,7 @@ def download_music_video():
                 video_template = '$artist/$title-video'
             safe_artist = _sanitize(artist_name)
             video_path = video_template
-            video_path = video_path.replace('$artistletter', safe_artist[0].upper() if safe_artist else 'A')
+            video_path = video_path.replace('$artistletter', _shared_artist_letter(safe_artist) if safe_artist else 'A')
             video_path = video_path.replace('$artist', safe_artist)
             video_path = video_path.replace('$title', _sanitize(track_title))
             video_path = video_path.replace('$year', str(year) if year else '')
@@ -9874,18 +9987,18 @@ def write_artist_image_to_disk(artist_id):
         source_override = (data.get('source_override') or '').strip().lower() or None
 
         db = get_database()
-        try:
-            artist_id_int = int(artist_id)
-        except (TypeError, ValueError):
+        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
             return jsonify({"success": False, "error": "Invalid artist id"}), 400
 
-        artist_row = db.get_artist(artist_id_int)
+        artist_row = db.get_artist(artist_id)
         if artist_row is None:
             return jsonify({"success": False, "error": "Artist not found"}), 404
 
         # Find a track file on disk so we can derive the artist folder.
         # Walk albums in DB order; first one with a resolvable track wins.
-        albums = db.get_albums_by_artist(artist_id_int)
+        albums = db.get_albums_by_artist(artist_id)
         if not albums:
             return jsonify({"success": False,
                             "error": "No albums for this artist; cannot derive folder."}), 400
@@ -9922,7 +10035,7 @@ def write_artist_image_to_disk(artist_id):
         else:
             try:
                 image_url = _get_artist_image_url(
-                    artist_id_int,
+                    artist_id,
                     source_override=source_override,
                     artist_name=getattr(artist_row, 'name', None),
                 )
@@ -10094,6 +10207,155 @@ def get_artist_top_tracks_endpoint(artist_id):
         return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 
+def _resolve_artist_source_ids(artist_id) -> dict:
+    """Per-source artist ids from the enriched library row, keyed by source.
+
+    Looks the row up by ANY id the frontend might send (library PK or any
+    provider id) and returns every stored provider id, so each source gets
+    ITS OWN id instead of someone else's (which Deezer would happily accept
+    as a different artist). Lifted from the discography endpoint; the
+    gap-fill endpoint shares it."""
+    artist_source_ids = {}
+    try:
+        _db = get_database()
+        _conn = _db._get_connection()
+        try:
+            _cur = _conn.cursor()
+            _cur.execute("""
+                SELECT spotify_artist_id, itunes_artist_id,
+                       deezer_id, musicbrainz_id
+                FROM artists
+                WHERE id = ?
+                   OR spotify_artist_id = ?
+                   OR itunes_artist_id = ?
+                   OR deezer_id = ?
+                   OR musicbrainz_id = ?
+                LIMIT 1
+            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+            _row = _cur.fetchone()
+            if _row:
+                if _row['spotify_artist_id']:
+                    artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
+                if _row['itunes_artist_id']:
+                    artist_source_ids['itunes'] = str(_row['itunes_artist_id'])
+                if _row['deezer_id']:
+                    artist_source_ids['deezer'] = str(_row['deezer_id'])
+                if _row['musicbrainz_id']:
+                    artist_source_ids['musicbrainz'] = str(_row['musicbrainz_id'])
+                logger.info(
+                    f"Discography: resolved per-source IDs for artist_id={artist_id} → "
+                    f"{artist_source_ids}"
+                )
+        finally:
+            _conn.close()
+    except Exception as _id_exc:
+        logger.debug(f"Could not resolve per-source artist IDs for {artist_id}: {_id_exc}")
+    return artist_source_ids
+
+
+@app.route('/api/artist/<artist_id>/discography/gap-fill', methods=['GET'])
+def get_artist_discography_gap_fill(artist_id):
+    """Releases OTHER metadata sources know that the base source's
+    discography doesn't (#1067 — the hybrid/gap-fill view option).
+
+    Strictly additive + conservative: only sources whose ENRICHED per-source
+    artist id we hold are consulted (never a fuzzy name search — the wrong
+    artist's discography as 'gap-fill' would be worse than no feature), each
+    source is fetched with fallback disabled so a failing source contributes
+    nothing instead of double-counting another, and the dedup shows a
+    borderline edition twice rather than merging it wrongly. The base page's
+    own load path is untouched — this endpoint only ever ADDS cards."""
+    try:
+        artist_name = request.args.get('artist_name', '').strip()
+        base_source = (request.args.get('base_source', '') or '').strip().lower()
+
+        artist_source_ids = _resolve_artist_source_ids(artist_id)
+
+        from core.metadata.discography_gapfill import gap_fill_buckets
+        from core.metadata.lookup import MetadataLookupOptions
+        from core.metadata.discography_strict import get_artist_detail_discography
+
+        def _fetch(source, source_artist_id, name=''):
+            # OTHER-source fetches pass NO artist name: the per-source lookup
+            # has an internal search-by-name fallback when the id yields
+            # nothing (album_tracks.get_artist_albums_for_source), and a stale
+            # enriched id must degrade to "no gap-fill from this source" —
+            # never to a name search that could pick the wrong artist. Only
+            # the base fetch keeps the name (mirrors the page's own load).
+            disc = get_artist_detail_discography(
+                source_artist_id,
+                artist_name=name,
+                options=MetadataLookupOptions(
+                    source_override=source,
+                    allow_fallback=False,   # a down source must not answer from another
+                    skip_cache=False,
+                    max_pages=0,
+                    limit=200,
+                    artist_source_ids=artist_source_ids or None,
+                ),
+            )
+            if disc.get('state') != 'results':
+                return None
+            return {'albums': disc.get('albums') or [],
+                    'eps': disc.get('eps') or [],
+                    'singles': disc.get('singles') or []}
+
+        # Resolve the BASE the same way the page did. An explicit base_source
+        # (source-only artist pages) pins it; otherwise fetch with NO override
+        # so ragnarlotus's Library-discography-source setting (#1068 — primary /
+        # automatic / explicit) picks the source exactly like the page's own
+        # load, and read back which source actually answered.
+        if base_source:
+            base = _fetch(base_source, artist_source_ids.get(base_source) or artist_id,
+                          name=artist_name)
+            resolved_base = base_source
+        else:
+            disc = get_artist_detail_discography(
+                artist_id,
+                artist_name=artist_name,
+                options=MetadataLookupOptions(
+                    skip_cache=False, max_pages=0, limit=200,
+                    artist_source_ids=artist_source_ids or None,
+                ),
+            )
+            if disc.get('state') == 'results':
+                base = {'albums': disc.get('albums') or [],
+                        'eps': disc.get('eps') or [],
+                        'singles': disc.get('singles') or []}
+                resolved_base = str(disc.get('source') or '').lower()
+            else:
+                base, resolved_base = None, ''
+
+        if base is None:
+            # No base to diff against — returning gaps would duplicate the page
+            return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
+                            "sources_checked": [], "base_source": resolved_base,
+                            "note": "Base discography unavailable."})
+
+        candidates = [s for s in ('spotify', 'deezer', 'itunes', 'musicbrainz')
+                      if s != resolved_base and artist_source_ids.get(s)]
+        if not candidates:
+            return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
+                            "sources_checked": [], "base_source": resolved_base,
+                            "note": "No other sources have a verified id for this artist yet "
+                                    "(enrichment provides them)."})
+
+        others = {}
+        checked = []
+        for source in candidates:
+            disc = _fetch(source, artist_source_ids[source])
+            if disc is not None:
+                others[source] = disc
+                checked.append(source)
+
+        gaps = gap_fill_buckets(base, others, checked)
+        return jsonify({"success": True, "gaps": gaps,
+                        "sources_checked": checked, "base_source": resolved_base})
+    except Exception as e:
+        logger.error(f"Discography gap-fill failed for {artist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
@@ -10140,41 +10402,7 @@ def get_artist_discography(artist_id):
         #     back to fuzzy name search → may pick wrong artist
         # With server-side resolution, every source gets its OWN stored
         # ID regardless of which one the URL carries.
-        artist_source_ids = {}
-        try:
-            _db = get_database()
-            _conn = _db._get_connection()
-            try:
-                _cur = _conn.cursor()
-                _cur.execute("""
-                    SELECT spotify_artist_id, itunes_artist_id,
-                           deezer_id, musicbrainz_id
-                    FROM artists
-                    WHERE id = ?
-                       OR spotify_artist_id = ?
-                       OR itunes_artist_id = ?
-                       OR deezer_id = ?
-                       OR musicbrainz_id = ?
-                    LIMIT 1
-                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-                _row = _cur.fetchone()
-                if _row:
-                    if _row['spotify_artist_id']:
-                        artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
-                    if _row['itunes_artist_id']:
-                        artist_source_ids['itunes'] = str(_row['itunes_artist_id'])
-                    if _row['deezer_id']:
-                        artist_source_ids['deezer'] = str(_row['deezer_id'])
-                    if _row['musicbrainz_id']:
-                        artist_source_ids['musicbrainz'] = str(_row['musicbrainz_id'])
-                    logger.info(
-                        f"Discography: resolved per-source IDs for artist_id={artist_id} → "
-                        f"{artist_source_ids}"
-                    )
-            finally:
-                _conn.close()
-        except Exception as _id_exc:
-            logger.debug(f"Could not resolve per-source artist IDs for {artist_id}: {_id_exc}")
+        artist_source_ids = _resolve_artist_source_ids(artist_id)
 
         discography = _get_artist_discography(
             artist_id,
@@ -10465,8 +10693,14 @@ def get_artist_art_options(artist_id):
     the library row has one (exact), otherwise a name search on that source.
     Mirrors the album art-options endpoint."""
     try:
+        # #1069 (matvei4iz): artists.id is TEXT since the id-columns migration —
+        # Navidrome/Jellyfin ids are strings ("7dB07x8Q…"), and int() here made
+        # the whole picker 400 for every non-Plex backend. Ids are opaque.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
+            return jsonify({"error": "Invalid artist id"}), 400
         db = get_database()
-        artist_row = db.get_artist(int(artist_id))
+        artist_row = db.get_artist(artist_id)
         if artist_row is None:
             return jsonify({"error": "Artist not found"}), 404
         name = getattr(artist_row, 'name', '') or ''
@@ -10474,7 +10708,7 @@ def get_artist_art_options(artist_id):
         # Key by ROW id, not name: two artists sharing a name must not share
         # a cache slot. Empty results only stick for a minute — a transient
         # source failure used to poison the picker with 'no photos' for 15.
-        cache_key = ('artist', int(artist_id))
+        cache_key = ('artist', artist_id)
         now = time.time()
         with _ART_OPTIONS_CACHE_LOCK:
             hit = _ART_OPTIONS_CACHE.get(cache_key)
@@ -10490,9 +10724,9 @@ def get_artist_art_options(artist_id):
         with _ART_OPTIONS_CACHE_LOCK:
             _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
         return jsonify({"artist_id": artist_id, "count": len(candidates), "candidates": candidates})
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid artist id"}), 400
     except Exception as e:
+        # No blanket (TypeError, ValueError) → "Invalid artist id" anymore —
+        # it mislabeled any deep ValueError as an id problem (#1069).
         logger.error("[artist-art-options] failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
 
@@ -10516,8 +10750,12 @@ def set_artist_art(artist_id):
         if not url:
             return jsonify({"error": "url is required"}), 400
 
+        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
+            return jsonify({"error": "Invalid artist id"}), 400
         db = get_database()
-        artist_row = db.get_artist(int(artist_id))
+        artist_row = db.get_artist(artist_id)
         if artist_row is None:
             return jsonify({"error": "Artist not found"}), 404
         artist_name = getattr(artist_row, 'name', '') or ''
@@ -10538,7 +10776,7 @@ def set_artist_art(artist_id):
         if image_bytes is not None and not _looks_like_image(image_bytes):
             return jsonify({"error": "That URL doesn't point to an image"}), 400
 
-        if not db.set_artist_thumb_url(int(artist_id), url):
+        if not db.set_artist_thumb_url(artist_id, url):
             return jsonify({"error": "Could not update artist"}), 500
 
         # 2. Active media server poster (Plex/Jellyfin have APIs; Navidrome's
@@ -10564,7 +10802,7 @@ def set_artist_art(artist_id):
         disk_written = False
         try:
             from core.library.artist_image import derive_artist_folder, write_artist_jpg
-            albums = db.get_albums_by_artist(int(artist_id)) or []
+            albums = db.get_albums_by_artist(artist_id) or []
             artist_folder = None
             for album in albums:
                 for tr in (db.get_tracks_by_album(album.id) or []):
@@ -10593,13 +10831,13 @@ def set_artist_art(artist_id):
             logger.warning("[set-artist-art] disk write failed: %s", exc)
 
         # Invalidate the candidates cache so a re-open reflects reality.
+        # (#1069: this popped a NAME-keyed entry while the cache stores by ID —
+        # a dead pop, leaving stale candidates for a minute after Apply.)
         with _ART_OPTIONS_CACHE_LOCK:
-            _ART_OPTIONS_CACHE.pop(('artist', artist_name.lower()), None)
+            _ART_OPTIONS_CACHE.pop(('artist', artist_id), None)
 
         return jsonify({"success": True, "artist_id": artist_id, "thumb_url": url,
                         "server_updated": server_updated, "disk_written": disk_written})
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid artist id"}), 400
     except Exception as e:
         logger.error("[set-artist-art] failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -10818,7 +11056,10 @@ def export_library_m3u():
         db = get_database()
         entries = db.get_all_library_tracks_for_export()
         from core.library.m3u_export import build_m3u
-        content = build_m3u(entries, entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '')
+        content = build_m3u(entries,
+                            entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '',
+                            rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+                            rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
         return Response(
             content,
             mimetype='audio/x-mpegurl',
@@ -11356,10 +11597,17 @@ def library_completion_stream():
                         'release_date': item.get('release_date') or item.get('releaseDate'),
                     }
 
+                    # Per-item source: gap-fill ("Other Sources") cards each
+                    # belong to their OWN source — their ids only mean anything
+                    # against it (#1071). Base-discography items carry no
+                    # per-item source and keep the request-level one.
+                    item_source = (str(item.get('source') or '').strip().lower()
+                                   or source_override)
+
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
+                        result = check_single_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums)
+                        result = check_album_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums)
 
                     result['id'] = item['id']
                     result['category'] = category
@@ -16994,7 +17242,7 @@ def _apply_path_template(template: str, context: dict) -> str:
         'albumartist': album_artist_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
         'playlist': clean_context.get('playlist_name', ''),
-        'artistletter': (clean_context.get('artist', 'U') or 'U')[0].upper(),
+        'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
         'artist': clean_context.get('artist', 'Unknown Artist'),
         'album': clean_context.get('album', 'Unknown Album'),
         'title': clean_context.get('title', 'Unknown Track'),
@@ -17013,7 +17261,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
-    result = result.replace('$artistletter', (clean_context.get('artist', 'U') or 'U')[0].upper())
+    result = result.replace('$artistletter', _shared_artist_letter(clean_context.get('artist', 'U')))
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
@@ -17648,7 +17896,7 @@ def is_watchlist_actually_scanning():
 
     return True
 
-def _process_wishlist_automatically(automation_id=None):
+def _process_wishlist_automatically(automation_id=None, apply_backoff=None):
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
     from core.wishlist_service import get_wishlist_service
@@ -17692,7 +17940,8 @@ def _process_wishlist_automatically(automation_id=None):
         profile_id=1,
     )
 
-    _process_wishlist_automatically_impl(runtime, automation_id=automation_id)
+    _process_wishlist_automatically_impl(runtime, automation_id=automation_id,
+                                         apply_backoff=apply_backoff)
 
 # ===============================
 # == DATABASE UPDATER API      ==
@@ -17748,7 +17997,10 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
                 or config_manager.get('soulseek.transfer_path', './Transfer')
             _dest = docker_resolve_path(_dest)
             _base = config_manager.get('m3u_export.entry_base_path', '') or ''
-            _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
+            _written = write_library_m3u(
+                _entries, _dest, entry_base_path=_base,
+                rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
+                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
                 m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"
@@ -18761,6 +19013,20 @@ def remove_album_from_wishlist():
         return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error removing album from wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/remove-artist', methods=['POST'])
+def remove_artist_from_wishlist():
+    """Remove every wishlist track by one artist (#1065 — one click instead
+    of unchecking a whole discography album by album)."""
+    try:
+        data = request.get_json() or {}
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_remove_artist_from_wishlist(
+            runtime, artist_name=data.get('artist_name'))
+        return jsonify(payload), status_code
+    except Exception as e:
+        logger.error(f"Error removing artist from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/wishlist/remove-batch', methods=['POST'])
@@ -28422,6 +28688,9 @@ def delete_profile(profile_id):
             return jsonify({'success': False, 'error': 'Profile not found'}), 404
 
         success = database.delete_profile(profile_id)
+        if success:
+            from api.profiles import _sweep_video_profile_data
+            _sweep_video_profile_data(profile_id)
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -37218,8 +37487,27 @@ def get_mirrored_playlists_endpoint():
         logger.error(f"Error getting mirrored playlists: {e}")
         return jsonify({"error": str(e)}), 500
 
+def _mirror_scope_profile_id():
+    """None for admin, else the active profile.
+
+    Merged from upstream/dev's ``mirrored_playlist_visible`` admin bypass: an
+    admin can read/manage any profile's mirror, matching the parallel
+    isolation-audit work upstream did on the same by-id mirror routes. ``None``
+    is the existing "trusted caller who already resolved the mirror" scope
+    (see ``_mirror_owner_clause``), so admin gets the unscoped read/write on a
+    playlist_id that a non-admin would only get after passing the ownership
+    check below.
+    """
+    try:
+        is_admin = bool(getattr(g, "is_admin", True))
+    except RuntimeError:
+        is_admin = True  # no request context = system caller
+    return None if is_admin else get_current_profile_id()
+
+
 def _owned_mirrored_playlist(database, playlist_id):
-    """The mirror ``playlist_id`` IF it belongs to the active SoulSync profile.
+    """The mirror ``playlist_id`` IF it belongs to the active SoulSync profile,
+    or any mirror when the caller is admin.
 
     Request handlers must never look a mirror up by primary key alone: the ids
     are small integers and the synthetic ``auto_mirror_<pk>`` form is guessable,
@@ -37227,7 +37515,7 @@ def _owned_mirrored_playlist(database, playlist_id):
     delete another profile's mirror — and read its Quality Profile (P0-01).
     A foreign mirror is reported exactly like a missing one.
     """
-    return database.get_mirrored_playlist(playlist_id, profile_id=get_current_profile_id())
+    return database.get_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id())
 
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])
@@ -37292,7 +37580,7 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
             playlist_id,
             normalized.source_playlist_id,
             normalized.description,
-            profile_id=get_current_profile_id(),
+            profile_id=_mirror_scope_profile_id(),
         )
         if not ok:
             return jsonify({"error": "Failed to update source reference"}), 500
@@ -37319,7 +37607,7 @@ def update_mirrored_playlist_custom_name_endpoint(playlist_id):
 
         # `custom_name` may be '' / null to CLEAR the alias.
         ok = database.set_mirrored_playlist_custom_name(
-            playlist_id, data.get('custom_name'), profile_id=get_current_profile_id()
+            playlist_id, data.get('custom_name'), profile_id=_mirror_scope_profile_id()
         )
         if not ok:
             return jsonify({"error": "Failed to update name"}), 500
@@ -37341,7 +37629,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
-        profile_id = get_current_profile_id()
+        profile_id = _mirror_scope_profile_id()
         playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
@@ -37621,6 +37909,8 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
     """Return the latest manual pipeline progress for a mirrored playlist."""
     try:
+        if not mirrored_playlist_visible(get_database().get_mirrored_playlist(playlist_id)):
+            return jsonify({"error": "Playlist not found"}), 404
         state = _snapshot_playlist_pipeline_state(playlist_id)
         if not state:
             return jsonify({
@@ -37676,7 +37966,7 @@ def delete_mirrored_playlist_endpoint(playlist_id):
     """Delete a mirrored playlist."""
     try:
         database = get_database()
-        if database.delete_mirrored_playlist(playlist_id, profile_id=get_current_profile_id()):
+        if database.delete_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id()):
             return jsonify({"success": True})
         return jsonify({"error": "Playlist not found"}), 404
     except Exception as e:
@@ -37688,7 +37978,7 @@ def clear_mirrored_discovery_endpoint(playlist_id):
     """Clear discovery data for all tracks in a mirrored playlist, including discovery cache."""
     try:
         database = get_database()
-        profile_id = get_current_profile_id()
+        profile_id = _mirror_scope_profile_id()
         if not _owned_mirrored_playlist(database, playlist_id):
             return jsonify({"error": "Playlist not found"}), 404
 
@@ -37926,7 +38216,7 @@ def prepare_mirrored_discovery(playlist_id):
     """Register a mirrored playlist into youtube_playlist_states so the YouTube discovery pipeline can run."""
     try:
         database = get_database()
-        profile_id = get_current_profile_id()
+        profile_id = _mirror_scope_profile_id()
         playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
@@ -38113,6 +38403,8 @@ def prepare_mirrored_discovery(playlist_id):
 def retry_failed_mirrored_discovery(playlist_id):
     """Re-run discovery only for tracks that failed or are pending in a mirrored playlist."""
     try:
+        if not mirrored_playlist_visible(get_database().get_mirrored_playlist(playlist_id)):
+            return jsonify({"error": "Playlist not found"}), 404
         url_hash = f"mirrored_{playlist_id}"
         state = youtube_playlist_states.get(url_hash)
         if not state:
@@ -39637,6 +39929,10 @@ try:
     # Store refs for WebSocket push loop
     repair_worker._progress_lock_ref = repair_job_progress_lock
     repair_worker._progress_states_ref = repair_job_progress_states
+    # Bridge repair events into the automation engine ('Maintenance Finding
+    # Raised' / 'Maintenance Scan Done' triggers — music parity with video)
+    if automation_engine is not None:
+        repair_worker._event_emit = automation_engine.emit
     repair_worker.start()
     logger.info("Repair worker initialized and started")
 except Exception as e:
@@ -39907,6 +40203,53 @@ def repair_findings_bulk_fix():
     except Exception as e:
         logger.error(f"Error bulk fixing findings: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/bulk-fix-start', methods=['POST'])
+def repair_findings_bulk_fix_start():
+    """Start a background bulk-fix run (Fix All at library scale).
+
+    The synchronous /bulk-fix endpoint runs its loop inside the request,
+    which times out the browser at thousands of findings while the server
+    quietly keeps working. This returns immediately; poll
+    /api/repair/bulk-fix/status for progress."""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        data = request.get_json(silent=True) or {}
+        result = repair_worker.start_bulk_fix(
+            job_id=data.get('job_id') or None,
+            severity=data.get('severity') or None,
+            finding_ids=data.get('ids') or None,
+            fix_action=data.get('fix_action') or None,
+        )
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error starting background bulk fix: {e}")
+        return jsonify({'started': False, 'error': str(e)}), 500
+
+@app.route('/api/repair/bulk-fix/status', methods=['GET'])
+def repair_bulk_fix_status():
+    """Progress of the current (or most recent) background bulk fix."""
+    try:
+        if repair_worker is None:
+            return jsonify({'running': False}), 200
+        return jsonify(repair_worker.get_bulk_fix_status()), 200
+    except Exception as e:
+        logger.error(f"Error getting bulk fix status: {e}")
+        return jsonify({'running': False, 'error': str(e)}), 500
+
+@app.route('/api/repair/bulk-fix/stop', methods=['POST'])
+def repair_bulk_fix_stop():
+    """Stop a running background bulk fix after its current item."""
+    try:
+        if repair_worker is None:
+            return jsonify({'success': False}), 400
+        repair_worker.stop_bulk_fix()
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.error(f"Error stopping bulk fix: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/repair/findings/bulk', methods=['POST'])
 def repair_findings_bulk():
@@ -40718,15 +41061,42 @@ def handle_download_unsubscribe(data):
 
 @socketio.on('profile:join')
 def handle_profile_join(data):
-    """Client joins a profile room for scoped WebSocket emits (watchlist/wishlist counts)."""
-    profile_id = data.get('profile_id')
-    if profile_id:
-        # Leave any previous profile rooms
-        old_id = data.get('old_profile_id')
-        if old_id:
-            leave_room(f'profile:{old_id}')
-        join_room(f'profile:{profile_id}')
-        logger.debug(f"Client joined profile room: profile:{profile_id}")
+    """Client joins a profile room for scoped WebSocket emits (watchlist/wishlist counts).
+
+    The room is derived from the SESSION, not the payload — the socket
+    handshake carries the Flask session cookie, so the server already knows
+    which profile this client is. Trusting data['profile_id'] let any
+    connected client join any profile's room and receive their scoped pushes
+    (profile-isolation audit). Admins may join any room (their UI legitimately
+    watches all); everyone else gets exactly their own."""
+    requested = data.get('profile_id')
+    pid, is_admin = _ws_session_profile()
+    target = requested if (is_admin and requested) else pid
+    if target != requested and requested:
+        logger.warning("profile:join — client asked for profile %s but session is %s; "
+                       "joining the session's room", requested, pid)
+    old_id = data.get('old_profile_id')
+    if old_id:
+        leave_room(f'profile:{old_id}')
+    join_room(f'profile:{target}')
+    logger.debug(f"Client joined profile room: profile:{target}")
+
+
+def _ws_session_profile():
+    """(profile_id, is_admin) for the CURRENT socket's session — server-side
+    truth for room joins. Fail-closed to the session profile; profile 1 or an
+    is_admin-flagged profile counts as admin."""
+    try:
+        pid = int(session.get('profile_id', 1) or 1)
+    except (TypeError, ValueError):
+        pid = 1
+    if pid == 1:
+        return pid, True
+    try:
+        profile = get_database().get_profile(pid)
+        return pid, bool((profile or {}).get('is_admin', False))
+    except Exception:
+        return pid, False
 
 # --- Phase 2: Dashboard emitters ---
 
@@ -41293,10 +41663,37 @@ def handle_logs_unsubscribe(data):
     leave_room('logs:live')
 
 
+def _playlist_room_allowed(raw_id, spid, is_admin) -> bool:
+    """May THIS session join a playlist-keyed push room (sync:/discovery:)?
+
+    Ids that resolve to a mirrored playlist get the owner-or-admin rule (the
+    push-side twin of the HTTP IDOR fix). Every other key shape — YouTube url
+    hashes, Beatport chart ids, 'mirrored_<n>' composites, ids with no row
+    behind them — joins exactly as before: those rooms carry no per-profile
+    data (or no data at all), and refusing them would break legit
+    subscriptions whose key shapes aren't numeric."""
+    s = str(raw_id)
+    if s.isdigit():
+        n = int(s)
+    elif s.startswith('mirrored_') and s[len('mirrored_'):].isdigit():
+        n = int(s[len('mirrored_'):])
+    else:
+        return True
+    try:
+        pl = get_database().get_mirrored_playlist(n)
+    except Exception:
+        return True
+    if not pl:
+        return True   # no row = empty room, nothing to leak
+    return is_admin or int(pl.get('profile_id') or 1) == spid
+
+
 @socketio.on('sync:subscribe')
 def handle_sync_subscribe(data):
+    _spid, _is_admin = _ws_session_profile()
     for pid in data.get('playlist_ids', []):
-        join_room(f'sync:{pid}')
+        if _playlist_room_allowed(pid, _spid, _is_admin):
+            join_room(f'sync:{pid}')
 
 @socketio.on('sync:unsubscribe')
 def handle_sync_unsubscribe(data):
@@ -41305,8 +41702,10 @@ def handle_sync_unsubscribe(data):
 
 @socketio.on('discovery:subscribe')
 def handle_discovery_subscribe(data):
+    _spid, _is_admin = _ws_session_profile()
     for pid in data.get('ids', []):
-        join_room(f'discovery:{pid}')
+        if _playlist_room_allowed(pid, _spid, _is_admin):
+            join_room(f'discovery:{pid}')
 
 @socketio.on('discovery:unsubscribe')
 def handle_discovery_unsubscribe(data):
