@@ -3482,17 +3482,16 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.6': [
-        { date: 'July 2026 · 3.1.6' },
-        { title: 'Video files land safely (the skipping-playback fix)', desc: 'downloads copied straight to their final library filename, so Plex/Jellyfin could index a half-written file — playback then skipped like corruption, and an interrupted copy left a truncated file that looked complete. Files now land under a hidden temp name, get their byte count verified, and appear at the real name in one atomic rename. A move never deletes its source until the destination is proven whole.' },
-        { title: 'Automations, next level', desc: 'custom webhook payload templates (write the exact JSON gotify/ntfy/Slack/Home Assistant want, with {variable} tags), per-step conditions ("only ping Discord when status is error"), numeric condition operators, a Send-test button on every notification step, timezone-aware schedules, and a builder bug sweep (monthly schedules configurable + real countdowns, proper labels everywhere). New triggers too: music Maintenance Finding/Scan events, video Release Grabbed (Sonarr\'s On Grab) and Request Filed/Approved.' },
-        { title: 'Automations page redesigned', desc: 'one clean uniform card language across music and video: status rail with a live pulsing orb, color-coded WHEN → DO → THEN pipeline chips, quiet ghost controls, live progress with a terminal-style log, a command strip with the master switch, and a rebuilt builder canvas with glowing drop slots.' },
-        { title: 'Cross-source ownership on discographies (#1071)', desc: 'an album you own no longer shows as missing just because the viewing source dates it differently — when a card\'s id matches the enrichment id stored on your local album, that\'s identity proof and OWNED lights up. "Other Sources" cards get real ownership checks too.' },
-        { title: 'Artist letter "#" folder (#1072)', desc: 'opt-in file-organization toggle: artists starting with digits, symbols or non-Latin scripts all sort into one "#" folder instead of one folder per character; accented letters fold to their base letter (Édith Piaf → E). Off by default — nothing changes unless you flip it.' },
-        { title: 'M3U path prefix rewrite', desc: 'generate playlists inside a container, play them anywhere: a new setting hot-swaps a path prefix on every m3u entry (/data/media → M:/media) so the file plays directly on the machine that mounts the same storage elsewhere. Plus a guard so entries can never start with "#" (players would read them as comments).' },
-        { title: 'Video detail fixes', desc: 'episode action buttons (auto search / manual search / wishlist) never disappear behind a "Downloaded" badge anymore, and Grab Season sends the show poster along so the Downloads page stops showing art-less placeholder orbs.' },
-        { title: 'Music video filing', desc: 'a music video downloaded from a fan channel files under the real artist parsed from the title, not the uploader\'s channel name — "bad boy edd" folders are over.' },
-        { title: 'Earlier versions', desc: '3.1.5 made chat best-in-class and added the discography source picker + gap-fill. 3.1.4 added the Comma Artist Splitter + ReplayGain targets. 3.1.3 added record-label following. 3.1.2 brought the chat page.' },
+    '3.1.7': [
+        { date: 'July 2026 · 3.1.7' },
+        { title: 'The room jukebox', desc: 'listen together in any chat room. paste a YouTube link or search, the room votes on what plays next, and everyone who tunes in hears the same track at the same spot. no server runs it — every SoulSync client reduces the same hidden message stream to the same queue, so it stays in sync on its own.' },
+        { title: 'Jukebox, fully loaded', desc: 'vote to skip the current track, thumbnails everywhere with a now-playing progress bar and an "up next" highlight, recently-played with one-click requeue, pull your own submission back out, an audio-only toggle + a local volume slider, and auto-DJ — flip it on and the queue keeps itself fed with related tracks when it runs dry.' },
+        { title: 'Chat file sharing', desc: 'upload a file or pick a track straight from your library, and it lands in chat as a rich card you can preview inline. powered by filepost.dev (drop in your API key on the chat settings).' },
+        { title: 'Polls, pins, topics, presence', desc: 'ask the room a question with live vote bars, 📌 any message to a shared board, set a room topic, see typing indicators, and a ♫ next to whoever\'s tuned into the jukebox.' },
+        { title: 'Slash commands', desc: 'type / in the composer for autocomplete: /play, /skip, /tune, /topic, /poll, /pin, /gif, /shrug. plus the chat modals got rebuilt to match SoulSync\'s actual design instead of the old flat gray.' },
+        { title: 'HiFi failover (#1073)', desc: 'HiFi requests that hit a rate limit or a blocked instance now rotate to another instance instead of just failing — the way the monochrome instances do. thanks Lain2077.' },
+        { title: 'Track Repair, version + disc aware (#1075)', desc: 'repair stripped "(Why Us? Version)"-style qualifiers before matching, so different versions of a song looked identical and it grabbed the wrong disc\'s copy — the full title breaks ties now. multi-disc repairs also write the disc tag (so per-disc numbering can\'t create duplicate track numbers), and the change tells you when a number is disc-relative: "Track number: 1 → 10 (disc 2 of 3)". thanks Lain2077. heads up: multi-disc albums missing disc tags will show new findings — that\'s the fix tagging the whole album.' },
+        { title: 'Earlier versions', desc: '3.1.6 made video downloads land atomically (the skipping-playback fix) + redesigned automations. 3.1.5 made chat best-in-class + added the discography source picker. 3.1.4 added the Comma Artist Splitter. 3.1.3 added record-label following.' },
     ],
 };
 
@@ -3523,19 +3522,29 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.6: the safe-landings + automations release",
-        description: "video downloads land atomically (the skipping-playback corruption fix), the automations system gets custom webhook payloads, per-step conditions and new triggers under a full visual redesign, discography ownership stops being source-locked, and file organization learns the '#' folder.",
+        title: "3.1.7: the chat jukebox release",
+        description: "chat turns into a place you actually hang out — a shared room jukebox you listen to together and vote on, file sharing, polls, pins, typing indicators, slash commands. plus a hifi failover fix and a version + disc aware track repair.",
         features: [
-            "video files land safely: downloads used to copy straight to their final library filename, so your media server could index a half-written file (playback skipped like corruption) and an interrupted copy left a truncated file that looked complete. files now land under a hidden temp name, get byte-verified, and appear atomically — and a move never deletes its source until the destination is proven whole",
-            "automations, next level: custom webhook payload templates with {variable} tags (write the exact JSON gotify/ntfy/slack/home assistant want), per-step conditions ('only ping discord when status is error'), numeric operators, a send-test button on every notification step, timezone-aware schedules, and new triggers — music maintenance findings/scans, video release-grabbed (sonarr's on-grab) and request filed/approved",
-            "automations page redesigned: one uniform card language on both sides — status rail with a live pulsing orb, color-coded when → do → then pipeline chips, quiet ghost controls, live progress with a terminal-style log, and a rebuilt builder canvas with glowing drop slots",
-            "cross-source ownership (#1071, thanks QT3496): an album you own shows OWNED no matter which metadata source you view the artist through — enrichment ids are identity proof that beats edition-date differences, and 'other sources' cards get real ownership checks",
-            "the '#' folder (#1072, thanks QT3496): opt-in toggle groups digit/symbol/non-latin artists into one '#' folder for $artistletter templates; accents fold to their base letter (édith piaf → E). off by default",
-            "m3u portability (thanks wolf39us): a path-prefix rewrite setting turns container paths into playback-machine paths on every generated playlist (/data/media → M:/media), plus a guard so no entry can ever start with '#' and get skipped as a comment",
-            "video detail fixes: episode action buttons never vanish behind a downloaded badge, and grab season carries the show poster so the downloads page stops showing placeholder orbs",
-            "music videos file under the real artist parsed from the title, not the uploader's fan-channel name",
+            "the room jukebox: listen to music together in any chat room. paste a youtube link or search, the room votes on what plays next, and everyone who tunes in hears the same track at the same spot. no server runs it — every soulsync client folds the same hidden message stream into the same queue, so it stays in sync on its own",
+            "jukebox, fully loaded: vote to skip (majority of listeners), thumbnails everywhere with a now-playing progress bar and an 'up next' highlight, recently-played with one-click requeue, pull your own submission back out, an audio-only toggle + a local volume slider, and auto-dj that keeps the queue fed with related tracks when it runs dry",
+            "chat file sharing (filepost.dev): upload a file or pick a track straight from your library, and it drops in chat as a rich card you can preview inline",
+            "polls, pins, topics, presence: ask the room a question with live vote bars, 📌 any message to a shared board, set a room topic, see who's typing, and a ♫ next to whoever's tuned into the jukebox",
+            "slash commands: /play /skip /tune /topic /poll /pin /gif /shrug with autocomplete — plus the chat modals rebuilt to match soulsync's real design instead of the old flat gray",
+            "hifi failover (#1073, thanks Lain2077): hifi requests that hit a rate limit or a blocked instance rotate to another instance instead of failing, like the monochrome instances do",
+            "track repair, version + disc aware (#1075, thanks Lain2077): repair used to strip '(Why Us? Version)'-style qualifiers before matching, so different versions of a song looked identical and it grabbed the wrong disc's copy — the full title breaks ties now. multi-disc repairs also write the disc tag so per-disc numbering can't create duplicate track numbers, and the change tells you when a number is disc-relative ('track number: 1 → 10 (disc 2 of 3)')",
         ],
-        usage_note: "webhook payload templates + per-step conditions live on each notification step in the automation builder. the '#' folder toggle and m3u rewrite are under settings → file organization / m3u export.",
+        usage_note: "the jukebox controls live in the chat page header (open a room to see them). drop your filepost.dev API key on the chat settings cog to enable file sharing. heads up: multi-disc albums missing disc tags will show new Track Repair findings after this update — that's the fix tagging the whole album.",
+    },
+    {
+        title: "Earlier in 3.1.6 — the safe-landings + automations release",
+        description: "video downloads land atomically (the skipping-playback corruption fix), automations get custom webhook payloads + per-step conditions + new triggers under a full page redesign, discography ownership stops being source-locked, and file organization learns the '#' folder.",
+        features: [
+            "video files land safely: downloads land under a hidden temp name, get byte-verified, and appear atomically — no more half-written files indexed as skipping/corrupt, and a move never deletes its source until the destination is proven whole",
+            "automations, next level: custom webhook payload templates with {variable} tags, per-step conditions, numeric operators, a send-test button, timezone-aware schedules, and new triggers (maintenance findings/scans, video release-grabbed + request filed/approved) — all under a rebuilt uniform card + builder design",
+            "cross-source ownership (#1071, thanks QT3496): an album you own shows OWNED no matter which metadata source you view the artist through",
+            "the '#' folder (#1072, thanks QT3496) + m3u path-prefix portability (thanks wolf39us), both opt-in",
+            "video detail fixes (episode buttons never vanish, grab-season carries the poster) + music videos file under the real artist, not the fan-channel name",
+        ],
     },
     {
         title: "Earlier in 3.1.5 — the chat + discography release",
