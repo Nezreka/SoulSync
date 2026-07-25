@@ -1722,6 +1722,7 @@
                 renderUsers(res.body.users);
                 _ingestProtocol(res.body.protocol);
                 _sendJoinBeacon();
+                _jbxWatchdog();   // drive the queue even with the panel closed
             });
         } else {
             work = getJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser))
@@ -2763,6 +2764,15 @@
         return Math.max(1, Math.ceil(n / 2));
     }
 
+    function _jbxHasListeners() {
+        // Is anyone actually listening? Counts ourself the instant we tune in
+        // (before our own jbx.tune echoes back). Gates auto-DJ so an unwatched
+        // room never generates an endless stream of tracks nobody hears.
+        if (state.jukebox.tunedIn) return true;
+        var CP = window.ChatProtocol;
+        return !!(CP && Object.keys(CP.reduceTuned(_roomEvents())).length);
+    }
+
     function renderJukebox() {
         var panel = q('[data-chat-jukebox]');
         if (!panel) return;
@@ -2931,7 +2941,13 @@
     // tab, network), ANY capable client kicks the queue after 45s — a rare
     // double-start converges (latest now wins, same track either way).
     function _jbxWatchdog() {
-        if (!state.jukebox.open) return;
+        // Drives the shared queue whenever we're viewing a room — NOT gated on
+        // the jukebox panel being open, so the elected DJ advances the room
+        // even with the panel closed (else the queue stalled until a 45s
+        // starvation fallback, or froze if the DJ never opened the panel).
+        // Called from the 5s panel timer AND the 4s room refresh; both are
+        // already behind pageVisible, so a backgrounded tab never DJs.
+        if (state.view !== 'room') return;
         var st = _jbxState();
         var elapsed = _jbxElapsed(st.now);
         // A tuned-in client asks the PLAYER for the truth — pasted links have
@@ -2948,7 +2964,10 @@
         var stale = !st.now || playerEnded || skipped ||
             (effD && elapsed !== null && elapsed > effD + 8) ||
             (!effD && elapsed !== null && elapsed > 900);   // untuned + unknown length: 15-min cap
-        if (!st.queue.length && st.radio && _jbxIsDj()) _jbxAutoQueue(st);
+        // Radio only refills for an audience — an empty, unwatched room must
+        // not spin up an endless YouTube stream nobody hears. (Advancing an
+        // EXISTING queue below is unconditional: a finite queue just drains.)
+        if (!st.queue.length && st.radio && _jbxIsDj() && _jbxHasListeners()) _jbxAutoQueue(st);
         if (!st.queue.length || !stale) { state.jukebox.starvedAt = 0; return; }
         if (_jbxIsDj()) { _jbxAdvance(st); return; }
         if (!state.jukebox.starvedAt) {

@@ -261,3 +261,30 @@ def test_auto_dj_radio_wiring():
     assert "jbx.radio" in proto and "entry.auto = true" in proto
     html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     assert "data-chat-jbx-radio" in html
+
+
+def test_watchdog_drives_queue_with_panel_closed():
+    """Correctness pass (Boulder): advancing must not depend on the DJ having
+    the jukebox PANEL open. The watchdog gates on being in a room (not
+    panel-open) and is ticked from the 4s room refresh, so the elected DJ
+    starts/advances the queue even with the panel closed — otherwise the
+    queue stalled until a 45s starvation fallback, or froze entirely."""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    wd = js[js.index("function _jbxWatchdog"):js.index("function _jbxAutoQueue")]
+    assert "if (state.view !== 'room') return;" in wd     # room-view, not panel-open
+    assert "if (!state.jukebox.open) return;" not in wd    # the old gate is gone
+    # ticked from the room refresh (which itself is behind pageVisible + room)
+    refresh_room = js[js.index("_sendJoinBeacon();"):js.index("_sendJoinBeacon();") + 200]
+    assert "_jbxWatchdog();" in refresh_room
+
+
+def test_radio_refill_requires_a_listener():
+    """Auto-DJ must not generate an endless stream in an unwatched room —
+    radio refill is gated on someone being tuned in. (Advancing an existing
+    finite queue stays unconditional; it just drains.)"""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    wd = js[js.index("function _jbxWatchdog"):js.index("function _jbxAutoQueue")]
+    assert "st.radio && _jbxIsDj() && _jbxHasListeners()" in wd
+    assert "function _jbxHasListeners" in js
+    fn = js[js.index("function _jbxHasListeners"):js.index("function _jbxHasListeners") + 600]
+    assert "state.jukebox.tunedIn" in fn and "reduceTuned(_roomEvents())" in fn
