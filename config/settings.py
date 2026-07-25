@@ -457,7 +457,19 @@ class ConfigManager:
             "plex": {
                 "base_url": "",
                 "token": "",
-                "auto_detect": True
+                "auto_detect": True,
+                # Read timeout (seconds) for every Plex HTTP request. A deep
+                # scan enumerates the whole library in 100-item pages (plexapi
+                # batches internally); on a big library or a slow/remote server
+                # a single page can exceed the old hard-coded 15s and the scan
+                # died with "0 artists". 30s gives large libraries room without
+                # making a genuinely-dead server hang too long.
+                "request_timeout_seconds": 30,
+                # How many times a bulk library enumeration (artists / albums /
+                # tracks) is retried on a transient failure before giving up.
+                # plexapi has no per-page retry — one slow page used to zero the
+                # whole scan. 0 disables retries (original behavior).
+                "scan_retries": 2,
             },
             "jellyfin": {
                 "base_url": "",
