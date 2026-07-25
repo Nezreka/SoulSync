@@ -1055,28 +1055,68 @@ def create_blueprint() -> Blueprint:
         r"\((?:[^)]*\b(?:official|lyric|lyrics|audio|video|visualizer|hd|4k|mv|remaster[^)]*)\b[^)]*)\)"
         r"|\[[^\]]*\]", _re.I)
 
-    def _radio_split(raw):
-        """('artist', 'track') from a YouTube-style title. Artist may be ''."""
+    # Plenty of what gets pasted isn't a song at all — mixes, DJ sets, genre
+    # essays ("this is what deep ambient techno is supposed to feel like |
+    # PART II"). Those have no artist to branch from, but they DO have a genre,
+    # which is the better thing to follow anyway.
+    _RADIO_MIXY = _re.compile(
+        r"\b(mix|mixtape|set|dj\s*set|liveset|live\s*set|playlist|compilation|"
+        r"session|sessions|radio|episode|ep\.?\s*\d|vol\.?\s*\d|part\s+\w+|pt\.?\s*\d|"
+        r"hour|hours|minutes|continuous|mixed\s+by|selected\s+by|full\s+album)\b", _re.I)
+    # phrase-y titles that are describing a feeling/genre, not naming a track
+    _RADIO_ESSAY = _re.compile(
+        r"\b(this is what|sounds? like|feel like|feels like|music (?:to|for)|"
+        r"songs? (?:to|for)|when you|that make)\b", _re.I)
+    _RADIO_STOP = _re.compile(
+        r"\b(this|is|what|are|the|a|an|of|to|for|and|you|your|when|it|its|"
+        r"supposed|feel|feels|like|sounds?|music|songs?|track|tracks|"
+        r"mix|mixtape|set|playlist|compilation|session|sessions|radio|"
+        r"part|pt|vol|volume|episode|full|album|best|top|new|old|dj|"
+        r"hour|hours|minute|minutes|continuous|official|video|audio|"
+        # roman numerals trailing a series title ("… | PART II") would other-
+        # wise poison the tag lookup ("deep ambient techno II" matches nothing)
+        r"i{1,3}|iv|v|vi{1,3}|ix|x)\b", _re.I)
+
+    def _radio_parse(raw):
+        """('track'|'vibe', artist, track, vibe) from a YouTube-style title.
+
+        'track' → a real song we can branch from by artist/track.
+        'vibe'  → a mix/genre video; follow its GENRE instead.
+        """
         t = _RADIO_NOISE.sub(" ", str(raw or ""))
         t = _re.sub(r"\s+", " ", t).strip()
-        for sep in (" - ", " – ", " — ", " | ", " ~ "):
-            if sep in t:
-                left, right = t.split(sep, 1)
-                return left.strip()[:80], right.strip()[:80]
-        return "", t[:80]
+        if not t:
+            return "vibe", "", "", ""
+        mixy = bool(_RADIO_MIXY.search(t) or _RADIO_ESSAY.search(t))
+        # Only a dash separates artist from track. '|' and '~' are YouTube title
+        # decoration ("... | PART II") and must never be read as an artist.
+        if not mixy:
+            for sep in (" - ", " – ", " — "):
+                if sep in t:
+                    left, right = t.split(sep, 1)
+                    left, right = left.strip()[:80], right.strip()[:80]
+                    # An artist name is short. A sentence on the left means this
+                    # is a phrase, not "Artist - Track".
+                    if left and right and len(left) <= 40 and len(left.split()) <= 6:
+                        return "track", left, right, ""
+                    break
+        # Vibe: strip the filler words and keep the genre-ish remainder.
+        words = [w for w in _re.split(r"[^A-Za-z0-9']+", t) if w]
+        keep = [w for w in words if not _RADIO_STOP.fullmatch(w) and not w.isdigit()]
+        return "vibe", "", "", " ".join(keep[:6])[:80]
 
     @bp.route("/api/chat/jukebox/radio", methods=["POST"])
     def chat_jukebox_radio():
         if not _can_send():
             return jsonify({"error": "Chat sending is admin-only on this server"}), 403
         body = request.get_json(silent=True) or {}
-        artist, track = _radio_split(body.get("title"))
+        kind, artist, track, vibe = _radio_parse(body.get("title"))
         avoid = set()
         for x in (body.get("avoid") or [])[:80]:
             s = str(x or "").strip().lower()
             if s:
                 avoid.add(s)
-        if not artist and not track:
+        if not artist and not track and not vibe:
             return jsonify({"query": None, "why": "no seed"})
 
         def _fresh(a, t=""):
@@ -1097,6 +1137,22 @@ def create_blueprint() -> Blueprint:
                 lastfm = LastFMClient(api_key=_key)
         except Exception:   # noqa: BLE001 - radio degrades, never breaks the room
             logger.debug("chat radio: lastfm unavailable", exc_info=True)
+
+        # 0) VIBE seeds (a mix, a DJ set, a "this is what X feels like" video).
+        # There's no artist to branch from, but the GENRE is the better thread
+        # to pull anyway: ask Last.fm who defines that tag and play them.
+        if kind == "vibe" and vibe:
+            if lastfm:
+                try:
+                    for cand in (lastfm.get_tag_top_artists(vibe, limit=40) or []):
+                        ca = str(cand.get("name") or "")
+                        if _fresh(ca):
+                            return jsonify({"query": ca, "why": "%s" % vibe})
+                except Exception:   # noqa: BLE001
+                    logger.debug("chat radio: tag lookup failed", exc_info=True)
+            # Unknown tag (or no Last.fm): stay in the same lane by searching
+            # for more of the same KIND of thing rather than the same video.
+            return jsonify({"query": "%s mix" % vibe, "why": vibe})
 
         # 1) similar TRACKS — the closest thing to a real station
         if lastfm and artist and track:

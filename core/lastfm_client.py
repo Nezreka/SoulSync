@@ -419,6 +419,24 @@ class LastFMClient:
         artists = data.get('similarartists', {}).get('artist', [])
         return artists if isinstance(artists, list) else [artists] if artists else []
 
+    def get_tag_top_artists(self, tag: str, limit: int = 30) -> List[Dict[str, Any]]:
+        """Top artists for a Last.fm tag ("deep ambient techno", "shoegaze").
+
+        Genre-level radio: a YouTube mix or a "this is what X sounds like"
+        video has no artist to branch from, but its GENRE does. Returns
+        artist dicts (name, mbid, url); empty when the tag is unknown.
+        """
+        if not str(tag or '').strip():
+            return []
+        data = self._make_request('tag.gettopartists', {
+            'tag': str(tag).strip(),
+            'limit': limit,
+        })
+        if not data:
+            return []
+        artists = (data.get('topartists') or {}).get('artist', [])
+        return artists if isinstance(artists, list) else [artists] if artists else []
+
     # ── Album Methods ──
 
     @rate_limited
