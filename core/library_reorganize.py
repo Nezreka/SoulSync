@@ -438,6 +438,32 @@ def _feat_in_title_enabled() -> bool:
         return False
 
 
+def _preserve_casing_enabled() -> bool:
+    """Whether the reorganize leaves a title/album alone when the metadata
+    source differs from the user's file only by letter-case (#1078 QT3496:
+    already-organized files were flagged for cosmetic re-casing). Default on.
+    Isolated so tests can monkeypatch without a config manager."""
+    try:
+        from config.settings import config_manager
+        return bool(config_manager.get("library.reorganize_preserve_casing", True))
+    except Exception:
+        return True
+
+
+def _keep_user_casing(source_value, user_value):
+    """Return the USER's string when it matches the source only by case, else
+    the source string. Case-only means identical after casefold — so genuine
+    edits (punctuation, words, feat additions) still adopt the source; only
+    cosmetic capitalization churn is suppressed."""
+    if not _preserve_casing_enabled():
+        return source_value
+    s = str(source_value or "")
+    u = str(user_value or "")
+    if u and s and s != u and s.strip().casefold() == u.strip().casefold():
+        return u
+    return source_value
+
+
 def _extract_feat_credit(title: str) -> str:
     """The '(feat. X)' credit substring from a title (leading space trimmed),
     or '' when there's none. Lets us carry a user's own credit forward when
@@ -987,6 +1013,9 @@ def _build_post_process_context(
 
     api_album_id = api_album.get('id') or api_album.get('album_id') or ''
     api_album_name = api_album.get('name') or api_album.get('title') or album_title
+    # #1078: keep the user's album-folder casing when the source differs only
+    # by case (album_title is the user's own library album name).
+    api_album_name = _keep_user_casing(api_album_name, album_title)
     api_album_release = (
         api_album.get('release_date')
         or api_album.get('releaseDate')
@@ -1014,6 +1043,12 @@ def _build_post_process_context(
     # dropping "(feat. X)" — flagging already-correct files for "correction".
     if _feat_in_title_enabled():
         track_name = _apply_feat_credit(track_name, normalized_artists, local_title or '')
+    # #1078: keep the user's own title casing when the source title differs
+    # ONLY by case — no cosmetic rename/re-tag on already-organized files.
+    # Runs AFTER feat so "Song (feat. X)" vs a bare source title stays a real
+    # change; this only collapses pure capitalization differences. Both the
+    # filename and the title tag are built from this string, so they agree.
+    track_name = _keep_user_casing(track_name, local_title or '')
 
     return {
         'spotify_artist': {

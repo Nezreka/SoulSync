@@ -745,7 +745,15 @@ class ConfigManager:
             },
             "library": {
                 "music_paths": [],
-                "music_videos_path": ""
+                "music_videos_path": "",
+                # Library Organize: when the tool re-resolves a track from the
+                # metadata source, the source's title/album CASING often differs
+                # from a file the user already curated (Spotify capitalizing
+                # prepositions, an ALL-CAPS artist, iTunes vs Deezer). With this
+                # on (default), a difference that is ONLY letter-case is left
+                # alone — no cosmetic rename churn on already-organized files.
+                # Turn off to canonicalize casing to the metadata source.
+                "reorganize_preserve_casing": True,
             },
             "scripts": {
                 "path": "./scripts",
