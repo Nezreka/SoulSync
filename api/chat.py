@@ -215,9 +215,12 @@ def _gif_fetch(url: str, params: dict) -> dict:
 
 
 def _resolve_track_path(db, track_id):
-    """A library track's on-disk path, tried at the usual roots (as-stored,
-    transfer folder, download folder). None when unreachable."""
-    import os as _os
+    """A library track's on-disk path. The DB stores the path as the MEDIA
+    SERVER sees it (e.g. Plex's ``/mnt/musicBackup/...``), which the SoulSync
+    process usually can't open directly — so we hand it to the shared library
+    resolver, the same one the repair/import flows use. It maps the stored
+    path onto SoulSync's actual mounts via ``library.music_paths`` +
+    transfer/download roots (suffix-matching). None when unreachable."""
     conn = None
     try:
         conn = db._get_connection()
@@ -231,20 +234,13 @@ def _resolve_track_path(db, track_id):
     fp = row["file_path"] if row else None
     if not fp:
         return None
-    candidates = [fp]
     try:
-        base = str(_config_get("soulseek.transfer_path", "") or "")
-        if base:
-            candidates.append(_os.path.join(base, fp))
-        dl = str(_config_get("soulseek.download_path", "") or "")
-        if dl:
-            candidates.append(_os.path.join(dl, fp))
+        from config.settings import config_manager
+        from core.library.path_resolver import resolve_library_file_path
+        return resolve_library_file_path(str(fp), config_manager=config_manager)
     except Exception:
-        logger.debug("chat: path candidates from config failed", exc_info=True)
-    for c in candidates:
-        if c and _os.path.isfile(c):
-            return c
-    return None
+        logger.debug("chat: library path resolve failed", exc_info=True)
+        return None
 
 
 def _filepost_upload(api_key, name, stream, expiry=None):
@@ -643,8 +639,10 @@ def create_blueprint() -> Blueprint:
             db = _db()
             path = _resolve_track_path(db, track_id) if db is not None else None
             if not path:
-                return jsonify({"error": "That track's file isn't reachable "
-                                         "from SoulSync"}), 404
+                return jsonify({"error": "Can't reach that track's file — it's "
+                                         "stored at your media server's path. Add "
+                                         "where SoulSync sees your music under "
+                                         "Settings → Library → Music Paths."}), 404
             import os as _os
             size = _os.path.getsize(path)
             if size > max_bytes:

@@ -224,3 +224,47 @@ def test_browser_upload_size_cap_holds_server_side(files_app):
                   content_type="multipart/form-data")
     assert r.status_code == 413
     assert uploads == []
+
+
+def test_media_server_path_resolves_via_music_paths(files_app, tmp_path, monkeypatch):
+    """#1078-adjacent (Boulder): the DB stores a track's path as the MEDIA
+    SERVER sees it (e.g. Plex '/mnt/musicBackup/...'), which SoulSync can't
+    open directly. The upload must resolve it through the shared library
+    resolver + Settings → Library → Music Paths, not a naive as-stored check.
+    """
+    http, state, client, uploads = files_app
+    from config.settings import config_manager
+    from database.music_database import MusicDatabase
+
+    # the real file lives where SoulSync mounts the library
+    mount = tmp_path / "ssmount"
+    (mount / "Artist" / "Album").mkdir(parents=True)
+    real = mount / "Artist" / "Album" / "07 - Song.flac"
+    real.write_bytes(b"y" * 2048)
+
+    # ...but the DB records the MEDIA-SERVER path, which doesn't exist here
+    db = MusicDatabase(str(tmp_path / "m2.db"))
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR9','A','test')")
+        conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('AL9','AR9','Album','test')")
+        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, file_size, server_source) "
+                     "VALUES ('T9','AL9','AR9','Song','/mnt/musicBackup/Artist/Album/07 - Song.flac',2048,'test')")
+        conn.commit()
+    monkeypatch.setattr(chat_api, "_db", lambda: db)
+
+    # without a music-paths mapping → unreachable (honest 404 pointing at the fix)
+    r = http.post("/api/chat/files/upload", json={"track_id": "T9"})
+    assert r.status_code == 404
+    assert "Music Paths" in r.get_json()["error"]
+
+    # configure where SoulSync sees the music → the suffix match resolves it
+    prev = config_manager.get("library.music_paths", [])
+    try:
+        config_manager.set("library.music_paths", [str(mount)])
+        r = http.post("/api/chat/files/upload", json={"track_id": "T9"})
+        body = r.get_json()
+        assert body["ok"] is True
+        assert body["url"].endswith("07 - Song.flac")
+        assert uploads[-1]["bytes"] == 2048
+    finally:
+        config_manager.set("library.music_paths", prev)
