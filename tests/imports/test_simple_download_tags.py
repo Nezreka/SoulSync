@@ -114,6 +114,10 @@ def test_simple_download_branch_writes_known_tags(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "_persist_verification_status", lambda *a, **kw: None)
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
 
+    monkeypatch.setattr(
+        import_pipeline, "read_file_tags",
+        lambda path: {"title": None, "artist": None, "album": None, "error": None},
+    )
     tag_calls = []
     monkeypatch.setattr(import_pipeline, "write_tags_to_file",
                         lambda path, db_data, **kw: tag_calls.append((path, db_data, kw)) or {"success": True})

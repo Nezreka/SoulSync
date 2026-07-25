@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 import core.wishlist.routes as routes_module
 from core.wishlist.routes import (
     WishlistRouteRuntime,
@@ -15,6 +17,16 @@ from core.wishlist.routes import (
     remove_track_from_wishlist,
     set_wishlist_cycle,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_get_wishlist_service():
+    """``_build_runtime`` below reassigns ``routes_module.get_wishlist_service``
+    directly (not via monkeypatch) so it survives across tests and leaks the
+    fake service into any later test/module that imports the real one."""
+    original = routes_module.get_wishlist_service
+    yield
+    routes_module.get_wishlist_service = original
 
 
 class _FakeLogger:

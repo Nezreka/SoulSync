@@ -217,12 +217,33 @@ def _db_with_tracks(n=3):
     return d
 
 
+def _subjects_from_db(db):
+    """The job now enumerates Library-v2 file subjects, not the legacy
+    ``tracks`` table directly — bridge ``_db_with_tracks``'s rows into that
+    shape so these tests stay isolated from whatever real files happen to
+    exist on the filesystem being scanned."""
+    conn = db._get_connection()
+    rows = conn.execute(
+        "SELECT id, title, file_path FROM tracks ORDER BY id"
+    ).fetchall()
+    conn.close()
+    # subject_details() casts track_id to int (real lib2 rows use an integer
+    # PK) — synthesize one instead of reusing the legacy string id ("T0").
+    return [
+        {'track_id': index + 1, 'title': r['title'], 'artist_name': 'A', 'path': r['file_path']}
+        for index, r in enumerate(rows)
+    ]
+
+
 def test_scan_rescan_off_skips_tagged_tracks():
     db = _db_with_tracks(2)
     findings = []
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
-         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}):
+         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]):
         ReplayGainFillerJob().scan(_scan_ctx(db, _Cfg(), findings))
     assert findings == []                      # all tagged, rescan off → nothing
 
@@ -233,7 +254,10 @@ def test_scan_rescan_on_flags_tagged_tracks_as_retag():
     cfg = _Cfg(**{'repair.jobs.replaygain_filler.settings.rescan_existing': True})
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
-         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}):
+         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]):
         res = ReplayGainFillerJob().scan(_scan_ctx(db, cfg, findings))
     assert res.findings_created == 2
     assert all(f['finding_type'] == 'replaygain_retag' for f in findings)
@@ -251,6 +275,9 @@ def test_scan_rescan_cap_is_honoured_and_logged():
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
          patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]), \
          patch.object(ReplayGainFillerJob, 'RESCAN_BATCH_LIMIT', 2):
         ReplayGainFillerJob().scan(ctx)
     assert len(findings) == 2                                  # capped
@@ -263,7 +290,10 @@ def test_untagged_tracks_still_flagged_normally_in_rescan_mode():
     cfg = _Cfg(**{'repair.jobs.replaygain_filler.settings.rescan_existing': True})
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
-         patch('core.replaygain.read_replaygain_tags', return_value=None):
+         patch('core.replaygain.read_replaygain_tags', return_value=None), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]):
         ReplayGainFillerJob().scan(_scan_ctx(db, cfg, findings))
     assert len(findings) == 1
     assert findings[0]['finding_type'] == 'missing_replaygain'

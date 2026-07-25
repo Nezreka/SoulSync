@@ -502,3 +502,92 @@ abgesichert (`tests/library2/test_artwork_*`, `tests/search/test_search_orchestr
 Offen bleiben ausschließlich Finding 2 und 10 — beide warten auf die
 Kaltstart-Vertrags-Entscheidung aus [features F-01](library-v2-features.md#feat-artwork)
 und sind bewusst nicht mitimplementiert.
+
+---
+
+## 14. Rebase auf den Foundation-Merge (26. Juli)
+
+`library-overhaul` wurde gemäß dem in
+[branch-split/LIBRARY_OVERHAUL.md](branch-split/LIBRARY_OVERHAUL.md) §"Rebase
+order and conflict policy" festgelegten Ablauf auf den aktualisierten
+`dev`-Branch rebased, nachdem PR #1076 (`quality-profiles-foundation`) sowie
+die Misc-Fixes-PR upstream gemerged wurden. Alle 50 eigenen Commits wurden
+einzeln neu appliziert; Konflikte wurden nach Ownership aufgelöst (Foundation:
+natives Watchlist/Wishlist/Mirror/Sync/Automation; library-overhaul:
+Library-v2-Katalog/Acquisition) statt nach "wer ist neuer".
+
+### Konfliktauflösung — wesentliche Entscheidungen
+
+| Bereich | Entscheidung | Begründung |
+|---|---|---|
+| `database/music_database.py::add_to_wishlist_detailed` Dedup-Key | library-overhauls composite-first-Algorithmus (P1-09) behalten, nicht Foundations bare-first-Variante | library-overhauls eigener, mit 9 Tests abgesicherter Audit-Fix (`tests/wishlist/test_wishlist_idempotency.py`); Foundations abweichende Erwartungen in `tests/quality/test_wishlist_add_outcome.py` angepasst |
+| `set_mirrored_playlist_quality_profile` / mirrored-playlist-Schema | Foundations native Version übernommen; library-overhauls gekoppelten Playlist-Quality-Prototyp über `4f3952ae`+`35ec7dca` sauber entfernt | Split-Doc: Foundation besitzt `mirrored_playlists.quality_profile_id` |
+| `_pipeline_shared.py` Wishlist-Trigger | Foundations `apply_backoff`-Parameter MIT library-overhauls `track_ids`/`profile_ids`-Scoping kombiniert | beide Features sind orthogonal (Backoff-Gate vs. Playlist-Scope), keine Konkurrenz |
+| `core/repair_jobs/replaygain_filler.py` | Foundations Rescan-Feature (#1060) MIT library-overhauls Subject-Aware-Details (`entity_type='file'` für native Files ohne lib2-Eintrag) kombiniert | orthogonal |
+| `core/repair_worker.py::_fix_handlers` | additive Vereinigung beider Job-Listen; `duplicate_tracks`/`_fix_duplicates` bewusst NICHT wiederhergestellt | `duplicate_detector` steht in `RETIRED_JOB_IDS` ohne Preserved-Finding-Pfad — bereits bewusste P2-Konsolidierung, nicht rückgängig gemacht |
+
+### Während der Rekonziliation entdeckte und behobene Bugs
+
+- `add_artist_to_watchlist`/`remove_artist_from_watchlist` in
+  `database/music_database.py` hatten nach dem Merge kein
+  `raise_on_error`-Signaturparameter mehr, obwohl ihr Exception-Handler
+  bereits `if raise_on_error: raise` enthielt UND
+  `core/library2/mirror_outbox.py`s `_execute_op` sie mit
+  `raise_on_error=True` aufruft — ein reines Merge-Artefakt (Foundations
+  schlankere Signatur + library-overhauls Body). Ohne den Fix hätte ein
+  fehlgeschlagener Watchlist-Mirror-Vorgang aus dem Library-v2
+  Artist-Monitoring-Outbox-Pfad nie einen Retry ausgelöst — ein potenziell
+  stiller Reliability-Bug.
+- `database.add_to_wishlist(..., raise_on_error=True)` (Bool-Wrapper) hat den
+  Parameter nie an `add_to_wishlist_detailed` durchgereicht — ebenfalls inert
+  für den Mirror-Outbox-`wishlist_add`-Pfad; wirft jetzt bei `status ==
+  "error"`.
+- `core/wishlist/service.py::add_track_to_wishlist`/`add_spotify_track_to_wishlist`
+  hatten `quality_profile_id` verloren, obwohl `core/wishlist/routes.py`
+  (Library-Album-Modal "Add to Wishlist") bzw. der Cancel/Retry-Pfad in
+  `web_server.py` (P2-06) es weiterhin übergeben — beide wiederhergestellt.
+- `core/repair_jobs/__init__.py`: Foundations `genre_cleanup`/
+  `comma_artist_splitter`-Jobs kannten library-overhauls P3-Governance
+  (`JOB_DATA_BASIS`/`JOB_LIBRARY_V2_EFFECTS`) noch nicht — Deklarationen
+  ergänzt (`lib2` / `{'observe','metadata'}` bzw. `{'observe','tags'}`).
+- `tests/wishlist/test_routes.py`: Ein Test-Helper reassignte
+  `routes_module.get_wishlist_service` direkt statt über `monkeypatch` —
+  leakte über Testdatei-Grenzen hinweg und ließ Foundations neuen
+  `tests/acquisition/test_quality_profile_contract.py` nur in Kombination mit
+  vorher laufenden Wishlist-Tests fehlschlagen. Autouse-Fixture zur
+  Wiederherstellung ergänzt — eine vorbestehende Test-Hygiene-Lücke, durch
+  Foundations neuen Test erstmals sichtbar geworden.
+
+### Verifikation
+
+Alle 50 Commits erfolgreich rebased; kein Silent-Drop (Funktionsnamen-Diff
+zwischen dem ursprünglichen `library-overhaul` und dem Reko-Ergebnis über den
+gesamten geänderten Dateibestand geprüft). Gezielte Backend-Suite
+(Quality/Wishlist/Library2/Watchlist/Imports/Repair/RepairJobs/Downloads/
+Acquisition/Automation + betroffene Einzeldateien): 3940 passed, 2
+pre-existing failed (siehe unten), 3 skipped. Frontend Library-v2-Suite:
+154/154 passed.
+
+### Offen — nicht Teil dieser Rekonziliation
+
+- **Pre-existing** (bereits auf dem unrebased `library-overhaul` fehlschlagend,
+  nicht durch die Reko verursacht — per Vergleich in einem separaten
+  Worktree verifiziert):
+  `tests/library2/test_maintenance_sync.py::test_cover_art_scanner_flags_v2_only_album`
+  und `::test_metadata_gap_scanner_covers_v2_only_track` scheitern an
+  `sqlite3.OperationalError: no such column` (`al.spotify_album_id` bzw.
+  `t.isrc`) — vermutlich Schema-/Query-Drift in
+  `missing_cover_art.py`/`metadata_gap_filler.py`. Root Cause noch nicht
+  untersucht.
+- Ebenfalls bereits vorher fehlschlagend (8 Tests in
+  `tests/test_repair_worker_album_fill.py`,
+  `tests/test_repair_worker_unknown_artist_path.py`,
+  `tests/test_repair_worker_duplicate_delete.py`): testen
+  `_fix_unknown_artist`/`_fix_duplicates`/`_perform_album_fill`, die als Teil
+  der P1/P2-Tool-Migration bereits entfernt wurden, ohne dass die
+  zugehörigen Alt-Tests entfernt/migriert wurden.
+- **Thin-Adapter (Artist-Monitoring → natives Watchlist)**: bereits
+  vorhanden über `api/library_v2.py::lib2_set_monitored` →
+  `core/library2/mirror_outbox.py::enqueue_artist_watchlist` → `drain()` →
+  `database.add_artist_to_watchlist` — keine Neuentwicklung nötig, nur die
+  zwei oben genannten `raise_on_error`-Bugs im Pfad gefunden und behoben.

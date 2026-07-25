@@ -38,6 +38,8 @@ JOB_DATA_BASIS: dict[str, str] = {
     'quality_info_backfill': 'lib2',
     'expired_download_cleaner': 'filesystem',
     'library_reorganize': 'lib2',
+    'genre_cleanup': 'lib2',
+    'comma_artist_splitter': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -86,6 +88,11 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'quality_info_backfill': frozenset({'metadata'}),
     'expired_download_cleaner': frozenset({'delete', 'wanted'}),
     'library_reorganize': frozenset({'observe', 'path'}),
+    # Rewrites artists.genres / albums.genres to the kept (whitelisted) list.
+    'genre_cleanup': frozenset({'observe', 'metadata'}),
+    # Re-tags the affected files' embedded artist fields; the DB artist row
+    # itself isn't touched by the fix.
+    'comma_artist_splitter': frozenset({'observe', 'tags'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2

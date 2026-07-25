@@ -125,6 +125,7 @@ def test_mixed_playlists_still_runs_wishlist():
     assert result['wishlist_queued'] == 1
     assert wishlist_calls == [{
         'automation_id': None,
+        'apply_backoff': True,
         'track_ids': ['matched-track', 'native-track'],
         'profile_ids': [1],
     }]

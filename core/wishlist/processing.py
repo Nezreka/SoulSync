@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from contextlib import AbstractContextManager
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.wishlist.payloads import build_failed_track_wishlist_context
 from core.wishlist.selection import filter_wishlist_tracks_by_category, sanitize_and_dedupe_wishlist_tracks

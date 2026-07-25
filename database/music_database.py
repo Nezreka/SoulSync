@@ -10532,8 +10532,13 @@ class MusicDatabase:
         Kept exactly as it was for the many callers that only log the result.
         Anything that needs to tell "already there, refreshed" apart from
         "refused" must use :meth:`add_to_wishlist_detailed` (R2-03).
+
+        ``raise_on_error`` re-raises an unexpected failure instead of
+        returning ``False`` — a caller like the Library-v2 mirror outbox must
+        be able to tell "legitimate terminal outcome" (duplicate, blocklisted)
+        apart from "exception, retry me" (P0-04).
         """
-        return self.add_to_wishlist_detailed(
+        outcome = self.add_to_wishlist_detailed(
             spotify_track_data=spotify_track_data,
             failure_reason=failure_reason,
             source_type=source_type,
@@ -10542,7 +10547,10 @@ class MusicDatabase:
             track_data=track_data,
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
-        )["created"]
+        )
+        if raise_on_error and outcome["status"] == "error":
+            raise RuntimeError(outcome.get("reason") or "add_to_wishlist failed")
+        return outcome["created"]
 
     def add_to_wishlist_detailed(
         self,
@@ -10734,21 +10742,33 @@ class MusicDatabase:
                             logger.warning(f"Error parsing existing wishlist track data: {parse_error}")
                             continue
 
-                # When duplicates are allowed, retain the established key
-                # convention: the first occurrence uses the bare track id and
-                # another album uses track::album.  Repeated authoritative
-                # intent for the same occurrence updates that row in place.
+                # When allow_duplicates is on, make the key unique per album so the
+                # same track from different albums can coexist in the wishlist.
+                # The composite key is CANONICAL from the first insert (P1-09) —
+                # deriving it from "does the bare id already exist" made a second
+                # add of the SAME album look like a different one (bare row has
+                # no album in its key), creating base + composite duplicates.
+                album_obj = spotify_track_data.get('album', {})
+                album_id = album_obj.get('id', '') if isinstance(album_obj, dict) else ''
                 insert_track_id = track_id
-                existing = None
-                if allow_duplicates:
-                    album_obj = spotify_track_data.get('album', {})
-                    album_id = album_obj.get('id', '') if isinstance(album_obj, dict) else ''
+                if allow_duplicates and album_id:
+                    insert_track_id = f"{track_id}::{album_id}"
+
+                existing = cursor.execute(
+                    "SELECT id, source_type FROM wishlist_tracks "
+                    "WHERE spotify_track_id=? AND profile_id=?",
+                    (insert_track_id, profile_id),
+                ).fetchone()
+                if existing is None and insert_track_id != track_id:
+                    # Pre-fix rows keyed the first album under the bare track id.
+                    # Adopt such a row when it represents the SAME album so the
+                    # intent is updated in place instead of duplicated.
                     base_row = cursor.execute(
                         "SELECT id, source_type, spotify_data FROM wishlist_tracks "
                         "WHERE spotify_track_id=? AND profile_id=?",
                         (track_id, profile_id),
                     ).fetchone()
-                    if base_row is not None and album_id:
+                    if base_row is not None:
                         try:
                             base_album_id = (
                                 (json.loads(base_row['spotify_data']).get('album') or {})
@@ -10758,16 +10778,7 @@ class MusicDatabase:
                             base_album_id = ''
                         if base_album_id == album_id:
                             existing = base_row
-                        else:
-                            insert_track_id = f"{track_id}::{album_id}"
-                    elif base_row is not None:
-                        existing = base_row
-                    if existing is None and insert_track_id != track_id:
-                        existing = cursor.execute(
-                            "SELECT id, source_type FROM wishlist_tracks "
-                            "WHERE spotify_track_id=? AND profile_id=?",
-                            (insert_track_id, profile_id),
-                        ).fetchone()
+                            insert_track_id = track_id
 
                 if existing is not None:
                     updates = ["spotify_data = ?"]
@@ -11500,6 +11511,7 @@ class MusicDatabase:
         profile_id: int = 1,
         source: str = None,
         quality_profile_id: Optional[int] = None,
+        raise_on_error: bool = False,
     ) -> bool:
         """Add an artist to the watchlist for monitoring new releases.
 
@@ -11674,7 +11686,8 @@ class MusicDatabase:
             )
             return False
 
-    def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
+    def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1,
+                                     raise_on_error: bool = False) -> bool:
         """Remove an artist from the watchlist (checks cross-provider artist IDs)"""
         try:
             with self._get_connection() as conn:

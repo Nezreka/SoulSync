@@ -332,8 +332,12 @@ def test_bulk_fixable_set_matches_fix_handlers(tmp_path):
     replaygain_retag / comma_artist_split in Fix All. Derivation pins them in."""
     db = MusicDatabase(str(tmp_path / "m.db"))
     handlers = _worker(db, tmp_path)._fix_handlers()
+    # duplicate_tracks (duplicate_detector) is a deliberately retired job
+    # (RETIRED_JOB_IDS, P2 consolidation) with no preserved compatibility fix
+    # path — native Library v2 catalogue construction prevents the duplicates
+    # it used to scan for, so it isn't expected here.
     for ft in ('genre_cleanup', 'replaygain_retag', 'comma_artist_split',
-               'dead_file', 'duplicate_tracks'):
+               'dead_file'):
         assert ft in handlers
 
 
