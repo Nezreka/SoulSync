@@ -94,6 +94,24 @@ class PersonalizedPlaylistManager:
         """Return the playlist row if it exists. Does NOT auto-create."""
         return self._fetch_playlist_row(kind, variant, profile_id)
 
+    def delete_playlist(self, kind: str, variant: str = '', profile_id: int = 1) -> bool:
+        """Delete a playlist and its tracks. Returns True if a row was deleted."""
+        record = self._fetch_playlist_row(kind, variant, profile_id)
+        if record is None:
+            return False
+        with self.database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM personalized_playlist_tracks WHERE playlist_id = ?",
+                (record.id,),
+            )
+            cursor.execute(
+                "DELETE FROM personalized_playlists WHERE id = ?",
+                (record.id,),
+            )
+            conn.commit()
+        return True
+
     def list_playlists(self, profile_id: int = 1) -> List[PlaylistRecord]:
         """List every persisted playlist for a profile, newest-first."""
         with self.database._get_connection() as conn:

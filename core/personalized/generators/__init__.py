@@ -26,3 +26,5 @@ from core.personalized.generators import fresh_tape  # noqa: F401
 from core.personalized.generators import archives  # noqa: F401
 from core.personalized.generators import seasonal_mix  # noqa: F401
 from core.personalized.generators import listening_mix  # noqa: F401
+from core.personalized.generators import recent_unheard  # noqa: F401
+from core.personalized.generators import unplayed_tracks  # noqa: F401  # deprecated, kept for DB compat
