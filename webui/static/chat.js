@@ -41,8 +41,10 @@
             tunedIn: false,      //   player exists (requires a user gesture)
             player: null,        //   YT.Player instance while tuned in
             playingId: null,     //   video id the player was last pointed at
+            playingNow: null,    //   the now-track the player is actually playing (display fallback)
             playerAlive: false,  //   iframe API fired onReady (safe to call methods)
             results: [],         //   resolve results awaiting a pick
+            searchResults: [],   //   YouTube search modal results
             resolving: false,
             lastRendered: '',    //   reduced-state fingerprint (skip no-op renders)
             lastAdvanceAt: 0,    //   DJ double-fire guard (ms)
@@ -2172,6 +2174,16 @@
             if (t) { sendProtocol('jbx.vote', { o: t.getAttribute('data-chat-jbx-vote') }); return; }
             t = e.target.closest('[data-chat-jbx-pick]');
             if (t) { _jbxPick(state.jukebox.results[parseInt(t.getAttribute('data-chat-jbx-pick'), 10)]); return; }
+            t = e.target.closest('[data-chat-jbx-vpick]');
+            if (t) {
+                _jbxPick(state.jukebox.searchResults[parseInt(t.getAttribute('data-chat-jbx-vpick'), 10)]);
+                _closeJbxSearchModal();
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-searchclose]');
+            if (t) { _closeJbxSearchModal(); return; }
+            var jbxSearchOv = e.target.closest('[data-chat-jbx-search-modal]');
+            if (jbxSearchOv && e.target === jbxSearchOv) { _closeJbxSearchModal(); return; }
             t = e.target.closest('[data-chat-jbx-skip]');
             if (t) { sendProtocol('jbx.skip', { o: t.getAttribute('data-chat-jbx-skip') }); return; }
             t = e.target.closest('[data-chat-jbx-unsub]');
@@ -2309,6 +2321,8 @@
         if (form) form.addEventListener('submit', function (e) { e.preventDefault(); send(); });
         var jbxForm = q('[data-chat-jbx-form]');
         if (jbxForm) jbxForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSubmit(); });
+        var jbxSearchForm = q('[data-chat-jbx-searchform]');
+        if (jbxSearchForm) jbxSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSearchModalSubmit(); });
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -2823,6 +2837,23 @@
         var elapsed = _jbxElapsed(now);
         var effD = _jbxEffDuration(now);
         var ended = !!(now && effD && elapsed !== null && elapsed > effD + 5);
+        // Display honesty (Boulder): the shared now-event can scroll out of the
+        // bounded protocol log (busy room / long track), or a wrong duration
+        // can flag 'ended' while the audio is genuinely still playing — either
+        // way the panel would flip to 'Nothing playing' over a live track.
+        // If our own player is actively playing, keep showing that track.
+        if ((!now || ended) && state.jukebox.tunedIn && state.jukebox.playerAlive &&
+                state.jukebox.player && state.jukebox.playingNow) {
+            try {
+                var _ps = state.jukebox.player.getPlayerState();
+                if (_ps === 1 || _ps === 2 || _ps === 3) {   // playing / paused / buffering
+                    now = state.jukebox.playingNow;
+                    elapsed = _jbxElapsed(now);
+                    effD = _jbxEffDuration(now);
+                    ended = false;
+                }
+            } catch (e) { /* player mid-teardown */ }
+        }
         // the player follows the ROOM, not the panel — a tuned-in listener
         // reading PMs must still hear the DJ's advances (panel merely hides)
         _jbxSyncPlayer(now && !ended ? now : null);
@@ -3097,6 +3128,7 @@
         }
         state.jukebox.player = null;
         state.jukebox.playingId = null;
+        state.jukebox.playingNow = null;
         state.jukebox.playerAlive = false;
         var host = q('[data-chat-jbx-player]');
         if (host) { host.innerHTML = ''; host.hidden = true; }
@@ -3118,6 +3150,7 @@
             host.hidden = false;
             host.innerHTML = '<div data-chat-jbx-yt></div>';
             state.jukebox.playingId = now.id;
+            state.jukebox.playingNow = now;
             state.jukebox.player = new window.YT.Player(host.firstChild, {
                 width: '100%', height: '158', videoId: now.id,
                 playerVars: { autoplay: 1, start: offset, rel: 0, playsinline: 1 },
@@ -3132,6 +3165,7 @@
             });
         } else if (state.jukebox.playingId !== now.id && state.jukebox.playerAlive) {
             state.jukebox.playingId = now.id;
+            state.jukebox.playingNow = now;
             try {
                 state.jukebox.player.loadVideoById({ videoId: now.id, startSeconds: offset });
             } catch (e) { _jbxTuneOut(); }
@@ -3139,9 +3173,12 @@
     }
 
     function _jbxOnPlayerState(e) {
-        // ENDED (0): the tuned-in DJ advances the room. Non-DJs just wait —
-        // their player moves when the DJ's jbx.now arrives.
-        if (e && e.data === 0 && _jbxIsDj()) _jbxAdvance(null);
+        // ENDED (0): drop the display fallback so the panel can honestly show
+        // 'waiting for the next track', and (if we're the DJ) advance the room.
+        if (e && e.data === 0) {
+            state.jukebox.playingNow = null;
+            if (_jbxIsDj()) _jbxAdvance(null);
+        }
     }
 
     function _jbxSubmit() {
@@ -3160,21 +3197,81 @@
                 return;
             }
             var results = res.body.results;
+            if (resHost) { resHost.hidden = true; resHost.innerHTML = ''; }
             if (results.length === 1) {                 // pasted link → straight in
                 _jbxPick(results[0]);
                 return;
             }
-            state.jukebox.results = results;
-            if (resHost) resHost.innerHTML = results.map(function (r, i) {
-                return '<button class="chat-jbx-result" type="button" data-chat-jbx-pick="' + i + '">' +
-                    '<span class="chat-jbx-title">' + esc(r.title || r.id) + '</span>' +
-                    '<span class="chat-jbx-meta">' + esc(r.channel || '') +
-                        (r.duration ? ' · ' + _fmtSecs(r.duration) : '') + '</span>' +
-                '</button>';
-            }).join('');
+            _openJbxSearchModal(results, qtext);         // a search → the rich picker
         }).catch(function () {
             state.jukebox.resolving = false;
             if (resHost) resHost.innerHTML = '<div class="chat-jbx-meta">Lookup failed — try again.</div>';
+        });
+    }
+
+    // ── jukebox YouTube search modal (search-page video-card look) ──────
+    function _fmtViews(n) {
+        n = Number(n) || 0;
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n ? String(n) : '';
+    }
+
+    function _jbxSearchCards(results) {
+        return (results || []).map(function (r, i) {
+            var views = _fmtViews(r.views);
+            return '<button class="chat-jbx-vcard" type="button" data-chat-jbx-vpick="' + i + '">' +
+                '<div class="chat-jbx-vthumb">' +
+                    '<img src="' + attr(_jbxThumb(r.id)) + '" alt="" loading="lazy">' +
+                    '<span class="chat-jbx-vplay">▶</span>' +
+                    (r.duration ? '<span class="chat-jbx-vdur">' + _fmtSecs(r.duration) + '</span>' : '') +
+                '</div>' +
+                '<div class="chat-jbx-vinfo">' +
+                    '<div class="chat-jbx-vtitle" title="' + attr(r.title || r.id) + '">' + esc(r.title || r.id) + '</div>' +
+                    '<div class="chat-jbx-vchannel">' + esc(r.channel || '') +
+                        (views ? ' · ' + views + ' views' : '') + '</div>' +
+                '</div>' +
+            '</button>';
+        }).join('');
+    }
+
+    function _openJbxSearchModal(results, query) {
+        var ov = q('[data-chat-jbx-search-modal]');
+        if (!ov) { _jbxPick(results[0]); return; }   // no modal in DOM → graceful fallback
+        state.jukebox.searchResults = results;
+        var grid = q('[data-chat-jbx-searchgrid]');
+        if (grid) grid.innerHTML = _jbxSearchCards(results) ||
+            '<div class="chat-jbx-meta">Nothing found — try different words or paste a link.</div>';
+        var inp = q('[data-chat-jbx-searchinput]');
+        if (inp) inp.value = query || '';
+        ov.hidden = false;
+    }
+
+    function _closeJbxSearchModal() {
+        var ov = q('[data-chat-jbx-search-modal]');
+        if (ov) ov.hidden = true;
+        state.jukebox.searchResults = [];
+    }
+
+    function _jbxSearchModalSubmit() {
+        var inp = q('[data-chat-jbx-searchinput]');
+        var grid = q('[data-chat-jbx-searchgrid]');
+        if (!inp || state.jukebox.resolving) return;
+        var qtext = String(inp.value || '').trim();
+        if (!qtext) return;
+        state.jukebox.resolving = true;
+        if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Searching…</div>';
+        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+            state.jukebox.resolving = false;
+            var results = (res.ok && res.body.results) || [];
+            state.jukebox.searchResults = results;
+            if (grid) grid.innerHTML = results.length ? _jbxSearchCards(results) :
+                '<div class="chat-jbx-meta">' +
+                esc((res.body && res.body.error) || 'Nothing found — try different words or paste a link.') + '</div>';
+        }).catch(function () {
+            state.jukebox.resolving = false;
+            if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Search failed — try again.</div>';
         });
     }
 

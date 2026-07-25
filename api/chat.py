@@ -1021,6 +1021,7 @@ def create_blueprint() -> Blueprint:
                 "title": str(getattr(v, "title", "") or "")[:120],
                 "channel": str(getattr(v, "channel", "") or "")[:80],
                 "duration": int(getattr(v, "duration", 0) or 0),
+                "views": int(getattr(v, "view_count", 0) or 0),
             })
         return jsonify({"results": results})
 

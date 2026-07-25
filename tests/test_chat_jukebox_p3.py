@@ -94,7 +94,7 @@ def test_free_text_goes_through_search_seam(jbx_app):
     http, state = jbx_app
     state["search_results"] = [
         SimpleNamespace(video_id="aaaaaaaaaaa", title="Around the World",
-                        channel="Daft Punk", duration=429),
+                        channel="Daft Punk", duration=429, view_count=0),
         SimpleNamespace(video_id="not a vid!!", title="hostile", channel="x",
                         duration=1),              # bad id → filtered
     ]
@@ -102,7 +102,7 @@ def test_free_text_goes_through_search_seam(jbx_app):
                      json={"q": "daft punk around the world"}).get_json()
     assert state["search_calls"] == [("daft punk around the world", 5)]
     assert body["results"] == [{"id": "aaaaaaaaaaa", "title": "Around the World",
-                                "channel": "Daft Punk", "duration": 429}]
+                                "channel": "Daft Punk", "duration": 429, "views": 0}]
 
 
 def test_unresolvable_video_404s(jbx_app):
@@ -288,3 +288,47 @@ def test_radio_refill_requires_a_listener():
     assert "function _jbxHasListeners" in js
     fn = js[js.index("function _jbxHasListeners"):js.index("function _jbxHasListeners") + 600]
     assert "state.jukebox.tunedIn" in fn and "reduceTuned(_roomEvents())" in fn
+
+
+def test_search_projection_includes_views():
+    """The resolve search results carry view_count so the modal cards can
+    show '1.2M views' like the search-page video cards."""
+    import inspect
+    import api.chat as chat_api
+    src = inspect.getsource(chat_api.create_blueprint)
+    assert '"views": int(getattr(v, "view_count", 0) or 0)' in src
+
+
+def test_jukebox_search_modal_wiring():
+    """Free-text search opens a rich pop-in modal (video-card grid) instead of
+    the cramped dropdown; a pasted link still adds straight in."""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    assert "_openJbxSearchModal" in js and "_jbxSearchCards" in js
+    # a single result (pasted link / lone match) still adds directly, no modal
+    submit = js[js.index("function _jbxSubmit"):js.index("function _fmtViews")]
+    assert "results.length === 1" in submit and "_jbxPick(results[0])" in submit
+    assert "_openJbxSearchModal(results, qtext)" in submit
+    # cards use the free youtube thumbnail + duration + views
+    cards = js[js.index("function _jbxSearchCards"):js.index("function _openJbxSearchModal")]
+    assert "_jbxThumb(r.id)" in cards and "chat-jbx-vdur" in cards and "_fmtViews(r.views)" in cards
+    # card click adds to the queue and closes the modal
+    assert "data-chat-jbx-vpick" in js and "_closeJbxSearchModal()" in js
+    html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    assert "data-chat-jbx-search-modal" in html and "data-chat-jbx-searchgrid" in html
+    css = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8")
+    assert ".chat-jbx-vcard" in css and ".chat-jbx-searchgrid" in css
+
+
+def test_jukebox_display_honesty_fallback():
+    """A playing track whose now-event scrolled out of the bounded protocol
+    log (or was flagged 'ended' on a wrong duration) must not flip the panel
+    to 'Nothing playing' — the live player's track keeps showing."""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    rj = js[js.index("function renderJukebox"):js.index("function toggleJukebox")]
+    assert "state.jukebox.playingNow" in rj
+    assert "_ps === 1 || _ps === 2 || _ps === 3" in rj   # only while actually playing
+    # the fallback source is set when the player is pointed at a track...
+    assert js.count("state.jukebox.playingNow = now") >= 2
+    # ...and cleared on a genuine end + on tune-out
+    ended = js[js.index("function _jbxOnPlayerState"):js.index("function _jbxOnPlayerState") + 400]
+    assert "state.jukebox.playingNow = null" in ended
