@@ -4658,7 +4658,11 @@ function _normalizeTrack(track) {
     };
 }
 
-function renderCompactPlaylist(container, tracks) {
+// opts.selectable (#1079): render a per-row preview button + selection checkbox so
+// Mixes / ListenBrainz playlist modals can preview and download individual tracks.
+// Default off — other callers (Build Playlist results) render exactly as before.
+function renderCompactPlaylist(container, tracks, opts = {}) {
+    const selectable = !!(opts && opts.selectable);
     let html = '<div class="discover-playlist-tracks-compact">';
 
     tracks.forEach((track, index) => {
@@ -4668,11 +4672,20 @@ function renderCompactPlaylist(container, tracks) {
         const durationSec = Math.floor((t.durationMs % 60000) / 1000);
         const duration = t.durationMs > 0 ? `${durationMin}:${durationSec.toString().padStart(2, '0')}` : '';
 
+        const selectCell = selectable
+            ? `<div class="track-compact-select"><input type="checkbox" class="track-compact-check" data-track-index="${index}" onchange="_onMixTrackToggle()" onclick="event.stopPropagation()"></div>`
+            : '';
+        const playOverlay = selectable
+            ? `<button type="button" class="track-compact-play" title="Preview" onclick="event.stopPropagation(); _previewMixTrack(${index})">&#9654;</button>`
+            : '';
+
         html += `
-            <div class="discover-playlist-track-compact" data-track-index="${index}">
+            <div class="discover-playlist-track-compact${selectable ? ' has-select' : ''}" data-track-index="${index}">
+                ${selectCell}
                 <div class="track-compact-number">${index + 1}</div>
                 <div class="track-compact-image">
                     <img src="${coverUrl}" alt="${_esc(t.album)}" loading="lazy">
+                    ${playOverlay}
                 </div>
                 <div class="track-compact-info">
                     <div class="track-compact-name">${_esc(t.name)}</div>
@@ -4686,6 +4699,102 @@ function renderCompactPlaylist(container, tracks) {
 
     html += '</div>';
     container.innerHTML = html;
+}
+
+// ── #1079: preview + selective download for Mixes / ListenBrainz playlist modals ──
+// The active mix modal's track context, so the per-row preview + "Download selected"
+// handlers can resolve tracks by index. Refreshed every time a mix modal renders.
+let _activeMixSelection = { tracks: [], title: '', idBase: 'discover_selected' };
+
+// Convert a discover/ListenBrainz raw track into the spotify-ish shape the download
+// modal expects — same mapping the whole-playlist download uses (openDownloadModalFor
+// DiscoverPlaylist), so a selected subset downloads identically to "download all".
+function _discoverTrackToSpotifyShape(track) {
+    let s = track.track_data_json ? { ...track.track_data_json } : {
+        id: track.spotify_track_id,
+        name: track.track_name || track.name,
+        artists: [{ name: track.artist_name }],
+        album: {
+            name: track.album_name || '',
+            images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+        },
+        duration_ms: track.duration_ms || 0
+    };
+    if (s.artists && Array.isArray(s.artists)) {
+        s.artists = s.artists.map(a => (a && a.name) || a);
+    }
+    return s;
+}
+
+function _previewMixTrack(index) {
+    const track = _activeMixSelection.tracks[index];
+    if (!track) { showToast('Track is no longer available', 'error'); return; }
+    const t = _normalizeTrack(track);
+    if (typeof playTrackFromLibraryOrStream === 'function') {
+        // Resolves a local file if you own it, else streams a preview from your source.
+        playTrackFromLibraryOrStream(
+            { title: t.name, file_path: track.file_path || null, id: track.id || null },
+            t.album, t.artist
+        );
+    } else {
+        showToast('Playback is not available here', 'error');
+    }
+}
+
+function _mixCheckedBoxes() {
+    return Array.from(document.querySelectorAll('#mix-modal-tracks .track-compact-check:checked'));
+}
+
+function _onMixTrackToggle() {
+    _updateMixSelBar();
+}
+
+function _mixToggleSelectAll(checked) {
+    document.querySelectorAll('#mix-modal-tracks .track-compact-check').forEach(cb => { cb.checked = checked; });
+    _updateMixSelBar();
+}
+
+function _mixClearSelection() {
+    document.querySelectorAll('#mix-modal-tracks .track-compact-check').forEach(cb => { cb.checked = false; });
+    const all = document.getElementById('mix-select-all');
+    if (all) all.checked = false;
+    _updateMixSelBar();
+}
+
+function _updateMixSelBar() {
+    const count = _mixCheckedBoxes().length;
+    const countEl = document.getElementById('mix-sel-count');
+    if (countEl) countEl.textContent = `${count} selected`;
+    const dlBtn = document.getElementById('mix-dl-selected');
+    if (dlBtn) {
+        dlBtn.disabled = count === 0;
+        dlBtn.textContent = count > 0 ? `Download selected (${count})` : 'Download selected';
+    }
+    const total = document.querySelectorAll('#mix-modal-tracks .track-compact-check').length;
+    const all = document.getElementById('mix-select-all');
+    if (all) all.checked = total > 0 && count === total;
+}
+
+async function _downloadSelectedMixTracks() {
+    const boxes = _mixCheckedBoxes();
+    if (!boxes.length) { showToast('Select at least one track first', 'info'); return; }
+    const subset = boxes
+        .map(cb => _activeMixSelection.tracks[parseInt(cb.dataset.trackIndex, 10)])
+        .filter(Boolean);
+    if (!subset.length) { showToast('Selected tracks are no longer available', 'error'); return; }
+    const spotifyTracks = subset.map(_discoverTrackToSpotifyShape);
+    // Unique virtual id so a subset download never collides with the whole-playlist
+    // download's state/modal (which stays keyed by the playlist's own id).
+    const idBase = _activeMixSelection.idBase || 'discover_selected';
+    const virtualId = `${idBase}_sel_${Date.now()}`;
+    const name = `${_activeMixSelection.title || 'Playlist'} (${subset.length} selected)`;
+    document.getElementById('mix-modal-overlay')?.remove();
+    try {
+        await openDownloadMissingModalForYouTube(virtualId, name, spotifyTracks);
+    } catch (e) {
+        console.error('Download selected failed:', e);
+        showToast('Failed to open download for the selected tracks', 'error');
+    }
 }
 
 // ── Your Mixes shelf (#discover redesign) ───────────────────────────────────
@@ -4847,21 +4956,38 @@ function openMixModal(mix) {
                 </div>
             </div>
             ${syncStatus}
+            <div class="mix-modal-selbar" id="mix-modal-selbar" style="display:none">
+                <label class="mix-selbar-all"><input type="checkbox" id="mix-select-all" onchange="_mixToggleSelectAll(this.checked)"> Select all</label>
+                <span class="mix-sel-count" id="mix-sel-count">0 selected</span>
+                <span class="mix-selbar-spacer"></span>
+                <button type="button" class="btn btn--sm btn--secondary" onclick="_mixClearSelection()">Clear</button>
+                <button type="button" class="btn btn--sm btn--primary" id="mix-dl-selected" onclick="_downloadSelectedMixTracks()" disabled>Download selected</button>
+            </div>
             <div class="mix-modal-body" id="mix-modal-tracks"></div>
         </div>
     `;
     document.body.appendChild(overlay);
+    // #1079: seed the selection context so per-row preview + "Download selected" work.
+    _activeMixSelection = { tracks: mix.tracks || [], title: mix.title || '', idBase: mix.syncKey || mix.key || 'discover_selected' };
     const body = document.getElementById('mix-modal-tracks');
+    const _revealSelBar = () => {
+        const bar = document.getElementById('mix-modal-selbar');
+        if (bar && _activeMixSelection.tracks.length) bar.style.display = 'flex';
+        _updateMixSelBar();
+    };
     if (mix.tracks) {
-        renderCompactPlaylist(body, mix.tracks);
+        renderCompactPlaylist(body, mix.tracks, { selectable: true });
+        _revealSelBar();
     } else if (mix.fetchTracks) {
         // Lazy sections (e.g. decades) load their tracks on open; fetch then fill in the count.
         body.innerHTML = '<div class="discover-empty"><p>Loading tracks…</p></div>';
         Promise.resolve(mix.fetchTracks()).then(tracks => {
             mix.tracks = tracks || [];
+            _activeMixSelection.tracks = mix.tracks;
             const metaEl = overlay.querySelector('.mix-modal-meta');
             if (metaEl) metaEl.textContent = `${mix.tracks.length} tracks`;
-            renderCompactPlaylist(body, mix.tracks);
+            renderCompactPlaylist(body, mix.tracks, { selectable: true });
+            _revealSelBar();
         }).catch(() => { body.innerHTML = '<div class="discover-empty"><p>Failed to load tracks</p></div>'; });
     }
 

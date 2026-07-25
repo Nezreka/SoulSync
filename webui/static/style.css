@@ -37946,6 +37946,88 @@ div.artist-hero-badge {
     text-align: right;
 }
 
+/* #1079 — preview + selective download controls in Mixes / ListenBrainz modals.
+   Scoped to .has-select so the plain compact list (Build Playlist results,
+   ListenBrainz inline view) keeps its original 5-column layout untouched. */
+.discover-playlist-track-compact.has-select {
+    grid-template-columns: 24px 30px 40px 1fr 1.5fr 60px;
+}
+
+.track-compact-select {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.track-compact-check {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: #1db954;
+}
+
+.has-select .track-compact-image {
+    position: relative;
+}
+
+.track-compact-play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    margin: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.has-select .track-compact-image:hover .track-compact-play,
+.track-compact-play:focus-visible {
+    opacity: 1;
+}
+
+.mix-modal-selbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #2a2a2a;
+    background: #1a1a1a;
+}
+
+.mix-selbar-all {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #ccc;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.mix-selbar-all input {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: #1db954;
+}
+
+.mix-sel-count {
+    font-size: 12px;
+    color: #999;
+}
+
+.mix-selbar-spacer {
+    flex: 1;
+}
+
 .track-compact-block {
     display: none;
     width: 22px;
