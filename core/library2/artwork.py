@@ -89,63 +89,86 @@ def thumb_file(database, kind: str, entity_id: int) -> Path:
     return artwork_dir(database) / f"{kind}_{int(entity_id)}_t.jpg"
 
 
-_version_snapshots: Dict[str, tuple[int, Dict[str, int]]] = {}
-_version_snapshots_guard = threading.Lock()
+_entity_versions: Dict[tuple[str, str, int], tuple[int, int]] = {}
+_entity_generations: Dict[tuple[str, str, int], int] = {}
+_entity_versions_guard = threading.Lock()
 
 
-def forget_artwork_versions(database) -> None:
-    """Drop the cached mtime snapshot for this database's artwork directory.
+def forget_artwork_versions(database, kind: Optional[str] = None, entity_id: Optional[int] = None) -> None:
+    """Drop cached mtimes so the next lookup re-stats from disk.
 
-    The snapshot is normally revalidated against the directory's own mtime, but
-    filesystems with coarse directory timestamps could otherwise hide a rewrite
-    that happened inside the same tick, so every managed write/delete forgets
-    the snapshot explicitly.
+    rev25-09: every drop also bumps that entity's own generation marker,
+    checked (under the same lock) by any lookup for the *same entity* that's
+    mid-stat when it happens.  A lookup only commits its result to the cache
+    if its entity's marker is still what it was when the lookup started — so
+    a write racing a concurrent read can never have its invalidation silently
+    overwritten by the read's now-stale value, the way a pre-scandir
+    directory-mtime snapshot could.  The marker is per entity (not a single
+    shared counter) so invalidating one entity can't force every other
+    already-cached entity on the same page to re-stat too.
+
+    With ``kind``/``entity_id`` given, drops only that one entry (the normal
+    case — every managed write already knows exactly what it touched).
+    Without them, drops every entry for this database (bulk operations, e.g.
+    a full rescan moving the whole cache directory).
     """
-    with _version_snapshots_guard:
-        _version_snapshots.pop(str(artwork_dir(database)), None)
-
-
-def _artwork_versions(database) -> Dict[str, int]:
-    """Snapshot of ``{filename: mtime}`` for the artwork cache directory.
-
-    perf25-01: the list endpoint needs a cache-bust token per row.  Statting one
-    file per artist put 75 syscalls on the request thread for a page whose
-    images are all cached already.  One directory scan serves the whole page and
-    is reused until the directory's own mtime changes.
-    """
-    directory = artwork_dir(database)
-    key = str(directory)
-    try:
-        stamp = directory.stat().st_mtime_ns
-    except OSError:
-        stamp = -1
-    with _version_snapshots_guard:
-        cached = _version_snapshots.get(key)
-        if cached is not None and cached[0] == stamp:
-            return cached[1]
-
-    versions: Dict[str, int] = {}
-    try:
-        with os.scandir(directory) as entries:
-            for entry in entries:
-                if not entry.name.endswith(".jpg"):
-                    continue
-                try:
-                    versions[entry.name] = int(entry.stat().st_mtime)
-                except OSError:
-                    continue
-    except OSError as exc:
-        logger.debug("artwork version scan failed for %s: %s", directory, exc)
-        return {}
-
-    with _version_snapshots_guard:
-        _version_snapshots[key] = (stamp, versions)
-    return versions
+    with _entity_versions_guard:
+        if kind is not None and entity_id is not None:
+            key = (str(database.database_path), kind, int(entity_id))
+            _entity_generations[key] = _entity_generations.get(key, 0) + 1
+            _entity_versions.pop(key, None)
+        else:
+            prefix = str(database.database_path)
+            for cache_key in {k for k in _entity_versions if k[0] == prefix} | {
+                k for k in _entity_generations if k[0] == prefix
+            }:
+                _entity_generations[cache_key] = _entity_generations.get(cache_key, 0) + 1
+                _entity_versions.pop(cache_key, None)
 
 
 def artwork_version(database, kind: str, entity_id: int) -> int:
-    """Cache-bust token for one entity's artwork, or 0 when it isn't cached."""
-    return _artwork_versions(database).get(f"{kind}_{int(entity_id)}.jpg", 0)
+    """Cache-bust token for one entity's artwork, or 0 when it isn't cached.
+
+    rev25-03: a whole-directory scan (the previous implementation) costs more
+    syscalls than the handful of entities any single caller actually needs —
+    two files per artist/album means tens of thousands of directory entries on
+    a large library, and every successful build now forgets the snapshot from
+    several call sites (list rendering, autolink, discography-expand), so the
+    "reused across renders" premise rarely holds anymore.  Statting only the
+    one file this call needs, cached per entity until its own write
+    invalidates it, keeps the win without the inversion.
+    """
+    key = (str(database.database_path), kind, int(entity_id))
+    with _entity_versions_guard:
+        cached = _entity_versions.get(key)
+        marker = _entity_generations.get(key, 0)
+    if cached is not None and cached[0] == marker:
+        return cached[1]
+    try:
+        mtime = int(artwork_file(database, kind, entity_id).stat().st_mtime)
+    except OSError:
+        mtime = 0
+    with _entity_versions_guard:
+        if _entity_generations.get(key, 0) == marker:
+            _entity_versions[key] = (marker, mtime)
+    return mtime
+
+
+def _cached_artwork_filenames(directory: Path) -> set[str]:
+    """One-shot bulk listing of every cached ``.jpg`` filename.
+
+    rev25-14: kept as the *one* directory-scan implementation, used only by
+    :func:`precache_all_artwork` — a full-library pass over tens of thousands
+    of entities is the one case where a single scan legitimately beats a stat
+    per entity.  Every other caller wants a handful of specific entities and
+    uses :func:`artwork_version` instead.
+    """
+    try:
+        with os.scandir(directory) as entries:
+            return {entry.name for entry in entries if entry.name.endswith(".jpg")}
+    except OSError as exc:
+        logger.debug("artwork directory listing failed for %s: %s", directory, exc)
+        return set()
 
 
 def invalidate_artwork(database, kind: str, entity_id: int) -> int:
@@ -169,7 +192,7 @@ def invalidate_artwork(database, kind: str, entity_id: int) -> int:
                 pass
             except OSError as exc:
                 logger.debug("artwork invalidation failed for %s: %s", path, exc)
-    forget_artwork_versions(database)
+    forget_artwork_versions(database, kind, int(entity_id))
     return removed
 
 
@@ -317,12 +340,14 @@ def _normalize_jpeg_variants(data: bytes, thumb_height: int = 256) -> Optional[t
                     Image.LANCZOS,
                 )
 
-            # perf25-05b: no ``optimize`` on the full-size variant.  Its extra
-            # entropy pass costs real CPU per cold image while saving only a
-            # few percent of bytes on a file the list view never requests; the
-            # thumbnail below, fetched once per row, still gets it.
+            # rev25-13: both variants pay the extra entropy pass.  The full
+            # variant is not list-view-only — it's requested on every artist/
+            # album detail-page visit and in the cover-pick match dialogs — so
+            # the CPU cost (paid once, in a background thread, when the image
+            # is first cached) buys back real bytes on every one of those
+            # future serves plus a smaller permanent on-disk footprint.
             output = BytesIO()
-            image.save(output, "JPEG", quality=90)
+            image.save(output, "JPEG", quality=90, optimize=True)
             thumb_output = BytesIO()
             thumbnail.save(thumb_output, "JPEG", quality=82, optimize=True)
             return output.getvalue(), thumb_output.getvalue()
@@ -606,7 +631,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
         tmp.write_bytes(data)
         os.replace(tmp, out)
         _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
-        forget_artwork_versions(database)
+        forget_artwork_versions(database, kind, entity_id)
         return str(out)
     except OSError as e:
         logger.debug("artwork write failed (%s %s): %s", kind, entity_id, e)
@@ -614,8 +639,36 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
 
 
 _background_executor: Optional[ThreadPoolExecutor] = None
+_background_executor_workers: int = 0
 _background_inflight: set = set()
 _background_guard = threading.Lock()
+# rev25-08: submit() has no native queue bound — a client abusing the artwork
+# endpoint, or repeated renders of a page full of uncached covers, could grow
+# the pending queue faster than the pool drains it, each entry eventually
+# opening its own DB connection when it runs.  Beyond this many
+# scheduled-or-running entities, new requests fall back to the placeholder
+# contract instead of queuing (dropped, not queued without bound).
+_MAX_BACKGROUND_QUEUE = 500
+
+
+def shutdown_background_executor() -> None:
+    """Best-effort teardown for the background artwork pool.
+
+    rev25-08: ``ThreadPoolExecutor`` registers a non-daemon ``threading``
+    atexit hook that joins its worker threads — an in-flight provider
+    download stuck on a slow socket used to delay interpreter exit, and with
+    it the container's response to SIGTERM.  Called from the app's own
+    shutdown handler, alongside every other pool in ``web_server.py``'s
+    ``_shutdown_runtime_components``.  A no-op if the pool was never created.
+    Also clears the module reference, so a stray scheduling call afterwards
+    builds a fresh pool instead of hitting the shut-down one's ``RuntimeError``.
+    """
+    global _background_executor
+    with _background_guard:
+        executor = _background_executor
+        _background_executor = None
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def schedule_artwork_build(database, config_manager, kind: str, entity_id: int):
@@ -627,43 +680,74 @@ def schedule_artwork_build(database, config_manager, kind: str, entity_id: int):
     and let this bounded pool fill the cache for the next render.
 
     Returns the scheduled :class:`~concurrent.futures.Future`, or ``None`` when
-    a build for the same entity is already queued/running.  ``build_artwork``
-    still owns the per-entity single-flight lock, so a concurrent HTTP or
-    precache build can never be duplicated either.
+    a build for the same entity is already queued/running, or the background
+    queue is already saturated.  ``build_artwork`` still owns the per-entity
+    single-flight lock, so a concurrent HTTP or precache build can never be
+    duplicated either.
     """
-    global _background_executor
+    global _background_executor, _background_executor_workers
     key = (str(database.database_path), kind, int(entity_id))
     with _background_guard:
         if key in _background_inflight:
             return None
+        if len(_background_inflight) >= _MAX_BACKGROUND_QUEUE:
+            logger.debug(
+                "background artwork queue full (%d), dropping %s %s",
+                len(_background_inflight), kind, entity_id,
+            )
+            return None
+        desired_workers = _precache_max_workers(config_manager)
         if _background_executor is None:
             _background_executor = ThreadPoolExecutor(
-                max_workers=_precache_max_workers(config_manager),
+                max_workers=desired_workers,
                 thread_name_prefix="Lib2ArtworkBg",
             )
+            _background_executor_workers = desired_workers
+        elif desired_workers != _background_executor_workers and not _background_inflight:
+            # rev25-08: the pool's worker count was frozen from whichever
+            # caller happened to construct it first — a later change to
+            # ``library_v2.artwork_cache_workers``/``auto_import.max_workers``
+            # never took effect without a process restart, unlike
+            # precache_all_artwork, which reads fresh on every run. Nothing is
+            # queued/running right now, so it's safe to replace the pool.
+            _background_executor.shutdown(wait=False)
+            _background_executor = ThreadPoolExecutor(
+                max_workers=desired_workers,
+                thread_name_prefix="Lib2ArtworkBg",
+            )
+            _background_executor_workers = desired_workers
         executor = _background_executor
         _background_inflight.add(key)
 
     def _run() -> bool:
+        # rev25-01: the key must be released no matter which step fails —
+        # including connection acquisition itself.  A single finally around
+        # the whole body (rather than a separate try/except just for
+        # _get_connection) is what guarantees that; a transient connection
+        # error used to leak the key and pin this entity to its placeholder
+        # for the rest of the process's life.
+        conn = None
         try:
-            conn = database._get_connection()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("background artwork connection failed: %s", exc)
-            return False
-        try:
-            return bool(
-                build_artwork(database, conn, config_manager, kind, int(entity_id))
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "background artwork build failed (%s %s): %s", kind, entity_id, exc
-            )
-            return False
-        finally:
             try:
-                conn.close()
+                conn = database._get_connection()
             except Exception as exc:  # noqa: BLE001
-                logger.debug("background artwork connection close failed: %s", exc)
+                logger.debug("background artwork connection failed: %s", exc)
+                return False
+            try:
+                return bool(
+                    build_artwork(database, conn, config_manager, kind, int(entity_id))
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "background artwork build failed (%s %s): %s", kind, entity_id, exc
+                )
+                return False
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("background artwork connection close failed: %s", exc)
             # Released inside the worker, not in a done-callback: the entity
             # must be schedulable again the moment its build is over, and a
             # callback can still be pending when the future already resolved.
@@ -682,23 +766,26 @@ def schedule_artwork_build(database, config_manager, kind: str, entity_id: int):
 def schedule_missing_artwork(database, config_manager, targets) -> int:
     """Warm the artwork cache for entities that just joined the library.
 
-    perf25-04: the batch precache job only knows the state of its last run, so
-    an artist added by a finished download or a freshly expanded discography
-    stayed cold until someone browsed it.  Callers pass ``(kind, entity_id)``
-    pairs after their own commit; already cached entities cost nothing (the
-    directory snapshot answers that), the rest are queued on the same bounded
-    background pool.  Never raises — artwork is presentation data.
+    perf25-04/rev25-04: the batch precache job only knows the state of its
+    last run, so an artist added by a finished download or a freshly expanded
+    discography stayed cold until someone browsed it.  Callers pass
+    ``(kind, entity_id)`` pairs after their own commit — typically one album
+    plus its artist, never the whole library — so each target is checked with
+    its own stat via :func:`artwork_version` instead of a full directory scan;
+    a per-download import used to re-scandir the entire cache directory here,
+    which is exactly the blocking I/O perf25-04 was meant to remove.  The rest
+    are queued on the same bounded background pool.  Never raises — artwork is
+    presentation data.
     """
     scheduled = 0
     try:
-        cached = _artwork_versions(database)
         seen = set()
         for kind, entity_id in targets or ():
             try:
                 key = (str(kind), int(entity_id))
             except (TypeError, ValueError):
                 continue
-            if key in seen or f"{key[0]}_{key[1]}.jpg" in cached:
+            if key in seen or artwork_version(database, key[0], key[1]) > 0:
                 continue
             seen.add(key)
             if schedule_artwork_build(database, config_manager, key[0], key[1]) is not None:
@@ -754,15 +841,16 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
         conn.close()
 
     total = len(artist_ids) + len(album_ids)
-    # Compute cache paths from one directory snapshot.  artwork_file() ensures
-    # the directory exists on every call; doing that thousands of times here is
-    # unnecessary filesystem work even when every image is already cached.
-    cache_dir = artwork_dir(database)
+    # rev25-14: one bulk directory listing instead of a per-entity exists()
+    # check — a real library's artist+album count can run into the tens of
+    # thousands, and this is the one place that's actually cheaper than the
+    # per-entity path every other caller uses (see artwork_version).
+    cached_names = _cached_artwork_filenames(artwork_dir(database))
     pending = [
         (kind, eid)
         for kind, ids in (("album", album_ids), ("artist", artist_ids))
         for eid in ids
-        if not (cache_dir / f"{kind}_{int(eid)}.jpg").exists()
+        if f"{kind}_{int(eid)}.jpg" not in cached_names
     ]
     progress_lock = threading.Lock()
     done = [total - len(pending)]
@@ -856,7 +944,7 @@ def apply_manual_artwork(
         except OSError as e:
             logger.debug("manual artwork write failed (%s %s): %s", kind, entity_id, e)
             return False
-    forget_artwork_versions(database)
+    forget_artwork_versions(database, kind, entity_id)
     return True
 
 
@@ -873,4 +961,5 @@ __all__ = [
     "precache_all_artwork",
     "schedule_artwork_build",
     "schedule_missing_artwork",
+    "shutdown_background_executor",
 ]

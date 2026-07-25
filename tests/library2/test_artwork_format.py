@@ -96,11 +96,16 @@ def test_old_png_named_jpg_is_rebuilt(imported_conn, legacy_db, monkeypatch):
     assert artwork.is_cached_jpeg(cached)
 
 
-def test_full_variant_skips_the_extra_huffman_optimize_pass():
-    """perf25-05b: the cold path pays a full Pillow decode plus two encodes per
-    image.  ``optimize=True`` adds a second entropy pass whose byte win is
-    negligible on the full-size variant; only the list thumbnail, which is
-    fetched for every row, keeps it."""
+def test_both_variants_take_the_extra_huffman_optimize_pass(monkeypatch):
+    """rev25-13: the full variant is not list-view-only — the artist/album
+    detail headers and the match dialogs all request it, on every visit, so
+    the entropy pass earns back its one-time background-thread cost in bytes
+    saved on every subsequent serve plus a smaller permanent cache footprint.
+
+    Uses the shared ``monkeypatch`` fixture (not a manual save/restore of the
+    class attribute) so the patch cannot survive a thread that's still
+    mid-build from another test — ``Image.Image.save`` is a shared class
+    attribute and the module keeps a process-global background executor."""
     source = _image_bytes("PNG", "RGB")
     saves: list[dict] = []
     real_save = Image.Image.save
@@ -109,14 +114,12 @@ def test_full_variant_skips_the_extra_huffman_optimize_pass():
         saves.append({"size": self.size, **kwargs})
         return real_save(self, fp, *args, **kwargs)
 
-    Image.Image.save = recording_save
-    try:
-        assert artwork._normalize_jpeg_variants(source, thumb_height=2) is not None
-    finally:
-        Image.Image.save = real_save
+    monkeypatch.setattr(Image.Image, "save", recording_save)
+
+    assert artwork._normalize_jpeg_variants(source, thumb_height=2) is not None
 
     full, thumbnail = saves
     assert full["size"] == (4, 3)
-    assert full.get("optimize") is not True
+    assert full.get("optimize") is True
     assert thumbnail["size"] == (2, 2)
     assert thumbnail.get("optimize") is True

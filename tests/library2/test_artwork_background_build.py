@@ -8,8 +8,17 @@ immediately with the placeholder contract and schedules the build.
 from __future__ import annotations
 
 import threading
+from unittest.mock import MagicMock
+
+import pytest
 
 from core.library2 import artwork
+
+
+def _config(**values):
+    config = MagicMock()
+    config.get = MagicMock(side_effect=lambda key, default=None: values.get(key, default))
+    return config
 
 
 def _shim(tmp_path):
@@ -72,6 +81,32 @@ def test_duplicate_schedules_are_collapsed(tmp_path, monkeypatch):
     assert calls == [9, 9]
 
 
+def test_connection_failure_does_not_pin_the_entity(tmp_path, monkeypatch):
+    """rev25-01: a transient connection error (SQLite file locked, EMFILE)
+    must release the in-flight key just like a build failure does — the old
+    code returned before the ``finally`` that released it, pinning the
+    entity to its placeholder for the rest of the process's life."""
+    database = _shim(tmp_path)
+    real_get_connection = database._get_connection
+    calls = {"n": 0}
+
+    def flaky_get_connection():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("unable to open database file")
+        return real_get_connection()
+
+    monkeypatch.setattr(database, "_get_connection", flaky_get_connection)
+    monkeypatch.setattr(artwork, "build_artwork", lambda *_a, **_k: "art.jpg")
+
+    first = artwork.schedule_artwork_build(database, None, "album", 11)
+    assert first.result(timeout=10) is False
+
+    second = artwork.schedule_artwork_build(database, None, "album", 11)
+    assert second is not None, "the key must be released even when connecting fails"
+    assert second.result(timeout=10) is True
+
+
 def test_build_failure_does_not_pin_the_entity(tmp_path, monkeypatch):
     database = _shim(tmp_path)
 
@@ -89,3 +124,77 @@ def test_build_failure_does_not_pin_the_entity(tmp_path, monkeypatch):
     second = artwork.schedule_artwork_build(database, None, "album", 3)
     assert second is not None
     assert second.result(timeout=10) is True
+
+
+def test_queue_bound_drops_scheduling_past_the_cap(tmp_path, monkeypatch):
+    """rev25-08: submit() has no native queue bound — without one, a client
+    hammering the endpoint (or repeated renders of a page full of uncached
+    covers) could grow the pending queue without limit."""
+    database = _shim(tmp_path)
+    monkeypatch.setattr(artwork, "_MAX_BACKGROUND_QUEUE", 2)
+    release = threading.Event()
+
+    def blocking_build(*_a, **_k):
+        release.wait(timeout=10)
+        return None
+
+    monkeypatch.setattr(artwork, "build_artwork", blocking_build)
+
+    first = artwork.schedule_artwork_build(database, None, "artist", 1)
+    second = artwork.schedule_artwork_build(database, None, "artist", 2)
+    third = artwork.schedule_artwork_build(database, None, "artist", 3)
+
+    assert first is not None
+    assert second is not None
+    assert third is None, "the queue bound must drop scheduling once saturated"
+
+    release.set()
+    first.result(timeout=10)
+    second.result(timeout=10)
+
+
+def test_worker_count_picks_up_a_config_change_once_idle(tmp_path, monkeypatch):
+    """rev25-08: the pool's worker count used to freeze from whichever caller
+    happened to construct it first — a later change to
+    ``auto_import.max_workers``/``library_v2.artwork_cache_workers`` never
+    took effect without a process restart. Once the pool is idle (nothing
+    scheduled/running), the next call should pick up the new value."""
+    database = _shim(tmp_path)
+    monkeypatch.setattr(artwork, "build_artwork", lambda *_a, **_k: "art.jpg")
+    monkeypatch.setattr(artwork, "_background_executor", None)
+
+    first = artwork.schedule_artwork_build(
+        database, _config(**{"auto_import.max_workers": 2}), "artist", 1
+    )
+    first.result(timeout=10)
+    assert artwork._background_executor_workers == 2
+
+    second = artwork.schedule_artwork_build(
+        database, _config(**{"auto_import.max_workers": 5}), "artist", 2
+    )
+    second.result(timeout=10)
+    assert artwork._background_executor_workers == 5
+
+
+def test_shutdown_background_executor_is_a_safe_noop_when_never_created():
+    artwork.shutdown_background_executor()
+
+
+def test_shutdown_background_executor_shuts_down_the_pool(tmp_path, monkeypatch):
+    """rev25-08: ThreadPoolExecutor's own atexit hook joins non-daemon worker
+    threads, which used to delay interpreter/container exit indefinitely on a
+    slow in-flight build. The app's shutdown handler must be able to tear the
+    pool down without waiting for that."""
+    database = _shim(tmp_path)
+    monkeypatch.setattr(artwork, "build_artwork", lambda *_a, **_k: "art.jpg")
+    monkeypatch.setattr(artwork, "_background_executor", None)
+
+    future = artwork.schedule_artwork_build(database, None, "artist", 42)
+    future.result(timeout=10)
+    executor_ref = artwork._background_executor
+
+    artwork.shutdown_background_executor()
+
+    assert artwork._background_executor is None
+    with pytest.raises(RuntimeError):
+        executor_ref.submit(lambda: None)

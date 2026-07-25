@@ -2135,6 +2135,15 @@ def _shutdown_runtime_components():
     ]:
         _shutdown_executor(executor, name)
 
+    # rev25-08: the Library-v2 artwork background pool is created lazily on
+    # first use (not at import time like the pools above), so it's shut down
+    # through its own module rather than a direct executor reference here.
+    try:
+        from core.library2.artwork import shutdown_background_executor
+        shutdown_background_executor()
+    except Exception as e:
+        logger.error(f"Error shutting down lib2 artwork background executor: {e}")
+
     # Give daemon cleanup threads a moment to observe the shutdown flag.
     time.sleep(0.2)
 
