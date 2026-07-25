@@ -60,18 +60,18 @@ TRACK_SAMPLE_LIMIT = 40
 _API_SOURCES = ('deezer', 'itunes', 'spotify')
 
 
-def normalize_artist_name(name) -> str:
+def normalize_artist_name(name: str, symbols: list) -> str:
     """Casefold + whitespace-collapse for exact-name comparison. Separator spacing
     is normalized too ("Tyler,The Creator" == "Tyler, The Creator") so a
     missing space after the separator can't dodge the whitelist / API match."""
-    text = re.sub(r'\s*[,;&/]\s*', ', ', str(name or ''))
+    text = re.sub(r'\s*[{}]\s*'.format(''.join(symbols)), ', ', str(name or ''))
     return ' '.join(text.casefold().split())
 
 
-def split_artist_parts(name: str) -> list:
+def split_artist_parts(name: str, symbols: list) -> list:
     """Split a separator-joined artist string into clean parts.
     Supports: comma (,), semicolon (;), ampersand (&), forward slash (/)."""
-    parts = re.split(r'[,;&/]+', str(name or ''))
+    parts = re.split(r'[{}]+'.format(''.join(symbols)), str(name or ''))
     return [p.strip() for p in parts if p.strip()]
 
 
@@ -96,11 +96,22 @@ class CommaArtistSplitterJob(RepairJob):
         'convention Picard uses). After your media server rescans, each artist is credited '
         'individually and the combined dummy artist disappears.\n\n'
         'Nothing is changed until you approve a finding.'
+        'Settings:\n'
+        '- Comma Splitter: Enable splitting commas (,)\n'
+        '- Semicolon Splitter: Enable splitting semicolons (;)\n'
+        '- Forward Slash Splitter: Enable splitting forward slashes (/)\n'
+        '- Ampersand Splitter: Enable splitting ampersands (&)\n'
     )
     icon = 'repair-icon-artist'
     default_enabled = False
     default_interval_hours = 168  # Weekly
     auto_fix = False
+    default_settings = {
+        'comma_splitter': True,
+        'semicolon_splitter': True,
+        'forward_slash_splitter': True,
+        'ampersand_splitter': True,
+    }
 
     def estimate_scope(self, context: JobContext) -> int:
         try:
@@ -118,8 +129,32 @@ class CommaArtistSplitterJob(RepairJob):
         except Exception:
             return 0
 
+    def _get_settings(self, context: JobContext) -> dict:
+        """Read job settings from config, falling back to defaults."""
+        if not context.config_manager:
+            return self.default_settings.copy()
+        cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+        merged = self.default_settings.copy()
+        merged.update(cfg)
+        return merged
+
+    def _get_symbols(self, settings: dict) -> list:
+        """Return the list of separators enabled in the settings."""
+        symbols = []
+        if settings.get('comma_splitter', True):
+            symbols.append(',')
+        if settings.get('semicolon_splitter', True):
+            symbols.append(';')
+        if settings.get('forward_slash_splitter', True):
+            symbols.append('/')
+        if settings.get('ampersand_splitter', True):
+            symbols.append('&')
+        return symbols
+    
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
+        settings = self._get_settings(context)
+        symbols: list = self._get_symbols(settings)
 
         tracks = []
         conn = None
@@ -166,6 +201,7 @@ class CommaArtistSplitterJob(RepairJob):
 
         for i, (track_id, file_path, artist_id, db_artist_name, thumb_url) in enumerate(tracks):
             if context.check_stop():
+                logger.debug("Scan stopped by user request")
                 return result
             if context.wait_if_paused():
                 return result
@@ -179,31 +215,35 @@ class CommaArtistSplitterJob(RepairJob):
                     file_path, transfer_folder=context.transfer_folder if hasattr(context, 'transfer_folder') else None,
                     config_manager=context._config_manager if hasattr(context, '_config_manager') else None)
                 if not resolved or not __import__('os').path.exists(resolved):
+                    logger.debug(f"File not found or inaccessible: {file_path}")
                     continue
 
                 audio = MutagenFile(resolved)
                 if audio is None or audio.tags is None:
+                    logger.debug(f"Unsupported or untagged file: {file_path}")
                     continue
 
                 # Extract the artist tag value from the file metadata
                 file_artist = self._get_artist_tag(audio)
                 if not file_artist:
+                    logger.debug(f"No artist tag found for file: {file_path}")
                     continue
 
                 # Check if it contains separators
-                parts = split_artist_parts(file_artist)
+                parts = split_artist_parts(file_artist, symbols)
                 if len(parts) < 2:
+                    logger.debug(f"Artist tag does not contain multiple parts: {file_artist}")
                     continue
 
                 # Memoize the split
                 if file_artist not in memo_splits:
-                    norm_full = normalize_artist_name(file_artist)
+                    norm_full = normalize_artist_name(file_artist, symbols)
                     if norm_full in KNOWN_COMMA_ARTISTS:
                         memo_splits[file_artist] = None
                     else:
                         # Check 1: is the FULL string a real artist?
                         is_real, checked_sources = self._full_string_is_real_artist(
-                            context, file_artist, search_memo)
+                            context, file_artist, search_memo, symbols)
                         if is_real:
                             memo_splits[file_artist] = None
                         elif not checked_sources:
@@ -211,7 +251,7 @@ class CommaArtistSplitterJob(RepairJob):
                             memo_splits[file_artist] = None
                         else:
                             # Check 2: every part must resolve
-                            parts_resolution = self._resolve_parts(context, parts, search_memo)
+                            parts_resolution = self._resolve_parts(context, parts, search_memo, symbols)
                             if parts_resolution is None:
                                 memo_splits[file_artist] = None
                             else:
@@ -335,10 +375,10 @@ class CommaArtistSplitterJob(RepairJob):
             pass
         return None
 
-    def _search_artist_names(self, source: str, query: str, memo: dict):
+    def _search_artist_names(self, source: str, query: str, memo: dict, symbols: list):
         """Normalized artist-name set from one API source, memoized per run.
         Returns None when the source is unreachable/unusable (≠ empty result)."""
-        key = (source, normalize_artist_name(query))
+        key = (source, normalize_artist_name(query, symbols))
         if key in memo:
             return memo[key]
         names = None
@@ -351,7 +391,7 @@ class CommaArtistSplitterJob(RepairJob):
                 for r in (results or []):
                     n = r.get('name') if isinstance(r, dict) else getattr(r, 'name', None)
                     if n:
-                        names.add(normalize_artist_name(n))
+                        names.add(normalize_artist_name(n, symbols))
         except Exception as e:
             logger.debug("Artist search failed on %s for %r: %s", source, query, e)
             names = None
@@ -364,13 +404,13 @@ class CommaArtistSplitterJob(RepairJob):
                 continue
             yield source
 
-    def _full_string_is_real_artist(self, context: JobContext, name: str, memo: dict):
+    def _full_string_is_real_artist(self, context: JobContext, name: str, memo: dict, symbols: list):
         """Returns (is_real, checked_sources). checked_sources lists sources
         that answered — empty means the check could not run at all."""
         checked = []
-        norm = normalize_artist_name(name)
+        norm = normalize_artist_name(name, symbols)
         for source in self._iter_sources(context):
-            names = self._search_artist_names(source, name, memo)
+            names = self._search_artist_names(source, name, memo, symbols)
             if names is None:
                 continue
             checked.append(source)
@@ -378,7 +418,7 @@ class CommaArtistSplitterJob(RepairJob):
                 return True, checked
         return False, checked
 
-    def _resolve_parts(self, context: JobContext, parts: list, memo: dict):
+    def _resolve_parts(self, context: JobContext, parts: list, memo: dict, symbols: list):
         """Verify every part is a known artist. Returns the resolution list
         for the finding details, or None if any part can't be verified."""
         resolution = []
@@ -391,9 +431,9 @@ class CommaArtistSplitterJob(RepairJob):
                 entry['library_artist_id'] = library_id
                 entry['verified_via'] = 'library'
             else:
-                norm = normalize_artist_name(part)
+                norm = normalize_artist_name(part, symbols)
                 for source in self._iter_sources(context):
-                    names = self._search_artist_names(source, part, memo)
+                    names = self._search_artist_names(source, part, memo, symbols)
                     if names and norm in names:
                         entry['verified_via'] = source
                         break
