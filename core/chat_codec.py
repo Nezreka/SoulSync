@@ -98,6 +98,81 @@ def reaction_of(payload) -> dict | None:
     return {"k": k, "e": e}
 
 
+import re as _re
+
+_PROTOCOL_KIND_RE = _re.compile(r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)?$")
+
+
+def protocol_of(payload) -> dict | None:
+    """The validated protocol object from a decoded envelope ({'k': kind, ...}),
+    or None. Protocol carriers are empty-text envelopes carrying machine
+    coordination (jukebox votes, polls, pins, presence beacons) — invisible
+    to vanilla clients, intercepted before the visible list and NEVER
+    archived. REMOTE input: kind is a short dotted identifier, ≤16 fields,
+    strings ≤512, numbers finite, one nesting level (list/dict) with the
+    same caps. Mirrors ChatProtocol.parseProtocol in chat-protocol.js —
+    the two validators must agree or clients desync."""
+    p = (payload or {}).get("p") if isinstance(payload, dict) else None
+    if not isinstance(p, dict):
+        return None
+    k = p.get("k")
+    if not isinstance(k, str) or len(k) > 24 or not _PROTOCOL_KIND_RE.match(k):
+        return None
+
+    def _scalar_ok(v):
+        if isinstance(v, str):
+            return len(v) <= 512
+        if isinstance(v, bool) or v is None:
+            return True
+        if isinstance(v, (int, float)):
+            return abs(v) < 1e15
+        return False
+
+    def _payload_ok(obj, depth):
+        if not isinstance(obj, dict) or len(obj) > 16:
+            return False
+        for v in obj.values():
+            if _scalar_ok(v):
+                continue
+            if depth > 0 and isinstance(v, list):
+                if len(v) > 32 or not all(_scalar_ok(x) for x in v):
+                    return False
+            elif depth > 0 and isinstance(v, dict):
+                if not _payload_ok(v, depth - 1):
+                    return False
+            else:
+                return False
+        return True
+
+    if not _payload_ok(p, 1):
+        return None
+    return p
+
+
+def file_of(payload) -> dict | None:
+    """The validated file-card metadata from a decoded envelope ({'n' name,
+    's' size, 'm' mime}), or None. The URL itself travels as the message
+    TEXT (so the link survives archives and copy); this object only dresses
+    the card. REMOTE input — caps everywhere."""
+    f = (payload or {}).get("f") if isinstance(payload, dict) else None
+    if not isinstance(f, dict):
+        return None
+    n = str(f.get("n") or "").strip()[:200]
+    if not n:
+        return None
+    out = {"n": n}
+    try:
+        size = int(f.get("s") or 0)
+        if 0 < size < 10 ** 12:
+            out["s"] = size
+    except (TypeError, ValueError):
+        pass
+    m = str(f.get("m") or "").strip()[:80]
+    if m:
+        out["m"] = m
+    return out
+
+
 def reply_of(payload) -> dict | None:
     """The validated reply reference from a decoded envelope, or None.
     Everything here is REMOTE input — strict shape, hard caps."""

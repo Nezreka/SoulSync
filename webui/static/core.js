@@ -455,6 +455,9 @@ function initializeWebSocket() {
     socket.on('chat:unread', function (d) {
         if (window.ChatPage && ChatPage.onUnread) ChatPage.onUnread(d);
     });
+    socket.on('chat:room_protocol', function (d) {
+        if (window.ChatPage && ChatPage.onRoomProtocol) ChatPage.onRoomProtocol(d);
+    });
 
     // Phase 2 event listeners (dashboard pollers)
     socket.on('rate-monitor:update', _handleRateMonitorUpdate);

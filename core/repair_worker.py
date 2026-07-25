@@ -1943,6 +1943,16 @@ class RepairWorker:
                 total_tracks = int(total_tracks or 0)
                 _fix_track_number_tag(resolved, int(correct_num), total_tracks)
 
+            # #1075: per-disc numbering needs the disc tag written too — the
+            # scan rode disc_ok/disc_number/total_discs in the finding, so
+            # approve applies exactly the promised disc change. Legacy
+            # findings lack disc_ok (defaults True) → no disc write, exactly
+            # the old behavior.
+            if not details.get('disc_ok', True) and details.get('disc_number'):
+                from core.repair_jobs.track_number_repair import _fix_disc_number_tag
+                _fix_disc_number_tag(resolved, int(details['disc_number']),
+                                     int(details.get('total_discs') or 0))
+
             # Rename to EXACTLY what the finding promised (#1009 — the old code
             # recomputed the prefix here and mangled 4-digit disc+track names:
             # '0213 - X' became '133 - X'). Findings created before the plan
