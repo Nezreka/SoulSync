@@ -48,6 +48,65 @@ describe('Artwork placeholder retry (perf25-02)', () => {
     expect(screen.getByLabelText('Remote').textContent).toBe('♪');
   });
 
+  it('rev25-12: does not commit a stale retry suffix onto a new base on src change', () => {
+    const { rerender } = render(
+      <Artwork src="/api/library/v2/artwork/artist/7" alt="Artist" className="c" />,
+    );
+    fireEvent.error(screen.getByAltText('Artist'));
+    act(() => void vi.advanceTimersByTime(2000));
+    // handleError briefly swaps in the placeholder <div> before the retry
+    // fires, so the retried <img> is a fresh DOM node — re-query for it.
+    const image = screen.getByAltText('Artist') as HTMLImageElement;
+    expect(image.getAttribute('src')).toContain('retry=1');
+
+    // React flushes the base-keyed useEffect synchronously inside act(), so
+    // asserting only on the settled DOM after rerender() can't see a frame
+    // that briefly existed mid-commit. A real `<img>` element starts loading
+    // whatever `src` it's given the instant the attribute is set, before any
+    // later effect corrects it — so what matters is every value the element
+    // was ever pointed at, not just the last one. Capture that directly.
+    const observedSrc: string[] = [];
+    const originalSetAttribute = image.setAttribute.bind(image);
+    image.setAttribute = ((name: string, value: string) => {
+      if (name === 'src') observedSrc.push(value);
+      return originalSetAttribute(name, value);
+    }) as typeof image.setAttribute;
+
+    rerender(<Artwork src="/api/library/v2/artwork/artist/7?v=99" alt="Artist" className="c" />);
+
+    // No value the element was ever pointed at during this update may still
+    // carry the previous base's retry suffix — that would force a second,
+    // guaranteed cache-missing image load for a cover that just arrived.
+    expect(observedSrc.some((value) => value.includes('retry='))).toBe(false);
+    expect(image.getAttribute('src')).toBe('/api/library/v2/artwork/artist/7?v=99');
+  });
+
+  it('rev25-12: never points the element at a truthy garbage src when src goes empty mid-retry', () => {
+    const { rerender } = render(
+      <Artwork src="/api/library/v2/artwork/artist/7" alt="Artist" className="c" />,
+    );
+    fireEvent.error(screen.getByAltText('Artist'));
+    act(() => void vi.advanceTimersByTime(2000));
+    const image = screen.getByAltText('Artist') as HTMLImageElement;
+    expect(image.getAttribute('src')).toContain('retry=1');
+
+    // Empty base + a leftover retry count used to compute `'' + '?retry=1'`
+    // — a non-empty, truthy string that `<img>` resolves against the current
+    // document (visible as a broken-image flash) instead of the placeholder.
+    const observedSrc: string[] = [];
+    const originalSetAttribute = image.setAttribute.bind(image);
+    image.setAttribute = ((name: string, value: string) => {
+      if (name === 'src') observedSrc.push(value);
+      return originalSetAttribute(name, value);
+    }) as typeof image.setAttribute;
+
+    rerender(<Artwork src="" alt="Artist" className="c" />);
+
+    expect(observedSrc.some((value) => value.startsWith('?'))).toBe(false);
+    expect(screen.queryByAltText('Artist')).toBeNull();
+    expect(screen.getByLabelText('Artist').textContent).toBe('♪');
+  });
+
   it('appends the thumb variant before the retry marker', () => {
     render(<Artwork src="/api/library/v2/artwork/artist/9?v=42" alt="Thumb" className="c" thumb />);
 

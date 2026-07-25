@@ -331,20 +331,30 @@ export function Artwork({
   thumb?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Only SoulSync's artwork endpoint understands ``size=thumb``. Appending it
   // to Spotify/Deezer/CDN URLs (the previous behavior) can invalidate signed
   // URLs; it also produced ``...?v=123?size=thumb`` for cache-busted local art.
   const local = Boolean(src) && src.startsWith(LOCAL_ARTWORK_PREFIX);
   const base = src && thumb && local ? `${src}${src.includes('?') ? '&' : '?'}size=thumb` : src;
-  const url = attempt > 0 ? `${base}${base.includes('?') ? '&' : '?'}retry=${attempt}` : base;
-  // A card is reused as searches/settings refresh. One failed old URL must not
-  // permanently pin the component to its placeholder after a valid URL arrives.
-  useEffect(() => {
+  // rev25-12: the retry count is keyed to the base it was counted against and
+  // reset the instant `base` changes — during render, not in a `[base]`
+  // effect. An effect fires only after this render already committed, so a
+  // src change (e.g. a list refetch landing a fresh `?v=`) used to commit one
+  // frame that still carried the old base's `retry=N` suffix on the new URL,
+  // forcing every such change to load the image twice. Adjusting state during
+  // render (React's documented pattern for this) means the corrected value is
+  // what actually gets painted, never a transient wrong one.
+  const [retry, setRetry] = useState({ base, attempt: 0 });
+  if (retry.base !== base) {
+    setRetry({ base, attempt: 0 });
     setFailed(false);
-    setAttempt(0);
-  }, [base]);
+  }
+  const attempt = retry.base === base ? retry.attempt : 0;
+  // A falsy `base` must stay falsy: `''` plus a stale retry suffix produces
+  // the truthy string `'?retry=1'`, which `<img>` resolves against the
+  // current document — a broken-image flash — instead of the placeholder.
+  const url = base && attempt > 0 ? `${base}${base.includes('?') ? '&' : '?'}retry=${attempt}` : base;
   useEffect(
     () => () => {
       if (retryTimer.current) clearTimeout(retryTimer.current);
@@ -359,7 +369,7 @@ export function Artwork({
     if (retryTimer.current) clearTimeout(retryTimer.current);
     retryTimer.current = setTimeout(() => {
       retryTimer.current = null;
-      setAttempt((current) => current + 1);
+      setRetry((current) => (current.base === base ? { base, attempt: current.attempt + 1 } : current));
       setFailed(false);
     }, delay);
   };
