@@ -450,6 +450,22 @@ def _preserve_casing_enabled() -> bool:
         return True
 
 
+def _keep_user_year(api_release_date, user_year):
+    """Prefer the user's own album year over the source's original-release
+    year when preserving is on (#1080 QT3496: a file imported as [2023] — a
+    reissue/edition year the user chose — was being 'corrected' to the
+    source's 2020 original). Returns a release_date string the path builder
+    reads for $year; falls back to the source value."""
+    if not _preserve_casing_enabled():
+        return api_release_date
+    uy = str(user_year or "").strip()
+    if len(uy) == 4 and uy.isdigit():
+        src_year = str(api_release_date or "")[:4]
+        if uy != src_year:
+            return uy
+    return api_release_date
+
+
 def _keep_user_casing(source_value, user_value):
     """Return the USER's string when it matches the source only by case, else
     the source string. Case-only means identical after casefold — so genuine
@@ -996,6 +1012,7 @@ def _build_post_process_context(
     album_title: str,
     total_discs: int,
     local_title: Optional[str] = None,
+    local_year: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
@@ -1021,6 +1038,9 @@ def _build_post_process_context(
         or api_album.get('releaseDate')
         or ''
     )
+    # #1080: keep the user's own album year ($year) — a reissue/edition year
+    # they imported with, not the source's original-release year.
+    api_album_release = _keep_user_year(api_album_release, local_year)
     api_album_total_tracks = (
         api_album.get('total_tracks')
         or api_album.get('totalTracks')
@@ -1256,6 +1276,7 @@ def preview_album_reorganize(
         context = _build_post_process_context(
             per_item_album, api_track, artist_name, album_title, total_discs,
             local_title=title,
+            local_year=(str(album_data.get('year')) if album_data.get('year') else None),
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1412,6 +1433,7 @@ class _RunContext:
     artist_name: str
     album_title: str
     total_discs: int
+    local_year: Optional[str]               # the user's stored album year (#1080)
     staging_album_dir: str
     state_lock: threading.Lock              # required to mutate lock-protected fields
     summary: dict                           # LOCK-PROTECTED
@@ -1507,7 +1529,7 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
     api_album = per_item_api_album if per_item_api_album else ctx.api_album
     context = _build_post_process_context(
         api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs,
-        local_title=title,
+        local_title=title, local_year=ctx.local_year,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -1810,6 +1832,7 @@ def reorganize_album(
         artist_name=artist_name,
         album_title=album_title,
         total_discs=total_discs,
+        local_year=(str(album_data.get('year')) if album_data.get('year') else None),
         staging_album_dir=staging_album_dir,
         state_lock=state_lock,
         summary=summary,

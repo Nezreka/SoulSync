@@ -103,3 +103,26 @@ def test_casing_preserve_composes_with_feat(monkeypatch):
     # feat re-added from the API artists, then the WHOLE thing is a case-only
     # match to the user's title → user's casing kept
     assert ctx["original_search_result"]["title"] == "the chase (feat. big artist)"
+
+
+# ── #1080: the user's own album year is kept, not the source's original ──────
+
+def test_keep_user_year_prefers_user_when_preserving():
+    from core.library_reorganize import _keep_user_year
+    assert _keep_user_year("2020-05-01", "2023") == "2023"     # reissue year kept
+    assert _keep_user_year("2020-05-01", "2020") == "2020-05-01"  # same → source
+    assert _keep_user_year("2020-05-01", None) == "2020-05-01"    # no user year
+    assert _keep_user_year("2020-05-01", "bogus") == "2020-05-01"  # not a 4-digit year
+
+
+def test_keep_user_year_disabled_passthrough(monkeypatch):
+    monkeypatch.setattr("core.library_reorganize._preserve_casing_enabled", lambda: False)
+    from core.library_reorganize import _keep_user_year
+    assert _keep_user_year("2020-05-01", "2023") == "2020-05-01"
+
+
+def test_context_carries_user_year_into_release_date():
+    ctx = _build_post_process_context(
+        _album(), {"name": "Song", "track_number": 1, "disc_number": 1, "artists": [{"name": "A"}]},
+        "A", "Alb", 1, local_year="2023")
+    assert ctx["spotify_album"]["release_date"] == "2023"
