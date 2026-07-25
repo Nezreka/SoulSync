@@ -201,3 +201,24 @@ class TestTypingIndicators:
         assert "data-chat-typing" in _HTML
         css = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8", errors="replace")
         assert ".chat-typing" in css
+
+
+class TestSlashCommands:
+    """/play /skip /tune /topic /poll /pin /gif /shrug — power-user glue
+    over existing features. Autocomplete shares the mention pop; unknown
+    /words fall through as plain messages (never eaten)."""
+
+    def test_wiring(self):
+        js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8", errors="replace")
+        assert "SLASH_COMMANDS" in js and "_runSlash" in js
+        for cmd in ("'play'", "'skip'", "'tune'", "'topic'", "'poll'", "'pin'", "'gif'", "'shrug'"):
+            assert "cmd === " + cmd in js, cmd
+        # unknown commands are sent as text, not swallowed
+        run = js[js.index("function _runSlash"):js.index("function pickMention")]
+        assert run.rstrip().endswith("// unknown /word → plain message\n    }") or "return false;" in run[-200:]
+        # Tab completes the first hit; commands never emit typing noise
+        assert "data-chat-slash-pick" in js
+        assert "=== '/') return;" in js.split("_maybeSendTyping", 2)[2][:600]
+        # send() intercepts before posting
+        send_fn = js[js.index("function send()"):js.index("function send()") + 3000]
+        assert "_runSlash(text)" in send_fn

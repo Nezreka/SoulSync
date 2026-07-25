@@ -1134,6 +1134,127 @@
         pop.hidden = false;
     }
 
+    // ── slash commands (room only — power-user glue over existing features)
+    var SLASH_COMMANDS = [
+        { c: '/play',  a: '<song or link>', d: 'queue it on the jukebox' },
+        { c: '/skip',  a: '', d: 'vote to skip the current track' },
+        { c: '/tune',  a: '', d: 'tune in or out of the jukebox' },
+        { c: '/topic', a: '<text>', d: 'set the room topic' },
+        { c: '/poll',  a: '<question>', d: 'start a room poll' },
+        { c: '/pin',   a: '', d: 'pin the latest message' },
+        { c: '/gif',   a: '<search>', d: 'find a GIF' },
+        { c: '/shrug', a: '[message]', d: 'appends \u00af\\_(\u30c4)_/\u00af' },
+    ];
+
+    function updateSlashPop(input) {
+        var pop = q('[data-chat-mention-pop]');
+        if (!pop) return;
+        var v = String(input.value || '');
+        var active = state.view === 'room' && state.canSend &&
+            v[0] === '/' && v.length <= 12 && !/\s/.test(v);
+        if (!active) {
+            // only clear the pop when WE own it (mentions share the host)
+            if (pop.querySelector('[data-chat-slash-pick]')) { pop.hidden = true; pop.innerHTML = ''; }
+            return;
+        }
+        var hits = SLASH_COMMANDS.filter(function (sc) { return sc.c.indexOf(v) === 0; });
+        if (!hits.length) { pop.hidden = true; return; }
+        pop.innerHTML = hits.map(function (sc) {
+            return '<button type="button" class="chat-mention-opt chat-slash-opt" ' +
+                'data-chat-slash-pick="' + attr(sc.c) + '">' +
+                '<span class="chat-slash-cmd">' + esc(sc.c) +
+                    (sc.a ? ' <i>' + esc(sc.a) + '</i>' : '') + '</span>' +
+                '<span class="chat-slash-desc">' + esc(sc.d) + '</span></button>';
+        }).join('');
+        pop.hidden = false;
+    }
+
+    function pickSlash(cmd) {
+        var input = q('[data-chat-input]');
+        var pop = q('[data-chat-mention-pop]');
+        if (pop) { pop.hidden = true; pop.innerHTML = ''; }
+        if (!input || !cmd) return;
+        var meta = null;
+        SLASH_COMMANDS.forEach(function (sc) { if (sc.c === cmd) meta = sc; });
+        if (meta && !meta.a) {                     // no-arg commands run on click
+            input.value = '';
+            _runSlash(cmd);
+            return;
+        }
+        input.value = cmd + ' ';
+        input.focus();
+    }
+
+    function _runSlash(text) {
+        // true = handled; a string = transformed message text; false = not a command
+        var m = text.match(/^\/([a-z]+)\s*([\s\S]*)$/);
+        if (!m) return false;
+        var cmd = m[1], arg = (m[2] || '').trim();
+        var toast = function (msg, kind) {
+            if (typeof showToast === 'function') showToast(msg, kind || 'info');
+        };
+        if (cmd === 'shrug') {
+            return (arg ? arg + ' ' : '') + '\u00af\\_(\u30c4)_/\u00af';
+        }
+        if (cmd === 'skip') {
+            var stS = _jbxState();
+            if (stS.now) sendProtocol('jbx.skip', { o: stS.now.id });
+            else toast('Nothing is playing');
+            return true;
+        }
+        if (cmd === 'tune') {
+            if (state.jukebox.tunedIn) { _jbxTuneOut(); renderJukebox(); }
+            else if (_jbxState().now) { if (!state.jukebox.open) toggleJukebox(); _jbxTuneIn(); }
+            else toast('Nothing is playing');
+            return true;
+        }
+        if (cmd === 'topic') {
+            sendProtocol('topic.set', { t: arg });
+            return true;
+        }
+        if (cmd === 'play') {
+            if (!arg) {
+                var hb = q('[data-chat-jbx-input]');
+                if (hb) hb.focus();
+                return true;
+            }
+            postJSON('/api/chat/jukebox/resolve', { q: arg }).then(function (res) {
+                var r0 = res.ok && res.body.results && res.body.results[0];
+                if (r0) _jbxPick(r0);
+                else toast((res.body && res.body.error) || 'Nothing found for that', 'error');
+            });
+            return true;
+        }
+        if (cmd === 'poll') {
+            togglePollPop();
+            var qEl = q('[data-chat-poll-q]');
+            if (qEl && arg) { qEl.value = arg.slice(0, 160); }
+            var o1 = q('[data-chat-poll-o1]');
+            if (o1 && arg) o1.focus();
+            return true;
+        }
+        if (cmd === 'pin') {
+            var last = (state.msgs || [])[state.msgs.length - 1];
+            if (last && last.username) {
+                sendProtocol('pin.add', { u: last.username, ts: String(last.timestamp || ''),
+                                          x: String(last.message || '').slice(0, 140) });
+                toast('\ud83d\udccc Pinned for the room', 'success');
+            } else toast('Nothing to pin yet');
+            return true;
+        }
+        if (cmd === 'gif') {
+            toggleGifPicker();
+            var gs = q('[data-chat-gif-search]');
+            if (gs) {
+                gs.value = arg;
+                gs.focus();
+                if (arg) gs.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            return true;
+        }
+        return false;                              // unknown /word → plain message
+    }
+
     function pickMention(name) {
         var input = q('[data-chat-input]');
         var pop = q('[data-chat-mention-pop]');
@@ -1712,6 +1833,17 @@
         var text = (input.value || '').trim();
         if (!text || !state.canSend) return;
         state.lastTypSentAt = 0;
+        if (state.view === 'room' && text[0] === '/') {
+            var slash = _runSlash(text);
+            if (slash === true) {
+                input.value = '';
+                input.style.height = 'auto';
+                var spop = q('[data-chat-mention-pop]');
+                if (spop) { spop.hidden = true; spop.innerHTML = ''; }
+                return;
+            }
+            if (typeof slash === 'string') text = slash;
+        }
         input.value = '';
         input.style.height = 'auto';
         var url = state.view === 'room'
@@ -1841,6 +1973,8 @@
             }
             t = e.target.closest('[data-chat-reply-cancel]');
             if (t) { cancelReply(); return; }
+            t = e.target.closest('[data-chat-slash-pick]');
+            if (t) { pickSlash(t.getAttribute('data-chat-slash-pick')); return; }
             t = e.target.closest('[data-chat-mention-pick]');
             if (t) { pickMention(t.getAttribute('data-chat-mention-pick')); return; }
             t = e.target.closest('[data-chat-settings-btn]');
@@ -2069,11 +2203,20 @@
                     var mp = q('[data-chat-mention-pop]');
                     if (mp) mp.hidden = true;
                 }
+                if (e.key === 'Tab') {
+                    var sp = q('[data-chat-mention-pop]');
+                    var first = sp && !sp.hidden && sp.querySelector('[data-chat-slash-pick]');
+                    if (first) {
+                        e.preventDefault();
+                        pickSlash(first.getAttribute('data-chat-slash-pick'));
+                    }
+                }
             });
             inputEl.addEventListener('input', function () {
                 inputEl.style.height = 'auto';
                 inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px';
                 updateMentionPop(inputEl);
+                updateSlashPop(inputEl);
                 _maybeSendTyping(inputEl);
             });
         }
