@@ -679,6 +679,35 @@ def schedule_artwork_build(database, config_manager, kind: str, entity_id: int):
         return None
 
 
+def schedule_missing_artwork(database, config_manager, targets) -> int:
+    """Warm the artwork cache for entities that just joined the library.
+
+    perf25-04: the batch precache job only knows the state of its last run, so
+    an artist added by a finished download or a freshly expanded discography
+    stayed cold until someone browsed it.  Callers pass ``(kind, entity_id)``
+    pairs after their own commit; already cached entities cost nothing (the
+    directory snapshot answers that), the rest are queued on the same bounded
+    background pool.  Never raises — artwork is presentation data.
+    """
+    scheduled = 0
+    try:
+        cached = _artwork_versions(database)
+        seen = set()
+        for kind, entity_id in targets or ():
+            try:
+                key = (str(kind), int(entity_id))
+            except (TypeError, ValueError):
+                continue
+            if key in seen or f"{key[0]}_{key[1]}.jpg" in cached:
+                continue
+            seen.add(key)
+            if schedule_artwork_build(database, config_manager, key[0], key[1]) is not None:
+                scheduled += 1
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("eager artwork scheduling failed: %s", exc)
+    return scheduled
+
+
 def _precache_max_workers(config_manager, default: int = 6) -> int:
     """Return bounded artwork concurrency.
 
@@ -843,4 +872,5 @@ __all__ = [
     "is_cached_jpeg",
     "precache_all_artwork",
     "schedule_artwork_build",
+    "schedule_missing_artwork",
 ]

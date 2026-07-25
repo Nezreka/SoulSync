@@ -1368,3 +1368,28 @@ def test_same_title_second_release_id_is_recorded_as_edition(
     alts = _alt_editions(imported_conn, row["id"])
     assert len(alts) == 1
     assert json.loads(alts[0]["external_ids"])["deezer"] == "197089272"
+
+
+def test_expand_warms_artwork_for_new_releases(
+        legacy_db, imported_conn, fake_discography, monkeypatch):
+    """perf25-04: an expand queues the artist plus its new albums for artwork,
+    instead of leaving them cold until the next full precache run."""
+    from core.library2 import artwork
+
+    requests = []
+    monkeypatch.setattr(
+        artwork,
+        "schedule_missing_artwork",
+        lambda db, cfg, targets: requests.append(list(targets)),
+    )
+    aid = _artist_id(imported_conn)
+
+    D.expand_artist_discography(legacy_db, aid)
+
+    assert requests, "expand must warm artwork for what it just added"
+    targets = requests[0]
+    assert targets[0] == ("artist", aid)
+    new_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Scorpion'"
+    ).fetchone()["id"]
+    assert ("album", new_id) in targets

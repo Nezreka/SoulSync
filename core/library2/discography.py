@@ -370,6 +370,7 @@ def _expand_artist_discography(
         "source": None, "is_complete": None, "snapshot_changed": None,
         "prune_skipped": False, "auto_monitor_album_ids": [],
     }
+    new_album_ids: List[int] = []
     conn = database._get_connection()
     try:
         artist = conn.execute(
@@ -570,6 +571,7 @@ def _expand_artist_discography(
                 "expected_track_count": track_count, "track_count": track_count,
             })
             stats["added"] += 1
+            new_album_ids.append(new_id)
 
         # Prune provider-only rows that vanished from the provider — but never
         # rows the user monitored or that grew tracks/files since.
@@ -600,6 +602,18 @@ def _expand_artist_discography(
         conn.commit()
     finally:
         conn.close()
+    # perf25-04: releases that just appeared are not covered by the last
+    # precache run.  Warm them (and the artist itself) in the background so the
+    # discography view does not open on the cold artwork path.
+    try:
+        from config.settings import config_manager as settings_config
+        from core.library2.artwork import schedule_missing_artwork
+        schedule_missing_artwork(
+            database, settings_config,
+            [("artist", artist_id)] + [("album", album_id) for album_id in new_album_ids],
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("discography artwork warm-up skipped: %s", e)
     logger.info("Discography expand for artist %s: +%d new, %d enriched, -%d stale (source=%s)",
                 artist_id, stats["added"], stats["enriched"], stats["removed"], stats["source"])
     return stats

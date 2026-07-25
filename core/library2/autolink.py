@@ -353,6 +353,24 @@ def _pipeline_result_json(context: Dict[str, Any]) -> str:
     return json.dumps(result) if result else "{}"
 
 
+def _warm_new_artwork(database, conn, album_id: Optional[int]) -> None:
+    """Queue artwork for the album this download landed in and its artist."""
+    if not album_id:
+        return
+    try:
+        from config.settings import config_manager
+        from core.library2.artwork import schedule_missing_artwork
+        targets = [("album", int(album_id))]
+        row = conn.execute(
+            "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (album_id,)
+        ).fetchone()
+        if row and row["primary_artist_id"]:
+            targets.append(("artist", int(row["primary_artist_id"])))
+        schedule_missing_artwork(database, config_manager, targets)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("autolink artwork warm-up skipped: %s", e)
+
+
 def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
     """Link a finished download's file into ``lib2_*``. Returns the file-row id.
 
@@ -529,6 +547,10 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
             recompute_wanted(conn, profile_id=default_quality_profile_id(conn),
                              track_ids=[track_id])
             conn.commit()
+            # perf25-04: an artist/album born from a finished download is not
+            # covered by the last precache run, so warm its artwork now instead
+            # of leaving the first browse on the cold path.
+            _warm_new_artwork(db, conn, album_id)
             logger.info("Library v2 auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)
             return file_id
