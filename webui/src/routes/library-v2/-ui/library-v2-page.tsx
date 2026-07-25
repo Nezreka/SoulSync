@@ -3539,18 +3539,6 @@ function ArtistIndexView() {
   const navigate = useNavigate();
   // Debounce the filter box: navigating per keystroke fires a request each key.
   const searchDebounce = useRef<number | undefined>(undefined);
-  const artistsQuery = useQuery(
-    libraryV2ArtistsQueryOptions({
-      q: search.q,
-      sort: search.sort,
-      page: search.page,
-      monitored: search.monitored,
-    }),
-  );
-
-  const artists = artistsQuery.data?.artists ?? [];
-  const pagination = artistsQuery.data?.pagination;
-  const isEmpty = !artistsQuery.isLoading && artists.length === 0 && !search.q;
 
   // Only fetched for the table view (D6) — the card grid doesn't use either.
   const isTableView = search.view === 'table';
@@ -3566,6 +3554,24 @@ function ArtistIndexView() {
     added: false,
     size: false,
   };
+
+  // rev25-06/rev25-11: the size roll-up is requested explicitly by whichever
+  // view can actually render it, not derived from the preference server-side
+  // — so toggling the column is part of the query key and refetches, instead
+  // of rendering "—" from an already-cached total_size_bytes: 0 payload.
+  const artistsQuery = useQuery(
+    libraryV2ArtistsQueryOptions({
+      q: search.q,
+      sort: search.sort,
+      page: search.page,
+      monitored: search.monitored,
+      includeSize: isTableView && Boolean(artistTableColumns.size),
+    }),
+  );
+
+  const artists = artistsQuery.data?.artists ?? [];
+  const pagination = artistsQuery.data?.pagination;
+  const isEmpty = !artistsQuery.isLoading && artists.length === 0 && !search.q;
 
   return (
     <div className={styles.page}>

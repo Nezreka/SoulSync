@@ -2655,8 +2655,12 @@ def test_artwork_route_still_resolves_synchronously_on_request(api, monkeypatch)
     assert response.mimetype == "image/jpeg"
 
 
-def test_artist_list_computes_size_only_when_the_column_is_shown(api, monkeypatch):
-    """perf25-03: the opt-in size column drives the expensive roll-up."""
+def test_artist_list_computes_size_only_when_explicitly_requested(api, monkeypatch):
+    """rev25-06/rev25-11: the size roll-up is opt-in via an explicit request
+    parameter set by the component that renders the column — no longer
+    derived from a stored UI preference server-side, which silently affected
+    every other consumer of this endpoint and didn't invalidate the already-
+    fetched list when the preference was toggled."""
     client, _db, _ids = api
     from core.library2 import queries as Q
 
@@ -2670,16 +2674,37 @@ def test_artist_list_computes_size_only_when_the_column_is_shown(api, monkeypatc
     monkeypatch.setattr(Q, "list_artists", recording)
 
     assert client.get("/api/library/v2/artists").status_code == 200
-    assert seen == [False]
+    assert client.get("/api/library/v2/artists?include=size").status_code == 200
+    assert client.get("/api/library/v2/artists?include=genres,size").status_code == 200
 
-    client.put(
+    assert seen == [False, True, True]
+
+
+def test_artist_list_size_request_is_independent_of_the_stored_preference(api, monkeypatch):
+    """Turning the table preference on/off must not change whether the
+    server computes ``total_size_bytes`` — only the request parameter does."""
+    client, _db, _ids = api
+    from core.library2 import queries as Q
+
+    seen = []
+    original = Q.list_artists
+
+    def recording(conn, **kwargs):
+        seen.append(kwargs.get("include_size"))
+        return original(conn, **kwargs)
+
+    monkeypatch.setattr(Q, "list_artists", recording)
+
+    assert client.put(
         "/api/library/v2/ui-preferences",
         json={"artist_table": {"columns": {"size": True}}},
-    )
-    body = client.get("/api/library/v2/artists").get_json()
+    ).status_code == 200
+    assert client.get("/api/library/v2/artists").status_code == 200
+    assert client.get("/api/library/v2/artists?include=size").status_code == 200
 
-    assert seen == [False, True]
-    assert body["success"] is True
+    assert seen == [False, True], (
+        "the stored preference must not influence include_size — only the request parameter does"
+    )
 
 
 def test_ui_preferences_round_trip(api):

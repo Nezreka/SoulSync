@@ -197,13 +197,19 @@ export function resumeLibraryV2AcquisitionImport(importId: string) {
 }
 
 export async function fetchLibraryV2Artists(
-  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'>,
+  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'> & { includeSize?: boolean },
 ): Promise<ArtistsResponse> {
   const params = new URLSearchParams();
   if (search.q) params.set('search', search.q);
   params.set('sort', search.sort);
   params.set('monitored', search.monitored);
   params.set('page', String(search.page));
+  // rev25-06/rev25-11: the disk-space roll-up is expensive, so it's opt-in —
+  // but via a request parameter the caller sets, not a stored preference the
+  // server used to derive it from. That silently zeroed the field for every
+  // other consumer of this endpoint and didn't invalidate an already-fetched
+  // list when the preference was toggled.
+  if (search.includeSize) params.set('include', 'size');
   const payload = await readJson<ArtistsResponse>(
     apiClient.get('library/v2/artists', { searchParams: params }),
   );
@@ -1496,7 +1502,7 @@ export function libraryV2EnabledQueryOptions() {
 }
 
 export function libraryV2ArtistsQueryOptions(
-  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'>,
+  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'> & { includeSize?: boolean },
 ) {
   return queryOptions({
     queryKey: [
@@ -1506,6 +1512,7 @@ export function libraryV2ArtistsQueryOptions(
       search.sort,
       search.monitored,
       search.page,
+      Boolean(search.includeSize),
     ],
     queryFn: () => fetchLibraryV2Artists(search),
   });

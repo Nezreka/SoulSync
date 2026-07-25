@@ -1343,18 +1343,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             }), 400
         conn = _conn()
         try:
-            # perf25-03: the disk-space roll-up needs a window function over
-            # every file of the page's artists.  Its column is opt-in (default
-            # off), so it is only computed when the stored table preferences
-            # actually show it.
-            include_size = True
-            try:
-                from core.library2.ui_preferences import get_ui_preferences
-                include_size = bool(
-                    get_ui_preferences(conn)["artist_table"]["columns"].get("size")
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("artist size preference lookup failed: %s", exc)
+            # perf25-03/rev25-06/rev25-11: the disk-space roll-up needs a
+            # window function over every file of the page's artists — by far
+            # the heaviest part of the query, so it stays opt-in.  It used to
+            # be derived from the stored table preference server-side, which
+            # meant every OTHER consumer of this endpoint (the card/grid view,
+            # a future export, a script) silently got 0 with no way to ask for
+            # the real value, and toggling the preference didn't invalidate
+            # the already-fetched list, so the column showed "—" until an
+            # unrelated refetch happened to land.  An explicit parameter, set
+            # by the component that actually renders the column, fixes both:
+            # it's requestable by anyone, and it's part of the cache key.
+            include_size = "size" in {
+                token.strip()
+                for token in request.args.get("include", "").split(",")
+                if token.strip()
+            }
             artists, total = Q.list_artists(conn, search=search, sort=sort,
                                             monitored=monitored, page=page, limit=limit,
                                             include_size=include_size)
