@@ -794,17 +794,20 @@
     // No channel names a FEATURE. The jukebox is room-scoped — everyone shares
     // one queue regardless of which channel they're reading — so filing it under
     // a channel would imply a queue per channel. Tune-in is already its gate.
+    // Media-agnostic on purpose: SoulSync is music AND movies/TV AND YouTube,
+    // so nothing here is scoped to one side. Names avoid colliding with actual
+    // app features too — a '#requests' channel would read as the video Requests
+    // queue, and '#releases' as a SoulSync release rather than a new album.
+    // Mirrors where the real community traffic already goes.
     var CHAT_CHANNELS = [
         { cat: 'Community', items: [
             { slug: 'general', name: 'general' },
             { slug: 'off-topic', name: 'off-topic' },
         ] },
-        { cat: 'Music', items: [
-            { slug: 'requests', name: 'requests' },
-            { slug: 'releases', name: 'releases' },
-        ] },
         { cat: 'Support', items: [
             { slug: 'help', name: 'help' },
+            { slug: 'bugs', name: 'bugs' },
+            { slug: 'ideas', name: 'ideas' },
         ] },
     ];
     var CHAT_DEFAULT_CHANNEL = 'general';
