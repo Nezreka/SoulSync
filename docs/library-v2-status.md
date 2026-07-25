@@ -31,7 +31,7 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 |---|---|---|---|---|
 | [F-01](library-v2-features.md#feat-artwork) | Media-server-unabhängiges Artwork | Verified | Deep-Dive §28, Security-Fix `80b5af95` | Picker, Embed, Cache-Bust und Fetch-Hardening gezielt geprüft |
 | [F-02](library-v2-features.md#feat-monitoring) | Monitoring, Watchlist/Wishlist, Outbox | Verified | P3/§82, Regression-Checkpoint | Bidirektionale Sync-, Reconcile- und Profilgrenzen geprüft |
-| [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Partial | §53/§60, Branch-Split | Track→Album→Artist→Global verified; native Watchlist-/Playlist-Zuweisung kommt über Foundation |
+| [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Partial | §53/§60, Branch-Split, §14 | Track→Album→Artist→Global verified; Watchlist-Monitor-Mirroring läuft, aber `quality_profile_id`-Weitergabe von Library-v2-Artist-Settings an natives Watchlist fehlt noch (Details §14) |
 | [F-04](library-v2-features.md#feat-discography) | Discography, Tracklists, `monitor_new_items` | Verified | `2249f5d7`, `8f965d31` (später gesquasht) | Content-Filter und nie manuell expandierte Artists abgedeckt |
 | [F-05](library-v2-features.md#feat-bootstrap) | Automatischer Initialimport | Verified | Review 4/5, `c2d99eda`, `e9730afe` | Bounded Transactions und Streaming; Owner-/Fresh-Install-Fixes im Regression-Checkpoint |
 | [F-06](library-v2-features.md#feat-alias) | Artist Alias Registry und Scope | Verified | `ce7b4516`, `a95e5309` | Listen, Suche, Totals und artist-weite Actions gezielt geprüft |
@@ -586,8 +586,24 @@ pre-existing failed (siehe unten), 3 skipped. Frontend Library-v2-Suite:
   `_fix_unknown_artist`/`_fix_duplicates`/`_perform_album_fill`, die als Teil
   der P1/P2-Tool-Migration bereits entfernt wurden, ohne dass die
   zugehörigen Alt-Tests entfernt/migriert wurden.
-- **Thin-Adapter (Artist-Monitoring → natives Watchlist)**: bereits
-  vorhanden über `api/library_v2.py::lib2_set_monitored` →
-  `core/library2/mirror_outbox.py::enqueue_artist_watchlist` → `drain()` →
-  `database.add_artist_to_watchlist` — keine Neuentwicklung nötig, nur die
-  zwei oben genannten `raise_on_error`-Bugs im Pfad gefunden und behoben.
+- **Thin-Adapter (Artist-Monitoring → natives Watchlist) — nur zur Hälfte
+  verdrahtet.** Das Monitor-An/Aus mirrort korrekt: `api/library_v2.py::
+  lib2_set_monitored` → `core/library2/mirror_outbox.py::
+  enqueue_artist_watchlist` → `drain()` → `database.add_artist_to_watchlist`
+  (inkl. der zwei oben genannten `raise_on_error`-Bugfixes). **Aber** die in
+  [LIBRARY_OVERHAUL.md](branch-split/LIBRARY_OVERHAUL.md) §"Library v2
+  integration after rebase" geforderte Weitergabe von `quality_profile_id`
+  (+ Albums/EPs/Singles-Flags, restliche Watchlist-Filter) fehlt komplett:
+  `enqueue_artist_watchlist` sendet nur `{ext, name, source}`, liest nie ein
+  `quality_profile_id` aus dem Request, und `set_watchlist_artist_quality_profile`
+  (Foundations dafür vorgesehene Methode) wird von keiner Library-v2-Datei
+  aufgerufen. Folge: ein über Library v2 neu monitorter Artist landet mit dem
+  globalen Default-Profil im nativen Watchlist, nicht mit einer
+  Library-v2-seitig gewählten Zuweisung. Das bestehende
+  Katalog-Quality-Profile-Feld in Artist Settings
+  (`/api/library/v2/<entity>/<id>/quality-profile`, Track→Album→Artist→Global-
+  Vererbung) ist bewusst getrennt davon und bleibt unverändert korrekt — nur
+  die zusätzliche Watchlist-Intent-Weitergabe aus dem Split-Vertrag fehlt.
+  Bewusst nicht in dieser Reko nachgezogen (Nutzerentscheidung 26. Juli);
+  bleibt offenes Follow-up, deckungsgleich mit [F-03](#2-feature-status)
+  "Partial".
