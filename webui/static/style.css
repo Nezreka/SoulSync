@@ -324,10 +324,7 @@ body.max-performance .sidebar::after {
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Above the nav (which sits at z-index:1) — a sticky header sharing the
-       nav's stacking level paints in DOM order, letting scrolled nav items
-       win over the header in some engines (#1040). */
-    z-index: 2;
+    z-index: 1;
     overflow: hidden;
     flex-shrink: 0;
 
