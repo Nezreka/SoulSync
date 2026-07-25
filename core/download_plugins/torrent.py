@@ -68,6 +68,7 @@ from core.download_plugins.album_bundle import (
     resolve_reported_save_path,
 )
 from core.download_plugins.base import DownloadSourcePlugin
+from core.download_plugins.candidate_store import get_candidate_store
 from core.download_plugins.torrent_stall import (
     StallTracker,
     get_stall_action,
@@ -189,7 +190,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             download_url = result.magnet_uri or result.download_url
             if not download_url:
                 continue
-            filename = f"{download_url}{_FILENAME_SEP}{result.title}"
+            # The filename crosses to the browser in search responses and
+            # comes back on grab. Indexer URLs can carry API keys / signed
+            # params, so only an opaque server-side token travels (P0-03).
+            token = get_candidate_store().put(download_url)
+            filename = f"{token}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
@@ -248,9 +253,16 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
     ) -> Optional[str]:
         if not self.is_configured():
             return None
-        download_url, display_name = _decode_filename(filename)
+        token, display_name = _decode_filename(filename)
+        if not token:
+            logger.error("Torrent download missing candidate token in filename: %r", filename)
+            return None
+        # Only a token from OUR candidate store is accepted — a raw URL from
+        # the client is a trust-boundary violation, not a fallback (P0-03).
+        download_url = get_candidate_store().resolve(token)
         if not download_url:
-            logger.error("Torrent download missing URL in filename: %r", filename)
+            logger.error("Torrent download: unknown or expired candidate for %r "
+                         "— re-run the search", display_name)
             return None
 
         download_id = str(uuid.uuid4())
@@ -676,6 +688,14 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # default-'error' fallback the helper treats as transient.
             failed_states=frozenset(['error']),
             is_shutdown=self.shutdown_check,
+            # P2-21: remap the client-container path before the incomplete_path
+            # stability check, not just on the final save_path — otherwise a
+            # split-container mount never resolves to a readable local path and
+            # the fallback can't stabilize. expect_name isn't known this early
+            # (fetched below only after the poll returns), so this is the
+            # weaker no-expect_name resolution; the final walk_root re-resolves
+            # with expect_name for the stricter content-checked path.
+            resolve_path=resolve_reported_save_path,
             log_prefix='[Torrent album]',
         )
         if save_path is None:

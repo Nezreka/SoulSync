@@ -106,6 +106,33 @@ def test_update_progress_emit_failure_swallowed():
     assert progress.progress_states[1]['finished_at'] is not None
 
 
+def test_update_progress_clamps_overflow_to_100():
+    """P2-20: counters (processed+skipped+failed vs. a precomputed grand
+    total) can exceed the nominal total under races/double-counting — the
+    shared status boundary must never surface >100%."""
+    progress.init_progress(1, 'A', 'x')
+    progress.update_progress(1, progress=143)
+    assert progress.progress_states[1]['progress'] == 100
+
+
+def test_update_progress_clamps_underflow_to_0():
+    progress.init_progress(1, 'A', 'x')
+    progress.update_progress(1, progress=-7)
+    assert progress.progress_states[1]['progress'] == 0
+
+
+def test_update_progress_rounds_fractional_progress():
+    progress.init_progress(1, 'A', 'x')
+    progress.update_progress(1, progress=33.6)
+    assert progress.progress_states[1]['progress'] == 34
+
+
+def test_update_progress_in_range_value_unchanged():
+    progress.init_progress(1, 'A', 'x')
+    progress.update_progress(1, progress=57)
+    assert progress.progress_states[1]['progress'] == 57
+
+
 def test_update_progress_none_id_is_noop():
     progress.update_progress(None, progress=99)  # no exception
 
