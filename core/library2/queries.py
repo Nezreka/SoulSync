@@ -122,11 +122,18 @@ def _json_list(raw: Any) -> List[str]:
 
 
 def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str = "all",
-                 page: int = 1, limit: int = 75) -> Tuple[List[Dict[str, Any]], int]:
+                 page: int = 1, limit: int = 75,
+                 include_size: bool = True) -> Tuple[List[Dict[str, Any]], int]:
     """Paginated artist overview with per-artist roll-up stats.
 
     ``monitored`` filters the list: ``'all'`` (default), ``'monitored'``, or
     ``'unmonitored'``.
+
+    ``include_size`` (perf25-03) controls the disk-space roll-up, which needs a
+    window function over every file of the page's artists plus a SUM on top of
+    it — by far the heaviest part of this query.  The size column is opt-in in
+    the artist table (default off), so the caller may switch it off and get
+    ``total_size_bytes = 0`` for a value nothing renders.
     """
     order = _artist_page_order(sort)
     page = max(1, int(page))
@@ -152,19 +159,58 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         f"SELECT COUNT(*) AS c FROM lib2_artists a {where}", params
     ).fetchone()["c"]
 
+    # I8: disk-space roll-up, kept separate from track_stats below — that CTE's
+    # plain (unranked) tf join fans out per historical file row, which would
+    # inflate a SUM(size) sharing the same join. This one joins each track's
+    # single ADR-03 primary file exactly once.  perf25-03: the window function
+    # over every file of the page plus the SUM on top of it is the heaviest
+    # part of the statement, so it is only assembled when the caller wants it.
+    size_cte = f""",
+        track_primary_files AS (
+            SELECT tf.track_id, tf.size,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
+                   ) AS rank
+              FROM lib2_track_files tf
+             WHERE EXISTS (
+                   SELECT 1
+                     FROM lib2_track_artists ta
+                     JOIN canonical_members cm ON cm.member_id=ta.artist_id
+                     JOIN page_artists pa ON pa.id=cm.canonical_id
+                    WHERE ta.track_id=tf.track_id
+             )
+               AND COALESCE(tf.file_state, 'active') <> 'deleted'
+        ),
+        artist_size AS (
+            SELECT cm.canonical_id AS artist_id,
+                   COALESCE(SUM(pf.size), 0) AS total_size_bytes
+              FROM lib2_track_artists ta
+              JOIN canonical_members cm ON cm.member_id=ta.artist_id
+              JOIN page_artists pa ON pa.id=cm.canonical_id
+              JOIN track_primary_files pf ON pf.track_id=ta.track_id AND pf.rank=1
+             GROUP BY cm.canonical_id
+        )""" if include_size else ""
+    size_select = "COALESCE(asz.total_size_bytes, 0)" if include_size else "0"
+    size_join = "LEFT JOIN artist_size asz ON asz.artist_id=a.id" if include_size else ""
+
     rows = conn.execute(
         f"""
-        WITH canonical_members AS MATERIALIZED (
-            SELECT member.id AS member_id,
-                   COALESCE(member.canonical_artist_id, member.id) AS canonical_id
-              FROM lib2_artists member
-        ),
-        page_artists AS MATERIALIZED (
+        WITH page_artists AS MATERIALIZED (
             SELECT a.*
               FROM lib2_artists a
               {where}
              ORDER BY {order}
              LIMIT :limit OFFSET :offset
+        ),
+        -- perf25-03: only alias members that fold into an artist ON THIS PAGE
+        -- matter; materializing the whole artist table here made every list
+        -- request scale with library size instead of page size.
+        canonical_members AS MATERIALIZED (
+            SELECT member.id AS member_id,
+                   COALESCE(member.canonical_artist_id, member.id) AS canonical_id
+              FROM lib2_artists member
+             WHERE COALESCE(member.canonical_artist_id, member.id)
+                   IN (SELECT id FROM page_artists)
         ),
         artist_albums AS (
             SELECT cm.canonical_id AS artist_id, aa.album_id
@@ -210,35 +256,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                      ON w.track_id=t.id AND w.profile_id=1
               LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
              GROUP BY cm.canonical_id
-        ),
-        track_primary_files AS (
-            SELECT tf.track_id, tf.size,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
-                   ) AS rank
-              FROM lib2_track_files tf
-             WHERE EXISTS (
-                   SELECT 1
-                     FROM lib2_track_artists ta
-                     JOIN canonical_members cm ON cm.member_id=ta.artist_id
-                     JOIN page_artists pa ON pa.id=cm.canonical_id
-                    WHERE ta.track_id=tf.track_id
-             )
-               AND COALESCE(tf.file_state, 'active') <> 'deleted'
-        ),
-        -- I8: disk-space roll-up, kept separate from track_stats above —
-        -- that CTE's plain (unranked) tf join fans out per historical file
-        -- row, which would inflate a SUM(size) sharing the same join. This
-        -- one joins each track's single ADR-03 primary file exactly once.
-        artist_size AS (
-            SELECT cm.canonical_id AS artist_id,
-                   COALESCE(SUM(pf.size), 0) AS total_size_bytes
-              FROM lib2_track_artists ta
-              JOIN canonical_members cm ON cm.member_id=ta.artist_id
-              JOIN page_artists pa ON pa.id=cm.canonical_id
-              JOIN track_primary_files pf ON pf.track_id=ta.track_id AND pf.rank=1
-             GROUP BY cm.canonical_id
-        )
+        ){size_cte}
         SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
                a.monitored, a.monitor_new_items, a.quality_profile_id,
                a.quality_profile_explicit, a.added_at,
@@ -246,11 +264,11 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                COALESCE(als.single_count, 0) AS single_count,
                COALESCE(ts.track_count, 0) AS track_count,
                COALESCE(ts.track_files_present, 0) AS track_files_present,
-               COALESCE(asz.total_size_bytes, 0) AS total_size_bytes
+               {size_select} AS total_size_bytes
         FROM page_artists a
         LEFT JOIN album_stats als ON als.artist_id=a.id
         LEFT JOIN track_stats ts ON ts.artist_id=a.id
-        LEFT JOIN artist_size asz ON asz.artist_id=a.id
+        {size_join}
         ORDER BY {order}
         """,
         {**params, "limit": limit, "offset": offset},

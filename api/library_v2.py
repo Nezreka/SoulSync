@@ -1343,8 +1343,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             }), 400
         conn = _conn()
         try:
+            # perf25-03: the disk-space roll-up needs a window function over
+            # every file of the page's artists.  Its column is opt-in (default
+            # off), so it is only computed when the stored table preferences
+            # actually show it.
+            include_size = True
+            try:
+                from core.library2.ui_preferences import get_ui_preferences
+                include_size = bool(
+                    get_ui_preferences(conn)["artist_table"]["columns"].get("size")
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("artist size preference lookup failed: %s", exc)
             artists, total = Q.list_artists(conn, search=search, sort=sort,
-                                            monitored=monitored, page=page, limit=limit)
+                                            monitored=monitored, page=page, limit=limit,
+                                            include_size=include_size)
         finally:
             conn.close()
         for a in artists:

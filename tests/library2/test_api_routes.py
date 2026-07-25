@@ -2655,6 +2655,33 @@ def test_artwork_route_still_resolves_synchronously_on_request(api, monkeypatch)
     assert response.mimetype == "image/jpeg"
 
 
+def test_artist_list_computes_size_only_when_the_column_is_shown(api, monkeypatch):
+    """perf25-03: the opt-in size column drives the expensive roll-up."""
+    client, _db, _ids = api
+    from core.library2 import queries as Q
+
+    seen = []
+    original = Q.list_artists
+
+    def recording(conn, **kwargs):
+        seen.append(kwargs.get("include_size"))
+        return original(conn, **kwargs)
+
+    monkeypatch.setattr(Q, "list_artists", recording)
+
+    assert client.get("/api/library/v2/artists").status_code == 200
+    assert seen == [False]
+
+    client.put(
+        "/api/library/v2/ui-preferences",
+        json={"artist_table": {"columns": {"size": True}}},
+    )
+    body = client.get("/api/library/v2/artists").get_json()
+
+    assert seen == [False, True]
+    assert body["success"] is True
+
+
 def test_ui_preferences_round_trip(api):
     """B5: GET returns defaults, PUT merges a partial patch and persists it."""
     client, _db, _ids = api

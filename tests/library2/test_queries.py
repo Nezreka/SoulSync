@@ -873,3 +873,51 @@ def test_track_reads_expose_effective_wanted_projection(imported_conn):
         if row["id"] == track_id
     )
     assert album_track["monitored"] is True
+
+
+def test_list_artists_can_skip_the_disk_space_rollup(imported_conn):
+    """perf25-03: the size roll-up is the heaviest part of the statement and its
+    column is opt-in, so it must be omitted — not merely hidden — on request."""
+    statements = []
+    imported_conn.set_trace_callback(statements.append)
+    try:
+        artists, total = Q.list_artists(imported_conn, include_size=False)
+    finally:
+        imported_conn.set_trace_callback(None)
+
+    rollup_sql = next(
+        statement for statement in statements
+        if "page_artists AS MATERIALIZED" in statement
+    )
+    assert "ROW_NUMBER() OVER" not in rollup_sql
+    assert "artist_size" not in rollup_sql
+
+    by_name = {a["name"]: a for a in artists}
+    assert total == 2
+    # Everything the collapsed list actually renders is unchanged.
+    assert by_name["Drake"]["album_count"] == 1
+    assert by_name["Drake"]["single_count"] == 1
+    assert by_name["Drake"]["track_count"] == 2
+    assert by_name["Drake"]["tracks_present"] == 2
+    assert by_name["Drake"]["total_size_bytes"] == 0
+
+
+def test_list_artists_folds_only_page_aliases(imported_conn):
+    """perf25-03: the alias-fold CTE is scoped to the requested page, so the
+    result is identical while the scan no longer grows with library size."""
+    statements = []
+    imported_conn.set_trace_callback(statements.append)
+    try:
+        artists, _total = Q.list_artists(imported_conn, limit=1)
+    finally:
+        imported_conn.set_trace_callback(None)
+
+    rollup_sql = next(
+        statement for statement in statements
+        if "page_artists AS MATERIALIZED" in statement
+    )
+    assert rollup_sql.index("page_artists AS MATERIALIZED") < rollup_sql.index(
+        "canonical_members AS MATERIALIZED"
+    )
+    assert "IN (SELECT id FROM page_artists)" in rollup_sql
+    assert artists[0]["album_count"] == 1
