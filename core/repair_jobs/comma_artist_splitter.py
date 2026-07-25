@@ -108,14 +108,9 @@ class CommaArtistSplitterJob(RepairJob):
             try:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT COUNT(DISTINCT ar.id)
-                    FROM artists ar
-                    JOIN tracks t ON t.artist_id = ar.id
-                    WHERE (ar.name LIKE '%,%'
-                       OR ar.name LIKE '%;%'
-                       OR ar.name LIKE '%&%'
-                       OR ar.name LIKE '%/%')
-                      AND t.file_path IS NOT NULL AND t.file_path != ''
+                    SELECT COUNT(*)
+                    FROM tracks t
+                    WHERE t.file_path IS NOT NULL AND t.file_path != ''
                 """)
                 return cursor.fetchone()[0]
             finally:
@@ -126,113 +121,142 @@ class CommaArtistSplitterJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
-        rows = []
+        tracks = []
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
-            # ORDER BY track count so the biggest offenders are checked first
-            # when the per-scan cap bites. LIMIT+1 detects the cap.
             cursor.execute(f"""
-                SELECT ar.id, ar.name, ar.thumb_url, COUNT(t.id) AS n
-                FROM artists ar
-                JOIN tracks t ON t.artist_id = ar.id
-                WHERE (ar.name LIKE '%,%'
-                   OR ar.name LIKE '%;%'
-                   OR ar.name LIKE '%&%'
-                   OR ar.name LIKE '%/%')
-                  AND t.file_path IS NOT NULL AND t.file_path != ''
-                GROUP BY ar.id, ar.name, ar.thumb_url
-                ORDER BY n DESC
-                LIMIT {SCAN_ARTIST_LIMIT + 1}
+                SELECT t.id, t.file_path, t.artist_id, ar.name, ar.thumb_url
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                LIMIT {SCAN_ARTIST_LIMIT * 10}
             """)
-            rows = cursor.fetchall()
+            tracks = cursor.fetchall()
         except Exception as e:
-            logger.error("Error fetching separator-joined artists: %s", e, exc_info=True)
+            logger.error("Error fetching tracks: %s", e, exc_info=True)
             result.errors += 1
             return result
         finally:
             if conn:
                 conn.close()
 
-        capped = len(rows) > SCAN_ARTIST_LIMIT
-        if capped:
-            rows = rows[:SCAN_ARTIST_LIMIT]
+        if not tracks:
             if context.report_progress:
-                context.report_progress(
-                    log_line=f'More than {SCAN_ARTIST_LIMIT} separator-joined artists — checking the '
-                             f'{SCAN_ARTIST_LIMIT} with the most tracks this run; the rest next run.',
-                    log_type='warning')
-
-        total = len(rows)
-        if total == 0:
-            if context.report_progress:
-                context.report_progress(phase='No separator-joined artist names found',
+                context.report_progress(phase='No tracks to scan',
                                         log_line='Nothing to check', log_type='success')
             return result
 
         if context.update_progress:
-            context.update_progress(0, total)
+            context.update_progress(0, len(tracks))
         if context.report_progress:
-            context.report_progress(phase=f'Verifying {total} separator-joined artist(s)...', total=total)
+            context.report_progress(phase=f'Scanning {len(tracks)} track(s) for multi-artist metadata...',
+                                    total=len(tracks))
 
-        # Per-run memo of API lookups: (source, normalized query) → set of
-        # normalized result names, or None for "source unreachable".
+        from mutagen import File as MutagenFile
+        from core.library.path_resolver import resolve_library_file_path
+
+        # Memoize: combined_artist_string → (parts, primary, display)
+        memo_splits = {}
+        # Per-run memo of API lookups
         search_memo = {}
+        # Track: combined_artist → (artist_id, db_artist_name, thumb_url, files_with_this_tag)
+        findings_map = {}
 
-        for i, (artist_id, name, thumb_url, track_count) in enumerate(rows):
+        for i, (track_id, file_path, artist_id, db_artist_name, thumb_url) in enumerate(tracks):
             if context.check_stop():
                 return result
             if context.wait_if_paused():
                 return result
 
+            if context.update_progress:
+                context.update_progress(i + 1, len(tracks))
+
             result.scanned += 1
-            parts = split_artist_parts(name)
-            if len(parts) < 2:
-                continue
+            try:
+                resolved = resolve_library_file_path(
+                    file_path, transfer_folder=context.transfer_folder if hasattr(context, 'transfer_folder') else None,
+                    config_manager=context._config_manager if hasattr(context, '_config_manager') else None)
+                if not resolved or not __import__('os').path.exists(resolved):
+                    continue
 
-            norm_full = normalize_artist_name(name)
-            if norm_full in KNOWN_COMMA_ARTISTS:
-                result.skipped += 1
-                continue
+                audio = MutagenFile(resolved)
+                if audio is None or audio.tags is None:
+                    continue
 
-            # Check 1: is the FULL string a real artist on any reachable API?
-            is_real, checked_sources = self._full_string_is_real_artist(
-                context, name, search_memo)
-            if is_real:
-                result.skipped += 1
-                if context.report_progress:
-                    context.report_progress(
-                        scanned=i + 1, total=total,
-                        log_line=f'"{name}" is a real artist — skipped', log_type='info')
-                continue
-            if not checked_sources:
-                # No API reachable → cannot verify → never flag (fail-safe).
-                result.skipped += 1
-                if context.report_progress:
-                    context.report_progress(
-                        scanned=i + 1, total=total,
-                        log_line=f'"{name}": no metadata API reachable — skipped (cannot verify)',
-                        log_type='warning')
-                continue
+                # Extract the artist tag value from the file metadata
+                file_artist = self._get_artist_tag(audio)
+                if not file_artist:
+                    continue
 
-            # Check 2: every part must resolve to a known artist.
-            parts_resolution = self._resolve_parts(context, parts, search_memo)
-            if parts_resolution is None:
-                result.skipped += 1
-                if context.report_progress:
-                    context.report_progress(
-                        scanned=i + 1, total=total,
-                        log_line=f'"{name}": not every part is a known artist — skipped',
-                        log_type='info')
-                continue
+                # Check if it contains separators
+                parts = split_artist_parts(file_artist)
+                if len(parts) < 2:
+                    continue
 
-            sample_tracks = self._sample_tracks(context, artist_id)
+                # Memoize the split
+                if file_artist not in memo_splits:
+                    norm_full = normalize_artist_name(file_artist)
+                    if norm_full in KNOWN_COMMA_ARTISTS:
+                        memo_splits[file_artist] = None
+                    else:
+                        # Check 1: is the FULL string a real artist?
+                        is_real, checked_sources = self._full_string_is_real_artist(
+                            context, file_artist, search_memo)
+                        if is_real:
+                            memo_splits[file_artist] = None
+                        elif not checked_sources:
+                            # No API reachable → fail-safe
+                            memo_splits[file_artist] = None
+                        else:
+                            # Check 2: every part must resolve
+                            parts_resolution = self._resolve_parts(context, parts, search_memo)
+                            if parts_resolution is None:
+                                memo_splits[file_artist] = None
+                            else:
+                                memo_splits[file_artist] = (parts, parts[0], '; '.join(parts), checked_sources, parts_resolution)
+
+                split_info = memo_splits.get(file_artist)
+                if split_info is None:
+                    result.skipped += 1
+                    continue
+
+                parts, primary, display, checked_sources, parts_resolution = split_info
+
+                # Track this finding
+                if file_artist not in findings_map:
+                    findings_map[file_artist] = {
+                        'artist_id': artist_id,
+                        'db_artist_name': db_artist_name,
+                        'thumb_url': thumb_url,
+                        'parts': parts,
+                        'primary': primary,
+                        'display': display,
+                        'checked_sources': checked_sources,
+                        'parts_resolution': parts_resolution,
+                        'files': []
+                    }
+                findings_map[file_artist]['files'].append({'title': audio.get('title', ['Unknown'])[0] if isinstance(audio.get('title'), list) else audio.get('title', 'Unknown'),
+                                                           'file_path': file_path})
+
+            except Exception as e:
+                logger.debug("Error scanning track %s: %s", file_path, e)
+                result.errors += 1
+
+        # Create findings from the map
+        for combined_name, info in sorted(findings_map.items(),
+                                         key=lambda x: len(x[1]['files']),
+                                         reverse=True)[:SCAN_ARTIST_LIMIT]:
+            if context.check_stop():
+                return result
+
+            sample_files = info['files'][:TRACK_SAMPLE_LIMIT]
 
             if context.report_progress:
                 context.report_progress(
-                    scanned=i + 1, total=total,
-                    log_line=f'"{name}" → {len(parts)} artists ({track_count} track(s))',
+                    scanned=result.scanned,
+                    log_line=f'"{combined_name}" → {len(info["parts"])} artists ({len(info["files"])} track(s))',
                     log_type='warning')
 
             if context.create_finding:
@@ -241,27 +265,28 @@ class CommaArtistSplitterJob(RepairJob):
                         job_id=self.job_id,
                         finding_type='comma_artist_split',
                         severity='warning',
-                        entity_type='artist',
-                        entity_id=str(artist_id),
+                        entity_type='track',
+                        entity_id=None,
                         file_path=None,
-                        title=f'Combined artist: {name}',
+                        title=f'Combined artist: {combined_name}',
                         description=(
-                            f'"{name}" looks like {len(parts)} separate artists — the fix '
-                            f're-tags {track_count} track(s) so each artist is credited '
+                            f'"{combined_name}" looks like {len(info["parts"])} separate artists — the fix '
+                            f're-tags {len(info["files"])} track(s) so each artist is credited '
                             f'individually'
                         ),
                         details={
-                            'artist_id': artist_id,
-                            'artist_name': name,
-                            'artist_thumb_url': thumb_url or None,
-                            'combined_name': name,
-                            'split_artists': parts,
-                            'parts_resolution': parts_resolution,
-                            'checked_sources': checked_sources,
-                            'new_display_artist': '; '.join(parts),
-                            'primary_artist': parts[0],
-                            'track_count': track_count,
-                            'tracks': sample_tracks,
+                            'combined_name': combined_name,
+                            'split_artists': info['parts'],
+                            'primary_artist': info['primary'],
+                            'new_display_artist': info['display'],
+                            'db_artist_id': info['artist_id'],
+                            'db_artist_name': info['db_artist_name'],
+                            'artist_thumb_url': info['thumb_url'],
+                            'parts_resolution': info['parts_resolution'],
+                            'checked_sources': info['checked_sources'],
+                            'file_count': len(info['files']),
+                            'files': sample_files,
+                            'all_files': info['files'],  # Store all file paths for the fix
                         },
                     )
                     if inserted:
@@ -269,18 +294,14 @@ class CommaArtistSplitterJob(RepairJob):
                     else:
                         result.findings_skipped_dedup += 1
                 except Exception as e:
-                    logger.debug("Error creating separator-artist finding for %s: %s", artist_id, e)
+                    logger.debug("Error creating finding for %s: %s", combined_name, e)
                     result.errors += 1
 
-            # Rate-limit courtesy between API-heavy artists.
             if context.sleep_or_stop(0.15):
                 return result
 
-            if context.update_progress:
-                context.update_progress(i + 1, total)
-
         if context.update_progress:
-            context.update_progress(total, total)
+            context.update_progress(len(tracks), len(tracks))
         if context.report_progress:
             context.report_progress(
                 phase=f'Done — {result.findings_created} splittable artist(s) found',
@@ -290,6 +311,29 @@ class CommaArtistSplitterJob(RepairJob):
         return result
 
     # --- verification helpers -------------------------------------------------
+
+    def _get_artist_tag(self, audio):
+        """Extract artist tag value from audio file (handles all formats)."""
+        try:
+            from mutagen.id3 import ID3
+            from mutagen.mp4 import MP4
+            
+            if isinstance(audio.tags, ID3):
+                tpe1 = audio.tags.get('TPE1')
+                if tpe1:
+                    val = tpe1.text[0] if tpe1.text else None
+                    return str(val) if val else None
+            elif isinstance(audio, MP4):
+                val = audio.tags.get('\xa9ART')
+                if val:
+                    return str(val[0]) if isinstance(val, list) else str(val)
+            elif hasattr(audio, 'get'):  # Vorbis family
+                val = audio.get('artist')
+                if val:
+                    return str(val[0]) if isinstance(val, list) else str(val)
+        except Exception:
+            pass
+        return None
 
     def _search_artist_names(self, source: str, query: str, memo: dict):
         """Normalized artist-name set from one API source, memoized per run.

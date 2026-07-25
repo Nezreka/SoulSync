@@ -26,7 +26,7 @@ from core.repair_jobs.base import JobContext
 from core.repair_jobs.comma_artist_splitter import (
     CommaArtistSplitterJob,
     normalize_artist_name,
-    split_comma_parts,
+    split_artist_parts,
 )
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
@@ -111,11 +111,14 @@ def _run(db, monkeypatch, clients, findings=None):
 
 # ── unit: name helpers ───────────────────────────────────────────────────────
 
-def test_split_comma_parts():
-    assert split_comma_parts('Camellia, Toby Fox') == ['Camellia', 'Toby Fox']
-    assert split_comma_parts('A, B, C') == ['A', 'B', 'C']
-    assert split_comma_parts(' A ,') == ['A']
-    assert split_comma_parts('') == []
+def test_split_artist_parts():
+    assert split_artist_parts('Camellia, Toby Fox') == ['Camellia', 'Toby Fox']
+    assert split_artist_parts('A; B; C') == ['A', 'B', 'C']
+    assert split_artist_parts('A & B') == ['A', 'B']
+    assert split_artist_parts('A / B') == ['A', 'B']
+    assert split_artist_parts('A, B & C / D') == ['A', 'B', 'C', 'D']
+    assert split_artist_parts(' A ,') == ['A']
+    assert split_artist_parts('') == []
 
 
 def test_normalize_artist_name():

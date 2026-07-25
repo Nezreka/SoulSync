@@ -1118,7 +1118,7 @@ class RepairWorker:
                 conn.close()
 
     def _fix_comma_artist_split(self, entity_type, entity_id, file_path, details):
-        """Split a comma-joined artist tag into properly separated artists (jadux).
+        """Split a separator-joined artist tag into properly separated artists (jadux).
 
         Re-tags every file still under the combined artist: display artist
         becomes "A; B", the per-artist list goes into the multi-value Artists
@@ -1130,8 +1130,8 @@ class RepairWorker:
 
         Stale-finding guard: a file whose CURRENT artist tag no longer matches
         the combined string (user edited it, or it's already split) is left
-        untouched. The file list comes fresh from the DB, not from the
-        finding's display-capped sample.
+        untouched. The file list comes from the finding details, which scanned
+        the actual file metadata (not the database).
         """
         parts = details.get('split_artists')
         combined = details.get('combined_name') or details.get('artist_name')
@@ -1143,22 +1143,13 @@ class RepairWorker:
         display = details.get('new_display_artist') or '; '.join(parts)
         primary = details.get('primary_artist') or parts[0]
 
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT file_path FROM tracks WHERE artist_id = ? "
-                "AND file_path IS NOT NULL AND file_path != ''", (entity_id,))
-            files = [r[0] for r in cursor.fetchall()]
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-        finally:
-            if conn:
-                conn.close()
+        # Get file list from finding details
+        file_infos = details.get('all_files') or details.get('files') or []
+        files = [f.get('file_path') if isinstance(f, dict) else f for f in file_infos]
+        
         if not files:
             return {'success': True, 'action': 'already_gone',
-                    'message': 'No files under this artist anymore'}
+                    'message': 'No files in finding'}
 
         from mutagen import File as MutagenFile
         from mutagen.id3 import ID3, TPE1, TPE2, TXXX
