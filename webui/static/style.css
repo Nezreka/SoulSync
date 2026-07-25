@@ -71931,6 +71931,16 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     font-size: 11px; font-weight: 800; line-height: 18px; text-align: center;
     border: 2px solid #111114;
 }
+.chat-guild-wrap { position: relative; flex: 0 0 auto; display: flex; }
+.chat-guild-leave {
+    position: absolute; top: -3px; right: -3px; width: 17px; height: 17px;
+    border: 2px solid #111114; border-radius: 50%; cursor: pointer;
+    background: rgba(239,68,68,0.9); color: #fff;
+    font-size: 11px; line-height: 1; padding: 0;
+    opacity: 0; transition: opacity .15s ease;
+}
+.chat-guild-wrap:hover .chat-guild-leave { opacity: 1; }
+.chat-guild-leave:hover { background: #ef4444; }
 .chat-guild-sep { width: 32px; height: 2px; border-radius: 1px; background: rgba(255,255,255,0.1); flex: 0 0 auto; }
 .chat-guild--add { background: rgba(255,255,255,0.05); color: #1db954; font-size: 22px; font-weight: 400; }
 .chat-guild--add:hover { background: rgba(29,185,84,0.22); }

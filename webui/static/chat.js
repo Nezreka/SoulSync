@@ -376,7 +376,7 @@
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
                 'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
         }
-        if (state.view === 'room' && state.canSend && !state.thread) {
+        if (state.view === 'room' && state.canSend && !state.thread && _chanRoom()) {
             acts += '<button type="button" class="chat-line-reply" title="Start a thread on this message" ' +
                 'data-chat-thread-start="' + attr(_msgKey(m)) + '" ' +
                 'data-chat-thread-title="' + attr(String(m.message || '').slice(0, 60)) + '">🧵</button>';
@@ -579,16 +579,20 @@
             // Virtual channels: show only the active one. Untagged / unknown-slug
             // messages fold into the default channel (never hidden everywhere),
             // so vanilla-Soulseek and old-client traffic still reads in #general.
-            shown = shown.filter(function (m) { return _msgChannel(m) === state.channel; });
-            // Inside a thread: only its parent + its replies. Outside: thread
-            // replies fold away so the channel stays readable (Discord-style).
-            if (state.thread) {
-                var tid = state.thread.id;
-                shown = shown.filter(function (m) {
-                    return _msgThread(m) === tid || _msgKey(m) === tid;
-                });
-            } else {
-                shown = shown.filter(function (m) { return !_msgThread(m); });
+            // Only the SoulSync room is channelled/threaded — every other room
+            // shows its stream plainly, exactly as it did before.
+            if (_chanRoom()) {
+                shown = shown.filter(function (m) { return _msgChannel(m) === state.channel; });
+                // Inside a thread: only its parent + its replies. Outside: thread
+                // replies fold away so the channel stays readable (Discord-style).
+                if (state.thread) {
+                    var tid = state.thread.id;
+                    shown = shown.filter(function (m) {
+                        return _msgThread(m) === tid || _msgKey(m) === tid;
+                    });
+                } else {
+                    shown = shown.filter(function (m) { return !_msgThread(m); });
+                }
             }
         }
         // NEW divider: split at the frozen last-seen marker (set on room open).
@@ -749,25 +753,10 @@
 
     function renderSide(convos) {
         if (convos) state.convos = convos;   // guild-rail DM badge reads the latest list
-        var rooms = q('[data-chat-rooms]');
-        if (rooms) {
-            var list = (state.rooms.length ? state.rooms
-                : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
-            rooms.innerHTML = list.map(function (r) {
-                var on = state.view === 'room' && state.room === r.name;
-                return '<div class="chat-side-room' + (on ? ' chat-side-item--on' : '') + '">' +
-                    '<button class="chat-side-item" type="button" data-chat-open-room="' +
-                        attr(r.name) + '" title="' + attr(r.name) + '"># ' + esc(r.name) + '</button>' +
-                    (!r.home && state.canManage
-                        ? '<button class="chat-side-leave" type="button" data-chat-leave-room="' +
-                            attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
-                        : '') +
-                '</div>';
-            }).join('') +
-            (state.canManage
-                ? '<button class="chat-side-item chat-side-add" type="button" data-chat-browse-rooms>+ Browse rooms</button>'
-                : '');
-        }
+        // Rooms are rendered by renderGuilds() into the guild rail — switching,
+        // browsing and leaving all live there. They are deliberately not listed
+        // in this sidebar too (that was two Browse-rooms buttons and two room
+        // lists saying the same thing).
         var host = q('[data-chat-convos]');
         if (!host) return;
         var list = (convos || []).map(function (c) {
@@ -803,6 +792,18 @@
         ] },
     ];
     var CHAT_DEFAULT_CHANNEL = 'general';
+
+    // Channels + threads are for the SoulSync community room ONLY. In any other
+    // Soulseek room nobody tags anything, so a channel rail would file every
+    // message under #general and strand the other channels empty — and the
+    // thread fold would HIDE replies with no sidebar to find them again. Other
+    // rooms therefore get plain, unfiltered chat (the jukebox / polls / pins
+    // still work there, since those are additive folds that are simply empty
+    // when nobody has used them).
+    function _chanRoom() {
+        return state.view === 'room' &&
+               (!state.homeRoom || state.room === state.homeRoom);
+    }
 
     function _chanKnown(slug) {
         for (var i = 0; i < CHAT_CHANNELS.length; i++) {
@@ -844,9 +845,18 @@
         var html = rooms.map(function (r) {
             var on = state.view === 'room' && state.room === r.name;
             var initials = String(r.name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
-            return '<button class="chat-guild' + (on ? ' chat-guild--on' : '') + '" type="button" ' +
-                'data-chat-open-room="' + attr(r.name) + '" title="' + attr(r.name) + '">' +
-                esc(initials) + '</button>';
+            // The rail is the ONLY room switcher now (the sidebar lists channels,
+            // not rooms), so leaving has to live here too — × on hover, home room
+            // excluded, same rule the old sidebar list used.
+            return '<span class="chat-guild-wrap">' +
+                '<button class="chat-guild' + (on ? ' chat-guild--on' : '') + '" type="button" ' +
+                    'data-chat-open-room="' + attr(r.name) + '" title="' + attr(r.name) + '">' +
+                    esc(initials) + '</button>' +
+                (!r.home && state.canManage
+                    ? '<button class="chat-guild-leave" type="button" data-chat-leave-room="' +
+                        attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
+                    : '') +
+            '</span>';
         }).join('');
         // PM puck — unread dot when any conversation is waiting
         var pmUnread = (state.convos || []).filter(function (c) {
@@ -874,7 +884,7 @@
         }
         var host = q('[data-chat-channels]');
         if (!host) return;
-        if (state.view !== 'room') { host.innerHTML = ''; return; }
+        if (!_chanRoom()) { host.innerHTML = ''; return; }   // plain chat elsewhere
         if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
         var unread = _chanUnread();
         var closed = state.chanCatClosed || {};
@@ -1025,11 +1035,12 @@
         // view — snap back to the default before anything renders against it.
         if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
         head.innerHTML = state.view === 'room'
-            ? (state.thread
+            ? (state.thread && _chanRoom()
                 ? '<button class="chat-thread-back" type="button" data-chat-thread-close ' +
                       'title="Back to #' + attr(state.channel) + '">&larr;</button>' +
                   '<span class="chat-head-title">🧵 ' + esc(state.thread.name || 'Thread') + '</span>'
-                : '<span class="chat-head-title">#' + esc(state.channel) + '</span>') +
+                : '<span class="chat-head-title">#' +
+                      esc(_chanRoom() ? state.channel : (state.room || '')) + '</span>') +
               '<span class="chat-head-sub' + (topic ? ' chat-head-sub--topic' : '') + '"' +
                   (topic ? ' title="topic set by ' + attr(topic.by) + '"' : '') + '>' + subText +
                   (state.canSend
@@ -1069,8 +1080,10 @@
         form.classList.toggle('chat-composer--locked', !state.canSend);
         input.disabled = !state.canSend;
         input.placeholder = state.canSend
-            ? (state.view === 'room' ? 'Message #' + (state.channel || CHAT_DEFAULT_CHANNEL) + '…'
-                                     : 'Message ' + (state.pmUser || '') + '…')
+            ? (state.view === 'room'
+                ? 'Message #' + (_chanRoom() ? (state.channel || CHAT_DEFAULT_CHANNEL)
+                                             : (state.room || '')) + '…'
+                : 'Message ' + (state.pmUser || '') + '…')
             : 'Read-only — chat sending is admin-only on this server';
         // Formatting only exists inside the envelope — the toolbar is a ROOM
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
@@ -2142,6 +2155,7 @@
             state.pollDismissedAt = null;
         }
         state.room = nextRoom;
+        state.thread = null;         // threads are per-room (and home-room only)
         state.topicEditing = false;
         state.typing = {};
         state.typingArmedAt = Date.now() + 2000;   // archive replay isn't live typing
@@ -2305,10 +2319,14 @@
         var payload = { message: text };
         if (state.view === 'room') {
             payload.room = state.room || '';
-            payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;   // virtual channel tag
-            if (state.thread) {
-                payload.thread = state.thread.id;
-                payload.thread_name = state.thread.name || '';
+            // Only the SoulSync room carries channel/thread tags — a message in
+            // any other room stays a plain room message.
+            if (_chanRoom()) {
+                payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
+                if (state.thread) {
+                    payload.thread = state.thread.id;
+                    payload.thread_name = state.thread.name || '';
+                }
             }
         }
         var sentReply = null;
