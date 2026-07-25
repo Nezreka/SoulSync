@@ -74,6 +74,31 @@ class TestArchiveReply:
         assert "reply" not in rows[1]
 
 
+class TestArchiveFileCard:
+    def test_file_metadata_survives_the_archive(self, mdb):
+        """A shared-file message must keep its card metadata through the
+        archive — otherwise an archived file message renders as a bare link
+        with no preview or save-to-library button (only 'new' ones worked)."""
+        mdb.add_chat_messages("SoulSync", [
+            {"username": "dj", "message": "https://cdn.filepost.dev/x/song.flac",
+             "timestamp": "2026-07-19 10:00:00",
+             "file": {"n": "song.flac", "s": 12345, "m": "audio/flac"}},
+            {"username": "b", "message": "just chatting",
+             "timestamp": "2026-07-19 10:01:00"},
+        ])
+        rows = mdb.get_chat_messages("SoulSync")
+        assert rows[0]["file"] == {"n": "song.flac", "s": 12345, "m": "audio/flac"}
+        assert "file" not in rows[1]      # a plain message carries no file key
+
+    def test_malformed_file_is_dropped_not_stored(self, mdb):
+        mdb.add_chat_messages("SoulSync", [
+            {"username": "x", "message": "u", "timestamp": "2026-07-19 10:02:00",
+             "file": {"s": 5}},           # no name → not a valid card
+        ])
+        rows = mdb.get_chat_messages("SoulSync")
+        assert "file" not in rows[0]
+
+
 class TestArchiveApi:
     def _app(self, mdb):
         import api.chat as chat_api

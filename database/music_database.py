@@ -416,6 +416,7 @@ class MusicDatabase:
                     rich INTEGER NOT NULL DEFAULT 0,
                     timestamp TEXT NOT NULL,
                     reply TEXT,
+                    file TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(room, username, timestamp, message) ON CONFLICT IGNORE
                 )
@@ -435,6 +436,13 @@ class MusicDatabase:
             # already created it, so the column rides a tolerant ALTER
             try:
                 cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN reply TEXT")
+            except sqlite3.OperationalError:
+                pass    # already there
+            # file-share card metadata (name/size/mime) — without it, archived
+            # file messages lost their card + preview + save-to-library button
+            # and rendered as a bare link. Same tolerant-ALTER pattern as reply.
+            try:
+                cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN file TEXT")
             except sqlite3.OperationalError:
                 pass    # already there
 
@@ -10522,7 +10530,13 @@ class MusicDatabase:
             if isinstance(rep, dict) and rep.get('u'):
                 rep_json = json.dumps({'u': str(rep.get('u'))[:64],
                                        'x': str(rep.get('x') or '')[:140]})
-            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json))
+            fil = m.get('file')
+            fil_json = None
+            if isinstance(fil, dict) and fil.get('n'):
+                fil_json = json.dumps({'n': str(fil.get('n'))[:200],
+                                       's': fil.get('s') if isinstance(fil.get('s'), int) else None,
+                                       'm': str(fil.get('m') or '')[:80]})
+            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json))
         if not rows:
             return 0
         try:
@@ -10530,8 +10544,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply) "
-                    "VALUES (?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -10550,7 +10564,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -10563,13 +10577,14 @@ class MusicDatabase:
             rows.reverse()
             for r in rows:
                 r['rich'] = bool(r['rich'])
-                if r.get('reply'):
-                    try:
-                        r['reply'] = json.loads(r['reply'])
-                    except (ValueError, TypeError):
-                        r['reply'] = None
-                if not r.get('reply'):
-                    r.pop('reply', None)
+                for k in ('reply', 'file'):
+                    if r.get(k):
+                        try:
+                            r[k] = json.loads(r[k])
+                        except (ValueError, TypeError):
+                            r[k] = None
+                    if not r.get(k):
+                        r.pop(k, None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)
