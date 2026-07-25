@@ -133,6 +133,7 @@
         var votes = [];          // raw votes since last round
         var skipVotes = [];      // votes to skip the CURRENT track
         var history = [];        // previously played, newest first (cap 10)
+        var radio = false;       // auto-DJ: DJ tops up an empty queue (shared toggle)
         var now = null;
 
         (events || []).forEach(function (ev) {
@@ -145,6 +146,7 @@
                 if (queue.length >= 25) return;            // cap: no queue bombs
                 var entry = { id: id, ti: String(p.ti || '').slice(0, 120),
                               d: _saneDuration(p.d), by: ev.username };
+                if (p.a) entry.auto = true;        // queued by the auto-DJ
                 queue.push(entry);
                 inQueue[id] = entry;
             } else if (p.k === 'jbx.vote') {
@@ -158,6 +160,8 @@
                     queue = queue.filter(function (e) { return e.id !== uid; });
                     delete inQueue[uid];
                 }
+            } else if (p.k === 'jbx.radio') {
+                radio = !!p.on;                    // latest toggle wins, any sender
             } else if (p.k === 'jbx.skip') {
                 var so = String(p.o || '');
                 if (now && so === now.id) skipVotes.push({ username: ev.username, option: so });
@@ -184,7 +188,7 @@
         var tally = tallyVotes(votes);
         queue.forEach(function (e) { e.votes = tally.counts[e.id] || 0; });
         return { queue: queue, now: now, tally: tally,
-                 skips: tallyVotes(skipVotes).total, history: history };
+                 skips: tallyVotes(skipVotes).total, history: history, radio: radio };
     }
 
     // ── Pins / poll / topic / tuned-presence reducers ───────────────────

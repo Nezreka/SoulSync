@@ -213,6 +213,19 @@ describe('reduceJukebox — the pure fold every client agrees on', () => {
         shapeEqual(st.history.map(h => h.id), ['bbbbbbbbbbb', 'aaaaaaaaaaa']);
     });
 
+    test('radio toggle: latest wins, auto flag rides submissions', () => {
+        const st = P.reduceJukebox([
+            ev('a', { k: 'jbx.radio', on: 1 }),
+            ev('b', { k: 'jbx.radio', on: 0 }),
+            ev('a', { k: 'jbx.radio', on: 1 }),
+            ev('dj', { k: 'jbx.sub', id: 'aaaaaaaaaaa', ti: 'Auto pick', a: 1 }),
+            ev('x', { k: 'jbx.sub', id: 'bbbbbbbbbbb', ti: 'Human pick' }),
+        ]);
+        assert.equal(st.radio, true);
+        assert.equal(st.queue[0].auto, true);
+        assert.equal(st.queue[1].auto, undefined);
+    });
+
     test('queue cap holds at 25', () => {
         const evs = [];
         for (let i = 0; i < 30; i++) {

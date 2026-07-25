@@ -242,3 +242,22 @@ def test_jukebox_level_up_wiring():
     assert "chat_jbx_vol" in js and "setVolume" in js
     proto = (_ROOT / "webui" / "static" / "chat-protocol.js").read_text(encoding="utf-8")
     assert "skipVotes" in proto and "history" in proto
+
+
+def test_auto_dj_radio_wiring():
+    """Radio mode: shared jbx.radio toggle (latest wins, reduced like all
+    bus state); when the queue runs dry the DJ searches something related
+    to the last-heard track and queues it marked auto — vote/skippable
+    like any human pick, 25s cooldown, never fights the paste-only 503."""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    assert "_jbxAutoQueue" in js and "'jbx.radio'" in js
+    wd = js[js.index("function _jbxWatchdog"):js.index("function _jbxAutoQueue")]
+    assert "st.radio && _jbxIsDj()" in wd            # only the DJ tops up
+    auto = js[js.index("function _jbxAutoQueue"):js.index("function _jbxAdvance")]
+    assert "25000" in auto                            # cooldown
+    assert "avoid[h.id] = 1" in auto                  # history never replays
+    assert "a: 1" in auto                             # marked auto
+    proto = (_ROOT / "webui" / "static" / "chat-protocol.js").read_text(encoding="utf-8")
+    assert "jbx.radio" in proto and "entry.auto = true" in proto
+    html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    assert "data-chat-jbx-radio" in html

@@ -47,6 +47,7 @@
             lastAdvanceAt: 0,    //   DJ double-fire guard (ms)
             starvedAt: 0,        //   queue-waiting-with-no-DJ clock (ms)
             histOpen: false,     //   recently-played list expanded
+            lastAutoAt: 0,       //   auto-DJ top-up cooldown (ms)
             videoHidden: false,  //   audio-only mode (iframe hidden, audio plays)
             vol: 100,            //   local player volume (persisted)
             timer: null,         //   elapsed clock + DJ watchdog while open
@@ -2077,6 +2078,15 @@
                 renderJukebox();
                 return;
             }
+            t = e.target.closest('[data-chat-jbx-radio]');
+            if (t) {
+                var rSt = _jbxState();
+                sendProtocol('jbx.radio', { on: rSt.radio ? 0 : 1 });
+                if (typeof showToast === 'function') {
+                    showToast(rSt.radio ? '📻 Auto-DJ off' : '📻 Auto-DJ on — the queue keeps itself fed', 'info');
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-jbx-video]');
             if (t) {
                 state.jukebox.videoHidden = !state.jukebox.videoHidden;
@@ -2706,6 +2716,12 @@
                 var nTuned = Object.keys(window.ChatProtocol.reduceTuned(_roomEvents())).length;
                 lc.textContent = nTuned ? '♪ ' + nTuned + ' listening' : '';
             }
+            var rb = q('[data-chat-jbx-radio]');
+            if (rb) {
+                rb.hidden = !state.canSend;
+                rb.classList.toggle('chat-filter-btn--on', !!st.radio);
+                rb.classList.toggle('chat-jbx-radiobtn--on', !!st.radio);
+            }
         }
         var show = state.jukebox.open && inRoom;
         panel.hidden = !show;
@@ -2719,7 +2735,7 @@
                                  state.canSend, st.skips, needed, nextId,
                                  state.jukebox.histOpen, st.history.length,
                                  st.history[0] && st.history[0].id,   // cap rotation changes content, not length
-                                 state.jukebox.videoHidden]);
+                                 state.jukebox.videoHidden, st.radio]);
         if (fp !== state.jukebox.lastRendered) {
             state.jukebox.lastRendered = fp;
             var nowHost = q('[data-chat-jbx-now]');
@@ -2780,6 +2796,7 @@
                             '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
                             '<span class="chat-jbx-meta">' +
                                 (e.id === nextId ? '<b class="chat-jbx-next">up next</b> · ' : '') +
+                                (e.auto ? '📻 auto · ' : '') +
                                 (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
                         '</div>' +
                         '<button class="chat-jbx-vote" type="button" data-chat-jbx-vote="' + attr(e.id) + '"' +
@@ -2860,6 +2877,7 @@
         var stale = !st.now || playerEnded || skipped ||
             (effD && elapsed !== null && elapsed > effD + 8) ||
             (!effD && elapsed !== null && elapsed > 900);   // untuned + unknown length: 15-min cap
+        if (!st.queue.length && st.radio && _jbxIsDj()) _jbxAutoQueue(st);
         if (!st.queue.length || !stale) { state.jukebox.starvedAt = 0; return; }
         if (_jbxIsDj()) { _jbxAdvance(st); return; }
         if (!state.jukebox.starvedAt) {
@@ -2868,6 +2886,32 @@
             state.jukebox.starvedAt = 0;
             _jbxAdvance(st);
         }
+    }
+
+    function _jbxAutoQueue(st) {
+        // Radio mode: the queue ran dry — find something related to what the
+        // room just heard and queue it (marked auto, still vote/skippable).
+        if (Date.now() - (state.jukebox.lastAutoAt || 0) < 25000) return;
+        var seed = st.now || (st.history && st.history[0]);
+        if (!seed || !seed.ti) return;
+        state.jukebox.lastAutoAt = Date.now();
+        // strip (Official Video)-style noise so the search finds neighbors
+        var qtext = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
+            .replace(/\s+/g, ' ').trim().slice(0, 150);
+        if (!qtext) return;
+        var avoid = {};
+        if (st.now) avoid[st.now.id] = 1;
+        (st.history || []).forEach(function (h) { avoid[h.id] = 1; });
+        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+            if (!res.ok) return;                   // paste-only servers: radio just idles
+            var pick = (res.body.results || []).filter(function (r) {
+                return r && r.id && !avoid[r.id];
+            })[0];
+            if (!pick) return;
+            var p = { id: pick.id, ti: pick.title, a: 1 };
+            if (pick.duration) p.d = pick.duration;
+            sendProtocol('jbx.sub', p);
+        });
     }
 
     function _jbxAdvance(st) {
