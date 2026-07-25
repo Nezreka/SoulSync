@@ -613,6 +613,72 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
         return None
 
 
+_background_executor: Optional[ThreadPoolExecutor] = None
+_background_inflight: set = set()
+_background_guard = threading.Lock()
+
+
+def schedule_artwork_build(database, config_manager, kind: str, entity_id: int):
+    """Resolve one entity's artwork off the caller's thread (perf25-02).
+
+    The cold path costs a provider walk, an HTTP download and two JPEG encodes;
+    doing that inside the artwork request pins a web worker per uncached image
+    on a page.  Callers instead answer with the placeholder contract right away
+    and let this bounded pool fill the cache for the next render.
+
+    Returns the scheduled :class:`~concurrent.futures.Future`, or ``None`` when
+    a build for the same entity is already queued/running.  ``build_artwork``
+    still owns the per-entity single-flight lock, so a concurrent HTTP or
+    precache build can never be duplicated either.
+    """
+    global _background_executor
+    key = (str(database.database_path), kind, int(entity_id))
+    with _background_guard:
+        if key in _background_inflight:
+            return None
+        if _background_executor is None:
+            _background_executor = ThreadPoolExecutor(
+                max_workers=_precache_max_workers(config_manager),
+                thread_name_prefix="Lib2ArtworkBg",
+            )
+        executor = _background_executor
+        _background_inflight.add(key)
+
+    def _run() -> bool:
+        try:
+            conn = database._get_connection()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("background artwork connection failed: %s", exc)
+            return False
+        try:
+            return bool(
+                build_artwork(database, conn, config_manager, kind, int(entity_id))
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "background artwork build failed (%s %s): %s", kind, entity_id, exc
+            )
+            return False
+        finally:
+            try:
+                conn.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("background artwork connection close failed: %s", exc)
+            # Released inside the worker, not in a done-callback: the entity
+            # must be schedulable again the moment its build is over, and a
+            # callback can still be pending when the future already resolved.
+            with _background_guard:
+                _background_inflight.discard(key)
+
+    try:
+        return executor.submit(_run)
+    except RuntimeError as exc:  # interpreter/executor shutdown
+        logger.debug("background artwork scheduling failed: %s", exc)
+        with _background_guard:
+            _background_inflight.discard(key)
+        return None
+
+
 def _precache_max_workers(config_manager, default: int = 6) -> int:
     """Return bounded artwork concurrency.
 
@@ -776,4 +842,5 @@ __all__ = [
     "invalidate_artwork",
     "is_cached_jpeg",
     "precache_all_artwork",
+    "schedule_artwork_build",
 ]

@@ -2607,6 +2607,54 @@ def test_artwork_route_serves_real_jpeg_with_matching_mime(api):
         assert image.format == "JPEG"
 
 
+def test_artwork_route_answers_cold_misses_without_blocking(api, monkeypatch):
+    """perf25-02: an uncached image must not pin the web worker on a provider
+    walk; the request returns the placeholder contract and schedules a build."""
+    client, _db, ids = api
+    from core.library2 import artwork
+
+    scheduled = []
+    monkeypatch.setattr(
+        artwork,
+        "schedule_artwork_build",
+        lambda db, cfg, kind, eid: scheduled.append((kind, eid)),
+    )
+    monkeypatch.setattr(
+        artwork,
+        "build_artwork",
+        lambda *_a, **_k: pytest.fail("cold path must not resolve inline"),
+    )
+
+    response = client.get(f"/api/library/v2/artwork/artist/{ids['artist']}")
+
+    assert response.status_code == 404
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["X-Artwork-Pending"] == "1"
+    assert scheduled == [("artist", ids["artist"])]
+
+
+def test_artwork_route_still_resolves_synchronously_on_request(api, monkeypatch):
+    """``wait=1`` keeps the blocking contract for callers that need bytes now."""
+    client, db, ids = api
+    from PIL import Image
+    from core.library2 import artwork
+
+    def build(_db, _conn, _cfg, kind, eid, force=False):
+        Image.new("RGB", (3, 2), "blue").save(
+            artwork.artwork_file(db, kind, eid), "JPEG"
+        )
+        return "built"
+
+    monkeypatch.setattr(artwork, "build_artwork", build)
+
+    response = client.get(
+        f"/api/library/v2/artwork/artist/{ids['artist']}?wait=1"
+    )
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/jpeg"
+
+
 def test_ui_preferences_round_trip(api):
     """B5: GET returns defaults, PUT merges a partial patch and persists it."""
     client, _db, _ids = api

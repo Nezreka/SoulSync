@@ -311,9 +311,15 @@ function useNavigate() {
   return useRouterNavigate({ from: Route.fullPath });
 }
 
+const LOCAL_ARTWORK_PREFIX = '/api/library/v2/artwork/';
+// perf25-02: an uncached cover answers 404 while the server resolves it in the
+// background, so a local miss is retried a bounded number of times before the
+// placeholder becomes final. Remote provider URLs never retry.
+const ARTWORK_RETRY_DELAYS_MS = [1500, 4000, 9000];
+
 /** Cover/poster image with a graceful placeholder when no artwork resolves.
  *  ``thumb`` requests the small resized variant for fast list rendering. */
-function Artwork({
+export function Artwork({
   src,
   alt,
   className,
@@ -325,16 +331,38 @@ function Artwork({
   thumb?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Only SoulSync's artwork endpoint understands ``size=thumb``. Appending it
   // to Spotify/Deezer/CDN URLs (the previous behavior) can invalidate signed
   // URLs; it also produced ``...?v=123?size=thumb`` for cache-busted local art.
-  const url =
-    src && thumb && src.startsWith('/api/library/v2/artwork/')
-      ? `${src}${src.includes('?') ? '&' : '?'}size=thumb`
-      : src;
+  const local = Boolean(src) && src.startsWith(LOCAL_ARTWORK_PREFIX);
+  const base = src && thumb && local ? `${src}${src.includes('?') ? '&' : '?'}size=thumb` : src;
+  const url = attempt > 0 ? `${base}${base.includes('?') ? '&' : '?'}retry=${attempt}` : base;
   // A card is reused as searches/settings refresh. One failed old URL must not
   // permanently pin the component to its placeholder after a valid URL arrives.
-  useEffect(() => setFailed(false), [url]);
+  useEffect(() => {
+    setFailed(false);
+    setAttempt(0);
+  }, [base]);
+  useEffect(
+    () => () => {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    },
+    [],
+  );
+  const handleError = () => {
+    setFailed(true);
+    const delay = ARTWORK_RETRY_DELAYS_MS[attempt];
+    if (!local || delay === undefined) return;
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => {
+      retryTimer.current = null;
+      setAttempt((current) => current + 1);
+      setFailed(false);
+    }, delay);
+  };
   if (!url || failed) {
     return (
       <div className={`${className} ${styles.artPlaceholder}`} aria-label={alt}>
@@ -349,7 +377,7 @@ function Artwork({
       alt={alt}
       loading="lazy"
       referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
+      onError={handleError}
     />
   );
 }

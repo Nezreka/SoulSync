@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from flask import jsonify, request, send_file
+from flask import jsonify, make_response, request, send_file
 
 from core.library2 import ADMIN_PROFILE_ID
 from core.library2 import bootstrap as lib2_bootstrap
@@ -2037,9 +2037,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     full.unlink()
                 except OSError:
                     pass
-        # Slow path: build_artwork owns the shared per-entity single-flight
-        # lock, so HTTP requests and the background precache cannot duplicate
-        # provider/NAS work.
+        # Cold path (perf25-02): resolving artwork means a provider walk, an
+        # HTTP download and two JPEG encodes.  Doing that here pins one web
+        # worker per uncached image on a page, so the default is to answer with
+        # the placeholder contract immediately and cache in the background; the
+        # next render serves from disk.  ``wait=1`` and an explicit ``force``
+        # rebuild (a deliberate user action) still resolve synchronously.
+        if not force and request.args.get("wait") != "1":
+            from core.library2.artwork import schedule_artwork_build
+            schedule_artwork_build(db, config_manager, kind, eid)
+            response = make_response("", 404)
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Artwork-Pending"] = "1"
+            return response
+        # build_artwork owns the shared per-entity single-flight lock, so HTTP
+        # requests and the background precache cannot duplicate provider/NAS work.
         conn = db._get_connection()
         try:
             path = build_artwork(db, conn, config_manager, kind, eid, force=force)
