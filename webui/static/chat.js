@@ -48,6 +48,7 @@
             player: null,        //   YT.Player instance while tuned in
             playingId: null,     //   video id the player was last pointed at
             playingNow: null,    //   the now-track the player is actually playing (display fallback)
+            nowSeen: null,       //   {id, localStart, base} — elapsed on OUR clock, not the DJ's
             playerAlive: false,  //   iframe API fired onReady (safe to call methods)
             results: [],         //   resolve results awaiting a pick
             searchResults: [],   //   YouTube search modal results
@@ -2136,6 +2137,7 @@
         if (state.room && state.room !== nextRoom) {
             _jbxTuneOut();               // BEFORE the flip: the off event goes to the OLD room
             state.jukebox.lastRendered = '';
+            state.jukebox.nowSeen = null;   // new room, new event stream, new clock base
             state.pinsOpen = false;
             state.pollDismissedAt = null;
         }
@@ -3155,10 +3157,36 @@
         return CP.electCoordinator(pool) === state.selfName;
     }
 
+    // Track WHEN WE saw a now-track start, so elapsed is measured on our own
+    // clock instead of the DJ's. `at` is the publisher's wall clock, and a
+    // client whose clock runs minutes fast used to read every track as long
+    // overdue — if that client was the DJ it advanced immediately and raced
+    // through the whole queue. `at` is now only consulted when we JOIN
+    // mid-track (the one case where we genuinely need someone else's offset).
+    function _jbxNoteNow(now) {
+        if (!now) { state.jukebox.nowSeen = null; return; }
+        var s = state.jukebox.nowSeen;
+        if (s && s.id === now.id) return;                  // already timing it
+        var base = 0;
+        if (!s && typeof now.at === 'number') {
+            // Cold open: we joined with something already playing — trust `at`
+            // for the starting offset (clamped; a wild clock reads as 0).
+            var d = Math.floor(Date.now() / 1000 - now.at);
+            if (d > 0 && d < 86400) base = d;
+        }
+        // A handoff we watched happen started NOW, by our clock. No skew.
+        state.jukebox.nowSeen = { id: now.id, localStart: Date.now(), base: base };
+    }
+
     function _jbxElapsed(now) {
-        if (!now || typeof now.at !== 'number') return null;
-        var s = Math.floor(Date.now() / 1000 - now.at);
-        return (s >= 0 && s < 86400) ? s : null;
+        if (!now) return null;
+        var s = state.jukebox.nowSeen;
+        if (s && s.id === now.id) {
+            return s.base + Math.floor((Date.now() - s.localStart) / 1000);
+        }
+        if (typeof now.at !== 'number') return null;
+        var d = Math.floor(Date.now() / 1000 - now.at);
+        return (d >= 0 && d < 86400) ? d : null;
     }
 
     function _fmtSecs(s) {
@@ -3208,6 +3236,7 @@
         if (!panel) return;
         var st = _jbxState();
         var now = st.now;
+        _jbxNoteNow(now);             // same clock base the watchdog uses
         var elapsed = _jbxElapsed(now);
         var effD = _jbxEffDuration(now);
         var ended = !!(now && effD && elapsed !== null && elapsed > effD + 5);
@@ -3305,11 +3334,20 @@
                                 : '') +
                         '</div>';
                 } else {
-                    // tuned-in users keep their exit even between tracks
-                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' +
-                        (st.queue.length ? 'Waiting for the next track…'
-                                         : 'Nothing playing — add a song above and get the room voting.') +
-                        '</div>' +
+                    // tuned-in users keep their exit even between tracks.
+                    // Auto-DJ needs something to sound like: with no now-playing
+                    // and nothing in the room's history it has no seed to search
+                    // from, so say that instead of looking silently broken.
+                    var idleMsg;
+                    if (st.queue.length) {
+                        idleMsg = 'Waiting for the next track…';
+                    } else if (st.radio && !(st.history && st.history.length)) {
+                        idleMsg = 'Auto-DJ is on, but it needs a starting point — ' +
+                                  'add one song and it takes over from there.';
+                    } else {
+                        idleMsg = 'Nothing playing — add a song above and get the room voting.';
+                    }
+                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' + idleMsg + '</div>' +
                         (state.jukebox.tunedIn
                             ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>' : '');
                 }
@@ -3396,6 +3434,7 @@
         // already behind pageVisible, so a backgrounded tab never DJs.
         if (state.view !== 'room') return;
         var st = _jbxState();
+        _jbxNoteNow(st.now);          // stamp handoffs on OUR clock (skew guard)
         var elapsed = _jbxElapsed(st.now);
         // A tuned-in client asks the PLAYER for the truth — pasted links have
         // no duration (oEmbed doesn't give one), and the iframe's ENDED event
