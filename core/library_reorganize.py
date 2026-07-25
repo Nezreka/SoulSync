@@ -1008,15 +1008,21 @@ def plan_album_reorganize(
     #     numbered 2-disc set (1..25) spills past disc 1 → left multi-disc.
     # Gated on the same preserve-my-organization setting as casing/year.
     if total_discs > 1 and _preserve_casing_enabled():
-        user_nums = [int(t.get('track_number') or 0) for t in tracks if t.get('track_number')]
-        api_disc1 = sum(1 for t in api_tracks if int(t.get('disc_number') or 1) == 1)
-        if (user_nums and len(user_nums) == len(set(user_nums))
-                and api_disc1 and max(user_nums) <= api_disc1):
-            total_discs = 1
-            for item in items:
-                if item.get('matched') and item.get('api_track'):
-                    # shallow copy — override only the disc, keep name/track/artists
-                    item['api_track'] = {**item['api_track'], 'disc_number': 1}
+        try:
+            user_nums = [int(t.get('track_number')) for t in tracks
+                         if str(t.get('track_number') or '').strip().isdigit()]
+            api_disc1 = sum(1 for t in api_tracks if int(t.get('disc_number') or 1) == 1)
+            if (user_nums and len(user_nums) == len(set(user_nums))
+                    and api_disc1 and max(user_nums) <= api_disc1):
+                total_discs = 1
+                for item in items:
+                    if item.get('matched') and item.get('api_track'):
+                        # shallow copy — override only the disc, keep name/track/artists
+                        item['api_track'] = {**item['api_track'], 'disc_number': 1}
+        except Exception:
+            # never let the single-disc heuristic break the reorganize — on any
+            # odd data just fall back to the source's disc structure
+            logger.debug("single-disc cap skipped (unexpected track data)", exc_info=True)
 
     return {
         'status': 'planned',

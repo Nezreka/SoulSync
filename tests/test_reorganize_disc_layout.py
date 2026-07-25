@@ -99,3 +99,15 @@ def test_genuinely_single_disc_source_is_untouched(plan_with):
     user = _u(range(1, 6))
     api = _a([(n, 1) for n in range(1, 6)])
     assert plan_with(user, api)["total_discs"] == 1
+
+
+def test_non_numeric_track_numbers_never_crash(plan_with):
+    """Belt-and-suspenders: odd track_numbers ('11/13', None) must not crash
+    the plan. With NO usable numeric track number the cap can't run, so the
+    source's disc structure stands."""
+    user = [{"id": "T0", "title": "S1", "track_number": "1/13"},
+            {"id": "T1", "title": "S2", "track_number": None}]
+    api = _a([(1, 1), (2, 1), (3, 1), (1, 2), (2, 2)])
+    plan = plan_with(user, api)          # must not raise
+    assert plan["status"] == "planned"
+    assert plan["total_discs"] == 2      # no numeric nums → heuristic skipped
