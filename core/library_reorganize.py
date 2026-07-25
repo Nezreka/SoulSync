@@ -421,6 +421,59 @@ _FEAT_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Detection only (does a title carry ANY feat credit?) — word-boundary so
+# "Defeat"/"Lift" never trip it. Used to avoid double-crediting.
+_FEAT_DETECT_RE = re.compile(r"\b(?:feat|ft|featuring)\b", re.IGNORECASE)
+
+
+def _feat_in_title_enabled() -> bool:
+    """Whether the user asked featured artists to live in the track title
+    (Settings → Metadata). Read live so the reorganize honors the same
+    switch the download path does. Isolated in a helper so tests can
+    monkeypatch it without a full config manager."""
+    try:
+        from config.settings import config_manager
+        return bool(config_manager.get("metadata_enhancement.tags.feat_in_title", False))
+    except Exception:
+        return False
+
+
+def _extract_feat_credit(title: str) -> str:
+    """The '(feat. X)' credit substring from a title (leading space trimmed),
+    or '' when there's none. Lets us carry a user's own credit forward when
+    the API only knows the primary artist."""
+    if not title:
+        return ''
+    m = _FEAT_RE.search(str(title))
+    return m.group(0).strip() if m else ''
+
+
+def _apply_feat_credit(track_name: str, normalized_artists: list, local_title: str) -> str:
+    """#1078: when feat_in_title is on, make sure the clean title the
+    reorganize builds carries the featured-artist credit — so the FILENAME
+    keeps it too (the tag writer re-adds it for the tag, but the filename is
+    built straight from this clean title and was dropping "(feat. X)").
+
+    Precedence when the API's own track name has no credit:
+      1. featured artists from the API track's artist list (canonical names),
+      2. else the credit already present in the user's file title (the API
+         only knows the primary — don't strip what the user curated).
+    A track name that already carries a credit is left untouched."""
+    name = str(track_name or '')
+    if _FEAT_DETECT_RE.search(name):
+        return name
+    featured = [
+        (a.get('name') if isinstance(a, dict) else str(a))
+        for a in (normalized_artists[1:] if normalized_artists else [])
+    ]
+    featured = [f for f in featured if f]
+    if featured:
+        return f"{name} (feat. {', '.join(featured)})".strip()
+    credit = _extract_feat_credit(local_title)
+    if credit:
+        return f"{name} {credit}".strip()
+    return name
+
 
 def _normalize_title(value) -> str:
     """Lowercase + strip cosmetic punctuation and treat brackets / dashes
@@ -916,10 +969,15 @@ def _build_post_process_context(
     artist_name: str,
     album_title: str,
     total_discs: int,
+    local_title: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
-    metadata in hand."""
+    metadata in hand.
+
+    ``local_title`` is the user's own current track title — used only to
+    carry a featured-artist credit forward when feat_in_title is on and the
+    API doesn't supply one (#1078)."""
     track_number = int(api_track.get('track_number') or 1)
     disc_number = int(api_track.get('disc_number') or 1)
     track_artists = api_track.get('artists') or [artist_name]
@@ -950,6 +1008,12 @@ def _build_post_process_context(
                 api_album_image = first.get('url') or ''
 
     track_name = api_track.get('name') or api_track.get('title') or ''
+    # #1078: keep the featured-artist credit on the CLEAN title when the user
+    # asked for feat-in-title. The tag writer re-adds it to the tag, but the
+    # filename is built straight from this clean title and was silently
+    # dropping "(feat. X)" — flagging already-correct files for "correction".
+    if _feat_in_title_enabled():
+        track_name = _apply_feat_credit(track_name, normalized_artists, local_title or '')
 
     return {
         'spotify_artist': {
@@ -1155,7 +1219,8 @@ def preview_album_reorganize(
         # shares the same one).
         per_item_album = plan_item.get('api_album') or api_album
         context = _build_post_process_context(
-            per_item_album, api_track, artist_name, album_title, total_discs
+            per_item_album, api_track, artist_name, album_title, total_discs,
+            local_title=title,
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1406,7 +1471,8 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
     embedded album metadata."""
     api_album = per_item_api_album if per_item_api_album else ctx.api_album
     context = _build_post_process_context(
-        api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs
+        api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs,
+        local_title=title,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
