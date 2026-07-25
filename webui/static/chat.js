@@ -52,6 +52,10 @@
             timer: null,         //   elapsed clock + DJ watchdog while open
             ytLoading: false, ytCbs: [],
         },
+        typing: {},              // username → last typ-event receipt (ms, local clock)
+        typingArmedAt: 0,        // ignore typ events replayed from the archive on room open
+        lastTypSentAt: 0,        // our own typ throttle
+        typingTimer: null,       // pending expiry repaint
         pinsOpen: false,         // pin board expanded
         topicEditing: false,     // head shows the topic input (renderHead pauses)
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
@@ -1520,6 +1524,7 @@
                 }
                 renderHead(); renderComposer();
                 mergeMessages(res.body.messages);
+                _clearTypingFor(res.body.messages);
                 renderMessages(state.msgs);
                 renderUsers(res.body.users);
                 _ingestProtocol(res.body.protocol);
@@ -1565,6 +1570,9 @@
         }
         state.room = nextRoom;
         state.topicEditing = false;
+        state.typing = {};
+        state.typingArmedAt = Date.now() + 2000;   // archive replay isn't live typing
+        renderTyping();
         renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
         cancelReply();
@@ -1703,6 +1711,7 @@
         if (!input) return;
         var text = (input.value || '').trim();
         if (!text || !state.canSend) return;
+        state.lastTypSentAt = 0;
         input.value = '';
         input.style.height = 'auto';
         var url = state.view === 'room'
@@ -2065,6 +2074,7 @@
                 inputEl.style.height = 'auto';
                 inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px';
                 updateMentionPop(inputEl);
+                _maybeSendTyping(inputEl);
             });
         }
 
@@ -2267,6 +2277,11 @@
                           room: room, p: p };
             log.push(entry);
             fresh.push(entry);
+            if (p.k === 'typ' && entry.username && entry.username !== state.selfName &&
+                    state.typingArmedAt && Date.now() > state.typingArmedAt) {
+                state.typing[entry.username] = Date.now();
+                renderTyping();
+            }
         });
         if (log.length > 300) state.protocolLog = log.slice(-300);
         if (fresh.length) {
@@ -2300,6 +2315,52 @@
     function onRoomProtocol(d) {
         if (!d || d.room !== state.room) return;
         _ingestProtocol(d.events || []);
+    }
+
+    // ── typing indicators (typ events on the bus, deliberately frugal:
+    // every carrier is a visible noise line for vanilla clients, so we emit
+    // on composition start + at most one refresh per 20s, never per-key) ──
+    var _TYP_TTL = 25000;      // matches the ≤20s re-emit cadence + slack
+
+    function _maybeSendTyping(input) {
+        if (state.view !== 'room' || !state.canSend) return;
+        if (!input || !(input.value || '').trim()) return;
+        if ((input.value || '')[0] === '/') return;      // commands aren't messages
+        if (Date.now() - state.lastTypSentAt < 20000) return;
+        state.lastTypSentAt = Date.now();
+        sendProtocol('typ', {});
+    }
+
+    function renderTyping() {
+        var host = q('[data-chat-typing]');
+        if (!host) return;
+        var cut = Date.now() - _TYP_TTL;
+        var names = [];
+        Object.keys(state.typing).forEach(function (n) {
+            if (state.typing[n] < cut) delete state.typing[n];
+            else names.push(n);
+        });
+        if (!names.length || state.view !== 'room') { host.hidden = true; host.innerHTML = ''; return; }
+        names.sort();
+        var who = names.length === 1 ? '<b>' + esc(names[0]) + '</b> is'
+            : names.length === 2 ? '<b>' + esc(names[0]) + '</b> and <b>' + esc(names[1]) + '</b> are'
+            : names.length + ' people are';
+        host.innerHTML = '<span class="chat-typing-dots"><i></i><i></i><i></i></span> ' + who + ' typing…';
+        host.hidden = false;
+        if (state.typingTimer) clearTimeout(state.typingTimer);
+        state.typingTimer = setTimeout(renderTyping, 5000);
+    }
+
+    function _clearTypingFor(messages) {
+        // an arriving message from a typer means they sent it — clear now
+        var changed = false;
+        (messages || []).forEach(function (m) {
+            if (m && m.username && state.typing[m.username]) {
+                delete state.typing[m.username];
+                changed = true;
+            }
+        });
+        if (changed) renderTyping();
     }
 
     // Every surface reduced from the protocol bus, painted together.

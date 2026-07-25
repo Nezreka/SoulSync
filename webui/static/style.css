@@ -72512,3 +72512,22 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     background: rgba(var(--accent-rgb), 0.28);
     color: #fff;
 }
+
+/* ── typing indicators ────────────────────────────────────────────────── */
+.chat-typing[hidden] { display: none !important; }
+.chat-typing {
+    padding: 2px 18px 4px;
+    font-size: 11.5px;
+    color: rgba(255,255,255,0.5);
+}
+.chat-typing b { color: rgba(255,255,255,0.75); font-weight: 600; }
+.chat-typing-dots { display: inline-flex; gap: 3px; margin-right: 3px; vertical-align: middle; }
+.chat-typing-dots i {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: rgba(var(--accent-light-rgb), 0.8);
+    animation: chatTypDot 1.2s ease-in-out infinite;
+}
+.chat-typing-dots i:nth-child(2) { animation-delay: 0.2s; }
+.chat-typing-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes chatTypDot { 0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+                        30% { opacity: 1; transform: translateY(-2px); } }

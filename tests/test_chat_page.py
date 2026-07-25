@@ -182,3 +182,22 @@ class TestBusSurfacePlacement:
         main = _HTML[_HTML.index('class="chat-main"'):_HTML.index('class="chat-rail"')]
         assert "data-chat-poll" in main
         assert "data-chat-jukebox" not in main         # the panel left the main column
+
+
+class TestTypingIndicators:
+    """typ events on the bus — deliberately frugal (every carrier is a
+    visible noise line for vanilla clients): composition start + at most
+    one refresh per 20s, 25s TTL, cleared instantly when the typer's
+    message lands, and archive replay on room open never ghost-types."""
+
+    def test_wiring(self):
+        js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8", errors="replace")
+        assert "_maybeSendTyping" in js and "sendProtocol('typ', {})" in js
+        assert "< 20000) return;" in js                        # the frugality throttle
+        assert "_TYP_TTL = 25000" in js
+        assert "_clearTypingFor(res.body.messages)" in js      # message beats indicator
+        assert "typingArmedAt" in js                           # archive replay guard
+        assert "!== state.selfName" in js.split("p.k === 'typ'", 1)[1][:200]
+        assert "data-chat-typing" in _HTML
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8", errors="replace")
+        assert ".chat-typing" in css
