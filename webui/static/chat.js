@@ -35,6 +35,7 @@
         selfName: '',            // our slskd username (@mention highlighting)
         users: [],               // room user names (mention autocomplete)
         replyTo: null,           // {u, x} while composing a reply
+        pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
         jukebox: {               // shared room listening (reduced from protocolLog)
             open: false,         //   panel visible
             tunedIn: false,      //   player exists (requires a user gesture)
@@ -835,6 +836,22 @@
     function sendReaction(target, emoji) {
         closeReactRow();
         if (!target || !emoji) return;
+        // Optimistic: show the reaction instantly instead of waiting for the
+        // round-trip AND for slskd to echo our own reaction envelope back into
+        // the room buffer (which can lag several seconds). The pending mark
+        // keeps it from flickering away on the reconcile before the echo lands.
+        var msg = null;
+        for (var i = 0; i < state.msgs.length; i++) {
+            var m = state.msgs[i];
+            if (String(m.username || '') === String(target.user || '') &&
+                    String(m.message || '') === String(target.text || '')) { msg = m; break; }
+        }
+        if (msg && state.selfName) {
+            _addReactor(msg, emoji, state.selfName);
+            state.pendingReactions[_msgKey(msg) + '|' + emoji] = 1;
+            state.lastStamp = null;
+            renderMessages(state.msgs);
+        }
         postJSON('/api/chat/room/react', {
             target_user: target.user, target_text: target.text, e: emoji,
             room: state.room || '',
@@ -843,6 +860,8 @@
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'Reaction not sent', 'error');
                 }
+                // roll back the optimistic mark so a failed send doesn't stick
+                if (msg) delete state.pendingReactions[_msgKey(msg) + '|' + emoji];
                 return;
             }
             state.lastStamp = null;
@@ -1542,18 +1561,70 @@
     }
 
     function mergeMessages(incoming) {
-        var known = {};
-        state.msgs.forEach(function (m) { known[_msgKey(m)] = 1; });
-        var added = 0;
+        var byKey = {};
+        state.msgs.forEach(function (m) { byKey[_msgKey(m)] = m; });
+        var added = 0, reactionsChanged = false;
         (incoming || []).forEach(function (m) {
-            if (!known[_msgKey(m)]) { known[_msgKey(m)] = 1; state.msgs.push(m); added++; }
+            var k = _msgKey(m);
+            var existing = byKey[k];
+            if (!existing) {
+                byKey[k] = m; state.msgs.push(m); added++;
+            } else {
+                // Reactions are server-side aggregate state that changes over a
+                // message's life. mergeMessages used to only ADD new messages,
+                // so a reaction added after we first saw a message never showed
+                // without a full page reload. Reconcile the authoritative server
+                // reactions onto the copy we already hold, then re-assert our own
+                // just-sent reaction until slskd echoes it (avoids a flicker
+                // where the optimistic chip vanishes then returns).
+                var was = JSON.stringify(existing.reactions || []);
+                existing.reactions = m.reactions || [];
+                _reapplyPendingReactions(existing);
+                if (JSON.stringify(existing.reactions || []) !== was) reactionsChanged = true;
+            }
         });
         if (added) {
             state.msgs.sort(function (a, b) {
                 return String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
             });
         }
+        // renderMessages skips a repaint when the newest-timestamp+count is
+        // unchanged — a reaction change moves neither, so force the repaint.
+        if (reactionsChanged) state.lastStamp = null;
         return added;
+    }
+
+    // Add `me` to a message's reaction chip for `emoji` (creating it if new).
+    function _addReactor(m, emoji, me) {
+        m.reactions = m.reactions || [];
+        var chip = null;
+        m.reactions.forEach(function (r) { if (r.e === emoji) chip = r; });
+        if (!chip) {
+            m.reactions.push({ e: emoji, n: 1, users: me ? [me] : [] });
+        } else if (me && (chip.users || []).indexOf(me) === -1) {
+            chip.users = (chip.users || []).concat([me]);
+            chip.n = (chip.n || 0) + 1;
+        }
+    }
+
+    // Re-assert self-reactions the server hasn't echoed yet; drop each from the
+    // pending set once the authoritative copy contains it.
+    function _reapplyPendingReactions(m) {
+        var me = state.selfName;
+        if (!me) return;
+        var k = _msgKey(m);
+        Object.keys(state.pendingReactions).forEach(function (pk) {
+            var sep = pk.lastIndexOf('|');
+            if (pk.slice(0, sep) !== k) return;
+            var emoji = pk.slice(sep + 1);
+            var chip = null;
+            (m.reactions || []).forEach(function (r) { if (r.e === emoji) chip = r; });
+            if (chip && (chip.users || []).indexOf(me) > -1) {
+                delete state.pendingReactions[pk];      // server confirmed it
+            } else {
+                _addReactor(m, emoji, me);              // keep it visible meanwhile
+            }
+        });
     }
 
     function loadOlder() {

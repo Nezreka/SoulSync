@@ -222,3 +222,35 @@ class TestSlashCommands:
         # send() intercepts before posting
         send_fn = js[js.index("function send()"):js.index("function send()") + 3000]
         assert "_runSlash(text)" in send_fn
+
+
+class TestReactionLiveUpdate:
+    """Reactions used to require a full page reload to appear (Boulder):
+    mergeMessages only ADDED new messages, so a reaction on a message already
+    in view never updated; renderMessages also skips a repaint when only
+    reactions change (its fingerprint is newest-timestamp+count). Fixed with
+    reconcile-on-merge + forced repaint + optimistic self-reaction."""
+
+    def test_merge_reconciles_reactions_on_existing_messages(self):
+        merge = _CHAT_JS[_CHAT_JS.index("function mergeMessages"):
+                         _CHAT_JS.index("function _addReactor")]
+        # existing messages get their reactions reconciled, not just skipped
+        assert "existing.reactions = m.reactions" in merge
+        assert "_reapplyPendingReactions(existing)" in merge
+        # a reaction-only change still forces renderMessages to repaint
+        assert "if (reactionsChanged) state.lastStamp = null;" in merge
+
+    def test_send_reaction_is_optimistic_with_pending_guard(self):
+        send = _CHAT_JS[_CHAT_JS.index("function sendReaction"):
+                        _CHAT_JS.index("function sendReaction") + 1600]
+        assert "_addReactor(msg, emoji, state.selfName)" in send   # instant local chip
+        assert "state.pendingReactions[_msgKey(msg) + '|' + emoji] = 1" in send
+        assert "renderMessages(state.msgs)" in send                # repaint now
+        # a failed send rolls the optimistic mark back
+        assert "delete state.pendingReactions[_msgKey(msg) + '|' + emoji]" in send
+
+    def test_pending_reactions_clear_on_server_confirm(self):
+        fn = _CHAT_JS[_CHAT_JS.index("function _reapplyPendingReactions"):
+                      _CHAT_JS.index("function _reapplyPendingReactions") + 900]
+        assert "delete state.pendingReactions[pk]" in fn   # confirmed → stop forcing
+        assert "_addReactor(m, emoji, me)" in fn           # meanwhile keep it visible
