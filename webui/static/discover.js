@@ -180,6 +180,26 @@ async function loadAdventurousnessDial() {
     if (!_advWave.raf) _advWave.raf = requestAnimationFrame(_advDraw);
 }
 
+// Run a list of loader THUNKS with a bounded number in flight at once. Firing all
+// ~20 discover section loaders simultaneously means ~20 heavy DB/consensus queries
+// contend on the backend (Flask + GIL) and each ends up slow — the page took tens of
+// seconds to become usable. A small pool keeps a few requests moving at a time so each
+// returns quickly, and (because we feed above-the-fold loaders first) the top of the
+// page fills in within a couple seconds. Never rejects — a failing loader is swallowed,
+// same as the old Promise.allSettled. (#discover perf)
+async function _runLoadersLimited(thunks, limit = 5) {
+    let cursor = 0;
+    async function worker() {
+        while (cursor < thunks.length) {
+            const idx = cursor++;
+            try { await thunks[idx](); } catch (_) { /* allSettled semantics */ }
+        }
+    }
+    const pool = [];
+    for (let w = 0; w < Math.min(limit, thunks.length); w++) pool.push(worker());
+    await Promise.all(pool);
+}
+
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
 
@@ -195,34 +215,42 @@ async function loadDiscoverPage() {
         loadDiscoverWeekly(),            // external playlist source
     ];
 
-    // Fast/local sections — settle quickly so the layout snaps into place without waiting on the
-    // external APIs above. allSettled (not all) so one failing loader can't block the reorder.
-    await Promise.allSettled([
-        loadDiscoverHero(),
-        loadAdventurousnessDial(),  // sets the Discover-page dial from config
-        loadListeningRecommendations(),  // #913: play-weighted, consensus-ranked picks
-        loadPersonalizedListeningMix(),  // #913: playable track mix from those picks
-        loadRecommendedArtistsSection(),
-        loadYourArtists(),
-        loadYourAlbums(),
-        loadDiscoverRecentReleases(),
-        loadSeasonalContent(),  // Seasonal discovery
-        loadPersonalizedPopularPicks(),  // Popular picks from discovery pool
-        loadPersonalizedHiddenGems(),  // Hidden gems from discovery pool
-        loadDiscoveryShuffle(),  // Discovery Shuffle
-        loadBecauseYouListenTo(),  // Personalized by listening stats
-        loadCacheUndiscoveredAlbums(),  // From metadata cache
-        loadCacheGenreNewReleases(),    // From metadata cache
-        loadCacheLabelExplorer(),       // From metadata cache
-        loadCacheDeepCuts(),            // From metadata cache
-        loadCacheGenreExplorer(),       // From metadata cache
-        loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
-        loadListenBrainzPlaylistsFromBackend(),  // local: ListenBrainz playlist states for persistence
-        loadDiscoveryBlacklist()  // Blocked artists list
-    ]);
+    // Fast/local sections, split by where they sit in the layout. Above-the-fold loaders run FIRST
+    // (concurrency-limited) so the top of the page is usable in a couple seconds instead of waiting on
+    // the whole ~20-request storm; the rest stream in after. Thunks (not started promises) so the pool
+    // controls when each fires. (#discover perf — see _runLoadersLimited.)
+    const aboveFoldLoaders = [
+        () => loadDiscoverHero(),
+        () => loadAdventurousnessDial(),        // sets the Discover-page dial from config
+        () => loadCacheGenreExplorer(),         // top of the layout (quick browse)
+        () => loadListeningRecommendations(),   // #913: play-weighted, consensus-ranked picks
+        () => loadRecommendedArtistsSection(),  // paired with listening-recs
+        () => loadPersonalizedPopularPicks(),   // Your Mixes cards
+        () => loadPersonalizedHiddenGems(),
+        () => loadDiscoveryShuffle(),
+        () => loadPersonalizedListeningMix(),   // #913: playable track mix from those picks
+        () => loadDiscoverRecentReleases(),
+        () => loadCacheGenreNewReleases(),      // paired with recent releases
+    ];
+    const belowFoldLoaders = [
+        () => loadSeasonalContent(),            // Seasonal discovery
+        () => loadCacheUndiscoveredAlbums(),
+        () => loadCacheLabelExplorer(),
+        () => loadYourAlbums(),
+        () => loadYourArtists(),
+        () => loadBecauseYouListenTo(),         // Personalized by listening stats
+        () => loadCacheDeepCuts(),
+        () => loadDecadeBrowserTabs(),          // Time Machine (tabbed by decade)
+        () => loadListenBrainzPlaylistsFromBackend(),  // local: LB playlist states for persistence
+        () => loadDiscoveryBlacklist(),         // Blocked artists list
+    ];
 
-    // Reorder now that the fast sections are in — NOT gated on the slow external APIs above.
+    // Above-the-fold first → reorder so the top settles early.
+    await _runLoadersLimited(aboveFoldLoaders, 5);
     _reorderDiscoverSections();
+
+    // Below-the-fold stream in next, then reorder again (not gated on the slow external APIs).
+    _runLoadersLimited(belowFoldLoaders, 5).then(() => _reorderDiscoverSections());
 
     // Re-slot the slow external sections into the already-ordered layout when they finish, instead of
     // delaying the whole page until then. allSettled so one failing source can't block the re-order.
