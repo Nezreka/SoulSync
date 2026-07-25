@@ -324,6 +324,91 @@ def test_global_search_merges_v2_only_artists_and_provider_deduplicates(tmp_path
     }
 
 
+def test_global_search_links_v2_artist_without_backreference_or_provider_id(tmp_path):
+    """find25-search-02: a lib2 artist born from a normal download carries no
+    ``legacy_artist_id``; when it also shares no provider id with the legacy
+    row, the merge used to leave the result without ``library_v2_id`` — so the
+    search result opened the OLD library page (and a duplicate entry appeared).
+    """
+    import sqlite3
+
+    path = tmp_path / 'search-unlinked.sqlite'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE artists(
+            id INTEGER PRIMARY KEY, name TEXT, spotify_artist_id TEXT
+        );
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT, image_url TEXT,
+            spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Unlinked Artist', NULL);
+        INSERT INTO lib2_artists VALUES(
+            21, 'unlinked  artist', NULL, NULL, NULL, '{}', NULL, NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+    live = sqlite3.connect(path)
+    live.row_factory = sqlite3.Row
+    deps = _build_deps(database=_V2DB(live, artists=[_Artist(1, 'Unlinked Artist')]))
+
+    result = orchestrator.run_enhanced_search('unlinked', '', deps)
+
+    library = result['db_artists']
+    assert len(library) == 1, 'the same artist must not appear twice'
+    assert library[0]['library_v2_id'] == 21
+    # The link is repaired once, so later searches take the indexed path.
+    verify = sqlite3.connect(path)
+    verify.row_factory = sqlite3.Row
+    assert verify.execute(
+        'SELECT legacy_artist_id FROM lib2_artists WHERE id=21'
+    ).fetchone()['legacy_artist_id'] == 1
+
+
+def test_global_search_leaves_ambiguous_name_matches_unlinked(tmp_path):
+    """Two lib2 rows with the same name are not evidence of identity."""
+    import sqlite3
+
+    path = tmp_path / 'search-ambiguous.sqlite'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE artists(
+            id INTEGER PRIMARY KEY, name TEXT, spotify_artist_id TEXT
+        );
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT, image_url TEXT,
+            spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Twin Artist', NULL);
+        INSERT INTO lib2_artists VALUES(
+            31, 'Twin Artist', NULL, NULL, NULL, '{}', NULL, NULL
+        );
+        INSERT INTO lib2_artists VALUES(
+            32, 'Twin Artist', NULL, NULL, NULL, '{}', NULL, NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+    live = sqlite3.connect(path)
+    live.row_factory = sqlite3.Row
+    deps = _build_deps(database=_V2DB(live, artists=[_Artist(1, 'Twin Artist')]))
+
+    result = orchestrator.run_enhanced_search('twin', '', deps)
+
+    legacy_entry = next(a for a in result['db_artists'] if a['id'] == 1)
+    assert 'library_v2_id' not in legacy_entry
+    verify = sqlite3.connect(path)
+    verify.row_factory = sqlite3.Row
+    assert verify.execute(
+        'SELECT COUNT(*) c FROM lib2_artists WHERE legacy_artist_id IS NOT NULL'
+    ).fetchone()['c'] == 0
+
+
 # ---------------------------------------------------------------------------
 # run_enhanced_search — single source
 # ---------------------------------------------------------------------------

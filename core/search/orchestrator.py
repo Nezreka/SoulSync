@@ -118,6 +118,36 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
     return None, False
 
 
+def _search_name_key(name: Any) -> str:
+    """Normalized artist name used only as a last-resort merge key."""
+    try:
+        from core.library2.importer import normalize_name
+        return normalize_name(str(name or ''))
+    except Exception:  # noqa: BLE001 - never break search on a helper import
+        return ' '.join(str(name or '').lower().split())
+
+
+def _backfill_legacy_link(conn, v2_id: int, legacy_id: int) -> None:
+    """Persist a name-resolved legacy↔lib2 link, once and only when free.
+
+    Guarded on both sides: the lib2 row must still be unlinked and no other
+    lib2 row may already claim this legacy artist, so a repair can never
+    silently steal an existing identity.  Best effort — a read-only or busy
+    database leaves the in-memory merge intact.
+    """
+    try:
+        conn.execute(
+            "UPDATE lib2_artists SET legacy_artist_id=? "
+            " WHERE id=? AND legacy_artist_id IS NULL"
+            "   AND NOT EXISTS (SELECT 1 FROM lib2_artists other "
+            "                    WHERE other.legacy_artist_id=?)",
+            (legacy_id, v2_id, legacy_id),
+        )
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("legacy↔lib2 artist link backfill skipped: %s", exc)
+
+
 def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
     active_server = deps.config_manager.get_active_media_server()
     artist_objs = deps.database.search_artists(query, limit=5, server_source=active_server)
@@ -135,8 +165,9 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
     # Library-v2 can contain provider-native artists with no legacy ``artists``
     # row at all. Merge them into the global-search library bucket, annotating
     # the V2 id so clients can route to the correct detail page. Prefer the
-    # explicit legacy back-reference, then provider-qualified identity; names
-    # alone are deliberately not a dedup key.
+    # explicit legacy back-reference, then provider-qualified identity, and only
+    # then — when exactly one row on each side carries the name — an
+    # unambiguous normalized-name match (find25-search-02).
     conn = None
     try:
         conn = deps.database._get_connection()
@@ -171,6 +202,10 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                     if column in selected_provider_columns and row[column]:
                         legacy_by_provider[(source, str(row[column]))] = target
 
+        legacy_by_name: dict[str, list[dict]] = {}
+        for item in out:
+            legacy_by_name.setdefault(_search_name_key(item['name']), []).append(item)
+
         needle = f"%{query.strip().lower()}%"
         v2_rows = conn.execute(
             """SELECT a.id AS matched_id,
@@ -186,6 +221,14 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                 LIMIT 10""",
             (needle, needle),
         ).fetchall()
+        # Only an unambiguous pair may be linked by name: if two lib2 rows carry
+        # the same normalized name, the name says nothing about which one the
+        # legacy row is.
+        v2_ids_by_name: dict[str, set[int]] = {}
+        for row in v2_rows:
+            v2_ids_by_name.setdefault(
+                _search_name_key(row['name']), set()).add(int(row['id']))
+
         seen_v2: set[int] = set()
         for row in v2_rows:
             v2_id = int(row['id'])
@@ -215,6 +258,22 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                     for source, provider_id in provider_ids.items()
                     if (source, provider_id) in legacy_by_provider
                 ), None)
+
+            # find25-search-02: an artist that entered lib2 through a finished
+            # download carries neither ``legacy_artist_id`` nor necessarily a
+            # provider id the legacy row also has.  Without a third link the
+            # result kept pointing at the legacy detail page and the same
+            # artist showed up twice.  An unambiguous normalized-name match is
+            # accepted as that link and written back once, so the next search
+            # takes the explicit back-reference above.
+            if target is None and row['legacy_artist_id'] is None:
+                name_key = _search_name_key(row['name'])
+                candidates = legacy_by_name.get(name_key, [])
+                if (len(candidates) == 1
+                        and len(v2_ids_by_name.get(name_key, ())) == 1
+                        and 'library_v2_id' not in candidates[0]):
+                    target = candidates[0]
+                    _backfill_legacy_link(conn, v2_id, int(target['id']))
 
             if target is not None:
                 target['library_v2_id'] = v2_id
