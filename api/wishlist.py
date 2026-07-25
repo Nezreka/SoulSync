@@ -54,6 +54,11 @@ def register_routes(bp):
         default; sending an unknown id is a 400, never a silent fall back
         (P1-02/P2-04). For a track already on the wishlist an explicit id is
         authoritative and overwrites the stored one.
+
+        ``201`` a new row was created. ``200`` an existing row was updated —
+        both carry the stored ``track`` so the client can verify what landed,
+        and ``created`` says which happened. ``409`` means nothing was written
+        (R2-04).
         """
         body = request.get_json(silent=True) or {}
         track_data = body.get("track_data") or body.get("spotify_track_data")
@@ -80,7 +85,7 @@ def register_routes(bp):
                 if not db.quality_profile_exists(quality_profile_id):
                     return api_error("BAD_REQUEST", "Unknown quality_profile_id.", 400)
 
-            ok = db.add_to_wishlist(
+            outcome = db.add_to_wishlist_detailed(
                 track_data,
                 failure_reason=reason,
                 source_type=source_type,
@@ -91,16 +96,36 @@ def register_routes(bp):
                 # authoritatively rather than being silently dropped.
                 user_initiated=True,
             )
-            if ok:
-                stored = db.get_wishlist_track(track_data.get("id"), profile_id=profile_id)
+            if outcome["applied"]:
+                # Read back by the key that was actually written: a second album
+                # for the same track is stored as ``<id>::<album>``, so looking
+                # the bare id up again returns the OTHER album's row (R2-09).
+                stored = db.get_wishlist_track(
+                    outcome.get("track_id") or track_data.get("id"), profile_id=profile_id
+                )
+                # An existing row that was authoritatively refreshed is a
+                # success, not a conflict — the endpoint promises the explicit
+                # profile overwrites the stored one, so it must report that it
+                # did and let the client read the result back (R2-04).
+                created = outcome["status"] == "created"
                 return api_success(
                     {
-                        "message": "Track added to wishlist.",
+                        "message": (
+                            "Track added to wishlist." if created
+                            else "Track already on the wishlist; entry updated."
+                        ),
+                        "created": created,
                         "track": serialize_wishlist_track(stored) if stored else None,
                     },
-                    status=201,
+                    status=201 if created else 200,
                 )
-            return api_error("CONFLICT", "Track may already be in wishlist.", 409)
+            if outcome["status"] == "rejected":
+                return api_error("BAD_REQUEST", outcome.get("reason") or "Track rejected.", 400)
+            return api_error(
+                "CONFLICT",
+                outcome.get("reason") or "Track may already be in wishlist.",
+                409,
+            )
         except Exception as e:
             return api_error("WISHLIST_ERROR", str(e), 500)
 

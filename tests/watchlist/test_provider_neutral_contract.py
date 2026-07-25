@@ -134,3 +134,38 @@ def test_amazon_artist_can_be_found_and_removed(db):
     assert db.is_artist_in_watchlist("az-1") is True
     assert db.remove_artist_from_watchlist("az-1") is True
     assert _row(db, "Amazon Artist") is None
+
+
+# ── R2-01: an unstorable provider hint must degrade, not fail ────────────────
+
+@pytest.mark.parametrize("hint", ["hydrabase", "jiosaavn", "bandcamp", "", None])
+def test_metadata_only_provider_hint_degrades_to_the_legacy_guess(hint):
+    """``METADATA_SOURCE_PRIORITY`` names providers that have no id column here.
+
+    Passing one of those straight through made ``normalize_source`` return
+    ``None`` and the whole watchlist add fail. The hint must fall back to the
+    documented guess instead (R2-01).
+    """
+    from core.watchlist_sources import storable_source
+
+    assert storable_source(hint, "123456") == "itunes"
+    assert storable_source(hint, "37i9dQZF1DXcBWIGoYBM5M") == "spotify"
+
+
+def test_a_storable_provider_hint_is_still_honoured():
+    from core.watchlist_sources import storable_source
+
+    assert storable_source("deezer", "123456") == "deezer"
+    assert storable_source("discogs", "123456") == "discogs"
+
+
+def test_metadata_only_fallback_source_still_adds_the_artist(db):
+    """The end-to-end symptom: the add must succeed, not answer False."""
+    from core.watchlist_sources import storable_source
+
+    ok = db.add_artist_to_watchlist(
+        "998877", "Numeric Artist", source=storable_source("hydrabase", "998877")
+    )
+
+    assert ok is True
+    assert _row(db, "Numeric Artist")["itunes_artist_id"] == "998877"

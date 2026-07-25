@@ -1074,19 +1074,34 @@ function playlistDetailsOrganizeCheckboxId(playlistRef) {
     return `playlist-organize-${playlistRef}`;
 }
 
-/** Infer mirrored-playlist API source from a UI playlist / virtual id. */
+/**
+ * The provider a UI playlist / virtual id demonstrably belongs to, or null.
+ *
+ * Only prefixes we actually recognise produce an answer. Everything else —
+ * youtube_*, tidal_*, beatport_*, artist_album_*, library_* … — is genuinely
+ * unknown from the ref alone.
+ */
+function knownPlaylistSourceForRef(playlistRef) {
+    const ref = String(playlistRef || '');
+    if (ref.startsWith('spotify_public_')) return 'spotify_public';
+    if (ref.startsWith('deezer_arl_')) return 'deezer';
+    return null;
+}
+
+/**
+ * Infer mirrored-playlist API source from a UI playlist / virtual id.
+ *
+ * Falls back to 'spotify' because the organize-preference endpoints have always
+ * required a source and treat it as a lookup key. Do NOT use this for the
+ * mirror-resolution `source` hint — there the fabricated 'spotify' is taken as
+ * decisive and can pick the wrong mirror (R2-14); use
+ * `knownPlaylistSourceForRef` instead.
+ */
 function playlistOrganizeSourceForRef(playlistRef, explicitSource = null) {
     if (explicitSource) {
         return explicitSource;
     }
-    const ref = String(playlistRef || '');
-    if (ref.startsWith('spotify_public_')) {
-        return 'spotify_public';
-    }
-    if (ref.startsWith('deezer_arl_')) {
-        return 'deezer';
-    }
-    return 'spotify';
+    return knownPlaylistSourceForRef(playlistRef) || 'spotify';
 }
 
 /** Map UI playlist ids (e.g. deezer_arl_123) to mirrored-playlist resolve refs. */
@@ -1102,6 +1117,19 @@ function normalizePlaylistOrganizeRef(playlistRef, source = 'spotify') {
 }
 
 let _playlistQualityProfilesPromise = null;
+
+/**
+ * Drop the cached profile list so the next selector re-fetches it.
+ *
+ * Must be called whenever a Quality Profile is created, renamed or deleted.
+ * The cache used to live for the whole page, so after a change in Settings
+ * every dropdown kept offering the old list: a deleted id was posted back and
+ * rejected with 400, and a new profile stayed unusable until a full reload
+ * (R2-11).
+ */
+function invalidatePlaylistQualityProfiles() {
+    _playlistQualityProfilesPromise = null;
+}
 
 async function fetchPlaylistQualityProfiles() {
     if (!_playlistQualityProfilesPromise) {
@@ -1160,6 +1188,13 @@ function acquisitionQualityProfileSelectHtml(selectId = ACQUISITION_QUALITY_PROF
         </label>`;
 }
 
+// Per-select hydration generation. Two hydrations can be in flight for the SAME
+// select — the modal fires one on open (with a real mirror round-trip) and a
+// caller can immediately request a preselect (no round-trip, so it settles
+// first). Without this guard the slower, older call's continuation ran last and
+// overwrote the user's choice with the mirror/default (R2-05).
+const _acquisitionQualityProfileGeneration = new Map();
+
 /**
  * Fill an acquisition selector and preselect the effective profile.
  *
@@ -1173,14 +1208,22 @@ async function hydrateAcquisitionQualityProfileSelect(
 ) {
     const select = document.getElementById(selectId);
     if (!select) return;
+    const generation = (_acquisitionQualityProfileGeneration.get(selectId) || 0) + 1;
+    _acquisitionQualityProfileGeneration.set(selectId, generation);
+    const isStale = () => _acquisitionQualityProfileGeneration.get(selectId) !== generation;
     try {
-        const resolvedSource = playlistRef ? playlistOrganizeSourceForRef(playlistRef, source) : null;
+        // Only a provider we actually recognise may be handed to the mirror
+        // lookup; a guess makes the server pick the wrong mirror (R2-14).
+        const resolvedSource = playlistRef
+            ? (source || knownPlaylistSourceForRef(playlistRef))
+            : null;
         const [profiles, mirror] = await Promise.all([
             fetchPlaylistQualityProfiles(),
             (preselectId == null && playlistRef)
                 ? fetchMirroredPlaylistPreference(playlistRef, resolvedSource)
                 : Promise.resolve(null),
         ]);
+        if (isStale()) return;
         if (!profiles.length) {
             select.innerHTML = '<option value="">No Quality Profiles configured</option>';
             select.disabled = true;
@@ -1203,6 +1246,7 @@ async function hydrateAcquisitionQualityProfileSelect(
         }
         select.disabled = false;
     } catch (err) {
+        if (isStale()) return;
         console.warn('Could not load Quality Profiles for this dialog:', err);
         select.innerHTML = '<option value="">Quality Profiles unavailable — using default</option>';
         select.disabled = true;

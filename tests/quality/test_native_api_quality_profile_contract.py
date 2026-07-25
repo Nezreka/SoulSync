@@ -61,7 +61,43 @@ def test_watchlist_serializer_exposes_every_provider_id():
     })
     assert out["deezer_artist_id"] == "77"
     assert out["musicbrainz_artist_id"] == "mbid-1"
+
+
+@pytest.mark.parametrize("column,expected", [
+    ("spotify_artist_id", "spotify"),
+    ("itunes_artist_id", "itunes"),
+    ("deezer_artist_id", "deezer"),
+    ("discogs_artist_id", "discogs"),
+    ("musicbrainz_artist_id", "musicbrainz"),
+    ("amazon_artist_id", "amazon"),
+])
+def test_source_names_the_provider_that_owns_the_id(column, expected):
+    """R2-12: ``watchlist_artists`` has no ``source`` column, so the field has to
+    be derived from the id column that is actually populated. Reading a
+    non-existent column made it fall back to ``preferred_metadata_source``, an
+    unrelated user override that is NULL on almost every row."""
+    out = serialize_watchlist_artist({"id": 1, "artist_name": "A", column: "the-id"})
+
+    assert out["source"] == expected
+
+
+def test_source_does_not_come_from_the_metadata_override():
+    """A Deezer id with an iTunes metadata preference is still a Deezer artist."""
+    out = serialize_watchlist_artist({
+        "id": 1,
+        "artist_name": "A",
+        "deezer_artist_id": "77",
+        "preferred_metadata_source": "itunes",
+    })
+
     assert out["source"] == "deezer"
+    assert out["preferred_metadata_source"] == "itunes"
+
+
+def test_source_is_none_when_the_row_carries_no_provider_id():
+    out = serialize_watchlist_artist({"id": 1, "artist_name": "A"})
+
+    assert out["source"] is None
 
 
 # ── the DB tells valid from invalid instead of guessing ──────────────────────

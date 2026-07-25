@@ -73,6 +73,23 @@ def infer_source(artist_id) -> str:
     return "itunes" if str(artist_id or "").isdigit() else "spotify"
 
 
+def storable_source(hint, artist_id) -> str:
+    """A provider we can actually file an id under. Never ``None``.
+
+    ``hint`` is a *suggestion*, typically the configured metadata fallback
+    source. ``METADATA_SOURCE_PRIORITY`` legitimately contains providers that
+    have no ``watchlist_artists`` id column at all — Hydrabase, JioSaavn and
+    Bandcamp — so a hint is not automatically a storable provider.
+
+    Passing such a hint straight to ``add_artist_to_watchlist`` made
+    ``normalize_source`` return ``None`` and the whole add fail, where the
+    pre-P1-05 code simply fell through to the id-shape guess (R2-01). An
+    unusable hint therefore degrades to ``infer_source`` rather than turning a
+    working request into an error.
+    """
+    return normalize_source(hint) or infer_source(artist_id)
+
+
 def artist_id_match_sql(alias: str = "") -> str:
     """``(col = ? OR col = ? ...)`` over every provider id column.
 
@@ -90,5 +107,6 @@ __all__ = [
     "normalize_source",
     "source_column",
     "infer_source",
+    "storable_source",
     "artist_id_match_sql",
 ]

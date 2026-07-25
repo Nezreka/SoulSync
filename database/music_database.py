@@ -10160,6 +10160,40 @@ class MusicDatabase:
             logger.debug("Could not resolve quality profile id: %s", e)
             return None
 
+    @staticmethod
+    def _wishlist_outcome(status: str, track_id: Optional[str] = None,
+                          reason: Optional[str] = None) -> Dict[str, Any]:
+        """One shape for every ``add_to_wishlist_detailed`` exit.
+
+        ``status`` is one of:
+
+        ``created``    a new row was inserted.
+        ``updated``    an existing row was refreshed with this request's payload
+                       and (when explicit) its Quality Profile.
+        ``satisfied``  nothing to do because the track is already covered — a
+                       manual library match. Historically reported as ``True``.
+        ``skipped``    the row is intentionally left alone — blocklist,
+                       ignore-list, or a plain duplicate with nothing
+                       authoritative to apply.
+        ``rejected``   the request was refused (bad id, unknown profile).
+        ``error``      an unexpected failure.
+
+        ``applied`` is the question almost every caller actually asks: does the
+        wishlist now reflect what I asked for? A refreshed duplicate answers
+        yes. Collapsing that into the old bare ``False`` made Artist-Enhance
+        report every re-queued track as a hard failure (R2-03).
+
+        ``created`` reproduces the historic bool exactly, so existing callers
+        that were never updated keep behaving as before.
+        """
+        return {
+            "status": status,
+            "created": status in ("created", "satisfied"),
+            "applied": status in ("created", "updated", "satisfied"),
+            "track_id": track_id,
+            "reason": reason,
+        }
+
     def add_to_wishlist(
         self,
         spotify_track_data: Dict[str, Any] = None,
@@ -10171,7 +10205,39 @@ class MusicDatabase:
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
     ) -> bool:
+        """``True`` when a NEW wishlist row was inserted.
+
+        Kept exactly as it was for the many callers that only log the result.
+        Anything that needs to tell "already there, refreshed" apart from
+        "refused" must use :meth:`add_to_wishlist_detailed` (R2-03).
+        """
+        return self.add_to_wishlist_detailed(
+            spotify_track_data=spotify_track_data,
+            failure_reason=failure_reason,
+            source_type=source_type,
+            source_info=source_info,
+            profile_id=profile_id,
+            track_data=track_data,
+            user_initiated=user_initiated,
+            quality_profile_id=quality_profile_id,
+        )["created"]
+
+    def add_to_wishlist_detailed(
+        self,
+        spotify_track_data: Dict[str, Any] = None,
+        failure_reason: str = "Download failed",
+        source_type: str = "unknown",
+        source_info: Dict[str, Any] = None,
+        profile_id: int = 1,
+        track_data: Dict[str, Any] = None,
+        user_initiated: bool = False,
+        quality_profile_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Add a failed track to the wishlist for retry.
+
+        Returns a :meth:`_wishlist_outcome` dict rather than a bare bool, so a
+        caller can distinguish an insert, an authoritative refresh of an
+        existing row, and a genuine refusal.
 
         ``quality_profile_id`` selects which ``quality_profiles`` row this
         item's download/import must satisfy; omitted (``None``, the default)
@@ -10198,7 +10264,7 @@ class MusicDatabase:
                     "Cannot add track to wishlist: unknown quality_profile_id %r",
                     quality_profile_id,
                 )
-                return False
+                return self._wishlist_outcome("rejected", reason="unknown quality_profile_id")
 
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -10207,7 +10273,7 @@ class MusicDatabase:
                 track_id = spotify_track_data.get('id')
                 if not track_id:
                     logger.error("Cannot add track to wishlist: missing track ID")
-                    return False
+                    return self._wishlist_outcome("rejected", reason="missing track id")
 
                 # Blocklist guard (Phase 1): every auto-acquisition path funnels
                 # through here, so one check blocks a banned artist/album/track
@@ -10216,7 +10282,7 @@ class MusicDatabase:
                 if _blocked:
                     logger.info("Skipping wishlist add — %s is blocklisted: '%s'",
                                 _blocked[0], _blocked[1])
-                    return False
+                    return self._wishlist_outcome("skipped", track_id, reason="blocklisted")
 
                 # Ignore-list guard (#874): a user who removed or cancelled this
                 # track asked us to stop AUTO-requeuing it — every automatic
@@ -10229,7 +10295,7 @@ class MusicDatabase:
                         self.remove_from_wishlist_ignore(track_id, profile_id=profile_id)
                     elif self.is_track_ignored(track_id, profile_id=profile_id):
                         logger.info("Skipping wishlist add — track is on the ignore-list (#874): %s", track_id)
-                        return False
+                        return self._wishlist_outcome("skipped", track_id, reason="ignore-list")
                 except Exception as _ignore_exc:
                     logger.debug("Wishlist ignore-list check skipped (fail-open): %s", _ignore_exc)
 
@@ -10241,7 +10307,7 @@ class MusicDatabase:
                         spotify_track_data.get('provider') or spotify_track_data.get('source') or 'unknown',
                         track_id,
                     )
-                    return True
+                    return self._wishlist_outcome("satisfied", track_id, reason="manual library match")
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
@@ -10335,9 +10401,13 @@ class MusicDatabase:
                                         track_name,
                                         artist_name,
                                     )
-                                    return False
+                                    return self._wishlist_outcome(
+                                        "updated", existing['spotify_track_id'],
+                                    )
                                 logger.info(f"Skipping duplicate wishlist entry: '{track_name}' by {artist_name} (already exists as ID: {existing['id']})")
-                                return False  # Already exists, don't add duplicate
+                                return self._wishlist_outcome(
+                                    "skipped", existing['spotify_track_id'], reason="duplicate",
+                                )
                         except Exception as parse_error:
                             logger.warning(f"Error parsing existing wishlist track data: {parse_error}")
                             continue
@@ -10399,7 +10469,10 @@ class MusicDatabase:
                         "Wishlist entry already present; refreshed context for '%s'",
                         track_name,
                     )
-                    return False
+                    # ``insert_track_id`` is the key of the row we just refreshed
+                    # in both sub-cases above, so it is what a caller must read
+                    # back to see its own write (R2-09).
+                    return self._wishlist_outcome("updated", insert_track_id)
 
                 # Insert the track
                 cursor.execute("""
@@ -10413,11 +10486,11 @@ class MusicDatabase:
                 conn.commit()
 
                 logger.info(f"Added track to wishlist: '{track_name}' by {artist_name}")
-                return True
+                return self._wishlist_outcome("created", insert_track_id)
 
         except Exception as e:
             logger.error(f"Error adding track to wishlist: {e}")
-            return False
+            return self._wishlist_outcome("error", reason=str(e))
     
     def remove_from_wishlist(self, spotify_track_id: str, profile_id: int = 1) -> bool:
         """Remove a track from the wishlist (typically after successful download)"""

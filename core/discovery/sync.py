@@ -302,7 +302,9 @@ def run_sync_task(
             source_page='sync',
             # Whose sync this is, so the history stays per-profile and a later
             # re-add reproduces the same owner + Quality Profile (P1-04). The
-            # per-track stamp is filled in by record_sync_history_start.
+            # per-track stamp is derived inside record_sync_history_start from
+            # ``tracks``; that derivation used to live only in web_server, so
+            # this path recorded NULL (R2-06).
             profile_id=profile_id,
         )
 

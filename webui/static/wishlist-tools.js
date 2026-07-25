@@ -798,7 +798,15 @@ function currentWishlistModalQualityProfileId() {
     return getAcquisitionQualityProfileId(WISHLIST_MODAL_QUALITY_PROFILE_SELECT_ID);
 }
 
-async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwnership) {
+/**
+ * @param {object} [playlistContext] `{ playlistRef, playlistSource }` when this
+ *   modal was opened from a playlist surface, so the Quality Profile selector
+ *   can preselect that mirror's persisted assignment. The library/artist
+ *   surfaces that call this today have no playlist, and omitting it simply
+ *   preselects the global default — the context has to be passed in, it was
+ *   never derivable from the album/artist arguments (R2-10).
+ */
+async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwnership, playlistContext = null) {
     wishlistModalVersion++;
     showLoadingOverlay('Preparing wishlist...');
     console.log(`🎵 Opening Add to Wishlist modal for: ${artist.name} - ${album.name}`);
@@ -809,7 +817,9 @@ async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwn
             album,
             artist,
             tracks,
-            albumType
+            albumType,
+            playlistRef: playlistContext?.playlistRef || null,
+            playlistSource: playlistContext?.playlistSource || null
         };
 
         const modal = document.getElementById('add-to-wishlist-modal');
@@ -841,11 +851,11 @@ async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwn
         }
 
         // Quality Profile for this acquisition (P1-01). Preselects the mirror's
-        // persisted assignment when this modal was opened from a playlist, the
+        // persisted assignment when the caller passed a playlist context, the
         // default profile otherwise. Both footer buttons read the same control.
-        hydrateAcquisitionQualityProfileSelect(WISHLIST_MODAL_QUALITY_PROFILE_SELECT_ID, {
-            playlistRef: currentWishlistModalData?.playlistRef || null,
-            source: currentWishlistModalData?.playlistSource || null,
+        await hydrateAcquisitionQualityProfileSelect(WISHLIST_MODAL_QUALITY_PROFILE_SELECT_ID, {
+            playlistRef: currentWishlistModalData.playlistRef,
+            source: currentWishlistModalData.playlistSource,
         });
 
         // Show the modal
@@ -1346,7 +1356,12 @@ async function handleWishlistDownloadNow() {
         virtualPlaylistId, playlistName, tracks, album, artist, false
     );
     if (qualityProfileId != null) {
-        setDownloadModalQualityProfile(virtualPlaylistId, qualityProfileId);
+        // Awaited: the modal's own hydration is still in flight and would
+        // otherwise land after this one and overwrite the user's choice. The
+        // generation guard inside the helper makes the later call win either
+        // way; awaiting also keeps the loading overlay up until the selector
+        // really shows the chosen profile (R2-05).
+        await setDownloadModalQualityProfile(virtualPlaylistId, qualityProfileId);
     }
     hideLoadingOverlay();
 

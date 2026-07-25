@@ -2632,9 +2632,12 @@ async function startMissingTracksProcess(playlistId) {
             // i.e. exactly the pre-selector behaviour.
             quality_profile_id: getDownloadModalQualityProfileId(playlistId),
             // Provider hint so a mirror lookup can't be defeated by two providers
-            // sharing an upstream playlist id (P2-01).
-            source: (typeof playlistOrganizeSourceForRef === 'function')
-                ? playlistOrganizeSourceForRef(playlistId)
+            // sharing an upstream playlist id (P2-01). Only sent when the ref
+            // actually identifies a provider: the server treats an exact source
+            // match as decisive, so a guessed 'spotify' would resolve a
+            // YouTube/Beatport playlist to a Spotify mirror (R2-14).
+            source: (typeof knownPlaylistSourceForRef === 'function')
+                ? (knownPlaylistSourceForRef(playlistId) || undefined)
                 : undefined,
         };
 

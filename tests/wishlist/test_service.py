@@ -14,6 +14,20 @@ class _FakeWishlistDatabase:
         self.add_calls.append(kwargs)
         return True
 
+    def add_to_wishlist_detailed(self, **kwargs):
+        self.add_calls.append(kwargs)
+        return self._wishlist_outcome("created", kwargs.get("track_data", {}).get("id"))
+
+    @staticmethod
+    def _wishlist_outcome(status, track_id=None, reason=None):
+        return {
+            "status": status,
+            "created": status in ("created", "satisfied"),
+            "applied": status in ("created", "updated", "satisfied"),
+            "track_id": track_id,
+            "reason": reason,
+        }
+
     def get_wishlist_tracks(self, limit=None, profile_id=1):
         self.track_queries.append(("get_wishlist_tracks", limit, profile_id))
         tracks = list(self.tracks)

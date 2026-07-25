@@ -258,15 +258,33 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
 # ── Watchlist / Wishlist Serializers ──────────────────────────
 
 
+def _watchlist_artist_source(d: dict) -> Optional[str]:
+    """Which provider actually owns this row's artist id.
+
+    ``watchlist_artists`` has no ``source`` column, so reading one returned
+    ``None`` and the field silently degraded to ``preferred_metadata_source``
+    — a user metadata override that is NULL on nearly every row and means
+    something else entirely (R2-12). The answer is in the data: exactly one id
+    column is populated for a given provider, so report that one, in the same
+    lookup order the database uses.
+    """
+    from core.watchlist_sources import SOURCE_COLUMNS
+
+    for source, column in SOURCE_COLUMNS.items():
+        if d.get(column):
+            return source
+    return d.get("preferred_metadata_source")
+
+
 def serialize_watchlist_artist(obj, fields: Optional[Set[str]] = None) -> dict:
     """Full watchlist artist serialization — all columns including all content filters."""
     d = _to_dict(obj)
     result = {
         "id": d.get("id"),
-        # Every provider id column, plus the explicit source. A native client
-        # must be able to tell a Deezer artist from an iTunes one instead of
-        # inferring it from the id's shape (P1-05).
-        "source": d.get("source") or d.get("preferred_metadata_source"),
+        # Every provider id column, plus the provider that owns the id. A native
+        # client must be able to tell a Deezer artist from an iTunes one instead
+        # of inferring it from the id's shape (P1-05).
+        "source": _watchlist_artist_source(d),
         "spotify_artist_id": d.get("spotify_artist_id"),
         "itunes_artist_id": d.get("itunes_artist_id"),
         "deezer_artist_id": d.get("deezer_artist_id"),

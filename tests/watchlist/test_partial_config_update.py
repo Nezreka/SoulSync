@@ -155,3 +155,36 @@ def test_unknown_artist_is_404(client):
         "/api/watchlist/artist/nope/config", json={"include_albums": True}
     )
     assert response.status_code == 404
+
+
+def test_unparseable_boolean_is_rejected_instead_of_silently_reset(client):
+    """R2-08: a JSON number is not a boolean.
+
+    ``parse_strict_bool`` returns None for it, and the endpoint used to
+    substitute the hardcoded default — silently flipping a stored ``True`` off
+    on a 200 response. The modular API answers 400 for the same input, so the
+    two contracts also disagreed.
+    """
+    test_client, db = client
+    before = _config(db)
+    assert before["include_live"] == 1
+
+    response = test_client.post(
+        "/api/watchlist/artist/sp-1/config", json={"include_live": 1}
+    )
+
+    assert response.status_code == 400
+    assert "include_live" in (response.get_json() or {}).get("error", "")
+    assert _config(db) == before, "a rejected request must not write anything"
+
+
+def test_unparseable_auto_download_is_rejected(client):
+    test_client, db = client
+    before = _config(db)
+
+    response = test_client.post(
+        "/api/watchlist/artist/sp-1/config", json={"auto_download": "maybe"}
+    )
+
+    assert response.status_code == 400
+    assert _config(db) == before
