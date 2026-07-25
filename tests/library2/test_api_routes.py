@@ -50,8 +50,9 @@ class FakeDB:
         return True
 
     def add_artist_to_watchlist(self, ext_id, name, profile_id, source,
-                                raise_on_error=False):
-        self.watchlist_adds.append({"ext_id": ext_id, "profile_id": profile_id})
+                                quality_profile_id=None, raise_on_error=False):
+        self.watchlist_adds.append({"ext_id": ext_id, "profile_id": profile_id,
+                                    "quality_profile_id": quality_profile_id})
         return True
 
     def remove_artist_from_watchlist(self, ext_id, profile_id,
@@ -216,6 +217,56 @@ def test_artist_alias_group_monitor_and_quality_profile_are_atomic_scope(api):
         (alias_track,),
     ).fetchone()[0] == 1
     conn.close()
+
+
+def test_monitor_on_pushes_effective_catalog_profile_to_watchlist(api):
+    """Split-doc contract (branch-split/LIBRARY_OVERHAUL.md "Library v2
+    integration after rebase"): turning Library v2 monitoring on for an
+    artist passes that artist's current effective catalog Quality Profile
+    through to the native Watchlist add as an explicit quality_profile_id —
+    not the bare global default."""
+    client, db, ids = api
+    conn = _conn(db)
+    profile_id = conn.execute(
+        "INSERT INTO quality_profiles(name, is_default) VALUES('Hi-Res', 0)"
+    ).lastrowid
+    conn.commit()
+    conn.close()
+
+    quality = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json={"quality_profile_id": profile_id},
+    )
+    assert quality.status_code == 200
+
+    monitor = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/monitor",
+        json={"monitored": True},
+    )
+    assert monitor.status_code == 200
+    assert db.watchlist_adds == [
+        {"ext_id": "sp-drake", "profile_id": 1, "quality_profile_id": profile_id}
+    ]
+
+
+def test_monitor_on_falls_back_to_global_default_without_explicit_profile(api):
+    """No explicit catalog override on the artist -> the Watchlist add still
+    receives an explicit id (the app-wide default), never None/omitted."""
+    client, db, ids = api
+    conn = _conn(db)
+    default_profile = conn.execute(
+        "SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    conn.close()
+
+    monitor = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/monitor",
+        json={"monitored": True},
+    )
+    assert monitor.status_code == 200
+    assert db.watchlist_adds == [
+        {"ext_id": "sp-drake", "profile_id": 1, "quality_profile_id": default_profile}
+    ]
 
 
 def test_canonical_api_rejects_chains_and_invalid_ids(api):

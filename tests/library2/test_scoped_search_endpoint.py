@@ -37,7 +37,8 @@ class FakeDB:
     def remove_from_wishlist(self, track_id, profile_id=1, raise_on_error=False):
         return True
 
-    def add_artist_to_watchlist(self, ext_id, name, profile_id, source, raise_on_error=False):
+    def add_artist_to_watchlist(self, ext_id, name, profile_id, source,
+                                quality_profile_id=None, raise_on_error=False):
         return True
 
     def remove_artist_from_watchlist(self, ext_id, profile_id, raise_on_error=False):

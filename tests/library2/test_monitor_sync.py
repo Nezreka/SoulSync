@@ -57,7 +57,7 @@ class _FakeDB:
         return True
 
     def add_artist_to_watchlist(self, ext, name, profile_id, source=None,
-                                raise_on_error=False):
+                                quality_profile_id=None, raise_on_error=False):
         self.watchlist_added.append((ext, name, profile_id, source))
         return True
 

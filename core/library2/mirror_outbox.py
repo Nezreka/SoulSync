@@ -130,6 +130,17 @@ def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
         return []  # no external id → stays lib2-local only
     op = "watchlist_add" if monitored else "watchlist_remove"
     data = {"ext": ext, "name": row["name"], "source": source}
+    if monitored:
+        # Split-doc contract (branch-split/LIBRARY_OVERHAUL.md "Library v2
+        # integration after rebase"): the native Watchlist add takes one
+        # explicit quality_profile_id. Push the artist's current effective
+        # catalog profile (Track→Album→Artist→Global, guide §2.3) at the
+        # moment monitoring turns on. This is a one-time push, not a live
+        # link — a later catalog profile edit does not retroactively change
+        # an already-monitored artist's Watchlist assignment.
+        from core.library2.profile_lookup import effective_quality_profile
+        data["quality_profile_id"] = effective_quality_profile(
+            conn, "artists", artist_id)["id"]
     cur = conn.execute(
         "INSERT INTO lib2_mirror_outbox(op, payload, profile_id) VALUES(?,?,?)",
         (op, json.dumps(data), profile_id))
@@ -163,6 +174,7 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
     elif op == "watchlist_add":
         db.add_artist_to_watchlist(data.get("ext"), data.get("name"),
                                    profile_id, data.get("source"),
+                                   quality_profile_id=data.get("quality_profile_id"),
                                    raise_on_error=True)
     elif op == "watchlist_remove":
         db.remove_artist_from_watchlist(data.get("ext"), profile_id,

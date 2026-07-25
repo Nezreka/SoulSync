@@ -49,8 +49,9 @@ class FlakyDB:
         return True
 
     def add_artist_to_watchlist(self, ext, name, profile_id, source,
-                                raise_on_error=False):
-        self.watchlist_adds.append({"ext": ext, "profile_id": profile_id})
+                                quality_profile_id=None, raise_on_error=False):
+        self.watchlist_adds.append({"ext": ext, "profile_id": profile_id,
+                                    "quality_profile_id": quality_profile_id})
         return True
 
     def remove_artist_from_watchlist(self, ext, profile_id, raise_on_error=False):
@@ -221,13 +222,52 @@ def test_unmonitor_enqueues_remove_that_survives_row_deletion(db):
 
 def test_artist_watchlist_ops(db):
     flaky, conn = db
+    default_profile = conn.execute(
+        "SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1"
+    ).fetchone()[0]
     assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], True, profile_id=2)
     assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], False, profile_id=2)
     conn.commit()
     result = MO.drain(flaky)
     assert result == {"done": 2, "failed": 0}
-    assert flaky.watchlist_adds == [{"ext": "sp-a", "profile_id": 2}]
+    assert flaky.watchlist_adds == [
+        {"ext": "sp-a", "profile_id": 2, "quality_profile_id": default_profile}
+    ]
     assert flaky.watchlist_removes == [{"ext": "sp-a", "profile_id": 2}]
+
+
+def test_artist_watchlist_add_pushes_explicit_catalog_profile(db):
+    """Split-doc contract: the native Watchlist add takes one explicit
+    quality_profile_id (branch-split/LIBRARY_OVERHAUL.md "Library v2
+    integration after rebase"). An artist with an explicit catalog Quality
+    Profile override must push THAT profile, not the app-wide default."""
+    flaky, conn = db
+    conn.execute(
+        "INSERT INTO quality_profiles(id, name, is_default) VALUES(9, 'Hi-Res', 0)"
+    )
+    conn.execute(
+        "UPDATE lib2_artists SET quality_profile_id=9, quality_profile_explicit=1 "
+        "WHERE id=?",
+        (flaky.ids["artist"],),
+    )
+    assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], True, profile_id=2)
+    conn.commit()
+    result = MO.drain(flaky)
+    assert result == {"done": 1, "failed": 0}
+    assert flaky.watchlist_adds == [
+        {"ext": "sp-a", "profile_id": 2, "quality_profile_id": 9}
+    ]
+
+
+def test_artist_watchlist_remove_carries_no_quality_profile(db):
+    """Un-monitoring is a pure removal — it must not need or send a profile."""
+    flaky, conn = db
+    assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], False, profile_id=2)
+    conn.commit()
+    result = MO.drain(flaky)
+    assert result == {"done": 1, "failed": 0}
+    assert flaky.watchlist_removes == [{"ext": "sp-a", "profile_id": 2}]
+    assert flaky.watchlist_adds == []
 
 
 def test_status_and_prune(db):

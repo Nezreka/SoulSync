@@ -177,4 +177,5 @@ def test_artist_mirror_uses_non_spotify_provider_identity(imported_conn):
         "ext": "DZ-ARTIST",
         "name": "Deezer Native",
         "source": "deezer",
+        "quality_profile_id": 1,
     }
