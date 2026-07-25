@@ -127,15 +127,60 @@ def _search_name_key(name: Any) -> str:
         return ' '.join(str(name or '').lower().split())
 
 
-def _backfill_legacy_link(conn, v2_id: int, legacy_id: int) -> None:
-    """Persist a name-resolved legacy↔lib2 link, once and only when free.
+def _reconcile_legacy_artist_link(database, v2_id: int, legacy_id: int) -> None:
+    """Persist a name-resolved legacy↔lib2 link, off the request thread.
 
-    Guarded on both sides: the lib2 row must still be unlinked and no other
-    lib2 row may already claim this legacy artist, so a repair can never
-    silently steal an existing identity.  Best effort — a read-only or busy
-    database leaves the in-memory merge intact.
+    rev25-05/rev25-07: the caller only knows the pair looks unique inside its
+    own windowed search result (``LIMIT 5``/``LIMIT 10``) — not the same claim
+    as "unique in the database" — and the old code wrote on the same
+    connection a GET request reads from, risking a search blocked behind
+    another connection's ``busy_timeout`` on a busy WAL database. This opens
+    its own connection, on its own thread, re-verifies uniqueness against the
+    *whole* table (mirroring the dispatch pattern already used for the MB
+    release-group reconcile in ``api/library_v2.py``, §62.6 Stufe 3), and only
+    then persists.  Guarded on both sides like before: the lib2 row must still
+    be unlinked and no other lib2 row may already claim this legacy artist, so
+    a repair can never silently steal an existing identity.  Best effort — a
+    read-only/busy database or a pair that stopped matching leaves the
+    in-memory merge (already returned to the caller) intact.
     """
     try:
+        conn = database._get_connection()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("legacy↔lib2 artist link reconcile connection failed: %s", exc)
+        return
+    try:
+        legacy_row = conn.execute(
+            "SELECT name FROM artists WHERE id=?", (legacy_id,)
+        ).fetchone()
+        v2_row = conn.execute(
+            "SELECT COALESCE(c.name, a.name) AS name"
+            "  FROM lib2_artists a LEFT JOIN lib2_artists c ON c.id=a.canonical_artist_id"
+            " WHERE a.id=? OR c.id=?",
+            (v2_id, v2_id),
+        ).fetchone()
+        if not legacy_row or not v2_row:
+            return
+        name_key = _search_name_key(v2_row["name"])
+        if not name_key or name_key != _search_name_key(legacy_row["name"]):
+            return  # the pair drifted since the search that queued this repair
+
+        legacy_matches = {
+            int(row["id"])
+            for row in conn.execute("SELECT id, name FROM artists").fetchall()
+            if _search_name_key(row["name"]) == name_key
+        }
+        v2_matches = {
+            int(row["id"])
+            for row in conn.execute(
+                "SELECT COALESCE(c.id, a.id) AS id, COALESCE(c.name, a.name) AS name"
+                "  FROM lib2_artists a LEFT JOIN lib2_artists c ON c.id=a.canonical_artist_id"
+            ).fetchall()
+            if _search_name_key(row["name"]) == name_key
+        }
+        if len(legacy_matches) != 1 or len(v2_matches) != 1:
+            return
+
         conn.execute(
             "UPDATE lib2_artists SET legacy_artist_id=? "
             " WHERE id=? AND legacy_artist_id IS NULL"
@@ -145,7 +190,23 @@ def _backfill_legacy_link(conn, v2_id: int, legacy_id: int) -> None:
         )
         conn.commit()
     except Exception as exc:  # noqa: BLE001
-        logger.debug("legacy↔lib2 artist link backfill skipped: %s", exc)
+        logger.debug("legacy↔lib2 artist link reconcile skipped: %s", exc)
+    finally:
+        try:
+            conn.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("legacy↔lib2 artist link reconcile close failed: %s", exc)
+
+
+def _schedule_legacy_artist_link_reconcile(database, v2_id: int, legacy_id: int) -> None:
+    """Kick :func:`_reconcile_legacy_artist_link` off the request thread."""
+    import threading
+    threading.Thread(
+        target=_reconcile_legacy_artist_link,
+        args=(database, v2_id, legacy_id),
+        name="search-legacy-link-reconcile",
+        daemon=True,
+    ).start()
 
 
 def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
@@ -273,7 +334,14 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                         and len(v2_ids_by_name.get(name_key, ())) == 1
                         and 'library_v2_id' not in candidates[0]):
                     target = candidates[0]
-                    _backfill_legacy_link(conn, v2_id, int(target['id']))
+                    # rev25-05/rev25-07: this window (LIMIT 5/LIMIT 10) is not
+                    # proof of uniqueness in the database, and the search read
+                    # path must not write.  The in-memory merge below stays
+                    # lenient on this window; only the persisted link needs
+                    # the full-table re-check, done off-thread.
+                    _schedule_legacy_artist_link_reconcile(
+                        deps.database, v2_id, int(target['id'])
+                    )
 
             if target is not None:
                 target['library_v2_id'] = v2_id
