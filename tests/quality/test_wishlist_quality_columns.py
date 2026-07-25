@@ -62,12 +62,23 @@ def test_add_to_wishlist_resolves_explicit_profile(db):
     assert _wishlist_profile_id(db, "sp2") == pid
 
 
-def test_add_to_wishlist_falls_back_to_default_for_unknown_profile_id(db):
+def test_add_to_wishlist_rejects_an_explicitly_unknown_profile_id(db):
+    """Audit P2-04: this used to fall back to the default, which made a typo or a
+    stale id silently download at the wrong quality. "Not supplied" still means
+    "use the default"; "supplied but unknown" is now a hard failure."""
     assert db.add_to_wishlist(
         _track("sp3"), source_type="manual", user_initiated=True, quality_profile_id=99999,
+    ) is False
+
+    assert _wishlist_profile_id(db, "sp3") is None
+
+
+def test_add_to_wishlist_uses_the_default_when_no_profile_is_supplied(db):
+    assert db.add_to_wishlist(
+        _track("sp3c"), source_type="manual", user_initiated=True,
     ) is True
 
-    assert _wishlist_profile_id(db, "sp3") == 1
+    assert _wishlist_profile_id(db, "sp3c") == 1
 
 
 def test_add_to_wishlist_does_not_hardcode_deleted_profile_one(db):
@@ -81,8 +92,11 @@ def test_add_to_wishlist_does_not_hardcode_deleted_profile_one(db):
     default = next(p for p in db.list_quality_profiles() if p["is_default"])
     assert default["id"] != 1
 
+    # An OMITTED assignment must resolve to the promoted default, not to the
+    # deleted factory id. (An explicitly unknown id is rejected outright — see
+    # test_add_to_wishlist_rejects_an_explicitly_unknown_profile_id.)
     assert db.add_to_wishlist(
-        _track("sp3b"), source_type="manual", user_initiated=True, quality_profile_id=99999,
+        _track("sp3b"), source_type="manual", user_initiated=True,
     ) is True
     assert _wishlist_profile_id(db, "sp3b") == default["id"]
 

@@ -621,6 +621,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                             <input type="checkbox" id="playlist-folder-mode-${virtualPlaylistId}">
                             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
                         </label>`}
+                        ${downloadModalQualityProfileSelectHtml(virtualPlaylistId)}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
@@ -643,6 +644,8 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     `;
 
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
+    // Quality Profile selector for this acquisition (P1-01).
+    void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }
@@ -2761,6 +2764,18 @@ async function startMissingTracksProcess(playlistId) {
             ignore_manual_matches: forceDownloadAll,
             wing_it: isWingIt,
             skip_acoustid: skipAcoustid,
+            // The Quality Profile chosen in this dialog (P1-01). null keeps the
+            // server's own order: mirror assignment, then the global default —
+            // i.e. exactly the pre-selector behaviour.
+            quality_profile_id: getDownloadModalQualityProfileId(playlistId),
+            // Provider hint so a mirror lookup can't be defeated by two providers
+            // sharing an upstream playlist id (P2-01). Only sent when the ref
+            // actually identifies a provider: the server treats an exact source
+            // match as decisive, so a guessed 'spotify' would resolve a
+            // YouTube/Beatport playlist to a Spotify mirror (R2-14).
+            source: (typeof knownPlaylistSourceForRef === 'function')
+                ? (knownPlaylistSourceForRef(playlistId) || undefined)
+                : undefined,
         };
 
         // If this is an artist album download, use album name and include full context

@@ -172,3 +172,41 @@ def test_coalesce_mirror_track_shapes():
     assert coalesce_mirror_track(m) == m                   # mirror shape untouched
     s = coalesce_mirror_track({"name": "N", "artist": "Solo", "album": "AlbumStr"})
     assert s["artist_name"] == "Solo" and s["album_name"] == "AlbumStr"
+
+
+def test_mirrored_playlist_quality_profile_is_durable_and_refresh_safe(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    assigned = db.create_quality_profile("Playlist Assigned", {"ranked_targets": []})
+    assert assigned is not None
+    pid = db.mirror_playlist(
+        source="itunes_link",
+        source_playlist_id="apple-1",
+        name="Apple Mix",
+        tracks=[{"track_name": "Song", "artist_name": "Artist"}],
+        profile_id=1,
+        quality_profile_id=assigned,
+    )
+
+    # A provider refresh that does not know about UI preferences must preserve it.
+    assert db.mirror_playlist(
+        source="itunes_link",
+        source_playlist_id="apple-1",
+        name="Apple Mix Updated",
+        tracks=[{"track_name": "Song 2", "artist_name": "Artist"}],
+        profile_id=1,
+    ) == pid
+    assert db.get_mirrored_playlist(pid)["quality_profile_id"] == assigned
+
+
+def test_provider_agnostic_assignment_resolver_handles_non_spotify_source(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    pid = db.mirror_playlist(
+        source="deezer",
+        source_playlist_id="12345",
+        name="Deezer Mix",
+        tracks=[{"track_name": "Song", "artist_name": "Artist"}],
+        profile_id=1,
+    )
+
+    assert db.resolve_mirrored_playlist_assignment("12345", "Deezer Mix", 1)["id"] == pid
+    assert db.resolve_mirrored_playlist_assignment(f"auto_mirror_{pid}", None, 1)["id"] == pid

@@ -11317,6 +11317,18 @@
                 </div>
 
                 <div class="add-to-wishlist-modal-footer">
+                    <!-- Quality Profile for THIS acquisition. Applies to both
+                         buttons below so "Add to Wishlist" and "Download Now"
+                         can never disagree about the rules (audit P1-01). -->
+                    <label class="acquisition-quality-profile-control"
+                        for="wishlist-modal-quality-profile"
+                        title="Which Quality Profile these tracks must satisfy">
+                        <span>Quality Profile</span>
+                        <select id="wishlist-modal-quality-profile"
+                            class="acquisition-quality-profile-select" disabled>
+                            <option value="">Loading&hellip;</option>
+                        </select>
+                    </label>
                     <div class="wishlist-modal-actions">
                         <button class="btn btn--secondary"
                             onclick="closeAddToWishlistModal()">
@@ -11412,6 +11424,14 @@
                     <div class="config-section">
                         <h3 class="config-section-title">Download Preferences</h3>
                         <p class="config-section-subtitle">Select which types of releases to monitor for this artist</p>
+
+                        <div class="form-group" style="margin: 12px 0 16px;">
+                            <label for="config-quality-profile" style="display:block;margin-bottom:6px;font-weight:600;">Quality Profile</label>
+                            <select id="config-quality-profile" class="form-select">
+                                <option value="">Loading profiles…</option>
+                            </select>
+                            <small style="display:block;margin-top:6px;opacity:.7;">All Albums, EPs and Singles queued by this Watchlist artist use this profile.</small>
+                        </div>
 
                         <div class="config-options">
                             <label class="config-option">

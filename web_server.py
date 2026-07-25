@@ -87,6 +87,7 @@ if not pp_logger.handlers:
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
+from core.api_validation import parse_strict_bool, parse_strict_id, parse_strict_int
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited, SPOTIFY_OAUTH_SCOPE
 from core.plex_client import PlexClient
 from core.ui_appearance import is_firefox_user_agent, resolve_worker_orbs_default
@@ -125,6 +126,7 @@ from core.imports.context import (
 )
 from core.wishlist.payloads import (
     build_cancelled_task_wishlist_payload as _build_cancelled_task_wishlist_payload,
+    resolve_task_quality_profile_id,
     build_failed_track_wishlist_context as _build_failed_track_wishlist_context,
     ensure_wishlist_track_format as _ensure_wishlist_track_format,
     get_track_artist_name as _get_track_artist_name,
@@ -19096,6 +19098,14 @@ def add_album_track_to_wishlist():
         album = data.get('album')
         source_type = data.get('source_type', 'album')
         source_context = data.get('source_context', {})
+
+        # The Quality Profile the user picked in the shared acquisition dialog.
+        # Before P1-01 this field did not exist and every manual Search /
+        # Discover / Library add silently used the global default.
+        quality_profile_id, error = _parse_requested_quality_profile_id(data)
+        if error:
+            return error
+
         runtime = _build_wishlist_route_runtime()
         payload, status_code = _wishlist_add_album_track_to_wishlist(
             runtime,
@@ -19104,6 +19114,7 @@ def add_album_track_to_wishlist():
             album=album,
             source_type=source_type,
             source_context=source_context,
+            quality_profile_id=quality_profile_id,
         )
         return jsonify(payload), status_code
     except Exception as e:
@@ -20191,7 +20202,103 @@ def _build_master_deps():
 
 
 
+def _resolve_batch_quality_profile_id(
+    playlist_ref,
+    playlist_name,
+    profile_id=1,
+    explicit_quality_profile_id=None,
+    source=None,
+):
+    """The Quality Profile a whole batch runs under, or ``None``.
+
+    Precedence, highest first:
+
+    1. ``explicit_quality_profile_id`` — the user picked one in the acquisition
+       dialog for THIS action (P1-01);
+    2. the persisted mirror assignment, when the ref resolves to a mirror;
+    3. nothing, i.e. the app-wide default is applied later.
+
+    Split out of :func:`_tracks_with_mirrored_quality_profile` so the answer is
+    available BEFORE the sync-history row is written. Recording history first
+    and resolving the mirror afterwards stored ``NULL`` for every
+    mirror-assigned batch, and a later re-add then fell back to the global
+    default (R2-07).
+    """
+    if explicit_quality_profile_id is not None:
+        return explicit_quality_profile_id
+    try:
+        database = get_database()
+        mirror = database.resolve_mirrored_playlist_assignment(
+            playlist_ref,
+            playlist_name,
+            profile_id=int(profile_id or 1),
+            source=source,
+        )
+        return mirror.get('quality_profile_id') if mirror else None
+    except Exception as exc:
+        logger.debug("Could not resolve mirrored playlist Quality Profile: %s", exc)
+        return None
+
+
+def _tracks_with_mirrored_quality_profile(
+    playlist_ref,
+    playlist_name,
+    tracks_json,
+    profile_id=1,
+    explicit_quality_profile_id=None,
+    source=None,
+):
+    """Stamp the effective Quality Profile onto a provider-agnostic track list.
+
+    Older source-specific endpoints do not all carry ``source`` through to the
+    worker.  The database resolver handles that compatibility boundary; from
+    here onward the chosen profile travels with each track and therefore also
+    survives failed-download-to-Wishlist processing.
+
+    A track that already carries its OWN ``quality_profile_id`` keeps it unless
+    the user made an explicit choice for this action. Wishlist rows carry a
+    per-item assignment (P1-02), and a batch-level mirror match — which can come
+    from nothing more than a matching playlist name — must not silently discard
+    it (R2-13).
+    """
+    if not isinstance(tracks_json, list):
+        return tracks_json, None
+    try:
+        quality_profile_id = _resolve_batch_quality_profile_id(
+            playlist_ref,
+            playlist_name,
+            profile_id=profile_id,
+            explicit_quality_profile_id=explicit_quality_profile_id,
+            source=source,
+        )
+        if quality_profile_id is None:
+            return tracks_json, None
+        explicit = explicit_quality_profile_id is not None
+        enriched = []
+        for track in tracks_json:
+            if isinstance(track, dict):
+                track = dict(track)
+                if explicit or track.get('quality_profile_id') is None:
+                    track['quality_profile_id'] = quality_profile_id
+            enriched.append(track)
+        return enriched, quality_profile_id
+    except Exception as exc:
+        logger.debug("Could not apply mirrored playlist Quality Profile: %s", exc)
+        return tracks_json, None
+
+
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
+    batch = download_batches.get(batch_id, {})
+    tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
+        batch.get('playlist_id') or playlist_id,
+        batch.get('playlist_name'),
+        tracks_json,
+        profile_id=batch.get('profile_id', 1),
+        explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
+        source=batch.get('playlist_source'),
+    )
+    if quality_profile_id is not None:
+        batch['quality_profile_id'] = quality_profile_id
     return _downloads_master.run_full_missing_tracks_process(
         batch_id, playlist_id, tracks_json, _build_master_deps(), serialize=serialize
     )
@@ -20999,12 +21106,16 @@ def cancel_download_task():
 
             # Add to wishlist, treating cancellation as a failure
             # Pass the spotify data directly instead of creating a fake Track object
+            # A cancel/retry must not silently change the requested quality: carry
+            # the task's Quality Profile through, exactly like the regular
+            # failed-download path already does (P2-06).
             success = wishlist_service.add_spotify_track_to_wishlist(
                 spotify_track_data=spotify_track_data,
                 failure_reason="Download cancelled by user",
                 source_type="playlist",
                 source_context=source_context,
-                profile_id=get_current_profile_id()
+                profile_id=get_current_profile_id(),
+                quality_profile_id=resolve_task_quality_profile_id(task),
             )
 
             if success:
@@ -21404,8 +21515,11 @@ def get_sync_history():
         source = request.args.get('source') or None
 
         db = MusicDatabase()
-        entries, total = db.get_sync_history(source=source, page=page, limit=limit)
-        stats = db.get_sync_history_stats()
+        profile_id = get_current_profile_id()
+        entries, total = db.get_sync_history(
+            source=source, page=page, limit=limit, profile_id=profile_id
+        )
+        stats = db.get_sync_history_stats(profile_id=profile_id)
 
         # Parse artist/album names from JSON context for display
         for entry in entries:
@@ -21440,7 +21554,7 @@ def get_sync_history_entry(entry_id):
     """Get a single sync history entry with full cached data for re-trigger."""
     try:
         db = MusicDatabase()
-        entry = db.get_sync_history_entry(entry_id)
+        entry = db.get_sync_history_entry(entry_id, profile_id=get_current_profile_id())
         if not entry:
             return jsonify({"success": False, "error": "Entry not found"}), 404
 
@@ -21463,7 +21577,8 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
     behaves identically to the auto-add. Only 'wishlist'-status rows are eligible."""
     try:
         db = MusicDatabase()
-        entry = db.get_sync_history_entry(entry_id)
+        profile_id = get_current_profile_id()
+        entry = db.get_sync_history_entry(entry_id, profile_id=profile_id)
         if not entry:
             return jsonify({"success": False, "error": "Sync entry not found"}), 404
 
@@ -21474,6 +21589,16 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
         spotify_track_data = reconstruct_sync_track_data(track_results, tracks, track_index)
         if not spotify_track_data:
             return jsonify({"success": False, "error": "This track can't be re-added to the wishlist"}), 400
+
+        # A retry must reproduce the ORIGINAL request, not the caller's defaults:
+        # the run's own SoulSync profile and Quality Profile, falling back to the
+        # per-track stamp the payload carries (P1-04).
+        readd_profile_id = int(entry.get('profile_id') or profile_id)
+        readd_quality_profile_id = (
+            entry.get('quality_profile_id')
+            if entry.get('quality_profile_id') is not None
+            else spotify_track_data.get('quality_profile_id')
+        )
 
         from core.wishlist_service import get_wishlist_service
         added = get_wishlist_service().add_spotify_track_to_wishlist(
@@ -21486,6 +21611,8 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
                 'sync_type': 'automatic_sync',
                 'timestamp': datetime.now().isoformat(),
             },
+            profile_id=readd_profile_id,
+            quality_profile_id=readd_quality_profile_id,
         )
         return jsonify({"success": True, "added": bool(added),
                         "name": spotify_track_data.get('name', '')})
@@ -21499,7 +21626,7 @@ def delete_sync_history_entry_api(entry_id):
     """Delete a sync history entry."""
     try:
         db = MusicDatabase()
-        deleted = db.delete_sync_history_entry(entry_id)
+        deleted = db.delete_sync_history_entry(entry_id, profile_id=get_current_profile_id())
         return jsonify({"success": deleted})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -21509,7 +21636,7 @@ def get_sync_history_playlist_names():
     """Return distinct playlist names ever synced, for server playlist cross-reference."""
     try:
         db = MusicDatabase()
-        names = db.get_sync_history_playlist_names()
+        names = db.get_sync_history_playlist_names(profile_id=get_current_profile_id())
         return jsonify(names)
     except Exception as e:
         return jsonify([])
@@ -21530,13 +21657,19 @@ def _detect_sync_source(playlist_id):
 
 def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                                 is_album_download, album_context, artist_context,
-                                playlist_folder_mode, source_page=None):
+                                playlist_folder_mode, source_page=None,
+                                profile_id=None, quality_profile_id=None):
     """Record a sync start to the database."""
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    # The derivation itself now lives in core.downloads.history so every caller
+    # gets it, not just this one (R2-06).
     _downloads_history.record_sync_history_start(
         MusicDatabase(),
         batch_id, playlist_id, playlist_name, tracks,
         is_album_download, album_context, artist_context,
         playlist_folder_mode, source_page=source_page,
+        profile_id=profile_id, quality_profile_id=quality_profile_id,
     )
 
 
@@ -21750,10 +21883,11 @@ def get_server_playlist_tracks(playlist_id):
         elif playlist_name:
             # Legacy fallback: cross-reference with sync history
             db = get_database()
-            entries, _ = db.get_sync_history(page=1, limit=50)
+            _hist_profile_id = get_current_profile_id()
+            entries, _ = db.get_sync_history(page=1, limit=50, profile_id=_hist_profile_id)
             for entry in entries:
                 if entry.get('playlist_name', '').lower() == playlist_name.lower():
-                    full_entry = db.get_sync_history_entry(entry['id'])
+                    full_entry = db.get_sync_history_entry(entry['id'], profile_id=_hist_profile_id)
                     if full_entry:
                         try:
                             tr = json.loads(full_entry.get('track_results') or '[]')
@@ -22438,6 +22572,17 @@ def start_missing_tracks_process(playlist_id):
     skip_acoustid = bool(data.get('skip_acoustid', False))
     # Blocklist override (Phase 2b): set by the modal's "download anyway" confirm.
     ignore_blocklist = bool(data.get('ignore_blocklist', False))
+    # Quality Profile chosen in the shared acquisition dialog. Search, Discover,
+    # Library, album, single, discography and playlist-explorer all POST here, so
+    # this one field gives every manual path the same explicit choice (P1-01).
+    # It outranks the mirror's persisted assignment for this action only; the
+    # mirror row itself is unchanged unless the user edits it on the playlist.
+    requested_quality_profile_id, quality_profile_error = _parse_requested_quality_profile_id(data)
+    if quality_profile_error:
+        return quality_profile_error
+    # Provider hint so a mirror lookup can't be defeated by two providers sharing
+    # an upstream playlist id (P2-01).
+    playlist_source = data.get('source') or data.get('playlist_source') or None
 
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
@@ -22489,6 +22634,7 @@ def start_missing_tracks_process(playlist_id):
             db_pref.set_mirrored_playlist_organize_by_playlist(
                 int(mirrored_pl['id']),
                 bool(playlist_folder_mode),
+                profile_id=profile_id,
             )
     except Exception as pref_err:
         logger.debug(f"[Playlist Folder] Could not persist mirrored preference: {pref_err}")
@@ -22541,6 +22687,10 @@ def start_missing_tracks_process(playlist_id):
             'wing_it': wing_it,
             'skip_acoustid': skip_acoustid,  # #797 per-request AcoustID bypass
             'batch_source': _downloads_history.detect_sync_source(playlist_id),
+            # Explicit user choice for this batch — travels onto every track and
+            # therefore also onto any failed-download Wishlist row (P1-01).
+            'requested_quality_profile_id': requested_quality_profile_id,
+            'playlist_source': playlist_source,
         }
 
     # Record sync history — derive source_page from context
@@ -22552,9 +22702,20 @@ def start_missing_tracks_process(playlist_id):
         _source_page = 'sync'
     else:
         _source_page = 'sync'
+    # Resolve the mirror assignment BEFORE writing history. The per-track stamp
+    # is applied later, inside _run_full_missing_tracks_process, so a history row
+    # written first saw no stamp and recorded NULL for a mirror-assigned batch
+    # (R2-07).
+    _history_quality_profile_id = _resolve_batch_quality_profile_id(
+        playlist_id, playlist_name,
+        profile_id=get_current_profile_id(),
+        explicit_quality_profile_id=requested_quality_profile_id,
+        source=playlist_source,
+    )
     _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                                is_album_download, album_context, artist_context,
-                               playlist_folder_mode, source_page=_source_page)
+                               playlist_folder_mode, source_page=_source_page,
+                               quality_profile_id=_history_quality_profile_id)
 
     # Link YouTube playlist to download process if this is a YouTube playlist
     if playlist_id.startswith('youtube_'):
@@ -22697,6 +22858,49 @@ def _save_sync_status_file(sync_statuses):
     except Exception as e:
         logger.error(f"Error saving sync status: {e}")
 
+def _parse_requested_quality_profile_id(data):
+    """``(quality_profile_id, error_response)`` for an acquisition request.
+
+    One validator for every manual acquisition surface — Search, Discover,
+    Library, album, single, top tracks, discography, playlist explorer — so the
+    same request field means the same thing everywhere (P1-01). Absent/None
+    keeps whatever the server would have chosen (mirror assignment, then the
+    global default); an unknown id is a 400 rather than a silent downgrade.
+    """
+    if not isinstance(data, dict) or data.get('quality_profile_id') is None:
+        return None, None
+    parsed = parse_strict_int(data.get('quality_profile_id'))
+    if parsed is None or parsed <= 0:
+        return None, (jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400)
+    if not get_database().quality_profile_exists(parsed):
+        return None, (jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400)
+    return parsed, None
+
+
+def _invalidate_mirror_sync_fingerprint(playlist_id):
+    """Drop the smart-skip fingerprint for a mirror so the next sync really runs.
+
+    Auto-Sync short-circuits when the track list is byte-identical to the last
+    run. That is right for a provider refresh but wrong for an authoritative
+    Quality Profile change, which must re-stamp the existing Wishlist rows even
+    though not a single track id moved (P1-03). Clearing the stored hashes is
+    the smallest change that makes the very next scheduled run authoritative,
+    and it degrades safely: a lost preference write only costs one extra sync.
+    """
+    key = f"auto_mirror_{int(playlist_id)}"
+    try:
+        sync_statuses = _load_sync_status_file()
+        status = sync_statuses.get(key)
+        if not status:
+            return
+        for field in ('tracks_hash', 'mirror_tracks_hash', 'matched_tracks'):
+            status.pop(field, None)
+        sync_statuses[key] = status
+        _save_sync_status_file(sync_statuses)
+    except Exception as e:
+        logger.debug("Could not invalidate sync fingerprint for %s: %s", key, e)
+
+
 def _sync_status_timestamp(status_info):
     """Return comparable timestamp for a persisted sync-status record."""
     if not status_info or 'last_synced' not in status_info:
@@ -22763,7 +22967,11 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
             'last_synced': now.isoformat()
         }
         # Store match counts and track hash for smart-skip on scheduled syncs
-        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash', 'mirror_tracks_hash'):
+        # `quality_profile_id` is part of the smart-skip fingerprint: an
+        # authoritative profile change must re-run the sync even when the track
+        # list is byte-identical (P1-03).
+        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
+                    'mirror_tracks_hash', 'quality_profile_id'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -27585,6 +27793,12 @@ def _run_sync_task(
     if sync_mode is None:
         from core.sync.playlist_edit import normalize_sync_mode
         sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
+    tracks_json, _quality_profile_id = _tracks_with_mirrored_quality_profile(
+        playlist_id,
+        playlist_name,
+        tracks_json,
+        profile_id=profile_id,
+    )
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
@@ -29685,7 +29899,9 @@ def start_playlist_export_listenbrainz(playlist_id):
         body = request.get_json(silent=True) or {}
         mode = 'push' if body.get('mode') == 'push' else 'download'
         db = get_database()
-        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        meta = _owned_mirrored_playlist(db, int(playlist_id))
+        if not meta:
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
         title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
 
         import uuid
@@ -29727,7 +29943,9 @@ def start_playlist_export_service(playlist_id, service):
         body = request.get_json(silent=True) or {}
         backfill = bool(body.get('backfill'))
         db = get_database()
-        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        meta = _owned_mirrored_playlist(db, int(playlist_id))
+        if not meta:
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
         title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
 
         import uuid
@@ -29844,20 +30062,34 @@ def export_library_artists():
 def add_to_watchlist():
     """Add an artist to the watchlist"""
     try:
-        data = request.get_json()
-        artist_id = data.get('artist_id')
+        data = request.get_json() or {}
+        # Strict types: `artist_id` used to be truthiness-checked only, so a list
+        # or int survived until a `.isdigit()` deep in the DB raised a 500 (P3-01).
+        artist_id = parse_strict_id(data.get('artist_id'))
         artist_name = data.get('artist_name')
+        artist_name = artist_name.strip() if isinstance(artist_name, str) else None
 
         if not artist_id or not artist_name:
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
+        quality_profile_id = None
+        if data.get('quality_profile_id') is not None:
+            quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
+            if quality_profile_id is None or quality_profile_id <= 0:
+                return jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400
+            if not database.quality_profile_exists(quality_profile_id):
+                return jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400
         # Callers that KNOW the id's source (e.g. the Discovery Web, whose candidates carry
         # [source, id] pairs) can pass it explicitly — numeric Deezer/iTunes ids are ambiguous and
         # the detection below can otherwise mistake them for a library DB row id.
-        explicit_source = (data.get('source') or '').strip().lower()
-        if explicit_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
-            explicit_source = None
+        # An unrecognised source is a client error, not a reason to guess (P1-05).
+        from core.watchlist_sources import normalize_source
+        explicit_source = None
+        if data.get('source') is not None:
+            explicit_source = normalize_source(data.get('source'))
+            if explicit_source is None:
+                return jsonify({"success": False, "error": "Unknown source"}), 400
         # Detect source from ID — check if it's a library DB ID first
         is_numeric_id = artist_id.isdigit()
         source = explicit_source
@@ -29904,8 +30136,19 @@ def add_to_watchlist():
                 logger.debug("watchlist artist source lookup failed: %s", e)
         fallback_source = _get_metadata_fallback_source()   # always defined — image block below reads it
         if not source:
-            source = fallback_source if is_numeric_id else 'spotify'
-        success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
+            # The fallback source is a hint, not a storable provider: hydrabase,
+            # jiosaavn and bandcamp are in METADATA_SOURCE_PRIORITY but have no
+            # watchlist id column, and handing one of those to the strict
+            # provider check turned a working add into a hard failure (R2-01).
+            from core.watchlist_sources import storable_source
+            source = storable_source(fallback_source, artist_id) if is_numeric_id else 'spotify'
+        success = database.add_artist_to_watchlist(
+            artist_id,
+            artist_name,
+            profile_id=get_current_profile_id(),
+            source=source,
+            quality_profile_id=quality_profile_id,
+        )
         if success:
             database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
 
@@ -30049,9 +30292,18 @@ def add_batch_to_watchlist():
         if not artists or not isinstance(artists, list):
             return jsonify({"success": False, "error": "Missing or invalid artists list"}), 400
 
+        from core.watchlist_sources import storable_source
+
         database = get_database()
         added = 0
         skipped = 0
+        rejected = []
+
+        # The metadata fallback source is read once, not per artist, and the
+        # Quality Profile is validated with the dedicated existence check
+        # instead of pulling the whole profile table inside the loop (R2-15).
+        fb_source = _get_metadata_fallback_source()
+        checked_profile_ids = set()
 
         for artist in artists:
             artist_id = artist.get('artist_id')
@@ -30065,16 +30317,34 @@ def add_batch_to_watchlist():
                 continue
 
             is_numeric = artist_id.isdigit()
-            fb_source = _get_metadata_fallback_source()
-            src = fb_source if is_numeric else 'spotify'
-            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=src)
+            src = storable_source(fb_source, artist_id) if is_numeric else 'spotify'
+            quality_profile_id = artist.get('quality_profile_id')
+            if quality_profile_id is not None:
+                try:
+                    quality_profile_id = int(quality_profile_id)
+                except (TypeError, ValueError):
+                    # A rejected artist is reported, never silently dropped from
+                    # the count the client sees (R2-15).
+                    rejected.append({'artist_name': artist_name, 'reason': 'Invalid quality_profile_id'})
+                    continue
+                if quality_profile_id not in checked_profile_ids:
+                    if not database.quality_profile_exists(quality_profile_id):
+                        rejected.append({'artist_name': artist_name, 'reason': 'Unknown quality_profile_id'})
+                        continue
+                    checked_profile_ids.add(quality_profile_id)
+            success = database.add_artist_to_watchlist(
+                artist_id,
+                artist_name,
+                profile_id=get_current_profile_id(),
+                source=src,
+                quality_profile_id=quality_profile_id,
+            )
             if success:
                 added += 1
                 # Cache artist image
                 try:
                     is_numeric_id = artist_id.isdigit()
                     if is_numeric_id:
-                        fb_source = _get_metadata_fallback_source()
                         if fb_source == 'deezer':
                             fb_client = _get_metadata_fallback_client()
                             fb_artist = fb_client.get_artist(artist_id)
@@ -30100,12 +30370,18 @@ def add_batch_to_watchlist():
                                 database.update_watchlist_artist_image(artist_id, image_url)
                 except Exception as img_error:
                     logger.error(f"Could not fetch artist image for {artist_name}: {img_error}")
+            else:
+                rejected.append({'artist_name': artist_name, 'reason': 'Could not be added to the watchlist'})
 
+        message = f"Added {added} artist{'s' if added != 1 else ''} to watchlist ({skipped} already watched)"
+        if rejected:
+            message += f", {len(rejected)} rejected"
         return jsonify({
             "success": True,
             "added": added,
             "skipped": skipped,
-            "message": f"Added {added} artist{'s' if added != 1 else ''} to watchlist ({skipped} already watched)"
+            "rejected": rejected,
+            "message": message
         })
 
     except Exception as e:
@@ -30690,6 +30966,7 @@ def watchlist_artist_config(artist_id):
         from database.music_database import get_database
 
         database = get_database()
+        active_profile_id = get_current_profile_id()
 
         if request.method == 'GET':
             database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
@@ -30702,11 +30979,14 @@ def watchlist_artist_config(artist_id):
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
                        lookback_days, discogs_artist_id, preferred_metadata_source,
-                       amazon_artist_id, musicbrainz_artist_id, auto_download
+                       amazon_artist_id, musicbrainz_artist_id, auto_download,
+                       quality_profile_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                WHERE profile_id = ? AND (
+                      spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
                       OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
+                )
+            """, (active_profile_id, artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
@@ -30833,6 +31113,7 @@ def watchlist_artist_config(artist_id):
                 'preferred_metadata_source': result[17] if len(result) > 17 else None,
                 # follow-only toggle (default True/auto-download when column absent)
                 'auto_download': bool(result[20]) if len(result) > 20 and result[20] is not None else True,
+                'quality_profile_id': int(result[21]) if len(result) > 21 and result[21] is not None else None,
             }
 
             from core.metadata.registry import get_primary_source
@@ -30849,6 +31130,7 @@ def watchlist_artist_config(artist_id):
                 "musicbrainz_artist_id": musicbrainz_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
+                "quality_profiles": database.list_quality_profiles(),
             })
 
         else:  # POST
@@ -30856,65 +31138,133 @@ def watchlist_artist_config(artist_id):
             if not data:
                 return jsonify({"success": False, "error": "No data provided"}), 400
 
-            include_albums = data.get('include_albums', True)
-            include_eps = data.get('include_eps', True)
-            include_singles = data.get('include_singles', True)
-            include_live = data.get('include_live', False)
-            include_remixes = data.get('include_remixes', False)
-            include_acoustic = data.get('include_acoustic', False)
-            include_compilations = data.get('include_compilations', False)
-            include_instrumentals = data.get('include_instrumentals', False)
-            lookback_days = data.get('lookback_days', None)  # None = use global setting
-            # Validate lookback_days if provided
-            if lookback_days is not None:
-                lookback_days = int(lookback_days) if lookback_days != '' else None
-            preferred_metadata_source = data.get('preferred_metadata_source', None)
-            # Validate — only accept known sources, empty string means clear override
-            _watchlist_meta_sources = (
-                'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
-            )
-            from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
-            _watchlist_meta_sources = _watchlist_meta_sources + tuple(
-                name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
-            )
-            if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
-                preferred_metadata_source = None
+            # Read the CURRENT configuration first. This endpoint used to fill
+            # every absent field with a hardcoded default and then write the lot
+            # back, so a client sending only `quality_profile_id` silently reset
+            # release types, lookback, metadata source and auto-download (P2-03).
+            # Absent now means "keep", so a partial request really is partial
+            # while a full form request behaves exactly as before.
+            conn = sqlite3.connect(str(database.database_path))
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT include_albums, include_eps, include_singles, include_live,
+                       include_remixes, include_acoustic, include_compilations,
+                       include_instrumentals, lookback_days, preferred_metadata_source,
+                       auto_download, quality_profile_id
+                FROM watchlist_artists
+                WHERE profile_id = ? AND (
+                      spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                      OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
+                )
+            """, (active_profile_id, artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
+            old_row = cursor.fetchone()
+            if old_row is None:
+                conn.close()
+                return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
+
+            class _BadBool(Exception):
+                def __init__(self, field):
+                    self.field = field
+
+            def _field(name, fallback):
+                """Sent value, or the stored one when the client omitted the field.
+
+                An unparseable value is an error, NOT a reason to substitute the
+                hardcoded default: doing that silently flipped a stored setting
+                off on a 200 response, and disagreed with the modular API, which
+                answers 400 for the same input (R2-08).
+                """
+                if name not in data:
+                    return old_row[name] if old_row[name] is not None else fallback
+                parsed = parse_strict_bool(data.get(name))
+                if parsed is None:
+                    raise _BadBool(name)
+                return parsed
+
+            try:
+                include_albums = _field('include_albums', True)
+                include_eps = _field('include_eps', True)
+                include_singles = _field('include_singles', True)
+                include_live = _field('include_live', False)
+                include_remixes = _field('include_remixes', False)
+                include_acoustic = _field('include_acoustic', False)
+                include_compilations = _field('include_compilations', False)
+                include_instrumentals = _field('include_instrumentals', False)
+            except _BadBool as bad:
+                conn.close()
+                return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400
+
+            if 'lookback_days' in data:
+                lookback_days = data.get('lookback_days')  # None = use global setting
+                if lookback_days is not None:
+                    try:
+                        lookback_days = int(lookback_days) if lookback_days != '' else None
+                    except (TypeError, ValueError):
+                        conn.close()
+                        return jsonify({"success": False, "error": "Invalid lookback_days"}), 400
+            else:
+                lookback_days = old_row['lookback_days']
+
+            if 'preferred_metadata_source' in data:
+                preferred_metadata_source = data.get('preferred_metadata_source', None)
+                # Validate — only accept known sources, empty string means clear override
+                _watchlist_meta_sources = (
+                    'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
+                )
+                from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+                _watchlist_meta_sources = _watchlist_meta_sources + tuple(
+                    name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
+                )
+                if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
+                    preferred_metadata_source = None
+            else:
+                preferred_metadata_source = old_row['preferred_metadata_source']
+
             # Follow-only toggle: default True so an older client that omits the
             # field keeps auto-downloading.
-            auto_download = bool(data.get('auto_download', True))
+            try:
+                auto_download = _field('auto_download', True)
+            except _BadBool as bad:
+                conn.close()
+                return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400
+
+            if 'quality_profile_id' in data and data.get('quality_profile_id') is not None:
+                quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
+                if quality_profile_id is None or quality_profile_id <= 0:
+                    conn.close()
+                    return jsonify({"success": False, "error": "Invalid quality_profile_id"}), 400
+                if not database.quality_profile_exists(quality_profile_id):
+                    conn.close()
+                    return jsonify({"success": False, "error": "Unknown quality_profile_id"}), 400
+            else:
+                quality_profile_id = old_row['quality_profile_id']
 
             # Validate at least one release type is selected
             if not (include_albums or include_eps or include_singles):
+                conn.close()
                 return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
 
-            # Update database
-            conn = sqlite3.connect(str(database.database_path))
-            cursor = conn.cursor()
-
-            # Check if lookback_days changed — if so, clear last_scan_timestamp to force rescan
-            cursor.execute("""
-                SELECT lookback_days FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                      OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-            old_row = cursor.fetchone()
-            old_lookback = old_row[0] if old_row else None
-            lookback_changed = old_lookback != lookback_days
+            # lookback_days changed — clear last_scan_timestamp to force rescan
+            lookback_changed = old_row['lookback_days'] != lookback_days
 
             cursor.execute("""
                 UPDATE watchlist_artists
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?, lookback_days = ?, preferred_metadata_source = ?,
-                    auto_download = ?,
+                    auto_download = ?, quality_profile_id = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                      OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
+                WHERE profile_id = ? AND (
+                      spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                      OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
+                )
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  int(include_instrumentals), lookback_days, preferred_metadata_source, int(auto_download), lookback_changed,
-                  artist_id, artist_id, artist_id, artist_id, artist_id))
+                  int(include_instrumentals), lookback_days, preferred_metadata_source, int(auto_download),
+                  quality_profile_id, lookback_changed, active_profile_id,
+                  artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:
@@ -30938,6 +31288,7 @@ def watchlist_artist_config(artist_id):
                     'include_compilations': include_compilations,
                     'include_instrumentals': include_instrumentals,
                     'auto_download': auto_download,
+                    'quality_profile_id': quality_profile_id,
                 }
             })
 
@@ -37052,6 +37403,14 @@ def mirror_playlist_endpoint():
 
         database = get_database()
         profile_id = get_current_profile_id()
+        quality_profile_id = data.get('quality_profile_id')
+        if quality_profile_id is not None:
+            try:
+                quality_profile_id = int(quality_profile_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid quality_profile_id"}), 400
+            if not database.quality_profile_exists(quality_profile_id):
+                return jsonify({"error": "Unknown quality_profile_id"}), 400
 
         playlist_id = database.mirror_playlist(
             source=source,
@@ -37059,6 +37418,7 @@ def mirror_playlist_endpoint():
             name=name,
             tracks=tracks,
             profile_id=profile_id,
+            quality_profile_id=quality_profile_id,
             description=data.get('description'),
             owner=data.get('owner'),
             image_url=data.get('image_url')
@@ -37128,6 +37488,37 @@ def get_mirrored_playlists_endpoint():
         logger.error(f"Error getting mirrored playlists: {e}")
         return jsonify({"error": str(e)}), 500
 
+def _mirror_scope_profile_id():
+    """None for admin, else the active profile.
+
+    Merged from upstream/dev's ``mirrored_playlist_visible`` admin bypass: an
+    admin can read/manage any profile's mirror, matching the parallel
+    isolation-audit work upstream did on the same by-id mirror routes. ``None``
+    is the existing "trusted caller who already resolved the mirror" scope
+    (see ``_mirror_owner_clause``), so admin gets the unscoped read/write on a
+    playlist_id that a non-admin would only get after passing the ownership
+    check below.
+    """
+    try:
+        is_admin = bool(getattr(g, "is_admin", True))
+    except RuntimeError:
+        is_admin = True  # no request context = system caller
+    return None if is_admin else get_current_profile_id()
+
+
+def _owned_mirrored_playlist(database, playlist_id):
+    """The mirror ``playlist_id`` IF it belongs to the active SoulSync profile,
+    or any mirror when the caller is admin.
+
+    Request handlers must never look a mirror up by primary key alone: the ids
+    are small integers and the synthetic ``auto_mirror_<pk>`` form is guessable,
+    so an unscoped lookup let any profile read, rename, re-point, run, clear or
+    delete another profile's mirror — and read its Quality Profile (P0-01).
+    A foreign mirror is reported exactly like a missing one.
+    """
+    return database.get_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id())
+
+
 @app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
@@ -37135,8 +37526,8 @@ def get_mirrored_playlist_endpoint(playlist_id):
         from core.playlists.source_refs import describe_mirrored_source_ref
         from core.playlists.naming import effective_mirrored_name
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
-        if not mirrored_playlist_visible(playlist):
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
         source_ref = describe_mirrored_source_ref(playlist)
         playlist['source_ref'] = source_ref.source_ref
@@ -37159,8 +37550,8 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
         source_ref = data.get('source_ref') or data.get('source_playlist_id') or data.get('url')
 
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
-        if not mirrored_playlist_visible(playlist):
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
         try:
@@ -37190,11 +37581,12 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
             playlist_id,
             normalized.source_playlist_id,
             normalized.description,
+            profile_id=_mirror_scope_profile_id(),
         )
         if not ok:
             return jsonify({"error": "Failed to update source reference"}), 500
 
-        updated = database.get_mirrored_playlist(playlist_id) or {}
+        updated = _owned_mirrored_playlist(database, playlist_id) or {}
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
         logger.error(f"Error updating mirrored playlist source reference: {e}")
@@ -37210,16 +37602,18 @@ def update_mirrored_playlist_custom_name_endpoint(playlist_id):
         from core.playlists.naming import effective_mirrored_name
         data = request.get_json() or {}
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
-        if not mirrored_playlist_visible(playlist):
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
         # `custom_name` may be '' / null to CLEAR the alias.
-        ok = database.set_mirrored_playlist_custom_name(playlist_id, data.get('custom_name'))
+        ok = database.set_mirrored_playlist_custom_name(
+            playlist_id, data.get('custom_name'), profile_id=_mirror_scope_profile_id()
+        )
         if not ok:
             return jsonify({"error": "Failed to update name"}), 500
 
-        updated = database.get_mirrored_playlist(playlist_id) or {}
+        updated = _owned_mirrored_playlist(database, playlist_id) or {}
         updated['display_name'] = effective_mirrored_name(updated)
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
@@ -37232,20 +37626,52 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if 'organize_by_playlist' not in data:
-            return jsonify({"error": "organize_by_playlist is required"}), 400
+        if not ({'organize_by_playlist', 'quality_profile_id'} & set(data)):
+            return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
-        if not mirrored_playlist_visible(playlist):
+        profile_id = _mirror_scope_profile_id()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
-        enabled = bool(data.get('organize_by_playlist'))
-        ok = database.set_mirrored_playlist_organize_by_playlist(playlist_id, enabled)
-        if not ok:
+        organize_by_playlist = None
+        if 'organize_by_playlist' in data:
+            organize_by_playlist = parse_strict_bool(data.get('organize_by_playlist'))
+            if organize_by_playlist is None:
+                return jsonify({"error": "Invalid organize_by_playlist"}), 400
+
+        quality_profile_id = None
+        if 'quality_profile_id' in data:
+            quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
+            if quality_profile_id is None:
+                return jsonify({"error": "Invalid quality_profile_id"}), 400
+
+        # Both fields are validated and written in ONE transaction: a rejected
+        # Quality Profile used to leave the already-committed organize toggle
+        # behind while the response said 400 (P2-02).
+        outcome = database.update_mirrored_playlist_preferences(
+            playlist_id,
+            profile_id=profile_id,
+            organize_by_playlist=organize_by_playlist,
+            quality_profile_id=quality_profile_id,
+        )
+        if outcome == 'not_found':
+            return jsonify({"error": "Playlist not found"}), 404
+        if outcome == 'unknown_quality_profile':
+            return jsonify({"error": "Unknown quality_profile_id"}), 400
+        if outcome != 'ok':
             return jsonify({"error": "Failed to update preferences"}), 500
 
-        updated = database.get_mirrored_playlist(playlist_id) or {}
+        if (
+            quality_profile_id is not None
+            and quality_profile_id != playlist.get('quality_profile_id')
+        ):
+            # A profile-only change must not be swallowed by the auto-sync
+            # "tracks unchanged" fast path (P1-03).
+            _invalidate_mirror_sync_fingerprint(playlist_id)
+
+        updated = _owned_mirrored_playlist(database, playlist_id) or {}
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
         logger.error(f"Error updating mirrored playlist preferences: {e}")
@@ -37270,32 +37696,44 @@ def resolve_mirrored_playlist_endpoint():
         )
         if not playlist:
             return jsonify({"found": False, "playlist": None})
+        # Belt and braces: the resolver is owner-scoped, but this endpoint is the
+        # one that hands a persisted quality_profile_id to the browser (P0-01).
+        if int(playlist.get('profile_id') or 1) != int(profile_id):
+            return jsonify({"found": False, "playlist": None})
         return jsonify({"found": True, "playlist": playlist})
     except Exception as e:
         logger.error(f"Error resolving mirrored playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-def _playlist_pipeline_state_key(playlist_id):
-    return f"mirrored_{int(playlist_id)}"
+def _playlist_pipeline_state_key(playlist_id, profile_id=None):
+    """Progress-state key for a manual pipeline run.
+
+    Keyed by ``(profile, mirror)``: two profiles running a pipeline against
+    mirrors that happen to share a primary key must not read or overwrite each
+    other's progress, log lines or result (P0-01).
+    """
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    return f"p{int(profile_id)}:mirrored_{int(playlist_id)}"
 
 
-def _snapshot_playlist_pipeline_state(playlist_id):
-    key = _playlist_pipeline_state_key(playlist_id)
+def _snapshot_playlist_pipeline_state(playlist_id, profile_id=None):
+    key = _playlist_pipeline_state_key(playlist_id, profile_id)
     with playlist_pipeline_progress_lock:
         state = playlist_pipeline_progress_states.get(key)
         return dict(state) if state else None
 
 
-def _replace_playlist_pipeline_state(playlist_id, state):
-    key = _playlist_pipeline_state_key(playlist_id)
+def _replace_playlist_pipeline_state(playlist_id, state, profile_id=None):
+    key = _playlist_pipeline_state_key(playlist_id, profile_id)
     with playlist_pipeline_progress_lock:
         playlist_pipeline_progress_states[key] = dict(state)
         return dict(playlist_pipeline_progress_states[key])
 
 
-def _update_playlist_pipeline_progress(playlist_id, **kwargs):
-    key = _playlist_pipeline_state_key(playlist_id)
+def _update_playlist_pipeline_progress(playlist_id, profile_id=None, **kwargs):
+    key = _playlist_pipeline_state_key(playlist_id, profile_id)
     with playlist_pipeline_progress_lock:
         state = playlist_pipeline_progress_states.setdefault(key, {
             'run_id': key,
@@ -37327,18 +37765,27 @@ def _update_playlist_pipeline_progress(playlist_id, **kwargs):
 class _PlaylistPipelineDepsProxy:
     """Forward automation deps while routing progress into playlist UI state."""
 
-    def __init__(self, base_deps, playlist_id):
+    def __init__(self, base_deps, playlist_id, profile_id):
         self._base_deps = base_deps
         self._playlist_id = playlist_id
+        self._profile_id = profile_id
 
     def __getattr__(self, name):
         return getattr(self._base_deps, name)
 
     def update_progress(self, _automation_id, **kwargs):
-        _update_playlist_pipeline_progress(self._playlist_id, **kwargs)
+        _update_playlist_pipeline_progress(
+            self._playlist_id, profile_id=self._profile_id, **kwargs
+        )
 
 
-def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
+def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, profile_id=1):
+    # The caller is a bare thread, so neither Flask's `g` nor the request-scoped
+    # profile survives. Without this the whole pipeline — sync, organize batch,
+    # failed-track Wishlist writes — silently ran as admin (profile 1) for every
+    # non-default user (P0-01). Declare the owner for the whole unit of work.
+    from core.profile_context import set_background_profile, reset_background_profile
+    profile_token = set_background_profile(int(profile_id))
     try:
         if _automation_deps is None:
             raise RuntimeError("Automation dependencies are not available")
@@ -37348,13 +37795,14 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
         from core.playlists.pipeline import run_mirrored_playlist_pipeline
 
-        deps = _PlaylistPipelineDepsProxy(_automation_deps, playlist_id)
+        deps = _PlaylistPipelineDepsProxy(_automation_deps, playlist_id, profile_id)
         result = run_mirrored_playlist_pipeline(
             {
                 'playlist_id': str(playlist_id),
                 'all': False,
                 'skip_wishlist': bool(skip_wishlist),
-                '_automation_id': _playlist_pipeline_state_key(playlist_id),
+                'profile_id': int(profile_id),
+                '_automation_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             },
             deps,
             refresh_fn=auto_refresh_mirrored,
@@ -37366,6 +37814,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         if status == 'completed':
             _update_playlist_pipeline_progress(
                 playlist_id,
+                profile_id=profile_id,
                 status='finished',
                 progress=100,
                 phase='Pipeline complete',
@@ -37374,6 +37823,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         elif status == 'skipped':
             _update_playlist_pipeline_progress(
                 playlist_id,
+                profile_id=profile_id,
                 status='skipped',
                 progress=100,
                 phase='Pipeline already running',
@@ -37385,6 +37835,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         else:
             _update_playlist_pipeline_progress(
                 playlist_id,
+                profile_id=profile_id,
                 status='error',
                 progress=100,
                 phase='Pipeline error',
@@ -37395,6 +37846,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
         logger.error(f"Manual mirrored playlist pipeline failed for {playlist_id}: {e}")
         _update_playlist_pipeline_progress(
             playlist_id,
+            profile_id=profile_id,
             status='error',
             progress=100,
             phase='Pipeline error',
@@ -37402,6 +37854,8 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
             log_line=f'Pipeline failed: {e}',
             log_type='error',
         )
+    finally:
+        reset_background_profile(profile_token)
 
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/run', methods=['POST'])
@@ -37409,8 +37863,9 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
     """Run the all-in-one mirrored playlist pipeline from the playlist UI."""
     try:
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
-        if not mirrored_playlist_visible(playlist):
+        profile_id = get_current_profile_id()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
         if playlist.get('source') in ('file', 'beatport'):
             return jsonify({"error": "This playlist source cannot be refreshed by the pipeline"}), 400
@@ -37421,7 +37876,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 
         data = request.get_json(silent=True) or {}
         state = _replace_playlist_pipeline_state(playlist_id, {
-            'run_id': _playlist_pipeline_state_key(playlist_id),
+            'run_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             'playlist_id': int(playlist_id),
             'playlist_name': playlist.get('name') or '',
             'status': 'running',
@@ -37436,11 +37891,11 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
             'finished_at': None,
             'result': None,
             'error': None,
-        })
+        }, profile_id=profile_id)
 
         threading.Thread(
             target=_run_mirrored_playlist_pipeline_for_ui,
-            args=(playlist_id, bool(data.get('skip_wishlist', False))),
+            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id)),
             daemon=True,
             name=f"playlist-pipeline-{playlist_id}",
         ).start()
@@ -37461,6 +37916,8 @@ def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
         if not state:
             return jsonify({
                 "run_id": _playlist_pipeline_state_key(playlist_id),
+                # The key is profile-scoped, so a foreign run reads as idle here
+                # rather than leaking another profile's phase/log/result.
                 "playlist_id": int(playlist_id),
                 "status": "idle",
                 "progress": 0,
@@ -37510,9 +37967,7 @@ def delete_mirrored_playlist_endpoint(playlist_id):
     """Delete a mirrored playlist."""
     try:
         database = get_database()
-        if not mirrored_playlist_visible(database.get_mirrored_playlist(playlist_id)):
-            return jsonify({"error": "Playlist not found"}), 404
-        if database.delete_mirrored_playlist(playlist_id):
+        if database.delete_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id()):
             return jsonify({"success": True})
         return jsonify({"error": "Playlist not found"}), 404
     except Exception as e:
@@ -37524,12 +37979,13 @@ def clear_mirrored_discovery_endpoint(playlist_id):
     """Clear discovery data for all tracks in a mirrored playlist, including discovery cache."""
     try:
         database = get_database()
-        if not mirrored_playlist_visible(database.get_mirrored_playlist(playlist_id)):
+        profile_id = _mirror_scope_profile_id()
+        if not _owned_mirrored_playlist(database, playlist_id):
             return jsonify({"error": "Playlist not found"}), 404
 
         # Clear discovery cache entries for these tracks so re-discovery does fresh lookups
         try:
-            tracks = database.get_mirrored_playlist_tracks(playlist_id)
+            tracks = database.get_mirrored_playlist_tracks(playlist_id, profile_id=profile_id)
             if tracks:
                 conn = database._get_connection()
                 cursor = conn.cursor()
@@ -37544,7 +38000,7 @@ def clear_mirrored_discovery_endpoint(playlist_id):
         except Exception as cache_err:
             logger.warning(f"Error clearing discovery cache: {cache_err}")
 
-        cleared = database.clear_mirrored_playlist_discovery(playlist_id)
+        cleared = database.clear_mirrored_playlist_discovery(playlist_id, profile_id=profile_id)
         return jsonify({"success": True, "cleared": cleared})
     except Exception as e:
         logger.error(f"Error clearing mirrored discovery: {e}")
@@ -37761,11 +38217,12 @@ def prepare_mirrored_discovery(playlist_id):
     """Register a mirrored playlist into youtube_playlist_states so the YouTube discovery pipeline can run."""
     try:
         database = get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
-        if not mirrored_playlist_visible(playlist):
+        profile_id = _mirror_scope_profile_id()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
-        tracks_data = database.get_mirrored_playlist_tracks(playlist_id)
+        tracks_data = database.get_mirrored_playlist_tracks(playlist_id, profile_id=profile_id)
         url_hash = f"mirrored_{playlist_id}"
 
         # Build track list in the format the YouTube discovery worker expects
@@ -38060,6 +38517,7 @@ def _build_playlist_explorer_deps():
         get_metadata_fallback_client=_get_metadata_fallback_client,
         get_metadata_fallback_source=_get_metadata_fallback_source,
         get_metadata_cache=get_metadata_cache,
+        get_current_profile_id=get_current_profile_id,
     )
 
 
