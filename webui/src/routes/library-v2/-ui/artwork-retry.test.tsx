@@ -49,9 +49,7 @@ describe('Artwork placeholder retry (perf25-02)', () => {
   });
 
   it('appends the thumb variant before the retry marker', () => {
-    render(
-      <Artwork src="/api/library/v2/artwork/artist/9?v=42" alt="Thumb" className="c" thumb />,
-    );
+    render(<Artwork src="/api/library/v2/artwork/artist/9?v=42" alt="Thumb" className="c" thumb />);
 
     const image = screen.getByAltText('Thumb') as HTMLImageElement;
     expect(image.getAttribute('src')).toBe('/api/library/v2/artwork/artist/9?v=42&size=thumb');
