@@ -791,15 +791,20 @@
     // Untagged or unknown-slug messages always fall back to #general so nothing
     // is ever invisible — old clients and vanilla Soulseek users still land
     // somewhere. Categories are cosmetic grouping only.
+    // No channel names a FEATURE. The jukebox is room-scoped — everyone shares
+    // one queue regardless of which channel they're reading — so filing it under
+    // a channel would imply a queue per channel. Tune-in is already its gate.
     var CHAT_CHANNELS = [
-        { cat: 'Information', items: [
-            { slug: 'general', name: 'general' },
-        ] },
         { cat: 'Community', items: [
-            { slug: 'jukebox', name: 'jukebox' },
+            { slug: 'general', name: 'general' },
+            { slug: 'off-topic', name: 'off-topic' },
+        ] },
+        { cat: 'Music', items: [
             { slug: 'requests', name: 'requests' },
             { slug: 'releases', name: 'releases' },
-            { slug: 'off-topic', name: 'off-topic' },
+        ] },
+        { cat: 'Support', items: [
+            { slug: 'help', name: 'help' },
         ] },
     ];
     var CHAT_DEFAULT_CHANNEL = 'general';
