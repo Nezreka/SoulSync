@@ -126,3 +126,65 @@ def test_context_carries_user_year_into_release_date():
         _album(), {"name": "Song", "track_number": 1, "disc_number": 1, "artists": [{"name": "A"}]},
         "A", "Alb", 1, local_year="2023")
     assert ctx["spotify_album"]["release_date"] == "2023"
+
+
+# ── end-to-end preview: an already-organized file is left UNCHANGED (#1080) ──
+
+def test_preview_leaves_already_organized_file_unchanged(monkeypatch, tmp_path):
+    """The real complaint: run the actual preview against a file already
+    organized with the user's casing + year, and confirm it reports NO change
+    (not just that the path builder emits the right string). Mirrors QT3496's
+    'The Violence (Sikdope Remix) [2019]' (casing) + 'Best Of Underoath [2014]'
+    (casing + year) screenshots — the source returns lowercase 'remix'/'of'
+    and year 2013/2020, which used to churn."""
+    import core.library_reorganize as lr
+    from core.imports.paths import build_final_path_for_track
+
+    monkeypatch.setattr(lr, "_preserve_casing_enabled", lambda: True)
+    monkeypatch.setattr("core.imports._get_config_manager" if False else
+                        "core.imports.paths._get_config_manager",
+                        lambda: _TemplateCM())
+
+    album_data = {"id": "AL1", "title": "The Violence (Sikdope Remix)",
+                  "artist_name": "Asking Alexandria", "artist_id": "AR1",
+                  "year": 2019, "spotify_album_id": "sp1"}
+    tracks = [{"id": "T1", "title": "The Violence (Sikdope Remix)",
+               "track_number": 1, "file_path": "X", "duration": 200}]
+    api_album = {"id": "sp1", "name": "The Violence (Sikdope remix)",
+                 "release_date": "2020-01-01", "album_type": "single",
+                 "total_tracks": 1, "images": [{"url": ""}]}
+    api_tracks = [{"name": "The Violence (Sikdope remix)", "track_number": 1,
+                   "disc_number": 1, "artists": [{"name": "Asking Alexandria"}]}]
+    monkeypatch.setattr(lr, "load_album_and_tracks",
+                        lambda db, aid: (dict(album_data), [dict(t) for t in tracks]))
+    monkeypatch.setattr(lr, "_resolve_source",
+                        lambda ad, ps, strict_source=False, **kw: ("spotify", api_album, api_tracks))
+    monkeypatch.setattr(lr, "_feat_in_title_enabled", lambda: False)
+
+    organized = ("/xfer/A/Asking Alexandria/The Violence (Sikdope Remix) "
+                 "[2019] [Single]/01 - The Violence (Sikdope Remix).flac")
+
+    def _preview():
+        return lr.preview_album_reorganize(
+            album_id="AL1", db=None, transfer_dir="/xfer",
+            resolve_file_path_fn=lambda p: organized,
+            build_final_path_fn=build_final_path_for_track)["tracks"][0]
+
+    assert _preview()["unchanged"] is True            # preserve on → no rename
+
+    monkeypatch.setattr(lr, "_preserve_casing_enabled", lambda: False)
+    assert _preview()["unchanged"] is False           # off → would churn to the source
+
+
+class _TemplateCM:
+    """Minimal config-manager stub feeding QT3496's templates + transfer dir."""
+    _vals = {
+        "file_organization.templates": {
+            "album_path": "$artistletter/$albumartist/$album [$year] [$albumtype]/$disc$track - $title",
+            "single_path": "$artistletter/$albumartist/$album [$year] [Single]/$track - $title",
+        },
+        "soulseek.transfer_path": "/xfer",
+    }
+
+    def get(self, key, default=None):
+        return self._vals.get(key, default)
