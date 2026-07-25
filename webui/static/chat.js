@@ -34,6 +34,11 @@
         historyDone: false,      // no more archive pages
         selfName: '',            // our slskd username (@mention highlighting)
         users: [],               // room user names (mention autocomplete)
+        convos: [],              // latest PM conversation list (guild-rail DM badge)
+        channel: 'general',      // active virtual channel (envelope `c` tag)
+        chanSeen: {},            // channel slug → newest ts read there (unread badges)
+        chanCatClosed: {},       // sidebar category → collapsed
+        pingArmed: false,        // suppress mention pings while the archive loads
         replyTo: null,           // {u, x} while composing a reply
         pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
         jukebox: {               // shared room listening (reduced from protocolLog)
@@ -65,6 +70,10 @@
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
+    try {
+        var _ch = localStorage.getItem('chat_channel');
+        if (_ch) state.channel = _ch;      // validated against the config on first render
+    } catch (e) { /* ignore */ }
     try {
         state.jukebox.videoHidden = localStorage.getItem('chat_jbx_audio') === '1';
         var _v = parseInt(localStorage.getItem('chat_jbx_vol') || '100', 10);
@@ -560,6 +569,10 @@
                 shown = shown.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
                 hidden = before - shown.length;
             }
+            // Virtual channels: show only the active one. Untagged / unknown-slug
+            // messages fold into the default channel (never hidden everywhere),
+            // so vanilla-Soulseek and old-client traffic still reads in #general.
+            shown = shown.filter(function (m) { return _msgChannel(m) === state.channel; });
         }
         // NEW divider: split at the frozen last-seen marker (set on room open).
         // Groups deliberately break at the divider, like Discord's red line.
@@ -643,13 +656,21 @@
     }
 
     function _userBtn(n, extraClass, tunedMap) {
+        // Discord-style member row: circular avatar + presence dot, name, and an
+        // activity subline (the jukebox listen state doubles as "playing a game").
         var ign = isIgnored(n);
         var tuned = tunedMap && tunedMap[n];
+        var initials = String(n || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
             '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
             (tuned ? ' — listening to the room jukebox' : '') + '">' +
-            '<span class="chat-user-dot"></span>' + esc(n) +
-            (tuned ? '<span class="chat-user-tuned">♫</span>' : '') +
+            '<span class="chat-user-av">' + esc(initials) +
+                '<span class="chat-user-dot' + (tuned ? ' chat-user-dot--tuned' : '') + '"></span>' +
+            '</span>' +
+            '<span class="chat-user-main">' +
+                '<span class="chat-user-name">' + esc(n) + '</span>' +
+                (tuned ? '<span class="chat-user-act">♫ Listening to the jukebox</span>' : '') +
+            '</span>' +
             (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
     }
 
@@ -689,15 +710,18 @@
         });
         var tunedMap = window.ChatProtocol
             ? window.ChatProtocol.reduceTuned(_roomEvents()) : {};   // once, not per user
-        var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
-        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap); }).join('');
+        // Discord groups members by role with a "NAME — count" header.
+        var html = '';
+        if (self.length) {
+            html += '<div class="chat-users-label chat-users-label--sub">You</div>' +
+                self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap); }).join('');
+        }
         if (apps.length) {
-            html += '<div class="chat-users-label chat-users-label--sub">SoulSync users</div>' +
+            html += '<div class="chat-users-label chat-users-label--sub">SoulSync &mdash; ' + apps.length + '</div>' +
                 apps.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
         }
         if (rest.length) {
-            html += (apps.length || self.length
-                        ? '<div class="chat-users-label chat-users-label--sub">Other clients</div>' : '') +
+            html += '<div class="chat-users-label chat-users-label--sub">Online &mdash; ' + rest.length + '</div>' +
                 rest.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
@@ -707,6 +731,7 @@
     }
 
     function renderSide(convos) {
+        if (convos) state.convos = convos;   // guild-rail DM badge reads the latest list
         var rooms = q('[data-chat-rooms]');
         if (rooms) {
             var list = (state.rooms.length ? state.rooms
@@ -738,6 +763,161 @@
                 (unread ? '<span class="chat-side-dot"></span>' : '') + '</button>';
         }).join('');
         host.innerHTML = list || '<div class="chat-side-none">No conversations</div>';
+        renderGuilds();
+        renderChannels();
+        renderUserPanel();
+    }
+
+    // ── Discord-style shell: guild rail, channels, account strip ────────────
+    // CHANNELS are a client-side VIEW over the one Soulseek room: each message
+    // carries a channel slug in its envelope (see CHAT_CHANNELS / state.channel).
+    // Untagged or unknown-slug messages always fall back to #general so nothing
+    // is ever invisible — old clients and vanilla Soulseek users still land
+    // somewhere. Categories are cosmetic grouping only.
+    var CHAT_CHANNELS = [
+        { cat: 'Information', items: [
+            { slug: 'general', name: 'general' },
+        ] },
+        { cat: 'Community', items: [
+            { slug: 'jukebox', name: 'jukebox' },
+            { slug: 'requests', name: 'requests' },
+            { slug: 'releases', name: 'releases' },
+            { slug: 'off-topic', name: 'off-topic' },
+        ] },
+    ];
+    var CHAT_DEFAULT_CHANNEL = 'general';
+
+    function _chanKnown(slug) {
+        for (var i = 0; i < CHAT_CHANNELS.length; i++) {
+            for (var j = 0; j < CHAT_CHANNELS[i].items.length; j++) {
+                if (CHAT_CHANNELS[i].items[j].slug === slug) return true;
+            }
+        }
+        return false;
+    }
+
+    // The channel a message belongs to. Unknown/absent → the default, so a
+    // message can never be swallowed by a channel nobody is looking at.
+    function _msgChannel(m) {
+        var c = m && typeof m.chan === 'string' ? m.chan : '';
+        return _chanKnown(c) ? c : CHAT_DEFAULT_CHANNEL;
+    }
+
+    function _chanUnread() {
+        // Unread per channel = messages after our last-read marker for that
+        // channel, excluding our own. Cheap fold over the loaded message list.
+        var counts = {};
+        var seen = state.chanSeen || {};
+        (state.msgs || []).forEach(function (m) {
+            if (!m || m.username === state.selfName) return;
+            var c = _msgChannel(m);
+            if (c === state.channel) return;              // looking at it now
+            var ts = m.timestamp || '';
+            if (seen[c] && ts <= seen[c]) return;
+            counts[c] = (counts[c] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function renderGuilds() {
+        var host = q('[data-chat-guilds]');
+        if (!host) return;
+        var rooms = (state.rooms.length ? state.rooms
+            : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
+        var html = rooms.map(function (r) {
+            var on = state.view === 'room' && state.room === r.name;
+            var initials = String(r.name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
+            return '<button class="chat-guild' + (on ? ' chat-guild--on' : '') + '" type="button" ' +
+                'data-chat-open-room="' + attr(r.name) + '" title="' + attr(r.name) + '">' +
+                esc(initials) + '</button>';
+        }).join('');
+        // PM puck — unread dot when any conversation is waiting
+        var pmUnread = (state.convos || []).filter(function (c) {
+            return c.hasUnAcknowledgedMessages || c.unAcknowledgedMessageCount > 0;
+        }).length;
+        html += '<div class="chat-guild-sep"></div>' +
+            '<button class="chat-guild' + (state.view === 'pm' ? ' chat-guild--on' : '') + '" type="button" ' +
+                'data-chat-guild-dm title="Direct messages">✉' +
+                (pmUnread ? '<span class="chat-guild-badge">' + (pmUnread > 99 ? '99+' : pmUnread) + '</span>' : '') +
+            '</button>';
+        if (state.canManage) {
+            html += '<button class="chat-guild chat-guild--add" type="button" data-chat-browse-rooms ' +
+                'title="Browse Soulseek rooms">+</button>';
+        }
+        host.innerHTML = html;
+    }
+
+    function renderChannels() {
+        // sidebar header = the "server" (the Soulseek room we're in)
+        var nameEl = q('[data-chat-side-head-name]');
+        if (nameEl) {
+            nameEl.textContent = state.view === 'pm'
+                ? 'Direct Messages'
+                : (state.room || state.homeRoom || 'SoulSync');
+        }
+        var host = q('[data-chat-channels]');
+        if (!host) return;
+        if (state.view !== 'room') { host.innerHTML = ''; return; }
+        if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
+        var unread = _chanUnread();
+        var closed = state.chanCatClosed || {};
+        host.innerHTML = CHAT_CHANNELS.map(function (group) {
+            var isClosed = !!closed[group.cat];
+            var rows = isClosed ? '' : group.items.map(function (ch) {
+                var on = state.channel === ch.slug;
+                var n = unread[ch.slug] || 0;
+                return '<button class="chat-chan' + (on ? ' chat-chan--on' : '') +
+                    (n ? ' chat-chan--unread' : '') + '" type="button" ' +
+                    'data-chat-chan="' + attr(ch.slug) + '">' +
+                    '<span class="chat-chan-hash">#</span>' +
+                    '<span class="chat-chan-name">' + esc(ch.name) + '</span>' +
+                    (n ? '<span class="chat-chan-unread">' + (n > 99 ? '99+' : n) + '</span>' : '') +
+                '</button>';
+            }).join('');
+            return '<button class="chat-cat' + (isClosed ? ' chat-cat--closed' : '') + '" type="button" ' +
+                    'data-chat-cat="' + attr(group.cat) + '">' +
+                    '<span class="chat-cat-caret">⌄</span>' + esc(group.cat) +
+                '</button>' + rows;
+        }).join('');
+    }
+
+    function switchChannel(slug) {
+        if (!slug || !_chanKnown(slug) || slug === state.channel) return;
+        state.channel = slug;
+        try { localStorage.setItem('chat_channel', slug); } catch (e) { /* private mode */ }
+        // Mark everything currently loaded in this channel as read.
+        var newest = '';
+        (state.msgs || []).forEach(function (m) {
+            if (_msgChannel(m) === slug) {
+                var ts = String(m.timestamp || '');
+                if (ts > newest) newest = ts;
+            }
+        });
+        if (newest) state.chanSeen[slug] = newest;
+        state.lastStamp = null;      // force a repaint — the filter changed, not the data
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function renderUserPanel() {
+        var host = q('[data-chat-userpanel]');
+        if (!host) return;
+        var name = state.selfName || 'You';
+        var initials = String(name).replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+        host.innerHTML =
+            '<div class="chat-userpanel-av">' + esc(initials) + '</div>' +
+            '<div class="chat-userpanel-main">' +
+                '<div class="chat-userpanel-name">' + esc(name) + '</div>' +
+                '<div class="chat-userpanel-sub">' +
+                    (state.canSend ? 'Online' : 'Read-only') + '</div>' +
+            '</div>' +
+            (state.isAdmin
+                ? '<button class="chat-userpanel-btn" type="button" data-chat-settings-btn ' +
+                    'title="Chat settings">⚙</button>'
+                : '');
     }
 
     function renderHead() {
@@ -751,8 +931,11 @@
             ? esc(topic.t)
             : (isHome ? 'the SoulSync community room on Soulseek'
                       : 'a public Soulseek room');
+        // A stale/unknown persisted slug must never strand the user on an empty
+        // view — snap back to the default before anything renders against it.
+        if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
         head.innerHTML = state.view === 'room'
-            ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
+            ? '<span class="chat-head-title">#' + esc(state.channel) + '</span>' +
               '<span class="chat-head-sub' + (topic ? ' chat-head-sub--topic' : '') + '"' +
                   (topic ? ' title="topic set by ' + attr(topic.by) + '"' : '') + '>' + subText +
                   (state.canSend
@@ -792,7 +975,7 @@
         form.classList.toggle('chat-composer--locked', !state.canSend);
         input.disabled = !state.canSend;
         input.placeholder = state.canSend
-            ? (state.view === 'room' ? 'Message # ' + (state.room || '') + '…'
+            ? (state.view === 'room' ? 'Message #' + (state.channel || CHAT_DEFAULT_CHANNEL) + '…'
                                      : 'Message ' + (state.pmUser || '') + '…')
             : 'Read-only — chat sending is admin-only on this server';
         // Formatting only exists inside the envelope — the toolbar is a ROOM
@@ -1356,6 +1539,13 @@
             el = q('[data-chat-set-autojoin]'); if (el) el.checked = !!b.auto_join;
             el = q('[data-chat-set-membersend]'); if (el) el.checked = !!b.member_send;
             el = q('[data-chat-set-autoprove]'); if (el) el.checked = !!b.auto_prove;
+            // ping is a LOCAL preference (this browser only) — not server state
+            el = q('[data-chat-set-ping]');
+            if (el) {
+                var pOn = false;
+                try { pOn = localStorage.getItem('chat_ping') === '1'; } catch (err) { /* ignore */ }
+                el.checked = pOn;
+            }
             overlay.hidden = false;
         });
     }
@@ -1376,6 +1566,11 @@
         if (fEl && fEl.value.trim()) payload.filepost_key = fEl.value.trim();
         var xEl = q('[data-chat-set-filepost-expiry]');
         if (xEl) payload.filepost_expiry = xEl.value || '';
+        // local-only: the mention ping never leaves this browser
+        var pEl = q('[data-chat-set-ping]');
+        if (pEl) {
+            try { localStorage.setItem('chat_ping', pEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+        }
         postJSON('/api/chat/settings', payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -1602,6 +1797,51 @@
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
     }
 
+    // ── mention/reply ping (opt-in) ────────────────────────────────────────
+    // Fires only for someone ELSE @-mentioning us or replying to one of our
+    // messages. Never our own text, throttled so a burst can't machine-gun,
+    // and silent until the user turns it on (chat_ping localStorage).
+    var _lastPingAt = 0;
+
+    function _pingWorthy(m) {
+        // Armed only AFTER the first merge for a room: opening a room (and
+        // paging scrollback) replays the archive through here, and every old
+        // mention would fire a ping.
+        if (!state.pingArmed || state.loadingOlder) return false;
+        if (!m || !state.selfName) return false;
+        if (m.username === state.selfName || m.self === true || m.direction === 'Out') return false;
+        if (mentionsMe(m.message)) return true;
+        return !!(m.reply && m.reply.u && m.reply.u === state.selfName);
+    }
+
+    function _chatPing() {
+        var on = false;
+        try { on = localStorage.getItem('chat_ping') === '1'; } catch (e) { /* private mode */ }
+        if (!on) return;
+        var now = Date.now();
+        if (now - _lastPingAt < 4000) return;         // one ping per burst
+        _lastPingAt = now;
+        // Synthesized two-tone blip — no asset to ship, no autoplay policy fight
+        // (the user has already interacted with the page by the time this fires).
+        try {
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            var ctx = _chatPing._ctx || (_chatPing._ctx = new Ctx());
+            if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
+            [[880, 0], [1245, 0.09]].forEach(function (pair) {
+                var osc = ctx.createOscillator(), gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = pair[0];
+                var t0 = ctx.currentTime + pair[1];
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(t0); osc.stop(t0 + 0.18);
+            });
+        } catch (e) { /* audio unavailable — stay silent */ }
+    }
+
     function mergeMessages(incoming) {
         var byKey = {};
         state.msgs.forEach(function (m) { byKey[_msgKey(m)] = m; });
@@ -1611,6 +1851,7 @@
             var existing = byKey[k];
             if (!existing) {
                 byKey[k] = m; state.msgs.push(m); added++;
+                if (_pingWorthy(m)) _chatPing();
             } else {
                 // Reactions are server-side aggregate state that changes over a
                 // message's life. mergeMessages used to only ADD new messages,
@@ -1630,6 +1871,7 @@
                 return String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
             });
         }
+        state.pingArmed = true;   // the archive is in; from here on, pings are real
         // renderMessages skips a repaint when the newest-timestamp+count is
         // unchanged — a reaction change moves neither, so force the repaint.
         if (reactionsChanged) state.lastStamp = null;
@@ -1808,6 +2050,7 @@
         state.topicEditing = false;
         state.typing = {};
         state.typingArmedAt = Date.now() + 2000;   // archive replay isn't live typing
+        state.pingArmed = false;                   // ...and archive mentions aren't new pings
         renderTyping();
         renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
@@ -1965,7 +2208,10 @@
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
         var payload = { message: text };
-        if (state.view === 'room') payload.room = state.room || '';
+        if (state.view === 'room') {
+            payload.room = state.room || '';
+            payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;   // virtual channel tag
+        }
         var sentReply = null;
         if (state.view === 'room' && state.replyTo) {
             payload.reply = state.replyTo;
@@ -2096,6 +2342,23 @@
             if (t) { pickMention(t.getAttribute('data-chat-mention-pick')); return; }
             t = e.target.closest('[data-chat-settings-btn]');
             if (t) { openSettings(); return; }
+            // ── Discord shell: channel switch, category collapse, DM puck ──
+            t = e.target.closest('[data-chat-chan]');
+            if (t) { switchChannel(t.getAttribute('data-chat-chan')); return; }
+            t = e.target.closest('[data-chat-cat]');
+            if (t) {
+                var cat = t.getAttribute('data-chat-cat');
+                state.chanCatClosed[cat] = !state.chanCatClosed[cat];
+                renderChannels();
+                return;
+            }
+            t = e.target.closest('[data-chat-guild-dm]');
+            if (t) {
+                // Jump to the most recent conversation; otherwise just surface the list.
+                var first = (state.convos || [])[0];
+                if (first && (first.username || first.name)) openPm(first.username || first.name);
+                return;
+            }
             t = e.target.closest('[data-chat-settings-save]');
             if (t) { saveSettings(); return; }
             t = e.target.closest('[data-chat-settings-cancel]');

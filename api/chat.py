@@ -181,6 +181,12 @@ def _unwrap_room_messages(messages):
                     continue
             m["message"] = dec["t"]
             m["rich"] = True
+            # Virtual channel tag (Discord-style channels over the one room).
+            # Unknown/absent is fine — the client falls back to #general so a
+            # message is never invisible.
+            _c = dec.get("c")
+            if isinstance(_c, str) and _c.strip():
+                m["chan"] = _c.strip()[:24]
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
@@ -1081,6 +1087,13 @@ def create_blueprint() -> Blueprint:
         if fmeta:
             extra = dict(extra or {})
             extra["f"] = fmeta
+        # Virtual channel tag. Slug-validated here so a hostile client can't
+        # stuff arbitrary text into the envelope; the default channel is left
+        # untagged so old clients (and vanilla Soulseek) read it as #general.
+        chan = str(body.get("chan") or "").strip().lower()[:24]
+        if chan and chan != "general" and _re.fullmatch(r"[a-z0-9][a-z0-9-]*", chan):
+            extra = dict(extra or {})
+            extra["c"] = chan
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

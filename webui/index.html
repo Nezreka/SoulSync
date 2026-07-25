@@ -10084,11 +10084,25 @@
                         </div>
                     </div>
                     <div class="chat-shell">
+                        <!-- Discord-style guild rail: every joined Soulseek room is an
+                             "server" icon; PMs get their own puck. Purely a nav view over
+                             the rooms/convos the sidebar already lists. -->
+                        <nav class="chat-guilds" data-chat-guilds></nav>
                         <aside class="chat-side">
-                            <div class="chat-side-label">Rooms</div>
-                            <div class="chat-side-list" data-chat-rooms></div>
-                            <div class="chat-side-label">Messages</div>
-                            <div class="chat-side-list" data-chat-convos></div>
+                            <div class="chat-side-head" data-chat-side-head>
+                                <span class="chat-side-head-name" data-chat-side-head-name>SoulSync</span>
+                                <span class="chat-side-head-caret">⌄</span>
+                            </div>
+                            <div class="chat-side-scroll">
+                                <!-- virtual channels (client-side tags over the one room) -->
+                                <div class="chat-side-list chat-chanlist" data-chat-channels></div>
+                                <div class="chat-side-label">Rooms</div>
+                                <div class="chat-side-list" data-chat-rooms></div>
+                                <div class="chat-side-label">Direct Messages</div>
+                                <div class="chat-side-list" data-chat-convos></div>
+                            </div>
+                            <!-- bottom-left user panel (Discord's account strip) -->
+                            <div class="chat-userpanel" data-chat-userpanel></div>
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
@@ -10181,6 +10195,8 @@
                                         Auto-join the community room</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
                                         Let non-admin profiles send messages</label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-ping>
+                                        Play a sound when someone mentions or replies to me</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
                                         Auto-answer "prove you're human" download challenges</label>
                                     <div class="chat-settings-actions">

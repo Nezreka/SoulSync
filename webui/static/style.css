@@ -71891,10 +71891,113 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
    CHAT — Soulseek rooms + private messages (one page, both sidebars)
    ═══════════════════════════════════════════════════════════════════════════ */
 .chat-page-container { display: flex; flex-direction: column; height: 100%; }
+/* Discord-style 4-column shell: guild rail | channels | messages | members.
+   The rail + sidebar are flush (no gap) and share one panel surface, the way
+   Discord reads; the message column and member list keep their own cards. */
 .chat-shell {
-    display: grid; grid-template-columns: 220px 1fr 250px; gap: 16px;
+    display: grid; grid-template-columns: 72px 240px 1fr 240px; gap: 0 12px;
     flex: 1; min-height: 0; height: calc(100vh - 210px);
 }
+
+/* ── guild rail (joined rooms as pucks) ── */
+.chat-guilds {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 10px 0; overflow-y: auto; min-height: 0;
+    background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px; scrollbar-width: none;
+}
+.chat-guilds::-webkit-scrollbar { display: none; }
+.chat-guild {
+    position: relative; width: 46px; height: 46px; flex: 0 0 auto;
+    border: none; cursor: pointer; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700; letter-spacing: .3px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 16px; transition: border-radius .16s ease, background .16s ease;
+}
+.chat-guild:hover { border-radius: 14px; background: rgba(29,185,84,0.5); }
+.chat-guild--on { border-radius: 14px; background: rgba(29,185,84,0.72); }
+/* the white pill Discord slides in on the active/hovered server */
+.chat-guild::before {
+    content: ''; position: absolute; left: -11px; top: 50%; transform: translateY(-50%);
+    width: 4px; height: 0; border-radius: 0 4px 4px 0; background: #fff;
+    transition: height .16s ease;
+}
+.chat-guild:hover::before { height: 20px; }
+.chat-guild--on::before { height: 28px; }
+.chat-guild-badge {
+    position: absolute; right: -2px; bottom: -2px; min-width: 18px; height: 18px;
+    padding: 0 5px; border-radius: 9px; background: #ef4444; color: #fff;
+    font-size: 11px; font-weight: 800; line-height: 18px; text-align: center;
+    border: 2px solid #111114;
+}
+.chat-guild-sep { width: 32px; height: 2px; border-radius: 1px; background: rgba(255,255,255,0.1); flex: 0 0 auto; }
+.chat-guild--add { background: rgba(255,255,255,0.05); color: #1db954; font-size: 22px; font-weight: 400; }
+.chat-guild--add:hover { background: rgba(29,185,84,0.22); }
+
+/* ── channel sidebar ── */
+.chat-side { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.chat-side-head {
+    display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
+    padding: 14px 14px; font-size: 15px; font-weight: 800; color: #fff;
+    border-bottom: 1px solid rgba(0,0,0,0.4); cursor: default;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04);
+}
+.chat-side-head-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-side-head-caret { color: rgba(255,255,255,0.5); font-size: 13px; }
+.chat-side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 8px; }
+
+/* channel rows */
+.chat-chan {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 6px 8px; border-radius: 6px; border: none; background: none;
+    color: rgba(255,255,255,0.45); font-size: 14px; font-weight: 600;
+    cursor: pointer; text-align: left; margin-bottom: 1px;
+}
+.chat-chan:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.85); }
+.chat-chan--on { background: rgba(255,255,255,0.09); color: #fff; }
+.chat-chan-hash { color: rgba(255,255,255,0.3); font-size: 17px; font-weight: 500; }
+.chat-chan--on .chat-chan-hash { color: rgba(255,255,255,0.55); }
+.chat-chan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-chan-unread {
+    min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+    background: #ef4444; color: #fff; font-size: 11px; font-weight: 800;
+    line-height: 17px; text-align: center;
+}
+.chat-chan--unread { color: #fff; }
+.chat-cat {
+    display: flex; align-items: center; gap: 4px; width: 100%;
+    padding: 14px 4px 4px; border: none; background: none; cursor: pointer;
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px;
+    color: rgba(255,255,255,0.4); text-align: left;
+}
+.chat-cat:hover { color: rgba(255,255,255,0.75); }
+.chat-cat-caret { transition: transform .15s ease; display: inline-block; }
+.chat-cat--closed .chat-cat-caret { transform: rotate(-90deg); }
+
+/* bottom-left account strip */
+.chat-userpanel {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; background: rgba(0,0,0,0.32);
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+.chat-userpanel-av {
+    width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
+    background: rgba(29,185,84,0.28); color: #1db954;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800;
+}
+.chat-userpanel-main { flex: 1; min-width: 0; }
+.chat-userpanel-name {
+    font-size: 13px; font-weight: 700; color: #fff;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-userpanel-sub { font-size: 11px; color: rgba(255,255,255,0.45); }
+.chat-userpanel-btn {
+    width: 28px; height: 28px; border: none; background: none; cursor: pointer;
+    border-radius: 6px; color: rgba(255,255,255,0.55); font-size: 14px;
+}
+.chat-userpanel-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .chat-rail { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
 .chat-rail .chat-users { flex: 1 1 auto; }
 .chat-side, .chat-users {
@@ -72090,11 +72193,38 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-user:hover { background: rgba(255,255,255,0.07); color: #fff; }
 
+/* Discord-style member row: avatar w/ presence dot + name over an activity line */
+.chat-user-av {
+    position: relative; width: 30px; height: 30px; flex: 0 0 auto;
+    border-radius: 50%; background: rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.75);
+}
+.chat-user--self .chat-user-av { background: rgba(29,185,84,0.28); color: #1db954; }
+.chat-user-av .chat-user-dot {
+    position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px;
+    margin: 0; border-radius: 50%; background: #3ba55d; border: 2.5px solid #16161a;
+}
+.chat-user-av .chat-user-dot--tuned { background: rgb(var(--accent-light-rgb)); }
+.chat-user-main { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.chat-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chat-user-act {
+    font-size: 11px; color: rgba(255,255,255,0.4);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 @media (max-width: 900px) {
+    /* stack: the guild rail + member list fold away, channels scroll horizontally */
     .chat-shell { grid-template-columns: 1fr; height: calc(100vh - 190px); }
-    .chat-side { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; }
+    .chat-guilds { display: none; }
+    .chat-side { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; flex-direction: row; }
+    .chat-side-head, .chat-userpanel { display: none; }
+    .chat-side-scroll { display: flex; gap: 6px; padding: 6px; overflow-x: auto; }
     .chat-side-label { display: none; }
     .chat-side-list { display: flex; gap: 6px; }
+    .chat-chanlist { display: flex; gap: 6px; }
+    .chat-cat { display: none; }
+    .chat-chan { width: auto; white-space: nowrap; }
     .chat-side-item { width: auto; white-space: nowrap; }
     .chat-rail { display: none; }
 }
