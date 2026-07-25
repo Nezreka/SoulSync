@@ -2837,12 +2837,15 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-lookback-days').value = config.lookback_days != null ? String(config.lookback_days) : '';
         const qualityProfileSelect = document.getElementById('config-quality-profile');
         if (qualityProfileSelect) {
-            qualityProfileSelect.innerHTML = (quality_profiles || []).map(profile =>
+            // Explicit "Use default" so an artist with no saved profile (or one whose
+            // saved profile was since deleted) never silently defaults to the first
+            // listed profile on save. The save path maps an empty value back to null.
+            qualityProfileSelect.innerHTML = '<option value="">Use default</option>' + (quality_profiles || []).map(profile =>
                 `<option value="${profile.id}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (Default)' : ''}</option>`
             ).join('');
-            if (config.quality_profile_id != null) {
-                qualityProfileSelect.value = String(config.quality_profile_id);
-            }
+            qualityProfileSelect.value = config.quality_profile_id != null ? String(config.quality_profile_id) : '';
+            // Stored profile no longer exists (deleted) → fall back to "Use default", not blank.
+            if (qualityProfileSelect.selectedIndex < 0) qualityProfileSelect.value = '';
         }
 
         // Populate metadata source selector
