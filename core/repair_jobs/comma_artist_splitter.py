@@ -1,17 +1,17 @@
 """Comma Artist Splitter Job — finds "dummy" artists whose name is really
-several artists joined by commas ("Camellia, Toby Fox") and splits them.
+several artists joined by separators ("Camellia, Toby Fox" or "Artist & Guest").
 
-Multi-artist tracks tagged with a single comma-joined artist string make the
+Multi-artist tracks tagged with a single separator-joined artist string make the
 media server mint a fake artist per unique string (art-less, wrong scrobbles,
 clutters the artist grid). The scan flags an artist only when BOTH checks agree
 the string is not a real act:
 
   1. The full string is looked up on the metadata APIs (Deezer / iTunes /
-     Spotify). An exact match means it's a genuinely comma-named artist
+     Spotify). An exact match means it's a genuinely separator-named artist
      ("Tyler, The Creator") — skipped. A built-in whitelist of famous
      comma-named acts short-circuits the lookup. If NO API could be reached
      the artist is skipped entirely (fail-safe: never flag unverified).
-  2. Every comma-separated part must itself resolve to a known artist —
+  2. Every separated part must itself resolve to a known artist —
      in the user's own library first, else an exact API match. One
      unresolvable part kills the finding.
 
@@ -20,8 +20,11 @@ per-artist list is written to the multi-value Artists tag (Picard convention,
 same frames as issue #587), and an album-artist equal to the combined string
 becomes the primary (first) artist. The server's next scan then credits each
 artist individually and the dummy dissolves. Report-only (auto_fix = False).
+
+Supported separators: comma (,), semicolon (;), ampersand (&), forward slash (/).
 """
 
+import re
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -58,17 +61,18 @@ _API_SOURCES = ('deezer', 'itunes', 'spotify')
 
 
 def normalize_artist_name(name) -> str:
-    """Casefold + whitespace-collapse for exact-name comparison. Comma spacing
+    """Casefold + whitespace-collapse for exact-name comparison. Separator spacing
     is normalized too ("Tyler,The Creator" == "Tyler, The Creator") so a
-    missing space after the comma can't dodge the whitelist / API match."""
-    import re
-    text = re.sub(r'\s*,\s*', ', ', str(name or ''))
+    missing space after the separator can't dodge the whitelist / API match."""
+    text = re.sub(r'\s*[,;&/]\s*', ', ', str(name or ''))
     return ' '.join(text.casefold().split())
 
 
-def split_comma_parts(name: str) -> list:
-    """Split a comma-joined artist string into clean parts."""
-    return [p.strip() for p in str(name or '').split(',') if p.strip()]
+def split_artist_parts(name: str) -> list:
+    """Split a separator-joined artist string into clean parts.
+    Supports: comma (,), semicolon (;), ampersand (&), forward slash (/)."""
+    parts = re.split(r'[,;&/]+', str(name or ''))
+    return [p.strip() for p in parts if p.strip()]
 
 
 @register_job
@@ -107,7 +111,10 @@ class CommaArtistSplitterJob(RepairJob):
                     SELECT COUNT(DISTINCT ar.id)
                     FROM artists ar
                     JOIN tracks t ON t.artist_id = ar.id
-                    WHERE ar.name LIKE '%,%'
+                    WHERE (ar.name LIKE '%,%'
+                       OR ar.name LIKE '%;%'
+                       OR ar.name LIKE '%&%'
+                       OR ar.name LIKE '%/%')
                       AND t.file_path IS NOT NULL AND t.file_path != ''
                 """)
                 return cursor.fetchone()[0]
@@ -130,7 +137,10 @@ class CommaArtistSplitterJob(RepairJob):
                 SELECT ar.id, ar.name, ar.thumb_url, COUNT(t.id) AS n
                 FROM artists ar
                 JOIN tracks t ON t.artist_id = ar.id
-                WHERE ar.name LIKE '%,%'
+                WHERE (ar.name LIKE '%,%'
+                   OR ar.name LIKE '%;%'
+                   OR ar.name LIKE '%&%'
+                   OR ar.name LIKE '%/%')
                   AND t.file_path IS NOT NULL AND t.file_path != ''
                 GROUP BY ar.id, ar.name, ar.thumb_url
                 ORDER BY n DESC
@@ -138,7 +148,7 @@ class CommaArtistSplitterJob(RepairJob):
             """)
             rows = cursor.fetchall()
         except Exception as e:
-            logger.error("Error fetching comma artists: %s", e, exc_info=True)
+            logger.error("Error fetching separator-joined artists: %s", e, exc_info=True)
             result.errors += 1
             return result
         finally:
@@ -150,21 +160,21 @@ class CommaArtistSplitterJob(RepairJob):
             rows = rows[:SCAN_ARTIST_LIMIT]
             if context.report_progress:
                 context.report_progress(
-                    log_line=f'More than {SCAN_ARTIST_LIMIT} comma artists — checking the '
+                    log_line=f'More than {SCAN_ARTIST_LIMIT} separator-joined artists — checking the '
                              f'{SCAN_ARTIST_LIMIT} with the most tracks this run; the rest next run.',
                     log_type='warning')
 
         total = len(rows)
         if total == 0:
             if context.report_progress:
-                context.report_progress(phase='No comma-joined artist names found',
+                context.report_progress(phase='No separator-joined artist names found',
                                         log_line='Nothing to check', log_type='success')
             return result
 
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
-            context.report_progress(phase=f'Verifying {total} comma artist(s)...', total=total)
+            context.report_progress(phase=f'Verifying {total} separator-joined artist(s)...', total=total)
 
         # Per-run memo of API lookups: (source, normalized query) → set of
         # normalized result names, or None for "source unreachable".
@@ -177,7 +187,7 @@ class CommaArtistSplitterJob(RepairJob):
                 return result
 
             result.scanned += 1
-            parts = split_comma_parts(name)
+            parts = split_artist_parts(name)
             if len(parts) < 2:
                 continue
 
@@ -259,7 +269,7 @@ class CommaArtistSplitterJob(RepairJob):
                     else:
                         result.findings_skipped_dedup += 1
                 except Exception as e:
-                    logger.debug("Error creating comma-artist finding for %s: %s", artist_id, e)
+                    logger.debug("Error creating separator-artist finding for %s: %s", artist_id, e)
                     result.errors += 1
 
             # Rate-limit courtesy between API-heavy artists.
