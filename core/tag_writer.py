@@ -202,6 +202,24 @@ def write_verification_status(file_path: str, status: str) -> bool:
         return False
 
 
+def genre_write_value_is_subset_of_existing(file_genre_str: Any, db_genre_str: Any) -> bool:
+    """True when every genre token in ``db_genre_str`` already appears in
+    ``file_genre_str``'s (comma/semicolon-split) list — writing the DB
+    value would only narrow a richer existing tag, not add information
+    (prevents a generic parent genre like "Pop" from overwriting a rich
+    file genre list). Shared by ``build_tag_diff`` (the preview) and
+    ``write_tags_to_file`` (the actual write) so the two never disagree
+    about whether a genre write is a real change."""
+    import re
+    if not db_genre_str or not file_genre_str:
+        return False
+    file_genres = [g.strip().lower() for g in re.split(r'[,;]+', str(file_genre_str)) if g.strip()]
+    db_genres = [g.strip().lower() for g in re.split(r'[,;]+', str(db_genre_str)) if g.strip()]
+    if not db_genres:
+        return False
+    return all(g in file_genres for g in db_genres)
+
+
 def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
     """#800 guard: never replace a real file value with a placeholder.
 
@@ -215,6 +233,29 @@ def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
     if is_placeholder_meta(db_val) and not is_placeholder_meta(file_val):
         return None
     return db_val
+
+
+def _normalize_date_str(s: str) -> str:
+    """Normalize date/time strings (strip 'T', 'Z', seconds, offsets, and a
+    no-information midnight time-of-day) to compare values.
+
+    A bare ``YYYY-MM-DD`` and the same date written as a full ISO timestamp
+    (``YYYY-MM-DDT00:00:00Z``, the common shape from taggers that always
+    emit a time component) must normalize to the SAME value — the time
+    portion carries no real information for a music release date."""
+    import re
+    if not s:
+        return ''
+    s = s.replace('T', ' ').replace('Z', '').split('+')[0].strip()
+    match = re.match(
+        r'^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?(?::\d{2})?(?:\.\d+)?$', s,
+    )
+    if not match:
+        return s
+    date_part, time_part = match.group(1), match.group(2)
+    if time_part and time_part != '00:00':
+        return f'{date_part} {time_part}'
+    return date_part
 
 
 def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -274,6 +315,20 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # Only mark as changed if DB has a value AND it differs from file
         # (writer skips fields where DB value is empty, so don't show them as diffs)
         changed = bool(db_str) and file_str != db_str
+
+        if changed and db_key == 'year':
+            # Check if normalized date/time matches to avoid false format-only mismatches
+            if _normalize_date_str(file_str) == _normalize_date_str(db_str):
+                changed = False
+
+        if changed and db_key == 'genres' and db_val:
+            # If the file genres contain the database genres, do not flag as
+            # changed (prevents overwriting a rich genre list with a generic
+            # parent genre like Pop). write_tags_to_file applies the SAME
+            # check before writing, so this preview always matches the
+            # actual write outcome.
+            if genre_write_value_is_subset_of_existing(file_str, db_str):
+                changed = False
 
         # #800 — if the change would replace a real file value with a
         # placeholder (Various Artists / [Unknown Album] / …), hold it back:
@@ -410,6 +465,19 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             elif isinstance(genres, str):
                 genre_str = genres
 
+        # Same guard build_tag_diff's preview applies: don't narrow a
+        # richer existing genre tag down to a DB value that's a pure
+        # subset of it (prevents a generic parent genre like "Pop" from
+        # clobbering a real multi-genre tag). Without this, a batch write
+        # (gated on build_tag_diff's verdict) would skip the file, while a
+        # single-track write — which calls this function directly — would
+        # still overwrite it, silently disagreeing with what the preview
+        # told the user.
+        if genre_str and not _current.get('error'):
+            existing_genre = _current.get('genre')
+            if genre_write_value_is_subset_of_existing(existing_genre, genre_str):
+                genre_str = existing_genre
+
         # Multi-value artist support — issue #587. Caller can pass
         # `artists_list` (per-track list of contributor names) and the
         # writer respects the user's `metadata_enhancement.tags.write_multi_artist`
@@ -527,8 +595,18 @@ def _date_to_write(existing: Optional[str], year) -> str:
     year_str = str(year)
     if existing:
         existing = str(existing).strip()
-        if len(existing) > 4 and existing[:4] == year_str:
-            return existing
+        if len(existing) > 4 and len(year_str) >= 4 and existing[:4] == year_str[:4]:
+            if _normalize_date_str(existing) == _normalize_date_str(year_str):
+                return existing
+            # Only keep the (longer) existing value when the new value is
+            # itself just a bare year — genuinely less specific, so it
+            # can't express a real month/day correction. Any longer new
+            # value (e.g. a full date) is a genuine correction and must
+            # win even if `existing` happens to be an even longer string
+            # (a stale full timestamp is not "more specific" than a
+            # shorter but correct date).
+            if len(year_str) <= 4:
+                return existing
     return year_str
 
 

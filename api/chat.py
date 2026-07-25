@@ -19,6 +19,8 @@ when actually needed.
 
 from __future__ import annotations
 
+import re as _re
+
 from flask import Blueprint, g, jsonify, request
 
 from utils.logging_config import get_logger
@@ -49,19 +51,22 @@ def _self_username(client) -> str:
 # web_server, same pattern as core/enrichment/api.py.
 _client_getter = None      # () -> SoulseekClient | None (configured or None)
 _run_async = None          # coroutine -> result (the shared slskd event loop)
+_youtube_search = None     # (query, max_results) -> [YouTubeSearchResult] | None
 _config_get = None         # (key, default) -> value
 _config_set = None         # (key, value) -> None
 _db_getter = None          # () -> MusicDatabase (the chat archive lives there)
 
 
 def configure(*, client_getter, run_async, config_get, config_set=None,
-              db_getter=None) -> None:
-    global _client_getter, _run_async, _config_get, _config_set, _db_getter
+              db_getter=None, youtube_search=None) -> None:
+    global _client_getter, _run_async, _config_get, _config_set, _db_getter, \
+        _youtube_search
     _client_getter = client_getter
     _run_async = run_async
     _config_get = config_get
     _config_set = config_set
     _db_getter = db_getter
+    _youtube_search = youtube_search
 
 
 def _db():
@@ -144,10 +149,13 @@ def _unwrap_room_messages(messages):
     their text swapped for the payload + rich=True; reply refs are validated
     and attached. REACTION carriers (empty-text envelopes with 're') are
     pulled OUT of the visible list into a {target_key: {emoji: [users]}} map.
-    Returns (messages, reactions_map)."""
+    PROTOCOL carriers (envelopes with 'p' — jukebox votes, beacons, pins) are
+    pulled out into an event list: machine coordination, never rendered,
+    never archived. Returns (messages, reactions_map, protocol_events)."""
     from core import chat_codec
     out = []
     reactions: dict = {}
+    protocol: list = []
     for m in (messages or []):
         m = dict(m)
         dec = chat_codec.decode(m.get("message"))
@@ -160,13 +168,27 @@ def _unwrap_room_messages(messages):
                 if u and u not in users:
                     users.append(u)
                 continue                     # carriers never render as messages
+            proto = chat_codec.protocol_of(dec)
+            if proto:
+                protocol.append({"username": str(m.get("username") or ""),
+                                 "timestamp": m.get("timestamp"),
+                                 "p": proto})
+                # PURE carriers (empty text) vanish like reaction carriers.
+                # A message with BOTH text and 'p' (piggybacked state, e.g.
+                # now-playing) must still render — swallowing it would let
+                # any client vanish its own text from SoulSync views.
+                if not dec.get("t"):
+                    continue
             m["message"] = dec["t"]
             m["rich"] = True
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
+            f = chat_codec.file_of(dec)
+            if f:
+                m["file"] = f
         out.append(m)
-    return out, reactions
+    return out, reactions, protocol
 
 
 def _attach_reactions(messages, reactions) -> list:
@@ -192,6 +214,125 @@ def _gif_fetch(url: str, params: dict) -> dict:
     return r.json()
 
 
+def _resolve_track_path(db, track_id):
+    """A library track's on-disk path. The DB stores the path as the MEDIA
+    SERVER sees it (e.g. Plex's ``/mnt/musicBackup/...``), which the SoulSync
+    process usually can't open directly — so we hand it to the shared library
+    resolver, the same one the repair/import flows use. It maps the stored
+    path onto SoulSync's actual mounts via ``library.music_paths`` +
+    transfer/download roots (suffix-matching). None when unreachable."""
+    conn = None
+    try:
+        conn = db._get_connection()
+        row = conn.execute("SELECT file_path FROM tracks WHERE id = ?",
+                           (str(track_id),)).fetchone()
+    except Exception:
+        return None
+    finally:
+        if conn:
+            conn.close()
+    fp = row["file_path"] if row else None
+    if not fp:
+        return None
+    try:
+        from config.settings import config_manager
+        from core.library.path_resolver import resolve_library_file_path
+        return resolve_library_file_path(str(fp), config_manager=config_manager)
+    except Exception:
+        logger.debug("chat: library path resolve failed", exc_info=True)
+        return None
+
+
+def _filepost_upload(api_key, name, stream, expiry=None):
+    """One seam for the filepost.dev HTTP call (monkeypatched in tests)."""
+    import requests
+    data = {}
+    if expiry:
+        data["expires_in"] = expiry
+    r = requests.post("https://filepost.dev/v1/upload",
+                      headers={"X-API-Key": api_key},
+                      files={"file": (name, stream)},
+                      data=data, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+
+_AUDIO_EXTS = (".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav",
+               ".wma", ".alac", ".aiff", ".ape")
+
+
+def _is_safe_filepost_url(url: str) -> bool:
+    """SSRF guard: only https links on filepost.dev (or a subdomain) may be
+    fetched server-side. Everything else is refused before any network call."""
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(str(url or ""))
+        host = (p.hostname or "").lower()
+        return p.scheme == "https" and (host == "filepost.dev" or host.endswith(".filepost.dev"))
+    except Exception:
+        return False
+
+
+def _fetch_url_to_file(url, dest_path, max_bytes):
+    """One seam for the file fetch (monkeypatched in tests). Streams the URL
+    to a hidden temp file next to dest, enforcing the byte cap mid-stream, then
+    atomically renames into place — a partial download is never left where the
+    auto-importer would pick it up. Raises on any failure / oversize."""
+    import os as _os
+    import requests
+    tmp = dest_path + ".part"
+    got = 0
+    with requests.get(url, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(tmp, "wb") as fh:
+            for chunk in r.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                got += len(chunk)
+                if got > max_bytes:
+                    fh.close()
+                    _os.remove(tmp)
+                    raise ValueError("file exceeds the size cap")
+                fh.write(chunk)
+    _os.replace(tmp, dest_path)
+    return got
+
+
+_YT_ID_RE = _re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YT_URL_RES = (
+    _re.compile(r"(?:youtube\.com/watch\?(?:[^#\s]*&)?v=)([A-Za-z0-9_-]{11})"),
+    _re.compile(r"(?:youtu\.be/)([A-Za-z0-9_-]{11})"),
+    _re.compile(r"(?:youtube\.com/(?:shorts|embed|live)/)([A-Za-z0-9_-]{11})"),
+)
+
+
+def _parse_youtube_id(q: str):
+    """Extract an 11-char video id from a URL or a bare id; None otherwise."""
+    q = (q or "").strip()
+    if _YT_ID_RE.match(q):
+        return q
+    for rx in _YT_URL_RES:
+        m = rx.search(q)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _oembed_fetch(video_id):
+    """One seam for the keyless YouTube oEmbed lookup (monkeypatched in tests).
+
+    Returns {"title", "author_name"} or raises — never called with an
+    unvalidated id (the caller regex-gates it first)."""
+    import requests
+    r = requests.get(
+        "https://www.youtube.com/oembed",
+        params={"url": f"https://www.youtube.com/watch?v={video_id}",
+                "format": "json"},
+        timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
@@ -213,6 +354,8 @@ def create_blueprint() -> Blueprint:
             "auto_join": bool(_cfg("soulseek.chat_auto_join", True)),
             "auto_prove": bool(_cfg("soulseek.chat_auto_prove", True)),
             "giphy_key_set": bool(_cfg("soulseek.chat_giphy_key", "")),
+            "filepost_key_set": bool(_cfg("soulseek.chat_filepost_key", "")),
+            "filepost_expiry": str(_cfg("soulseek.chat_filepost_expiry", "") or ""),
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
@@ -238,6 +381,12 @@ def create_blueprint() -> Blueprint:
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
+        if "filepost_key" in body:
+            _config_set("soulseek.chat_filepost_key", str(body.get("filepost_key") or "").strip())
+        if "filepost_expiry" in body:
+            exp = str(body.get("filepost_expiry") or "").strip()
+            if exp in ("", "24h", "7d", "30d"):
+                _config_set("soulseek.chat_filepost_expiry", exp)
         # Renaming the room: walk slskd out of the old one, best-effort —
         # otherwise the account sits in both forever. Same for turning
         # auto-join OFF: an opt-out that leaves you sitting in the room until
@@ -315,7 +464,29 @@ def create_blueprint() -> Blueprint:
                                if isinstance(v, (str, int, float, bool)) and k != "picture"}
         except Exception:
             logger.debug("chat: user info failed", exc_info=True)
+        # OUR history with this peer — the card no other Soulseek client has:
+        # download count, success rate, last pull, bytes moved. Plus the local
+        # private note. Both best-effort; the card renders without them.
+        try:
+            db = _db()
+            if db is not None:
+                out["history"] = db.get_user_download_stats(username)
+                out["note"] = db.get_chat_user_note(username)
+        except Exception:
+            logger.debug("chat: user history/note failed", exc_info=True)
         return jsonify(out)
+
+    @bp.route("/api/chat/user/<path:username>/note", methods=["POST"])
+    def chat_user_note_set(username):
+        """Save the local, private note for a user ('' clears it)."""
+        db = _db()
+        if db is None:
+            return jsonify({"error": "database unavailable"}), 503
+        payload = request.get_json(silent=True) or {}
+        note = str(payload.get("note") or "")[:2000]
+        if not db.set_chat_user_note(username, note):
+            return jsonify({"error": "could not save note"}), 500
+        return jsonify({"ok": True, "note": note.strip()})
 
     @bp.route("/api/chat/user/<path:username>/shares", methods=["GET"])
     def chat_user_shares(username):
@@ -331,7 +502,13 @@ def create_blueprint() -> Blueprint:
             logger.exception("chat: browse failed for %r", username)
             return jsonify({"error": str(e)}), 502
         if dirs is None:
-            return jsonify({"error": "%s is offline or not sharing right now" % username}), 502
+            # Not necessarily "offline": most browse failures are slskd being
+            # unable to open a direct/indirect peer connection (NAT/firewall).
+            # Retries often succeed once the route is warmed up.
+            return jsonify({"error": "Couldn't connect to %s — they may be "
+                            "offline, or their client couldn't accept a "
+                            "connection. Trying again often works." % username,
+                            "retryable": True}), 502
         return jsonify({"username": username, "directories": dirs})
 
     @bp.route("/api/chat/user/<path:username>/shares/files", methods=["GET"])
@@ -424,6 +601,179 @@ def create_blueprint() -> Blueprint:
             if full:
                 gifs.append({"url": full, "preview": tiny})
         return jsonify({"gifs": gifs})
+
+    @bp.route("/api/chat/files/library-search", methods=["GET"])
+    def chat_files_library_search():
+        """Pick-a-track-from-your-library search for the share flow: title or
+        artist match, only tracks with a stored file path, 20 max."""
+        db = _db()
+        if db is None:
+            return jsonify({"tracks": []})
+        query = str(request.args.get("q") or "").strip()
+        if len(query) < 2:
+            return jsonify({"tracks": []})
+        conn = None
+        try:
+            conn = db._get_connection()
+            like = "%" + query.replace("%", "\\%") + "%"
+            rows = conn.execute(
+                """SELECT t.id, t.title, t.file_path, t.file_size,
+                          COALESCE(t.track_artist, ar.name, '') AS artist,
+                          COALESCE(al.title, '') AS album
+                   FROM tracks t
+                   LEFT JOIN artists ar ON ar.id = t.artist_id
+                   LEFT JOIN albums al ON al.id = t.album_id
+                   WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                     AND (t.title LIKE ? OR ar.name LIKE ? OR t.track_artist LIKE ?)
+                   ORDER BY t.title LIMIT 20""",
+                (like, like, like)).fetchall()
+            return jsonify({"tracks": [
+                {"id": r["id"], "title": r["title"], "artist": r["artist"],
+                 "album": r["album"], "size": r["file_size"]}
+                for r in rows]})
+        except Exception as e:
+            logger.debug("chat: library search failed: %s", e)
+            return jsonify({"tracks": []})
+        finally:
+            if conn:
+                conn.close()
+
+    @bp.route("/api/chat/files/upload", methods=["POST"])
+    def chat_files_upload():
+        """Upload to filepost.dev and hand back the CDN link + metadata.
+
+        Two sources: a browser file (multipart 'file') or a LIBRARY track
+        (json {track_id} — the file path resolves server-side, so sharing a
+        track is search → click, no filesystem browsing). Requires the
+        user's filepost API key (Settings → chat cog); size-capped at 50MB
+        (filepost free tier). Same gate as talking — this SENDS content."""
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+        try:
+            api_key = str(_config_get("soulseek.chat_filepost_key", "") or "").strip()
+        except Exception:
+            api_key = ""
+        if not api_key:
+            return jsonify({"error": "No filepost.dev API key configured "
+                                     "(chat settings cog)"}), 503
+
+        max_bytes = 50 * 1024 * 1024
+        name = None
+        stream = None
+        size = None
+        if "file" in request.files:
+            # REVIEW CATCH: the cap must hold server-side for browser uploads
+            # too — content_length covers the whole multipart body (slightly
+            # over the file size, never under), so this rejects before any
+            # bytes stream to filepost or hang the worker.
+            if (request.content_length or 0) > max_bytes + 1024 * 1024:
+                return jsonify({"error": "File is too big — filepost.dev caps "
+                                         "uploads at 50 MB"}), 413
+            fs = request.files["file"]
+            name = str(fs.filename or "file")[:200]
+            stream = fs.stream
+        else:
+            body = request.get_json(silent=True) or {}
+            track_id = body.get("track_id")
+            if not track_id:
+                return jsonify({"error": "No file or track_id given"}), 400
+            db = _db()
+            path = _resolve_track_path(db, track_id) if db is not None else None
+            if not path:
+                return jsonify({"error": "Can't reach that track's file — it's "
+                                         "stored at your media server's path. Add "
+                                         "where SoulSync sees your music under "
+                                         "Settings → Library → Music Paths."}), 404
+            import os as _os
+            size = _os.path.getsize(path)
+            if size > max_bytes:
+                return jsonify({"error": "File is %.0f MB — filepost.dev caps "
+                                         "uploads at 50 MB" % (size / 1048576)}), 413
+            name = _os.path.basename(path)
+            stream = open(path, "rb")
+
+        try:
+            expiry = str(_config_get("soulseek.chat_filepost_expiry", "") or "").strip()
+        except Exception:
+            expiry = ""
+        try:
+            result = _filepost_upload(api_key, name, stream, expiry or None)
+        except Exception as e:
+            logger.exception("chat: filepost upload failed")
+            return jsonify({"error": "Upload failed: %s" % e}), 502
+        finally:
+            try:
+                if stream is not None and hasattr(stream, "close"):
+                    stream.close()
+            except Exception:
+                logger.debug("chat: upload stream close failed", exc_info=True)
+        url = None
+        if isinstance(result, dict):
+            url = result.get("url") or result.get("cdn_url") or result.get("link")
+            if not url and isinstance(result.get("file"), dict):
+                url = result["file"].get("url")
+        if not url:
+            return jsonify({"error": "filepost.dev returned no URL"}), 502
+        import mimetypes as _mt
+        mime = _mt.guess_type(name)[0] or ""
+        return jsonify({"ok": True, "url": url, "name": name,
+                        "size": size, "mime": mime})
+
+    @bp.route("/api/chat/files/import", methods=["POST"])
+    def chat_files_import():
+        """Save a shared audio file into YOUR library: fetch the filepost link
+        into the auto-import staging folder, where the import pipeline picks it
+        up (automatically if Auto-Import is on, else it's waiting on the Import
+        page). Audio only — video needs library matching, a separate flow.
+        Admin-only: it writes a file into your library's intake folder."""
+        import os as _os
+        if not bool(getattr(g, "is_admin", True)):
+            return jsonify({"error": "Saving to the library is admin-only"}), 403
+        body = request.get_json(silent=True) or {}
+        url = str(body.get("url") or "").strip()
+        name = _os.path.basename(str(body.get("name") or "").strip())
+        mime = str(body.get("mime") or "").lower()
+
+        if not _is_safe_filepost_url(url):
+            return jsonify({"error": "Only filepost.dev links can be saved"}), 400
+        is_audio = mime.startswith("audio/") or name.lower().endswith(_AUDIO_EXTS)
+        if not is_audio:
+            return jsonify({"error": "Only audio files can be saved to your "
+                                     "library right now"}), 400
+        if not name or name in (".", ".."):
+            name = "shared-track"
+            for ext in _AUDIO_EXTS:
+                if mime.endswith(ext.lstrip(".")):
+                    name += ext
+                    break
+
+        try:
+            from core.imports.paths import docker_resolve_path
+            staging = docker_resolve_path(
+                str(_config_get("import.staging_path", "./Staging") or "./Staging"))
+            _os.makedirs(staging, exist_ok=True)
+        except Exception as e:
+            logger.exception("chat: staging dir unavailable")
+            return jsonify({"error": "Couldn't reach the import staging folder: %s" % e}), 500
+
+        dest = _os.path.join(staging, name)
+        if _os.path.exists(dest):
+            return jsonify({"error": "A file named %r is already waiting to "
+                                     "import" % name}), 409
+
+        # 60MB ceiling — a little above the 50MB filepost upload cap, room for
+        # the encoding overhead a re-hosted file can carry.
+        max_bytes = 60 * 1024 * 1024
+        try:
+            got = _fetch_url_to_file(url, dest, max_bytes)
+        except Exception as e:
+            logger.warning("chat: library import fetch failed: %s", e)
+            return jsonify({"error": "Couldn't fetch that file (%s)" % e}), 502
+
+        auto = bool(_config_get("auto_import.enabled", False))
+        logger.info("chat: saved shared file to staging (%s, %d bytes, auto=%s)",
+                    name, got, auto)
+        return jsonify({"ok": True, "name": name, "bytes": got, "auto_import": auto})
 
     @bp.route("/api/chat/rooms", methods=["GET"])
     def chat_rooms():
@@ -564,7 +914,7 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.exception("chat: room hydrate failed")
             return jsonify({"error": str(e)}), 502
-        live, reactions = _unwrap_room_messages(messages)
+        live, reactions, protocol_events = _unwrap_room_messages(messages)
         # Archive-first (chatbic P2): slskd forgets the room on restart, the
         # archive doesn't. Top it up from the live buffer (idempotent), then
         # serve the archive tail; live is only the fallback when the archive
@@ -587,7 +937,93 @@ def create_blueprint() -> Blueprint:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
         return jsonify({"room": room, "joined": True,
                         "messages": _attach_reactions(out, reactions),
-                        "users": users or [], "can_send": _can_send()})
+                        "users": users or [], "can_send": _can_send(),
+                        # machine coordination events (jukebox/polls/beacons)
+                        # from the live buffer — the page's protocol feed
+                        "protocol": protocol_events})
+
+    @bp.route("/api/chat/room/protocol", methods=["POST"])
+    def chat_room_protocol_send():
+        """Send a PROTOCOL carrier into the room: an empty-text envelope whose
+        'p' object coordinates SoulSync clients (a vote, a beacon, a pin).
+        Vanilla clients see one line of envelope noise; SoulSync clients
+        intercept it before render. Same send gate as talking — a client that
+        can't speak can't emit machine chatter either."""
+        from core import chat_codec
+        client = _client()
+        if client is None:
+            return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+        payload = request.get_json(silent=True) or {}
+        proto = chat_codec.protocol_of({"p": payload.get("p")})
+        if proto is None:
+            return jsonify({"error": "Malformed protocol payload"}), 400
+        room = _resolve_room(payload.get("room"))
+        if room is None:
+            return jsonify({"error": "Not in that room"}), 404
+        encoded = chat_codec.encode("", {"p": proto})
+        if encoded is None:
+            return jsonify({"error": "Protocol payload too large"}), 400
+        try:
+            if not _ensure_joined(client, room):
+                return jsonify({"error": "Could not join room"}), 502
+            ok = _run_async(client.send_room_message(room, encoded))
+        except Exception as e:
+            logger.exception("chat: protocol send failed")
+            return jsonify({"error": str(e)}), 502
+        if not ok:
+            return jsonify({"error": "slskd refused the message"}), 502
+        return jsonify({"ok": True})
+
+    @bp.route("/api/chat/jukebox/resolve", methods=["POST"])
+    def chat_jukebox_resolve():
+        """Turn a user's jukebox input into candidate tracks.
+
+        A YouTube URL or bare 11-char id resolves via keyless oEmbed (one
+        exact result); anything else goes through yt-dlp search when wired
+        (up to 5 picks). Gated like sending — submitting to the queue IS
+        sending protocol chatter, so a client that can't speak can't make
+        the server fetch on its behalf either."""
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+        payload = request.get_json(silent=True) or {}
+        q = str(payload.get("q") or "").strip()
+        if not q or len(q) > 200:
+            return jsonify({"error": "Give me a YouTube link or a search"}), 400
+
+        vid = _parse_youtube_id(q)
+        if vid:
+            try:
+                meta = _oembed_fetch(vid) or {}
+            except Exception:
+                return jsonify({"error": "That video could not be resolved"}), 404
+            return jsonify({"results": [{
+                "id": vid,
+                "title": str(meta.get("title") or "")[:120] or vid,
+                "channel": str(meta.get("author_name") or "")[:80],
+            }]})
+
+        if _youtube_search is None:
+            return jsonify({"error": "Search is unavailable — paste a YouTube link"}), 503
+        try:
+            found = _youtube_search(q, 5) or []
+        except Exception:
+            logger.exception("chat: jukebox search failed")
+            return jsonify({"error": "YouTube search failed"}), 502
+        results = []
+        for v in found[:5]:
+            vid2 = str(getattr(v, "video_id", "") or "")
+            if not _YT_ID_RE.match(vid2):
+                continue
+            results.append({
+                "id": vid2,
+                "title": str(getattr(v, "title", "") or "")[:120],
+                "channel": str(getattr(v, "channel", "") or "")[:80],
+                "duration": int(getattr(v, "duration", 0) or 0),
+                "views": int(getattr(v, "view_count", 0) or 0),
+            })
+        return jsonify({"results": results})
 
     @bp.route("/api/chat/room/history", methods=["GET"])
     def chat_room_history():
@@ -641,6 +1077,10 @@ def create_blueprint() -> Blueprint:
         rep = chat_codec.reply_of({"r": body.get("reply")})
         if rep:
             extra = {"r": rep}
+        fmeta = chat_codec.file_of({"f": body.get("file")})
+        if fmeta:
+            extra = dict(extra or {})
+            extra["f"] = fmeta
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

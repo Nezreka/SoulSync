@@ -420,16 +420,33 @@ class MusicDatabase:
                     rich INTEGER NOT NULL DEFAULT 0,
                     timestamp TEXT NOT NULL,
                     reply TEXT,
+                    file TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(room, username, timestamp, message) ON CONFLICT IGNORE
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_messages_room "
                            "ON chat_room_messages (room, timestamp)")
+            # Local, private notes on Soulseek users ("great jazz rips") —
+            # shown on the chat user card. Never leaves this install.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_user_notes (
+                    username TEXT PRIMARY KEY,
+                    note TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # the table shipped one commit before the reply column — live dbs
             # already created it, so the column rides a tolerant ALTER
             try:
                 cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN reply TEXT")
+            except sqlite3.OperationalError:
+                pass    # already there
+            # file-share card metadata (name/size/mime) — without it, archived
+            # file messages lost their card + preview + save-to-library button
+            # and rendered as a bare link. Same tolerant-ALTER pattern as reply.
+            try:
+                cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN file TEXT")
             except sqlite3.OperationalError:
                 pass    # already there
 
@@ -9733,9 +9750,15 @@ class MusicDatabase:
         References to the deleted id are cleaned up in the same transaction
         (wishlist rows and library tracks fall back dynamically, while durable
         Watchlist/playlist assignments are re-pointed to the active default,
-        and a matching Auto-Import override is cleared) — and even
-        a reference missed by that (or written concurrently) safely falls
-        back to the default via `core/quality/selection.py::load_profile_by_id`.
+        and a matching Auto-Import override is cleared after the DB
+        transaction commits) — and even a reference missed by that (or
+        written concurrently) safely falls back to the default via
+        `core/quality/selection.py::load_profile_by_id`.
+
+        A default is guaranteed to exist after this call even if the profile
+        table's is_default bookkeeping was ever left inconsistent (e.g. by a
+        bug or a hand-edited DB) — not just in the common case of deleting
+        the current default.
 
         Returns ``(success, reason)`` — ``reason`` is empty on success.
         """
@@ -9749,13 +9772,26 @@ class MusicDatabase:
             target = next((r for r in rows if r["id"] == profile_id), None)
             if target is None:
                 return False, "Profile not found"
+            remaining = [r for r in rows if r["id"] != profile_id]
             if target["is_default"]:
-                promote_id = next(r["id"] for r in rows if r["id"] != profile_id)
+                promote_id = remaining[0]["id"]
                 conn.execute("UPDATE quality_profiles SET is_default=0 WHERE is_default=1")
                 conn.execute(
                     "UPDATE quality_profiles SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (promote_id,),
                 )
+            elif not any(r["is_default"] for r in remaining):
+                # Defensive: the surviving profiles have no default at all
+                # (inconsistent is_default state pre-dating this delete).
+                # Promote one now instead of leaving the app without one.
+                conn.execute(
+                    "UPDATE quality_profiles SET is_default=1, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (remaining[0]["id"],),
+                )
+            # Runs after the promotions above, so the durable Watchlist/playlist
+            # assignments below always land on a profile that really is the
+            # default — never on the row that's about to be deleted.
             default_row = conn.execute(
                 "SELECT id FROM quality_profiles WHERE is_default=1 "
                 "AND id<>? ORDER BY id LIMIT 1",
@@ -10734,6 +10770,77 @@ class MusicDatabase:
 
     _CHAT_ARCHIVE_KEEP = 5000     # per room — plenty of scrollback, bounded disk
 
+    def get_chat_user_note(self, username: str) -> str:
+        """The local note for a Soulseek username ('' when none)."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute("SELECT note FROM chat_user_notes WHERE username = ?",
+                               (str(username),)).fetchone()
+            return row[0] if row else ''
+        except Exception as e:
+            logger.debug("get_chat_user_note failed: %s", e)
+            return ''
+        finally:
+            if conn:
+                conn.close()
+
+    def set_chat_user_note(self, username: str, note: str) -> bool:
+        """Upsert (empty note deletes the row — no tombstones)."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            if str(note or '').strip():
+                conn.execute(
+                    "INSERT INTO chat_user_notes (username, note, updated_at) "
+                    "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(username) DO UPDATE SET note = excluded.note, "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (str(username), str(note).strip()))
+            else:
+                conn.execute("DELETE FROM chat_user_notes WHERE username = ?",
+                             (str(username),))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error("set_chat_user_note failed: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def get_user_download_stats(self, username: str) -> Dict[str, Any]:
+        """Our HISTORY with a Soulseek peer, from track_downloads — the user
+        card differentiator no other client has: how many tracks we've pulled
+        from them, how reliably, and when we last did."""
+        out = {'downloads': 0, 'completed': 0, 'failed': 0,
+               'success_rate': None, 'last_download': None, 'total_bytes': 0}
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT COUNT(*) AS n,
+                           SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS ok,
+                           SUM(CASE WHEN status NOT IN ('completed') THEN 1 ELSE 0 END) AS bad,
+                           MAX(created_at) AS last,
+                           COALESCE(SUM(CASE WHEN status = 'completed'
+                                             THEN COALESCE(source_size, 0) ELSE 0 END), 0) AS bytes
+                    FROM track_downloads WHERE source_username = ?""",
+                (str(username),)).fetchone()
+            if row and row['n']:
+                out['downloads'] = row['n']
+                out['completed'] = row['ok'] or 0
+                out['failed'] = row['bad'] or 0
+                out['success_rate'] = round(100.0 * (row['ok'] or 0) / row['n'], 1)
+                out['last_download'] = row['last']
+                out['total_bytes'] = row['bytes'] or 0
+        except Exception as e:
+            logger.debug("get_user_download_stats failed: %s", e)
+        finally:
+            if conn:
+                conn.close()
+        return out
+
     def add_chat_messages(self, room: str, messages) -> int:
         """Archive a batch of DECODED room messages ({username, message, rich,
         timestamp}). Idempotent — the natural-key UNIQUE swallows replays from
@@ -10753,7 +10860,13 @@ class MusicDatabase:
             if isinstance(rep, dict) and rep.get('u'):
                 rep_json = json.dumps({'u': str(rep.get('u'))[:64],
                                        'x': str(rep.get('x') or '')[:140]})
-            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json))
+            fil = m.get('file')
+            fil_json = None
+            if isinstance(fil, dict) and fil.get('n'):
+                fil_json = json.dumps({'n': str(fil.get('n'))[:200],
+                                       's': fil.get('s') if isinstance(fil.get('s'), int) else None,
+                                       'm': str(fil.get('m') or '')[:80]})
+            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json))
         if not rows:
             return 0
         try:
@@ -10761,8 +10874,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply) "
-                    "VALUES (?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -10781,7 +10894,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -10794,13 +10907,14 @@ class MusicDatabase:
             rows.reverse()
             for r in rows:
                 r['rich'] = bool(r['rich'])
-                if r.get('reply'):
-                    try:
-                        r['reply'] = json.loads(r['reply'])
-                    except (ValueError, TypeError):
-                        r['reply'] = None
-                if not r.get('reply'):
-                    r.pop('reply', None)
+                for k in ('reply', 'file'):
+                    if r.get(k):
+                        try:
+                            r[k] = json.loads(r[k])
+                        except (ValueError, TypeError):
+                            r[k] = None
+                    if not r.get(k):
+                        r.pop(k, None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)

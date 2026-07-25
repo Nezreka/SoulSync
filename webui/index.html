@@ -8842,6 +8842,24 @@
                                 </div>
                             </div>
 
+                            <!-- Library Organize casing -->
+                            <div class="settings-group" data-stg="library">
+                                <h3>Library Organize</h3>
+                                <label class="toggle-row">
+                                    <input type="checkbox" id="reorganize-preserve-casing">
+                                    <span>Preserve my casing, year &amp; disc layout</span>
+                                </label>
+                                <div class="help-text" style="margin-top: 6px;">
+                                    When the Library Organize tool re-matches a track, the metadata source often
+                                    differs from files you've already organized: capitalization, release year (a
+                                    reissue [2023] "corrected" to the source's 2020), or disc layout (a single-disc
+                                    album matched to a deluxe 2-disc edition, stamping a bogus "0211" prefix). With
+                                    this on (default), a title/album differing <em>only</em> by letter-case, your own
+                                    album year, and a genuinely single-disc album's numbering are all left alone —
+                                    no needless renames. Turn off to match the metadata source exactly.
+                                </div>
+                            </div>
+
                             </div><!-- end Paths & Organization body -->
 
                             <!-- ═══ POST-PROCESSING ═══ -->
@@ -10042,13 +10060,27 @@
                  via SHARED_PAGES (video-side.js). All content driven by chat.js. -->
             <div class="page" id="chat-page">
                 <div class="page-shell chat-page-container">
-                    <div class="tools-page-header">
+                    <div class="tools-page-header chat-page-head">
                         <div class="tools-page-header-left">
                             <h2 class="tools-page-title">
                                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                                 Chat
                             </h2>
                             <p class="tools-page-subtitle" data-chat-subtitle>Soulseek rooms &amp; private messages</p>
+                        </div>
+                        <!-- the jukebox lives up here (Boulder): brand + listeners +
+                             add-a-song; the queue/player panel opens below in the room -->
+                        <div class="chat-jbx-headbar" data-chat-jbx-headbar hidden>
+                            <span class="chat-jbx-brand">♫ Jukebox</span>
+                            <span class="chat-jbx-listeners" data-chat-jbx-listeners></span>
+                            <button type="button" class="chat-fmt-btn chat-jbx-radiobtn" data-chat-jbx-radio hidden
+                                    title="Auto-DJ: when the queue runs dry, keep the music going with related tracks">📻 Auto-DJ</button>
+                            <form class="chat-jbx-form" data-chat-jbx-form>
+                                <input class="chat-input chat-jbx-input" data-chat-jbx-input type="text" maxlength="200"
+                                       placeholder="Add a song or paste a YouTube link…" autocomplete="off">
+                                <button type="submit" class="chat-fmt-btn chat-jbx-add">Add</button>
+                            </form>
+                            <div class="chat-jbx-results" data-chat-jbx-results hidden></div>
                         </div>
                     </div>
                     <div class="chat-shell">
@@ -10060,15 +10092,20 @@
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
+                            <!-- pinned messages popover (📌 in the room head) + the room
+                                 poll — both pure folds over the protocol bus. The poll stays
+                                 inline: a live poll SHOULD interrupt the room's attention. -->
+                            <div class="chat-pinbar" data-chat-pinbar hidden></div>
+                            <div class="chat-pollcard" data-chat-poll hidden></div>
                             <!-- user popover card (click any username) -->
                             <div class="chat-settings-overlay" data-chat-user-card hidden>
                                 <div class="chat-settings-modal chat-user-card">
                                     <div data-chat-user-card-body></div>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-card-close>Close</button>
-                                        <button type="button" class="chat-fmt-btn" data-chat-card-ignore>Mute</button>
-                                        <button type="button" class="chat-fmt-btn" data-chat-card-browse>Browse files</button>
-                                        <button type="button" class="chat-send-btn" data-chat-card-message>Message</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-ignore>Mute</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-browse>Browse files</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-card-message>Message</button>
                                     </div>
                                 </div>
                             </div>
@@ -10080,9 +10117,9 @@
                                            placeholder="Filter folders…" autocomplete="off">
                                     <div class="chat-browse-body" data-chat-browse-body></div>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-browse-back hidden>&larr; Folders</button>
-                                        <button type="button" class="chat-fmt-btn" data-chat-browse-close>Close</button>
-                                        <button type="button" class="chat-send-btn" data-chat-browse-dl hidden>Download selected</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-browse-back hidden>&larr; Folders</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-browse-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-browse-dl hidden>Download selected</button>
                                     </div>
                                 </div>
                             </div>
@@ -10094,7 +10131,22 @@
                                            placeholder="Search rooms…" autocomplete="off">
                                     <div class="chat-rooms-list" data-chat-rooms-list></div>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-rooms-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-rooms-close>Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- jukebox YouTube search: rich pop-in, search-page video-card look -->
+                            <div class="chat-settings-overlay" data-chat-jbx-search-modal hidden>
+                                <div class="chat-settings-modal chat-jbx-search-modal">
+                                    <h3 class="chat-settings-title">♫ Add to the jukebox</h3>
+                                    <form class="chat-jbx-searchform" data-chat-jbx-searchform>
+                                        <input class="chat-input" data-chat-jbx-searchinput type="text" maxlength="200"
+                                               placeholder="Search YouTube, or paste a link…" autocomplete="off">
+                                        <button type="submit" class="chat-send-btn">Search</button>
+                                    </form>
+                                    <div class="chat-jbx-searchgrid" data-chat-jbx-searchgrid></div>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-jbx-searchclose>Close</button>
                                     </div>
                                 </div>
                             </div>
@@ -10112,6 +10164,19 @@
                                                placeholder="" autocomplete="off">
                                         <span class="chat-settings-hint">free at developers.giphy.com — enables GIF search; leave blank to keep the current key</span>
                                     </label>
+                                    <label class="chat-settings-label">filepost.dev API key
+                                        <input class="chat-input" data-chat-set-filepost type="password"
+                                               placeholder="" autocomplete="off">
+                                        <span class="chat-settings-hint">free at filepost.dev — enables file sharing in chat; leave blank to keep the current key</span>
+                                    </label>
+                                    <label class="chat-settings-label">Shared files expire after
+                                        <select class="chat-input" data-chat-set-filepost-expiry>
+                                            <option value="">Never (permanent link)</option>
+                                            <option value="24h">24 hours</option>
+                                            <option value="7d">7 days</option>
+                                            <option value="30d">30 days</option>
+                                        </select>
+                                    </label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-autojoin>
                                         Auto-join the community room</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
@@ -10119,8 +10184,8 @@
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
                                         Auto-answer "prove you're human" download challenges</label>
                                     <div class="chat-settings-actions">
-                                        <button type="button" class="chat-fmt-btn" data-chat-settings-cancel>Cancel</button>
-                                        <button type="button" class="chat-send-btn" data-chat-settings-save>Save</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-settings-cancel>Cancel</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-settings-save>Save</button>
                                     </div>
                                 </div>
                             </div>
@@ -10128,6 +10193,7 @@
                             <button class="chat-jump-pill" type="button" data-chat-jump hidden>New messages ↓</button>
                             <div class="chat-mention-pop" data-chat-mention-pop hidden></div>
                             <form class="chat-composer" data-chat-composer>
+                                <div class="chat-typing" data-chat-typing hidden></div>
                                 <div class="chat-reply-bar" data-chat-reply-bar hidden>
                                     <span class="chat-reply-bar-label">↩ Replying to <b data-chat-reply-who></b>
                                         <span class="chat-reply-bar-x" data-chat-reply-excerpt></span></span>
@@ -10152,6 +10218,32 @@
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
                                         <span class="chat-toolbar-hint">**bold** · *italic* · `code` · ||spoiler||</span>
                                         <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
+                                        <div class="chat-gif-pop chat-attach-pop" data-chat-attach-pop hidden>
+                                            <div class="chat-attach-tabs">
+                                                <button type="button" class="chat-fmt-btn" data-chat-attach-upload>Upload a file</button>
+                                                <span class="chat-attach-or">or share from your library:</span>
+                                            </div>
+                                            <input type="file" data-chat-attach-file hidden>
+                                            <input class="chat-input chat-gif-search" data-chat-attach-search type="text"
+                                                   placeholder="Search your library…" autocomplete="off">
+                                            <div class="chat-attach-results" data-chat-attach-results></div>
+                                            <div class="chat-attach-status" data-chat-attach-status hidden></div>
+                                        </div>
+                                        <div class="chat-gif-pop chat-poll-pop" data-chat-poll-pop hidden>
+                                            <input class="chat-input" data-chat-poll-q type="text" maxlength="160"
+                                                   placeholder="Ask the room something…" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o1 type="text" maxlength="80"
+                                                   placeholder="Option 1" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o2 type="text" maxlength="80"
+                                                   placeholder="Option 2" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o3 type="text" maxlength="80"
+                                                   placeholder="Option 3 (optional)" autocomplete="off">
+                                            <input class="chat-input" data-chat-poll-o4 type="text" maxlength="80"
+                                                   placeholder="Option 4 (optional)" autocomplete="off">
+                                            <div class="chat-settings-actions">
+                                                <button type="button" class="chat-send-btn" data-chat-poll-start>Start poll</button>
+                                            </div>
+                                        </div>
                                         <div class="chat-gif-pop" data-chat-gif-pop hidden>
                                             <input class="chat-input chat-gif-search" data-chat-gif-search type="text"
                                                    placeholder="Search GIPHY…" autocomplete="off">
@@ -10163,6 +10255,10 @@
                                                   placeholder="Message…" autocomplete="off" rows="1"></textarea>
                                         <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-emoji-btn title="Emoji">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-attach-btn title="Share a file (filepost.dev)">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-poll-btn title="Start a room poll">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="20" x2="6" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="14"/></svg></button>
                                         <button type="button" class="chat-tbtn chat-tbtn--side chat-gif-btn" data-chat-gif-btn title="Send a GIF">GIF</button>
                                         <button class="chat-send-fab" type="submit" title="Send">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
@@ -10170,7 +10266,18 @@
                                 </div>
                             </form>
                         </main>
-                        <aside class="chat-users" data-chat-users></aside>
+                        <div class="chat-rail">
+                            <!-- room jukebox (queue/player) — a rail card above the user
+                                 list, Discord-activity style. Static skeleton: the player
+                                 iframe must survive the 4s poll (renderJukebox only
+                                 rewrites now/queue). -->
+                            <div class="chat-jukebox" data-chat-jukebox hidden>
+                                <div class="chat-jbx-now" data-chat-jbx-now></div>
+                                <div class="chat-jbx-player" data-chat-jbx-player hidden></div>
+                                <div class="chat-jbx-queue" data-chat-jbx-queue></div>
+                            </div>
+                            <aside class="chat-users" data-chat-users></aside>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -11992,6 +12099,7 @@
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='chat-protocol.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='label-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>

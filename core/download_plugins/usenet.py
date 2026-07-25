@@ -25,11 +25,14 @@ from core.download_plugins.album_bundle import (
     TransientMissCounter,
     copy_audio_files_atomically,
     get_completed_no_path_window_seconds,
+    incomplete_path_stability_check,
     pick_best_album_release,
     poll_album_download,
     resolve_reported_save_path,
+    snapshot_incomplete_path,
 )
 from core.download_plugins.base import DownloadSourcePlugin
+from core.download_plugins.candidate_store import get_candidate_store
 from core.download_plugins.torrent import (
     _adapter_state_to_display,
     _decode_filename,
@@ -121,7 +124,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 continue
             if not result.download_url:
                 continue
-            filename = f"{result.download_url}{_FILENAME_SEP}{result.title}"
+            # The filename crosses to the browser in search responses and
+            # comes back on grab. Prowlarr NZB URLs can carry API keys /
+            # signed params, so only an opaque server token travels (P0-03).
+            token = get_candidate_store().put(result.download_url)
+            filename = f"{token}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
@@ -176,9 +183,16 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
     ) -> Optional[str]:
         if not self.is_configured():
             return None
-        nzb_url, display_name = _decode_filename(filename)
+        token, display_name = _decode_filename(filename)
+        if not token:
+            logger.error("Usenet download missing candidate token in filename: %r", filename)
+            return None
+        # Only a token from OUR candidate store is accepted — a raw URL from
+        # the client is a trust-boundary violation, not a fallback (P0-03).
+        nzb_url = get_candidate_store().resolve(token)
         if not nzb_url:
-            logger.error("Usenet download missing URL in filename: %r", filename)
+            logger.error("Usenet download: unknown or expired candidate for %r "
+                         "— re-run the search", display_name)
             return None
 
         download_id = str(uuid.uuid4())
@@ -232,6 +246,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
         last_incomplete_path: Optional[str] = None
+        # Stability gate for the incomplete_path fallback below (P2-21,
+        # sibling of the same fix in album_bundle.poll_album_download):
+        # the snapshot + path it was taken for, so a poll returning the
+        # SAME fingerprint for the SAME path counts as "stopped changing".
+        last_incomplete_snapshot: Optional[tuple] = None
+        last_incomplete_snapshot_path: Optional[str] = None
         # Tolerate transient None / unmapped 'error' reads — SAB
         # removes a job from the queue before adding it to history,
         # and on busy servers that gap spans several polls. See
@@ -247,6 +267,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             max(misses.threshold,
                 int(get_completed_no_path_window_seconds() / max(_POLL_INTERVAL_SECONDS, 0.001)) or 1)
         )
+        # Sibling of the same counter in poll_album_download: caps how many
+        # consecutive polls tolerate an incomplete_path that can't be read
+        # at all (e.g. no usenet_path_mappings entry for a split-container
+        # deployment) — without it the stability gate below never becomes
+        # True and the thread would poll for the full outer deadline.
+        incomplete_path_unreadable_misses = TransientMissCounter(misses.threshold)
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -294,14 +320,59 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 # than erroring a download that actually succeeded.
                 if completed_no_path_misses.record_miss():
                     if last_incomplete_path:
-                        logger.warning(
-                            "Usenet %s: '%s' completed but no final save_path after "
-                            "%d polls — falling back to in-progress path %r",
-                            download_id[:8], job_id, completed_no_path_misses.misses,
+                        # Don't trust incomplete_path just because the
+                        # window elapsed — SAB/NZBGet post-processing may
+                        # still be writing into it. Require the same
+                        # fingerprint on two consecutive polls before
+                        # accepting it; otherwise keep polling, bounded by
+                        # the outer deadline rather than this window
+                        # (P2-21). Shared with poll_album_download's
+                        # sibling logic in album_bundle.py.
+                        stable, resolved_incomplete_path, current_snapshot = incomplete_path_stability_check(
                             last_incomplete_path,
+                            last_incomplete_snapshot_path,
+                            last_incomplete_snapshot,
+                            snapshot_path=snapshot_incomplete_path,
+                            resolve_path=resolve_reported_save_path,
                         )
-                        self._finalize_download(download_id, last_incomplete_path)
-                        return
+                        if current_snapshot is None:
+                            if incomplete_path_unreadable_misses.record_miss():
+                                logger.error(
+                                    "Usenet %s: '%s' in-progress path %r could not be "
+                                    "read for %d consecutive polls — giving up instead "
+                                    "of waiting out the full timeout.",
+                                    download_id[:8], job_id, resolved_incomplete_path,
+                                    incomplete_path_unreadable_misses.misses,
+                                )
+                                self._mark_error(
+                                    download_id,
+                                    "Usenet job completed but client never reported a save_path",
+                                )
+                                return
+                        else:
+                            incomplete_path_unreadable_misses.reset()
+                        if stable:
+                            logger.warning(
+                                "Usenet %s: '%s' completed but no final save_path after "
+                                "%d polls — falling back to in-progress path %r (its "
+                                "contents were unchanged across a poll, so "
+                                "post-processing looks done).",
+                                download_id[:8], job_id, completed_no_path_misses.misses,
+                                resolved_incomplete_path,
+                            )
+                            self._finalize_download(download_id, resolved_incomplete_path)
+                            return
+                        logger.info(
+                            "Usenet %s: '%s' completed but save_path never landed and "
+                            "in-progress path %r is still changing (or unreadable) — "
+                            "waiting for it to stabilize (poll %d).",
+                            download_id[:8], job_id, resolved_incomplete_path,
+                            completed_no_path_misses.misses,
+                        )
+                        last_incomplete_snapshot = current_snapshot
+                        last_incomplete_snapshot_path = resolved_incomplete_path
+                        time.sleep(_POLL_INTERVAL_SECONDS)
+                        continue
                     self._mark_error(
                         download_id,
                         "Usenet job completed but client never reported a save_path",
@@ -506,6 +577,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             complete_states=frozenset(['completed']),
             failed_states=frozenset(['failed']),
             is_shutdown=self.shutdown_check,
+            # P2-21: remap the client-container path before the
+            # incomplete_path stability check runs, not just on the final
+            # save_path — otherwise a split-container SAB/NZBGet mount
+            # never resolves to a locally-readable path and the stability
+            # gate can never stabilize.
+            resolve_path=resolve_reported_save_path,
             log_prefix='[Usenet album]',
         )
         if save_path is None:

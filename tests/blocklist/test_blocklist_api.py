@@ -17,6 +17,11 @@ def client(monkeypatch):
     return web_server.app.test_client()
 
 
+def _skip_download(coro):
+    coro.close()
+    return None
+
+
 def test_search_proxies_active_source(client):
     with patch.object(web_server, "_search_service", return_value=[
             {"id": "drake-sp", "name": "Drake", "image": None, "extra": "", "provider": "spotify"}]):
@@ -82,18 +87,20 @@ def test_manual_download_blocked_by_artist_name(client, banned_artist):
 
 
 def test_manual_download_unrelated_artist_not_blocked(client, banned_artist):
-    # Allowed artist → guard passes (the download itself may fail offline; we
-    # only assert it wasn't blocked by the blocklist).
-    r = client.post("/api/download", json={
-        "result_type": "track", "username": "peer", "filename": "y.flac",
-        "artist": "Allowed Artist", "title": "Song"})
+    # Allowed artist -> guard passes. Keep the external download outside this
+    # guard test so an unavailable client cannot stall the suite.
+    with patch.object(web_server, "run_async", side_effect=_skip_download):
+        r = client.post("/api/download", json={
+            "result_type": "track", "username": "peer", "filename": "y.flac",
+            "artist": "Allowed Artist", "title": "Song"})
     assert not (r.get_json() or {}).get("blocked")
 
 
 def test_manual_download_override_passes_guard(client, banned_artist):
-    r = client.post("/api/download", json={
-        "result_type": "track", "username": "peer", "filename": "x.flac",
-        "artist": "Banned Guy", "title": "Song", "ignore_blocklist": True})
+    with patch.object(web_server, "run_async", side_effect=_skip_download):
+        r = client.post("/api/download", json={
+            "result_type": "track", "username": "peer", "filename": "x.flac",
+            "artist": "Banned Guy", "title": "Song", "ignore_blocklist": True})
     assert not (r.get_json() or {}).get("blocked")   # override skips the guard
 
 

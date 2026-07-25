@@ -24,6 +24,8 @@
         stickBottom: true,       // autoscroll unless the user scrolled up
         started: false,
         ssOnly: false,           // room filter: show only SoulSync-app messages
+        protocolLog: [],         // recent machine-coordination events (bounded)
+        beaconed: {},            // rooms we've announced ourselves in this session
         isAdmin: false,          // shows the settings cog (from /status)
         newMarker: null,         // frozen last-seen ts for the NEW divider (per room open)
         renderedCount: 0,        // for the new-messages pill delta
@@ -33,8 +35,41 @@
         selfName: '',            // our slskd username (@mention highlighting)
         users: [],               // room user names (mention autocomplete)
         replyTo: null,           // {u, x} while composing a reply
+        pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
+        jukebox: {               // shared room listening (reduced from protocolLog)
+            open: false,         //   panel visible
+            tunedIn: false,      //   player exists (requires a user gesture)
+            player: null,        //   YT.Player instance while tuned in
+            playingId: null,     //   video id the player was last pointed at
+            playingNow: null,    //   the now-track the player is actually playing (display fallback)
+            playerAlive: false,  //   iframe API fired onReady (safe to call methods)
+            results: [],         //   resolve results awaiting a pick
+            searchResults: [],   //   YouTube search modal results
+            resolving: false,
+            lastRendered: '',    //   reduced-state fingerprint (skip no-op renders)
+            lastAdvanceAt: 0,    //   DJ double-fire guard (ms)
+            starvedAt: 0,        //   queue-waiting-with-no-DJ clock (ms)
+            histOpen: false,     //   recently-played list expanded
+            lastAutoAt: 0,       //   auto-DJ top-up cooldown (ms)
+            videoHidden: false,  //   audio-only mode (iframe hidden, audio plays)
+            vol: 100,            //   local player volume (persisted)
+            timer: null,         //   elapsed clock + DJ watchdog while open
+            ytLoading: false, ytCbs: [],
+        },
+        typing: {},              // username → last typ-event receipt (ms, local clock)
+        typingArmedAt: 0,        // ignore typ events replayed from the archive on room open
+        lastTypSentAt: 0,        // our own typ throttle
+        typingTimer: null,       // pending expiry repaint
+        pinsOpen: false,         // pin board expanded
+        topicEditing: false,     // head shows the topic input (renderHead pauses)
+        pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
+    try {
+        state.jukebox.videoHidden = localStorage.getItem('chat_jbx_audio') === '1';
+        var _v = parseInt(localStorage.getItem('chat_jbx_vol') || '100', 10);
+        if (_v >= 0 && _v <= 100) state.jukebox.vol = _v;
+    } catch (e) { /* ignore */ }
 
     function q(sel) {
         var page = document.getElementById('chat-page');
@@ -330,6 +365,12 @@
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
                 'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
         }
+        if (state.view === 'room' && state.canSend) {
+            acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
+                'data-chat-pin-user="' + attr(m.username || '') + '" ' +
+                'data-chat-pin-ts="' + attr(String(m.timestamp || '')) + '" ' +
+                'data-chat-pin-x="' + attr(String(m.message || '').slice(0, 140)) + '">📌</button>';
+        }
         var actions = '<span class="chat-line-acts">' + acts + '</span>';
         var chips = '';
         if (m.reactions && m.reactions.length) {
@@ -339,10 +380,93 @@
                     (r.n > 1 ? ' <b>' + r.n + '</b>' : '') + '</span>';
             }).join('') + '</div>';
         }
+        var bodyHtml = (m.file && m.file.n)
+            ? _fileCardHtml(m)
+            : (m.rich ? renderRich(m.message) : renderPlain(m.message));
         return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
             attr(_fullTs(m.timestamp)) + '">' + replyRef +
-            (m.rich ? renderRich(m.message) : renderPlain(m.message)) +
-            actions + chips + '</div>';
+            bodyHtml + actions + chips + '</div>';
+    }
+
+    // ── shared file card (filepost.dev links dressed by envelope 'f') ────
+    var _AUDIO_EXT = /\.(flac|mp3|m4a|ogg|opus|wav|aiff?)$/i;
+    var _VIDEO_EXT = /\.(mp4|mkv|webm|mov)$/i;
+    var _IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+
+    function _fileCardHtml(m) {
+        var url = String(m.message || '').trim();
+        var f = m.file || {};
+        var name = String(f.n || 'file');
+        var mime = String(f.m || '');
+        var isAudio = mime.indexOf('audio/') === 0 || _AUDIO_EXT.test(name);
+        var isVideo = mime.indexOf('video/') === 0 || _VIDEO_EXT.test(name);
+        var isImage = mime.indexOf('image/') === 0 || _IMAGE_EXT.test(name);
+        if (!/^https:\/\//i.test(url)) {
+            // hostile envelope: card metadata on a non-https 'link' — render
+            // as plain text instead of a clickable trap
+            return m.rich ? renderRich(m.message) : renderPlain(m.message);
+        }
+        var icon = isAudio ? '🎵' : isVideo ? '🎬' : isImage ? '🖼' : '📄';
+        var preview = '';
+        if (isAudio) {
+            preview = '<button type="button" class="chat-embed-chip" data-chat-file-audio="' +
+                attr(url) + '">▶ preview</button>';
+        } else if (isVideo) {
+            preview = '<button type="button" class="chat-embed-chip" data-chat-file-video="' +
+                attr(url) + '">▶ preview</button>';
+        } else if (isImage) {
+            preview = '<button type="button" class="chat-embed-chip" data-chat-embed-img="' +
+                attr(url) + '">🖼 show</button>';
+        }
+        return '<div class="chat-file-card">' +
+            '<span class="chat-file-icon">' + icon + '</span>' +
+            '<span class="chat-file-meta"><b class="chat-file-name">' + esc(name) + '</b>' +
+            (f.s ? '<span class="chat-file-size">' + esc(_fmtBytes(f.s)) + '</span>' : '') +
+            '</span>' +
+            preview +
+            (isAudio
+                ? '<button type="button" class="chat-embed-chip chat-file-save" ' +
+                    'data-chat-file-save="' + attr(url) + '" data-chat-file-name="' + attr(name) +
+                    '" data-chat-file-mime="' + attr(mime) + '">➕ save to library</button>'
+                : '') +
+            '<a class="chat-embed-chip chat-file-dl" href="' + attr(url) +
+                '" target="_blank" rel="noopener noreferrer" download>⬇ download</a>' +
+            '<div class="chat-file-slot"></div></div>';
+    }
+
+    // Save a shared audio file into the library: hand the filepost link to the
+    // server, which drops it in the import staging folder for the pipeline.
+    function _saveFileToLibrary(btn) {
+        if (!btn || btn.disabled) return;
+        var url = btn.getAttribute('data-chat-file-save');
+        var name = btn.getAttribute('data-chat-file-name') || '';
+        var mime = btn.getAttribute('data-chat-file-mime') || '';
+        btn.disabled = true;
+        var was = btn.textContent;
+        btn.textContent = 'saving…';
+        postJSON('/api/chat/files/import', { url: url, name: name, mime: mime })
+            .then(function (res) {
+                if (res.ok && res.body && res.body.ok) {
+                    btn.textContent = '✓ saved';
+                    if (typeof showToast === 'function') {
+                        showToast(res.body.auto_import
+                            ? '➕ Saved — auto-import will pick it up'
+                            : '➕ Saved to your Staging folder — import it from the Import page',
+                            'success');
+                    }
+                    return;
+                }
+                btn.disabled = false;
+                btn.textContent = was;
+                if (typeof showToast === 'function') {
+                    showToast((res.body && res.body.error) || 'Could not save that file', 'error');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.textContent = was;
+                if (typeof showToast === 'function') showToast('Could not save that file', 'error');
+            });
     }
 
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
@@ -500,19 +624,32 @@
     // Users who spoke through SoulSync (the envelope is the app signature) —
     // sourced from the loaded messages, so it's an approximation of "runs
     // SoulSync", not a directory.
-    function _soulsyncUsers() {
-        var set = {};
+    function _userClassification() {
+        // {name: 'soulsync'|'vanilla'} — the assume-SoulSync flip: names
+        // absent from this map never spoke and are treated as SoulSync.
+        // Built with ChatProtocol.classifyUser (envelope conclusive forever,
+        // protocol events count as envelopes; only bare text marks vanilla).
+        var cls = {};
+        var CP = window.ChatProtocol;
         (state.msgs || []).forEach(function (m) {
-            if (m.rich && m.username) set[m.username] = 1;
+            if (!m.username) return;
+            cls[m.username] = CP ? CP.classifyUser(cls[m.username], !!m.rich)
+                                 : (m.rich ? 'soulsync' : (cls[m.username] || 'vanilla'));
         });
-        return set;
+        (state.protocolLog || []).forEach(function (ev) {
+            if (ev && ev.username) cls[ev.username] = 'soulsync';
+        });
+        return cls;
     }
 
-    function _userBtn(n, extraClass) {
+    function _userBtn(n, extraClass, tunedMap) {
         var ign = isIgnored(n);
+        var tuned = tunedMap && tunedMap[n];
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
-            '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) + '">' +
+            '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
+            (tuned ? ' — listening to the room jukebox' : '') + '">' +
             '<span class="chat-user-dot"></span>' + esc(n) +
+            (tuned ? '<span class="chat-user-tuned">♫</span>' : '') +
             (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
     }
 
@@ -542,23 +679,26 @@
             return a.toLowerCase().localeCompare(b.toLowerCase());
         });
         if (f) names = names.filter(function (n) { return n.toLowerCase().indexOf(f) > -1; });
-        var ss = _soulsyncUsers();
+        var cls = _userClassification();
         var self = [], apps = [], rest = [];
         names.forEach(function (n) {
             if (state.selfName && n === state.selfName) self.push(n);
-            else if (ss[n]) apps.push(n);
+            // the flip: unknown (never spoke) = assumed SoulSync
+            else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
         });
+        var tunedMap = window.ChatProtocol
+            ? window.ChatProtocol.reduceTuned(_roomEvents()) : {};   // once, not per user
         var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
-        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self'); }).join('');
+        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap); }).join('');
         if (apps.length) {
             html += '<div class="chat-users-label chat-users-label--sub">SoulSync users</div>' +
-                apps.map(function (n) { return _userBtn(n); }).join('');
+                apps.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
         }
         if (rest.length) {
             html += (apps.length || self.length
-                        ? '<div class="chat-users-label chat-users-label--sub">Everyone</div>' : '') +
-                rest.map(function (n) { return _userBtn(n); }).join('');
+                        ? '<div class="chat-users-label chat-users-label--sub">Other clients</div>' : '') +
+                rest.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
@@ -603,18 +743,36 @@
     function renderHead() {
         var head = q('[data-chat-head]');
         if (!head) return;
+        if (state.topicEditing) return;   // don't clobber the open topic input
         var isHome = !state.homeRoom || state.room === state.homeRoom;
+        var topic = (window.ChatProtocol && state.view === 'room')
+            ? window.ChatProtocol.reduceTopic(_roomEvents()) : null;
+        var subText = topic
+            ? esc(topic.t)
+            : (isHome ? 'the SoulSync community room on Soulseek'
+                      : 'a public Soulseek room');
         head.innerHTML = state.view === 'room'
             ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
-              '<span class="chat-head-sub">' + (isHome
-                  ? 'the SoulSync community room on Soulseek'
-                  : 'a public Soulseek room') + '</span>' +
+              '<span class="chat-head-sub' + (topic ? ' chat-head-sub--topic' : '') + '"' +
+                  (topic ? ' title="topic set by ' + attr(topic.by) + '"' : '') + '>' + subText +
+                  (state.canSend
+                      ? ' <button class="chat-topic-edit" type="button" data-chat-topic-edit ' +
+                        'title="Set the room topic (SoulSync clients only)">✎</button>'
+                      : '') + '</span>' +
               '<span class="chat-head-search' + (state.searchMode ? ' chat-head-search--on' : '') + '">' +
                   '<button class="chat-filter-btn" type="button" data-chat-search-btn title="Search this room\'s history">🔍</button>' +
                   '<input class="chat-head-search-in" data-chat-search-input type="text" ' +
                       'placeholder="Search history…" autocomplete="off"' +
                       (state.searchMode ? '' : ' hidden') + '>' +
               '</span>' +
+              '<button class="chat-filter-btn' + (state.pinsOpen ? ' chat-filter-btn--on' : '') +
+              '" type="button" data-chat-pins-toggle title="Pinned messages">📌' +
+              (function () {
+                  var n = window.ChatProtocol ? window.ChatProtocol.reducePins(_roomEvents()).length : 0;
+                  return n ? ' ' + n : '';
+              })() + '</button>' +
+              '<button class="chat-filter-btn' + (state.jukebox.open ? ' chat-filter-btn--on' : '') +
+              '" type="button" data-chat-jukebox-btn title="Room jukebox — listen together, vote on what plays next">♫ Jukebox</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
@@ -645,7 +803,10 @@
         // emoji button stays everywhere (plain unicode is fine in PMs).
         var gifBtn = q('[data-chat-gif-btn]');
         if (gifBtn) gifBtn.hidden = !(state.view === 'room' && state.canSend);
-        if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); }
+        // polls are a room thing (bus events mean nothing in a PM)
+        var pollBtn = q('[data-chat-poll-btn]');
+        if (pollBtn) pollBtn.hidden = !(state.view === 'room' && state.canSend);
+        if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); togglePollPop(true); }
     }
 
     // ── composer toolbar (room only) ─────────────────────────────────────────
@@ -717,6 +878,22 @@
     function sendReaction(target, emoji) {
         closeReactRow();
         if (!target || !emoji) return;
+        // Optimistic: show the reaction instantly instead of waiting for the
+        // round-trip AND for slskd to echo our own reaction envelope back into
+        // the room buffer (which can lag several seconds). The pending mark
+        // keeps it from flickering away on the reconcile before the echo lands.
+        var msg = null;
+        for (var i = 0; i < state.msgs.length; i++) {
+            var m = state.msgs[i];
+            if (String(m.username || '') === String(target.user || '') &&
+                    String(m.message || '') === String(target.text || '')) { msg = m; break; }
+        }
+        if (msg && state.selfName) {
+            _addReactor(msg, emoji, state.selfName);
+            state.pendingReactions[_msgKey(msg) + '|' + emoji] = 1;
+            state.lastStamp = null;
+            renderMessages(state.msgs);
+        }
         postJSON('/api/chat/room/react', {
             target_user: target.user, target_text: target.text, e: emoji,
             room: state.room || '',
@@ -725,6 +902,8 @@
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'Reaction not sent', 'error');
                 }
+                // roll back the optimistic mark so a failed send doesn't stick
+                if (msg) delete state.pendingReactions[_msgKey(msg) + '|' + emoji];
                 return;
             }
             state.lastStamp = null;
@@ -757,6 +936,8 @@
             if (overlay.getAttribute('data-chat-user-card-for') !== name) return;
             var info = (res.ok && res.body.info) || {};
             var status = (res.ok && res.body.status) || {};
+            var hist = (res.ok && res.body.history) || null;
+            var note = (res.ok && typeof res.body.note === 'string') ? res.body.note : '';
             var rows = [];
             var pres = status.presence || status.status ||
                 (status.isOnline === true ? 'Online' : (status.isOnline === false ? 'Offline' : null));
@@ -769,14 +950,62 @@
             }
             var infoHost = overlay.querySelector('.chat-card-info');
             if (infoHost) {
-                infoHost.innerHTML = rows.length
+                var html = rows.length
                     ? rows.map(function (r) {
                         return '<div class="chat-card-row"><span>' + esc(r[0]) +
                             '</span><b>' + esc(r[1]) + '</b></div>';
                     }).join('')
                     : '<div class="chat-card-row chat-card-none">No info available</div>';
+                // OUR history with this peer — the card no other client has
+                if (hist && hist.downloads > 0) {
+                    html += '<div class="chat-card-hist">' +
+                        '<div class="chat-card-row"><span>Downloads from them</span><b>' +
+                            esc(String(hist.downloads)) + '</b></div>' +
+                        (hist.success_rate != null
+                            ? '<div class="chat-card-row"><span>Success rate</span><b>' +
+                                esc(String(hist.success_rate)) + '%</b></div>' : '') +
+                        (hist.total_bytes > 0
+                            ? '<div class="chat-card-row"><span>Data pulled</span><b>' +
+                                esc(_fmtBytes(hist.total_bytes)) + '</b></div>' : '') +
+                        (hist.last_download
+                            ? '<div class="chat-card-row"><span>Last download</span><b>' +
+                                esc(String(hist.last_download).slice(0, 16)) + '</b></div>' : '') +
+                        '</div>';
+                }
+                // private local note ("great jazz rips") — never leaves this install
+                html += '<div class="chat-card-note">' +
+                    '<textarea class="chat-card-note-input" data-chat-card-note ' +
+                        'placeholder="Private note about ' + attr(name) + '\u2026" ' +
+                        'maxlength="2000" rows="2">' + esc(note) + '</textarea>' +
+                    '<button class="chat-fmt-btn chat-card-note-save" type="button" ' +
+                        'data-chat-card-note-save hidden>Save note</button></div>';
+                infoHost.innerHTML = html;
+                var ta = infoHost.querySelector('[data-chat-card-note]');
+                var saveBtn = infoHost.querySelector('[data-chat-card-note-save]');
+                if (ta && saveBtn) {
+                    ta.addEventListener('input', function () { saveBtn.hidden = false; });
+                    saveBtn.addEventListener('click', function () {
+                        postJSON('/api/chat/user/' + encodeURIComponent(name) + '/note',
+                                 { note: ta.value }).then(function (r2) {
+                            if (r2.ok) {
+                                saveBtn.hidden = true;
+                                if (typeof showToast === 'function') showToast('Note saved', 'success');
+                            } else if (typeof showToast === 'function') {
+                                showToast('Could not save note', 'error');
+                            }
+                        });
+                    });
+                }
             }
         });
+    }
+
+    function _fmtBytes(n) {
+        n = Number(n) || 0;
+        if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+        if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+        return n + ' B';
     }
 
     function closeUserCard() {
@@ -818,7 +1047,10 @@
             if (!res.ok) {
                 if (body) {
                     body.innerHTML = '<div class="chat-gif-hint">' +
-                        esc(res.body && res.body.error || 'Could not browse') + '</div>';
+                        esc(res.body && res.body.error || 'Could not browse') + '</div>' +
+                        '<div class="chat-browse-retry-row">' +
+                        '<button type="button" class="modal-button modal-button--primary" ' +
+                            'data-chat-browse-retry>Try again</button></div>';
                 }
                 return;
             }
@@ -964,6 +1196,127 @@
         pop.hidden = false;
     }
 
+    // ── slash commands (room only — power-user glue over existing features)
+    var SLASH_COMMANDS = [
+        { c: '/play',  a: '<song or link>', d: 'queue it on the jukebox' },
+        { c: '/skip',  a: '', d: 'vote to skip the current track' },
+        { c: '/tune',  a: '', d: 'tune in or out of the jukebox' },
+        { c: '/topic', a: '<text>', d: 'set the room topic' },
+        { c: '/poll',  a: '<question>', d: 'start a room poll' },
+        { c: '/pin',   a: '', d: 'pin the latest message' },
+        { c: '/gif',   a: '<search>', d: 'find a GIF' },
+        { c: '/shrug', a: '[message]', d: 'appends \u00af\\_(\u30c4)_/\u00af' },
+    ];
+
+    function updateSlashPop(input) {
+        var pop = q('[data-chat-mention-pop]');
+        if (!pop) return;
+        var v = String(input.value || '');
+        var active = state.view === 'room' && state.canSend &&
+            v[0] === '/' && v.length <= 12 && !/\s/.test(v);
+        if (!active) {
+            // only clear the pop when WE own it (mentions share the host)
+            if (pop.querySelector('[data-chat-slash-pick]')) { pop.hidden = true; pop.innerHTML = ''; }
+            return;
+        }
+        var hits = SLASH_COMMANDS.filter(function (sc) { return sc.c.indexOf(v) === 0; });
+        if (!hits.length) { pop.hidden = true; return; }
+        pop.innerHTML = hits.map(function (sc) {
+            return '<button type="button" class="chat-mention-opt chat-slash-opt" ' +
+                'data-chat-slash-pick="' + attr(sc.c) + '">' +
+                '<span class="chat-slash-cmd">' + esc(sc.c) +
+                    (sc.a ? ' <i>' + esc(sc.a) + '</i>' : '') + '</span>' +
+                '<span class="chat-slash-desc">' + esc(sc.d) + '</span></button>';
+        }).join('');
+        pop.hidden = false;
+    }
+
+    function pickSlash(cmd) {
+        var input = q('[data-chat-input]');
+        var pop = q('[data-chat-mention-pop]');
+        if (pop) { pop.hidden = true; pop.innerHTML = ''; }
+        if (!input || !cmd) return;
+        var meta = null;
+        SLASH_COMMANDS.forEach(function (sc) { if (sc.c === cmd) meta = sc; });
+        if (meta && !meta.a) {                     // no-arg commands run on click
+            input.value = '';
+            _runSlash(cmd);
+            return;
+        }
+        input.value = cmd + ' ';
+        input.focus();
+    }
+
+    function _runSlash(text) {
+        // true = handled; a string = transformed message text; false = not a command
+        var m = text.match(/^\/([a-z]+)\s*([\s\S]*)$/);
+        if (!m) return false;
+        var cmd = m[1], arg = (m[2] || '').trim();
+        var toast = function (msg, kind) {
+            if (typeof showToast === 'function') showToast(msg, kind || 'info');
+        };
+        if (cmd === 'shrug') {
+            return (arg ? arg + ' ' : '') + '\u00af\\_(\u30c4)_/\u00af';
+        }
+        if (cmd === 'skip') {
+            var stS = _jbxState();
+            if (stS.now) sendProtocol('jbx.skip', { o: stS.now.id });
+            else toast('Nothing is playing');
+            return true;
+        }
+        if (cmd === 'tune') {
+            if (state.jukebox.tunedIn) { _jbxTuneOut(); renderJukebox(); }
+            else if (_jbxState().now) { if (!state.jukebox.open) toggleJukebox(); _jbxTuneIn(); }
+            else toast('Nothing is playing');
+            return true;
+        }
+        if (cmd === 'topic') {
+            sendProtocol('topic.set', { t: arg });
+            return true;
+        }
+        if (cmd === 'play') {
+            if (!arg) {
+                var hb = q('[data-chat-jbx-input]');
+                if (hb) hb.focus();
+                return true;
+            }
+            postJSON('/api/chat/jukebox/resolve', { q: arg }).then(function (res) {
+                var r0 = res.ok && res.body.results && res.body.results[0];
+                if (r0) _jbxPick(r0);
+                else toast((res.body && res.body.error) || 'Nothing found for that', 'error');
+            });
+            return true;
+        }
+        if (cmd === 'poll') {
+            togglePollPop();
+            var qEl = q('[data-chat-poll-q]');
+            if (qEl && arg) { qEl.value = arg.slice(0, 160); }
+            var o1 = q('[data-chat-poll-o1]');
+            if (o1 && arg) o1.focus();
+            return true;
+        }
+        if (cmd === 'pin') {
+            var last = (state.msgs || [])[state.msgs.length - 1];
+            if (last && last.username) {
+                sendProtocol('pin.add', { u: last.username, ts: String(last.timestamp || ''),
+                                          x: String(last.message || '').slice(0, 140) });
+                toast('\ud83d\udccc Pinned for the room', 'success');
+            } else toast('Nothing to pin yet');
+            return true;
+        }
+        if (cmd === 'gif') {
+            toggleGifPicker();
+            var gs = q('[data-chat-gif-search]');
+            if (gs) {
+                gs.value = arg;
+                gs.focus();
+                if (arg) gs.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            return true;
+        }
+        return false;                              // unknown /word → plain message
+    }
+
     function pickMention(name) {
         var input = q('[data-chat-input]');
         var pop = q('[data-chat-mention-pop]');
@@ -997,6 +1350,9 @@
             if (el) el.value = b.room || '';
             el = q('[data-chat-set-giphy]');
             if (el) { el.value = ''; el.placeholder = b.giphy_key_set ? '••••••••  (configured)' : 'not set'; }
+            el = q('[data-chat-set-filepost]');
+            if (el) { el.value = ''; el.placeholder = b.filepost_key_set ? '••••••••  (configured)' : 'not set'; }
+            el = q('[data-chat-set-filepost-expiry]'); if (el) el.value = b.filepost_expiry || '';
             el = q('[data-chat-set-autojoin]'); if (el) el.checked = !!b.auto_join;
             el = q('[data-chat-set-membersend]'); if (el) el.checked = !!b.member_send;
             el = q('[data-chat-set-autoprove]'); if (el) el.checked = !!b.auto_prove;
@@ -1016,6 +1372,10 @@
         // blank must never clear a configured key
         var kEl = q('[data-chat-set-giphy]');
         if (kEl && kEl.value.trim()) payload.giphy_key = kEl.value.trim();
+        var fEl = q('[data-chat-set-filepost]');
+        if (fEl && fEl.value.trim()) payload.filepost_key = fEl.value.trim();
+        var xEl = q('[data-chat-set-filepost-expiry]');
+        if (xEl) payload.filepost_expiry = xEl.value || '';
         postJSON('/api/chat/settings', payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -1035,6 +1395,104 @@
             refresh();
             if (typeof showToast === 'function') showToast('Chat settings saved', 'success');
         });
+    }
+
+    // ── file sharing (filepost.dev) ─────────────────────────────────────
+    function toggleAttachPanel(forceClose) {
+        var pop = q('[data-chat-attach-pop]');
+        if (!pop) return;
+        if (forceClose === true) { pop.hidden = true; return; }
+        pop.hidden = !pop.hidden;
+        if (!pop.hidden) {
+            toggleGifPicker(true); toggleEmojiPicker(true);
+            var inp = q('[data-chat-attach-search]');
+            if (inp) inp.focus();
+        }
+    }
+
+    function _attachStatus(text, isError) {
+        var el = q('[data-chat-attach-status]');
+        if (!el) return;
+        el.hidden = !text;
+        el.textContent = text || '';
+        el.classList.toggle('chat-attach-status--err', !!isError);
+    }
+
+    function _sendFileMessage(meta) {
+        var url = String(meta.url || '');
+        if (!url) return;
+        var done = function (res) {
+            _attachStatus('');
+            toggleAttachPanel(true);
+            if (res.ok) refresh();
+            else if (typeof showToast === 'function') {
+                showToast(res.body && res.body.error || 'Could not send the file link', 'error');
+            }
+        };
+        if (state.view === 'room') {
+            postJSON('/api/chat/room/message', {
+                message: url, room: state.room,
+                file: { n: meta.name || 'file', s: meta.size || 0, m: meta.mime || '' },
+            }).then(done);
+        } else if (state.pmUser) {
+            // PMs are plaintext by design — the recipient gets a usable URL
+            postJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser),
+                     { message: url }).then(done);
+        }
+    }
+
+    function attachUploadFile(file) {
+        if (!file) return;
+        if (file.size > 50 * 1024 * 1024) {
+            _attachStatus('Too big — filepost.dev caps uploads at 50 MB', true);
+            return;
+        }
+        _attachStatus('Uploading ' + file.name + '\u2026');
+        var fd = new FormData();
+        fd.append('file', file, file.name);
+        fetch('/api/chat/files/upload', { method: 'POST', body: fd })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                if (!res.ok || !res.body.ok) {
+                    _attachStatus(res.body && res.body.error || 'Upload failed', true);
+                    return;
+                }
+                _sendFileMessage(res.body);
+            })
+            .catch(function () { _attachStatus('Upload failed', true); });
+    }
+
+    function attachSendTrack(trackId, label) {
+        _attachStatus('Uploading ' + (label || 'track') + '\u2026');
+        postJSON('/api/chat/files/upload', { track_id: trackId }).then(function (res) {
+            if (!res.ok || !res.body.ok) {
+                _attachStatus(res.body && res.body.error || 'Upload failed', true);
+                return;
+            }
+            _sendFileMessage(res.body);
+        });
+    }
+
+    var _attachSearchTimer = null;
+    function attachLibrarySearch(qstr) {
+        var host = q('[data-chat-attach-results]');
+        if (!host) return;
+        if (!qstr || qstr.length < 2) { host.innerHTML = ''; return; }
+        getJSON('/api/chat/files/library-search?q=' + encodeURIComponent(qstr))
+            .then(function (res) {
+                if (!res.ok) return;
+                var tracks = res.body.tracks || [];
+                host.innerHTML = tracks.length ? tracks.map(function (t) {
+                    var label = (t.artist ? t.artist + ' — ' : '') + t.title;
+                    return '<button type="button" class="chat-browse-row" ' +
+                        'data-chat-attach-track="' + attr(String(t.id)) + '" ' +
+                        'data-chat-attach-label="' + attr(label) + '">' +
+                        '<span class="chat-browse-icon">🎵</span>' +
+                        '<span class="chat-browse-name">' + esc(label) + '</span>' +
+                        (t.size ? '<span class="chat-browse-meta">' + esc(_fmtBytes(t.size)) + '</span>' : '') +
+                        '</button>';
+                }).join('') : '<div class="chat-side-none">No matches with files on disk</div>';
+            });
     }
 
     function toggleGifPicker(forceClose) {
@@ -1145,18 +1603,70 @@
     }
 
     function mergeMessages(incoming) {
-        var known = {};
-        state.msgs.forEach(function (m) { known[_msgKey(m)] = 1; });
-        var added = 0;
+        var byKey = {};
+        state.msgs.forEach(function (m) { byKey[_msgKey(m)] = m; });
+        var added = 0, reactionsChanged = false;
         (incoming || []).forEach(function (m) {
-            if (!known[_msgKey(m)]) { known[_msgKey(m)] = 1; state.msgs.push(m); added++; }
+            var k = _msgKey(m);
+            var existing = byKey[k];
+            if (!existing) {
+                byKey[k] = m; state.msgs.push(m); added++;
+            } else {
+                // Reactions are server-side aggregate state that changes over a
+                // message's life. mergeMessages used to only ADD new messages,
+                // so a reaction added after we first saw a message never showed
+                // without a full page reload. Reconcile the authoritative server
+                // reactions onto the copy we already hold, then re-assert our own
+                // just-sent reaction until slskd echoes it (avoids a flicker
+                // where the optimistic chip vanishes then returns).
+                var was = JSON.stringify(existing.reactions || []);
+                existing.reactions = m.reactions || [];
+                _reapplyPendingReactions(existing);
+                if (JSON.stringify(existing.reactions || []) !== was) reactionsChanged = true;
+            }
         });
         if (added) {
             state.msgs.sort(function (a, b) {
                 return String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
             });
         }
+        // renderMessages skips a repaint when the newest-timestamp+count is
+        // unchanged — a reaction change moves neither, so force the repaint.
+        if (reactionsChanged) state.lastStamp = null;
         return added;
+    }
+
+    // Add `me` to a message's reaction chip for `emoji` (creating it if new).
+    function _addReactor(m, emoji, me) {
+        m.reactions = m.reactions || [];
+        var chip = null;
+        m.reactions.forEach(function (r) { if (r.e === emoji) chip = r; });
+        if (!chip) {
+            m.reactions.push({ e: emoji, n: 1, users: me ? [me] : [] });
+        } else if (me && (chip.users || []).indexOf(me) === -1) {
+            chip.users = (chip.users || []).concat([me]);
+            chip.n = (chip.n || 0) + 1;
+        }
+    }
+
+    // Re-assert self-reactions the server hasn't echoed yet; drop each from the
+    // pending set once the authoritative copy contains it.
+    function _reapplyPendingReactions(m) {
+        var me = state.selfName;
+        if (!me) return;
+        var k = _msgKey(m);
+        Object.keys(state.pendingReactions).forEach(function (pk) {
+            var sep = pk.lastIndexOf('|');
+            if (pk.slice(0, sep) !== k) return;
+            var emoji = pk.slice(sep + 1);
+            var chip = null;
+            (m.reactions || []).forEach(function (r) { if (r.e === emoji) chip = r; });
+            if (chip && (chip.users || []).indexOf(me) > -1) {
+                delete state.pendingReactions[pk];      // server confirmed it
+            } else {
+                _addReactor(m, emoji, me);              // keep it visible meanwhile
+            }
+        });
     }
 
     function loadOlder() {
@@ -1249,8 +1759,12 @@
                 }
                 renderHead(); renderComposer();
                 mergeMessages(res.body.messages);
+                _clearTypingFor(res.body.messages);
                 renderMessages(state.msgs);
                 renderUsers(res.body.users);
+                _ingestProtocol(res.body.protocol);
+                _sendJoinBeacon();
+                _jbxWatchdog();   // drive the queue even with the panel closed
             });
         } else {
             work = getJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser))
@@ -1283,7 +1797,19 @@
     function openRoom(name) {
         state.view = 'room'; state.pmUser = null; state.lastStamp = null; state.stickBottom = true;
         state.renderedCount = 0; hideJumpPill();
-        state.room = name || state.room || state.homeRoom || 'SoulSync';
+        var nextRoom = name || state.room || state.homeRoom || 'SoulSync';
+        if (state.room && state.room !== nextRoom) {
+            _jbxTuneOut();               // BEFORE the flip: the off event goes to the OLD room
+            state.jukebox.lastRendered = '';
+            state.pinsOpen = false;
+            state.pollDismissedAt = null;
+        }
+        state.room = nextRoom;
+        state.topicEditing = false;
+        state.typing = {};
+        state.typingArmedAt = Date.now() + 2000;   // archive replay isn't live typing
+        renderTyping();
+        renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
         cancelReply();
         try {
@@ -1409,7 +1935,8 @@
         state.searchMode = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
-        renderHead(); renderComposer();
+        state.topicEditing = false;
+        renderHead(); renderComposer(); renderBusUI();   // hides the panels (audio keeps playing)
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
         refresh();
@@ -1420,6 +1947,18 @@
         if (!input) return;
         var text = (input.value || '').trim();
         if (!text || !state.canSend) return;
+        state.lastTypSentAt = 0;
+        if (state.view === 'room' && text[0] === '/') {
+            var slash = _runSlash(text);
+            if (slash === true) {
+                input.value = '';
+                input.style.height = 'auto';
+                var spop = q('[data-chat-mention-pop]');
+                if (spop) { spop.hidden = true; spop.innerHTML = ''; }
+                return;
+            }
+            if (typeof slash === 'string') text = slash;
+        }
         input.value = '';
         input.style.height = 'auto';
         var url = state.view === 'room'
@@ -1475,6 +2014,16 @@
                     !e.target.closest('[data-chat-emoji-pop]')) {
                 toggleEmojiPicker(true);
             }
+            if (!e.target.closest('[data-chat-poll-btn]') &&
+                    !e.target.closest('[data-chat-poll-pop]')) {
+                togglePollPop(true);
+            }
+            if (state.pinsOpen && !e.target.closest('[data-chat-pins-toggle]') &&
+                    !e.target.closest('[data-chat-pinbar]')) {
+                state.pinsOpen = false;
+                renderPinbar();
+                if (!state.searchMode) renderHead();
+            }
             if (!e.target.closest('[data-chat-gif-btn]') &&
                     !e.target.closest('[data-chat-gif-pop]')) {
                 toggleGifPicker(true);
@@ -1498,6 +2047,33 @@
                     'onerror="this.replaceWith(document.createTextNode(\'(image failed to load)\'))">';
                 return;
             }
+            t = e.target.closest('[data-chat-file-audio]');
+            if (t) {
+                var card = t.closest('.chat-file-card');
+                var slot = card && card.querySelector('.chat-file-slot');
+                if (slot) {
+                    slot.innerHTML = '<audio class="chat-file-player" controls preload="none" src="' +
+                        t.getAttribute('data-chat-file-audio').replace(/"/g, '&quot;') + '"></audio>';
+                    slot.querySelector('audio').play().catch(function () {});
+                    t.remove();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-file-video]');
+            if (t) {
+                var vcard = t.closest('.chat-file-card');
+                var vslot = vcard && vcard.querySelector('.chat-file-slot');
+                if (vslot) {
+                    vslot.innerHTML = '<video class="chat-file-player chat-file-player--video" controls preload="metadata" src="' +
+                        t.getAttribute('data-chat-file-video').replace(/"/g, '&quot;') + '"></video>';
+                    t.remove();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-file-save]');
+            if (t) { _saveFileToLibrary(t); return; }
+            t = e.target.closest('[data-chat-attach-btn]');
+            if (t) { toggleAttachPanel(); return; }
             t = e.target.closest('[data-chat-spoiler]');
             if (t) { t.classList.add('chat-spoiler--shown'); return; }
             t = e.target.closest('[data-chat-fmt]');
@@ -1514,6 +2090,8 @@
             }
             t = e.target.closest('[data-chat-reply-cancel]');
             if (t) { cancelReply(); return; }
+            t = e.target.closest('[data-chat-slash-pick]');
+            if (t) { pickSlash(t.getAttribute('data-chat-slash-pick')); return; }
             t = e.target.closest('[data-chat-mention-pick]');
             if (t) { pickMention(t.getAttribute('data-chat-mention-pick')); return; }
             t = e.target.closest('[data-chat-settings-btn]');
@@ -1531,6 +2109,118 @@
                 state.lastStamp = null;
                 state.renderedCount = 0; hideJumpPill();   // a filter flip isn't 'new messages'
                 renderHead(); refresh();
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-retry]');
+            if (t) { if (_browse.user) openBrowse(_browse.user); return; }
+            t = e.target.closest('[data-chat-pins-toggle]');
+            if (t) {
+                state.pinsOpen = !state.pinsOpen;
+                renderPinbar();
+                if (!state.searchMode) renderHead();
+                return;
+            }
+            t = e.target.closest('[data-chat-pin-del-u]');
+            if (t) {
+                sendProtocol('pin.del', { u: t.getAttribute('data-chat-pin-del-u'),
+                                          ts: t.getAttribute('data-chat-pin-del-ts') });
+                return;
+            }
+            t = e.target.closest('[data-chat-pin-user]');
+            if (t) {
+                sendProtocol('pin.add', { u: t.getAttribute('data-chat-pin-user'),
+                                          ts: t.getAttribute('data-chat-pin-ts'),
+                                          x: t.getAttribute('data-chat-pin-x') });
+                if (typeof showToast === 'function') showToast('📌 Pinned for the room', 'success');
+                return;
+            }
+            t = e.target.closest('[data-chat-poll-btn]');
+            if (t) { togglePollPop(); return; }
+            t = e.target.closest('[data-chat-poll-start]');
+            if (t) { _pollStart(); return; }
+            t = e.target.closest('[data-chat-poll-vote]');
+            if (t) { sendProtocol('poll.vote', { o: t.getAttribute('data-chat-poll-vote') }); return; }
+            t = e.target.closest('[data-chat-poll-end]');
+            if (t) { sendProtocol('poll.end', {}); return; }
+            t = e.target.closest('[data-chat-poll-dismiss]');
+            if (t) {
+                var pd = window.ChatProtocol ? window.ChatProtocol.reducePoll(_roomEvents()) : null;
+                state.pollDismissedAt = pd ? pd.at : null;
+                renderPoll();
+                return;
+            }
+            t = e.target.closest('[data-chat-topic-edit]');
+            if (t) {
+                state.topicEditing = true;
+                var headEl = q('[data-chat-head]');
+                var cur = (window.ChatProtocol ? window.ChatProtocol.reduceTopic(_roomEvents()) : null);
+                if (headEl) {
+                    headEl.innerHTML = '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
+                        '<input class="chat-input chat-topic-in" data-chat-topic-input type="text" maxlength="160" ' +
+                        'placeholder="Set a room topic… (Enter to save, Esc to cancel)" autocomplete="off" value="' +
+                        attr(cur ? cur.t : '') + '">';
+                    var ti = q('[data-chat-topic-input]');
+                    if (ti) { ti.focus(); ti.select(); }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-jukebox-btn]');
+            if (t) { toggleJukebox(); return; }
+            t = e.target.closest('[data-chat-jbx-tunein]');
+            if (t) { _jbxTuneIn(); return; }
+            t = e.target.closest('[data-chat-jbx-tuneout]');
+            if (t) { _jbxTuneOut(); renderJukebox(); return; }
+            t = e.target.closest('[data-chat-jbx-vote]');
+            if (t) { sendProtocol('jbx.vote', { o: t.getAttribute('data-chat-jbx-vote') }); return; }
+            t = e.target.closest('[data-chat-jbx-pick]');
+            if (t) { _jbxPick(state.jukebox.results[parseInt(t.getAttribute('data-chat-jbx-pick'), 10)]); return; }
+            t = e.target.closest('[data-chat-jbx-vpick]');
+            if (t) {
+                _jbxPick(state.jukebox.searchResults[parseInt(t.getAttribute('data-chat-jbx-vpick'), 10)]);
+                _closeJbxSearchModal();
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-searchclose]');
+            if (t) { _closeJbxSearchModal(); return; }
+            var jbxSearchOv = e.target.closest('[data-chat-jbx-search-modal]');
+            if (jbxSearchOv && e.target === jbxSearchOv) { _closeJbxSearchModal(); return; }
+            t = e.target.closest('[data-chat-jbx-skip]');
+            if (t) { sendProtocol('jbx.skip', { o: t.getAttribute('data-chat-jbx-skip') }); return; }
+            t = e.target.closest('[data-chat-jbx-unsub]');
+            if (t) { sendProtocol('jbx.unsub', { id: t.getAttribute('data-chat-jbx-unsub') }); return; }
+            t = e.target.closest('[data-chat-jbx-resub]');
+            if (t) {
+                var rp = { id: t.getAttribute('data-chat-jbx-resub'),
+                           title: t.getAttribute('data-chat-jbx-resub-ti') || '' };
+                var rd = parseInt(t.getAttribute('data-chat-jbx-resub-d') || '', 10);
+                if (rd > 0) rp.duration = rd;
+                _jbxPick(rp);
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-hist]');
+            if (t) {
+                state.jukebox.histOpen = !state.jukebox.histOpen;
+                state.jukebox.lastRendered = '';
+                renderJukebox();
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-radio]');
+            if (t) {
+                var rSt = _jbxState();
+                sendProtocol('jbx.radio', { on: rSt.radio ? 0 : 1 });
+                if (typeof showToast === 'function') {
+                    showToast(rSt.radio ? '📻 Auto-DJ off' : '📻 Auto-DJ on — the queue keeps itself fed', 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-video]');
+            if (t) {
+                state.jukebox.videoHidden = !state.jukebox.videoHidden;
+                try { localStorage.setItem('chat_jbx_audio', state.jukebox.videoHidden ? '1' : '0'); } catch (err) { /* ignore */ }
+                var ph = q('[data-chat-jbx-player]');
+                if (ph) ph.classList.toggle('chat-jbx-player--audio', state.jukebox.videoHidden);
+                state.jukebox.lastRendered = '';
+                renderJukebox();
                 return;
             }
             t = e.target.closest('[data-chat-search-btn]');
@@ -1629,6 +2319,10 @@
 
         var form = q('[data-chat-composer]');
         if (form) form.addEventListener('submit', function (e) { e.preventDefault(); send(); });
+        var jbxForm = q('[data-chat-jbx-form]');
+        if (jbxForm) jbxForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSubmit(); });
+        var jbxSearchForm = q('[data-chat-jbx-searchform]');
+        if (jbxSearchForm) jbxSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSearchModalSubmit(); });
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -1647,11 +2341,21 @@
                     var mp = q('[data-chat-mention-pop]');
                     if (mp) mp.hidden = true;
                 }
+                if (e.key === 'Tab') {
+                    var sp = q('[data-chat-mention-pop]');
+                    var first = sp && !sp.hidden && sp.querySelector('[data-chat-slash-pick]');
+                    if (first) {
+                        e.preventDefault();
+                        pickSlash(first.getAttribute('data-chat-slash-pick'));
+                    }
+                }
             });
             inputEl.addEventListener('input', function () {
                 inputEl.style.height = 'auto';
                 inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px';
                 updateMentionPop(inputEl);
+                updateSlashPop(inputEl);
+                _maybeSendTyping(inputEl);
             });
         }
 
@@ -1663,12 +2367,31 @@
                 if (e.key === 'Enter') { e.preventDefault(); runSearch(e.target.value); }
                 if (e.key === 'Escape') exitSearch();
             }
+            if (e.target && e.target.matches('[data-chat-topic-input]')) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    sendProtocol('topic.set', { t: String(e.target.value || '').trim() });
+                    state.topicEditing = false;
+                    renderHead();
+                }
+                if (e.key === 'Escape') { state.topicEditing = false; renderHead(); }
+            }
         });
 
         page.addEventListener('input', function (e) {
             if (e.target && e.target.matches('[data-chat-user-search]')) {
                 state.userFilter = e.target.value.trim();
                 renderUsersList();
+            }
+            if (e.target && e.target.matches('[data-chat-jbx-vol]')) {
+                var vv = parseInt(e.target.value, 10);
+                if (vv >= 0 && vv <= 100) {
+                    state.jukebox.vol = vv;
+                    try { localStorage.setItem('chat_jbx_vol', String(vv)); } catch (err) { /* ignore */ }
+                    if (state.jukebox.player && state.jukebox.playerAlive) {
+                        try { state.jukebox.player.setVolume(vv); } catch (err) { /* gone */ }
+                    }
+                }
             }
             if (e.target && e.target.matches('[data-chat-browse-search]')) {
                 var v = e.target.value.trim();
@@ -1691,6 +2414,32 @@
                 _gifTimer = setTimeout(function () { gifSearch(gifIn.value.trim()); }, 400);
             });
         }
+
+        var attIn = q('[data-chat-attach-search]');
+        if (attIn) {
+            attIn.addEventListener('input', function () {
+                if (_attachSearchTimer) clearTimeout(_attachSearchTimer);
+                _attachSearchTimer = setTimeout(function () {
+                    attachLibrarySearch(attIn.value.trim());
+                }, 350);
+            });
+        }
+        var attFile = q('[data-chat-attach-file]');
+        if (attFile) {
+            attFile.addEventListener('change', function () {
+                if (attFile.files && attFile.files[0]) attachUploadFile(attFile.files[0]);
+                attFile.value = '';
+            });
+        }
+        document.addEventListener('click', function (e) {
+            var up = e.target.closest('[data-chat-attach-upload]');
+            if (up) { var fi = q('[data-chat-attach-file]'); if (fi) fi.click(); return; }
+            var tr = e.target.closest('[data-chat-attach-track]');
+            if (tr) {
+                attachSendTrack(tr.getAttribute('data-chat-attach-track'),
+                                tr.getAttribute('data-chat-attach-label'));
+            }
+        });
 
         var scroller = q('[data-chat-messages]');
         if (scroller) {
@@ -1789,6 +2538,757 @@
         });
     }
 
+    // ── protocol bus (the hidden coordination channel) ──────────────────
+    function _ingestProtocol(events) {
+        if (!events || !events.length) return;
+        var log = state.protocolLog;
+        var room = state.room || '';
+        var seen = {};
+        log.forEach(function (e) { seen[e.room + '|' + e.username + '|' + e.timestamp + '|' + (e.p && e.p.k)] = 1; });
+        var fresh = [];
+        events.forEach(function (ev) {
+            if (!ev || !ev.p || !window.ChatProtocol) return;
+            var p = window.ChatProtocol.parseProtocol({ p: ev.p });
+            if (!p) return;
+            var key = room + '|' + ev.username + '|' + ev.timestamp + '|' + p.k;
+            if (seen[key]) return;
+            seen[key] = 1;
+            // room-tagged: reducers (jukebox) must never mix rooms' events
+            var entry = { username: String(ev.username || ''), timestamp: ev.timestamp,
+                          room: room, p: p };
+            log.push(entry);
+            fresh.push(entry);
+            if (p.k === 'typ' && entry.username && entry.username !== state.selfName &&
+                    state.typingArmedAt && Date.now() > state.typingArmedAt) {
+                state.typing[entry.username] = Date.now();
+                renderTyping();
+            }
+        });
+        if (log.length > 300) state.protocolLog = log.slice(-300);
+        if (fresh.length) {
+            // presence: a protocol event proves SoulSync — refresh buckets
+            renderUsersList();
+            renderBusUI();
+            try {
+                document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
+                    { detail: { events: fresh } }));
+            } catch (e) { /* older browsers: features just poll the log */ }
+        }
+    }
+
+    function sendProtocol(kind, fields) {
+        // One-liner for features: fire a coordination event into the room.
+        // Respects the send gate server-side; failures are silent (fun-grade).
+        var p = Object.assign({ k: kind }, fields || {});
+        return postJSON('/api/chat/room/protocol', { room: state.room, p: p });
+    }
+
+    function _sendJoinBeacon() {
+        // Announce capability ONCE per room per session — powers the
+        // assume-SoulSync presence for users who haven't typed anything.
+        if (!state.canSend || !state.room || state.beaconed[state.room]) return;
+        state.beaconed[state.room] = 1;
+        sendProtocol('hello', {}).then(function (r) {
+            if (!r.ok) state.beaconed[state.room] = 0;   // retry next refresh
+        });
+    }
+
+    function onRoomProtocol(d) {
+        if (!d || d.room !== state.room) return;
+        _ingestProtocol(d.events || []);
+    }
+
+    // ── typing indicators (typ events on the bus, deliberately frugal:
+    // every carrier is a visible noise line for vanilla clients, so we emit
+    // on composition start + at most one refresh per 20s, never per-key) ──
+    var _TYP_TTL = 25000;      // matches the ≤20s re-emit cadence + slack
+
+    function _maybeSendTyping(input) {
+        if (state.view !== 'room' || !state.canSend) return;
+        if (!input || !(input.value || '').trim()) return;
+        if ((input.value || '')[0] === '/') return;      // commands aren't messages
+        if (Date.now() - state.lastTypSentAt < 20000) return;
+        state.lastTypSentAt = Date.now();
+        sendProtocol('typ', {});
+    }
+
+    function renderTyping() {
+        var host = q('[data-chat-typing]');
+        if (!host) return;
+        var cut = Date.now() - _TYP_TTL;
+        var names = [];
+        Object.keys(state.typing).forEach(function (n) {
+            if (state.typing[n] < cut) delete state.typing[n];
+            else names.push(n);
+        });
+        if (!names.length || state.view !== 'room') { host.hidden = true; host.innerHTML = ''; return; }
+        names.sort();
+        var who = names.length === 1 ? '<b>' + esc(names[0]) + '</b> is'
+            : names.length === 2 ? '<b>' + esc(names[0]) + '</b> and <b>' + esc(names[1]) + '</b> are'
+            : names.length + ' people are';
+        host.innerHTML = '<span class="chat-typing-dots"><i></i><i></i><i></i></span> ' + who + ' typing…';
+        host.hidden = false;
+        if (state.typingTimer) clearTimeout(state.typingTimer);
+        state.typingTimer = setTimeout(renderTyping, 5000);
+    }
+
+    function _clearTypingFor(messages) {
+        // an arriving message from a typer means they sent it — clear now
+        var changed = false;
+        (messages || []).forEach(function (m) {
+            if (m && m.username && state.typing[m.username]) {
+                delete state.typing[m.username];
+                changed = true;
+            }
+        });
+        if (changed) renderTyping();
+    }
+
+    // Every surface reduced from the protocol bus, painted together.
+    function renderBusUI() {
+        renderJukebox();
+        renderPinbar();
+        renderPoll();
+        // topic lives in the head sub-line — but search mode freezes the
+        // head (its input would be clobbered mid-typing by a socket event)
+        if (!state.searchMode) renderHead();
+    }
+
+    // ── pinned messages (pin.add / pin.del on the bus) ──────────────────
+    function renderPinbar() {
+        // A POPOVER, not a standing bar (Boulder): pins are look-up-occasionally,
+        // so they cost zero message height until the head 📌 button opens them.
+        var host = q('[data-chat-pinbar]');
+        if (!host) return;
+        var show = state.pinsOpen && state.view === 'room';
+        host.hidden = !show;
+        if (!show) { host.innerHTML = ''; return; }
+        var CP = window.ChatProtocol;
+        var pins = CP ? CP.reducePins(_roomEvents()) : [];
+        host.innerHTML = '<div class="chat-pins-title">📌 Pinned messages</div>' +
+            (pins.length
+                ? pins.slice().reverse().map(function (pin) {
+                    return '<div class="chat-pin-row">' +
+                        '<span class="chat-pin-text"><b>' + esc(pin.u) + '</b> ' + esc(pin.x) + '</span>' +
+                        '<span class="chat-pin-by">pinned by ' + esc(pin.by) + '</span>' +
+                        (state.canSend
+                            ? '<button class="chat-pin-del" type="button" title="Unpin" ' +
+                              'data-chat-pin-del-u="' + attr(pin.u) + '" data-chat-pin-del-ts="' + attr(pin.ts) + '">×</button>'
+                            : '') +
+                    '</div>';
+                }).join('')
+                : '<div class="chat-side-none">Nothing pinned yet — hover a message and hit 📌</div>');
+    }
+
+    // ── the room poll (poll.start / poll.vote / poll.end on the bus) ────
+    function renderPoll() {
+        var host = q('[data-chat-poll]');
+        if (!host) return;
+        var CP = window.ChatProtocol;
+        var poll = (CP && state.view === 'room') ? CP.reducePoll(_roomEvents()) : null;
+        if (!poll || (poll.closed && state.pollDismissedAt === poll.at)) {
+            host.hidden = true; host.innerHTML = ''; return;
+        }
+        host.hidden = false;
+        var total = poll.tally.total;
+        var rows = poll.options.map(function (opt, i) {
+            var idx = String(i + 1);
+            var n = poll.tally.counts[idx] || 0;
+            var pct = total ? Math.round(n * 100 / total) : 0;
+            var winner = poll.closed && poll.tally.winner === idx;
+            return '<div class="chat-poll-opt' + (winner ? ' chat-poll-opt--win' : '') + '">' +
+                (poll.closed || !state.canSend
+                    ? '<span class="chat-poll-label">' + esc(opt) + '</span>'
+                    : '<button class="chat-poll-vote" type="button" data-chat-poll-vote="' + idx + '">' +
+                          esc(opt) + '</button>') +
+                '<span class="chat-poll-n">' + n + (total ? ' · ' + pct + '%' : '') + '</span>' +
+                '<span class="chat-poll-bar" style="width:' + pct + '%"></span>' +
+            '</div>';
+        }).join('');
+        host.innerHTML =
+            '<div class="chat-poll-head">📊 <b>' + esc(poll.q) + '</b>' +
+                '<span class="chat-jbx-meta">' + (poll.closed ? 'final — ' : '') +
+                    total + ' vote' + (total === 1 ? '' : 's') + ' · by ' + esc(poll.by) + '</span>' +
+                (!poll.closed && state.selfName && poll.by === state.selfName
+                    ? '<button class="chat-fmt-btn" type="button" data-chat-poll-end>End poll</button>' : '') +
+                (poll.closed
+                    ? '<button class="chat-pin-del" type="button" title="Dismiss" data-chat-poll-dismiss>×</button>' : '') +
+            '</div>' + rows;
+    }
+
+    function _pollStart() {
+        var qEl = q('[data-chat-poll-q]');
+        if (!qEl) return;
+        var fields = { q: String(qEl.value || '').trim() };
+        var opts = 0;
+        for (var i = 1; i <= 4; i++) {
+            var o = q('[data-chat-poll-o' + i + ']');
+            var v = o ? String(o.value || '').trim() : '';
+            if (v) { opts += 1; fields['o' + opts] = v; }   // compact gaps
+        }
+        if (!fields.q || opts < 2) {
+            if (typeof showToast === 'function') showToast('A poll needs a question and at least 2 options', 'error');
+            return;
+        }
+        sendProtocol('poll.start', fields);
+        [qEl].concat([1, 2, 3, 4].map(function (i2) { return q('[data-chat-poll-o' + i2 + ']'); }))
+            .forEach(function (el) { if (el) el.value = ''; });
+        togglePollPop(true);
+        state.pollDismissedAt = null;
+    }
+
+    function togglePollPop(forceClose) {
+        var pop = q('[data-chat-poll-pop]');
+        if (!pop) return;
+        pop.hidden = forceClose === true ? true : !pop.hidden;
+        if (!pop.hidden) {
+            toggleEmojiPicker(true); toggleGifPicker(true); toggleAttachPanel(true);
+            var qEl = q('[data-chat-poll-q]');
+            if (qEl) qEl.focus();
+        }
+    }
+
+    // ── jukebox (shared room listening — a pure fold over the bus) ──────
+    // State lives in the protocol stream (jbx.sub / jbx.vote / jbx.now);
+    // every client reduces the same events to the same queue + now-playing.
+    // Playback is an OPT-IN YouTube embed ("Tune in" = the user gesture
+    // browsers require for audible autoplay); joiners seek to the live
+    // position from now.at. The DJ (deterministic election, no chatter) is
+    // the one client that emits jbx.now when a track ends or the queue waits.
+    function _roomEvents() {
+        var room = state.room || '';
+        return (state.protocolLog || []).filter(function (e) { return e.room === room; });
+    }
+
+    function _jbxState() {
+        var CP = window.ChatProtocol;
+        if (!CP) return { queue: [], now: null, tally: { counts: {}, winner: null, total: 0 } };
+        return CP.reduceJukebox(_roomEvents());
+    }
+
+    function _jbxIsDj() {
+        // DJ candidates are PROTOCOL-CAPABLE clients only: users who have
+        // emitted protocol events (hello beacon, jukebox chatter) in this
+        // room. Envelope messages are NOT enough — every pre-jukebox
+        // SoulSync version speaks envelopes, and electing one of those gets
+        // a DJ that can never press play. We're always in our own pool.
+        var CP = window.ChatProtocol;
+        if (!CP || !state.canSend || !state.selfName) return false;
+        var emitters = {};
+        _roomEvents().forEach(function (e) { emitters[e.username] = 1; });
+        var pool = (state.users || []).filter(function (n) { return emitters[n]; });
+        if (pool.indexOf(state.selfName) === -1) pool.push(state.selfName);
+        return CP.electCoordinator(pool) === state.selfName;
+    }
+
+    function _jbxElapsed(now) {
+        if (!now || typeof now.at !== 'number') return null;
+        var s = Math.floor(Date.now() / 1000 - now.at);
+        return (s >= 0 && s < 86400) ? s : null;
+    }
+
+    function _fmtSecs(s) {
+        if (s === null || isNaN(s)) return '';
+        var m = Math.floor(s / 60), r = s % 60;
+        return m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    function _jbxThumb(id) {
+        return 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg';
+    }
+
+    function _jbxEffDuration(now) {
+        // the protocol event's duration when it has one, else a live player's
+        // truth (pasted links resolve via oEmbed, which has no duration)
+        if (!now) return null;
+        if (now.d) return now.d;
+        if (state.jukebox.tunedIn && state.jukebox.playerAlive &&
+                state.jukebox.player && state.jukebox.playingId === now.id) {
+            try {
+                var pd = state.jukebox.player.getDuration();
+                if (pd > 0) return Math.floor(pd);
+            } catch (e) { /* mid-teardown */ }
+        }
+        return null;
+    }
+
+    function _jbxSkipNeeded() {
+        // majority of tuned-in listeners (deterministic — derived from the
+        // same event stream everywhere); floor of 1 when nobody's tuned
+        var CP = window.ChatProtocol;
+        var n = CP ? Object.keys(CP.reduceTuned(_roomEvents())).length : 0;
+        return Math.max(1, Math.ceil(n / 2));
+    }
+
+    function _jbxHasListeners() {
+        // Is anyone actually listening? Counts ourself the instant we tune in
+        // (before our own jbx.tune echoes back). Gates auto-DJ so an unwatched
+        // room never generates an endless stream of tracks nobody hears.
+        if (state.jukebox.tunedIn) return true;
+        var CP = window.ChatProtocol;
+        return !!(CP && Object.keys(CP.reduceTuned(_roomEvents())).length);
+    }
+
+    function renderJukebox() {
+        var panel = q('[data-chat-jukebox]');
+        if (!panel) return;
+        var st = _jbxState();
+        var now = st.now;
+        var elapsed = _jbxElapsed(now);
+        var effD = _jbxEffDuration(now);
+        var ended = !!(now && effD && elapsed !== null && elapsed > effD + 5);
+        // Display honesty (Boulder): the shared now-event can scroll out of the
+        // bounded protocol log (busy room / long track), or a wrong duration
+        // can flag 'ended' while the audio is genuinely still playing — either
+        // way the panel would flip to 'Nothing playing' over a live track.
+        // If our own player is actively playing, keep showing that track.
+        if ((!now || ended) && state.jukebox.tunedIn && state.jukebox.playerAlive &&
+                state.jukebox.player && state.jukebox.playingNow) {
+            try {
+                var _ps = state.jukebox.player.getPlayerState();
+                if (_ps === 1 || _ps === 2 || _ps === 3) {   // playing / paused / buffering
+                    now = state.jukebox.playingNow;
+                    elapsed = _jbxElapsed(now);
+                    effD = _jbxEffDuration(now);
+                    ended = false;
+                }
+            } catch (e) { /* player mid-teardown */ }
+        }
+        // the player follows the ROOM, not the panel — a tuned-in listener
+        // reading PMs must still hear the DJ's advances (panel merely hides)
+        _jbxSyncPlayer(now && !ended ? now : null);
+        // the header bar (brand + listeners + add-a-song) lives in the page
+        // header and shows whenever a room is on screen — panel open or not
+        var inRoom = state.view === 'room';
+        var headbar = q('[data-chat-jbx-headbar]');
+        if (headbar) {
+            headbar.hidden = !inRoom;
+            var form = q('[data-chat-jbx-form]');
+            if (form) form.hidden = !state.canSend;
+            var lc = q('[data-chat-jbx-listeners]');
+            if (lc && window.ChatProtocol) {
+                var nTuned = Object.keys(window.ChatProtocol.reduceTuned(_roomEvents())).length;
+                lc.textContent = nTuned ? '♪ ' + nTuned + ' listening' : '';
+            }
+            var rb = q('[data-chat-jbx-radio]');
+            if (rb) {
+                rb.hidden = !state.canSend;
+                rb.classList.toggle('chat-filter-btn--on', !!st.radio);
+                rb.classList.toggle('chat-jbx-radiobtn--on', !!st.radio);
+            }
+        }
+        var show = state.jukebox.open && inRoom;
+        panel.hidden = !show;
+        if (!show) return;
+        var needed = _jbxSkipNeeded();
+        var nextId = (st.queue.length > 1 && window.ChatProtocol)
+            ? (window.ChatProtocol.nextTrack(st) || {}).id : null;
+        // fingerprint: skip DOM writes when nothing visible changed (the
+        // clock + progress bar tick via cheap updates below)
+        var fp = JSON.stringify([now && now.id, ended, st.queue, state.jukebox.tunedIn,
+                                 state.canSend, st.skips, needed, nextId,
+                                 state.jukebox.histOpen, st.history.length,
+                                 st.history[0] && st.history[0].id,   // cap rotation changes content, not length
+                                 state.jukebox.videoHidden, st.radio]);
+        if (fp !== state.jukebox.lastRendered) {
+            state.jukebox.lastRendered = fp;
+            var nowHost = q('[data-chat-jbx-now]');
+            if (nowHost) {
+                if (now && !ended) {
+                    var pct = (effD && elapsed !== null)
+                        ? Math.min(100, 100 * elapsed / effD) : 0;
+                    nowHost.innerHTML =
+                        '<div class="chat-jbx-nowcard">' +
+                            '<img class="chat-jbx-art" src="' + attr(_jbxThumb(now.id)) + '" alt="">' +
+                            '<div class="chat-jbx-nowmain">' +
+                                '<div class="chat-jbx-titlerow">' +
+                                    '<span class="chat-jbx-eq"><i></i><i></i><i></i></span>' +
+                                    '<a class="chat-jbx-title" href="https://youtu.be/' + attr(now.id) +
+                                        '" target="_blank" rel="noopener" title="' + attr(now.ti || now.id) + '">' +
+                                        esc(now.ti || now.id) + '</a>' +
+                                '</div>' +
+                                '<div class="chat-jbx-meta">added by ' + esc(now.by || '?') +
+                                    (elapsed !== null ? ' · <span data-chat-jbx-clock>' + _fmtSecs(elapsed) + '</span>' +
+                                        (effD ? ' / ' + _fmtSecs(effD) : '') : '') + '</div>' +
+                                '<div class="chat-jbx-progress"><span class="chat-jbx-progbar" ' +
+                                    'data-chat-jbx-bar style="width:' + pct.toFixed(1) + '%"></span></div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="chat-jbx-controls">' +
+                            (state.jukebox.tunedIn
+                                ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>'
+                                : '<button class="chat-send-btn chat-jbx-tune" type="button" data-chat-jbx-tunein>▶ Tune in</button>') +
+                            '<button class="chat-fmt-btn" type="button" data-chat-jbx-skip="' + attr(now.id) + '"' +
+                                (state.canSend ? '' : ' disabled') +
+                                ' title="Vote to skip this track (majority of listeners)">⏭ Skip' +
+                                (st.skips ? ' ' + st.skips + '/' + needed : '') + '</button>' +
+                            (state.jukebox.tunedIn
+                                ? '<button class="chat-fmt-btn" type="button" data-chat-jbx-video title="' +
+                                      (state.jukebox.videoHidden ? 'Show the video' : 'Audio only — hide the video') + '">' +
+                                      (state.jukebox.videoHidden ? '🎬 Video' : '🎧 Audio only') + '</button>' +
+                                  '<input class="chat-jbx-vol" data-chat-jbx-vol type="range" min="0" max="100" ' +
+                                      'value="' + state.jukebox.vol + '" title="Volume (just yours)">'
+                                : '') +
+                        '</div>';
+                } else {
+                    // tuned-in users keep their exit even between tracks
+                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' +
+                        (st.queue.length ? 'Waiting for the next track…'
+                                         : 'Nothing playing — add a song above and get the room voting.') +
+                        '</div>' +
+                        (state.jukebox.tunedIn
+                            ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>' : '');
+                }
+            }
+            var qHost = q('[data-chat-jbx-queue]');
+            if (qHost) {
+                var rows = st.queue.map(function (e) {
+                    var mine = state.selfName && e.by === state.selfName;
+                    return '<div class="chat-jbx-row' + (e.id === nextId ? ' chat-jbx-row--next' : '') + '">' +
+                        '<img class="chat-jbx-qthumb" src="' + attr(_jbxThumb(e.id)) + '" alt="" loading="lazy">' +
+                        '<div class="chat-jbx-qmain">' +
+                            '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
+                            '<span class="chat-jbx-meta">' +
+                                (e.id === nextId ? '<b class="chat-jbx-next">up next</b> · ' : '') +
+                                (e.auto ? '📻 auto · ' : '') +
+                                (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
+                        '</div>' +
+                        '<button class="chat-jbx-vote" type="button" data-chat-jbx-vote="' + attr(e.id) + '"' +
+                            (state.canSend ? '' : ' disabled') + ' title="Vote to play this next">▲ ' +
+                            (e.votes || 0) + '</button>' +
+                        (mine && state.canSend
+                            ? '<button class="chat-jbx-unsub" type="button" data-chat-jbx-unsub="' + attr(e.id) +
+                              '" title="Remove your submission">×</button>' : '') +
+                    '</div>';
+                }).join('');
+                if (st.history.length) {
+                    rows += '<button class="chat-jbx-histbtn" type="button" data-chat-jbx-hist>' +
+                        (state.jukebox.histOpen ? '▾' : '▸') + ' Recently played (' + st.history.length + ')</button>';
+                    if (state.jukebox.histOpen) {
+                        rows += st.history.map(function (h) {
+                            return '<div class="chat-jbx-row chat-jbx-row--hist">' +
+                                '<img class="chat-jbx-qthumb" src="' + attr(_jbxThumb(h.id)) + '" alt="" loading="lazy">' +
+                                '<div class="chat-jbx-qmain">' +
+                                    '<span class="chat-jbx-title" title="' + attr(h.ti || h.id) + '">' + esc(h.ti || h.id) + '</span>' +
+                                    '<span class="chat-jbx-meta">' + esc(h.by || '') + '</span>' +
+                                '</div>' +
+                                (state.canSend
+                                    ? '<button class="chat-jbx-vote" type="button" data-chat-jbx-resub="' + attr(h.id) +
+                                      '" data-chat-jbx-resub-ti="' + attr(h.ti || '') + '"' +
+                                      (h.d ? ' data-chat-jbx-resub-d="' + attr(String(h.d)) + '"' : '') +
+                                      ' title="Queue it again">↻</button>' : '') +
+                            '</div>';
+                        }).join('');
+                    }
+                }
+                qHost.innerHTML = rows;
+            }
+        } else if (elapsed !== null) {
+            var clock = q('[data-chat-jbx-clock]');
+            if (clock) clock.textContent = _fmtSecs(elapsed);
+            var bar = q('[data-chat-jbx-bar]');
+            if (bar && effD) bar.style.width = Math.min(100, 100 * elapsed / effD).toFixed(1) + '%';
+        }
+    }
+
+    function toggleJukebox() {
+        state.jukebox.open = !state.jukebox.open;
+        if (!state.jukebox.open) _jbxTuneOut();
+        state.jukebox.lastRendered = '';
+        renderHead();
+        renderJukebox();
+        if (state.jukebox.open && !state.jukebox.timer) {
+            state.jukebox.timer = setInterval(function () {
+                renderJukebox();
+                _jbxWatchdog();
+            }, 5000);
+        } else if (!state.jukebox.open && state.jukebox.timer) {
+            clearInterval(state.jukebox.timer);
+            state.jukebox.timer = null;
+        }
+    }
+
+    // DJ duties: kick the queue when nothing is playing, or when the current
+    // track has provably run out (duration known) and nobody advanced it.
+    // Starvation fallback: if the elected DJ went away mid-session (closed
+    // tab, network), ANY capable client kicks the queue after 45s — a rare
+    // double-start converges (latest now wins, same track either way).
+    function _jbxWatchdog() {
+        // Drives the shared queue whenever we're viewing a room — NOT gated on
+        // the jukebox panel being open, so the elected DJ advances the room
+        // even with the panel closed (else the queue stalled until a 45s
+        // starvation fallback, or froze if the DJ never opened the panel).
+        // Called from the 5s panel timer AND the 4s room refresh; both are
+        // already behind pageVisible, so a backgrounded tab never DJs.
+        if (state.view !== 'room') return;
+        var st = _jbxState();
+        var elapsed = _jbxElapsed(st.now);
+        // A tuned-in client asks the PLAYER for the truth — pasted links have
+        // no duration (oEmbed doesn't give one), and the iframe's ENDED event
+        // is best-effort, so poll instead of trusting either.
+        var effD = _jbxEffDuration(st.now);
+        var playerEnded = false;
+        if (state.jukebox.tunedIn && state.jukebox.playerAlive && state.jukebox.player) {
+            try {
+                playerEnded = state.jukebox.player.getPlayerState() === 0;   // YT ENDED
+            } catch (e) { /* player mid-teardown */ }
+        }
+        var skipped = !!(st.now && st.skips >= _jbxSkipNeeded());
+        var stale = !st.now || playerEnded || skipped ||
+            (effD && elapsed !== null && elapsed > effD + 8) ||
+            (!effD && elapsed !== null && elapsed > 900);   // untuned + unknown length: 15-min cap
+        // Radio only refills for an audience — an empty, unwatched room must
+        // not spin up an endless YouTube stream nobody hears. (Advancing an
+        // EXISTING queue below is unconditional: a finite queue just drains.)
+        if (!st.queue.length && st.radio && _jbxIsDj() && _jbxHasListeners()) _jbxAutoQueue(st);
+        if (!st.queue.length || !stale) { state.jukebox.starvedAt = 0; return; }
+        if (_jbxIsDj()) { _jbxAdvance(st); return; }
+        if (!state.jukebox.starvedAt) {
+            state.jukebox.starvedAt = Date.now();
+        } else if (Date.now() - state.jukebox.starvedAt > 45000) {
+            state.jukebox.starvedAt = 0;
+            _jbxAdvance(st);
+        }
+    }
+
+    function _jbxAutoQueue(st) {
+        // Radio mode: the queue ran dry — find something related to what the
+        // room just heard and queue it (marked auto, still vote/skippable).
+        if (Date.now() - (state.jukebox.lastAutoAt || 0) < 25000) return;
+        var seed = st.now || (st.history && st.history[0]);
+        if (!seed || !seed.ti) return;
+        state.jukebox.lastAutoAt = Date.now();
+        // strip (Official Video)-style noise so the search finds neighbors
+        var qtext = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
+            .replace(/\s+/g, ' ').trim().slice(0, 150);
+        if (!qtext) return;
+        var avoid = {};
+        if (st.now) avoid[st.now.id] = 1;
+        (st.history || []).forEach(function (h) { avoid[h.id] = 1; });
+        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+            if (!res.ok) return;                   // paste-only servers: radio just idles
+            var pick = (res.body.results || []).filter(function (r) {
+                return r && r.id && !avoid[r.id];
+            })[0];
+            if (!pick) return;
+            var p = { id: pick.id, ti: pick.title, a: 1 };
+            if (pick.duration) p.d = pick.duration;
+            sendProtocol('jbx.sub', p);
+        });
+    }
+
+    function _jbxAdvance(st) {
+        var CP = window.ChatProtocol;
+        if (!CP || !state.canSend) return;
+        if (Date.now() - state.jukebox.lastAdvanceAt < 15000) return;  // outlast a slow slskd roundtrip
+        var next = CP.nextTrack(st || _jbxState());
+        if (!next) return;
+        state.jukebox.lastAdvanceAt = Date.now();
+        var p = { id: next.id, ti: next.ti, at: Math.floor(Date.now() / 1000) };
+        if (next.d) p.d = next.d;
+        sendProtocol('jbx.now', p);
+    }
+
+    // ── jukebox playback (YouTube iframe API, loaded on first tune-in) ──
+    function _jbxLoadYT(cb) {
+        if (window.YT && window.YT.Player) { cb(); return; }
+        state.jukebox.ytCbs.push(cb);
+        if (state.jukebox.ytLoading) return;
+        state.jukebox.ytLoading = true;
+        var prev = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = function () {
+            if (typeof prev === 'function') { try { prev(); } catch (e) { /* theirs */ } }
+            var cbs = state.jukebox.ytCbs;
+            state.jukebox.ytCbs = [];
+            cbs.forEach(function (f) { try { f(); } catch (e) { /* one bad cb */ } });
+        };
+        var s = document.createElement('script');
+        s.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(s);
+    }
+
+    function _jbxTuneIn() {
+        var st = _jbxState();
+        if (!st.now) return;
+        state.jukebox.tunedIn = true;
+        sendProtocol('jbx.tune', { on: 1 });
+        state.jukebox.lastRendered = '';
+        renderJukebox();
+        _jbxLoadYT(function () {
+            if (!state.jukebox.tunedIn) return;        // tuned out while loading
+            _jbxSyncPlayer(_jbxState().now);
+        });
+    }
+
+    function _jbxTuneOut() {
+        if (state.jukebox.tunedIn) sendProtocol('jbx.tune', { on: 0 });
+        state.jukebox.tunedIn = false;
+        if (state.jukebox.player) {
+            try { state.jukebox.player.destroy(); } catch (e) { /* already gone */ }
+        }
+        state.jukebox.player = null;
+        state.jukebox.playingId = null;
+        state.jukebox.playingNow = null;
+        state.jukebox.playerAlive = false;
+        var host = q('[data-chat-jbx-player]');
+        if (host) { host.innerHTML = ''; host.hidden = true; }
+        state.jukebox.lastRendered = '';
+    }
+
+    function _jbxSyncPlayer(now) {
+        // Point the player at `now`, seeking to the live position. Never
+        // touches the DOM outside [data-chat-jbx-player] — renderJukebox
+        // depends on that so the iframe survives queue re-renders.
+        if (!state.jukebox.tunedIn) return;
+        if (!now) return;   // between tracks: keep the player, never kick the listener
+        if (!(window.YT && window.YT.Player)) return;  // tune-in cb will land here again
+        var host = q('[data-chat-jbx-player]');
+        if (!host) return;
+        var offset = Math.max(0, _jbxElapsed(now) || 0);
+        host.classList.toggle('chat-jbx-player--audio', state.jukebox.videoHidden);
+        if (!state.jukebox.player) {
+            host.hidden = false;
+            host.innerHTML = '<div data-chat-jbx-yt></div>';
+            state.jukebox.playingId = now.id;
+            state.jukebox.playingNow = now;
+            state.jukebox.player = new window.YT.Player(host.firstChild, {
+                width: '100%', height: '158', videoId: now.id,
+                playerVars: { autoplay: 1, start: offset, rel: 0, playsinline: 1 },
+                events: {
+                    onReady: function () {
+                        state.jukebox.playerAlive = true;
+                        try { state.jukebox.player.setVolume(state.jukebox.vol); } catch (e) { /* gone */ }
+                        _jbxSyncPlayer(_jbxState().now);   // catch a now-change during boot
+                    },
+                    onStateChange: _jbxOnPlayerState,
+                },
+            });
+        } else if (state.jukebox.playingId !== now.id && state.jukebox.playerAlive) {
+            state.jukebox.playingId = now.id;
+            state.jukebox.playingNow = now;
+            try {
+                state.jukebox.player.loadVideoById({ videoId: now.id, startSeconds: offset });
+            } catch (e) { _jbxTuneOut(); }
+        }
+    }
+
+    function _jbxOnPlayerState(e) {
+        // ENDED (0): drop the display fallback so the panel can honestly show
+        // 'waiting for the next track', and (if we're the DJ) advance the room.
+        if (e && e.data === 0) {
+            state.jukebox.playingNow = null;
+            if (_jbxIsDj()) _jbxAdvance(null);
+        }
+    }
+
+    function _jbxSubmit() {
+        var input = q('[data-chat-jbx-input]');
+        var resHost = q('[data-chat-jbx-results]');
+        if (!input || state.jukebox.resolving) return;
+        var qtext = String(input.value || '').trim();
+        if (!qtext) return;
+        state.jukebox.resolving = true;
+        if (resHost) { resHost.hidden = false; resHost.innerHTML = '<div class="chat-jbx-meta">Looking that up…</div>'; }
+        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+            state.jukebox.resolving = false;
+            if (!res.ok || !(res.body.results || []).length) {
+                if (resHost) resHost.innerHTML = '<div class="chat-jbx-meta">' +
+                    esc((res.body && res.body.error) || 'Nothing found — try a link or a different search.') + '</div>';
+                return;
+            }
+            var results = res.body.results;
+            if (resHost) { resHost.hidden = true; resHost.innerHTML = ''; }
+            if (results.length === 1) {                 // pasted link → straight in
+                _jbxPick(results[0]);
+                return;
+            }
+            _openJbxSearchModal(results, qtext);         // a search → the rich picker
+        }).catch(function () {
+            state.jukebox.resolving = false;
+            if (resHost) resHost.innerHTML = '<div class="chat-jbx-meta">Lookup failed — try again.</div>';
+        });
+    }
+
+    // ── jukebox YouTube search modal (search-page video-card look) ──────
+    function _fmtViews(n) {
+        n = Number(n) || 0;
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n ? String(n) : '';
+    }
+
+    function _jbxSearchCards(results) {
+        return (results || []).map(function (r, i) {
+            var views = _fmtViews(r.views);
+            return '<button class="chat-jbx-vcard" type="button" data-chat-jbx-vpick="' + i + '">' +
+                '<div class="chat-jbx-vthumb">' +
+                    '<img src="' + attr(_jbxThumb(r.id)) + '" alt="" loading="lazy">' +
+                    '<span class="chat-jbx-vplay">▶</span>' +
+                    (r.duration ? '<span class="chat-jbx-vdur">' + _fmtSecs(r.duration) + '</span>' : '') +
+                '</div>' +
+                '<div class="chat-jbx-vinfo">' +
+                    '<div class="chat-jbx-vtitle" title="' + attr(r.title || r.id) + '">' + esc(r.title || r.id) + '</div>' +
+                    '<div class="chat-jbx-vchannel">' + esc(r.channel || '') +
+                        (views ? ' · ' + views + ' views' : '') + '</div>' +
+                '</div>' +
+            '</button>';
+        }).join('');
+    }
+
+    function _openJbxSearchModal(results, query) {
+        var ov = q('[data-chat-jbx-search-modal]');
+        if (!ov) { _jbxPick(results[0]); return; }   // no modal in DOM → graceful fallback
+        state.jukebox.searchResults = results;
+        var grid = q('[data-chat-jbx-searchgrid]');
+        if (grid) grid.innerHTML = _jbxSearchCards(results) ||
+            '<div class="chat-jbx-meta">Nothing found — try different words or paste a link.</div>';
+        var inp = q('[data-chat-jbx-searchinput]');
+        if (inp) inp.value = query || '';
+        ov.hidden = false;
+    }
+
+    function _closeJbxSearchModal() {
+        var ov = q('[data-chat-jbx-search-modal]');
+        if (ov) ov.hidden = true;
+        state.jukebox.searchResults = [];
+    }
+
+    function _jbxSearchModalSubmit() {
+        var inp = q('[data-chat-jbx-searchinput]');
+        var grid = q('[data-chat-jbx-searchgrid]');
+        if (!inp || state.jukebox.resolving) return;
+        var qtext = String(inp.value || '').trim();
+        if (!qtext) return;
+        state.jukebox.resolving = true;
+        if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Searching…</div>';
+        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+            state.jukebox.resolving = false;
+            var results = (res.ok && res.body.results) || [];
+            state.jukebox.searchResults = results;
+            if (grid) grid.innerHTML = results.length ? _jbxSearchCards(results) :
+                '<div class="chat-jbx-meta">' +
+                esc((res.body && res.body.error) || 'Nothing found — try different words or paste a link.') + '</div>';
+        }).catch(function () {
+            state.jukebox.resolving = false;
+            if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Search failed — try again.</div>';
+        });
+    }
+
+    function _jbxPick(r) {
+        if (!r || !r.id) return;
+        var p = { id: r.id, ti: String(r.title || '').slice(0, 120) };
+        if (r.duration) p.d = r.duration;
+        sendProtocol('jbx.sub', p);
+        if (!state.jukebox.open && state.view === 'room') toggleJukebox();
+        var input = q('[data-chat-jbx-input]');
+        if (input) input.value = '';
+        var resHost = q('[data-chat-jbx-results]');
+        if (resHost) { resHost.hidden = true; resHost.innerHTML = ''; }
+        state.jukebox.results = [];
+        if (typeof showToast === 'function') showToast('♫ Added to the room queue', 'success');
+    }
+
     function onRoomMessages(d) {
         _ensureSelf();
         // a mention pings you wherever you are in the app (Discord behavior)
@@ -1856,6 +3356,7 @@
 
     window.ChatPage = { open: open, openPm: openPm, messageUser: messageUser,
                         onRoomMessages: onRoomMessages, onUnread: onUnread,
+                        onRoomProtocol: onRoomProtocol, sendProtocol: sendProtocol,
                         // exported for the node render harness (XSS contract tests)
                         renderRich: renderRich, renderPlain: renderPlain,
                         renderGroups: renderGroups,

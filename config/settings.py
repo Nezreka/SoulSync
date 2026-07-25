@@ -457,7 +457,19 @@ class ConfigManager:
             "plex": {
                 "base_url": "",
                 "token": "",
-                "auto_detect": True
+                "auto_detect": True,
+                # Read timeout (seconds) for every Plex HTTP request. A deep
+                # scan enumerates the whole library in 100-item pages (plexapi
+                # batches internally); on a big library or a slow/remote server
+                # a single page can exceed the old hard-coded 15s and the scan
+                # died with "0 artists". 30s gives large libraries room without
+                # making a genuinely-dead server hang too long.
+                "request_timeout_seconds": 30,
+                # How many times a bulk library enumeration (artists / albums /
+                # tracks) is retried on a transient failure before giving up.
+                # plexapi has no per-page retry — one slow page used to zero the
+                # whole scan. 0 disables retries (original behavior).
+                "scan_retries": 2,
             },
             "jellyfin": {
                 "base_url": "",
@@ -733,7 +745,15 @@ class ConfigManager:
             },
             "library": {
                 "music_paths": [],
-                "music_videos_path": ""
+                "music_videos_path": "",
+                # Library Organize: when the tool re-resolves a track from the
+                # metadata source, the source's title/album CASING often differs
+                # from a file the user already curated (Spotify capitalizing
+                # prepositions, an ALL-CAPS artist, iTunes vs Deezer). With this
+                # on (default), a difference that is ONLY letter-case is left
+                # alone — no cosmetic rename churn on already-organized files.
+                # Turn off to canonicalize casing to the metadata source.
+                "reorganize_preserve_casing": True,
             },
             "scripts": {
                 "path": "./scripts",

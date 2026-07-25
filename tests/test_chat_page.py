@@ -123,3 +123,134 @@ class TestMessageUserHooks:
         assert dl.count("escapeHtml(result.username || '').replace(/\"/g, '&quot;')") == 2
         # candidates: only SOULSEEK peers are messageable (torrent rows aren't users)
         assert "/soulseek/i.test(String(c.source))" in dl
+
+
+class TestChatModalStandard:
+    """Boulder's design feedback (Jul 24): chat modals must follow the app's
+    modal standard — accent-var chrome + modal-button actions, no hardcoded
+    Spotify green — and browse failures must be honest + retryable."""
+
+    def test_modal_actions_use_the_standard_buttons(self):
+        # all four chat modals' action rows ride modal-button, not chat-*-btn
+        import re
+        for anchor in ("data-chat-card-message", "data-chat-browse-dl",
+                       "data-chat-rooms-close", "data-chat-settings-save"):
+            btn = re.search(r'<button[^>]*' + anchor + r'[^>]*>', _HTML)
+            assert btn and 'modal-button' in btn.group(0), anchor
+
+    def test_modal_css_is_accent_var_not_green(self):
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(
+            encoding="utf-8", errors="replace")
+        block = css[css.index(".chat-settings-overlay {"):css.index(".chat-input--area")]
+        assert "#1db954" not in block                  # the green is gone
+        assert "var(--accent-rgb)" in block            # themeable accent chrome
+        assert "linear-gradient(135deg, #1a1a1a" in block   # the standard card
+
+    def test_browse_failure_offers_retry(self):
+        assert "data-chat-browse-retry" in _CHAT_JS
+        py = (_ROOT / "api" / "chat.py").read_text(encoding="utf-8", errors="replace")
+        assert "Trying again often works" in py
+        assert "offline or not sharing" not in py      # the victim-blaming line
+
+    def test_jukebox_controls_live_in_the_page_header(self):
+        # Boulder: the jukebox bar (brand + listeners + add-a-song) rides
+        # tools-page-header, not the panel; the panel below is queue-only
+        header = _HTML[_HTML.index('class="tools-page-header chat-page-head"'):
+                       _HTML.index('class="chat-shell"')]
+        for hook in ("data-chat-jbx-headbar", "data-chat-jbx-form",
+                     "data-chat-jbx-listeners", "data-chat-jbx-results"):
+            assert hook in header, hook
+        rail = _HTML[_HTML.index('class="chat-rail"'):_HTML.index('data-chat-users')]
+        assert "data-chat-jukebox" in rail             # queue/player card in the right rail
+        assert "data-chat-jbx-form" not in rail        # ...without a second add-song form
+
+
+class TestBusSurfacePlacement:
+    """Boulder's layout round 2: jukebox queue/player = right-rail card,
+    pins = head-button popover (zero standing height), poll stays inline."""
+
+    def test_pins_are_a_popover_not_a_bar(self):
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(
+            encoding="utf-8", errors="replace")
+        bar = css[css.index(".chat-pinbar {"):css.index(".chat-pins-title")]
+        assert "position: absolute" in bar
+        # the head button carries the count; outside clicks close the popover
+        assert "data-chat-pins-toggle" in _CHAT_JS
+        assert "state.pinsOpen && !e.target.closest('[data-chat-pins-toggle]')" in _CHAT_JS
+
+    def test_poll_card_stays_inline_in_the_main_column(self):
+        main = _HTML[_HTML.index('class="chat-main"'):_HTML.index('class="chat-rail"')]
+        assert "data-chat-poll" in main
+        assert "data-chat-jukebox" not in main         # the panel left the main column
+
+
+class TestTypingIndicators:
+    """typ events on the bus — deliberately frugal (every carrier is a
+    visible noise line for vanilla clients): composition start + at most
+    one refresh per 20s, 25s TTL, cleared instantly when the typer's
+    message lands, and archive replay on room open never ghost-types."""
+
+    def test_wiring(self):
+        js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8", errors="replace")
+        assert "_maybeSendTyping" in js and "sendProtocol('typ', {})" in js
+        assert "< 20000) return;" in js                        # the frugality throttle
+        assert "_TYP_TTL = 25000" in js
+        assert "_clearTypingFor(res.body.messages)" in js      # message beats indicator
+        assert "typingArmedAt" in js                           # archive replay guard
+        assert "!== state.selfName" in js.split("p.k === 'typ'", 1)[1][:200]
+        assert "data-chat-typing" in _HTML
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8", errors="replace")
+        assert ".chat-typing" in css
+
+
+class TestSlashCommands:
+    """/play /skip /tune /topic /poll /pin /gif /shrug — power-user glue
+    over existing features. Autocomplete shares the mention pop; unknown
+    /words fall through as plain messages (never eaten)."""
+
+    def test_wiring(self):
+        js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8", errors="replace")
+        assert "SLASH_COMMANDS" in js and "_runSlash" in js
+        for cmd in ("'play'", "'skip'", "'tune'", "'topic'", "'poll'", "'pin'", "'gif'", "'shrug'"):
+            assert "cmd === " + cmd in js, cmd
+        # unknown commands are sent as text, not swallowed
+        run = js[js.index("function _runSlash"):js.index("function pickMention")]
+        assert run.rstrip().endswith("// unknown /word → plain message\n    }") or "return false;" in run[-200:]
+        # Tab completes the first hit; commands never emit typing noise
+        assert "data-chat-slash-pick" in js
+        assert "=== '/') return;" in js.split("_maybeSendTyping", 2)[2][:600]
+        # send() intercepts before posting
+        send_fn = js[js.index("function send()"):js.index("function send()") + 3000]
+        assert "_runSlash(text)" in send_fn
+
+
+class TestReactionLiveUpdate:
+    """Reactions used to require a full page reload to appear (Boulder):
+    mergeMessages only ADDED new messages, so a reaction on a message already
+    in view never updated; renderMessages also skips a repaint when only
+    reactions change (its fingerprint is newest-timestamp+count). Fixed with
+    reconcile-on-merge + forced repaint + optimistic self-reaction."""
+
+    def test_merge_reconciles_reactions_on_existing_messages(self):
+        merge = _CHAT_JS[_CHAT_JS.index("function mergeMessages"):
+                         _CHAT_JS.index("function _addReactor")]
+        # existing messages get their reactions reconciled, not just skipped
+        assert "existing.reactions = m.reactions" in merge
+        assert "_reapplyPendingReactions(existing)" in merge
+        # a reaction-only change still forces renderMessages to repaint
+        assert "if (reactionsChanged) state.lastStamp = null;" in merge
+
+    def test_send_reaction_is_optimistic_with_pending_guard(self):
+        send = _CHAT_JS[_CHAT_JS.index("function sendReaction"):
+                        _CHAT_JS.index("function sendReaction") + 1600]
+        assert "_addReactor(msg, emoji, state.selfName)" in send   # instant local chip
+        assert "state.pendingReactions[_msgKey(msg) + '|' + emoji] = 1" in send
+        assert "renderMessages(state.msgs)" in send                # repaint now
+        # a failed send rolls the optimistic mark back
+        assert "delete state.pendingReactions[_msgKey(msg) + '|' + emoji]" in send
+
+    def test_pending_reactions_clear_on_server_confirm(self):
+        fn = _CHAT_JS[_CHAT_JS.index("function _reapplyPendingReactions"):
+                      _CHAT_JS.index("function _reapplyPendingReactions") + 900]
+        assert "delete state.pendingReactions[pk]" in fn   # confirmed → stop forcing
+        assert "_addReactor(m, emoji, me)" in fn           # meanwhile keep it visible

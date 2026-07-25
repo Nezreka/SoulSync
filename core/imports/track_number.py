@@ -31,9 +31,17 @@ real source position.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Optional
 
 from core.imports.filename import extract_explicit_track_number
+
+# Audio extensions considered when deriving a scan-order fallback number
+# (§16.3(a)). Kept liberal so odd but real formats still count as siblings.
+_AUDIO_EXTENSIONS = frozenset({
+    ".flac", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav",
+    ".aif", ".aiff", ".alac", ".ape", ".wv", ".wma", ".mpc", ".dsf",
+})
 
 
 def _coerce_positive(value: Any) -> Optional[int]:
@@ -159,6 +167,41 @@ def resolve_track_number(
     # value the pre-fix resolver would have used. A correctly-named file
     # with a stale/wrong embedded tag is therefore never regressed.
     return _coerce_positive(embedded_track_number)
+
+
+def track_number_from_directory_order(file_path: str) -> Optional[int]:
+    """Last-resort track number: this file's 1-based position among the audio
+    files that sit next to it, sorted by name (§16.3(a)).
+
+    The pipeline's final ``default to 1`` floor collapses a WHOLE album onto
+    track 1 whenever no source (metadata, filename, embedded tag) carried a
+    per-track number — every track then claims position 1 and all but one show
+    as "missing". Album-bundle downloads stage all of an album's files into one
+    directory together, so their sorted order is a stable, DISTINCT fallback:
+    a wrong-but-ordered guess is strictly better than one slot for the whole
+    album, and it can only ever replace the constant-1 default (never a number
+    a real source already produced).
+
+    Best-effort: returns None when the directory can't be listed or the file has
+    no audio siblings (a lone file needs no disambiguation), so the caller keeps
+    its own default. Never raises.
+    """
+    if not file_path:
+        return None
+    try:
+        directory = os.path.dirname(file_path)
+        base = os.path.basename(file_path)
+        if not directory or not os.path.isdir(directory):
+            return None
+        siblings = sorted(
+            name for name in os.listdir(directory)
+            if os.path.splitext(name)[1].lower() in _AUDIO_EXTENSIONS
+        )
+    except OSError:
+        return None
+    if base in siblings and len(siblings) > 1:
+        return siblings.index(base) + 1
+    return None
 
 
 def normalize_disc_number(value) -> int:

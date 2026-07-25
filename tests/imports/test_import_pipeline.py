@@ -2,6 +2,8 @@ import logging
 import sys
 import types
 
+import pytest
+
 import core.imports.pipeline as import_pipeline
 import core.imports.paths as import_paths
 import core.runtime_state as runtime_state
@@ -31,6 +33,58 @@ class _ImmediateThread:
     def start(self):
         if self._target:
             self._target()
+
+
+def test_fill_only_simple_download_tags_skips_fields_with_real_existing_values(monkeypatch):
+    """The simple-download tagger must FILL blank/placeholder fields, never
+    overwrite a real existing tag — search titles come straight from the
+    user's request and Soulseek filenames are often messy, so the file's
+    own tag (when present) wins."""
+    monkeypatch.setattr(
+        import_pipeline, "read_file_tags",
+        lambda path: {
+            "title": "Real Title", "artist": None, "album": "[Unknown Album]",
+            "error": None,
+        },
+    )
+    result = import_pipeline._fill_only_simple_download_tags(
+        "/fake/dest.flac",
+        {"title": "Messy Filename Title", "artist_name": "Parsed Artist", "album_title": "Real Album"},
+    )
+    # title: file already has a real value → dropped.
+    # artist_name: file has no artist at all → filled.
+    # album_title: file's album is a placeholder → filled.
+    assert result == {"artist_name": "Parsed Artist", "album_title": "Real Album"}
+
+
+def test_fill_only_simple_download_tags_keeps_all_fields_when_file_is_blank(monkeypatch):
+    monkeypatch.setattr(
+        import_pipeline, "read_file_tags",
+        lambda path: {"title": None, "artist": None, "album": None, "error": None},
+    )
+    simple_tags = {"title": "Title", "artist_name": "Artist", "album_title": "Album"}
+    result = import_pipeline._fill_only_simple_download_tags("/fake/dest.flac", simple_tags)
+    assert result == simple_tags
+
+
+def test_fill_only_simple_download_tags_skips_write_when_file_unreadable(monkeypatch):
+    """When the file's current tags can't be determined at all, don't guess
+    — skip tagging entirely rather than risk clobbering an unknown value."""
+    monkeypatch.setattr(
+        import_pipeline, "read_file_tags",
+        lambda path: {"error": "Could not read file with Mutagen"},
+    )
+    result = import_pipeline._fill_only_simple_download_tags(
+        "/fake/dest.flac", {"title": "Title", "artist_name": "Artist"},
+    )
+    assert result == {}
+
+
+def test_fill_only_simple_download_tags_empty_input_short_circuits(monkeypatch):
+    calls = []
+    monkeypatch.setattr(import_pipeline, "read_file_tags", lambda path: calls.append(path) or {})
+    assert import_pipeline._fill_only_simple_download_tags("/fake/dest.flac", {}) == {}
+    assert calls == []   # never even reads the file when there's nothing to fill
 
 
 def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
@@ -227,6 +281,125 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
     assert seen["runtime"] is metadata_runtime
     assert len(library_calls) == 1
     assert library_calls[0][2]["album_name"] == "Album"
+
+
+# ---------------------------------------------------------------------------
+# §16.3(a) scan-order track-number fallback must only fire for genuine
+# album-bundle downloads (files staged into one directory dedicated to that
+# album). A plain/non-bundle download lands in a SHARED flat directory that
+# can hold unrelated in-flight downloads at the same time — applying the
+# fallback there would compute a track's position among files from a
+# different download entirely.
+# ---------------------------------------------------------------------------
+
+def _wire_post_process_common(monkeypatch, tmp_path, target_path, *, track_number, is_album_download):
+    monkeypatch.setattr(import_pipeline, "config_manager", types.SimpleNamespace(
+        get=lambda key, default=None: {
+            "post_processing.replaygain_enabled": False,
+            "lossy_copy.enabled": False,
+            "lossy_copy.delete_original": False,
+            "import.replace_lower_quality": False,
+            "soulseek.download_path": str(tmp_path / "downloads"),
+        }.get(key, default)
+    ))
+    monkeypatch.setattr(import_pipeline, "normalize_import_context", lambda context: context)
+    monkeypatch.setattr(import_pipeline, "get_import_track_info", lambda context: {})
+    monkeypatch.setattr(import_pipeline, "get_import_original_search", lambda context: {"title": "Track", "album": "Album"})
+    monkeypatch.setattr(import_pipeline, "get_import_context_artist", lambda context: {"name": "Artist"})
+    monkeypatch.setattr(import_pipeline, "get_import_has_clean_metadata", lambda context: True)
+    monkeypatch.setattr(
+        import_pipeline,
+        "build_import_album_info",
+        lambda context, force_album=False: {
+            "is_album": is_album_download,
+            "album_name": "Album",
+            "track_number": track_number,
+            "disc_number": 1,
+            "clean_track_name": "Track",
+            "source": "unknown",
+        },
+    )
+    monkeypatch.setattr(import_pipeline, "resolve_album_group", lambda artist_context, album_info, original_album: album_info["album_name"])
+    monkeypatch.setattr(import_pipeline, "get_import_clean_title", lambda *args, **kwargs: "Track")
+    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda file_path: "")
+    monkeypatch.setattr(import_pipeline, "check_flac_bit_depth", lambda *args, **kwargs: None)
+    from core.imports.file_integrity import IntegrityResult
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity",
+                        lambda *_a, **_kw: IntegrityResult(ok=True, checks={}))
+    monkeypatch.setattr(import_pipeline, "build_final_path_for_track", lambda *args, **kwargs: (str(target_path), None))
+    monkeypatch.setattr(import_pipeline, "enhance_file_metadata", lambda *args, **kwargs: True)
+    monkeypatch.setattr(import_pipeline, "safe_move_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "download_cover_art", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "generate_lrc_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "downsample_hires_flac", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "create_lossy_copy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "cleanup_empty_directories", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "emit_track_downloaded", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "record_library_history_download", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "record_download_provenance", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda *args, **kwargs: None)
+    library_calls = []
+    monkeypatch.setattr(import_pipeline, "record_soulsync_library_entry",
+                        lambda context, artist_context, album_info: library_calls.append(album_info))
+    return library_calls
+
+
+def test_scan_order_fallback_used_for_album_bundle_download(tmp_path, monkeypatch):
+    """A genuine album-bundle download (files staged into one directory
+    dedicated to this album) with no per-track number from any source
+    SHOULD use the scan-order fallback instead of collapsing to track 1."""
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"audio")
+    target_path = tmp_path / "Album Folder" / "track.flac"
+
+    library_calls = _wire_post_process_common(
+        monkeypatch, tmp_path, target_path, track_number=0, is_album_download=True)
+    import core.imports.track_number as track_number_module
+    monkeypatch.setattr(track_number_module, "track_number_from_directory_order",
+                        lambda file_path: 7)
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {
+        "track_info": {},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": True,
+    }
+    import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+    assert library_calls[0]["track_number"] == 7
+
+
+def test_scan_order_fallback_not_used_for_plain_download(tmp_path, monkeypatch):
+    """A plain (non-bundle) download lands in a SHARED flat directory that
+    can hold unrelated in-flight downloads at the same time — the
+    scan-order fallback must NOT be attempted there, since it would compute
+    a position among files from a different download entirely. Falls back
+    to the old constant-1 default instead."""
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"audio")
+    target_path = tmp_path / "Album Folder" / "track.flac"
+
+    library_calls = _wire_post_process_common(
+        monkeypatch, tmp_path, target_path, track_number=0, is_album_download=False)
+    import core.imports.track_number as track_number_module
+    fallback_calls = []
+    monkeypatch.setattr(
+        track_number_module, "track_number_from_directory_order",
+        lambda file_path: fallback_calls.append(file_path) or 7,
+    )
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {
+        "track_info": {},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": False,
+    }
+    import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+    assert fallback_calls == []
+    assert library_calls[0]["track_number"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +771,27 @@ def test_exhaustive_soulseek_peer_resolves_to_soulseek(monkeypatch):
 
     assert task["status"] == "searching"
     assert task["quarantine_retry_counts_by_source"] == {"soulseek": 1}
+
+
+@pytest.mark.parametrize("source", ["torrent", "usenet"])
+def test_exhaustive_release_source_keeps_its_own_budget(monkeypatch, source):
+    _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    task, _completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch,
+        _acoustid_quarantine,
+        task_extra={
+            "username": source,
+            "filename": "release-reference",
+            "query_count": 1,
+        },
+    )
+
+    assert task["quarantine_retry_counts_by_source"] == {source: 1}
 
 
 def test_exhaustive_budget_defaults_query_count_to_one(monkeypatch):

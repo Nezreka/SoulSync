@@ -813,8 +813,10 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
     prefix_match = re.match(r'^(\d+)', basename.strip())
     prefix = prefix_match.group(1) if prefix_match else ''
 
-    file_disc, _ = _read_disc_number_tag(audio)
-    # a DDTT filename prefix reveals the disc when the tag doesn't
+    tag_disc, _tag_disc_total = _read_disc_number_tag(audio)
+    file_disc = tag_disc
+    # a DDTT filename prefix reveals the disc when the tag doesn't (matching
+    # only — an inferred disc is not a tag, so it never satisfies disc_ok)
     if not file_disc and multi_disc and len(prefix) == 4:
         file_disc = int(prefix[:2]) or None
 
@@ -843,6 +845,13 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
     current_num, current_total = _read_track_number_tag(audio)
     tag_ok = (current_num == correct_num
               and current_total in (None, disc_total, len(api_tracks)))
+    # #1075: per-disc track numbers are meaningless without disc tags — a
+    # repair that writes "track 10 of 11" onto a disc-tagless file in a
+    # 3-disc folder just manufactures a duplicate track number. On multi-disc
+    # albums the DISC TAG is part of correctness; single-disc albums never
+    # get disc tags touched.
+    total_discs = _api_disc_count(api_tracks)
+    disc_ok = (not multi_disc) or (tag_disc == correct_disc)
 
     planned = _planned_prefix(prefix, correct_num, correct_disc, multi_disc)
     new_basename = None
@@ -851,7 +860,7 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
         if candidate != basename:
             new_basename = candidate
 
-    if tag_ok and new_basename is None:
+    if tag_ok and disc_ok and new_basename is None:
         return None
     return {
         'matched_track': matched_track,
@@ -859,10 +868,13 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
         'correct_num': correct_num,
         'correct_disc': correct_disc,
         'disc_total': disc_total,
+        'total_discs': total_discs,
         'multi_disc': multi_disc,
         'current_num': current_num,
         'current_total': current_total,
+        'current_disc': tag_disc,
         'tag_ok': tag_ok,
+        'disc_ok': disc_ok,
         'new_basename': new_basename,
         'file_title': file_title,
     }
@@ -870,22 +882,32 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
 
 def _match_title_to_api_track(file_title: str, api_tracks: List[Dict],
                                threshold: float) -> Tuple[Optional[Dict], float]:
-    """Fuzzy-match a file title to an API track. Returns (track, score)."""
+    """Fuzzy-match a file title to an API track. Returns (track, score).
+
+    The primary score compares QUALIFIER-STRIPPED titles (remaster noise must
+    not break matching), but that makes every version of a song identical —
+    "Like Spinning Plates ('Why Us?' Version)" and "Like Spinning Plates"
+    both normalize to the same string, and first-in-tracklist used to win
+    (#1075: the file got renumbered to the WRONG disc's original version).
+    Ties on the stripped score are broken by the RAW title, so the version
+    whose full name actually matches the file wins."""
     norm_file = _normalize_title(file_title)
+    raw_file = file_title.lower().strip()
     best_match = None
-    best_score = 0.0
+    best_key = (-1.0, -1.0)
 
     for track in api_tracks:
         api_name = track.get('name', '')
-        norm_api = _normalize_title(api_name)
-        score = SequenceMatcher(None, norm_file, norm_api).ratio()
-        if score > best_score:
-            best_score = score
+        norm_score = SequenceMatcher(None, norm_file, _normalize_title(api_name)).ratio()
+        raw_score = SequenceMatcher(None, raw_file, api_name.lower().strip()).ratio()
+        key = (norm_score, raw_score)
+        if key > best_key:
+            best_key = key
             best_match = track
 
-    if best_score >= threshold:
-        return best_match, best_score
-    return None, best_score
+    if best_key[0] >= threshold:
+        return best_match, best_key[0]
+    return None, max(best_key[0], 0.0)
 
 
 def _normalize_title(title: str) -> str:
@@ -931,6 +953,44 @@ def _fix_track_number_tag(file_path: str, correct_num: int, total: int):
         logger.info("Fixed track tag: %s → %s", os.path.basename(file_path), track_str)
     except Exception as e:
         logger.error("Error fixing track tag in %s: %s", file_path, e, exc_info=True)
+
+
+def _fix_disc_number_tag(file_path: str, disc_num: int, total_discs: int):
+    """Update ONLY the disc number tag (multi-disc albums — #1075: per-disc
+    track numbering is only enforceable when the disc tag rides along)."""
+    from mutagen import File as MutagenFile
+    from mutagen.id3 import TPOS, ID3
+    from mutagen.flac import FLAC
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.mp4 import MP4
+
+    try:
+        audio = MutagenFile(file_path)
+        if audio is None:
+            logger.error("Cannot re-open file for disc tag fix: %s", file_path)
+            return
+
+        disc_str = f"{disc_num}/{total_discs}" if total_discs else str(disc_num)
+
+        if isinstance(audio.tags, ID3):
+            audio.tags.delall('TPOS')
+            audio.tags.add(TPOS(encoding=3, text=[disc_str]))
+        elif isinstance(audio, (FLAC, OggVorbis)):
+            audio['discnumber'] = [disc_str]
+            if total_discs:
+                audio['disctotal'] = [str(total_discs)]
+        elif isinstance(audio, MP4):
+            audio['disk'] = [(disc_num, total_discs or 0)]
+        else:
+            return
+
+        # Atomic + audio-integrity-verified save (#819/#1000)
+        from core.metadata.common import save_audio_file, get_mutagen_symbols
+        save_audio_file(audio, get_mutagen_symbols())
+
+        logger.info("Fixed disc tag: %s → %s", os.path.basename(file_path), disc_str)
+    except Exception as e:
+        logger.error("Error fixing disc tag in %s: %s", file_path, e, exc_info=True)
 
 
 def _rename_to_basename(file_path: str, filename: str, new_basename: str) -> Optional[str]:
@@ -1166,11 +1226,17 @@ def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     if not plan:
         return None
 
+    disc_suffix = (f" (disc {plan['correct_disc']} of {plan['total_discs']})"
+                   if plan['multi_disc'] else "")
     changes = []
     if plan['current_num'] != plan['correct_num']:
-        changes.append(f"Track number: {plan['current_num']} -> {plan['correct_num']}")
+        changes.append(f"Track number: {plan['current_num']} -> {plan['correct_num']}{disc_suffix}")
     if not plan['tag_ok'] and plan['current_total'] != plan['disc_total']:
-        changes.append(f"Total tracks: {plan['current_total']} -> {plan['disc_total']}")
+        changes.append(f"Total tracks: {plan['current_total']} -> {plan['disc_total']}"
+                       f"{' (per disc)' if plan['multi_disc'] else ''}")
+    if not plan['disc_ok']:
+        changes.append(f"Disc: {plan['current_disc'] if plan['current_disc'] else 'none'}"
+                       f" -> {plan['correct_disc']}/{plan['total_discs']}")
     if plan['new_basename']:
         changes.append(f"Filename: {filename} -> {plan['new_basename']}{os.path.splitext(filename)[1]}")
 
@@ -1187,11 +1253,13 @@ def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
         # the rename target ride in the finding so approve can never invent a
         # different (convention-mangling) rename than the one shown (#1009)
         'tag_ok': plan['tag_ok'],
+        'disc_ok': plan['disc_ok'],
     }
     if plan['new_basename']:
         details['new_filename'] = plan['new_basename'] + os.path.splitext(filename)[1]
     if plan['multi_disc']:
         details['disc_number'] = plan['correct_disc']
+        details['total_discs'] = plan['total_discs']
     return {
         'description': f'Matched to: "{matched_track.get("name", "?")}"\n' + '\n'.join(changes),
         'details': details,
@@ -1210,6 +1278,8 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
 
     if not plan['tag_ok']:
         _fix_track_number_tag(file_path, plan['correct_num'], plan['disc_total'])
+    if not plan['disc_ok']:
+        _fix_disc_number_tag(file_path, plan['correct_disc'], plan['total_discs'])
 
     if plan['new_basename']:
         new_path = _rename_to_basename(file_path, filename, plan['new_basename'])

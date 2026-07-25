@@ -1721,6 +1721,10 @@ async function loadSettingsData() {
         const _musicPaths = settings.library?.music_paths || [];
         renderMusicPaths(_musicPaths);
 
+        // Library Organize: preserve the user's casing (default on)
+        const _pcEl = document.getElementById('reorganize-preserve-casing');
+        if (_pcEl) _pcEl.checked = settings.library?.reorganize_preserve_casing !== false;
+
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
@@ -4606,7 +4610,8 @@ async function saveSettings(quiet = false) {
         },
         library: {
             music_paths: collectMusicPaths(),
-            music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
+            music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
+            reorganize_preserve_casing: document.getElementById('reorganize-preserve-casing')?.checked !== false
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,

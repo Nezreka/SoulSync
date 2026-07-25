@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.6"
+_SOULSYNC_BASE_VERSION = "3.1.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -7855,7 +7855,8 @@ def clear_finished_downloads():
 # Streaming sources where the candidate's `username` field IS the source name
 # (Soulseek uses a real peer username; everything else stamps the source string).
 _STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
+    'torrent', 'usenet',
 ))
 
 
@@ -40854,10 +40855,23 @@ def _emit_chat_push_loop():
                 if fresh:
                     # live pushes carry the same DECODED view the API serves
                     from core import chat_codec
-                    def _unwrap(m):
+                    proto_events = []
+                    def _unwrap(m, _sink=proto_events):   # bound at def (B023)
                         dec = chat_codec.decode(m.get('message'))
                         if dec is not None and chat_codec.reaction_of(dec):
                             return None      # reaction carriers never render/badge
+                        if dec is not None:
+                            _p = chat_codec.protocol_of(dec)
+                            if _p:
+                                # machine coordination: never archived, pushed
+                                # on its own channel for real-time handling.
+                                # Only PURE carriers (empty text) vanish —
+                                # piggybacked text still renders/archives.
+                                _sink.append({
+                                    'username': m.get('username'),
+                                    'timestamp': m.get('timestamp'), 'p': _p})
+                                if not dec.get('t'):
+                                    return None
                         out = {'username': m.get('username'),
                                'message': dec['t'] if dec else m.get('message'),
                                'timestamp': m.get('timestamp')}
@@ -40866,8 +40880,14 @@ def _emit_chat_push_loop():
                             rep = chat_codec.reply_of(dec)
                             if rep:
                                 out['reply'] = rep
+                            _f = chat_codec.file_of(dec)
+                            if _f:
+                                out['file'] = _f
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
+                    if proto_events:
+                        socketio.emit('chat:room_protocol', {
+                            'room': room, 'events': proto_events[-40:]})
                     if decoded:      # a reaction-only tick still tracks PMs below
                         try:
                             get_database().add_chat_messages(room, decoded)
@@ -41331,12 +41351,21 @@ app.register_blueprint(_create_enrichment_blueprint())
 # Soulseek chat (rooms + PMs through slskd) — side-neutral, absolute /api/chat
 # paths, mounted OUTSIDE the video blueprint so music-only profiles reach it.
 from api.chat import configure as _configure_chat_api, create_blueprint as _create_chat_blueprint
+def _chat_youtube_search(query, max_results):
+    """Jukebox search seam: the shared yt-dlp client, or None → paste-only."""
+    yt = download_orchestrator.client("youtube")
+    if yt is None:
+        return []
+    return run_async(yt.search_videos(query, max_results=max_results))
+
+
 _configure_chat_api(
     client_getter=lambda: download_orchestrator.client("soulseek"),
     run_async=run_async,
     config_get=lambda key, default=None: config_manager.get(key, default),
     config_set=lambda key, value: config_manager.set(key, value),
     db_getter=get_database,
+    youtube_search=_chat_youtube_search,
 )
 app.register_blueprint(_create_chat_blueprint())
 

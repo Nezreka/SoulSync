@@ -10,6 +10,7 @@ import re
 from utils.logging_config import get_logger
 from config.settings import config_manager
 import threading
+import time
 
 # Shared dataclasses live in the neutral media_server package now —
 # every server client used to define a near-identical XTrackInfo /
@@ -92,8 +93,13 @@ class PlexClient(MediaServerClient):
         
         try:
             if config.get('token'):
-                # Use a longer timeout (15 seconds) to prevent read timeouts on slow servers
-                self.server = PlexServer(config['base_url'], config['token'], timeout=15)
+                # Read timeout for every Plex request. Configurable because a
+                # deep scan on a large/remote library can take a single 100-item
+                # page longer than the old hard-coded 15s (which killed the scan
+                # with "0 artists"). See plex.request_timeout_seconds.
+                timeout = config_manager.get('plex.request_timeout_seconds', 30) or 30
+                self._scan_retries = int(config_manager.get('plex.scan_retries', 2) or 0)
+                self.server = PlexServer(config['base_url'], config['token'], timeout=timeout)
             else:
                 logger.error("Plex token not configured")
                 return
@@ -326,28 +332,56 @@ class PlexClient(MediaServerClient):
             return [self.music_library]
         return []
 
+    def _retry_bulk(self, dispatch, label: str):
+        """Run a whole-library enumeration with retries.
+
+        plexapi already pages the library in 100-item requests internally,
+        but it has NO per-page retry: a single slow page raises and loses the
+        entire enumeration, which the deep scan then reads as "0 artists" and
+        stops. Retrying the fetch a few times with backoff lets a transient
+        slow response recover instead of zeroing the scan. On persistent
+        failure the last error is re-raised — callers turn that into
+        last_fetch_failed=True, so we never hand back a silent partial list
+        that removal-detection would read as "these are gone"."""
+        retries = getattr(self, '_scan_retries', 2)
+        attempts = max(1, retries + 1)
+        last_err = None
+        for i in range(attempts):
+            try:
+                return dispatch()
+            except Exception as e:
+                last_err = e
+                if i < attempts - 1:
+                    wait = min(2 ** i, 8)
+                    logger.warning(
+                        "Plex %s enumeration failed (attempt %d/%d): %s — retrying in %ss",
+                        label, i + 1, attempts, e, wait,
+                    )
+                    time.sleep(wait)
+        raise last_err
+
     def _all_artists(self) -> List[PlexArtist]:
         """Every artist in the configured scope."""
         if self._all_libraries_mode:
-            return self.server.library.search(libtype='artist')
+            return self._retry_bulk(lambda: self.server.library.search(libtype='artist'), 'artist')
         if self.music_library:
-            return self.music_library.searchArtists()
+            return self._retry_bulk(lambda: self.music_library.searchArtists(), 'artist')
         return []
 
     def _all_albums(self) -> List[PlexAlbum]:
         """Every album in the configured scope."""
         if self._all_libraries_mode:
-            return self.server.library.search(libtype='album')
+            return self._retry_bulk(lambda: self.server.library.search(libtype='album'), 'album')
         if self.music_library:
-            return self.music_library.albums()
+            return self._retry_bulk(lambda: self.music_library.albums(), 'album')
         return []
 
     def _all_tracks(self) -> List[PlexTrack]:
         """Every track in the configured scope."""
         if self._all_libraries_mode:
-            return self.server.library.search(libtype='track')
+            return self._retry_bulk(lambda: self.server.library.search(libtype='track'), 'track')
         if self.music_library:
-            return self.music_library.searchTracks()
+            return self._retry_bulk(lambda: self.music_library.searchTracks(), 'track')
         return []
 
     def _search_general(self, **kwargs):
