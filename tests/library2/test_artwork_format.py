@@ -94,3 +94,29 @@ def test_old_png_named_jpg_is_rebuilt(imported_conn, legacy_db, monkeypatch):
 
     assert path == str(cached)
     assert artwork.is_cached_jpeg(cached)
+
+
+def test_full_variant_skips_the_extra_huffman_optimize_pass():
+    """perf25-05b: the cold path pays a full Pillow decode plus two encodes per
+    image.  ``optimize=True`` adds a second entropy pass whose byte win is
+    negligible on the full-size variant; only the list thumbnail, which is
+    fetched for every row, keeps it."""
+    source = _image_bytes("PNG", "RGB")
+    saves: list[dict] = []
+    real_save = Image.Image.save
+
+    def recording_save(self, fp, *args, **kwargs):
+        saves.append({"size": self.size, **kwargs})
+        return real_save(self, fp, *args, **kwargs)
+
+    Image.Image.save = recording_save
+    try:
+        assert artwork._normalize_jpeg_variants(source, thumb_height=2) is not None
+    finally:
+        Image.Image.save = real_save
+
+    full, thumbnail = saves
+    assert full["size"] == (4, 3)
+    assert full.get("optimize") is not True
+    assert thumbnail["size"] == (2, 2)
+    assert thumbnail.get("optimize") is True

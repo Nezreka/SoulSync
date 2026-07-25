@@ -317,8 +317,12 @@ def _normalize_jpeg_variants(data: bytes, thumb_height: int = 256) -> Optional[t
                     Image.LANCZOS,
                 )
 
+            # perf25-05b: no ``optimize`` on the full-size variant.  Its extra
+            # entropy pass costs real CPU per cold image while saving only a
+            # few percent of bytes on a file the list view never requests; the
+            # thumbnail below, fetched once per row, still gets it.
             output = BytesIO()
-            image.save(output, "JPEG", quality=90, optimize=True)
+            image.save(output, "JPEG", quality=90)
             thumb_output = BytesIO()
             thumbnail.save(thumb_output, "JPEG", quality=82, optimize=True)
             return output.getvalue(), thumb_output.getvalue()
