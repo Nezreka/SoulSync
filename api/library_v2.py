@@ -267,12 +267,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         Cache-Control on a URL that's otherwise stable, so a fresh cover pick
         (which rewrites the cache file, changing its mtime) needs a changed
         URL to ever reach the browser — invalidating React-Query alone only
-        clears the app's own cache, not the HTTP cache."""
-        from core.library2.artwork import artwork_file
-        try:
-            version = int(artwork_file(get_database(), kind, int(entity_id)).stat().st_mtime)
-        except OSError:
-            version = 0
+        clears the app's own cache, not the HTTP cache.
+
+        perf25-01: the version comes from a cached directory snapshot, not from
+        one ``stat()`` per row — a 75-artist page must not put 75 syscalls on
+        the request thread just to describe images that are already cached."""
+        from core.library2.artwork import artwork_version
+        version = artwork_version(get_database(), kind, int(entity_id))
         suffix = f"?v={version}" if version else ""
         return f"/api/library/v2/artwork/{kind}/{int(entity_id)}{suffix}"
 

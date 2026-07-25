@@ -89,6 +89,65 @@ def thumb_file(database, kind: str, entity_id: int) -> Path:
     return artwork_dir(database) / f"{kind}_{int(entity_id)}_t.jpg"
 
 
+_version_snapshots: Dict[str, tuple[int, Dict[str, int]]] = {}
+_version_snapshots_guard = threading.Lock()
+
+
+def forget_artwork_versions(database) -> None:
+    """Drop the cached mtime snapshot for this database's artwork directory.
+
+    The snapshot is normally revalidated against the directory's own mtime, but
+    filesystems with coarse directory timestamps could otherwise hide a rewrite
+    that happened inside the same tick, so every managed write/delete forgets
+    the snapshot explicitly.
+    """
+    with _version_snapshots_guard:
+        _version_snapshots.pop(str(artwork_dir(database)), None)
+
+
+def _artwork_versions(database) -> Dict[str, int]:
+    """Snapshot of ``{filename: mtime}`` for the artwork cache directory.
+
+    perf25-01: the list endpoint needs a cache-bust token per row.  Statting one
+    file per artist put 75 syscalls on the request thread for a page whose
+    images are all cached already.  One directory scan serves the whole page and
+    is reused until the directory's own mtime changes.
+    """
+    directory = artwork_dir(database)
+    key = str(directory)
+    try:
+        stamp = directory.stat().st_mtime_ns
+    except OSError:
+        stamp = -1
+    with _version_snapshots_guard:
+        cached = _version_snapshots.get(key)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+
+    versions: Dict[str, int] = {}
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".jpg"):
+                    continue
+                try:
+                    versions[entry.name] = int(entry.stat().st_mtime)
+                except OSError:
+                    continue
+    except OSError as exc:
+        logger.debug("artwork version scan failed for %s: %s", directory, exc)
+        return {}
+
+    with _version_snapshots_guard:
+        _version_snapshots[key] = (stamp, versions)
+    return versions
+
+
+def artwork_version(database, kind: str, entity_id: int) -> int:
+    """Cache-bust token for one entity's artwork, or 0 when it isn't cached."""
+    return _artwork_versions(database).get(f"{kind}_{int(entity_id)}.jpg", 0)
+
+
 def invalidate_artwork(database, kind: str, entity_id: int) -> int:
     """Remove both managed cache variants for one entity.
 
@@ -110,6 +169,7 @@ def invalidate_artwork(database, kind: str, entity_id: int) -> int:
                 pass
             except OSError as exc:
                 logger.debug("artwork invalidation failed for %s: %s", path, exc)
+    forget_artwork_versions(database)
     return removed
 
 
@@ -542,6 +602,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
         tmp.write_bytes(data)
         os.replace(tmp, out)
         _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
+        forget_artwork_versions(database)
         return str(out)
     except OSError as e:
         logger.debug("artwork write failed (%s %s): %s", kind, entity_id, e)
@@ -696,6 +757,7 @@ def apply_manual_artwork(
         except OSError as e:
             logger.debug("manual artwork write failed (%s %s): %s", kind, entity_id, e)
             return False
+    forget_artwork_versions(database)
     return True
 
 
@@ -703,6 +765,8 @@ __all__ = [
     "build_artwork",
     "apply_manual_artwork",
     "artwork_file",
+    "artwork_version",
+    "forget_artwork_versions",
     "thumb_file",
     "artwork_dir",
     "invalidate_artwork",
