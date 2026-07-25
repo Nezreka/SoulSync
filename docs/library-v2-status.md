@@ -5,8 +5,9 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 22. Juli 2026, einschließlich Branch-Split. Playlist UI ist geparkt;
-native Quality-Profile-Foundation wird vor dem Library-v2-Rebase gemerged.
+Stand: 25. Juli 2026, einschließlich Branch-Split sowie der Perf- und
+Search-Link-Findings aus Abschnitt 10/11. Playlist UI ist geparkt; native
+Quality-Profile-Foundation wird vor dem Library-v2-Rebase gemerged.
 
 ## 1. Statusbegriffe
 
@@ -389,14 +390,19 @@ Tabelle enthält ausschließlich den Bearbeitungsstatus.
 
 | # | Finding | Status | Referenz / Bemerkung |
 |---:|---|---|---|
-| [1](library-v2-issues.md#perf25-01) | `os.stat()` pro Artist im List-Endpoint | Pending | einfachster Fix, keine Verhaltensänderung |
-| [2](library-v2-issues.md#perf25-02) | Kalte Artist-Artwork-Resolution synchron/sequenziell | Pending | größter Effekt; Preis für Media-Server-Unabhängigkeit (§2.1) |
-| [3](library-v2-issues.md#perf25-03) | `list_artists`-CTEs berechnen live Aggregate, die Legacy nicht kennt | Pending | prüfen, ob auf der eingeklappten Liste überhaupt nötig |
-| [4](library-v2-issues.md#perf25-04) | Precache deckt nicht jeden ersten Seitenbesuch ab | Pending | Precache nach jeder Discography-/Library-Änderung anstoßen |
-| [5](library-v2-issues.md#perf25-05) | Kein Virtualisierungsproblem; Pillow-Doppel-Encode im kalten Pfad, den Legacys eigenständiger Cache nicht macht | Pending | DOM-Virtualisierung nicht nötig (Pagination begrenzt bereits); Encode-Overhead prüfen |
+| [1](library-v2-issues.md#perf25-01) | `os.stat()` pro Artist im List-Endpoint | Implemented | `1a6758b5` — Versionen aus einem Verzeichnis-Snapshot; jeder verwaltete Write/Delete verwirft ihn explizit |
+| [2](library-v2-issues.md#perf25-02) | Kalte Artist-Artwork-Resolution synchron/sequenziell | Implemented | `78bf84c9` — Endpoint antwortet sofort mit Placeholder-Vertrag (404, `no-store`, `X-Artwork-Pending`) und baut im Hintergrund; UI retryt lokal dreimal mit Backoff. Bewusste Abweichung: der sequenzielle Provider-Fallback bleibt, weil Fan-out zusätzliche Provider-Calls kostet für Latenz, die nach der Entkopplung niemand mehr sieht |
+| [3](library-v2-issues.md#perf25-03) | `list_artists`-CTEs berechnen live Aggregate, die Legacy nicht kennt | Implemented | `bca2ec04` — Size-Rollup nur bei eingeschalteter (opt-in, default aus) Spalte; Alias-Fold-CTE auf die angeforderte Seite begrenzt |
+| [4](library-v2-issues.md#perf25-04) | Precache deckt nicht jeden ersten Seitenbesuch ab | Implemented | `a965e829` — Autolink und Discography-Expand stellen ihre neuen Entities direkt in den Hintergrund-Pool |
+| [5](library-v2-issues.md#perf25-05) | Kein Virtualisierungsproblem; Pillow-Doppel-Encode im kalten Pfad, den Legacys eigenständiger Cache nicht macht | Implemented | 5a: Virtualisierung bestätigt unnötig, kein Code. 5b: `d51e85d8` — `optimize=True` nur noch auf dem Listen-Thumbnail |
 
-**Einstufung:** Root Cause identifiziert und dokumentiert, noch keine Fixes
-implementiert oder verifiziert.
+Verifikation: `tests/library2` + `tests/search` 1.136 bestanden (2 Fehler
+vorbestehend in `test_maintenance_sync.py`, auch auf unverändertem Baum);
+vollständige WebUI-Suite 252 Tests in 43 Dateien; `oxlint --type-check`,
+Production Build und Ruff über alle geänderten Dateien bestanden.
+
+**Einstufung:** Alle fünf Findings implementiert und gezielt geprüft; ein
+Messvergleich gegen die produktive große DB steht noch aus.
 
 ---
 
@@ -410,10 +416,14 @@ diese Tabelle enthält ausschließlich den Bearbeitungsstatus.
 | # | Finding | Status | Referenz / Bemerkung |
 |---:|---|---|---|
 | [1](library-v2-issues.md#find25-search-01) | Frontend-Link-Logik ist bereits korrekt | No fix needed | Fällt nur zurück, wenn Backend keine `library_v2_id` liefert |
-| [2](library-v2-issues.md#find25-search-02) | Orchestrator-Merge verknüpft Legacy- und lib2-Artist nicht zuverlässig | Pending | lib2-Artists ohne `legacy_artist_id` (via `autolink._find_or_create_artist`) fallen durchs Raster; kein Regressionstest für diesen Fall |
+| [2](library-v2-issues.md#find25-search-02) | Orchestrator-Merge verknüpft Legacy- und lib2-Artist nicht zuverlässig | Implemented | `d82ad12b` — eindeutiger Namensmatch als dritte, letzte Verknüpfung plus einmaliger `legacy_artist_id`-Backfill; beidseitig gegen Mehrdeutigkeit abgesichert |
 
-**Einstufung:** Root Cause identifiziert und dokumentiert, noch kein Fix
-implementiert oder verifiziert.
+Verifikation: zwei neue Regressionstests (fehlende Verknüpfung wird
+repariert; mehrdeutige Namen bleiben bewusst unverknüpft), `tests/search`
+vollständig grün.
+
+**Einstufung:** Fix implementiert und gezielt geprüft; produktive Bestätigung
+am realen Suchergebnis steht noch aus.
 
 ---
 
