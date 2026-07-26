@@ -534,6 +534,11 @@ function initializeWebSocket() {
         if (watchlistBtn) {
             watchlistBtn.classList.toggle('nav-watchlist-scanning', data.status === 'scanning');
         }
+        // Re-broadcast to the React side. `socket` is a module-scoped `let` in
+        // this file, so a React route cannot subscribe to it directly; this is
+        // the same `ss:` window-event seam the shell bridge already uses.
+        // Purely additive — the vanilla handlers above are untouched.
+        window.dispatchEvent(new CustomEvent('ss:watchlist-scan', { detail: data }));
     });
     socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); });
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));

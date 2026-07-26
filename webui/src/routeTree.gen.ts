@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
+import { Route as WatchlistRouteRouteImport } from './routes/watchlist/route'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
@@ -24,6 +25,11 @@ import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WatchlistRouteRoute = WatchlistRouteRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
   getParentRoute: () => rootRouteImport,
 } as any)
 const StatsRouteRoute = StatsRouteRouteImport.update({
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -108,6 +116,7 @@ export interface FileRoutesById {
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -123,6 +132,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/issues'
     | '/stats'
+    | '/watchlist'
     | '/$'
     | '/import/album'
     | '/import/auto'
@@ -135,6 +145,7 @@ export interface FileRouteTypes {
     | '/'
     | '/issues'
     | '/stats'
+    | '/watchlist'
     | '/$'
     | '/import/album'
     | '/import/auto'
@@ -148,6 +159,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/issues'
     | '/stats'
+    | '/watchlist'
     | '/$'
     | '/import/album'
     | '/import/auto'
@@ -162,6 +174,7 @@ export interface RootRouteChildren {
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
+  WatchlistRouteRoute: typeof WatchlistRouteRoute
   SplatRoute: typeof SplatRoute
   LabelDetailIdRoute: typeof LabelDetailIdRoute
   ArtistDetailSourceIdRoute: typeof ArtistDetailSourceIdRoute
@@ -174,6 +187,13 @@ declare module '@tanstack/react-router' {
       path: '/$'
       fullPath: '/$'
       preLoaderRoute: typeof SplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/watchlist': {
+      id: '/watchlist'
+      path: '/watchlist'
+      fullPath: '/watchlist'
+      preLoaderRoute: typeof WatchlistRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/stats': {
@@ -272,6 +292,7 @@ const rootRouteChildren: RootRouteChildren = {
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
+  WatchlistRouteRoute: WatchlistRouteRoute,
   SplatRoute: SplatRoute,
   LabelDetailIdRoute: LabelDetailIdRoute,
   ArtistDetailSourceIdRoute: ArtistDetailSourceIdRoute,

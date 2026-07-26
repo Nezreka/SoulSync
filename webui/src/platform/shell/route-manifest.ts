@@ -36,7 +36,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'search', path: '/search', kind: 'legacy' },
   { pageId: 'discover', path: '/discover', kind: 'legacy' },
   { pageId: 'playlist-explorer', path: '/playlist-explorer', kind: 'legacy' },
-  { pageId: 'watchlist', path: '/watchlist', kind: 'legacy' },
+  { pageId: 'watchlist', path: '/watchlist', kind: 'react' },
   { pageId: 'wishlist', path: '/wishlist', kind: 'legacy' },
   { pageId: 'automations', path: '/automations', kind: 'legacy' },
   { pageId: 'active-downloads', path: '/active-downloads', kind: 'legacy' },

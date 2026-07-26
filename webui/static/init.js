@@ -3369,9 +3369,10 @@ async function loadPageData(pageId) {
             case 'tools':
                 await initializeToolsPage();
                 break;
-            case 'watchlist':
-                await initializeWatchlistPage();
-                break;
+            // 'watchlist' is a React route now — navigateToPage shows the React
+            // host and never calls loadPageData for it. The vanilla
+            // initializeWatchlistPage and its page markup are dead and get
+            // removed in a follow-up once the React page has run live.
             case 'wishlist':
                 await initializeWishlistPage();
                 break;

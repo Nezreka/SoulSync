@@ -54,7 +54,14 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
     expect(getShellRouteByPageId('import')?.kind).toBe('react');
     expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
-    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['import', 'stats', 'issues']);
+    expect(getShellRouteByPageId('watchlist')?.kind).toBe('react');
+    // Order follows the manifest array, not the migration order.
+    expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
+      'watchlist',
+      'import',
+      'stats',
+      'issues',
+    ]);
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(true);
   });
 
