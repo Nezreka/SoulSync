@@ -320,3 +320,49 @@ def test_transfer_folder_orphan_finding_now_carries_quality_details(tmp_path: Pa
     assert result.findings_created == 1
     assert "quality_tier" in findings[0]["details"]
     assert "Measured quality" in findings[0]["description"]
+
+
+def test_materialized_simple_download_is_no_longer_an_orphan(tmp_path: Path,
+                                                             monkeypatch) -> None:
+    """issues §7 end-to-end: a Simple Download used to import fine, never reach
+    lib2, and then get flagged as an orphan on the next scan. With the file
+    materialized by autolink (status §18 decision), the very same scan
+    recognizes it as owned."""
+    from core.library2 import autolink
+
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+
+    downloaded = tmp_path / "Stray" / "Files" / "Some Artist - Some Song.mp3"
+    downloaded.parent.mkdir(parents=True)
+    downloaded.write_bytes(b"no DB match")
+
+    from config.settings import config_manager
+    real_get = config_manager.get
+    monkeypatch.setattr(
+        config_manager, "get",
+        lambda key, default=None: (True if key == "features.library_v2"
+                                   else real_get(key, default)))
+    monkeypatch.setattr("database.music_database.get_database",
+                        lambda: _DB(db_path))
+
+    assert autolink.link_download_into_library_v2({
+        "_final_processed_path": str(downloaded),
+        "track_info": {},
+        "search_result": {"is_simple_download": True,
+                          "filename": downloaded.name},
+    }) is not None
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.scanned == 1
+    assert findings == []
+    assert result.findings_created == 0

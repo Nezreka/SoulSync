@@ -27,8 +27,14 @@ from .importer import (
     normalize_name,
     release_title_key,
 )
+from .path_drift import split_track_numbering
+from .tag_cache import read_tag_snapshot
 
 logger = get_logger("library2.autolink")
+
+# Sentinel used by the same-named legacy/provider fallbacks across the app;
+# reusing the string keeps a later real match able to fold these rows away.
+UNKNOWN_ARTIST = "Unknown Artist"
 
 
 def _get(ti: Dict[str, Any], *keys: str) -> str:
@@ -188,7 +194,8 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
 
 def _find_or_create_album(conn, artist_id: int, title: str, *,
                           album_type: str, spotify_album_id: Optional[str] = None,
-                          source: Optional[str] = None) -> int:
+                          source: Optional[str] = None,
+                          monitored: Optional[int] = None) -> int:
     provider_id = str(spotify_album_id).strip() if spotify_album_id else None
     namespace = _provider_namespace(provider_id, source)
     key = release_title_key(title)
@@ -227,11 +234,11 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
                      if namespace not in (None, "spotify") else "{}")
     cur = conn.execute(
         """INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id,
-               external_ids, quality_profile_id)
-           VALUES(?,?,?,?,?,?)""",
+               external_ids, quality_profile_id, monitored)
+           VALUES(?,?,?,?,?,?, COALESCE(?, 1))""",
         (artist_id, title, album_type,
          provider_id if namespace == "spotify" else None,
-         external_json, profile_id),
+         external_json, profile_id, monitored),
     )
     album_id = cur.lastrowid
     conn.execute(
@@ -244,7 +251,8 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                           track_number: Optional[int],
                           spotify_track_id: Optional[str] = None,
                           disc_number: Optional[int] = None,
-                          source: Optional[str] = None) -> int:
+                          source: Optional[str] = None,
+                          monitored: Optional[int] = None) -> int:
     provider_id = str(spotify_track_id).strip() if spotify_track_id else None
     namespace = _provider_namespace(provider_id, source)
     key = dedup_title_key(title)
@@ -294,8 +302,8 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                   or default_quality_profile_id(conn))
     cur = conn.execute(
         """INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
-               spotify_id, external_ids, quality_profile_id)
-           VALUES(?,?,?,?,?,?,?)""",
+               spotify_id, external_ids, quality_profile_id, monitored)
+           VALUES(?,?,?,?,?,?,?, COALESCE(?, 1))""",
         (
             album_id,
             title,
@@ -305,6 +313,7 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
             json.dumps({namespace: provider_id})
             if namespace not in (None, "spotify") else "{}",
             profile_id,
+            monitored,
         ),
     )
     track_id = cur.lastrowid
@@ -371,6 +380,75 @@ def _warm_new_artwork(database, conn, album_id: Optional[int]) -> None:
         logger.debug("autolink artwork warm-up skipped: %s", e)
 
 
+def _split_artist_title(stem: str) -> tuple[Optional[str], str]:
+    """Read ``Artist - Title`` out of a bare filename stem.
+
+    A leading track/disc numbering is peeled first, so ``01 - Song`` yields a
+    title and no artist rather than an artist literally called "01".
+    """
+    _number, rest = split_track_numbering(stem)
+    rest = rest.strip()
+    for separator in (" - ", " – ", " — "):
+        if separator in rest:
+            left, right = rest.split(separator, 1)
+            left, right = left.strip(), right.strip()
+            if left and right:
+                return left, right
+    return None, rest
+
+
+def _fallback_identity(context: Dict[str, Any],
+                       file_path: str) -> Optional[Dict[str, Any]]:
+    """Best-effort identity for a download that carried no track metadata.
+
+    Simple Downloads (``search_result.is_simple_download``) never have a
+    ``track_info`` with title/artist and never a Library-v2 entity id, so
+    autolink used to skip them entirely: the file imported, the legacy history
+    recorded it, and lib2 never learned it existed — which is precisely what
+    later made the orphan detector flag a perfectly legitimate file
+    (issues §7).  The 26 July 2026 decision is to materialize instead of
+    skipping, so this derives an identity from what the file itself says:
+
+    1. the embedded tags the import pipeline just wrote — ground truth;
+    2. the download's own filename, parsed as ``Artist - Title``;
+    3. the bare filename stem under :data:`UNKNOWN_ARTIST`, because a visible
+       row with a weak name is still better than an invisible file.
+
+    Returns ``None`` only when there is no filename at all to work from.
+    """
+    tags: Dict[str, Any] = {}
+    try:
+        tags = read_tag_snapshot(file_path) or {}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("fallback tag read failed (%s): %s", file_path, exc)
+    title = str(tags.get("title") or "").strip()
+    artist = str(tags.get("artist") or tags.get("album_artist") or "").strip()
+    album = str(tags.get("album") or "").strip()
+
+    if not title or not artist:
+        search_result = context.get("search_result") or {}
+        name = ""
+        if isinstance(search_result, dict):
+            name = str(search_result.get("filename") or "").strip()
+        name = os.path.basename((name or str(file_path or "")).replace("\\", "/"))
+        stem = os.path.splitext(name)[0].strip()
+        if not stem:
+            return None
+        parsed_artist, parsed_title = _split_artist_title(stem)
+        title = title or parsed_title or stem
+        artist = artist or parsed_artist or UNKNOWN_ARTIST
+
+    if not title:
+        return None
+    return {
+        "title": title,
+        "artist": artist,
+        "album": album or None,
+        "track_number": tags.get("track_number"),
+        "disc_number": tags.get("disc_number"),
+    }
+
+
 def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
     """Link a finished download's file into ``lib2_*``. Returns the file-row id.
 
@@ -402,27 +480,44 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
 
         title = _get(ti, "name", "title")
         artist_name = _primary_artist_name(ti)
+        fallback: Dict[str, Any] = {}
         if not direct_track_id and not direct_album_id and (not title or not artist_name):
-            return None
-        album_name = _get(ti, "album") or title
+            # issues §7 / status §18: materialize instead of skipping. Without
+            # a catalogue row the file is invisible to every native subject
+            # query — including the orphan detector, which then reports a file
+            # the user legitimately downloaded.
+            derived = _fallback_identity(context, file_path)
+            if derived is None:
+                return None
+            fallback = derived
+            title = title or fallback["title"]
+            artist_name = artist_name or fallback["artist"]
+        album_name = _get(ti, "album") or fallback.get("album") or title
 
         embedded = context.get("_embedded_id_tags") or {}
         embedded_spotify_id = str(embedded.get("SPOTIFY_TRACK_ID") or "") or None
+        # On the fallback path ``ti`` IS the raw search result, whose ``id`` is
+        # the *source's* result id, not a music-provider identity — adopting it
+        # would write a Soulseek/usenet token into a provider namespace (the
+        # §62.4 poisoning the guide forbids). An embedded Spotify tag read off
+        # the file itself is a real qualified identity and still counts.
         spotify_track_id = embedded_spotify_id or (
-            str(ti.get("id")) if ti.get("id") else None
+            str(ti.get("id")) if ti.get("id") and not fallback else None
         )
         album_raw = ti.get("album") if isinstance(ti.get("album"), dict) else {}
-        spotify_album_id = str(album_raw.get("id") or "") or None
+        spotify_album_id = (
+            None if fallback else (str(album_raw.get("id") or "") or None)
+        )
         total_tracks = album_raw.get("total_tracks")
         album_type = str(album_raw.get("album_type") or "").lower() or (
             "single" if (normalize_name(album_name) == normalize_name(title)
                          or total_tracks in (1, "1")) else "album")
-        track_number = ti.get("track_number")
+        track_number = ti.get("track_number") or fallback.get("track_number")
         try:
             track_number = int(track_number) if track_number else None
         except (TypeError, ValueError):
             track_number = None
-        disc_number = ti.get("disc_number")
+        disc_number = ti.get("disc_number") or fallback.get("disc_number")
         try:
             disc_number = int(disc_number) if disc_number else None
         except (TypeError, ValueError):
@@ -460,14 +555,21 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                     source=ti_provider)
                 if artist_id is None:
                     return None
+                # A derived identity is an observation, never an acquisition
+                # intent: rows minted from tags/filename start unmonitored so
+                # a guessed "Unknown Artist" title can't enter the wanted
+                # projection and send the pipeline hunting for it. Matching an
+                # existing row leaves that row's own monitoring untouched.
+                derived_monitored = 0 if fallback else None
                 album_id = _find_or_create_album(
                     conn, artist_id, album_name,
                     album_type=album_type, spotify_album_id=spotify_album_id,
-                    source=ti_provider)
+                    source=ti_provider, monitored=derived_monitored)
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
                     track_number=track_number, spotify_track_id=spotify_track_id,
-                    disc_number=disc_number, source=track_identity_source)
+                    disc_number=disc_number, source=track_identity_source,
+                    monitored=derived_monitored)
 
             fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
             bitrate = sample_rate = bit_depth = None

@@ -79,35 +79,127 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
-def test_simple_download_never_gets_a_file_row(lib2_enabled, imported_conn):
-    """Confirms the root cause behind the "Quarantine Approve later flagged as
-    Orphan" report (docs/library-v2-issues.md §7): a Simple Download's
+def test_simple_download_is_materialized_from_its_filename(lib2_enabled, imported_conn):
+    """Root cause behind the "Quarantine Approve later flagged as Orphan"
+    report (docs/library-v2-issues.md §7): a Simple Download's
     ``search_result`` carries ``is_simple_download`` but no title/artist, and
     ``track_info`` is structurally empty ``{}`` (see
     tests/imports/test_import_pipeline.py). autolink's early-exit guard
     (``not direct_track_id and not direct_album_id and (not title or not
-    artist_name)``) then unconditionally skips the file — with NO
-    quarantine involved at all. The legacy/history write path (
-    core/imports/side_effects.py::record_download_provenance) has no such
-    guard and records the download regardless, so the import "succeeds" from
-    the user's point of view while lib2 never learns the file exists. A later
-    orphan scan (core/repair_jobs/orphan_file_detector.py) — which only knows
-    about active lib2 subjects — has no way to recognize the file as
-    legitimately owned and reports it as an orphan.
+    artist_name)``) used to skip the file unconditionally — with NO quarantine
+    involved at all. The legacy/history write path
+    (core/imports/side_effects.py::record_download_provenance) has no such
+    guard and records the download regardless, so the import "succeeded" from
+    the user's point of view while lib2 never learned the file exists, and a
+    later orphan scan (core/repair_jobs/orphan_file_detector.py) — which only
+    knows active lib2 subjects — reported it as an orphan.
 
-    This is NOT a quarantine-context-serialization bug (already ruled out —
-    the sidecar round-trips losslessly) and NOT quarantine-approve-specific:
-    it reproduces on a plain, non-quarantined Simple Download."""
+    Decision of 26 July 2026 (status §18) is option 1, materialize: derive a
+    fallback identity so the file becomes a real, visible catalogue row."""
     ctx = _context(
         track_info={},
         search_result={"is_simple_download": True,
                        "filename": "Some Artist - Some Song.flac"},
     )
-    assert A.link_download_into_library_v2(ctx) is None
+    file_id = A.link_download_into_library_v2(ctx)
+    assert file_id is not None
+
+    row = imported_conn.execute(
+        """SELECT t.title, al.title AS album, ar.name AS artist
+             FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id
+             JOIN lib2_albums al ON al.id = t.album_id
+             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE tf.id = ?""",
+        (file_id,),
+    ).fetchone()
+    assert row["artist"] == "Some Artist"
+    assert row["title"] == "Some Song"
+
+
+def test_simple_download_prefers_the_files_own_tags(lib2_enabled, imported_conn,
+                                                    monkeypatch, tmp_path):
+    """Embedded tags are ground truth after the import pipeline wrote them;
+    the filename is only the fallback's fallback."""
+    monkeypatch.setattr(
+        A, "read_tag_snapshot",
+        lambda _path: {"title": "Nonstop", "artist": "Drake", "album": "Scorpion",
+                       "track_number": 1},
+    )
+    ctx = _context(
+        track_info={},
+        search_result={"is_simple_download": True, "filename": "junk-name.flac"},
+    )
+    file_id = A.link_download_into_library_v2(ctx)
+    assert file_id is not None
+
+    row = imported_conn.execute(
+        """SELECT t.title, ar.name AS artist FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id
+             JOIN lib2_albums al ON al.id = t.album_id
+             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE tf.id = ?""",
+        (file_id,),
+    ).fetchone()
+    assert (row["artist"], row["title"]) == ("Drake", "Nonstop")
+    # Reuses the seeded Drake row rather than minting a second one.
     assert imported_conn.execute(
-        "SELECT COUNT(*) FROM lib2_track_files WHERE path=?",
-        (ctx["_final_processed_path"],),
-    ).fetchone()[0] == 0
+        "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
+
+
+def test_untitled_simple_download_still_becomes_visible(lib2_enabled, imported_conn):
+    """No tags, no "Artist - Title" filename: the row is still materialized —
+    an invisible file is exactly what makes the orphan detector fire."""
+    ctx = _context(
+        _final_processed_path="/music/loose/mystery.flac",
+        track_info={},
+        search_result={"is_simple_download": True, "filename": "mystery.flac"},
+    )
+    file_id = A.link_download_into_library_v2(ctx)
+    assert file_id is not None
+
+    row = imported_conn.execute(
+        """SELECT t.title, ar.name AS artist FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id
+             JOIN lib2_albums al ON al.id = t.album_id
+             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE tf.id = ?""",
+        (file_id,),
+    ).fetchone()
+    assert row["title"] == "mystery"
+    assert row["artist"] == A.UNKNOWN_ARTIST
+
+
+def test_materialized_simple_download_is_not_monitored(lib2_enabled, imported_conn):
+    """A guessed identity must never turn into acquisition intent."""
+    ctx = _context(
+        track_info={},
+        search_result={"is_simple_download": True,
+                       "filename": "Some Artist - Some Song.flac"},
+    )
+    file_id = A.link_download_into_library_v2(ctx)
+
+    row = imported_conn.execute(
+        """SELECT ar.monitored AS artist_monitored, al.monitored AS album_monitored,
+                  t.monitored AS track_monitored
+             FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id
+             JOIN lib2_albums al ON al.id = t.album_id
+             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE tf.id = ?""",
+        (file_id,),
+    ).fetchone()
+    assert (row["artist_monitored"], row["album_monitored"],
+            row["track_monitored"]) == (0, 0, 0)
+
+
+def test_a_download_with_no_identity_at_all_is_still_skipped(lib2_enabled,
+                                                             imported_conn):
+    """The fallback needs *some* filename to work from; without one there is
+    nothing to materialize and the old skip remains correct."""
+    ctx = _context(track_info={}, search_result={})
+    ctx["_final_processed_path"] = ""
+    assert A.link_download_into_library_v2(ctx) is None
 
 
 def test_new_autolink_artist_is_not_monitored_without_watchlist(lib2_enabled, imported_conn):
@@ -783,3 +875,47 @@ def test_unmarked_numeric_id_is_not_persisted_but_matches_poisoned_rows(
         "SELECT COUNT(*) c FROM lib2_albums WHERE spotify_id='1239706770'"
     ).fetchone()["c"]
     assert rows == 1
+
+
+def test_simple_download_never_adopts_the_source_result_id(lib2_enabled, imported_conn):
+    """A Simple Download's ``search_result.id`` is the *source's* result token
+    (Soulseek/usenet), not a music-provider identity. ``ti`` falls back to that
+    dict, so adopting its id would poison ``spotify_id`` — §62.4 / guide §2.5:
+    provider ids are always qualified."""
+    ctx = _context(
+        track_info={},
+        search_result={"is_simple_download": True, "id": "slsk-result-991",
+                       "filename": "Some Artist - Some Song.flac"},
+        _embedded_id_tags={},
+    )
+    file_id = A.link_download_into_library_v2(ctx)
+
+    row = imported_conn.execute(
+        """SELECT t.spotify_id, t.external_ids, al.spotify_id AS album_sp
+             FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id
+             JOIN lib2_albums al ON al.id = t.album_id
+            WHERE tf.id = ?""",
+        (file_id,),
+    ).fetchone()
+    assert row["spotify_id"] is None
+    assert row["album_sp"] is None
+    assert "slsk-result-991" not in (row["external_ids"] or "")
+
+
+def test_simple_download_keeps_an_embedded_spotify_id(lib2_enabled, imported_conn):
+    """An id read off the file itself IS a qualified identity and must survive
+    the fallback path."""
+    ctx = _context(
+        track_info={},
+        search_result={"is_simple_download": True,
+                       "filename": "Some Artist - Some Song.flac"},
+    )
+    ctx["_embedded_id_tags"] = {"SPOTIFY_TRACK_ID": "sp-embedded-1"}
+    file_id = A.link_download_into_library_v2(ctx)
+
+    assert imported_conn.execute(
+        """SELECT t.spotify_id FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id WHERE tf.id=?""",
+        (file_id,),
+    ).fetchone()["spotify_id"] == "sp-embedded-1"
