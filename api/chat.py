@@ -28,6 +28,10 @@ from utils.logging_config import get_logger
 logger = get_logger("chat.api")
 
 _MAX_MESSAGE_LEN = 1000
+# Preset chat avatars live at webui/static/avatar/1.png .. <AVATAR_COUNT>.png.
+# The id is only ever an INDEX into that fixed set — remote input must never
+# reach a filesystem path.
+AVATAR_COUNT = 99
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
 _SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
 _AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-min TTL)
@@ -190,6 +194,14 @@ def _unwrap_room_messages(messages):
             # Thread membership: `th` is the parent message key (user|timestamp),
             # `tn` the display name carried so the sidebar still has a title when
             # the parent has scrolled out of the loaded archive.
+            # Preset avatar id (webui/static/avatar/<n>.png). Bounded int only —
+            # it indexes a fixed set, it is NEVER used to build a path.
+            try:
+                _av = int(dec.get("av"))
+                if 1 <= _av <= AVATAR_COUNT:
+                    m["av"] = _av
+            except (TypeError, ValueError):
+                pass
             _th = dec.get("th")
             if isinstance(_th, str) and _th.strip():
                 m["th"] = _th.strip()[:160]
@@ -977,6 +989,10 @@ def create_blueprint() -> Blueprint:
         room = _resolve_room(payload.get("room"))
         if room is None:
             return jsonify({"error": "Not in that room"}), 404
+        # NOTE: the avatar rides INSIDE the protocol payload for carriers (the
+        # 'hello' beacon sends {k:'hello', av:N}) — an envelope-level field
+        # would be dropped here, since pure carriers never reach the message
+        # unwrap path that reads it.
         encoded = chat_codec.encode("", {"p": proto})
         if encoded is None:
             return jsonify({"error": "Protocol payload too large"}), 400
@@ -1267,6 +1283,16 @@ def create_blueprint() -> Blueprint:
         if chan and chan != "general" and _re.fullmatch(r"[a-z0-9][a-z0-9-]*", chan):
             extra = dict(extra or {})
             extra["c"] = chan
+        # Preset avatar id, validated to the known range. Riding it on messages
+        # you're already sending costs a few bytes and adds NO extra carrier
+        # messages (so no extra line noise for vanilla Soulseek clients).
+        try:
+            _av = int(body.get("avatar"))
+            if 1 <= _av <= AVATAR_COUNT:
+                extra = dict(extra or {})
+                extra["av"] = _av
+        except (TypeError, ValueError):
+            pass
         # Thread membership (parent message key + carried display name).
         thread = str(body.get("thread") or "").strip()[:160]
         if thread:

@@ -676,17 +676,17 @@
         return cls;
     }
 
-    function _userBtn(n, extraClass, tunedMap, npMap) {
-        // Discord-style member row: circular avatar + presence dot, name, and an
-        // activity subline (the jukebox listen state doubles as "playing a game").
+    function _userBtn(n, extraClass, tunedMap, npMap, avMap) {
+        // Discord-style member row: avatar + presence dot, name, and an activity
+        // subline (the jukebox listen state doubles as "playing a game").
         var ign = isIgnored(n);
         var tuned = tunedMap && tunedMap[n];
         var np = npMap && npMap[n];
-        var initials = String(n || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
             '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
             (tuned ? ' — listening to the room jukebox' : '') + '">' +
-            '<span class="chat-user-av">' + esc(initials) +
+            '<span class="chat-user-av">' +
+                _avatarHtml(n, avMap && avMap[n], 'chat-av--fill') +
                 '<span class="chat-user-dot' + (tuned ? ' chat-user-dot--tuned' : '') + '"></span>' +
             '</span>' +
             '<span class="chat-user-main">' +
@@ -742,22 +742,23 @@
             ? window.ChatProtocol.reduceTuned(_evs) : {};            // once, not per user
         var npMap = (window.ChatProtocol && window.ChatProtocol.reduceNowPlaying)
             ? window.ChatProtocol.reduceNowPlaying(_evs) : {};
+        var avMap = _avatarMap();
         // Discord groups members by role with a "NAME — count" header.
         var html = '';
         if (self.length) {
             html += '<div class="chat-users-label chat-users-label--sub">You</div>' +
-                self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap, npMap); }).join('');
+                self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap, npMap, avMap); }).join('');
         }
         if (apps.length) {
             html += '<div class="chat-users-label chat-users-label--sub">SoulSync &mdash; ' + apps.length + '</div>' +
-                apps.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
+                apps.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
         if (rest.length) {
             // NOT "Online" — the SoulSync bucket above is online too; this one
             // is specifically everyone on a non-SoulSync client.
             html += '<div class="chat-users-label chat-users-label--sub">Other clients &mdash; ' +
                 rest.length + '</div>' +
-                rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
+                rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
@@ -1681,6 +1682,7 @@
                 try { nOn = localStorage.getItem('chat_np') === '1'; } catch (err) { /* ignore */ }
                 el.checked = nOn;
             }
+            renderAvatarPicker();
             overlay.hidden = false;
         });
     }
@@ -1938,6 +1940,79 @@
     // ── room message store (archive pages + live tail) ───────────────────────
     function _msgKey(m) {
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
+    }
+
+    // ── preset avatars ─────────────────────────────────────────────────────
+    // webui/static/avatar/1.png .. N.png. The id is an INDEX into that fixed
+    // set and is bounds-checked everywhere it crosses the wire — it must never
+    // be interpolated into a path. Unknown/absent falls back to initials, so a
+    // missing file or an old client never renders broken.
+    var CHAT_AVATARS = 99;
+
+    function _avatarId(raw) {
+        var n = parseInt(raw, 10);
+        return (n >= 1 && n <= CHAT_AVATARS) ? n : 0;      // 0 = none
+    }
+
+    function _myAvatar() {
+        try { return _avatarId(localStorage.getItem('chat_avatar')); } catch (e) { return 0; }
+    }
+
+    // username -> avatar id, from the hello beacons AND from anything they've
+    // said (messages carry the id, so history alone is enough to paint faces).
+    function _avatarMap() {
+        var out = {};
+        if (window.ChatProtocol && window.ChatProtocol.reduceAvatars) {
+            out = window.ChatProtocol.reduceAvatars(_roomEvents(), CHAT_AVATARS);
+        }
+        (state.msgs || []).forEach(function (m) {
+            var n = _avatarId(m && m.av);
+            if (n && typeof m.username === 'string') out[m.username] = n;
+        });
+        if (state.selfName && _myAvatar()) out[state.selfName] = _myAvatar();
+        return out;
+    }
+
+    // The avatar element for a user: the chosen picture, else initials.
+    function _avatarHtml(name, avId, extraClass) {
+        var initials = String(name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+        var cls = 'chat-av' + (extraClass ? ' ' + extraClass : '');
+        var n = _avatarId(avId);
+        if (n) {
+            return '<span class="' + cls + ' chat-av--img">' +
+                '<img src="/static/avatar/' + n + '.png" alt="" loading="lazy" ' +
+                    'onerror="this.parentElement.classList.remove(\'chat-av--img\');' +
+                    'this.parentElement.textContent=' + attr(JSON.stringify(initials)) + ';">' +
+            '</span>';
+        }
+        return '<span class="' + cls + '">' + esc(initials) + '</span>';
+    }
+
+    function renderAvatarPicker() {
+        var host = q('[data-chat-avpicker]');
+        if (!host) return;
+        var cur = _myAvatar();
+        var cells = ['<button type="button" class="chat-avpick' + (cur ? '' : ' chat-avpick--on') +
+            ' chat-avpick--none" data-chat-avpick="0" title="No avatar (use initials)">&times;</button>'];
+        for (var i = 1; i <= CHAT_AVATARS; i++) {
+            cells.push('<button type="button" class="chat-avpick' + (i === cur ? ' chat-avpick--on' : '') +
+                '" data-chat-avpick="' + i + '" title="Avatar ' + i + '">' +
+                // lazy so opening settings doesn't pull all 99 at once
+                '<img src="/static/avatar/' + i + '.png" alt="" loading="lazy"></button>');
+        }
+        host.innerHTML = cells.join('');
+    }
+
+    function pickAvatar(raw) {
+        var n = _avatarId(raw);                    // 0 clears
+        try { localStorage.setItem('chat_avatar', String(n)); } catch (e) { /* private mode */ }
+        renderAvatarPicker();
+        // Announce it now so the room repaints without waiting for us to talk.
+        if (state.canSend && state.view === 'room') {
+            try { sendProtocol('hello', n ? { av: n } : {}); } catch (e) { /* not in a room */ }
+        }
+        state.lastRendered = '';
+        renderUsersList();
     }
 
     // ── now-playing sharing (opt-in) ───────────────────────────────────────
@@ -2379,6 +2454,7 @@
         var payload = { message: text };
         if (state.view === 'room') {
             payload.room = state.room || '';
+            if (_myAvatar()) payload.avatar = _myAvatar();   // rides the envelope
             // Only the SoulSync room carries channel/thread tags — a message in
             // any other room stays a plain room message.
             if (_chanRoom()) {
@@ -2519,6 +2595,8 @@
             if (t) { pickMention(t.getAttribute('data-chat-mention-pick')); return; }
             t = e.target.closest('[data-chat-settings-btn]');
             if (t) { openSettings(); return; }
+            t = e.target.closest('[data-chat-avpick]');
+            if (t) { pickAvatar(t.getAttribute('data-chat-avpick')); return; }
             // ── Discord shell: channel switch, category collapse, DM puck ──
             t = e.target.closest('[data-chat-thread]');
             if (t) {
@@ -3042,7 +3120,8 @@
         // assume-SoulSync presence for users who haven't typed anything.
         if (!state.canSend || !state.room || state.beaconed[state.room]) return;
         state.beaconed[state.room] = 1;
-        sendProtocol('hello', {}).then(function (r) {
+        // carry the avatar so we get a face before we've said anything
+        sendProtocol('hello', _myAvatar() ? { av: _myAvatar() } : {}).then(function (r) {
             if (!r.ok) state.beaconed[state.room] = 0;   // retry next refresh
         });
     }
