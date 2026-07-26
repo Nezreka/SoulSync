@@ -735,6 +735,166 @@ def test_smart_split_legacy_backed_artist_becomes_alias(imported_conn):
     assert alb["primary_artist_id"] == a_id
 
 
+def _insert_album(conn, artist_id, title, *, spotify_id=None, musicbrainz_id=None,
+                   external_ids=None, featured_artist_id=None):
+    cur = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id, "
+        "musicbrainz_id, external_ids) VALUES(?, ?, ?, ?, ?)",
+        (artist_id, title, spotify_id, musicbrainz_id,
+         json.dumps(external_ids or {})),
+    )
+    album_id = int(cur.lastrowid)
+    if featured_artist_id is not None:
+        conn.execute(
+            "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+            "VALUES(?, ?, 'featured')",
+            (album_id, featured_artist_id),
+        )
+    return album_id
+
+
+def _insert_track(conn, album_id, title, *, spotify_id=None, musicbrainz_id=None,
+                   external_ids=None, featured_artist_id=None):
+    cur = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, spotify_id, musicbrainz_id, "
+        "external_ids) VALUES(?, ?, ?, ?, ?)",
+        (album_id, title, spotify_id, musicbrainz_id, json.dumps(external_ids or {})),
+    )
+    track_id = int(cur.lastrowid)
+    if featured_artist_id is not None:
+        conn.execute(
+            "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position) "
+            "VALUES(?, ?, 'featured', 1)",
+            (track_id, featured_artist_id),
+        )
+    return track_id
+
+
+def _refusing_resolver(name):
+    raise AssertionError(
+        f"name-based resolver must not run when a strong catalog anchor exists (got {name!r})"
+    )
+
+
+def test_resolve_uses_album_anchor_instead_of_name_search(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Afrojack")
+    _insert_album(imported_conn, aid, "Ten Feet Tall", spotify_id="SP-ALBUM-1")
+
+    def anchor_resolver(source, kind, provider_id):
+        assert (source, kind, provider_id) == ("spotify", "album", "SP-ALBUM-1")
+        return {"source": "spotify", "artist_id": "SP-ANCHORED-AFRO",
+                "name": "Afrojack", "image_url": "http://img/afro.jpg", "genres": ["edm"]}
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, aid, resolver=_refusing_resolver, anchor_resolver=anchor_resolver,
+    )
+
+    assert result["success"] is True
+    assert result["source"] == "spotify"
+    assert result["provider_id"] == "SP-ANCHORED-AFRO"
+    row = imported_conn.execute(
+        "SELECT spotify_id, image_url FROM lib2_artists WHERE id=?", (aid,)
+    ).fetchone()
+    assert row["spotify_id"] == "SP-ANCHORED-AFRO"
+    assert row["image_url"] == "http://img/afro.jpg"
+
+
+def test_resolve_collects_every_anchored_source_not_just_the_first(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Multi Source")
+    _insert_album(
+        imported_conn, aid, "One Release",
+        spotify_id="SP-A", musicbrainz_id="MB-A",
+        external_ids={"deezer": "DZ-A"},
+    )
+
+    def anchor_resolver(source, kind, provider_id):
+        return {"source": source, "artist_id": f"{source.upper()}-ARTIST", "name": "Multi Source"}
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, aid, resolver=_refusing_resolver, anchor_resolver=anchor_resolver,
+    )
+
+    assert result["success"] is True
+    assert set(result["anchor_sources"]) == {"spotify", "musicbrainz", "deezer"}
+    row = imported_conn.execute(
+        "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists WHERE id=?", (aid,)
+    ).fetchone()
+    assert row["spotify_id"] == "SPOTIFY-ARTIST"
+    assert row["musicbrainz_id"] == "MUSICBRAINZ-ARTIST"
+    assert json.loads(row["external_ids"])["deezer"] == "DEEZER-ARTIST"
+
+
+def test_resolve_uses_track_anchor_when_no_album_anchor_exists(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Track Only")
+    album_id = _insert_album(imported_conn, aid, "Untagged Album")
+    _insert_track(imported_conn, album_id, "Some Song", spotify_id="SP-TRACK-1")
+
+    def anchor_resolver(source, kind, provider_id):
+        assert (source, kind, provider_id) == ("spotify", "track", "SP-TRACK-1")
+        return {"source": "spotify", "artist_id": "SP-FROM-TRACK", "name": "Track Only"}
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, aid, resolver=_refusing_resolver, anchor_resolver=anchor_resolver,
+    )
+
+    assert result["success"] is True
+    assert result["provider_id"] == "SP-FROM-TRACK"
+
+
+def test_resolve_finds_anchor_via_featured_credit_not_just_primary_artist(imported_conn):
+    primary = _insert_native_artist(imported_conn, "Main Act")
+    featured = _insert_native_artist(imported_conn, "Guest Verse")
+    _insert_album(
+        imported_conn, primary, "Collab Album",
+        spotify_id="SP-COLLAB", featured_artist_id=featured,
+    )
+
+    def anchor_resolver(source, kind, provider_id):
+        return {"source": "spotify", "artist_id": "SP-GUEST", "name": "Guest Verse"}
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, featured, resolver=_refusing_resolver, anchor_resolver=anchor_resolver,
+    )
+
+    assert result["success"] is True
+    assert result["provider_id"] == "SP-GUEST"
+
+
+def test_resolve_falls_back_to_name_search_without_any_anchor(imported_conn):
+    aid = _insert_native_artist(imported_conn, "No Catalog Yet")
+    anchor_calls = []
+
+    def anchor_resolver(source, kind, provider_id):
+        anchor_calls.append((source, kind, provider_id))
+        return None
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, aid,
+        resolver=lambda name: {"source": "spotify", "artist_id": "SP-NAMED", "name": name},
+        anchor_resolver=anchor_resolver,
+    )
+
+    assert anchor_calls == []
+    assert result["success"] is True
+    assert result["provider_id"] == "SP-NAMED"
+    assert "anchor_sources" not in result
+
+
+def test_resolve_falls_back_to_name_search_when_anchor_lookup_fails(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Stale Anchor")
+    _insert_album(imported_conn, aid, "Delisted Album", spotify_id="SP-GONE")
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, aid,
+        resolver=lambda name: {"source": "deezer", "artist_id": "DZ-FALLBACK", "name": name},
+        anchor_resolver=lambda source, kind, provider_id: None,
+    )
+
+    assert result["success"] is True
+    assert result["source"] == "deezer"
+    assert result["provider_id"] == "DZ-FALLBACK"
+
+
 def test_lastfm_only_artist_is_considered_pending(imported_conn):
     # Insert an artist who only has lastfm in external_ids
     aid = _insert_native_artist(imported_conn, "LastFM Artist")
@@ -757,3 +917,86 @@ def test_lastfm_only_artist_is_considered_pending(imported_conn):
     pending = NE._pending_unmapped_artists(imported_conn, limit=None)
     pending_ids = [p["id"] for p in pending]
     assert aid not in pending_ids
+
+
+# --- issues.md §16 Finding 2: cooldown for permanently unmatched artists ----
+
+
+def _attempt_marker(conn, artist_id):
+    return conn.execute(
+        "SELECT unmapped_last_attempted_at FROM lib2_artists WHERE id=?", (artist_id,)
+    ).fetchone()["unmapped_last_attempted_at"]
+
+
+def test_reconcile_marks_the_attempt_on_an_unmatched_artist(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Nobody Knows This Name")
+
+    NE.reconcile_unmapped_native_artists(imported_conn, resolver=lambda name: None)
+
+    assert _attempt_marker(imported_conn, aid) is not None
+
+
+def test_reconcile_marks_the_attempt_even_when_the_resolver_raises(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Exploding Resolver")
+    imported_conn.commit()  # the pass rolls back on error; the row predates it
+
+    def resolver(name):
+        raise RuntimeError("provider down")
+
+    stats = NE.reconcile_unmapped_native_artists(imported_conn, resolver=resolver)
+
+    assert stats["errors"] >= 1
+    # The rollback must not take the backoff marker with it, otherwise a
+    # permanently failing source is re-hammered on every automated trigger.
+    assert _attempt_marker(imported_conn, aid) is not None
+
+
+def test_automated_reconcile_skips_an_artist_inside_the_cooldown_window(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Recently Tried")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET unmapped_last_attempted_at=CURRENT_TIMESTAMP WHERE id=?",
+        (aid,),
+    )
+    calls = []
+
+    NE.reconcile_unmapped_native_artists(
+        imported_conn,
+        resolver=lambda name: calls.append(name) or None,
+        cooldown_hours=168,
+    )
+
+    assert "Recently Tried" not in calls
+
+
+def test_automated_reconcile_retries_once_the_cooldown_window_passed(imported_conn):
+    aid = _insert_native_artist(imported_conn, "Tried Long Ago")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET unmapped_last_attempted_at=datetime('now','-200 hours') "
+        "WHERE id=?",
+        (aid,),
+    )
+    calls = []
+
+    NE.reconcile_unmapped_native_artists(
+        imported_conn,
+        resolver=lambda name: calls.append(name) or None,
+        cooldown_hours=168,
+    )
+
+    assert "Tried Long Ago" in calls
+
+
+def test_manual_reconcile_ignores_the_cooldown(imported_conn):
+    _insert_native_artist(imported_conn, "Recently Tried")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET unmapped_last_attempted_at=CURRENT_TIMESTAMP "
+        "WHERE name='Recently Tried'"
+    )
+    calls = []
+
+    # No cooldown_hours: the user pressed the button, they get the full backlog.
+    NE.reconcile_unmapped_native_artists(
+        imported_conn, resolver=lambda name: calls.append(name) or None,
+    )
+
+    assert "Recently Tried" in calls

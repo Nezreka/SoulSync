@@ -31,10 +31,12 @@ _TYPED_ALBUM_CONVERTERS: Dict[str, Callable[[Dict[str, Any]], Album]] = {
 }
 
 __all__ = [
+    "get_album_artist_identity_for_source",
     "get_album_for_source",
     "get_album_tracks_for_source",
     "get_artist_album_tracks",
     "get_artist_albums_for_source",
+    "get_track_artist_identity_for_source",
     "resolve_album_reference",
 ]
 
@@ -568,6 +570,99 @@ def get_album_for_source(source: str, album_id: str, artist_name: str = '', albu
         return client.get_album(album_id)
     except Exception:
         return None
+
+
+def _full_artist_identity(
+    source: str, client: Any, provider_id: str, fallback_name: str,
+) -> Dict[str, Any]:
+    """Fetch the full artist record (image, genres) for an id we already
+    trust — a stub artist reference embedded in an album/track response only
+    carries id+name, not the picture/genre data a name search's result item
+    would (issues.md §16 Finding 1)."""
+    artist_raw = None
+    if client and hasattr(client, 'get_artist'):
+        try:
+            artist_raw = client.get_artist(provider_id)
+        except Exception as exc:
+            logger.debug("Could not fetch %s artist %s: %s", source, provider_id, exc)
+    name = str(
+        _extract_lookup_value(artist_raw, 'name', default='') or fallback_name or ''
+    ).strip()
+    image_url = _extract_lookup_value(
+        artist_raw, 'image_url', 'picture_xl', 'picture_big', 'picture',
+        'thumb_url', 'image',
+    ) if artist_raw else None
+    genres = _extract_lookup_value(artist_raw, 'genres', default=[]) if artist_raw else []
+    return {
+        'source': source,
+        'artist_id': provider_id,
+        'name': name or provider_id,
+        'image_url': image_url,
+        'genres': list(genres) if isinstance(genres, (list, tuple)) else [],
+    }
+
+
+def get_album_artist_identity_for_source(source: str, album_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve the artist embedded in an ALREADY-KNOWN album (by provider id).
+
+    Unlike :func:`resolve_artist_identity`, this never searches by name: the
+    caller already trusts ``album_id`` (a provider id already confirmed on a
+    catalog row, e.g. via a past import match), so the provider's own album
+    response is authoritative for who the artist is — Guide §2.5 ("starke IDs
+    schlagen Namensheuristiken"). Returns the same shape as
+    ``resolve_artist_identity``, or ``None`` when the album can't be fetched
+    or carries no artist id.
+    """
+    raw_album = get_album_for_source(source, album_id)
+    if not raw_album:
+        return None
+    info = _build_album_info(raw_album, album_id, source=source)
+    artist_provider_id = str(info.get('artist_id') or '').strip()
+    if not artist_provider_id:
+        return None
+    client = metadata_registry.get_client_for_source(source)
+    fallback_name = str(info.get('artist_name') or info.get('artist') or '')
+    return _full_artist_identity(source, client, artist_provider_id, fallback_name)
+
+
+def get_track_artist_identity_for_source(source: str, track_id: str) -> Optional[Dict[str, Any]]:
+    """Track-anchor sibling of :func:`get_album_artist_identity_for_source`.
+
+    Uses whichever single-track fetch the client exposes (``get_track_details``
+    on most sources, ``get_track`` on Tidal/Qobuz); a source with neither
+    method simply yields ``None`` — the caller tries its other anchors.
+    """
+    client = metadata_registry.get_client_for_source(source)
+    if not client:
+        return None
+    fetch = getattr(client, 'get_track_details', None) or getattr(client, 'get_track', None)
+    if not fetch:
+        return None
+    try:
+        raw_track = fetch(track_id)
+    except Exception as exc:
+        logger.debug("Could not fetch %s track %s: %s", source, track_id, exc)
+        return None
+    if not raw_track:
+        return None
+
+    artists = _extract_lookup_value(raw_track, 'artists', default=[]) or []
+    if isinstance(artists, dict):
+        artists = [artists]
+    primary = artists[0] if artists else {}
+    artist_provider_id = str(
+        _extract_lookup_value(primary, 'id', default='')
+        or _extract_lookup_value(raw_track, 'artist_id', default='')
+        or ''
+    ).strip()
+    if not artist_provider_id:
+        return None
+    fallback_name = str(
+        _extract_lookup_value(primary, 'name', default='')
+        or _extract_lookup_value(raw_track, 'artist_name', 'artist', default='')
+        or ''
+    )
+    return _full_artist_identity(source, client, artist_provider_id, fallback_name)
 
 
 def resolve_artist_identity(

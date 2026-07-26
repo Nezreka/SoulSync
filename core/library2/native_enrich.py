@@ -33,6 +33,8 @@ logger = get_logger("library2.native_enrich")
 
 # resolver(name) -> {"source", "artist_id", "name", "image_url"?, "genres"?} | None
 ArtistResolver = Callable[[str], Optional[Dict[str, Any]]]
+# anchor_resolver(source, kind ['album'|'track'], provider_id) -> identity dict | None
+AnchorResolver = Callable[[str, str, str], Optional[Dict[str, Any]]]
 ENRICH_AMBIGUITY_MARGIN = 0.08
 
 
@@ -152,21 +154,95 @@ def _persist_identity(
     )
 
 
+def _artist_catalog_anchors(conn, artist_id: int) -> Dict[str, tuple]:
+    """``source -> ('album'|'track', provider_id)`` for every strong provider
+    id already confirmed on this artist's own catalog rows (primary or
+    credited via the junction tables).
+
+    These ids came from a real album/track match, not a name guess, so they
+    are strong anchors (Guide §2.5, issues.md §16 Finding 1). Album anchors
+    win over track anchors for the same source when both exist —
+    ``get_album_for_source`` is supported uniformly across every registered
+    provider, while single-track fetch isn't (album rows are checked first
+    and a source is never overwritten once found).
+    """
+    anchors: Dict[str, tuple] = {}
+
+    def _consume(row, kind: str) -> None:
+        if row["spotify_id"] and "spotify" not in anchors:
+            anchors["spotify"] = (kind, str(row["spotify_id"]))
+        if row["musicbrainz_id"] and "musicbrainz" not in anchors:
+            anchors["musicbrainz"] = (kind, str(row["musicbrainz_id"]))
+        try:
+            ext = json.loads(row["external_ids"] or "{}")
+        except (TypeError, ValueError):
+            ext = {}
+        if isinstance(ext, dict):
+            for source, value in ext.items():
+                if value and source not in anchors:
+                    anchors[str(source)] = (kind, str(value))
+
+    album_rows = conn.execute(
+        "SELECT DISTINCT al.spotify_id, al.musicbrainz_id, al.external_ids "
+        "FROM lib2_albums al WHERE al.primary_artist_id=? "
+        "   OR al.id IN (SELECT album_id FROM lib2_album_artists WHERE artist_id=?)",
+        (artist_id, artist_id),
+    ).fetchall()
+    for row in album_rows:
+        _consume(row, "album")
+
+    track_rows = conn.execute(
+        "SELECT DISTINCT t.spotify_id, t.musicbrainz_id, t.external_ids "
+        "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+        "WHERE al.primary_artist_id=? "
+        "   OR t.id IN (SELECT track_id FROM lib2_track_artists WHERE artist_id=?)",
+        (artist_id, artist_id),
+    ).fetchall()
+    for row in track_rows:
+        _consume(row, "track")
+
+    return anchors
+
+
+def default_anchor_resolver(source: str, kind: str, provider_id: str) -> Optional[Dict[str, Any]]:
+    """Production adapter over ``core.metadata.album_tracks`` — imported
+    lazily so tests (which inject a fake anchor_resolver) never pull the
+    metadata stack, same seam as :func:`default_artist_resolver`."""
+    from core.metadata.album_tracks import (
+        get_album_artist_identity_for_source,
+        get_track_artist_identity_for_source,
+    )
+
+    if kind == "album":
+        return get_album_artist_identity_for_source(source, provider_id)
+    return get_track_artist_identity_for_source(source, provider_id)
+
+
 def resolve_and_enrich_native_artist(
     conn,
     artist_id: int,
     *,
     resolver: Optional[ArtistResolver] = None,
+    anchor_resolver: Optional[AnchorResolver] = None,
 ) -> Dict[str, Any]:
-    """Resolve one native artist by name and persist id + artwork onto its row.
+    """Resolve one native artist and persist id + artwork onto its row.
+
+    Tries every strong catalog anchor first (an already-confirmed provider id
+    sitting on one of this artist's own albums/tracks) — one lookup per
+    anchored source, all of them persisted, not just the first (issues.md §16
+    Finding 1). Only when the artist has no anchor anywhere does this fall
+    back to the original single-source name search.
 
     Returns ``{"success": True, "source", "provider_id", "image_url"}`` on a
-    match, or ``{"success": False, "attempted": True, "reason": "not_found"}``
-    when no provider had the artist as a single entity (the expected outcome for
+    match — with an additional ``"anchor_sources"`` list when the match came
+    from catalog anchors — or ``{"success": False, "attempted": True,
+    "reason": "not_found"}`` when nothing resolved (the expected outcome for
     genuine collaboration names like "Ian Asher & Galantis").
     """
     if resolver is None:
         resolver = default_artist_resolver
+    if anchor_resolver is None:
+        anchor_resolver = default_anchor_resolver
 
     row = conn.execute(
         "SELECT id, name, spotify_id, musicbrainz_id, external_ids "
@@ -175,6 +251,55 @@ def resolve_and_enrich_native_artist(
     ).fetchone()
     if row is None:
         raise LookupError(f"Library v2 artist {artist_id} not found")
+
+    anchors = _artist_catalog_anchors(conn, int(artist_id))
+    if anchors:
+        matched_sources: List[str] = []
+        first_match: Optional[Dict[str, Any]] = None
+        existing_external_ids = row["external_ids"]
+        for source, (kind, provider_id) in anchors.items():
+            try:
+                identity = anchor_resolver(source, kind, provider_id)
+            except Exception as exc:  # noqa: BLE001 — one bad source must not abort the rest
+                logger.debug(
+                    "anchor resolve failed for artist %s source %s: %s",
+                    artist_id, source, exc,
+                )
+                continue
+            resolved_id = str((identity or {}).get("artist_id") or "").strip()
+            if not identity or not resolved_id:
+                continue
+            _persist_identity(
+                conn, int(artist_id),
+                source=source,
+                provider_id=resolved_id,
+                image_url=identity.get("image_url"),
+                genres=_normalize_genres(identity.get("genres")),
+                existing_external_ids=existing_external_ids,
+            )
+            # Re-read so the next anchor's merge sees this write — several
+            # non-dedicated-column sources share the same external_ids blob.
+            existing_external_ids = conn.execute(
+                "SELECT external_ids FROM lib2_artists WHERE id=?", (int(artist_id),)
+            ).fetchone()["external_ids"]
+            matched_sources.append(source)
+            if first_match is None:
+                first_match = {
+                    "source": source, "provider_id": resolved_id,
+                    "image_url": identity.get("image_url"),
+                }
+
+        if matched_sources:
+            return {
+                "success": True, "artist_id": int(artist_id),
+                "source": first_match["source"],
+                "provider_id": first_match["provider_id"],
+                "image_url": first_match.get("image_url"),
+                "anchor_sources": matched_sources,
+            }
+        # Anchors existed but none resolved (album delisted upstream, network
+        # hiccup, ...) — fall through to the name-based path below.
+
     name = str(row["name"] or "").strip()
     identity = resolver(name) if name else None
     source = str((identity or {}).get("source") or "").strip().lower()
@@ -750,15 +875,62 @@ def smart_split_combined_artist(
     }
 
 
-def _pending_unmapped_artists(conn, limit: Optional[int]) -> List[Dict[str, Any]]:
-    """Artists (both native and legacy) that still carry no catalog provider id."""
+def _has_attempt_column(conn) -> bool:
+    """``lib2_artists.unmapped_last_attempted_at`` present? (pre-migration DBs)."""
+    try:
+        return any(
+            str(row[1]) == "unmapped_last_attempted_at"
+            for row in conn.execute("PRAGMA table_info(lib2_artists)").fetchall()
+        )
+    except Exception as exc:  # noqa: BLE001 — a missing column only costs backoff
+        logger.debug("attempt-column probe failed: %s", exc)
+        return False
+
+
+def _mark_reconcile_attempted(conn, artist_id: int) -> None:
+    """Stamp the backoff marker for one artist (issues.md §16 Finding 2).
+
+    Written for *every* attempt, matched or not: a matched artist drops out of
+    the pending query anyway, while an unmatched or erroring one must not be
+    re-asked at every automated trigger. A row deleted meanwhile (smart split)
+    simply updates nothing.
+    """
+    try:
+        conn.execute(
+            "UPDATE lib2_artists SET unmapped_last_attempted_at=CURRENT_TIMESTAMP "
+            "WHERE id=?",
+            (int(artist_id),),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("could not mark reconcile attempt for artist %s: %s", artist_id, exc)
+
+
+def _pending_unmapped_artists(
+    conn, limit: Optional[int], *, cooldown_hours: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Artists (both native and legacy) that still carry no catalog provider id.
+
+    ``cooldown_hours`` skips rows attempted inside that window — the backoff an
+    automated (post-import) run needs so a permanently unresolvable name does
+    not re-hit every configured provider on every trigger. A manual run passes
+    ``None`` and gets the full backlog.
+    """
     sql = (
         "SELECT id, legacy_artist_id, external_ids FROM lib2_artists "
         "WHERE (spotify_id IS NULL OR spotify_id='') "
         "  AND (musicbrainz_id IS NULL OR musicbrainz_id='') "
-        "ORDER BY id"
     )
-    rows = conn.execute(sql).fetchall()
+    params: List[Any] = []
+    if cooldown_hours is not None and _has_attempt_column(conn):
+        # Compared inside SQLite so both sides are the same UTC clock the
+        # CURRENT_TIMESTAMP marker is written with.
+        sql += (
+            "  AND (unmapped_last_attempted_at IS NULL "
+            "       OR unmapped_last_attempted_at < datetime('now', ?)) "
+        )
+        params.append(f"-{float(cooldown_hours)} hours")
+    sql += "ORDER BY id"
+    rows = conn.execute(sql, params).fetchall()
 
     catalog_providers = {
         "spotify",
@@ -798,6 +970,7 @@ def reconcile_unmapped_native_artists(
     resolver: Optional[ArtistResolver] = None,
     limit: Optional[int] = None,
     progress: Optional[Callable[[int, int], None]] = None,
+    cooldown_hours: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Resolve every still-unmapped artist by name (the backlog healer).
 
@@ -805,11 +978,16 @@ def reconcile_unmapped_native_artists(
     artists" action: it walks artists with no provider id and tries to
     resolve+enrich (for native) or split them. Collaboration names that no provider
     models as one entity simply stay unmatched — counted, never fabricated.
+
+    ``cooldown_hours`` is the automated caller's backoff (issues.md §16
+    Finding 2): rows attempted inside the window are left alone. Every attempt
+    is stamped regardless of outcome, so the window also covers rows whose
+    provider call errored.
     """
     if resolver is None:
         resolver = default_artist_resolver
 
-    artists = _pending_unmapped_artists(conn, limit)
+    artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours)
     total = len(artists)
     stats = {"scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0}
     for index, art in enumerate(artists):
@@ -819,6 +997,7 @@ def reconcile_unmapped_native_artists(
             result = resolve_and_enrich_native_artist(conn, artist_id, resolver=resolver)
             if result.get("success"):
                 stats["matched"] += 1
+                _mark_reconcile_attempted(conn, artist_id)
                 if progress is not None:
                     progress(index + 1, total)
                 else:
@@ -831,6 +1010,7 @@ def reconcile_unmapped_native_artists(
             else:
                 stats["unmatched"] += 1
 
+            _mark_reconcile_attempted(conn, artist_id)
             if progress is not None:
                 progress(index + 1, total)
             else:
@@ -842,6 +1022,14 @@ def reconcile_unmapped_native_artists(
                 conn.rollback()
             except Exception as rollback_err:
                 logger.debug("reconcile rollback failed: %s", rollback_err)
+            # After the rollback, never inside it: a failing provider must
+            # still earn its backoff, otherwise an automated trigger retries
+            # the same broken row at full frequency.
+            _mark_reconcile_attempted(conn, artist_id)
+            try:
+                conn.commit()
+            except Exception as commit_err:  # noqa: BLE001
+                logger.debug("reconcile attempt-marker commit failed: %s", commit_err)
             if progress is not None:
                 try:
                     progress(index + 1, total)

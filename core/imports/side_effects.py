@@ -410,6 +410,18 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
     except Exception as e:
         logger.debug("library v2 autolink skipped: %s", e)
 
+    # ...and heal the artists that link just created. Featured credits and
+    # wishlist/discography rows are born without a provider id, so their chips
+    # stay 'pending' and they carry no artwork until something resolves them
+    # (status.md §28). Debounced — a 30-track album import fires this hook 30
+    # times and gets one run — and cooldown-guarded so unresolvable names are
+    # not re-asked at every import (issues.md §16 Finding 2).
+    try:
+        from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
+        schedule_unmapped_artist_reconcile(_get_config_manager())
+    except Exception as e:
+        logger.debug("library v2 unmapped-artist reconcile not scheduled: %s", e)
+
     # Persistent acquisition completion is intentionally downstream of every
     # shared pipeline guard and the Library-v2 autolink. Quarantined files never
     # reach this point; a later manual approval re-enters the same pipeline and

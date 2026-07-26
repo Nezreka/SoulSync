@@ -427,6 +427,11 @@ _ADDED_COLUMNS = (
     # fallback) that the autolink import-callback now persists per file.
     ("lib2_track_files", "pipeline_result_json",
      "ALTER TABLE lib2_track_files ADD COLUMN pipeline_result_json TEXT NOT NULL DEFAULT '{}'"),
+    # issues.md §16 Finding 2: reconcile_unmapped_native_artists backoff —
+    # without this, an automated/repeated run re-asks every configured
+    # provider for the same permanently-unmatched name on every trigger.
+    ("lib2_artists", "unmapped_last_attempted_at",
+     "ALTER TABLE lib2_artists ADD COLUMN unmapped_last_attempted_at TIMESTAMP"),
 )
 
 
