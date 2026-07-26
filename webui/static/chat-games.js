@@ -23,7 +23,7 @@
 //                            r:1 also means "I accept whatever you say",
 //                            which is the ONLY thing that un-freezes a game
 //                            whose checkpoint disagreed
-//   gm.state {g, n, f}       a seated player answering with the position
+//   gm.state {g, n, f}       ANY client answering with the position it holds
 //   gm.vote  {g, n, m}       ROOM-VS-PLAYER only: vote for the room's move at
 //                            ply n. gm.new {r: 1} makes the seat opposite the
 //                            creator belong to the whole room instead of one
@@ -54,10 +54,24 @@
 // look completely normal. gm.sync is the way out -- ask the room where the
 // game is, rather than waiting for a message that is never coming.
 //
-// It is also the only recovery from a desync freeze, and deliberately so:
-// an automatic answer never resolves a disagreement (that would let whoever
-// re-broadcasts last simply win), so a frozen game moves only when a human
-// sends gm.sync with r:1, which means "I accept your position".
+// Answers are corroborated, not trusted. "Furthest along wins" would reward
+// lying -- a bad client claims ply 999 and takes over every time -- so answers
+// are grouped by POSITION (not by ply: two clients can be at the same ply with
+// different boards, which is exactly the disagreement case) and a position only
+// overrules ours once STATE_QUORUM independent clients report it.
+//
+// Two rules keep that from making things worse:
+//   - it never moves us BACKWARDS. If we are at ply 8 and the room agrees on
+//     ply 6 because they all missed our last two moves, we are the one holding
+//     the information; we answer, we do not adopt.
+//   - a disagreement (desync) is only ever settled by quorum. In a two-player
+//     game with nobody else around, "the room agrees" would just mean "my
+//     opponent says so", which is precisely the injection this guards against.
+//     No quorum, no auto-heal: the game stays frozen for a human to settle.
+//
+// A single SEATED player can still pull us forward when we are merely behind
+// and nothing is in dispute -- that cannot invent history, and if they lie the
+// next real move disagrees and freezes the game.
 //
 // ── Time ────────────────────────────────────────────────────────────────
 //
@@ -77,6 +91,10 @@
     var MAX_MOVES = 600;         // no real game is longer; stops a flood
     var ABANDON_MS = 24 * 60 * 60 * 1000;
     var VOTE_DEFAULT = 2, VOTE_MAX = 9;
+    // How many INDEPENDENT clients must report the same position before it can
+    // overrule ours. Every SoulSync client in the room folds every game, so the
+    // pool is the whole room, not the two players.
+    var STATE_QUORUM = 2;
 
     function _ts(ev) {
         var t = ev && ev.timestamp;
@@ -318,6 +336,7 @@
                     roomSeat: roomSeat,
                     ack: {},             // username -> highest ply they have shown they know
                     syncReq: null,       // latest gm.sync seen for this game
+                    answers: {},         // fen -> {n, by:{username:1}} for the live request
                     voteK: voteK,
                     votes: {},           // uci -> distinct voters, current ply
                     voteBy: {},          // username -> uci, current ply
@@ -362,7 +381,7 @@
                     white: '', black: '',
                     createdBy: '', createdAt: at, lastAt: at,
                     invited: '', isPrivate: false,
-                    roomSeat: '', ack: {}, syncReq: null,
+                    roomSeat: '', ack: {}, syncReq: null, answers: {},
                     voteK: VOTE_DEFAULT, votes: {}, voteBy: {},
                     fen: ad2.fen(adopted),
                     // `moves` below is empty and only collects what arrives
@@ -486,6 +505,7 @@
                 game.drawOffer = '';                          // any move withdraws it
                 game.votes = {};                              // ballots are per-ply
                 game.voteBy = {};
+                game.answers = {};                            // and so are sync answers
                 if (applied.over) {
                     _finish(game, applied.result, applied.reason, applied.winnerColor);
                 }
@@ -504,26 +524,37 @@
             }
 
             if (k === 'gm.state') {
-                // Only a seated player may speak for the game; otherwise
-                // anyone in the room could restate the board as they liked.
-                if (!_seatOf(game, user)) return;
                 var tn = p.n;
                 if (typeof tn !== 'number' || !isFinite(tn) || tn < 0 || tn > MAX_MOVES) return;
                 tn = Math.floor(tn);
                 game.ack[user] = Math.max(game.ack[user] || 0, tn);
 
-                var newSt = adapter2.adopt(String(p.f || ''));
-                if (!newSt) return;
+                var stFen = String(p.f || '');
+                var newSt = adapter2.adopt(stFen);
+                if (!newSt) return;               // not even a legal position
+
+                // Tally it. Grouping by position rather than by ply is the
+                // point: agreement means agreeing about the BOARD.
+                var slot = game.answers[stFen] || (game.answers[stFen] = { n: tn, by: {} });
+                slot.by[user] = 1;
+                var backers = Object.keys(slot.by).length;
+                var quorum = backers >= STATE_QUORUM;
 
                 if (game.desync) {
-                    // Never resolve a disagreement on our own: only a human
-                    // saying "I accept yours" (gm.sync r:1) can break the tie,
-                    // and not from the same client that is answering.
-                    var pending = game.syncReq && game.syncReq.reset &&
-                                  game.syncReq.by !== user;
-                    if (!pending) return;
+                    // A disagreement is settled by the room or by a human, and
+                    // by nothing else. A human accepting (gm.sync r:1) counts
+                    // as the deciding voice, but never from the answerer.
+                    var accepted = game.syncReq && game.syncReq.reset &&
+                                   game.syncReq.by !== user;
+                    if (!quorum && !accepted) return;
+                    if (tn < game.ply) return;    // even then, never rewind
                 } else if (tn <= game.ply) {
-                    return;                       // nothing we do not already have
+                    return;                       // we are level or ahead: we answer, not adopt
+                } else if (!quorum && !_seatOf(game, user)) {
+                    // Merely behind: one SEATED player is enough to top us up
+                    // (they cannot invent history, and a lie freezes on the
+                    // next real move). Anyone else needs corroboration.
+                    return;
                 }
 
                 states[gid] = newSt;
@@ -535,6 +566,7 @@
                 game.partial = true;
                 game.desync = false;
                 game.syncReq = null;
+                game.answers = {};
                 game.drawOffer = '';
                 game.votes = {}; game.voteBy = {};
                 game.lastAt = at;
@@ -756,6 +788,7 @@
         isRoomTurn: isRoomTurn,
         ratings: ratings,
         toMove: toMove,
+        STATE_QUORUM: STATE_QUORUM,
         ELO_START: ELO_START,
         ABANDON_MS: ABANDON_MS,
         MAX_GAMES: MAX_GAMES,

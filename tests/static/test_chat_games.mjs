@@ -415,6 +415,114 @@ describe('un-freezing a desynced game', () => {
     });
 });
 
+describe('quorum — the room outvotes a single voice', () => {
+    // Every SoulSync client in the room folds every game, so the pool that can
+    // answer is the whole room. That only helps if answers are corroborated:
+    // "furthest along wins" would reward lying outright.
+    const players = ['boulder', 'kazimir'];
+    const full = [opened(), joined(),
+        ...moveEvents('g001', players, ['e2e4', 'e7e5', 'g1f3'])];
+    const behind = full.slice(0, 4);
+    const ahead = one(full);
+    const st = (by, n, f, at) => ev(by, { k: 'gm.state', g: 'g001', n: n, f: f }, at);
+
+    // A legal but WRONG position — a liar's board.
+    let fake = E.newGame();
+    ['d2d4', 'd7d5', 'c1f4'].forEach(u => { fake = E.makeMove(fake, E.uciToMove(fake, u)); });
+
+    test('one non-player alone cannot move our board', () => {
+        const g = one([...behind, st('sella', ahead.ply, ahead.fen, T0 + 9e5)]);
+        assert.equal(g.ply, 2, 'a single unseated voice is not enough');
+    });
+    test('two independent clients agreeing does move it', () => {
+        const g = one([...behind,
+            st('sella', ahead.ply, ahead.fen, T0 + 9e5),
+            st('lain', ahead.ply, ahead.fen, T0 + 9e5 + 1)]);
+        assert.equal(g.fen, ahead.fen);
+        assert.equal(g.ply, ahead.ply);
+    });
+    test('the same client repeating itself is still one voice', () => {
+        const g = one([...behind,
+            st('sella', ahead.ply, ahead.fen, T0 + 9e5),
+            st('sella', ahead.ply, ahead.fen, T0 + 9e5 + 1),
+            st('sella', ahead.ply, ahead.fen, T0 + 9e5 + 2)]);
+        assert.equal(g.ply, 2, 'agreement means DISTINCT clients');
+    });
+    test('a lone liar claiming a huge ply is ignored', () => {
+        // "Furthest wins" would hand the game to whoever exaggerates most.
+        const g = one([...behind, st('mallory', 400, E.toFEN(fake), T0 + 9e5)]);
+        assert.equal(g.ply, 2);
+        assert.equal(g.fen, one(behind).fen);
+    });
+    test('a liar cannot outrank a corroborated position by claiming more', () => {
+        const g = one([...behind,
+            st('mallory', 400, E.toFEN(fake), T0 + 9e5),
+            st('sella', ahead.ply, ahead.fen, T0 + 9e5 + 1),
+            st('lain', ahead.ply, ahead.fen, T0 + 9e5 + 2)]);
+        assert.equal(g.fen, ahead.fen, 'two honest clients beat one loud one');
+    });
+    test('agreement is on the POSITION, not the ply number', () => {
+        // Two clients at the same ply with different boards agree about
+        // nothing, and neither should carry.
+        let other = E.newGame();
+        ['d2d4', 'd7d5', 'g1f3'].forEach(u => { other = E.makeMove(other, E.uciToMove(other, u)); });
+        const g = one([...behind,
+            st('sella', 3, ahead.fen, T0 + 9e5),
+            st('lain', 3, E.toFEN(other), T0 + 9e5 + 1)]);
+        assert.equal(g.ply, 2);
+    });
+    test('a seated player alone can still top us up when nothing is disputed', () => {
+        // They cannot invent history, and a lie freezes on the next real move.
+        const g = one([...behind, st('boulder', ahead.ply, ahead.fen, T0 + 9e5)]);
+        assert.equal(g.fen, ahead.fen);
+    });
+    test('the room never drags us backwards', () => {
+        // We are at ply 3; the room agrees on ply 1 because they missed our
+        // last moves. Those moves are real and must not be deleted.
+        let early = E.newGame();
+        early = E.makeMove(early, E.uciToMove(early, 'e2e4'));
+        const g = one([...full,
+            st('sella', 1, E.toFEN(early), T0 + 9e5),
+            st('lain', 1, E.toFEN(early), T0 + 9e5 + 1),
+            st('kazimir', 1, E.toFEN(early), T0 + 9e5 + 2)]);
+        assert.equal(g.ply, ahead.ply, 'we hold the information; we answer, not adopt');
+        assert.equal(g.fen, ahead.fen);
+    });
+    test('a landed move clears outstanding answers', () => {
+        // Otherwise a half-formed quorum could still carry a position several
+        // moves after it stopped being true.
+        const partial = one([...behind, st('sella', ahead.ply, ahead.fen, T0 + 9e5)]);
+        assert.equal(Object.keys(partial.answers).length, 1, 'one answer pending');
+        const moved = one([...full, st('sella', ahead.ply, ahead.fen, T0 + 9e5),
+            ...moveEvents('g001', players, ['e2e4', 'e7e5', 'g1f3', 'b8c6']).slice(3)]);
+        assert.equal(Object.keys(moved.answers).length, 0, 'the move wiped them');
+    });
+});
+
+describe('quorum settles a frozen game without a human', () => {
+    const frozen = [opened(), joined(),
+        ev('boulder', { k: 'gm.move', g: 'g001', n: 0, m: 'e2e4',
+                        f: '4k3/8/8/8/8/8/8/4K2R b - - 0 1' }, T0 + 5000)];
+    let good = E.newGame();
+    good = E.makeMove(good, E.uciToMove(good, 'e2e4'));
+    const st = (by, at) => ev(by, { k: 'gm.state', g: 'g001', n: 1, f: E.toFEN(good) }, at);
+
+    test('one voice still cannot settle it', () => {
+        assert.equal(one([...frozen, st('boulder', T0 + 6000)]).desync, true);
+    });
+    test('but the room can', () => {
+        const g = one([...frozen, st('boulder', T0 + 6000), st('sella', T0 + 6001)]);
+        assert.equal(g.desync, false, 'consensus is not a guess');
+        assert.equal(g.fen, E.toFEN(good));
+    });
+    test('a human accepting still works when there is no room to ask', () => {
+        const g = one([...frozen,
+            ev('kazimir', { k: 'gm.sync', g: 'g001', n: 0, r: 1 }, T0 + 6000),
+            st('boulder', T0 + 6001)]);
+        assert.equal(g.desync, false);
+    });
+});
+
 describe('acknowledgement — free, from carriers we already send', () => {
     // "Has my opponent seen my move" needs no extra round trip: any carrier
     // they send proves what they knew at the time.

@@ -1303,6 +1303,7 @@
     // per game per cooldown.
     var ARC_SYNC_QUIET = 5 * 60 * 1000;    // nothing heard for this long
     var ARC_SYNC_EVERY = 10 * 60 * 1000;   // and ask no more often than this
+    var ARC_ANSWER_SPREAD = 6000;          // answers stagger across this window
     var _arcAsked = {};                    // gid -> when we last asked (ms)
     var _arcAnswered = {};                 // gid|user|n -> already answered
 
@@ -1315,21 +1316,46 @@
         sendProtocol('gm.sync', f).then(_arcAfterSend(gid));
     }
 
-    // Answer somebody else's request, if we actually know more than they do.
+    // A stable per-client delay in [0, ARC_ANSWER_SPREAD). Derived from the
+    // username so it does not change between renders, and so two clients
+    // reliably answer at different moments rather than colliding.
+    function _arcAnswerDelay() {
+        var h = 0, n = String(state.selfName || '');
+        for (var i = 0; i < n.length; i++) h = ((h << 5) - h + n.charCodeAt(i)) | 0;
+        return Math.abs(h) % ARC_ANSWER_SPREAD;
+    }
+
+    // Answer somebody else's request. EVERY SoulSync client in the room folds
+    // every game, so the pool of clients that can help is the whole room, not
+    // the two players — which is what makes a quorum reachable at all.
+    //
+    // The flip side is that a naive implementation has sixteen people shouting
+    // the same position at once. So each client waits its own stable moment and
+    // then shuts up if the room has already produced enough agreement: the cost
+    // settles at roughly quorum-plus-a-few messages instead of one per client.
     function _arcAnswerSyncs(fresh) {
         if (!_arcReady() || !state.canSend || !state.selfName) return;
-        var st = _gamesState();
         (fresh || []).forEach(function (e) {
             if (!e || !e.p || e.p.k !== 'gm.sync') return;
             if (e.username === state.selfName) return;          // not our own
-            var g = st.games[e.p.g];
-            if (!g || g.status !== 'live') return;
-            if (_arcSeat(g) === '') return;                     // only players answer
-            if (!(g.ply > e.p.n) && !e.p.r) return;             // they are not behind
-            var key = g.id + '|' + e.username + '|' + e.p.n;
+            if (typeof e.p.n !== 'number') return;
+            var g0 = _gamesState().games[e.p.g];
+            if (!g0 || g0.status !== 'live') return;
+            if (!(g0.ply > e.p.n) && !e.p.r) return;            // they are not behind
+            var key = g0.id + '|' + e.username + '|' + e.p.n;
             if (_arcAnswered[key]) return;                      // asked and answered
             _arcAnswered[key] = 1;
-            sendProtocol('gm.state', { g: g.id, n: g.ply, f: g.fen });
+            setTimeout(function () {
+                // Re-read: the answer may have arrived from others while we
+                // waited, and the game may have moved on entirely.
+                var g = _gamesState().games[e.p.g];
+                if (!g || g.status !== 'live') return;
+                if (!(g.ply > e.p.n) && !e.p.r) return;
+                var slot = g.answers && g.answers[g.fen];
+                var backers = slot ? Object.keys(slot.by).length : 0;
+                if (backers >= window.ChatGames.STATE_QUORUM) return;   // settled without us
+                sendProtocol('gm.state', { g: g.id, n: g.ply, f: g.fen });
+            }, _arcAnswerDelay());
         });
     }
 

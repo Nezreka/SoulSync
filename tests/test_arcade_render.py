@@ -110,17 +110,45 @@ class TestWiring:
         assert "if (_arcMyMove(g)) return;                          // the ball is with us" in _CHAT_JS
         assert "if (!_arcSeat(g)) return;                           // only our own games" in _CHAT_JS
 
-    def test_only_players_answer_a_sync(self):
-        assert "if (_arcSeat(g) === '') return;                     // only players answer" in _CHAT_JS
+    def test_any_client_may_answer_a_sync(self):
+        # Deliberately widened: every SoulSync client in the room folds every
+        # game, so restricting answers to the two players threw away the whole
+        # room's memory. Safe because answers are corroborated, not trusted.
+        assert "if (_arcSeat(g) === '') return;" not in _CHAT_JS
+        assert "sendProtocol('gm.state'" in _CHAT_JS
         games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
-        assert "if (!_seatOf(game, user)) return;" in games_js
+        # A seated player is still the one shortcut, and only when nothing is
+        # in dispute.
+        assert "} else if (!quorum && !_seatOf(game, user)) {" in games_js
+
+    def test_recovery_is_corroborated_not_trusted(self):
+        # "Furthest along wins" would reward lying outright: a bad client
+        # claims ply 999 and takes over every time. Answers are grouped by
+        # POSITION and need independent backing.
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "var STATE_QUORUM = 2;" in games_js
+        assert "game.answers[stFen]" in games_js
+        assert "var backers = Object.keys(slot.by).length;" in games_js
+
+    def test_recovery_never_moves_backwards(self):
+        # A stale majority must not delete real moves.
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "return;                       // we are level or ahead: we answer, not adopt" in games_js
+        assert "if (tn < game.ply) return;    // even then, never rewind" in games_js
+
+    def test_answers_are_staggered(self):
+        # Every client in the room can answer, so without a spread sixteen
+        # people shout the same position at once.
+        assert "ARC_ANSWER_SPREAD" in _CHAT_JS
+        assert "_arcAnswerDelay()" in _CHAT_JS
+        assert "if (backers >= window.ChatGames.STATE_QUORUM) return;" in _CHAT_JS
 
     def test_automatic_sync_never_settles_a_disagreement(self):
         # Otherwise whoever re-broadcast last would simply win. A frozen game
         # moves only when a human sends gm.sync with r:1.
         games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
-        assert "var pending = game.syncReq && game.syncReq.reset &&" in games_js
-        assert "game.syncReq.by !== user;" in games_js
+        assert "var accepted = game.syncReq && game.syncReq.reset &&" in games_js
+        assert "if (!quorum && !accepted) return;" in games_js
         assert "data-chat-arc-accept" in _CHAT_JS
 
     def test_acknowledgement_costs_nothing(self):
