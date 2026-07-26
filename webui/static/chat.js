@@ -1572,8 +1572,9 @@
                             'your client and your opponent\'s each work it out ' +
                             'independently.</div>' +
                     '</div>' +
-                    '<div class="chat-arc-purse" title="Play money, kept on this machine. ' +
-                        'Tops back up every midnight.">' +
+                    '<div class="chat-arc-purse" title="Play money, kept on this ' +
+                        'machine. Topped back up to the daily allowance at midnight if ' +
+                        'you are below it — anything you win above it, you keep.">' +
                         '<span class="chat-arc-purse-coin">🪙</span>' +
                         '<span class="chat-arc-purse-amt">' +
                             (bank ? bank.balance.toLocaleString() : '·····') + '</span>' +
@@ -2000,9 +2001,9 @@
             '<div class="chat-slot-bank">' +
                 '<span class="chat-slot-balance">' +
                     (bal === null ? '…' : bal.toLocaleString()) + '</span>' +
-                '<span class="chat-slot-banklabel">in the bank · tops back up to ' +
+                '<span class="chat-slot-banklabel">in the bank · back up to ' +
                     (sl.bank ? sl.bank.allowance.toLocaleString() : '10,000') +
-                    ' at midnight</span>' +
+                    ' at midnight if you drop below · winnings are yours</span>' +
             '</div>' +
             '<div class="chat-slot-stakes">' +
                 SLOT_STAKES.map(function (v) {

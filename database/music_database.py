@@ -10998,15 +10998,19 @@ class MusicDatabase:
                             "refilled_on": today, "lifetime_won": 0, "lifetime_lost": 0}
                 row = dict(row)
                 if row["refilled_on"] != today:
-                    # A new day tops you back up to the allowance. It does not
-                    # ADD to a balance you never spent — otherwise leaving it
-                    # alone for a month would make you rich for doing nothing.
+                    # A FLOOR, not a reset. The point is that everyone can
+                    # always play today, so a balance below the allowance is
+                    # topped up to it — and a balance above it is left alone,
+                    # because winnings are yours to keep. It never ADDS the
+                    # allowance either, or sitting out a month would make you
+                    # rich for doing nothing.
+                    topped = max(int(row["balance"]), self.ARCADE_DAILY)
                     conn.execute(
                         "UPDATE arcade_bank SET balance = ?, refilled_on = ?, "
                         "updated_at = CURRENT_TIMESTAMP WHERE profile_id = ?",
-                        (self.ARCADE_DAILY, today, int(profile_id)))
+                        (topped, today, int(profile_id)))
                     conn.commit()
-                    row["balance"] = self.ARCADE_DAILY
+                    row["balance"] = topped
                     row["refilled_on"] = today
                 return {"balance": int(row["balance"]), "allowance": self.ARCADE_DAILY,
                         "refilled_on": row["refilled_on"],

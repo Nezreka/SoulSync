@@ -68,21 +68,29 @@ class TestBank:
         assert mdb.get_arcade_bank(1)["balance"] == 5
         # Reading on a later day is what triggers the refill; there is no
         # scheduler and none is wanted.
-        with mdb._get_connection() as conn:
-            conn.execute("UPDATE arcade_bank SET refilled_on = '2020-01-01' "
-                         "WHERE profile_id = 1")
-            conn.commit()
+        self._roll_day(mdb)
         assert mdb.get_arcade_bank(1)["balance"] == mdb.ARCADE_DAILY
 
-    def test_the_refill_does_not_stack_on_an_unspent_balance(self, mdb):
-        # Leaving it alone for a month must not make you rich for doing
-        # nothing — the day resets you TO the allowance, it does not add it.
-        mdb.adjust_arcade_bank(1, 5000)
+    @staticmethod
+    def _roll_day(mdb):
+        """Pretend midnight has passed. Reading the bank is what refills it."""
         with mdb._get_connection() as conn:
             conn.execute("UPDATE arcade_bank SET refilled_on = '2020-01-01' "
                          "WHERE profile_id = 1")
             conn.commit()
-        assert mdb.get_arcade_bank(1)["balance"] == mdb.ARCADE_DAILY
+
+    def test_winnings_above_the_allowance_survive_the_refill(self, mdb):
+        # The refill is a FLOOR, not a reset — you keep what you won.
+        mdb.adjust_arcade_bank(1, 5000)                     # 15,000
+        self._roll_day(mdb)
+        assert mdb.get_arcade_bank(1)["balance"] == mdb.ARCADE_DAILY + 5000
+
+    def test_the_refill_never_adds_the_allowance(self, mdb):
+        # Sitting out a month must not make you rich for doing nothing: the
+        # floor tops you UP to the allowance, it does not hand you another one.
+        for _ in range(3):
+            self._roll_day(mdb)
+            assert mdb.get_arcade_bank(1)["balance"] == mdb.ARCADE_DAILY
 
     def test_junk_deltas_leave_the_balance_alone(self, mdb):
         for bad in (None, "lots", 1.5e400, [], {}):
