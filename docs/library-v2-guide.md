@@ -85,6 +85,9 @@ und dürfen nicht als vermeintliche „Paritätslücke“ ungefragt gebaut werde
 Aufgeschoben sind M3U-/Roster-Export sowie Reidentify/„I Have This“. Sie sind
 keine stillschweigend angenommenen Anforderungen.
 
+- **Import Review (Entscheidung 27. Juli 2026):** Die eigenständige `Import Review`-Oberfläche (`/import-review`) wird für die aktuelle PR vollständig gestrichen und muss aus den aktiven Routen entfernt werden.
+
+
 ---
 
 ## 2. Nicht verhandelbare Produkt- und Designregeln
@@ -404,6 +407,9 @@ ein Kandidat Track oder Album-Bundle ist.
   entfernt; Remix/Live/Remaster bleiben eigene Entities.
 - Ein Import ist erst abgeschlossen, wenn Disk, V2, Legacy-/Media-Projektion,
   Runtime und Acquisition entweder synchron oder explizit fehlgeschlagen sind.
+- **Import-Review UI gestrichen (Entscheidung 27. Juli 2026):** Die eigenständige `Import Review`-Oberfläche (`/import-review`) wurde für diese PR gestrichen und aus den aktiven Routen entfernt. Automatisierte Importe laufen direkt durch die gemeinsame Post-Processing-Pipeline. *(Hinweis für den nächsten Chat: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+- **Reorganize All bei geänderten Einstellungs-Templates:** Wenn die Ordner- oder Dateinamenstruktur in den Einstellungen geändert wird, evaluiert `Reorganize All` (`core/reorganize_runner.py` & `core/library_reorganize.py`) alle verwalteten `lib2_track_files` gegen die neuen Pfad-Templates (per-run Config-Auflösung), erstellt vorab einen atomaren Verschiebeplan (Preview), verifiziert die Storage-Root-Gesundheit, führt physische Move-/Rename-Operationen durch und synchronisiert atomar `lib2_track_files.path`, Legacy-Pfadreferenzen (`tracks.file_path`), Media-Server-Projektionen und die `library_history`. *(Hinweis für den nächsten Chat: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
 
 ---
 

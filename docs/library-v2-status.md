@@ -51,10 +51,10 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-09](library-v2-features.md#feat-playlists) | Library-v2-Playlist-Oberfläche | Deferred | `library-v2-playlist-ui` | Vollständig aus dem aktiven Overhaul entfernt und separat geparkt |
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
-| [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Implemented | Regression-Checkpoint `ee30247a`, im aktuellen Squash `fb0096ce` | `import-review`-Route, Queue/Detail, Assignments und Resolve/Rescan/Resume vorhanden; Konfliktliste benennt seit §27 den betroffenen Track/Pfad statt nur den Code; vollständiger Browser-E2E fehlt |
-| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Implemented | §29/§53/§55/§60/§71 | Scoped/Transient Search, Force-Audit und gemeinsame Pipeline gezielt geprüft |
-| [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1 | Gemeinsamer Delete-Vertrag, File-Scope und Pfadsync abgedeckt |
-| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Verified | §28–§37, Review 9/10/17 | Review-spezifische Regressionen plus WebUI-Suite |
+| [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Removed / Deferred | §31, Entscheidung 27. Juli | `import-review`-Route und UI-Oberfläche per Nutzerentscheidung aus dieser PR entfernt |
+| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Partial | §29/§53/§55, §31, [iss27-01](library-v2-issues.md#iss27-01) | Scoped/Transient Search vorhanden; Interactive Search aktuell defekt, Quellenauswahl-Redesign & globaler Automatic-Search-Header-Button offen |
+| [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1, §31 | Delete, File-Scope und Pfadsync abgedeckt; `Reorganize All` Ablauf bei Einstellungsänderung spezifiziert |
+| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Partial | §28–§37, §31, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05) | Artist-scoped Refresh & Scan File Inspection, Preview Re-Tag Album-Subdivision, Tags Match Hover & Tag Gap Click Fix offen |
 | [F-16](library-v2-features.md#feat-wanted) | Wanted Views, Entity Queue, Diskspace | Verified | §72–§74, `2e227c1b` | Entity Rollups und ein Queue-Poll pro Artist-Seite geprüft |
 
 ### UI-Status
@@ -62,9 +62,11 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | ID | Bereich | Status | Hinweis |
 |---|---|---|---|
 | [UI-01](library-v2-features.md#ui-icons) | Icons/Nomenklatur | Verified | Automatic=Lupe, Interactive=User, Quality=Stern, Track=Pencil |
-| [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Implemented | Preferences/Sort/Provider vorhanden; Resize bewusst Deferred |
+| [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Pending | Track File Size Column (Singles/EPs), Verification Column, Excel-like Column Resizing & Modal Layout Redesign offen |
 | [UI-04](library-v2-features.md#ui-bulk) | Multi-Select/Bulk Bar | Implemented | Monitor, Profil, RG, Tags, Delete und Rich Bulk Edit |
-| F-12 UI | Acquisition Review | Implemented | Frontend-Consumer und Review-Oberfläche vorhanden; Browser-E2E bleibt Release-Gate |
+| [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Pending | Artist Navigation State Reset ("My Library"), Library Header Actions ("Automatic Search"), Maintenance UX Overhaul offen |
+| F-12 UI | Acquisition Review | Removed | Per Nutzerentscheidung aus PR entfernt und gelöscht |
+
 
 ---
 
@@ -1459,10 +1461,42 @@ Alternativentwurf (nur einmal nach Abschluss der Bootstrap-Phase) wurde
 verworfen, weil „die Bootstrap-Phase ist zu Ende" kein Signal ist, das die
 Pipeline heute liefert.
 
+---
+
+## 31. Ergänztes Nutzer-Anforderungspaket für Library V2 (27. Juli 2026)
+
+Aufnahme aller am 27. Juli 2026 definierten Nutzeranforderungen, UI-Optimierungen und Bugfix-Aufträge.
+
+> **Regel für die nächste Chat-Session:** Der nächste Chat muss vor der Bearbeitung der hier aufgeführten Punkte selbstständig im Code recherchieren und bei etwaigen Unklarheiten gezielt Gegenfragen stellen!
+
+
+### Übersichtstabelle der neuen/angepassten Punkte
+
+| # | Anforderung / Modul | Typ | Status | Referenz / Issue | Kurzbeschreibung |
+|---:|---|---|---|---|---|
+| 1 | Track File Size Column | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Eigene sortierbare Spalte für Track-Dateigröße auf Disk; auch für Singles und EPs |
+| 2 | Resizable Table Columns | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Manuelle Spaltenbreitenanpassung per Drag-and-Drop (Excel-like) |
+| 3 | Files & Tools -> Maintenance UX | UI / UX | Pending | [iss27-08](library-v2-issues.md#iss27-08) | Umbenennung, Entschachtelung & klare Gruppierung von Maintenance-Jobs |
+| 4 | Reorganize All Mechanismus | Dokumentation | Verified | [guide §5](library-v2-guide.md#5-technische-invarianten) | Ablauf bei Einstellungsänderung (Pfad-Templates, Move-Plan, Path-Sync & History) dokumentiert |
+| 5 | Preview Re-Tag UX | UI / UX | Pending | [iss27-07](library-v2-issues.md#iss27-07) | Übersichtliche Album-Unterteilung und visuelle Grenzen in Re-Tag Preview |
+| 6a | Tags Match Hover Breakdown | UI / Feature | Pending | [F-15](library-v2-features.md#feat-metadata) | Tooltip/Popover bei Tags Match für exakte Aufschlüsselung vorhandener vs. fehlender Tags |
+| 6b | Tag Gap Klick-Aktion Fix | Bugfix | Pending | [iss27-02](library-v2-issues.md#iss27-02) | Klick auf Tag Gap löst Provider-Re-Fetch und Schreiben der Tags in Datei aus |
+| 7 | Artist-scoped Refresh & Scan | Feature / Fix | Pending | [iss27-05](library-v2-issues.md#iss27-05) | Strikter Artist-Scope + physische Datei-Inspektion (Audio Stream Quality, Features, Verification Tags) |
+| 8 | Column Settings Layout Redesign | UI / UX | Pending | [iss27-06](library-v2-issues.md#iss27-06) | Umbau des Column Settings Modals von langer vertikaler Liste zu Mehrspalten/Tab-Layout |
+| 9 | Navigation State Reset bei Artist-Wechsel | UI / UX | Pending | [iss27-04](library-v2-issues.md#iss27-04) | Beim Betreten eines neuen Artists immer auf „My Library" zurücksetzen (kein Auto-Fetch von All Releases) |
+| 10 | Change Photo Provider Reliability | Bugfix | Pending | [iss27-03](library-v2-issues.md#iss27-03) | Verlässliche Foto-Abfrage über alle 5-6 Metadata Provider ohne Stille Ausfälle |
+| 11a | Verification Tag Reader | Backend / Feature | Pending | [F-15](library-v2-features.md#feat-metadata) | Lesen von `HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT` direkt aus Audio-Tags |
+| 11b | Verification Table Column | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Neue Tabellenspalte „Verification" / „Verified" (`verification_status`) |
+| 12 | Import Review Removal | Decision | Removed | [F-12](library-v2-features.md#feat-acq-review) | `/import-review` Route und UI-Seite vollständig aus diesem PR-Scope gelöscht |
+| 13a | Interactive Search UI Redesign & Source Filter | UI / UX | Pending | [iss27-01](library-v2-issues.md#iss27-01) | Moderne Checkboxen, Standard: alle Quellen durchsuchen, vereinfachter Quellenswitcher (Ref: Basic Search) |
+| 13b | Interactive Search Defekt-Fix | Bugfix | Pending | [iss27-01](library-v2-issues.md#iss27-01) | Behebung des Defekts von Interactive Search unter Verwendung von Basic Search als Referenz |
+| 14 | Library Header Actions | UI / Feature | Pending | [F-13](library-v2-features.md#feat-search) | Button „Automatic Search" (Missing Wishlist + Cutoff Unmet Upgrade Search); `Re-Import Library` bleibt temporär |
+| 15 | Referenz auf Basic Search | Dokumentation | Verified | [iss27-01](library-v2-issues.md#iss27-01) | Querverweis in Doku aufgenommen, Basic Search für Search-Overhaul als Vorbild zu nutzen |
+
 ### Verifikation
 
 - `tests/library2`: **1.064 bestanden** (1.050 + 5 Cooldown-, 7 Trigger-,
-  2 Fan-out-Tests);
+  4 Fan-out-Tests);
 - `tests/repair`, `tests/repair_jobs`: **120 bestanden** (108 + 8 T-11-,
   3 T-12-, 1 Registry-Test);
 - `tests/imports`: unverändert grün (gemeinsamer Lauf mit den beiden obigen,

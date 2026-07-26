@@ -2794,3 +2794,79 @@ Die Fehlerbild-Frage (§18 Punkt 5) ist pro Werkzeug nur konstruktiv
 beantwortet, nicht durch Injektion belegt: Restart mitten im Apply,
 read-only Root und Windows-/Docker-Pfad-Mapping bleiben Teil des
 §9-Release-Gates und sind für keinen der 25 Jobs einzeln durchgespielt worden.
+
+---
+
+## 20. Nutzer-UI- und Funktionale Anforderungen für Library V2 (27. Juli 2026)
+
+Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-Punkte, Fehlerbilder und Spezifikationen.
+
+> **Wichtiger Arbeitsauftrag für die nächste Chat-Session:** Der nächste Chat muss vor der Ausführung aller in Abschnitt 20 genannten Punkte selbstständig weiter im Code recherchieren und bei etwaigen Unklarheiten oder Detailentscheidungen gezielt Gegenfragen an den Nutzer stellen!
+
+
+### 20.1 <a name="iss27-01"></a> iss27-01 — Interactive Search ist defekt und Quellenauswahl unübersichtlich
+
+**Symptom:** Klick auf Interactive Search bei Alben oder Einzel-Tracks schlägt fehl, zeigt keine Kandidaten oder bricht ab. Auch Automatic Search ist dadurch betroffen. Die Checkboxen („Quality Check“, „Acoustic ID Check“, „Only Show Results with Cutoff“) wirken optisch unansehnlich und die Quellenauswahl ist schwer verständlich.
+
+**Root Cause / Referenz:** Interactive Search nutzt im Backend (`core/search/`) und im WebUI-Binding nicht die stabilen Abfrage- und Filterstrukturen der bestehenden Basic Search (`webui/src/routes/search/`).
+
+**Fix-Vertrag:**
+1. Backend-Pipeline für Interactive Search an der Implementierung von Basic Search ausrichten.
+2. Quellenauswahl: Standardmäßig alle aktivierten Quellen gleichzeitig durchsuchen und ein einfaches, verständliches Umschalt-Filter-Interface bereitstellen (wie in Basic Search).
+3. Automatic Search auf Track-Ebene strikt auf die jeweilige Track-Entity scopen.
+4. UI-Redesign der Checkboxen („Quality Check“, „AcoustID Check“, „Cutoff-Filter“) zu modernen Toggle-Controls.
+
+### 20.2 <a name="iss27-02"></a> iss27-02 — Tag Gaps Klick-Aktion löst Re-Fetch und Tag-Schreiben nicht aus
+
+**Symptom:** Im Tags Match Werkzeug führt das Klicken auf ein fehlendes Tag (Tag Gap) nicht dazu, dass die entsprechenden Metadaten/Artwork von den Providern neu heruntergeladen und in die physische Audio-Datei geschrieben werden.
+
+**Fix-Vertrag:**
+1. Event-Handler und API-Endpunkt für Tag-Gap-Klicks reparieren.
+2. Der Klick muss gezielt den Provider-Re-Fetch für dieses Feld starten und das Ergebnis über den Tag-Writer direkt in die physischen Audio-Tags schreiben.
+3. Beim Hovern über den Tags-Match-Status/Chip einen informativen Tooltip/Popover anzeigen, der analog zur Metadata-Vorschau exakt auflistet, welche Tags vorhanden sind und welche fehlen.
+
+### 20.3 <a name="iss27-03"></a> iss27-03 — Change Photo / Artist-Bild-Fetch unzuverlässig
+
+**Symptom:** Beim Öffnen des Foto-Pickers („Change Photo“) werden für manche Künstler nicht alle verfügbaren Provider-Bilder geladen oder einzelne Quellen fehlen vollständig in der Auswahl.
+
+**Fix-Vertrag:**
+1. Provider-Fetch-Pipeline für Artist-Fotos prüfen: Alle 5 bis 6 konfigurierten Provider (Spotify, MusicBrainz, Deezer, Fanart.tv, iTunes etc.) müssen verlässlich abgefragt werden.
+2. Fehlerantworten oder Timeouts einzelner Provider isolieren, sodass funktionierende Quell-Kandidaten im Picker vollständig gerendert werden.
+
+### 20.4 <a name="iss27-04"></a> iss27-04 — Artist-Navigation behält Tab „All Releases" und löst ungewollte Diskografie-Fetches aus
+
+**Symptom:** Wenn der Nutzer in der Artist-Ansicht auf den Tab „All Releases" wechselt und anschließend zu einem anderen Künstler navigiert, bleibt die UI im Tab „All Releases" und löst sofort ein vollständiges Herunterladen der Diskografie des neuen Künstlers aus.
+
+**Root Cause:** In `webui/src/routes/library-v2/-ui/library-v2-page.tsx`, `ArtistDetailView` liest `releasesMode` aus den URL-Suchparametern (`search.releases`). Beim Wechsel von Artist A zu Artist B behält der Router die Suchparameter bei (`releases=all`), wodurch `useEffect` auf den Mount-State anspricht, `shouldAutoFetchDiscography` auf `true` auswertet und automatisch `updateDiscography()` für den neuen Artist auslöst.
+
+**Fix-Vertrag:**
+1. Bei jeder Navigation zu einem neuen Artist (ID-Wechsel) muss der `releases`-Suchparameter in der Navigation zwingend auf `'library'` zurückgesetzt (oder weggelassen) werden.
+2. Das Laden von „All Releases" darf erst durch einen expliziten Klick des Nutzers auf den Tab ausgelöst werden.
+
+### 20.5 <a name="iss27-05"></a> iss27-05 — Refresh & Scan liest Audio-File-Features und Verifikations-Tags nicht vollständig aus
+
+**Symptom:** Ein „Refresh & Scan" im Artist-Kontext führt derzeit zum Teil keine echte Neu-Inspektion der physischen Dateien durch oder erfasst eingebettete Eigenschaften (Audio-Stream-Details wie 24-Bit/44.1kHz, ReplayGain, Lyrics, embedded Cover) sowie im Tag geschriebene Verifikations-Zustände (`HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT`) nicht verlässlich.
+
+**Fix-Vertrag:**
+1. Refresh & Scan im Artist-Kontext strikt auf die Dateien dieses Künstlers scopen.
+2. Echte Datei-Neu-Inspektion ausführen: `probe_audio_quality` (Bitrate, Sample Rate, Bit Depth), Tag-Inspection für Features und Verifikations-Tags (`HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT`).
+3. Re-Verify gegen das effektive Quality Profile und Aktualisierung der V2-Datenbank-Zeilen.
+
+### 20.6 <a name="iss27-06"></a> iss27-06 — Column Settings Dialog hat exzessives vertikales Scrolling
+
+**Symptom:** Das Modal für die Tabellenspalten-Einstellungen ordnet alle Optionen untereinander in einer langen Liste an, was zu unübersichtlichem vertikalen Scrollen führt.
+
+**Fix-Vertrag:** Redesign des Column Settings Dialogs in ein kompaktes Mehrspalten- oder Tab-Layout (z.B. Tabs für „Sichtbare Spalten“, „Match-Provider“, „Quality & Badges“, „Sortierung“).
+
+### 20.7 <a name="iss27-07"></a> iss27-07 — Preview Re-Tag unübersichtlich bei mehreren Alben
+
+**Symptom:** In der Vorschau von Re-Tag sind die vorgeschlagenen Tag-Änderungen über verschiedene Alben hinweg nicht ausreichend visuell voneinander getrennt.
+
+**Fix-Vertrag:** Re-Tag Preview UI um klare Album-Header und visuelle Sub-Divisions pro Album/EP/Single ergänzen.
+
+### 20.8 <a name="iss27-08"></a> iss27-08 — Maintenance unter Files & Tools unübersichtlich und versteckt
+
+**Symptom:** Werkzeuge unter Files & Tools -> Maintenance (wie Meta Gapfill, Album Tag Consistency) sind optisch versteckt, unübersichtlich und die Nomenklatur „Maintenance“ ist für Nutzer schwer verständlich.
+
+**Fix-Vertrag:** Optische Reorganisation von Maintenance: Eindeutige, verständliche Modul-Bezeichnungen, visuelle Trennung von artist-spezifischen vs. globalen Jobs und verbesserte Zugänglichkeit.
+

@@ -128,6 +128,12 @@ Der Picker zeigt die aktuelle Auswahl, Provider-Kandidaten und eine Paste-URL-
 Option. Signierte externe URLs dürfen nicht durch pauschal angehängte Query-
 Parameter beschädigt werden.
 
+#### Provider-Abdeckung bei „Change Photo" (Ergänzung 27. Juli 2026)
+
+Der Foto-Picker ("Change Photo") muss alle 5 bis 6 konfigurierten Provider (Spotify, MusicBrainz, Deezer, Fanart.tv, iTunes etc.) verlässlich abfragen. Ausfälle oder fehlende Kandidaten einzelner Provider müssen abgefangen werden, sodass jederzeit alle verfügbaren Bild-Kandidaten aus allen funktionierenden Quellen im Picker angezeigt werden. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
+
+
 #### Kaltstart-Vertrag (entschieden und umgesetzt, 26. Juli 2026)
 
 Seit der Entkopplung des kalten Pfads (§10 Finding 2 im Status) antwortet der
@@ -503,11 +509,13 @@ nummerierter Track abgespielt oder protokolliert werden kann.
 
 ---
 
-### <a name="feat-acq-review"></a> F-12 — Acquisition Review / manuelle Bundle-Zuordnung
+### <a name="feat-acq-review"></a> F-12 — Acquisition Review / Import Review (für aktuelle PR gestrichen)
 
-Das Backend besitzt Requests, Grabs, Imports, Blocklist, Path Health,
-Correlation Coverage und `/acquisition/imports/<id>/resolve`. Das Feature ist
-erst als Produkt vollständig, wenn diese Fähigkeiten im WebUI nutzbar sind.
+> **Entscheidung vom 27. Juli 2026:** Die eigenständige `Import Review`-Oberfläche (`/import-review`) wird für die aktuelle PR vollständig entfernt. Das Feature wird aus dem aktiven PR-Scope gestrichen; die entsprechende Route und Ansicht wird aus der Benutzeroberfläche gelöscht. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
+Das Backend behält die grundlegende Request-/Assignment-Infrastruktur; eine manuelle Review-Oberfläche ist jedoch in dieser PR nicht enthalten.
+
+
 
 #### Nutzerfall
 
@@ -545,7 +553,7 @@ abgeschlossenen Import sowie Restart/Resume-Abdeckung.
 - Es gibt keinen clientseitigen „best pick“-Algorithmus.
 - Ein gescopeter Fehler fällt nie auf globale Wishlist-Verarbeitung zurück.
 
-#### Interactive Search
+#### Interactive Search (Ergänzung & Fix-Auftrag 27. Juli 2026)
 
 Interactive Search zeigt Source-Familie, Titel, Artist, Quality, Größe,
 Alter, Availability und Profile-Hints. Der Nutzer wählt, aber die Datei läuft
@@ -555,6 +563,20 @@ Kandidaten außerhalb des Profils werden mit rotem Fail-Grund gezeigt und nur
 nach einer separaten, expliziten Force-Bestätigung dispatcht. „Skip AcoustID“
 und „Force Quality“ sind benannte, auditierte Overrides; sie gelten nur für
 den konkret bestätigten Check.
+
+**UI- und Quellenauswahl-Redesign:**
+- Die Checkboxen („Quality Check“, „AcoustID Check“, „Only Show Results with Cutoff“) werden visuell überarbeitet und modern gestaltet.
+- Quellenauswahl: Interactive Search soll standardmäßig alle aktivierten Quellen gleichzeitig durchsuchen. Das Umschalten/Filtern der angezeigten Quellen muss einfach und verständlich gestaltet werden, angelehnt an die bewährte Quellenauswahl der **Basic Search** (`webui/src/routes/search/` und `core/search/`).
+- **Defekt/Fix-Auftrag:** Interactive Search ist aktuell funktionsunfähig. Bei der Behebung ist die Implementierung von Basic Search als Referenz für Query-Building, Quellenauswahl und Ergebnisverarbeitung heranzuziehen. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
+#### Globales Automatic Search (Library Header)
+
+Auf der Haupt-Library-Seite befindet sich oben rechts der Button **Automatic Search**. Dieser führt automatisch eine Suche durch für:
+1. Alle fehlenden Tracks (Missing), über Auslösung der Wishlist-Verarbeitung.
+2. Alle vorhandenen Tracks, deren Cutoff-Profil noch nicht erfüllt ist (Cutoff Unmet / Upgrades).
+Der Button `Re-Import Library` bleibt vorerst erhalten, soll jedoch in einer späteren Phase entfernt werden. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
+
 
 #### Early Materialization
 
@@ -648,15 +670,17 @@ gekürzte Pfade mit Tooltip/Copy/Reveal. DB-only bleibt auch bei unsicheren
 Pfaden möglich. Permanent Delete ist fail closed und journalisiert Actor,
 File-IDs, Pfade und reales Ergebnis.
 
-#### Reorganize
+#### Reorganize All bei geänderten Einstellungs-Templates
 
-Preview und Apply verwenden die bestehende Planner-/Queue-Engine. Album- und
-Artist-Scope zeigen Queue-Status, Fehler, Cancel und Clear. Nach einem Move
-werden Legacy- und V2-Pfad derselben konkreten File-ID atomar/restart-sicher
-aktualisiert; `.lrc`-Sidecars bewegen sich mit. Single-Disc und Multi-Disc
-behalten korrekte Disc-/Track-Nummern.
+Wird in den Einstellungen die Ordner- oder Dateinamenstruktur geändert, evaluiert `Reorganize All` alle verwalteten Dateien (`lib2_track_files`) gegen die neuen Pfad-Templates. Der Ablauf erfolgt in folgenden Schritten:
+1. Ermittlung der Zielpfade basierend auf Metadaten (Artist, Album, Disc, Track, Quality).
+2. Erzeugung einer Vorschau (Preview-Plan) mit Gegenüberstellung alter Pfad → neuer Pfad und Warnungen bei Pfadkonflikten.
+3. Sichere Durchführung der physischen Move-/Rename-Operationen (inklusive Sidecar-Dateien).
+4. Atomares Update von `lib2_track_files.path`, Legacy-Pfaden, Media-Server-Projektionen und Eintragung im `library_history`-Journal. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
 
 #### Replacement
+
 
 Die alte Datei bleibt bis nach verifiziertem Import. Bei Erfolg wird sie
 sofort entfernt, sofern kein Recycle-Bin-Vertrag konfiguriert ist. Kürzere
@@ -666,21 +690,23 @@ Preview-/Null-Header-Dateien dürfen nie eine vollständige Datei ersetzen.
 
 ### <a name="feat-metadata"></a> F-15 — Metadata, Retag, Features und Matching
 
-#### Refresh & Scan
+#### Refresh & Scan (Artist-scoped & File Inspection)
 
-Liest reale Files über `probe_audio_quality` und Tag-Cache. Aktualisiert
-Sample Rate, Bit Depth, Bitrate, Format, Größe, Quality Tier, ReplayGain,
-Lyrics und Verification. Fehlende Pfade werden über Root Health gestuft, nie
-blind als deleted behandelt. Der Lauf ist beobachtbarer Background-Job mit
-echtem Fehlerzustand.
+Ein „Refresh & Scan" im Artist-Kontext ist strikt auf die Dateien dieses Künstlers beschränkt. Der Job führt eine tiefgehende Re-Inspektion direkt an den physischen Dateien auf Disk durch:
+- Auslesen der Audiodaten (Sample Rate, Bit Depth z.B. 24-Bit/44.1kHz, Bitrate, Format, Dateigröße).
+- Auslesen von Feature-Tags (ReplayGain, Lyrics, embedded Cover art).
+- **Auslesen von Verifikations-Tags:** Direkt aus den Audio-Tags gespeicherte Verifikations-Informationen (`HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT`) werden gelesen und in der Datenbank synchronisiert.
+- Erneute Bewertung gegen das effektive Quality Profile sowie Re-Fetch fehlender Metadaten von den Providern. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
 
-#### Retag und Edit
+#### Retag, Preview Re-Tag und Tag Matching
 
-- Preview zeigt nur vorhandene Files und gruppiert nach Album.
-- Datumsformat- und Genre-Substring-Unterschiede erzeugen keine falschen
-  Änderungen.
+- **Preview Re-Tag UX:** Die Vorschau-Ansicht gruppiert Änderungen klar und übersichtlich nach Alben/EPs/Singles mit eindeutigen visuellen Album-Grenzen.
+- **Tags Match Hover Breakdown:** Beim Hovern über den Tags-Match-Status/Chip erscheint ein Tooltip/Popover mit detaillierter Aufschlüsselung vorhandener vs. fehlender Tags (analog zum Metadata Hover).
+- **Tag Gap Klick-Aktion Fix:** Das Klicken auf ein fehlendes Tag-Element (Tag Gap) löst das erneute Herunterladen/Fetchen dieser spezifischen Metadaten bei den Providern sowie das anschließende Schreiben der Tags in die Datei aus. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
 - Write Tags berührt nur betroffene Files.
 - Rich Edit umfasst BPM, Style, Mood, Label und Explicit.
+
 - Bulk Edit schreibt nur fachlich gemeinsam sinnvolle Felder.
 - Track-Detail verwendet Pencil/Settings, weil es editierbar ist.
 
@@ -744,15 +770,14 @@ dokumentierten Felder statt nur ID/Artwork.
 
 Ein richtiges Options-Modal persistiert Einstellungen pro Profil:
 
-- Spalten: #, Disc, Artists, Match, Quality, Features, Metadata, Duration,
-  BPM, File, Format/Bitrate;
-- sichtbare Match-Provider;
-- Feature-Badges;
-- Artist-Tabellenfelder Quality, Genres und Added.
+- Spalten: #, Disc, Track Title, Artists, Verification Status, Match, Quality Profile/Tier, Features, Metadata, Duration, File Size on Disk, BPM, File Path, Format/Bitrate;
+- **File Size Column:** Eigene Track-Spalte für Dateigröße auf Disk (`file_size_bytes`) inklusive Sortierbarkeit für alle Release-Typen (Alben, EPs, Singles).
+- **Verification Column:** Neue Spalte „Verification" / „Verified" (`verification_status`), welche z.B. „AcoustID Verified", „AcoustID Unverified", „Human Verified", „Retry Import" anzeigt.
+- **Manual Resizable Columns (Excel-like):** Die Spaltenbreite lässt sich per Drag-and-Drop manuell anpassen (wie in Excel). Inklusive Pointer-Capture, Min/Max-Breiten, Doppelklick-Reset und Wiederherstellung gespeicherter Breiten.
+- **Column Settings Dialog Redesign:** Das Einstellungs-Modal für Tabellenspalten wird vom langen vertikalen Stapel in ein kompaktes Mehrspalten-/Tab-Layout umgebaut, um vertikales Scrolling zu vermeiden.
+*(Hinweis für die nächste Chat-Session: Vor der Umsetzung aller hier genannten Punkte selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
 
-Track-Tabellen sind clientseitig sortierbar. Resizable Columns wurden bewusst
-aufgeschoben; eine spätere Umsetzung braucht Pointer-Capture, Tastaturzugang,
-Min/Max-Breiten, Doppelklick-Reset und persistierte Breiten.
+
 
 Eine Spalten-Preference darf steuern, **was gerendert wird**, nicht **was die
 API liefert**. Die opt-in Size-Spalte der Artist-Tabelle verletzte das bis zum
@@ -793,8 +818,13 @@ Die Artist-Toolbar trennt:
 - Files/Tools: Retag, Reorganize, Maintenance, Manual Import, Enrich;
 - Entity: Manage Tracks, History, Settings, Edit, Delete.
 
-Globale Search-/Upgrade-Aktionen gehören auf Library/Wanted, nicht in einen
-Artist-Kontext.
+**Navigation State Reset:**
+Beim Wechsel zu einem neuen Artist wird der aktive Tab im Artist-View standardmäßig immer auf **„My Library"** zurückgesetzt. Das verhindert ein automatisches Verharren im Tab „All Releases" und das damit verbundene ungewollte Herunterladen von Provider-Diskografien beim Betreten eines Künstlers. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
+**Files & Tools -> Maintenance UX Overhaul:**
+Der Bereich „Maintenance" unter Files & Tools wird optisch und begrifflich überarbeitet. Jobs wie „Meta Gapfill" oder „Album Tag Consistency" erhalten eine klarere Gruppierung, eindeutige Bezeichnungen und verständliche Scope-Indikatoren (Künstler-gescopt vs. Global), um Verstecktheit und Unübersichtlichkeit aufzulösen. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+
+
 
 ### UI-06 — Search-Ergebnisse
 
