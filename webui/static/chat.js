@@ -1511,8 +1511,8 @@
                     'title="Take the table away — nobody joined, so nobody wins">' +
                     'Withdraw</button>';
             }
-            return '<button class="chat-arc-card' + (mySeat ? ' chat-arc-card--mine' : '') +
-                '" type="button" data-chat-arc-open="' + attr(g.id) + '">' +
+            return '<div class="chat-arc-card' + (mySeat ? ' chat-arc-card--mine' : '') +
+                '" role="button" tabindex="0" data-chat-arc-open="' + attr(g.id) + '">' +
                 '<span class="chat-arc-card-top">' +
                     _arcWho(g.white, '♔', toMove && toMove === g.white) +
                     '<span class="chat-arc-vs">vs</span>' +
@@ -1525,7 +1525,7 @@
                 '</span>' +
                 badge +
                 (actions ? '<span class="chat-arc-card-actions">' + actions + '</span>' : '') +
-            '</button>';
+            '</div>';
         }
 
         function section(title, list) {
@@ -2161,6 +2161,16 @@
                         ? '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
                           'data-chat-bs-commit="' + attr(game.id) + '">Commit fleet</button>'
                         : '') +
+                    // Setup returns early with its own action row, so without
+                    // this the creator lands here and has no way back out.
+                    (game.status === 'open' && game.createdBy === state.selfName
+                        ? '<button class="chat-arc-btn" type="button" ' +
+                          'data-chat-arc-cancel="' + attr(game.id) + '">Withdraw</button>'
+                        : '') +
+                    (game.status === 'live'
+                        ? '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                          'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>'
+                        : '') +
                 '</div>' +
                 '<div class="chat-arc-note">Your layout stays on this machine. Only a ' +
                     'fingerprint of it goes to the room now — the fleet itself is revealed ' +
@@ -2232,6 +2242,16 @@
         if (state.canSend && !seat && game.status === 'open') {
             actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
                 'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        // The board had no way out at all: no withdraw before anyone joined,
+        // and nothing to take an idle seat with.
+        if (state.canSend && game.status === 'open' && game.createdBy === state.selfName) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-cancel="' +
+                attr(game.id) + '">Withdraw</button>';
+        }
+        if (state.canSend && !seat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
         }
 
         return '<div class="chat-arc-board-wrap">' +
@@ -4215,8 +4235,6 @@
             // ── Arcade ──
             t = e.target.closest('[data-chat-arc-home]');
             if (t) { openArcade(null); return; }
-            t = e.target.closest('[data-chat-arc-open]');
-            if (t) { openArcade(t.getAttribute('data-chat-arc-open')); return; }
             t = e.target.closest('[data-chat-arc-new]');
             if (t) {
                 arcNewGame(t.getAttribute('data-chat-arc-new'), '',
@@ -4300,6 +4318,12 @@
                 }).then(function (ok) { if (ok) arcSync(agid, true); });
                 return;
             }
+            // LAST of the arcade handlers on purpose. A lobby card carries
+            // data-chat-arc-open and CONTAINS the action buttons, so checking
+            // it earlier made every Join / Withdraw / Take-the-seat click
+            // resolve to the card and just open the game.
+            t = e.target.closest('[data-chat-arc-open]');
+            if (t) { openArcade(t.getAttribute('data-chat-arc-open')); return; }
             t = e.target.closest('[data-chat-arc-flip]');
             if (t) {
                 if (state.arcade) { state.arcade.flip = !state.arcade.flip; renderArcade(); }

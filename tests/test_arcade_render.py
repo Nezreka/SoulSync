@@ -186,6 +186,27 @@ class TestWiring:
         games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
         assert "!g.partial" in games_js
 
+    def test_card_actions_are_routed_before_the_card_itself(self):
+        # A lobby card carries data-chat-arc-open and CONTAINS the action
+        # buttons. Checking the card first made every Join / Withdraw /
+        # Take-the-seat click resolve to the card and merely open the game --
+        # which is exactly what it did, unnoticed, because the tests only
+        # checked the markup contained the buttons and never that a click
+        # reached them.
+        def at(sel):
+            return _CHAT_JS.index("closest('[%s]')" % sel)
+
+        card = at("data-chat-arc-open")
+        for action in ("data-chat-arc-join", "data-chat-arc-claim",
+                       "data-chat-arc-cancel", "data-chat-arc-resign",
+                       "data-chat-arc-draw"):
+            assert at(action) < card, action
+
+    def test_a_card_is_not_a_button(self):
+        # <button> inside <button> is invalid HTML and the parser rearranges it.
+        assert '<button class="chat-arc-card' not in _CHAT_JS
+        assert '\'<div class="chat-arc-card\'' in _CHAT_JS or 'chat-arc-card' in _CHAT_JS
+
     def test_promotion_is_asked_not_assumed(self):
         # Under-promotion is occasionally the only winning move.
         assert "state.arcade.promo = { from: from, to: to };" in _CHAT_JS

@@ -591,6 +591,26 @@ const NASTY = '<img src=x onerror=alert(1)>';
           CP._bsDraft().board === before, CP._bsDraft().board);
 }
 
+// ── a card's buttons are reachable, not swallowed by the card ───────────
+{
+    // The card is clickable AND contains buttons. It must not be a <button>,
+    // or the parser rearranges the DOM and the inner ones stop working.
+    const open = [ev('boulder', { k: 'gm.new', g: 'card', v: 'chess' })];
+    setRoom(open, 'boulder');
+    const lobby = CP._arcLobbyHtml();
+    check('card: not a nested button', !lobby.includes('<button class="chat-arc-card'), lobby);
+    check('card: still clickable', lobby.includes('data-chat-arc-open="card"'), lobby);
+    check('card: the creator gets Withdraw', lobby.includes('data-chat-arc-cancel'), lobby);
+
+    // Battleship boards had no exit at all.
+    const bs = [ev('boulder', { k: 'gm.new', g: 'bsex', v: 'battleship' })];
+    setRoom(bs, 'boulder');
+    CP._testSetState({ arcade: { game: 'bsex', sel: -1, promo: null, flip: false } });
+    const board = CP._arcBsBoardHtml(game(bs, 'bsex'));
+    check('battleship: can withdraw from the board',
+          board.includes('data-chat-arc-cancel'), board);
+}
+
 // ── the Arcade hides itself if its libraries are absent ─────────────────
 {
     // chat.js must not throw when chess-engine.js / chat-games.js failed to
