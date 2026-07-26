@@ -53,8 +53,10 @@ EVENT_CATEGORY = {
     "import_needs_review": ("quarantined", "Needs review"),
     "import_resolved_manually": ("imported", "Resolved manually"),
     "import_file_quarantined": ("quarantined", "Quarantined"),
+    "recovered_to_staging": ("quarantined", "Recovered to staging"),
     "import_completed": ("imported", "Imported"),
     "import_failed": ("failed", "Import failed"),
+    "previous_file_replaced": ("imported", "Previous file replaced"),
 }
 
 ENTITY_EVENT_LABEL = {

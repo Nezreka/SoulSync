@@ -217,6 +217,17 @@ def _journal_pipeline_check(
         return False
 
 
+def _journal_previous_file_replaced(context: dict, *, reason: str, message: str | None = None) -> bool:
+    """Fail-open bridge for the F-10 ``previous_file_replaced`` history step."""
+    try:
+        from core.acquisition.pipeline_callback import notify_previous_file_replaced
+
+        return notify_previous_file_replaced(context, reason=reason, message=message)
+    except Exception as exc:  # noqa: BLE001 — bookkeeping cannot block import
+        logger.debug("acquisition previous_file_replaced journal skipped: %s", exc)
+        return False
+
+
 def _quality_history_payload(context: dict, actual_quality: str | None) -> dict:
     track_info = context.get("track_info")
     track_info = track_info if isinstance(track_info, dict) else {}
@@ -1440,6 +1451,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # discard it (#1045). Rides the same replace path as enhance — the
         # short-file replacement guard above still applies.
         force_replace = _batch_force_replace(context)
+        # F-10 history step: set by whichever branch below actually removes an
+        # existing library file, then journaled once the move itself succeeds.
+        _replace_reason: str | None = None
 
         logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
@@ -1497,6 +1511,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                             logger.info(f"[Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
                             try:
                                 os.remove(final_path)
+                                _replace_reason = "quality_upgrade"
                             except Exception as e:
                                 logger.error(f"[Quality Replace] Could not remove existing file: {e}")
                         else:
@@ -1528,12 +1543,14 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         logger.info(f"[Force] User-forced re-download — replacing existing file: {os.path.basename(final_path)}")
                     try:
                         os.remove(final_path)
+                        _replace_reason = "enhance" if is_enhance_download else "force"
                     except Exception as e:
                         logger.error(f"[Enhance] Could not remove existing file for replacement: {e}")
                 else:
                     logger.info(f"[Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
                     try:
                         os.remove(final_path)
+                        _replace_reason = "no_metadata_overwrite"
                     except FileNotFoundError:
                         pass
             except Exception as check_error:
@@ -1541,6 +1558,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 try:
                     if os.path.exists(final_path):
                         os.remove(final_path)
+                        _replace_reason = "metadata_check_error_overwrite"
                 except Exception as e:
                     logger.error(f"[Protection] Failed to remove existing file for overwrite: {e}")
 
@@ -1581,6 +1599,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         from core.imports.file_ops import move_companion_sidecars
         move_companion_sidecars(file_path, final_path)
         cleanup_slskd_dedup_siblings(file_path)
+        if _replace_reason:
+            _journal_previous_file_replaced(context, reason=_replace_reason)
 
         if is_enhance_download and _enhance_source_info.get('original_file_path'):
             original_enhance_path = _enhance_source_info['original_file_path']

@@ -719,6 +719,66 @@ def notify_task_retry_cancelled(
         track_info, status="cancelled", connection_factory=connection_factory)
 
 
+def notify_previous_file_replaced(
+    context: Mapping[str, Any],
+    *,
+    reason: str,
+    message: Optional[str] = None,
+    payload: Optional[Mapping[str, Any]] = None,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Journal that an existing library file was removed to make way for this
+    download (F-10's ``previous_file_replaced`` step).
+
+    Same fail-open, context-derived correlation as
+    :func:`notify_pipeline_check_result` — an ordinary import with no
+    acquisition marker is a zero-write no-op. Fires once per completed
+    replace, right where the shared pipeline already knows a prior file
+    existed at the destination and was removed for this one.
+    """
+    if not _context_value(context, "_acquisition_import_id"):
+        from core.acquisition.manual_grab import GRAB_MARKER
+
+        if not _context_value(context, GRAB_MARKER):
+            return False
+    if connection_factory is None:
+        from database.music_database import get_database
+
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        correlation = _pipeline_correlation(conn, context)
+        if correlation is None:
+            return False
+        event_payload = dict(payload or {})
+        event_payload.update({
+            "reason": reason,
+            "import_id": correlation["import_id"],
+            "track_id": _context_value(context, "_acquisition_track_id"),
+        })
+        from core.acquisition.history import record_history_event
+
+        record_history_event(
+            conn,
+            "previous_file_replaced",
+            request_id=correlation["request_id"],
+            candidate_id=correlation["candidate_id"],
+            download_id=correlation["download_id"],
+            reason_code=reason,
+            message=message,
+            payload=event_payload,
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        logger.exception("Acquisition previous_file_replaced journal failed (%s)", reason)
+        return False
+    finally:
+        conn.close()
+
+
 __all__ = [
     "CHECK_EVENT_TYPES",
     "CHECK_STATUSES",
@@ -730,6 +790,7 @@ __all__ = [
     "notify_pipeline_import_started",
     "notify_pipeline_import_success",
     "notify_pipeline_retry_exhausted",
+    "notify_previous_file_replaced",
     "notify_quarantine_approved",
     "notify_task_retry_cancelled",
 ]

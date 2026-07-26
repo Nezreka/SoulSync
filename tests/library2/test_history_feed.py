@@ -172,6 +172,31 @@ def test_structured_pipeline_checks_surface_status_quality_and_reason(imported_c
     ] == ["acoustic_id_checked", "quality_checked"]
 
 
+def test_previous_file_replaced_surfaces_in_the_feed(imported_conn):
+    """F-10 event vocabulary: an upgrade/replace step must show up in the
+    track's history feed like every other correlated pipeline event."""
+    from core.acquisition.history import record_history_event
+
+    drake = _drake_ids(imported_conn)
+    request_id = _acquisition_grab(
+        imported_conn, scope="recording", entity_id=drake["recording_id"]
+    )
+    record_history_event(
+        imported_conn,
+        "previous_file_replaced",
+        request_id=request_id,
+        reason_code="quality_upgrade",
+        payload={"reason": "quality_upgrade"},
+    )
+    imported_conn.commit()
+
+    history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
+    replaced = next(e for e in history if e["event_type"] == "previous_file_replaced")
+    assert replaced["title"] == "Previous file replaced"
+    assert replaced["category"] == "imported"
+    assert replaced["detail"] == "quality_upgrade"
+
+
 def test_artist_missing_scope_does_not_leak_into_a_different_artist(imported_conn):
     drake = _drake_ids(imported_conn)
     rihanna = _second_artist(imported_conn)

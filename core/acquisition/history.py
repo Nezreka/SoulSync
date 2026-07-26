@@ -42,6 +42,7 @@ EVENT_TYPES = frozenset({
     "recovered_to_staging",
     "import_completed",
     "import_failed",
+    "previous_file_replaced",
 })
 
 ACQUISITION_HISTORY_DDL = """

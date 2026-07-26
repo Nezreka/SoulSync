@@ -38,7 +38,7 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3 | Code und gezielte Tests vorhanden; produktive Datenreparatur bleibt Backup/Dry-Run-abhängig |
 | [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11 | Enrich/Smart-Split und globale Suche abgedeckt |
 | [F-09](library-v2-features.md#feat-playlists) | Library-v2-Playlist-Oberfläche | Deferred | `library-v2-playlist-ui` | Vollständig aus dem aktiven Overhaul entfernt und separat geparkt |
-| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Partial | §35/§37/§57/§58 | Feed, File-Ergebnis und Albumzweig vorhanden; vollständiger Track-Stepper/Eventvokabular nicht vollständig belegt |
+| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Partial | §35/§37/§57/§58, §17 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` jetzt Teil des Eventvokabulars (§17); `human_verified`/`rejected` bleiben Partial, siehe §17 |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Implemented | Regression-Checkpoint `ee30247a`, im aktuellen Squash `fb0096ce` | `import-review`-Route, Queue/Detail, Assignments und Resolve/Rescan/Resume vorhanden; vollständiger Browser-E2E fehlt |
 | [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Implemented | §29/§53/§55/§60/§71 | Scoped/Transient Search, Force-Audit und gemeinsame Pipeline gezielt geprüft |
@@ -217,8 +217,8 @@ Historische Bugcluster-Prüfung:
 | DD-A1/A2 — Cover Embed/Cache | Verified | §28 |
 | DD-A3/A4 — scoped Search/serverseitiges Ranking | Verified | §29 |
 | DD-A5 — BPM/Duration | Verified | §29 |
-| DD-A6 — History Feed | Implemented | §35; vollständiger Track-Stepper bleibt F-10 Partial |
-| DD-A7 — File Pipeline Result | Partial | §37; granularer gesamter Versuch bleibt F-10 Partial |
+| DD-A6 — History Feed | Implemented | §35, §17; `previous_file_replaced` ergänzt, `human_verified`/`rejected` bleiben F-10 Partial |
+| DD-A7 — File Pipeline Result | Partial | §37; `human_verified`/`rejected` ohne Acquisition-Korrelation bleiben F-10 Partial (§17) |
 | DD-A8/A9 — Provider-Filter/Artist Picker | Verified | §29 |
 | DD-G1–G6 | Verified | §28 |
 | DD-G7 | Verified | §29 |
@@ -673,3 +673,54 @@ Entscheidung.
 
 **Einstufung:** Root Cause bestätigt und gezielt geprüft; Korrektur bleibt
 offen bis zur Produktentscheidung.
+
+---
+
+## 17. F-10 Eventvokabular — `previous_file_replaced` ergänzt (26. Juli)
+
+Deep-Dive in den Track-Stepper-Rückstand aus DD-A6/DD-A7: Von den in
+[features F-10](library-v2-features.md#feat-history) verlangten Schritten
+fehlten `human_verified`, `rejected` und `previous_file_replaced` im
+`acquisition_history`-Eventvokabular (`core/acquisition/history.py::
+EVENT_TYPES`). Alle drei sind jetzt einzeln untersucht statt pauschal
+"fehlt":
+
+**`previous_file_replaced` — implementiert.** Alle drei Replace-Zweige in
+`core/imports/pipeline.py::post_process_matched_download` (Quality-Replace,
+Enhance/Force, metadatenloses Overwrite) markieren jetzt einen
+`_replace_reason`; nach erfolgreichem `safe_move_file` journalt
+`_journal_previous_file_replaced` → `core/acquisition/pipeline_callback.py::
+notify_previous_file_replaced` das Ereignis über dieselbe
+`_pipeline_correlation`-Fail-open-Brücke wie `quality_checked`/
+`acoustic_id_checked` — ordinäre (nicht Acquisition-getrackte) Importe bleiben
+ein Zero-Write-No-op. `core/library2/history_feed.py::EVENT_CATEGORY` zeigt es
+als `("imported", "Previous file replaced")`; `recovered_to_staging` bekam
+dieselbe fehlende Label-Zuordnung nachgetragen.
+
+**`human_verified`/`rejected` — bewusst NICHT implementiert, geänderte
+Einschätzung.** Der ursprüngliche Scope-Vorschlag ("zwei `record_history_event`
+Calls in den bestehenden Verification-Routen") ist bei genauerer Prüfung
+nicht ausführbar: `record_history_event` verlangt zwingend eine
+`request_id`/`candidate_id`/`download_id`-Korrelation, und diese Korrelation
+existiert für `/api/verification/<id>/approve` und `.../delete`
+(`web_server.py`) nicht — beide operieren nur auf einer
+`library_history.id`, die **keine** persistierte Verbindung zurück zur
+Acquisition-Seite trägt (`core/acquisition/*.py` referenziert
+`library_history_id` an keiner Stelle; die einzige Verknüpfung ist der
+transiente In-Memory-`context["_history_id"]` aus demselben Pipeline-Lauf,
+der zum späteren Approve-Zeitpunkt längst weg ist). `lib2_entity_history` ist
+per CHECK-Constraint auf Merge-/Move-Events geschlossen und passt semantisch
+nicht. Eine echte Korrektur bräuchte eine neue persistente Korrelationsspalte
+auf `library_history` (Schema- plus Write-Site-Änderung beim Import) — kein
+Nachmittags-Task mehr, sondern ein eigener, separat zu planender Schnitt.
+
+Verifikation: `tests/acquisition/test_pipeline_callback.py` (2 neue Tests:
+Korrelation erhalten, No-op ohne Marker), `tests/library2/test_history_feed.py`
+(1 neuer Test: Feed-Darstellung), `tests/imports/test_import_pipeline.py`
+unverändert grün (kein Regressionsrisiko an den drei Replace-Zweigen). Gezielter
+Lauf `tests/acquisition tests/imports tests/library2`: siehe Testlauf-Ergebnis
+dieser Session.
+
+**Einstufung:** `previous_file_replaced` implementiert und gezielt geprüft.
+`human_verified`/`rejected` bleiben F-10 Partial — Korrektur braucht eine
+eigene Schema-Entscheidung, kein offener "einfacher Rest" mehr.

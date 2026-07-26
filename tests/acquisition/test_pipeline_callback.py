@@ -14,6 +14,7 @@ from core.acquisition.pipeline_callback import (
     notify_pipeline_import_quarantined,
     notify_pipeline_import_started,
     notify_pipeline_retry_exhausted,
+    notify_previous_file_replaced,
 )
 from core.acquisition.requests import get_request
 from core.imports.quarantine import serialize_quarantine_context
@@ -252,6 +253,52 @@ def test_pipeline_checks_keep_native_import_correlation_and_structured_status(tm
     assert acoustic.reason_code == "verification_unavailable"
     assert acoustic.payload["status"] == "not_run"
     conn.close()
+
+
+def test_previous_file_replaced_keeps_native_import_correlation(tmp_path):
+    """F-10 history step: an upgrade/replace inside the shared pipeline is
+    journaled against the same request/candidate/download as the rest of
+    that import's correlated events."""
+    database_path = tmp_path / "replaced.sqlite"
+
+    def factory():
+        conn = sqlite3.connect(database_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    conn = factory()
+    ensure_acquisition_schema(conn)
+    importing, request = _importing_record(conn)
+    conn.commit()
+    conn.close()
+    context = {
+        "_acquisition_import_id": importing.id,
+        "_acquisition_relative_path": "01.flac",
+        "_acquisition_track_id": 101,
+    }
+
+    assert notify_previous_file_replaced(
+        context, reason="quality_upgrade", connection_factory=factory,
+    ) is True
+
+    conn = factory()
+    events = list_history_events(conn, request_id=request.id)
+    replaced = next(
+        event for event in events if event.event_type == "previous_file_replaced"
+    )
+    assert replaced.download_id == importing.download_id
+    assert replaced.candidate_id == importing.candidate_id
+    assert replaced.reason_code == "quality_upgrade"
+    assert replaced.payload["reason"] == "quality_upgrade"
+    assert replaced.payload["track_id"] == 101
+    conn.close()
+
+
+def test_previous_file_replaced_is_a_noop_for_ordinary_imports():
+    """Ordinary (non-acquisition) imports carry no marker — zero-write no-op,
+    matching every other pipeline callback in this module."""
+    assert notify_previous_file_replaced({}, reason="quality_upgrade") is False
 
 
 def test_pipeline_check_callback_rejects_invalid_or_uncorrelated_input():
