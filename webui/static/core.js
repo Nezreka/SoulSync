@@ -32,10 +32,8 @@ let dbUpdateStatusInterval = null;
 let duplicateCleanerStatusInterval = null;
 let wishlistCountInterval = null;
 let wishlistCountdownInterval = null;  // Countdown timer for wishlist overview modal
-let watchlistCountdownInterval = null;  // Countdown timer for watchlist overview modal
 
 // Page state for Watchlist & Wishlist sidebar pages
-let watchlistPageState = { isInitialized: false, artists: [] };
 let wishlistPageState = { isInitialized: false };
 
 // --- Add these globals for the Sync Page ---
@@ -45,7 +43,6 @@ let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
 // Phase 5: WebSocket sync/discovery/scan state
 let _syncProgressCallbacks = {};
 let _discoveryProgressCallbacks = {};
-let _lastWatchlistScanStatus = null;
 let _lastMediaScanStatus = null;
 let _lastWishlistStats = null;
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
@@ -529,7 +526,6 @@ function initializeWebSocket() {
     // manual syncs, UI pipelines, and the scheduled auto-sync automation.
     socket.on('sync:active', () => qaSignal('sync'));
     socket.on('scan:watchlist', (data) => {
-        updateWatchlistScanFromData(data);
         const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');
         if (watchlistBtn) {
             watchlistBtn.classList.toggle('nav-watchlist-scanning', data.status === 'scanning');

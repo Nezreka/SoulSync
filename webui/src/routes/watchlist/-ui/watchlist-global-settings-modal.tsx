@@ -103,14 +103,6 @@ export function setAllIncludes(
   return next;
 }
 
-/**
- * style.css bumps #watchlist-global-config-modal-overlay to z-index 11000 so
- * this modal clears the default .modal-overlay. The React modal does not carry
- * that id — the dead vanilla markup still owns it, and duplicate ids are
- * invalid — so the value is applied directly.
- */
-const OVERLAY_STYLE = { zIndex: 11000 } as const;
-
 interface Props {
   profileId: number;
   initialConfig: WatchlistGlobalConfig | null;
@@ -155,8 +147,11 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
     setConfig((previous) => ({ ...previous, [key]: value }));
 
   return (
-    <div className="modal-overlay" style={OVERLAY_STYLE} onClick={onClose}>
+    // See the artist config modal: these ids drive the style.css z-index rule
+    // and helper.js's contextual help, and are free now the vanilla markup is gone.
+    <div id="watchlist-global-config-modal-overlay" className="modal-overlay" onClick={onClose}>
       <div
+        id="watchlist-global-config-modal"
         className="watchlist-artist-config-modal wl-global-modal"
         role="dialog"
         aria-modal="true"
