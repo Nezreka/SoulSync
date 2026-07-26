@@ -1,8 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
 import { getProfileHomePath } from '@/platform/shell/bridge';
-import { LegacyRouteController } from '@/platform/shell/route-controllers';
-import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
 import { WishlistPage } from './-ui/wishlist-page';
 import {
@@ -12,18 +10,6 @@ import {
   wishlistTracksQueryOptions,
 } from './-wishlist.api';
 import { wishlistSearchSchema } from './-wishlist.types';
-
-/**
- * Whether the shell has handed /wishlist over to React yet.
- *
- * The route file exists (and is tested) before the React page reaches parity.
- * Without this check TanStack would match /wishlist regardless of the manifest
- * and the vanilla page and the React host would both activate. Delete this
- * indirection once the vanilla wishlist page is gone.
- */
-function isReactOwned(): boolean {
-  return getShellRouteByPageId('wishlist')?.kind === 'react';
-}
 
 export const Route = createFileRoute('/wishlist')({
   validateSearch: wishlistSearchSchema,
@@ -35,8 +21,6 @@ export const Route = createFileRoute('/wishlist')({
     }
   },
   loader: async ({ context }) => {
-    if (!isReactOwned()) return;
-
     const { profile } = context.shell;
     const { queryClient } = context;
 
@@ -50,12 +34,5 @@ export const Route = createFileRoute('/wishlist')({
       queryClient.ensureQueryData(wishlistArtistPhotosQueryOptions(profile.profileId)),
     ]);
   },
-  component: WishlistRouteComponent,
+  component: WishlistPage,
 });
-
-function WishlistRouteComponent() {
-  if (!isReactOwned()) {
-    return <LegacyRouteController pathname="/wishlist" />;
-  }
-  return <WishlistPage />;
-}

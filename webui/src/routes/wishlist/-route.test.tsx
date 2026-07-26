@@ -6,19 +6,6 @@ import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-// The React wishlist page is dormant in the shipped manifest; these tests
-// exercise it, so they declare it owned. Everything else ships as-is.
-vi.mock('@/platform/shell/route-manifest', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/platform/shell/route-manifest')>();
-  return {
-    ...actual,
-    getShellRouteByPageId: (pageId: string) =>
-      pageId === 'wishlist'
-        ? { pageId: 'wishlist', path: '/wishlist', kind: 'react' }
-        : actual.getShellRouteByPageId(pageId as never),
-  };
-});
-
 const res = (body: unknown) =>
   new Response(JSON.stringify(body), {
     status: 200,

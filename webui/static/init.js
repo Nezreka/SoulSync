@@ -3368,9 +3368,8 @@ async function loadPageData(pageId) {
             case 'tools':
                 await initializeToolsPage();
                 break;
-            case 'wishlist':
-                await initializeWishlistPage();
-                break;
+            // 'wishlist' is a React route now — navigateToPage shows the React
+            // host and never calls loadPageData for it.
             case 'automations':
                 await loadAutomations();
                 break;
