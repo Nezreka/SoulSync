@@ -17,6 +17,8 @@ interface Props {
   index: number;
   artistImages: Map<string, string>;
   currentCycle: string;
+  /** A wishlist run is in flight; the orb shows its working state. */
+  processing: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
   onRemoveAlbum: (albumName: string) => void;
@@ -29,6 +31,7 @@ export function WishlistOrb({
   index,
   artistImages,
   currentCycle,
+  processing,
   expanded,
   onToggleExpand,
   onRemoveAlbum,
@@ -45,7 +48,7 @@ export function WishlistOrb({
 
   return (
     <div
-      className={`wl-orb-group${expanded ? ' expanded' : ''}`}
+      className={`wl-orb-group${expanded ? ' expanded' : ''}${processing ? ' orb-processing' : ''}`}
       data-artist={group.name}
       data-failing={group.failingCount}
       style={{ animationDelay: `${orbAnimationDelay(index)}ms` }}

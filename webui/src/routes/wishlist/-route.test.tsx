@@ -37,8 +37,14 @@ function albumRow(artist: string, album: string, name: string, retry = 0) {
   };
 }
 
-function stubFetch(opts: { total?: number; albums?: unknown[]; singles?: unknown[] } = {}) {
-  const { albums = [albumRow('Aphex Twin', 'SAW', 'Xtal')], singles = [] } = opts;
+function stubFetch(
+  opts: { total?: number; albums?: unknown[]; singles?: unknown[]; processing?: boolean } = {},
+) {
+  const {
+    albums = [albumRow('Aphex Twin', 'SAW', 'Xtal')],
+    singles = [],
+    processing = false,
+  } = opts;
   const total = opts.total ?? albums.length + singles.length;
   vi.stubGlobal(
     'fetch',
@@ -50,7 +56,10 @@ function stubFetch(opts: { total?: number; albums?: unknown[]; singles?: unknown
           albums: albums.length,
           singles: singles.length,
           next_run_in_seconds: 600,
+          is_auto_processing: processing,
         });
+      // The live poller hits this on mount; stub it so nothing silently 404s.
+      if (url.includes('/api/active-processes')) return res({ active_processes: [] });
       if (url.includes('/api/wishlist/cycle')) return res({ cycle: 'albums' });
       if (url.includes('category=albums'))
         return res({ tracks: albums, artist_images: { 'Aphex Twin': 'library.jpg' } });
@@ -263,6 +272,70 @@ describe('wishlist route', () => {
 
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(calls).toEqual([]);
+  });
+
+  it('delegates the action bar and download button to the downloads.js globals', async () => {
+    stubFetch();
+    window.openWishlistIgnoreModal = vi.fn();
+    window.cleanupWishlistOverview = vi.fn();
+    window.clearEntireWishlist = vi.fn();
+    window._nebulaDownload = vi.fn();
+    renderRoute();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Ignored' })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ignored' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cleanup' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download Wishlist' }));
+
+    // These own module-scoped state (activeDownloadProcesses, WishlistModalState),
+    // so they are invoked rather than reimplemented.
+    expect(window.openWishlistIgnoreModal).toHaveBeenCalled();
+    expect(window.cleanupWishlistOverview).toHaveBeenCalled();
+    expect(window.clearEntireWishlist).toHaveBeenCalled();
+    expect(window._nebulaDownload).toHaveBeenCalled();
+  });
+
+  it('hands the countdown to downloads.js with the cycle and remaining seconds', async () => {
+    stubFetch();
+    window.startWishlistCountdownTimer = vi.fn();
+    renderRoute();
+
+    await waitFor(() =>
+      expect(window.startWishlistCountdownTimer).toHaveBeenCalledWith('albums', 600),
+    );
+    // and renders the element that helper writes into
+    expect(document.getElementById('wishlist-next-auto-timer')).toBeTruthy();
+  });
+
+  it('renders the ids the vanilla download dialog reads its counts from', async () => {
+    stubFetch({ albums: [albumRow('A', 'X', 'a1')], singles: [] });
+    renderRoute();
+
+    await waitFor(() => expect(document.getElementById('wishlist-stat-albums')).toBeTruthy());
+    expect(document.getElementById('wishlist-stat-albums')?.textContent).toBe('1');
+    expect(document.getElementById('wishlist-stat-singles')?.textContent).toBe('0');
+  });
+
+  it('marks the field and orbs as processing while a run is in flight', async () => {
+    stubFetch({ processing: true });
+    renderRoute();
+
+    await waitFor(() =>
+      expect(document.querySelector('.wl-nebula-field.nebula-processing')).toBeTruthy(),
+    );
+    expect(document.querySelector('.wl-orb-group.orb-processing')).toBeTruthy();
+  });
+
+  it('does not mark processing when nothing is running', async () => {
+    stubFetch({ processing: false });
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelector('.wl-orb-group')).toBeTruthy());
+    expect(document.querySelector('.nebula-processing')).toBeNull();
+    expect(document.querySelector('.orb-processing')).toBeNull();
   });
 
   it('redirects away when the profile may not see the wishlist', async () => {

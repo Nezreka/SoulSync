@@ -41,6 +41,23 @@ declare global {
      */
     _searchWishlistTrackManually?: (artistName: string, trackName: string) => void;
     _navigateToArtistFromWishlist?: (artistName: string) => void;
+    /**
+     * The wishlist download flow. Cannot move to React: it reads
+     * `activeDownloadProcesses` and `WishlistModalState`, both module-scoped in
+     * core.js, to decide between rehydrating an in-flight batch and offering the
+     * category choice. Reads #wishlist-stat-albums / #wishlist-stat-singles for
+     * the counts in its dialog, so the React page renders those ids.
+     */
+    _nebulaDownload?: () => void | Promise<void>;
+    /**
+     * Writes the "Next Auto" line into #wishlist-next-auto-timer and self-cancels
+     * via `wishlistCountdownInterval`. Also module-scope bound (socketConnected,
+     * _lastWishlistStats), so it stays in downloads.js.
+     */
+    startWishlistCountdownTimer?: (currentCycle: string, initialSeconds: number) => void;
+    openWishlistIgnoreModal?: () => void;
+    cleanupWishlistOverview?: () => void;
+    clearEntireWishlist?: () => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -22,6 +22,7 @@ import {
   parseWishlistTrack,
   trackCountLabel,
 } from '../-wishlist.helpers';
+import { useLiveWishlist } from '../-wishlist.live';
 import { Route } from '../route';
 import { WishlistOrb } from './wishlist-orb';
 
@@ -76,6 +77,18 @@ export function WishlistPage() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: WISHLIST_QUERY_KEY });
 
+  const { processing } = useLiveWishlist(() => {
+    void refresh();
+  });
+
+  // The countdown lives in downloads.js: it is bound to wishlistCountdownInterval,
+  // socketConnected and _lastWishlistStats, all module-scoped, and writes into
+  // #wishlist-next-auto-timer — which is why that id is rendered below.
+  const nextRunSeconds = statsQuery.data?.next_run_in_seconds ?? 0;
+  useEffect(() => {
+    window.startWishlistCountdownTimer?.(currentCycle, nextRunSeconds);
+  }, [currentCycle, nextRunSeconds]);
+
   const removeAlbum = useMutation({
     mutationFn: (albumName: string) => removeWishlistAlbum(albumName),
     onSuccess: async (_data, albumName) => {
@@ -117,9 +130,39 @@ export function WishlistPage() {
           </h2>
           <div className="wishlist-page-meta">
             <span className="wishlist-page-count">{trackCountLabel(total)}</span>
-            <span className="wishlist-page-timer">Next Auto: --</span>
+            {/* startWishlistCountdownTimer writes this line. */}
+            <span className="wishlist-page-timer" id="wishlist-next-auto-timer">
+              Next Auto: --
+            </span>
           </div>
         </div>
+      </div>
+
+      <div className="wishlist-page-actions">
+        {/* All three open modals owned by downloads.js and shared with the
+            wishlist hero button, so they are invoked rather than reimplemented. */}
+        <button
+          className="btn btn--secondary"
+          type="button"
+          title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again."
+          onClick={() => window.openWishlistIgnoreModal?.()}
+        >
+          Ignored
+        </button>
+        <button
+          className="btn btn--secondary"
+          type="button"
+          onClick={() => window.cleanupWishlistOverview?.()}
+        >
+          Cleanup
+        </button>
+        <button
+          className="btn btn--danger"
+          type="button"
+          onClick={() => window.clearEntireWishlist?.()}
+        >
+          Clear All
+        </button>
       </div>
 
       {total === 0 ? (
@@ -147,12 +190,16 @@ export function WishlistPage() {
               exactly as the vanilla initializer did. */}
           <div className="wishlist-stats-strip">
             <div className="wishlist-stat-item">
-              <span className="wishlist-stat-value">{albumCount}</span>
+              <span className="wishlist-stat-value" id="wishlist-stat-albums">
+                {albumCount}
+              </span>
               <span className="wishlist-stat-label">Album Tracks</span>
             </div>
             <div className="wishlist-stat-divider" />
             <div className="wishlist-stat-item">
-              <span className="wishlist-stat-value">{singleCount}</span>
+              <span className="wishlist-stat-value" id="wishlist-stat-singles">
+                {singleCount}
+              </span>
               <span className="wishlist-stat-label">Singles</span>
             </div>
             <div className="wishlist-stat-divider" />
@@ -189,9 +236,16 @@ export function WishlistPage() {
               >
                 ⚠ Failing
               </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => void window._nebulaDownload?.()}
+              >
+                Download Wishlist
+              </button>
             </div>
 
-            <div className="wl-nebula-field">
+            <div className={`wl-nebula-field${processing ? ' nebula-processing' : ''}`}>
               {groups.length === 0 ? (
                 <div className="wl-nebula-empty">Your wishlist is empty</div>
               ) : (
@@ -202,6 +256,7 @@ export function WishlistPage() {
                     index={index}
                     artistImages={artistImages}
                     currentCycle={currentCycle}
+                    processing={processing}
                     expanded={expandedArtist === group.name}
                     onToggleExpand={() =>
                       setExpandedArtist((current) => (current === group.name ? null : group.name))
