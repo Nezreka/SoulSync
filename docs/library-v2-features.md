@@ -128,7 +128,7 @@ Der Picker zeigt die aktuelle Auswahl, Provider-Kandidaten und eine Paste-URL-
 Option. Signierte externe URLs dürfen nicht durch pauschal angehängte Query-
 Parameter beschädigt werden.
 
-#### Kaltstart-Vertrag (offen, 25. Juli 2026)
+#### Kaltstart-Vertrag (entschieden und umgesetzt, 26. Juli 2026)
 
 Seit der Entkopplung des kalten Pfads (§10 Finding 2 im Status) antwortet der
 Endpoint für ein noch nicht gecachtes Bild sofort mit dem Placeholder-Vertrag
@@ -137,26 +137,31 @@ Zusage „Cover erscheinen zuverlässig" nur noch dann erfüllt, wenn das fertig
 Bild den bereits gerenderten Client auch erreicht. Der Branch-Review vom
 25. Juli zeigt, dass genau das derzeit nicht garantiert ist
 ([issues rev25-02](library-v2-issues.md#rev25-02),
-[rev25-10](library-v2-issues.md#rev25-10)). Zu entscheiden ist:
+[rev25-10](library-v2-issues.md#rev25-10)). Zwei Punkte standen zur
+Entscheidung:
 
 - **Nachlieferung:** Wie erfährt eine gerenderte Seite, dass ihr Cover fertig
   ist — Polling gegen den Endpoint, Auswertung von `X-Artwork-Pending`, oder
   ein Refetch der sichtbaren Seite nach abgeschlossenem Build? Ein festes
   Retry-Budget im Client ist keine Zusage, solange der Build länger dauern
-  darf als das Budget.
+  darf als das Budget. **Entschieden und umgesetzt (26. Juli 2026):** Der
+  Client fragt den Server, statt zu raten. Ein gebündelter Status-Endpoint
+  meldet pro Entity `ready` (mit Cache-Bust-Version), `pending` oder
+  `unavailable`; die gerenderte Seite stellt einen Poll pro Tick für alle
+  offenen Cover und hört auf, sobald der Server eine Antwort gibt. Damit hängt
+  die Wartezeit an der realen Build-Dauer und nicht mehr an einer Konstanten.
+  Umsetzungsstand in [status.md §24](library-v2-status.md).
 - **Endgültiges Nein:** Für eine Entity, deren Artwork nachweislich nirgends
   auflösbar ist, braucht es einen persistierten Negativzustand mit Backoff.
   Ohne ihn ist der Placeholder korrekt, kostet aber bei jedem Seitenbesuch
-  erneut einen vollständigen Provider-Walk.
+  erneut einen vollständigen Provider-Walk. **Bleibt zurückgestellt** — kein
+  Teil der aktuellen Entscheidung.
 
 Die bestehende Zusage aus „Verhalten beim Cover-Pick" — mutable Artwork-URLs
 nie ohne korrekten Versionsparameter als `immutable` ausliefern — bleibt
 unverändert gültig; die Race im Versions-Snapshot, die sie verletzbar machte,
 ist am 25. Juli behoben (Generation-Marker pro Entity statt
 Directory-Mtime-Vergleich, [issues rev25-09](library-v2-issues.md#rev25-09)).
-Die beiden Punkte oben (Nachlieferung, endgültiges Nein) bleiben offen — sie
-sind reine Produktentscheidungen, keine Bugs, und deshalb bewusst nicht Teil
-derselben Umsetzung.
 
 #### Sicherheit
 
@@ -458,6 +463,28 @@ Der Feed ist nach Artist, Album, Track und File filterbar. Fehlgeschlagene
 Versuche bleiben sichtbar, auch wenn nie eine neue File-Zeile entstand.
 File-Zeilen speichern zusätzlich das kompakte Pipeline-Ergebnis inklusive
 Quality-Profil/Fallback, AcoustID-Grund und Verification-State.
+
+#### Korrelation zu `human_verified`/`rejected` (Entscheidung 26. Juli 2026)
+
+`record_history_event` verlangt zwingend eine
+`request_id`/`candidate_id`/`download_id`-Korrelation; `/api/verification/
+<id>/approve` und `.../delete` (`web_server.py`) operieren aber bislang nur
+auf einer `library_history.id` ohne persistierte Rückverbindung zur
+Acquisition-Seite (Diagnose in status.md §17). Entschieden: Diese Korrelation
+wird nachgerüstet, nicht zurückgestellt — dem Nutzer ist wichtig, dass
+sichtbar bleibt, wie ein Track durch die Download-Pipeline gelaufen ist, auch
+über den Verifikationsschritt hinaus. Die Korrektur bekommt eine neue
+persistente Korrelationsspalte auf `library_history`
+(`request_id`/`candidate_id`/`download_id`), gefüllt über dieselbe
+Fail-open-Bridge (`core/acquisition/pipeline_callback.py::
+_pipeline_correlation`), die bereits `previous_file_replaced` speist —
+ordinäre, nicht Acquisition-getrackte Importe bleiben dabei ein
+Zero-Write-No-op. **Umgesetzt am 26. Juli 2026** (Spalten
+`acquisition_request_id`/`acquisition_candidate_id`/`acquisition_download_id`,
+geschrieben direkt nach dem History-Insert; Approve/Delete journalen daraus).
+Bewusste Grenze: kein Backfill für Zeilen aus der Zeit davor — für sie
+existiert die Korrelation nirgends mehr. Umsetzungsstand in
+[status.md §23](library-v2-status.md).
 
 ---
 
@@ -860,6 +887,7 @@ Primary-Datei bzw. Track-ID.
 | Corrupt File Detector | Root-/Path-sicherer Decode-Test auf V2- und Filesystem-Subjects |
 | Skip Audit Cleanup | ausschließlich abgelaufene manuelle Skip-Zeilen |
 | Monitoring List Reconcile | Outbox, Artist⇄Watchlist und Wanted⇄Wishlist in einem neutralen Job |
+| Stale Index Paths | read-only Vorschlag für Zeilen, deren Datei unter anderem Namen im selben Ordner liegt; höchstens ein eindeutiger Kandidat, mehrdeutige und fremd-indizierte Treffer bleiben unfixbar; Approve ändert nur den Index, nie die Datei |
 
 Lose/unindexierte Files dürfen durch den nativen Cutover nicht Fake-Lossless,
 Converter, Tracknummer, ReplayGain oder Corruption verlieren. Wo Cutoff ohne

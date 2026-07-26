@@ -5,9 +5,10 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 25. Juli 2026, einschließlich Branch-Split sowie der Perf- und
-Search-Link-Findings aus Abschnitt 10/11. Playlist UI ist geparkt; native
-Quality-Profile-Foundation wird vor dem Library-v2-Rebase gemerged.
+Stand: 26. Juli 2026, einschließlich Foundation-Rebase (§14) und der an diesem
+Tag umgesetzten Korrekturen §20–§24 (Pfad-Desync, Manual-Match-Timeout,
+Orphan-Approve-Materialisierung, F-10-Korrelation, Artwork-Kaltstart-
+Nachlieferung). Playlist UI bleibt geparkt.
 
 ## 1. Statusbegriffe
 
@@ -29,7 +30,7 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 
 | ID | Feature | Status | Referenz | Abdeckung / Rest |
 |---|---|---|---|---|
-| [F-01](library-v2-features.md#feat-artwork) | Media-server-unabhängiges Artwork | Verified | Deep-Dive §28, Security-Fix `80b5af95` | Picker, Embed, Cache-Bust und Fetch-Hardening gezielt geprüft |
+| [F-01](library-v2-features.md#feat-artwork) | Media-server-unabhängiges Artwork | Verified | Deep-Dive §28, Security-Fix `80b5af95`, §24 | Picker, Embed, Cache-Bust und Fetch-Hardening gezielt geprüft; Kaltstart-Nachlieferung seit §24 serverseitig getrieben |
 | [F-02](library-v2-features.md#feat-monitoring) | Monitoring, Watchlist/Wishlist, Outbox | Verified | P3/§82, Regression-Checkpoint | Bidirektionale Sync-, Reconcile- und Profilgrenzen geprüft |
 | [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Implemented | §53/§60, §14, §15 | Track→Album→Artist→Global verified; Watchlist-Monitor-Mirroring inkl. `quality_profile_id`-Weitergabe an natives Watchlist jetzt verdrahtet (§15) |
 | [F-04](library-v2-features.md#feat-discography) | Discography, Tracklists, `monitor_new_items` | Verified | `2249f5d7`, `8f965d31` (später gesquasht) | Content-Filter und nie manuell expandierte Artists abgedeckt |
@@ -38,7 +39,7 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3 | Code und gezielte Tests vorhanden; produktive Datenreparatur bleibt Backup/Dry-Run-abhängig |
 | [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11 | Enrich/Smart-Split und globale Suche abgedeckt |
 | [F-09](library-v2-features.md#feat-playlists) | Library-v2-Playlist-Oberfläche | Deferred | `library-v2-playlist-ui` | Vollständig aus dem aktiven Overhaul entfernt und separat geparkt |
-| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Partial | §35/§37/§57/§58, §17 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` jetzt Teil des Eventvokabulars (§17); `human_verified`/`rejected` bleiben Partial, siehe §17 |
+| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Implemented | Regression-Checkpoint `ee30247a`, im aktuellen Squash `fb0096ce` | `import-review`-Route, Queue/Detail, Assignments und Resolve/Rescan/Resume vorhanden; vollständiger Browser-E2E fehlt |
 | [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Implemented | §29/§53/§55/§60/§71 | Scoped/Transient Search, Force-Audit und gemeinsame Pipeline gezielt geprüft |
@@ -195,7 +196,7 @@ keinen vollständigen externen E2E.
 | [LV2-015](library-v2-issues.md#lv2-015) | Deferred | Historische Diagnose; aktive Library-v2-Playlist-Integration wurde geparkt |
 | [LV2-016](library-v2-issues.md#lv2-016) | Verified | Default 0 plus Reconcile/Repair |
 | [LV2-017](library-v2-issues.md#lv2-017) | Implemented | später über H-13 und Review 1 gehärtet; produktiver Backfill bleibt Dry-Run-abhängig |
-| [Orphan Approve](library-v2-issues.md#orphan-bug) | Pending | Root Cause bestätigt (§16); Korrektur braucht noch eine Produktentscheidung |
+| [Orphan Approve](library-v2-issues.md#orphan-bug) | Implemented | Root Cause bestätigt (§16), Korrektur nach §18-Entscheidung umgesetzt (§22) |
 
 Historische Bugcluster-Prüfung:
 
@@ -217,8 +218,8 @@ Historische Bugcluster-Prüfung:
 | DD-A1/A2 — Cover Embed/Cache | Verified | §28 |
 | DD-A3/A4 — scoped Search/serverseitiges Ranking | Verified | §29 |
 | DD-A5 — BPM/Duration | Verified | §29 |
-| DD-A6 — History Feed | Implemented | §35, §17; `previous_file_replaced` ergänzt, `human_verified`/`rejected` bleiben F-10 Partial |
-| DD-A7 — File Pipeline Result | Partial | §37; `human_verified`/`rejected` ohne Acquisition-Korrelation bleiben F-10 Partial (§17) |
+| DD-A6 — History Feed | Implemented | §35, §17, §23; Eventvokabular jetzt vollständig |
+| DD-A7 — File Pipeline Result | Implemented | §37; die fehlende Acquisition-Korrelation für `human_verified`/`rejected` ist in §23 nachgerüstet |
 | DD-A8/A9 — Provider-Filter/Artist Picker | Verified | §29 |
 | DD-G1–G6 | Verified | §28 |
 | DD-G7 | Verified | §29 |
@@ -466,14 +467,16 @@ aus §10 und §11. Root-Cause-Diagnosen stehen in
 [library-v2-issues.md §12](library-v2-issues.md#rev25-01); diese Tabelle
 enthält ausschließlich den Bearbeitungsstatus. Dreizehn der fünfzehn Findings
 sind am 25. Juli im selben Aufwasch behoben worden; die zwei verbleibenden
-(2, 10) brauchen zuerst die in
+(2, 10) brauchten zuerst die in
 [features F-01](library-v2-features.md#feat-artwork) skizzierte
-Produktentscheidung zum Kaltstart-Vertrag und bleiben bewusst offen.
+Produktentscheidung zum Kaltstart-Vertrag. Diese ist am 26. Juli gefallen
+(§18): Finding 2 ist seitdem umgesetzt (§24), Finding 10 bleibt bewusst
+zurückgestellt.
 
 | # | Finding | Betroffener Commit | Status | Bemerkung |
 |---:|---|---|---|---|
 | [1](library-v2-issues.md#rev25-01) | `_background_inflight` leakt beim Verbindungsfehler, Entity bleibt dauerhaft Placeholder | `78bf84c9` | Fixed | Ein `finally` um den gesamten `_run`-Körper inkl. Verbindungsaufbau; Regressionstest mit fehlschlagendem `_get_connection` |
-| [2](library-v2-issues.md#rev25-02) | Kaltes Cover kann dauerhaft Placeholder bleiben: 14,5 s Retry-Budget < kalter Build, kein Refetch, `X-Artwork-Pending` ohne Konsument | `78bf84c9` | **Open** | Braucht weiterhin die Produktentscheidung zum Kaltstart-Vertrag, siehe [features F-01](library-v2-features.md#feat-artwork) |
+| [2](library-v2-issues.md#rev25-02) | Kaltes Cover kann dauerhaft Placeholder bleiben: 14,5 s Retry-Budget < kalter Build, kein Refetch, `X-Artwork-Pending` ohne Konsument | `78bf84c9` | Fixed | Serverseitig getriebenes Polling ersetzt das feste Retry-Budget, siehe §24 |
 | [3](library-v2-issues.md#rev25-03) | Verzeichnis-Snapshot kostet auf großen Bibliotheken mehr Syscalls als die 75 `stat()`, die er ersetzt | `1a6758b5` | Fixed | Whole-Directory-Snapshot ersetzt durch Per-Entity-Mtime-Cache mit Generation-Marker (löst auch Finding 9) |
 | [4](library-v2-issues.md#rev25-04) | Voller Artwork-Verzeichnis-Scan auf dem Per-Download-Importpfad | `a965e829` | Fixed | `schedule_missing_artwork` prüft nur noch die eigenen Targets über `artwork_version`, kein Verzeichnis-Scan mehr |
 | [5](library-v2-issues.md#rev25-05) | Namens-Backfill persistiert Identität aus Eindeutigkeitsprüfung über `LIMIT 5`/`LIMIT 10` | `d82ad12b` | Fixed | Reconcile prüft Eindeutigkeit ohne `LIMIT` gegen die volle Tabelle, bevor geschrieben wird |
@@ -499,9 +502,11 @@ Entity die Caches aller anderen mit-invalidiert).
 dieser Liste sind jetzt ebenfalls umgesetzt und mit gezielten Tests
 abgesichert (`tests/library2/test_artwork_*`, `tests/search/test_search_orchestrator.py`,
 `tests/library2/test_api_routes.py`, `webui/.../artwork-retry.test.tsx`).
-Offen bleiben ausschließlich Finding 2 und 10 — beide warten auf die
-Kaltstart-Vertrags-Entscheidung aus [features F-01](library-v2-features.md#feat-artwork)
-und sind bewusst nicht mitimplementiert.
+Offen blieben zunächst Finding 2 und 10 — beide warteten auf die
+Kaltstart-Vertrags-Entscheidung aus [features F-01](library-v2-features.md#feat-artwork).
+Die Entscheidung fiel am 26. Juli (§18): Finding 2 (Nachlieferung) ist
+umgesetzt (§24), Finding 10 (Negativ-Cache) bleibt bewusst zurückgestellt und
+ist damit der einzige offene Punkt dieser Liste.
 
 ---
 
@@ -589,6 +594,13 @@ pre-existing failed (siehe unten), 3 skipped. Frontend Library-v2-Suite:
   `t.isrc`) — vermutlich Schema-/Query-Drift in
   `missing_cover_art.py`/`metadata_gap_filler.py`. Root Cause noch nicht
   untersucht.
+  **Nachtrag 26. Juli 2026:** Beide Spalten werden auf einer real
+  migrierten DB per `ALTER TABLE` nachgezogen (`database/music_database.py`
+  Zeilen ~3065/~3880) — die beiden Tests scheitern also wahrscheinlich an
+  einer Test-Fixture ohne vollständige Migrationskette, nicht an einem
+  Produktivschema-Fehler. Nicht abschließend gegen ein reales Produktiv-
+  Schema verifiziert; bei Gelegenheit per `PRAGMA table_info(albums)` /
+  `PRAGMA table_info(tracks)` gegenprüfen.
 - Ebenfalls bereits vorher fehlschlagend (8 Tests in
   `tests/test_repair_worker_album_fill.py`,
   `tests/test_repair_worker_unknown_artist_path.py`,
@@ -671,8 +683,9 @@ härten" (Details in der Issue-Datei). Ein roter/beweisender Test allein
 autorisiert laut Guide-Arbeitsregel 3 noch keine Korrektur ohne diese
 Entscheidung.
 
-**Einstufung:** Root Cause bestätigt und gezielt geprüft; Korrektur bleibt
-offen bis zur Produktentscheidung.
+**Einstufung:** Root Cause bestätigt und gezielt geprüft; Produktentscheidung
+getroffen (§18) und am selben Tag umgesetzt — siehe §22. Der beweisende Test
+wurde dabei durch seinen Positiv-Nachfolger ersetzt.
 
 ---
 
@@ -722,5 +735,281 @@ Lauf `tests/acquisition tests/imports tests/library2`: siehe Testlauf-Ergebnis
 dieser Session.
 
 **Einstufung:** `previous_file_replaced` implementiert und gezielt geprüft.
-`human_verified`/`rejected` bleiben F-10 Partial — Korrektur braucht eine
-eigene Schema-Entscheidung, kein offener "einfacher Rest" mehr.
+Die für `human_verified`/`rejected` verlangte Schema-Entscheidung ist in §18
+gefallen und in §23 umgesetzt; F-10 ist damit nicht mehr wegen fehlender
+Korrelation Partial.
+
+---
+
+## 18. Produktentscheidungen vom 26. Juli 2026
+
+Drei in §13, §16 und §17 offen gelassene Produktentscheidungen sind getroffen.
+Diese Tabelle hält ausschließlich fest, dass entschieden wurde und wohin die
+jeweilige Entscheidung dokumentiert ist; die fachliche Begründung steht bei
+Features/Issues, nicht hier.
+
+| Thema | Entscheidung | Referenz |
+|---|---|---|
+| Orphan-Approve (§16) | Option 1, Materialisieren: Simple Downloads ohne Titel/Artist-Match bekommen künftig eine Fallback-Entity in lib2 | [issues.md §7](library-v2-issues.md#orphan-bug) |
+| Artwork-Kaltstart, Nachlieferung (§13 Finding 2) | Wird umgesetzt; genauer Mechanismus (Polling/Header/Refetch) ist Implementierungsdetail | [features.md F-01](library-v2-features.md#feat-artwork) |
+| Artwork-Kaltstart, Negativ-Cache (§13 Finding 10) | Bleibt zurückgestellt, kein Teil dieser Entscheidung | [issues.md rev25-10](library-v2-issues.md#rev25-10) |
+| F-10 `human_verified`/`rejected` (§17) | Wird umgesetzt: neue persistente Korrelationsspalte auf `library_history` (`request_id`/`candidate_id`/`download_id`) über dieselbe Fail-open-Bridge wie `previous_file_replaced` | [features.md F-10](library-v2-features.md#feat-history) |
+
+**Einstufung:** Alle drei Korrekturen sind priorisiert, freigegeben und
+inzwischen umgesetzt: Orphan-Approve in §22, Artwork-Nachlieferung in §24,
+F-10-Korrelation in §23. Der Negativ-Cache (§13 Finding 10) bleibt wie
+entschieden zurückgestellt.
+
+---
+
+## 19. Nutzer-Bugreport vom 26. Juli 2026
+
+Diagnose in [issues.md §13](library-v2-issues.md#13-nutzer-bugreport-vom-26-juli-2026).
+Diese Tabelle enthält ausschließlich den Bearbeitungsstatus.
+
+| # | Finding | Status | Referenz |
+|---:|---|---|---|
+| 1 | Metadaten-Scan bleibt „pending" für vorhandene Songs — derselbe Pfad-Desync-Mechanismus wie [LV2-017](library-v2-issues.md#lv2-017), zusätzlich Risiko einer Fehlklassifikation als `missing_confirmed` | Implemented | §20 |
+| 2 | Manual Match (Artist) läuft durch synchrone Artwork-Nachladung nach Match-Commit in den 10s-Client-Timeout | Implemented | §21 |
+
+**Einstufung:** Beide Root Causes waren bestätigt (Finding 1 durch Codepfad-
+Analyse von `rescan_files`/`resolve_lib2_path`/`metadata_scan_status`,
+Finding 2 zusätzlich durch den Default-Timeout in `webui/src/app/api-client.ts`);
+beide sind am 26. Juli korrigiert, siehe §20 und §21. Zur Einordnung: Der
+bereits vorhandene „Reconcile Unmapped Artists"-Job
+([features F-08](library-v2-features.md#feat-unmapped), Button im
+Maintenance-Modal der Artist-Seite) deckt Artists ganz ohne Metadaten-Quelle
+bereits ab — dafür ist kein neuer Job nötig.
+
+---
+
+## 20. Pfad-Desync: Reconcile-Werkzeug und Missing-Lifecycle-Schutz (26. Juli)
+
+Schließt [pathdrift25-01](library-v2-issues.md#pathdrift25-01) in zwei Teilen.
+
+**Teil 1 — der Scan verwechselt „nicht auflösbar" nicht mehr mit „weg".**
+`core/library2/scan.py::rescan_files` fragt für jeden unauflösbaren Pfad
+`core/library2/path_drift.py::has_drift_candidate`: liegt im (über den
+gemeinsamen Resolver aufgelösten) Verzeichnis eine Datei, die plausibel zu
+dieser Zeile gehört? Wenn ja, zählt der Miss weiterhin, aber
+`_persist_missing_observation(..., allow_confirm=False)` deckelt den Zustand
+bei `missing_suspected`. Damit kann ein physisch vorhandener Song nicht mehr
+nach zwei Scans als `missing_confirmed` in der Wanted-/Redownload-Logik
+landen. Verschwindet der Kandidat später doch, bestätigt der nächste Scan
+sofort — der Zähler läuft unverändert weiter. Neue Statistik: `path_drift`.
+
+**Teil 2 — das in LV2-017 versprochene read-only Backfill-Werkzeug.** Neues
+Modul `core/library2/path_drift.py` plus Repair-Job `path_drift_reconcile`
+(„Stale Index Paths", Review-only, `default_enabled=False`,
+`JOB_LIBRARY_V2_EFFECTS = {observe, path}`) und Fix-Handler
+`_fix_stale_index_path` in `core/repair_worker.py`. Bewusste Grenzen:
+
+- Der Scan schreibt nichts und bewegt keine Datei; er schlägt vor.
+- Präzision vor Vollständigkeit: gleiche Endung + gleicher Titelschlüssel
+  (Numerierung abgeschält, Unicode-erhaltend); eine abweichende Tracknummer
+  disqualifiziert, außer die Dateigröße bestätigt die Paarung.
+- Mehrere gleich plausible Treffer werden als `ambiguous` gemeldet und nie
+  automatisch gewählt (LV2-017-Vertrag); solche Findings sind für den Worker
+  bewusst nicht fixbar.
+- Ein Kandidat, den bereits eine andere `lib2_track_files`-Zeile indiziert,
+  wird nie gestohlen (`claimed`).
+- Höchste Konfidenz zuerst: besitzt der Track eine `legacy_track_id`, deren
+  `tracks.file_path` real auflöst, ist das der Vorschlag — genau der
+  dokumentierte Entstehungsweg des Desyncs.
+- `apply_path_drift_fix` prüft alle Vorbedingungen erneut, schreibt den Pfad
+  im gespeicherten (Media-Server-)Namensraum — nur der Dateiname wird
+  ersetzt — und zieht die Legacy-Zeile nur dann mit, wenn auch sie
+  unauflösbar ist (H-11).
+
+Verifikation: `tests/library2/test_path_drift.py` (19 Tests: Matching,
+Ambiguität, Unicode, Endung, Claim, Bounded-Scan, Read-only, Apply-Guards,
+beide Scan-Lifecycle-Fälle), `tests/repair_jobs/test_path_drift_reconcile.py`
+(5 Tests inkl. Worker-Fix und Nachweis, dass keine Datei angefasst wird).
+
+**Einstufung:** Implementiert und gezielt geprüft. Ein Lauf gegen die reale
+Produktiv-DB des Nutzers steht aus und bleibt laut Guide §6.1 Backup-/
+Dry-Run-pflichtig — der Job ist genau deshalb Review-only und
+default-deaktiviert.
+
+---
+
+## 21. Manual Match: Artwork verlässt den Request-Pfad (26. Juli)
+
+Schließt [manualmatch25-01](library-v2-issues.md#manualmatch25-01).
+`api/library_v2.py::lib2_native_manual_match` committet den Match jetzt zuerst
+und ruft danach `core/library2/native_enrich.py::
+schedule_native_artist_artwork` — ein Daemon-Thread mit eigener Verbindung,
+derselbe Off-Thread-Dispatch wie beim Legacy↔lib2-Link-Reconcile (§13
+Finding 7). Der Artwork-Walk kann so beliebig lange dauern, ohne die Antwort
+zu blockieren; weil die Hintergrund-Verbindung eine neue ist, sieht sie den
+committeten Match (und der Request hält kein Write-Lock mehr).
+
+Bewusst **nicht** mitgeändert: Der Walk bleibt sequenziell über alle am
+Artist gespeicherten Provider-IDs (dieselbe bewusste Abweichung wie
+[perf25-02](library-v2-issues.md#perf25-02) — Fan-out kostet zusätzliche
+Provider-Calls für Latenz, die nach der Entkopplung niemand mehr sieht), und
+die im Request gewählte `service` bestimmt weiterhin nur, welche ID
+gespeichert wird. Beides ist nach der Entkopplung nicht mehr
+nutzersichtbar; für ein gezielt anderes Bild existiert der Artwork-Picker
+(F-01).
+
+Verifikation: `tests/library2/test_api_routes.py` — der Match antwortet,
+während der Enrich noch blockiert (Zeitschranke + Thread-Identität), die
+Hintergrund-Verbindung sieht den committeten Match, und ein DELETE plant
+keinen Walk.
+
+**Einstufung:** Implementiert und gezielt geprüft; kein Browser-E2E.
+
+---
+
+## 22. Orphan-Approve: Simple Downloads werden materialisiert (26. Juli)
+
+Setzt die §18-Entscheidung (Option 1) für
+[issues §7](library-v2-issues.md#orphan-bug) um.
+`core/library2/autolink.py` bricht bei einem Download ohne Titel/Artist und
+ohne V2-Entity nicht mehr ab, sondern leitet eine Identität ab —
+`_fallback_identity`:
+
+1. eingebettete Tags der fertig importierten Datei (Grundwahrheit);
+2. der Dateiname des Downloads, als `Artist - Titel` geparst (führende
+   Track-/Disc-Numerierung wird vorher abgeschält, damit „01 - Song" nicht
+   einen Artist namens „01" erzeugt);
+3. der reine Dateistamm unter `UNKNOWN_ARTIST`.
+
+Danach läuft der normale `_find_or_create_*`-Pfad, ein bereits existierender
+Artist/Album/Track wird also wiederverwendet statt dupliziert. Nur wenn gar
+kein Dateiname existiert, bleibt es beim alten Skip.
+
+**Bewusste Grenze 1 — kein Acquisition-Intent:** Über den Fallback *neu
+angelegte* Album-/Track-Zeilen starten `monitored=0` (neuer expliziter
+Parameter an `_find_or_create_album`/`_find_or_create_track`). Eine geratene
+Identität ist eine Beobachtung, kein Intent — sonst könnte „Unknown Artist /
+mystery" in die Wanted-Projektion geraten. Trifft der Fallback eine bestehende
+Zeile, bleibt deren Monitoring unangetastet.
+
+**Bewusste Grenze 2 — keine geliehene Provider-Identität:** Auf dem
+Fallback-Pfad ist `ti` das rohe `search_result`, dessen `id` der Result-Token
+der *Quelle* ist (Soulseek/Usenet), keine Musik-Provider-ID. Sie wird jetzt
+nicht mehr adoptiert — sonst landete ein Quelltoken in `spotify_id`/
+`external_ids` (genau die §62.4-Vergiftung, die Guide §2.5 verbietet). Ein
+`SPOTIFY_TRACK_ID`, der aus der Datei selbst gelesen wurde, ist dagegen eine
+echte qualifizierte Identität und bleibt erhalten. Dieser Fehler entstand erst
+dadurch, dass Simple Downloads diesen Code überhaupt erreichen — vorher brach
+der Early Return vorher ab.
+
+Verifikation: `tests/library2/test_autolink.py` (der frühere Beweis-Test
+`test_simple_download_never_gets_a_file_row` ist durch
+`test_simple_download_is_materialized_from_its_filename` ersetzt, plus
+Tag-Vorrang, Unknown-Fall, Monitoring-Grenze, Skip ohne jede Identität, beide
+Provider-ID-Fälle) und `tests/test_orphan_file_detector.py::
+test_materialized_simple_download_is_no_longer_an_orphan` — der End-to-End-
+Nachweis, dass genau derselbe Scan die Datei jetzt als bekannt erkennt.
+
+**Einstufung:** Implementiert und gezielt geprüft. Der ursprüngliche
+Nutzerbericht (Quarantäne-Approve) ist damit strukturell mit abgedeckt, weil
+er denselben lückenhaften Context zurückspielt; ein realer Quarantäne-
+Approve-Durchlauf am echten System steht aus.
+
+---
+
+## 23. F-10: `human_verified`/`rejected` bekommen ihre Korrelation (26. Juli)
+
+Setzt die §18-Entscheidung für
+[features F-10](library-v2-features.md#feat-history) um — der in §17 als
+„eigener Schnitt" beschriebene Schema-Schritt.
+
+- `library_history` bekommt `acquisition_request_id`,
+  `acquisition_candidate_id`, `acquisition_download_id` plus Index
+  (`database/music_database.py`, additive `ALTER TABLE`-Migration im
+  bestehenden Migrationsblock). Präfix bewusst: die Tabelle führt bereits
+  `source_track_id`/`download_source`, ein nacktes `request_id` läse sich dort
+  wie ein Legacy-Begriff.
+- `core/acquisition/pipeline_callback.py::persist_history_correlation`
+  schreibt die Korrelation direkt nach dem History-Insert
+  (`core/imports/side_effects.py`) über dieselbe Fail-open-Brücke
+  (`_pipeline_correlation`) wie `previous_file_replaced`; ein gewöhnlicher
+  Import bleibt ein Zero-Write-No-op.
+- `notify_verification_decision` journalt aus den gespeicherten Spalten.
+  `/api/verification/<id>/approve` meldet `human_verified`,
+  `/api/verification/<id>/delete` meldet `rejected` — bewusst **vor** dem
+  Löschen der Zeile, danach gäbe es nichts mehr zu korrelieren.
+- `EVENT_TYPES` und `history_feed.EVENT_CATEGORY` kennen beide Events
+  („Verified by you" / „Rejected by you").
+
+Verifikation: `tests/acquisition/test_pipeline_callback.py` (5 neue Tests:
+Persistenz, No-op ohne Acquisition, beide Entscheidungen, unkorrelierte Zeile
+schreibt nichts, unbekannte Entscheidung wird abgelehnt),
+`tests/library2/test_history_feed.py` (Feed-Darstellung beider Events).
+
+**Einstufung:** Implementiert und gezielt geprüft. Damit ist F-10 nicht mehr
+wegen fehlender Korrelation Partial; die verbleibende Lücke ist nur noch, dass
+alte History-Zeilen keine Korrelation nachträglich bekommen (kein Backfill —
+die Information existiert für sie nirgends).
+
+---
+
+## 24. Artwork-Kaltstart: Nachlieferung an den gerenderten Client (26. Juli)
+
+Setzt die §18-Entscheidung zu [§13 Finding 2](library-v2-issues.md#rev25-02)
+um. Der Mechanismus war ausdrücklich Implementierungsdetail; gewählt wurde
+**serverseitig getriebenes Polling statt fixer Client-Retries**, weil ein
+`<img>` `X-Artwork-Pending` nicht lesen kann und ein konstantes Retry-Budget
+per Definition nicht an die reale Build-Dauer gekoppelt ist.
+
+- `core/library2/artwork.py::artwork_build_states` beantwortet pro Entity
+  `ready` (mit Cache-Bust-Version), `pending` (Build läuft/ist eingeplant) oder
+  `unavailable` (nichts in Flight, nichts auf Platte).
+- `GET /api/library/v2/artwork/status?kind=&ids=` liefert das gebündelt,
+  `no-store`, auf 200 IDs gedeckelt.
+- `webui/.../artwork-pending.ts` sammelt alle fehlgeschlagenen lokalen Cover
+  einer Seite und pollt **einen** Request pro Tick (1,5 s → ×1,6 → max 15 s,
+  harte Obergrenze 25 Ticks). `ready` rendert mit neuer Version, `unavailable`
+  beendet das Warten sofort, ein Netzwerkfehler nagelt nicht die ganze Seite
+  auf den Platzhalter fest.
+- Die `Artwork`-Komponente ersetzt die drei festen Retries durch dieses Abo;
+  die rev25-12-Invariante (kein Frame mit fremdem Cache-Bust-Suffix) bleibt
+  durch Adjust-during-render erhalten, und `v` wird jetzt **ersetzt** statt
+  angehängt.
+
+**Bewusste Grenze:** Der Status-Endpoint plant für `unavailable` *keinen*
+neuen Build ein. Wiederholte Provider-Walks für bildlose Entities sind
+[Finding 10](library-v2-issues.md#rev25-10) (Negativ-Cache), und der bleibt
+laut §18 zurückgestellt. Vorher kostete eine Seite mit 75 bildlosen Artists
+bis zu 4 × 75 Requests; jetzt ist es ein gebündelter Poll pro Tick, der nach
+der ersten `unavailable`-Antwort endet.
+
+Verifikation: `tests/library2/test_artwork_background_build.py`
+(ready/pending/unavailable inkl. Übergang nach fehlgeschlagenem Build),
+`tests/library2/test_api_routes.py` (Route plus Eingabevalidierung),
+`webui/.../artwork-retry.test.tsx` (9 Tests, gegen msw: Nachlieferung,
+endgültiges Nein, ein gebündelter Request für mehrere Cover, keine Polls für
+Remote-URLs, Fehlertoleranz, beide rev25-12-Invarianten, Mount pollt nicht).
+
+**Einstufung:** Implementiert und gezielt geprüft; die Messung am echten
+Kaltstart einer großen Bibliothek steht aus.
+
+---
+
+## 25. Gemeinsamer Testlauf für §20–§24 (26. Juli)
+
+Ein Lauf über alle betroffenen Bereiche, damit die fünf Korrekturen nicht nur
+einzeln belegt sind:
+
+- Backend `tests/library2 tests/acquisition tests/imports tests/repair
+  tests/repair_jobs tests/wishlist tests/watchlist tests/quality tests/search
+  tests/test_orphan_file_detector.py`: **2825 passed, 3 skipped, 3 failed**;
+- Frontend vollständige WebUI-Suite: **260 Tests in 44 Dateien** grün;
+- `oxfmt --check` und `oxlint --type-check` auf allen geänderten
+  Frontend-Dateien: sauber (die zwei vorbestehenden Warnungen in
+  `library-v2-page.tsx` und die Formatabweichung in `artist-refresh.test.tsx`
+  wurden bewusst nicht mit angefasst — fremde Zeilen);
+- Ruff über alle geänderten Python-Dateien: sauber.
+
+Die drei Fehlschläge sind **vorbestehend**, nicht durch diese Arbeit
+verursacht:
+
+| Test | Einordnung |
+|---|---|
+| `tests/library2/test_maintenance_sync.py::test_cover_art_scanner_flags_v2_only_album` | bereits in §14 dokumentiert (Fixture ohne vollständige Migrationskette) |
+| `tests/library2/test_maintenance_sync.py::test_metadata_gap_scanner_covers_v2_only_track` | dito |
+| `tests/test_orphan_file_detector.py::test_native_job_is_gated_when_library_v2_is_disabled` | neu als vorbestehend identifiziert: der Test pinnt die Gating-Semantik, die H-18 bewusst entfernt hat (`features.library_v2=false` wird ignoriert). Am `git stash`-sauberen Baum reproduziert. Bisher nirgends notiert; der Test gehört an den Cutover-Vertrag angepasst oder entfernt |

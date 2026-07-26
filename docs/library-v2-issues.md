@@ -1068,11 +1068,11 @@ weil er denselben (bereits vorher lückenhaften) Context originalgetreu
 zurückspielt — die Sidecar-Serialisierung selbst bleibt verlustfrei (wie
 bereits empirisch ausgeschlossen, siehe oben).
 
-### Offene Korrekturentscheidung
+### Korrekturentscheidung
 
 Ein roter/beweisender Test allein autorisiert noch keine Korrektur — die
-Korrektur selbst braucht eine Produktentscheidung, weil zwei grundsätzlich
-verschiedene Richtungen technisch beide tragfähig sind:
+Korrektur selbst brauchte eine Produktentscheidung, weil zwei grundsätzlich
+verschiedene Richtungen technisch beide tragfähig waren:
 
 1. **Materialisieren:** Simple Downloads ohne Titel/Artist-Match bekommen eine
    Fallback-Entity in lib2 (Muster ähnlich der V2-nativen/Unmapped-Artist-
@@ -1085,8 +1085,20 @@ verschiedene Richtungen technisch beide tragfähig sind:
 
 Beide sind technisch tragfähig, unterscheiden sich aber im Produktverhalten
 (Simple Downloads danach in Library v2 sichtbar vs. weiterhin unsichtbar,
-aber sicher). Diese Entscheidung steht noch aus; bis dahin bleibt nur die
-Diagnose bestätigt, keine Korrektur implementiert.
+aber sicher).
+
+**Entschieden (26. Juli 2026): Option 1, Materialisieren.** Simple Downloads
+ohne Titel/Artist-Match bekommen eine Fallback-Entity in lib2, statt vom
+Orphan Detector unsichtbar zu bleiben.
+
+**Umgesetzt am 26. Juli 2026.** Die bei der Entscheidung noch offene
+Namensableitung ist: eingebettete Tags → Dateiname als `Artist - Titel`
+(Track-Numerierung vorher abgeschält) → Dateistamm unter `Unknown Artist`.
+Anschließend läuft der reguläre `_find_or_create_*`-Pfad, ein passender
+bestehender Eintrag wird also wiederverwendet. Neu über den Fallback angelegte
+Album-/Track-Zeilen starten unmonitored, damit eine geratene Identität keinen
+Acquisition-Intent erzeugt. Details in
+[status.md §22](library-v2-status.md#22-orphan-approve-simple-downloads-werden-materialisiert-26-juli).
 
 ### Relevante Pfade
 
@@ -1493,7 +1505,7 @@ bleibt dieses Cover für die gesamte Prozesslaufzeit Placeholder.
 gesamten `_run`-Körper inklusive Verbindungsaufbau umschließt, plus
 Regressionstest mit fehlschlagendem `_get_connection`.
 
-### <a name="rev25-02"></a> Finding 2 — Kaltes Cover kann dauerhaft Placeholder bleiben — Offen (Produktentscheidung)
+### <a name="rev25-02"></a> Finding 2 — Kaltes Cover kann dauerhaft Placeholder bleiben — Behoben, 26. Juli 2026
 
 **Ort:** `api/library_v2.py:2053-2065` und
 `webui/src/routes/library-v2/-ui/library-v2-page.tsx:314-345`.
@@ -1517,6 +1529,16 @@ abgeschlossenem Build einen Refetch der sichtbaren Seite auslösen. Das
 Retry-Budget an die reale Build-Dauer koppeln, nicht an eine Konstante. Die
 Produktseite dieser Entscheidung gehört nach
 [library-v2-features.md F-01](library-v2-features.md#feat-artwork).
+
+**Umgesetzt am 26. Juli 2026** — gewählt wurde die erste Variante: ein
+gebündelter Status-Endpoint (`GET /api/library/v2/artwork/status`) über
+`artwork_build_states` und ein Client-Abo, das pro Tick *einen* Request für
+alle offenen Cover einer Seite stellt. Das Warten endet, wenn der Server
+`ready` (rendern) oder `unavailable` (Platzhalter endgültig) meldet — nicht
+mehr nach einer Konstanten. `X-Artwork-Pending` bleibt als Signal am
+404-Vertrag, hat aber weiterhin bewusst keinen Konsumenten: der Client fragt
+den Status ohnehin gezielt ab. Details in
+[status.md §24](library-v2-status.md#24-artwork-kaltstart-nachlieferung-an-den-gerenderten-client-26-juli).
 
 ### <a name="rev25-03"></a> Finding 3 — `_artwork_versions` kostet auf großen Bibliotheken mehr Syscalls als die 75 `stat()`, die es ersetzt — Behoben, 25. Juli 2026
 
@@ -1765,3 +1787,115 @@ Bibliotheken) → 8 und 9 → 11, 13, 14, 15.
 im selben Umbau gelöst (ein Per-Entity-Mtime-Cache mit Generation-Marker statt
 des Whole-Directory-Snapshots), 6 im selben Umbau wie 11 (expliziter
 `?include=size`-Parameter).
+
+---
+
+## 13. Nutzer-Bugreport vom 26. Juli 2026
+
+Zwei vom Nutzer beobachtete Symptome, per Codepfad und (für Finding 1) per
+Reproduktion der zugrunde liegenden Funktionslogik nachvollzogen.
+
+### <a name="pathdrift25-01"></a> Finding 1 — „Metadaten-Scan pending" für vorhandene Songs durch denselben Pfad-Desync wie LV2-017
+
+**Ort:** `core/library2/scan.py::rescan_files` (Zeilen 209-220),
+`core/library2/status.py::metadata_scan_status`, `core/library2/paths.py::resolve_lib2_path`.
+
+**Realbeispiel des Nutzers:** `lib2_track_files.path` nennt
+`.../1nonly/Bunny Girl/01-01 - Bunny Girl.flac`; die reale Datei liegt unter
+`.../1nonly/Bunny Girl/01 - Bunny Girl.flac` — derselbe
+Disc-Präfix-Template-Drift wie bereits in [LV2-017](#lv2-017) dokumentiert
+(dort mit ReplayGain/Lyrics als sichtbarem „File no longer exists"-Fehler).
+
+`resolve_lib2_path` gleicht ausschließlich Root-/Mount-Abweichungen aus
+(`core/library.path_resolver`); einen abweichenden Dateinamen korrigiert es
+nicht und liefert für so einen Track `None`. `rescan_files` behandelt das als
+reinen Miss: Es zählt `stats["missing"] += 1` und ruft ausschließlich
+`_persist_missing_observation` auf. `persist_tag_cache`
+(`tags_json`/`missing_tags_json`) wird für diese Datei **nie** aufgerufen —
+unabhängig davon, wie oft „Refresh & Scan" läuft. `metadata_scan_status()`
+bleibt deshalb dauerhaft `pending`, nicht `unreadable` (dieser Codepfad
+erreicht den Lesefehler-Zweig gar nicht) — exakt der beobachtete Zustand für
+tatsächlich vorhandene, bereits heruntergeladene Songs.
+
+**Bisher nicht dokumentierte Zusatzfolge:** `missing_path_root_is_healthy`
+prüft nur, ob das übergeordnete Verzeichnis existiert; bei reinem
+Dateinamens-Drift ist das der Fall, der Miss gilt also als „gesund" und zählt.
+Nach zwei so gezählten Scans (`MISSING_CONFIRMATION_SCANS = 2`) kippt
+`file_state` auf `missing_confirmed`, obwohl die Datei physisch vorhanden
+ist — mit Risiko, dass nachgelagerte Wanted-/Redownload-Logik einen bereits
+vorhandenen Song erneut sucht.
+
+**Fehlendes Werkzeug:** Der ursprüngliche [LV2-017](#lv2-017)-Korrekturvertrag
+sah für betroffene Bestandsinstallationen einen „read-only Backfill-Dry-Run"
+vor. Im aktuellen Code existiert kein solches Tool — es gibt keine Logik, die
+für einen nicht auflösbaren Pfad im selben Verzeichnis nach einer plausibel
+zugehörigen, real vorhandenen Datei sucht. Nur die Forward-Korrektur (H-13:
+Reorganize schreibt beide Indizes atomar) wurde umgesetzt; bereits vor diesem
+Fix desynchronisierte Bestandsdaten bleiben ohne manuellen Eingriff dauerhaft
+betroffen.
+
+**Korrekturvertrag:** Ein bounded, read-only Abgleichslauf für Zeilen mit
+nicht auflösbarem Pfad: im aus dem gespeicherten Pfad ableitbaren Verzeichnis
+nach einer eindeutigen Kandidatendatei suchen (z. B. Tracknummer-/Titel-
+Ähnlichkeit oder Content-Hash bei gleicher Dateigröße) und einen Fix-Vorschlag
+statt einer stillen Automutation liefern; uneindeutige Mehrfachtreffer werden
+nicht automatisch gewählt (wie im LV2-017-Korrekturvertrag festgehalten).
+Zusätzlich sollte `rescan_files` einen „Pfad nicht auflösbar, aber
+Verzeichnis gesund"-Zustand von einem echten Miss unterscheiden, damit ein
+solcher Track nicht in Richtung `missing_confirmed` läuft, während der
+eigentliche Fund noch aussteht.
+
+**Umgesetzt am 26. Juli 2026** — `core/library2/path_drift.py` (Matching,
+bounded read-only Scan, re-verifizierendes Apply), Repair-Job
+`path_drift_reconcile` samt Worker-Fix-Handler, und der Deckel auf
+`missing_suspected` in `rescan_files`. Umfang und bewusste Grenzen stehen in
+[status.md §20](library-v2-status.md#20-pfad-desync-reconcile-werkzeug-und-missing-lifecycle-schutz-26-juli).
+
+### <a name="manualmatch25-01"></a> Finding 2 — Manual Match (Artist) läuft in den Client-Timeout durch synchrone Artwork-Nachladung
+
+**Ort:** `api/library_v2.py:1634` (`lib2_native_manual_match`) →
+`core/library2/native_enrich.py:222` (`enrich_native_artist_artwork`) →
+`core/library2/provider_adapters.py:791` (`fetch_artwork_url`) →
+`core/metadata/artist_image.py:48` (`_get_artist_image_from_source`).
+
+**Nutzerbeobachtung:** `PUT /api/library/v2/artists/<id>/manual-match` endet
+zuverlässig mit „Request timed out", unabhängig von Artist und gewählter
+Metadaten-Quelle.
+
+Nach jedem erfolgreichen Artist-Match (`entity_type in ("artist","artists")`)
+ruft der Endpoint unbedingt `enrich_native_artist_artwork` auf, **bevor**
+`conn.commit()` erreicht wird. Diese Funktion fragt über `fetch_artwork_url`
+alle konfigurierten und am Datensatz gespeicherten Provider-Quellen
+**sequenziell** mit je einem blockierenden HTTP-Call ab — derselbe
+Architekturbefund wie [perf25-02](#perf25-02), hier aber im
+request-kritischen Pfad statt im Artwork-Kaltstart. Die im Request gewählte
+`service`/`service_id` bestimmt nur, welche ID gespeichert wird — die
+anschließende Artwork-Suche läuft über ALLE am Artist gespeicherten
+Provider-IDs, nicht nur über die gerade gewählte. Das erklärt, warum der
+Timeout unabhängig von Artist und Quelle reproduzierbar ist.
+
+Das Frontend (`webui/src/app/api-client.ts`: `apiClient = ky.create({baseUrl,
+retry: 0})`) setzt kein eigenes `timeout`, wodurch `ky`s Default von 10 s
+gilt und exakt mit der Fehlermeldung „Request timed out" abbricht. Da
+`conn.commit()` erst nach dem Artwork-Versuch läuft, kann der Match
+serverseitig wenig später trotzdem erfolgreich durchlaufen — der Client hat
+davon durch den Timeout aber nichts mehr erfahren; ob eine bestimmte
+Zuordnung wirklich gespeichert wurde, lässt sich nur durch Neuladen der
+Artist-Seite prüfen.
+
+**Korrekturvertrag:** Der Match selbst darf nicht auf die Artwork-Nachladung
+warten — `conn.commit()` für den Match gehört vor den Artwork-Versuch, oder
+die Artwork-Suche wird analog zum Artwork-Kaltstart-Pfad (siehe
+[features F-01](library-v2-features.md#feat-artwork)) in den Hintergrund
+verlagert. Kurzfristig zumindest den bestehenden Parallel-Fetch aus dem
+Artwork-Picker (`core/metadata/art_lookup.py:601-613`, ThreadPoolExecutor)
+statt des sequenziellen Fallbacks verwenden, um unter das Client-Timeout zu
+kommen.
+
+**Umgesetzt am 26. Juli 2026** — beide Hauptpunkte zusammen: erst
+`conn.commit()`, dann `schedule_native_artist_artwork` off-thread mit eigener
+Verbindung. Der Parallel-Fetch wurde bewusst **nicht** übernommen; er war
+ausdrücklich nur die kurzfristige Notlösung, um unter das Timeout zu kommen,
+und nach der Entkopplung sieht die Latenz niemand mehr (dieselbe Abwägung wie
+in [perf25-02](#perf25-02)). Siehe
+[status.md §21](library-v2-status.md#21-manual-match-artwork-verlässt-den-request-pfad-26-juli).
