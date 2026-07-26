@@ -104,11 +104,18 @@ class LibraryReorganizeJob(RepairJob):
                         finding_type="reorganize_unavailable",
                         severity="warning",
                         entity_type="album",
-                        entity_id=str(album_id),
+                        # T-12: prefixed, because a bare number is read as a
+                        # LEGACY id and resolved through lib2_albums
+                        # .legacy_album_id — which can name a different row.
+                        entity_id=f"lib2:{album_id}",
                         file_path=None,
                         title=f'Cannot reorganize: {album["title"]}',
                         description="The file-owning album has no planner back-reference; re-import it to repair identity.",
-                        details={"lib2_album_id": album_id},
+                        details={
+                            "lib2_album_id": album_id,
+                            "library_v2_native": True,
+                            "library_v2": {"album_ids": [album_id]},
+                        },
                     )
                     result.findings_created += int(bool(inserted))
                     result.findings_skipped_dedup += int(not inserted)
@@ -156,7 +163,7 @@ class LibraryReorganizeJob(RepairJob):
                         finding_type="path_mismatch",
                         severity="info",
                         entity_type="track",
-                        entity_id=str(lib2_track_id),
+                        entity_id=f"lib2:{lib2_track_id}",  # T-12
                         file_path=current_path,
                         title=f"Would move: {os.path.basename(current_path) or track.get('title', '')}",
                         description=f"From: {current_path or '?'}\nTo: {new_path or '?'}",
@@ -170,6 +177,11 @@ class LibraryReorganizeJob(RepairJob):
                             "lib2_track_id": lib2_track_id,
                             "legacy_track_id": legacy_track_id,
                             "source": preview.get("source"),
+                            "library_v2_native": True,
+                            "library_v2": {
+                                "album_ids": [album_id],
+                                "track_ids": [lib2_track_id],
+                            },
                         },
                     )
                     result.findings_created += int(bool(inserted))

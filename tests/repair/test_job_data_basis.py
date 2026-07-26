@@ -40,3 +40,32 @@ def test_worker_job_info_does_not_expose_internal_data_basis(monkeypatch):
     monkeypatch.setattr(worker, '_get_last_run', lambda _job_id: None)
 
     assert 'data_basis' not in worker.get_all_job_info()[0]
+
+
+def test_catalogue_jobs_that_declare_lib2_are_served_by_a_native_class():
+    """T-11 — ``JOB_DATA_BASIS`` was a promise nothing checked.
+
+    ``register_job`` enforces that a declaration EXISTS, never that the code
+    honours it: ``genre_cleanup`` and ``comma_artist_splitter`` claimed 'lib2'
+    while scanning ``artists``/``albums``/``tracks``. This pins the set of
+    identities whose registered implementation is the native override, so a
+    later refactor that drops one fails here instead of silently shipping a
+    job that sees ~5% of the catalogue.
+    """
+    jobs = get_all_jobs()
+    native = {
+        job_id for job_id, cls in jobs.items()
+        if cls.__module__ == 'core.repair_jobs.native_p3'
+    }
+
+    assert native == {
+        'track_number_repair',
+        'acoustid_scanner',
+        'album_tag_consistency',
+        'metadata_gap_filler',
+        'missing_cover_art',
+        'live_commentary_cleaner',
+        'genre_cleanup',
+        'comma_artist_splitter',
+    }
+    assert all(JOB_DATA_BASIS[job_id] == 'lib2' for job_id in native)
