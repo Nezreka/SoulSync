@@ -948,8 +948,18 @@ class SpotifyClient:
             result = True
         except Exception as e:
             error_str = str(e)
-            # Rate limit means we ARE authenticated — just throttled
-            if "rate" in error_str.lower() or "429" in error_str:
+            # Rate limit means we ARE authenticated — just throttled.
+            #
+            # Match the STATUS, not the words. This used to look for the
+            # bare word "rate" anywhere in the exception text — a substring
+            # test against a message SoulSync does not control, where any
+            # error containing those four letters bought a 30-minute global
+            # ban on every Spotify feature. Spotipy carries the real code on
+            # .http_status; the string checks below stay only as a fallback
+            # for transports that do not, and both name the 429 explicitly.
+            _status = getattr(e, "http_status", None) or getattr(e, "status", None)
+            _low = error_str.lower()
+            if _status == 429 or "http status: 429" in _low or "too many requests" in _low:
                 # ANY rate limit on the auth probe means Spotify is actively throttling us.
                 # Always activate a global ban — even with a short or missing Retry-After.
                 # Without this, the probe→429→probe cycle repeats every ~60s forever.

@@ -28,24 +28,54 @@ from utils.logging_config import get_logger
 logger = get_logger("chat.api")
 
 _MAX_MESSAGE_LEN = 1000
+# Preset chat avatars live at webui/static/avatar/1.png .. <AVATAR_COUNT>.png.
+# The id is only ever an INDEX into that fixed set — remote input must never
+# reach a filesystem path.
+AVATAR_COUNT = 100
+# Avatars only their owner may wear. The picker hides them from everyone else,
+# but the envelope is client-controlled, so ownership is ALSO enforced on send
+# here and on render in chat.js — a forged id can't put someone else's face on
+# your name. Keys are avatar ids, values the slskd username (compared casefold).
+RESERVED_AVATARS = {100: "boulderbadgedad"}
+
+
+def _avatar_allowed(av: int, username: str) -> bool:
+    """True unless `av` is reserved for someone other than `username`."""
+    owner = RESERVED_AVATARS.get(int(av or 0))
+    if owner is None:
+        return True
+    return str(username or "").strip().casefold() == owner
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
 _SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
 _AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-min TTL)
 
 
 def _self_username(client) -> str:
+    """Our own Soulseek name, cached — several probes over the network.
+
+    A known name is held for the full TTL; a miss is retried much sooner so an
+    slskd that was still logging in resolves on the next page load instead of
+    making the user wait out five minutes. Failures keep the last known good
+    name rather than blanking it.
+    """
     import time as _time
     now = _time.time()
-    if _SELF["name"] and now - _SELF["at"] < 300:
+    ttl = 300 if _SELF["name"] else 45
+    if _SELF["at"] and now - _SELF["at"] < ttl:
         return _SELF["name"]
     try:
-        info = _run_async(client.get_session_info()) or {}
-        name = str(info.get("username") or "")
-        if name:
-            _SELF.update(name=name, at=now)
-        return name
-    except Exception:
+        name = str(_run_async(client.get_soulseek_username()) or "").strip()
+    except Exception as e:
+        logger.warning(f"Could not resolve our Soulseek username: {e}")
+        _SELF.update(at=now)
         return _SELF["name"]
+    if name:
+        _SELF.update(name=name, at=now)
+        return name
+    logger.warning("slskd did not report a Soulseek username; self-mention "
+                   "highlighting and reserved avatars stay off")
+    _SELF.update(at=now)
+    return _SELF["name"]
 
 # Host-injected callables (configure() below) — avoids circular imports with
 # web_server, same pattern as core/enrichment/api.py.
@@ -150,8 +180,11 @@ def _unwrap_room_messages(messages):
     and attached. REACTION carriers (empty-text envelopes with 're') are
     pulled OUT of the visible list into a {target_key: {emoji: [users]}} map.
     PROTOCOL carriers (envelopes with 'p' — jukebox votes, beacons, pins) are
-    pulled out into an event list: machine coordination, never rendered,
-    never archived. Returns (messages, reactions_map, protocol_events)."""
+    pulled out into an event list: machine coordination, never rendered. Most
+    are live-only; the Arcade's gm.* carriers are the exception and DO get
+    archived (see chat_game_carriers) because a game is durable state that
+    happens to travel as messages. Returns (messages, reactions_map,
+    protocol_events)."""
     from core import chat_codec
     out = []
     reactions: dict = {}
@@ -190,6 +223,14 @@ def _unwrap_room_messages(messages):
             # Thread membership: `th` is the parent message key (user|timestamp),
             # `tn` the display name carried so the sidebar still has a title when
             # the parent has scrolled out of the loaded archive.
+            # Preset avatar id (webui/static/avatar/<n>.png). Bounded int only —
+            # it indexes a fixed set, it is NEVER used to build a path.
+            try:
+                _av = int(dec.get("av"))
+                if 1 <= _av <= AVATAR_COUNT:
+                    m["av"] = _av
+            except (TypeError, ValueError):
+                pass
             _th = dec.get("th")
             if isinstance(_th, str) and _th.strip():
                 m["th"] = _th.strip()[:160]
@@ -351,6 +392,41 @@ def _oembed_fetch(video_id):
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
+    # ── Arcade bank (play money) ─────────────────────────────────────────
+    # Per profile, local, refilled every local midnight. It is NOT authoritative
+    # for anything between players and is not meant to be: a balance only your
+    # own machine can see cannot back a bet against somebody else. It exists so
+    # the solo games (the slot machine) have stakes, where there is nobody to
+    # defraud but yourself.
+    _ARCADE_MAX_STAKE = 1000
+
+    @bp.route("/api/chat/arcade/bank", methods=["GET"])
+    def arcade_bank_get():
+        db = _db()
+        if db is None:
+            return jsonify({"error": "Database unavailable"}), 503
+        return jsonify(db.get_arcade_bank(int(getattr(g, "profile_id", 1) or 1)))
+
+    @bp.route("/api/chat/arcade/bank", methods=["POST"])
+    def arcade_bank_adjust():
+        """Stake or collect. Bounded per call so a typo (or a bug) cannot mint
+        a fortune in one request; going below zero is refused outright, which
+        is the one rule a bank like this can actually enforce."""
+        db = _db()
+        if db is None:
+            return jsonify({"error": "Database unavailable"}), 503
+        data = request.json or {}
+        try:
+            delta = int(data.get("delta"))
+        except (TypeError, ValueError, OverflowError):
+            return jsonify({"error": "delta must be a whole number"}), 400
+        if abs(delta) > _ARCADE_MAX_STAKE * 100:
+            return jsonify({"error": "Amount out of range"}), 400
+        out = db.adjust_arcade_bank(int(getattr(g, "profile_id", 1) or 1), delta)
+        if out.get("refused"):
+            return jsonify(dict(out, error="Not enough in the bank")), 400
+        return jsonify(out)
+
     @bp.route("/api/chat/settings", methods=["GET"])
     def chat_settings_get():
         """The chat settings for the cog modal (admin-only — these are
@@ -371,6 +447,9 @@ def create_blueprint() -> Blueprint:
             "giphy_key_set": bool(_cfg("soulseek.chat_giphy_key", "")),
             "filepost_key_set": bool(_cfg("soulseek.chat_filepost_key", "")),
             "filepost_expiry": str(_cfg("soulseek.chat_filepost_expiry", "") or ""),
+            # Chosen preset avatar (0 = none). Server-side so it follows the
+            # account across browsers rather than living in one localStorage.
+            "avatar": int(_cfg("soulseek.chat_avatar", 0) or 0),
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
@@ -393,6 +472,16 @@ def create_blueprint() -> Blueprint:
                          ("auto_prove", "soulseek.chat_auto_prove")):
             if key in body:
                 _config_set(cfg, bool(body.get(key)))
+        if "avatar" in body:
+            try:
+                _av = int(body.get("avatar") or 0)
+            except (TypeError, ValueError):
+                _av = 0
+            if not (1 <= _av <= AVATAR_COUNT):
+                _av = 0
+            elif not _avatar_allowed(_av, _self_username(_client())):
+                _av = 0          # reserved for someone else — don't store it
+            _config_set("soulseek.chat_avatar", _av)
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
@@ -945,17 +1034,38 @@ def create_blueprint() -> Blueprint:
                 if now - _INGEST_AT.get(room, 0) > 60:
                     _INGEST_AT[room] = now
                     db.add_chat_messages(room, live)
+                # Game carriers ride every hydrate rather than the 60s throttle:
+                # they are rare (usually none at all), the natural-key UNIQUE
+                # makes repeats free, and losing one loses a move.
+                db.add_chat_game_carriers(room, protocol_events)
                 arch = db.get_chat_messages(room, limit=100)
                 if arch:
                     out = arch
             except Exception:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
+        # Games outlive slskd's buffer: replay the archived gm.* carriers
+        # ahead of the live feed so a match survives a restart even when nobody
+        # in the room is still holding it. Asking the room is always the first
+        # move (see gm.sync); this is the backstop for a cold room. Deduped on
+        # the same natural key the client uses, and ordered oldest-first
+        # because the fold depends on stream order.
+        feed = protocol_events
+        if db is not None:
+            try:
+                seen = {(e.get("username"), e.get("timestamp"),
+                         (e.get("p") or {}).get("k")) for e in protocol_events}
+                revived = [e for e in db.get_chat_game_carriers(room)
+                           if (e["username"], e["timestamp"], e["p"].get("k")) not in seen]
+                if revived:
+                    feed = revived + protocol_events
+            except Exception:
+                logger.debug("chat: game carrier replay unavailable", exc_info=True)
         return jsonify({"room": room, "joined": True,
                         "messages": _attach_reactions(out, reactions),
                         "users": users or [], "can_send": _can_send(),
                         # machine coordination events (jukebox/polls/beacons)
-                        # from the live buffer — the page's protocol feed
-                        "protocol": protocol_events})
+                        # from the live buffer, plus replayed game carriers
+                        "protocol": feed})
 
     @bp.route("/api/chat/room/protocol", methods=["POST"])
     def chat_room_protocol_send():
@@ -977,6 +1087,10 @@ def create_blueprint() -> Blueprint:
         room = _resolve_room(payload.get("room"))
         if room is None:
             return jsonify({"error": "Not in that room"}), 404
+        # NOTE: the avatar rides INSIDE the protocol payload for carriers (the
+        # 'hello' beacon sends {k:'hello', av:N}) — an envelope-level field
+        # would be dropped here, since pure carriers never reach the message
+        # unwrap path that reads it.
         encoded = chat_codec.encode("", {"p": proto})
         if encoded is None:
             return jsonify({"error": "Protocol payload too large"}), 400
@@ -1267,6 +1381,16 @@ def create_blueprint() -> Blueprint:
         if chan and chan != "general" and _re.fullmatch(r"[a-z0-9][a-z0-9-]*", chan):
             extra = dict(extra or {})
             extra["c"] = chan
+        # Preset avatar id, validated to the known range. Riding it on messages
+        # you're already sending costs a few bytes and adds NO extra carrier
+        # messages (so no extra line noise for vanilla Soulseek clients).
+        try:
+            _av = int(body.get("avatar"))
+            if 1 <= _av <= AVATAR_COUNT and _avatar_allowed(_av, _self_username(client)):
+                extra = dict(extra or {})
+                extra["av"] = _av
+        except (TypeError, ValueError):
+            pass
         # Thread membership (parent message key + carried display name).
         thread = str(body.get("thread") or "").strip()[:160]
         if thread:

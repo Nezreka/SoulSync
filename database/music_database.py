@@ -427,6 +427,43 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_messages_room "
                            "ON chat_room_messages (room, timestamp)")
+            # Arcade game carriers. Protocol carriers are normally ephemeral --
+            # they are machine coordination and replaying a stale jukebox vote
+            # would resurrect a dead queue -- but a GAME is durable state that
+            # happens to be carried as messages. slskd forgets the room on
+            # restart and the client only keeps the last 300 protocol events,
+            # so without this a match played across days simply vanishes once
+            # nobody in the room still holds it. Games only: never jbx.*, typ,
+            # hello or pins.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_game_carriers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    game_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room, username, timestamp, payload) ON CONFLICT IGNORE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_game_carriers_room "
+                           "ON chat_game_carriers (room, timestamp)")
+            # Arcade play-money bank. Local and per profile, refilled to the
+            # daily allowance the first time it is read on a new local day.
+            # DELIBERATELY not authoritative for anything between players: a
+            # balance nobody else can verify cannot back a bet. It exists for
+            # solo games (the slot machine) where there is nobody to defraud.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS arcade_bank (
+                    profile_id INTEGER PRIMARY KEY,
+                    balance INTEGER NOT NULL DEFAULT 0,
+                    refilled_on TEXT NOT NULL DEFAULT '',
+                    lifetime_won INTEGER NOT NULL DEFAULT 0,
+                    lifetime_lost INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # Local, private notes on Soulseek users ("great jazz rips") —
             # shown on the chat user card. Never leaves this install.
             cursor.execute("""
@@ -10769,6 +10806,8 @@ class MusicDatabase:
             return 0
 
     _CHAT_ARCHIVE_KEEP = 5000     # per room — plenty of scrollback, bounded disk
+    _CHAT_GAME_KEEP = 2000        # per room — a 60-move game is ~62 carriers
+    ARCADE_DAILY = 10000          # play money, refilled every local midnight
 
     def get_chat_user_note(self, username: str) -> str:
         """The local note for a Soulseek username ('' when none)."""
@@ -10888,6 +10927,154 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error archiving chat messages: %s", e)
             return 0
+
+    def add_chat_game_carriers(self, room: str, events) -> int:
+        """Archive Arcade game carriers ({username, timestamp, p}). Only
+        ``gm.*`` kinds are stored: the rest of the protocol bus is live-only
+        coordination and replaying it would resurrect state that is meant to
+        be dead. Idempotent on the natural key, pruned per room."""
+        rows = []
+        for e in events or []:
+            if not isinstance(e, dict):
+                continue
+            p = e.get('p')
+            if not isinstance(p, dict):
+                continue
+            kind = str(p.get('k') or '')
+            if not kind.startswith('gm.'):
+                continue
+            gid = str(p.get('g') or '').strip()[:16]
+            user = str(e.get('username') or '').strip()[:64]
+            ts = str(e.get('timestamp') or '').strip()[:40]
+            if not gid or not user or not ts:
+                continue
+            try:
+                payload = json.dumps(p, sort_keys=True, separators=(',', ':'))
+            except (TypeError, ValueError):
+                continue
+            if len(payload) > 2000:
+                continue
+            rows.append((str(room), gid, user, ts, payload))
+        if not rows:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                before = conn.total_changes
+                cursor.executemany(
+                    "INSERT INTO chat_game_carriers (room, game_id, username, timestamp, payload) "
+                    "VALUES (?, ?, ?, ?, ?)", rows)
+                inserted = conn.total_changes - before
+                if inserted:
+                    cursor.execute(
+                        "DELETE FROM chat_game_carriers WHERE room = ? AND id NOT IN "
+                        "(SELECT id FROM chat_game_carriers WHERE room = ? "
+                        " ORDER BY timestamp DESC, id DESC LIMIT ?)",
+                        (str(room), str(room), self._CHAT_GAME_KEEP))
+                conn.commit()
+                return inserted
+        except Exception as e:
+            logger.error("Error archiving chat game carriers: %s", e)
+            return 0
+
+    def get_arcade_bank(self, profile_id: int) -> Dict[str, Any]:
+        """The profile's play-money balance, refilling it if the local day has
+        turned over. Reading is what triggers a refill — there is no scheduler
+        involved and none is wanted: a bank nobody has looked at does not need
+        to be topped up."""
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT balance, refilled_on, lifetime_won, lifetime_lost "
+                    "FROM arcade_bank WHERE profile_id = ?", (int(profile_id),)).fetchone()
+                if row is None:
+                    conn.execute(
+                        "INSERT INTO arcade_bank (profile_id, balance, refilled_on) "
+                        "VALUES (?, ?, ?)", (int(profile_id), self.ARCADE_DAILY, today))
+                    conn.commit()
+                    return {"balance": self.ARCADE_DAILY, "allowance": self.ARCADE_DAILY,
+                            "refilled_on": today, "lifetime_won": 0, "lifetime_lost": 0}
+                row = dict(row)
+                if row["refilled_on"] != today:
+                    # A FLOOR, not a reset. The point is that everyone can
+                    # always play today, so a balance below the allowance is
+                    # topped up to it — and a balance above it is left alone,
+                    # because winnings are yours to keep. It never ADDS the
+                    # allowance either, or sitting out a month would make you
+                    # rich for doing nothing.
+                    topped = max(int(row["balance"]), self.ARCADE_DAILY)
+                    conn.execute(
+                        "UPDATE arcade_bank SET balance = ?, refilled_on = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE profile_id = ?",
+                        (topped, today, int(profile_id)))
+                    conn.commit()
+                    row["balance"] = topped
+                    row["refilled_on"] = today
+                return {"balance": int(row["balance"]), "allowance": self.ARCADE_DAILY,
+                        "refilled_on": row["refilled_on"],
+                        "lifetime_won": int(row["lifetime_won"] or 0),
+                        "lifetime_lost": int(row["lifetime_lost"] or 0)}
+        except Exception as e:
+            logger.error("Error reading arcade bank: %s", e)
+            return {"balance": 0, "allowance": self.ARCADE_DAILY, "refilled_on": "",
+                    "lifetime_won": 0, "lifetime_lost": 0, "error": True}
+
+    def adjust_arcade_bank(self, profile_id: int, delta: int) -> Dict[str, Any]:
+        """Move the balance by ``delta``. Refuses to go negative — you cannot
+        stake what you do not have, which is the only rule this bank enforces
+        and the only one it can."""
+        cur = self.get_arcade_bank(profile_id)
+        if cur.get("error"):
+            return cur
+        try:
+            delta = int(delta)
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError is the infinity case — int(float('inf')) raises it
+            # rather than ValueError, so leaving it out let junk through.
+            return cur
+        if delta < 0 and cur["balance"] + delta < 0:
+            return dict(cur, refused=True)
+        new_balance = cur["balance"] + delta
+        won = cur["lifetime_won"] + (delta if delta > 0 else 0)
+        lost = cur["lifetime_lost"] + (-delta if delta < 0 else 0)
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE arcade_bank SET balance = ?, lifetime_won = ?, "
+                    "lifetime_lost = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE profile_id = ?",
+                    (new_balance, won, lost, int(profile_id)))
+                conn.commit()
+        except Exception as e:
+            logger.error("Error updating arcade bank: %s", e)
+            return cur
+        return {"balance": new_balance, "allowance": self.ARCADE_DAILY,
+                "refilled_on": cur["refilled_on"], "lifetime_won": won,
+                "lifetime_lost": lost}
+
+    def get_chat_game_carriers(self, room: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """Archived game carriers, OLDEST-first — the order the fold expects."""
+        try:
+            with self._get_connection() as conn:
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT username, timestamp, payload FROM chat_game_carriers "
+                    "WHERE room = ? ORDER BY timestamp DESC, id DESC LIMIT ?",
+                    (str(room), max(1, min(int(limit), 1000)))).fetchall()]
+            rows.reverse()
+            out = []
+            for r in rows:
+                try:
+                    p = json.loads(r['payload'])
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(p, dict):
+                    out.append({'username': r['username'], 'timestamp': r['timestamp'], 'p': p})
+            return out
+        except Exception as e:
+            logger.error("Error reading chat game carriers: %s", e)
+            return []
 
     def get_chat_messages(self, room: str, before: str = None, limit: int = 100) -> List[Dict[str, Any]]:
         """A page of archived room messages, OLDEST-first within the page

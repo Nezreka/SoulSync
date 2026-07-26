@@ -293,6 +293,21 @@
         return np;
     }
 
+    // Preset avatar ids announced by the 'hello' beacon ({k:'hello', av:N}), so
+    // someone who joined but hasn't spoken still has a face. Messages carry the
+    // id too (see _avatarOf in chat.js) — this covers the silent ones. Bounded
+    // to the known set: the id INDEXES a fixed list, it never builds a path.
+    function reduceAvatars(events, maxId) {
+        var out = {};
+        var cap = (typeof maxId === 'number' && maxId > 0) ? maxId : 99;
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var n = parseInt(ev.p.av, 10);
+            if (n >= 1 && n <= cap) out[ev.username] = n;
+        });
+        return out;
+    }
+
     // The next track every client agrees on: most votes (lexicographic tie),
     // FIFO head when nobody voted. Null when the queue is empty.
     function nextTrack(state) {
@@ -311,6 +326,7 @@
         tallyVotes: tallyVotes,
         electCoordinator: electCoordinator,
         reduceNowPlaying: reduceNowPlaying,
+        reduceAvatars: reduceAvatars,
         reduceJukebox: reduceJukebox,
         nextTrack: nextTrack,
         reducePins: reducePins,

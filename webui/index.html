@@ -10195,6 +10195,9 @@
                                         Auto-join the community room</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
                                         Let non-admin profiles send messages</label>
+                                    <label class="chat-settings-label">Your avatar
+                                        <span class="chat-settings-hint" data-chat-avwho></span></label>
+                                    <div class="chat-avpicker" data-chat-avpicker></div>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-ping>
                                         Play a sound when someone mentions or replies to me</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-np>
@@ -12118,6 +12121,12 @@
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat-protocol.js', v=static_v) }}"></script>
+    <!-- Arcade: the chess rules engine and the game lifecycle fold. Both are
+         pure and self-contained (no DOM, no fetch); chat.js reads them off
+         window and simply hides the Arcade if either failed to load. -->
+    <script src="{{ url_for('static', filename='chat-hash.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='chess-engine.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='chat-games.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='label-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>

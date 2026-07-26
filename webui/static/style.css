@@ -72020,6 +72020,11 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     display: flex; align-items: center; justify-content: center;
     font-size: 13px; font-weight: 800;
 }
+/* The cell already has a fixed 32px box, so the image can fill it without the
+   circular height dependency that collapsed the avatar picker. */
+.chat-userpanel-av--img { background: none; overflow: hidden; padding: 0; }
+.chat-userpanel-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-guild-logo { width: 30px; height: 30px; object-fit: contain; display: block; }
 .chat-userpanel-main { flex: 1; min-width: 0; }
 .chat-userpanel-name {
     font-size: 13px; font-weight: 700; color: #fff;
@@ -72201,6 +72206,11 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     display: flex; gap: 10px; padding: 12px 14px;
     border-top: 1px solid rgba(255,255,255,0.07);
 }
+/* display:flex above beats the browser's own [hidden] { display: none }, so
+   form.hidden = true did nothing at all — the composer stayed on screen in
+   the Arcade (where there is no message to send) and behind the join gate.
+   Same trap as #track-detail-overlay further up this file. */
+.chat-composer[hidden] { display: none !important; }
 .chat-input {
     flex: 1; padding: 11px 14px; border-radius: 10px; font-size: 14px; color: #fff;
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
@@ -72225,6 +72235,46 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-user:hover { background: rgba(255,255,255,0.07); color: #fff; }
+
+/* Preset chat avatars. The art is 140x165 (portrait), so these are ROUNDED
+   RECTANGLES rather than circles — a circle would crop faces. Swap the
+   border-radius to 50% if you ever ship square art. */
+.chat-av {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%; border-radius: 8px; overflow: hidden;
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.75);
+    font-size: 11px; font-weight: 800; line-height: 1;
+}
+.chat-av--img { background: rgba(0,0,0,0.25); }
+.chat-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* avatar picker (chat settings).
+   NOTE: the cell height is EXPLICIT and the image is absolutely positioned.
+   The obvious version — aspect-ratio on a flex cell with a height:100% img —
+   makes the cell's height depend on the image while the image's height depends
+   on the cell, and the images collapse to nothing. Don't reintroduce that. */
+.chat-avpicker {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 8px; max-height: 300px; overflow-y: auto; padding: 10px;
+    background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; margin-bottom: 10px;
+}
+.chat-avpick {
+    position: relative;            /* containing block for the image */
+    height: 96px;                  /* explicit — never derived from the image */
+    padding: 0; cursor: pointer; overflow: hidden;
+    border: 2px solid transparent; border-radius: 8px;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55);
+    font-size: 20px; line-height: 92px; text-align: center;
+    transition: border-color .12s ease, transform .12s ease;
+}
+.chat-avpick img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.chat-avpick:hover { border-color: rgba(255,255,255,0.4); transform: translateY(-1px); }
+.chat-avpick--on { border-color: #1db954; box-shadow: 0 0 0 2px rgba(29,185,84,0.25); }
+.chat-avpick--none { font-weight: 700; }
 
 /* Discord-style member row: avatar w/ presence dot + name over an activity line */
 .chat-user-av {
@@ -72261,6 +72311,377 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     .chat-side-item { width: auto; white-space: nowrap; }
     .chat-rail { display: none; }
 }
+
+/* ── The Arcade (chat P3) ────────────────────────────────────────────────
+   Games take over the message column. Accent is the same #1db954 the rest of
+   chat uses; the board is deliberately desaturated so the green reads as
+   "your turn" and nothing else competes with it.
+
+   The board sizes itself off the column width with an aspect-ratio grid, so
+   it stays square at any width without JS. Note the cells do NOT set their
+   own height — the grid rows do — which is what stops the collapse the avatar
+   picker hit (a cell height depending on content that depends on the cell). */
+.chat-arc-lobby { padding: 12px 16px 24px; overflow-y: auto; }
+.chat-arc-hero {
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 18px;
+    background: linear-gradient(135deg, rgba(29,185,84,0.14), rgba(255,255,255,0.03));
+    border: 1px solid rgba(29,185,84,0.22);
+}
+.chat-arc-hero-title { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.chat-arc-hero-sub {
+    font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.62); max-width: 62ch;
+}
+.chat-arc-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chat-arc-hero-top { display: flex; align-items: flex-start; gap: 18px; }
+.chat-arc-hero-top > div:first-child { flex: 1; min-width: 0; }
+/* the purse reads as a physical thing rather than another stat line */
+.chat-arc-purse {
+    flex: none; display: flex; flex-direction: column; align-items: center; gap: 1px;
+    padding: 10px 16px; border-radius: 12px;
+    background: rgba(0,0,0,0.28); border: 1px solid rgba(255,213,79,0.28);
+}
+.chat-arc-purse-coin { font-size: 17px; line-height: 1; }
+.chat-arc-purse-amt {
+    font-size: 20px; font-weight: 800; color: #ffd54f; font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+}
+.chat-arc-purse-sub {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
+    color: rgba(255,255,255,0.4);
+}
+.chat-arc-hero-turn {
+    margin-top: 12px; display: inline-block; padding: 4px 11px; border-radius: 20px;
+    background: rgba(29,185,84,0.18); color: #1db954; font-size: 12px; font-weight: 800;
+}
+
+/* game picker — tiles rather than a row of look-alike buttons */
+.chat-arc-tiles {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 10px; margin-bottom: 6px;
+}
+.chat-arc-tile {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+    padding: 14px 14px 13px; cursor: pointer; text-align: left;
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.035); color: inherit;
+    transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+.chat-arc-tile:hover {
+    background: rgba(29,185,84,0.1); border-color: rgba(29,185,84,0.45);
+    transform: translateY(-2px);
+}
+.chat-arc-tile-icon { font-size: 26px; line-height: 1.1; }
+.chat-arc-tile-name { font-size: 14px; font-weight: 800; color: #fff; }
+.chat-arc-tile-blurb { font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.35; }
+.chat-arc-tilefoot { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
+.chat-arc-inline {
+    border: none; background: none; padding: 0; cursor: pointer; font: inherit;
+    color: #1db954; text-decoration: underline dotted rgba(29,185,84,0.5);
+    text-underline-offset: 2px;
+}
+.chat-arc-blank {
+    text-align: center; padding: 26px 16px; border-radius: 12px;
+    border: 1px dashed rgba(255,255,255,0.12); color: rgba(255,255,255,0.42);
+    font-size: 13px; margin-top: 14px;
+}
+
+.chat-arc-sectitle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
+    color: rgba(255,255,255,0.45); margin: 18px 2px 8px;
+}
+.chat-arc-count {
+    background: rgba(255,255,255,0.08); border-radius: 8px; padding: 1px 7px;
+    font-size: 11px; letter-spacing: 0;
+}
+
+.chat-arc-card {
+    display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left;
+    padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.03); color: inherit;
+}
+.chat-arc-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14); }
+.chat-arc-card--mine { border-color: rgba(29,185,84,0.3); }
+.chat-arc-card-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chat-arc-card-sub { font-size: 12px; color: rgba(255,255,255,0.45); }
+.chat-arc-card-actions { display: flex; gap: 8px; margin-top: 4px; }
+.chat-arc-vs { font-size: 11px; color: rgba(255,255,255,0.35); text-transform: uppercase; }
+
+.chat-arc-who {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 700; color: rgba(255,255,255,0.8);
+}
+.chat-arc-who--turn { color: #1db954; }
+.chat-arc-who-dot { font-size: 17px; line-height: 1; }
+
+.chat-arc-badge {
+    align-self: flex-start; border-radius: 6px; padding: 2px 8px;
+    font-size: 11px; font-weight: 700;
+    background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.6);
+}
+.chat-arc-badge--you { background: rgba(29,185,84,0.18); color: #1db954; }
+.chat-arc-badge--open { background: rgba(88,166,255,0.16); color: #8ab4f8; }
+.chat-arc-badge--stale { background: rgba(255,193,7,0.15); color: #ffc107; }
+.chat-arc-badge--bad { background: rgba(244,67,54,0.15); color: #ff6b5e; }
+.chat-arc-badge--done { background: rgba(255,255,255,0.06); }
+
+.chat-arc-btn {
+    border-radius: 8px; padding: 7px 13px; cursor: pointer; font-size: 13px; font-weight: 700;
+    border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.85);
+}
+.chat-arc-btn:hover { background: rgba(255,255,255,0.1); }
+.chat-arc-btn--go { background: #1db954; border-color: #1db954; color: #06130a; }
+.chat-arc-btn--go:hover { filter: brightness(1.08); background: #1db954; }
+.chat-arc-btn--bad { border-color: rgba(244,67,54,0.4); color: #ff6b5e; }
+.chat-arc-btn--slim { padding: 4px 9px; font-size: 12px; }
+
+/* ── board ── */
+.chat-arc-board-wrap {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px 16px 24px; overflow-y: auto; max-width: 640px; margin: 0 auto; width: 100%;
+}
+.chat-arc-players { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chat-arc-board {
+    display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    aspect-ratio: 1 / 1; width: 100%;
+    border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12);
+    user-select: none;
+}
+.chat-arc-board--over { opacity: 0.75; }
+.chat-arc-sq {
+    display: flex; align-items: center; justify-content: center; position: relative;
+    cursor: pointer;
+}
+.chat-arc-sq--light { background: #6f7c86; }
+.chat-arc-sq--dark { background: #46525c; }
+.chat-arc-sq--last { box-shadow: inset 0 0 0 100px rgba(255,193,7,0.16); }
+.chat-arc-sq--sel { box-shadow: inset 0 0 0 3px #1db954; }
+.chat-arc-sq--check { box-shadow: inset 0 0 0 100px rgba(244,67,54,0.35); }
+/* A legal empty square gets a dot; a legal capture gets a ring, so the two
+   read differently at a glance the way they do on every chess site. */
+.chat-arc-sq--dest::after {
+    content: ''; position: absolute; width: 28%; height: 28%; border-radius: 50%;
+    background: rgba(29,185,84,0.55);
+}
+.chat-arc-sq--take::after {
+    content: ''; position: absolute; inset: 6%; border-radius: 50%;
+    border: 4px solid rgba(29,185,84,0.6);
+}
+.chat-arc-pc {
+    font-size: clamp(20px, 6.2vw, 44px); line-height: 1; position: relative; z-index: 1;
+    pointer-events: none;
+}
+.chat-arc-pc--w { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.chat-arc-pc--b { color: #14181c; text-shadow: 0 1px 1px rgba(255,255,255,0.18); }
+
+.chat-arc-status { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
+.chat-arc-note {
+    font-size: 12px; color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.04);
+    border-left: 3px solid rgba(255,193,7,0.5); border-radius: 4px; padding: 7px 10px;
+}
+.chat-arc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-arc-promo {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.3);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700;
+}
+.chat-arc-promobtn {
+    font-size: 24px; line-height: 1; padding: 2px 10px; cursor: pointer; color: #fff;
+    border-radius: 6px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06);
+}
+.chat-arc-promobtn:hover { background: rgba(255,255,255,0.14); }
+
+.chat-arc-moves {
+    display: flex; flex-direction: column; gap: 1px; font-size: 13px;
+    background: rgba(255,255,255,0.03); border-radius: 8px; padding: 8px 10px;
+    max-height: 220px; overflow-y: auto;
+}
+.chat-arc-moverow {
+    display: grid; grid-template-columns: 40px 1fr 1fr; gap: 8px;
+    color: rgba(255,255,255,0.8); padding: 2px 0;
+}
+.chat-arc-moverow--none { color: rgba(255,255,255,0.4); grid-template-columns: 1fr; }
+.chat-arc-moveno { color: rgba(255,255,255,0.35); }
+
+/* acknowledgement line — derived, no extra round trip */
+.chat-arc-ack { font-size: 12px; color: rgba(255,255,255,0.45); }
+.chat-arc-ack--seen { color: #1db954; }
+
+/* ── slot machine (arcade P10) ── */
+.chat-slot-wrap {
+    display: flex; flex-direction: column; gap: 14px; align-items: center;
+    padding: 20px 16px 28px; max-width: 460px; margin: 0 auto; width: 100%;
+}
+.chat-slot-cab {
+    width: 100%; border-radius: 16px; padding: 22px 18px 16px;
+    background: linear-gradient(160deg, #2a1b3d, #14171c 70%);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 24px rgba(0,0,0,0.35);
+}
+.chat-slot-reels { display: flex; gap: 10px; justify-content: center; }
+.chat-slot-reel {
+    flex: 1; max-width: 108px; aspect-ratio: 3 / 4; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: clamp(34px, 11vw, 56px); line-height: 1;
+    background: linear-gradient(180deg, #f6f2ea, #cfc7bb);
+    box-shadow: inset 0 -6px 14px rgba(0,0,0,0.22), inset 0 4px 8px rgba(255,255,255,0.6);
+}
+/* the blur only during the pull — a still reel should read crisply */
+.chat-slot-cab--spin .chat-slot-reel { filter: blur(1.2px); }
+.chat-slot-verdict {
+    text-align: center; margin-top: 14px; font-size: 15px; font-weight: 800;
+    letter-spacing: 0.4px; color: rgba(255,255,255,0.5); min-height: 22px;
+}
+.chat-slot-verdict--win { color: #ffd54f; text-shadow: 0 0 18px rgba(255,213,79,0.5); }
+.chat-slot-bank { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.chat-slot-balance {
+    font-size: 26px; font-weight: 800; color: #1db954; font-variant-numeric: tabular-nums;
+}
+.chat-slot-banklabel { font-size: 11px; color: rgba(255,255,255,0.4); }
+.chat-slot-stakes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.chat-slot-pull { padding: 9px 26px; font-size: 15px; }
+.chat-slot-pull[disabled] { opacity: 0.5; cursor: default; }
+.chat-slot-pays {
+    width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px;
+    background: rgba(255,255,255,0.03); border-radius: 10px; padding: 10px 14px;
+}
+.chat-slot-payrow {
+    display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px;
+    align-items: center; font-size: 13px; color: rgba(255,255,255,0.7);
+}
+.chat-slot-payrow b { color: #1db954; font-variant-numeric: tabular-nums; }
+.chat-slot-paytwo { text-align: right; opacity: 0.65; }
+@media (max-width: 560px) { .chat-slot-pays { grid-template-columns: 1fr; } }
+
+/* ── battleship (arcade P9) ── */
+.chat-bs-title {
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
+    color: rgba(255,255,255,0.45); margin-top: 4px;
+}
+.chat-bs-lost { text-transform: none; letter-spacing: 0; color: #ffc107; font-weight: 600; }
+.chat-bs-grid {
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px;
+    aspect-ratio: 1 / 1; width: 100%; padding: 6px; border-radius: 10px;
+    background: #0d2438; border: 1px solid rgba(255,255,255,0.1);
+}
+/* their waters read cooler and emptier; yours warmer, because you can see it */
+.chat-bs-grid--foe { background: #0a1c2c; }
+.chat-bs-cell {
+    border-radius: 3px; background: rgba(120,180,230,0.09); position: relative;
+}
+.chat-bs-cell--ship { background: rgba(255,255,255,0.32); }
+.chat-bs-cell--fire { cursor: crosshair; }
+.chat-bs-cell--fire:hover { background: rgba(29,185,84,0.55); }
+.chat-bs-cell--miss::after {
+    content: ''; position: absolute; inset: 34%; border-radius: 50%;
+    background: rgba(255,255,255,0.4);
+}
+.chat-bs-cell--hit { background: #d63a2f; }
+.chat-bs-cell--hit::after {
+    content: ''; position: absolute; inset: 22%; border-radius: 50%;
+    background: rgba(255,220,120,0.9);
+}
+.chat-bs-fleetbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-bs-ship {
+    font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55);
+}
+.chat-bs-ship b { color: rgba(255,255,255,0.8); }
+.chat-bs-ship--set { background: rgba(29,185,84,0.16); color: #1db954; }
+.chat-bs-ship--next { box-shadow: 0 0 0 1px rgba(255,255,255,0.35); color: #fff; }
+
+/* ── room ballot (arcade P5) ── */
+.chat-arc-ballot {
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 9px 11px;
+    display: flex; flex-direction: column; gap: 5px;
+}
+.chat-arc-ballot-head {
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px;
+    color: rgba(255,255,255,0.45);
+}
+.chat-arc-ballotrow {
+    display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; align-items: center;
+    font-size: 13px; color: rgba(255,255,255,0.8);
+}
+.chat-arc-ballotmv { font-weight: 700; }
+.chat-arc-ballotbar {
+    height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden;
+}
+.chat-arc-ballotbar i { display: block; height: 100%; background: #1db954; }
+.chat-arc-ballotn {
+    font-size: 11px; color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums;
+}
+
+/* ── connect 4 (arcade P5) ── */
+.chat-arc-c4board {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+    aspect-ratio: 7 / 6; width: 100%; padding: 8px;
+    background: #2b4f8a; border-radius: 12px;
+}
+.chat-arc-c4cell {
+    display: flex; align-items: center; justify-content: center; border-radius: 50%;
+    background: rgba(0,0,0,0.28);
+}
+/* the whole COLUMN is the target — you drop into a column, not onto a cell */
+.chat-arc-c4cell--live { cursor: pointer; }
+.chat-arc-c4cell--live:hover { background: rgba(255,255,255,0.14); }
+.chat-arc-disc { width: 82%; height: 82%; border-radius: 50%; }
+.chat-arc-disc--w { background: radial-gradient(circle at 35% 30%, #ff8a80, #d63a2f); }
+/* Yellow, not blue: the board is blue, and a blue disc on a blue board is
+   the one colour pairing that cannot work. Red/yellow on blue is also what
+   the actual game looks like, so it reads instantly. */
+.chat-arc-disc--b { background: radial-gradient(circle at 35% 30%, #ffe082, #f2b90c); }
+
+/* ── ladder + the reveal (arcade P4) ── */
+.chat-arc-ladder {
+    background: rgba(255,255,255,0.03); border-radius: 10px; padding: 8px 10px;
+}
+.chat-arc-ladrow {
+    display: grid; grid-template-columns: 26px 1fr auto auto; gap: 10px; align-items: center;
+    padding: 5px 4px; font-size: 13px; color: rgba(255,255,255,0.78);
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.chat-arc-ladrow:last-of-type { border-bottom: none; }
+.chat-arc-ladrow--me { color: #1db954; font-weight: 700; }
+.chat-arc-ladno { color: rgba(255,255,255,0.35); text-align: right; }
+.chat-arc-ladname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-arc-ladwl { font-size: 11px; color: rgba(255,255,255,0.4); }
+.chat-arc-ladelo { font-weight: 800; font-variant-numeric: tabular-nums; }
+.chat-arc-ladnote {
+    font-size: 11px; color: rgba(255,255,255,0.38); line-height: 1.5; padding: 8px 4px 2px;
+}
+
+.chat-arc-exports { display: flex; gap: 8px; }
+.chat-arc-reveal { margin-top: 4px; }
+.chat-arc-reveal-btn {
+    display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer;
+    border-radius: 8px; padding: 8px 11px; font-size: 12px; font-weight: 700;
+    border: 1px dashed rgba(29,185,84,0.35); background: rgba(29,185,84,0.07);
+    color: #1db954; text-align: left;
+}
+.chat-arc-reveal-btn:hover { background: rgba(29,185,84,0.13); }
+.chat-arc-reveal-caret { margin-left: auto; }
+.chat-arc-rawnote {
+    font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.5; padding: 8px 4px 4px;
+}
+.chat-arc-raw {
+    max-height: 240px; overflow: auto; border-radius: 8px;
+    background: rgba(0,0,0,0.28); padding: 8px 10px;
+}
+.chat-arc-rawrow {
+    display: flex; gap: 8px; align-items: baseline; padding: 2px 0;
+    font-size: 11px; color: rgba(255,255,255,0.55);
+}
+.chat-arc-rawrow code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-all; color: rgba(255,255,255,0.75);
+}
+.chat-arc-rawwho { flex: none; color: #1db954; font-weight: 700; }
+
+/* a game in the sidebar where it is your move */
+.chat-thread--turn { color: #1db954; }
 
 /* message-this-user links (chat P4) — any surface can render one */
 .chat-user-link {
@@ -72378,6 +72799,14 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 16px; font-weight: 800; color: rgba(255,255,255,0.92);
     user-select: none; flex: none;
 }
+/* Preset-avatar variant of the message-group avatar. Rounded rectangle rather
+   than the initial's circle — the art is 140x165 portrait and a circle crops
+   faces (see .chat-av). */
+.chat-avatar--img {
+    border-radius: 9px; background: rgba(0,0,0,0.25); overflow: hidden;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+}
+.chat-avatar--img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .chat-group-body { min-width: 0; }
 .chat-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 1px; }
 .chat-group-head .chat-msg-user { font-size: 14.5px; }
