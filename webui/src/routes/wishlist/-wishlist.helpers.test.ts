@@ -230,6 +230,25 @@ describe('filterWishlistGroups', () => {
     { name: 'Boards of Canada', albums: [], singles: [], total: 5, failingCount: 2 },
   ];
 
+  it('matches album names, not just the artist', () => {
+    // Regression guard: f59c56438 renamed .wl-satellite -> .wl-album-tile and
+    // left the filter querying the old class, so this silently matched nothing
+    // from that commit until the port restored it.
+    const withAlbum = [
+      {
+        name: 'Boards of Canada',
+        albums: [{ name: 'Geogaddi', image: '', tracks: [] }],
+        singles: [],
+        total: 4,
+        failingCount: 0,
+      },
+      { name: 'Aphex Twin', albums: [], singles: [], total: 2, failingCount: 0 },
+    ];
+    expect(filterWishlistGroups(withAlbum, 'geogaddi', false).map((g) => g.name)).toEqual([
+      'Boards of Canada',
+    ]);
+  });
+
   it('matches the artist name case-insensitively', () => {
     expect(filterWishlistGroups(groups, 'APHEX', false).map((g) => g.name)).toEqual(['Aphex Twin']);
     expect(filterWishlistGroups(groups, '', false)).toHaveLength(2);

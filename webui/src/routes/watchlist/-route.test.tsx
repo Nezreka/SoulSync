@@ -454,6 +454,30 @@ describe('watchlist route', () => {
     expect(screen.getByText('Not scanned yet')).toBeInTheDocument();
   });
 
+  it('renders a scanned label without doubling the word "Scanned"', async () => {
+    // Regression guard: the card prefixed "Scanned " onto a helper that already
+    // returns "Scanned 3d ago", so it read "Scanned Scanned 3d ago".
+    stubFetch({
+      labels: [
+        {
+          id: 6,
+          musicbrainz_label_id: 'mb-ninja',
+          discogs_label_id: null,
+          label_name: 'Ninja Tune',
+          source: 'musicbrainz',
+          backlog: false,
+          date_added: null,
+          last_scan_timestamp: '2020-01-01T00:00:00Z',
+        },
+      ],
+    });
+    renderWatchlistRoute(['/watchlist?tab=labels']);
+
+    await waitFor(() => expect(screen.getByText('Ninja Tune')).toBeInTheDocument());
+    expect(screen.queryByText(/Scanned Scanned/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^Scanned \d+mo ago$/)).toBeInTheDocument();
+  });
+
   it('toggles label backlog without opening the label', async () => {
     const calls = stubFetch({
       labels: [

@@ -137,14 +137,14 @@ export function WatchlistLabelsTab({ profileId }: { profileId: number }) {
 /**
  * The label card's scan line.
  *
- * Reproduced exactly, doubled word and all: `formatRelativeScanTime` already
- * returns "Scanned 3d ago", and the vanilla template prefixes another
- * "Scanned ", so a scanned label reads "Scanned Scanned 3d ago" today. That is
- * a real (cosmetic) bug in the live page, kept here so this migration changes
- * nothing. Drop the prefix to fix it — deliberately not done as part of a port.
+ * `formatRelativeScanTime` already returns "Scanned 3d ago", so the extra
+ * "Scanned " prefix the label card carried produced "Scanned Scanned 3d ago".
+ * Introduced in 7bcfde777 (labels P3) by prefixing a function that already
+ * prefixes; the prefix is dropped here rather than the function changed,
+ * because every other caller relies on it supplying the word.
  */
 export function labelScanText(label: Pick<WatchlistLabel, 'last_scan_timestamp'>): string {
   return label.last_scan_timestamp
-    ? `Scanned ${formatRelativeScanTime(label.last_scan_timestamp)}`
+    ? formatRelativeScanTime(label.last_scan_timestamp)
     : 'Not scanned yet';
 }

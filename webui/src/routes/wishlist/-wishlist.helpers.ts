@@ -227,11 +227,11 @@ export function trackCountLabel(count: number): string {
 /**
  * Apply the search box and the Failing-only chip.
  *
- * Artist name only — which is what the vanilla filter actually does, despite
- * appearances. It also tries to match album names via `.wl-satellite`, but that
- * class is rendered nowhere (the markup is `.wl-album-tile`), so the album
- * branch has never matched anything. Reproduced as-is: making the filter
- * suddenly match albums would change which orbs a given query returns.
+ * Matches the artist name OR any of its album names, which is what the vanilla
+ * filter intended. It queried `.wl-satellite` for album names, but f59c56438
+ * renamed that markup to `.wl-album-tile` and never updated the selector, so
+ * the album branch silently matched nothing from that commit onward. Restored
+ * here — searching "geogaddi" finds the artist holding it again.
  */
 export function filterWishlistGroups(
   groups: WishlistArtistGroup[],
@@ -241,7 +241,8 @@ export function filterWishlistGroups(
   const needle = query.toLowerCase().trim();
   return groups.filter((group) => {
     if (failingOnly && group.failingCount === 0) return false;
-    if (needle && !group.name.toLowerCase().includes(needle)) return false;
-    return true;
+    if (!needle) return true;
+    if (group.name.toLowerCase().includes(needle)) return true;
+    return group.albums.some((album) => album.name.toLowerCase().includes(needle));
   });
 }
