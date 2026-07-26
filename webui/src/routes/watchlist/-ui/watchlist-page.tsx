@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import {
+  cancelWatchlistScan,
   removeWatchlistArtistsBatch,
+  startWatchlistScan,
   WATCHLIST_QUERY_KEY,
   watchlistArtistsQueryOptions,
   watchlistCountQueryOptions,
@@ -27,6 +29,7 @@ import {
   sortArtists,
   WATCHLIST_SOURCE_BADGES,
 } from '../-watchlist.helpers';
+import { useCountdown, useLiveWatchlistScan } from '../-watchlist.scan';
 import { WATCHLIST_SORT_VALUES, type WatchlistArtist } from '../-watchlist.types';
 import { Route } from '../route';
 import { WatchlistArtistConfigModal } from './watchlist-artist-config-modal';
@@ -34,6 +37,7 @@ import { WatchlistArtistDetail } from './watchlist-artist-detail';
 import { WatchlistGlobalSettingsModal } from './watchlist-global-settings-modal';
 import { WatchlistLabelsTab } from './watchlist-labels-tab';
 import styles from './watchlist-page.module.css';
+import { WatchlistScanDeck } from './watchlist-scan-deck';
 
 const SORT_LABELS: Record<(typeof WATCHLIST_SORT_VALUES)[number], string> = {
   'name-asc': 'Name A-Z',
@@ -56,19 +60,53 @@ export function WatchlistPage() {
   // different artist.
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
 
+  // Declared before the live-scan hook so the poll interval can read it. Only
+  // polls while a scan is running AND the socket has gone quiet — the vanilla
+  // fallback condition, which keeps this off entirely on a healthy socket.
+  const [pollWhileScanning, setPollWhileScanning] = useState(false);
+  const scanStatusQuery = useQuery({
+    ...watchlistScanStatusQueryOptions(profileId),
+    refetchInterval: pollWhileScanning ? 2000 : false,
+  });
+
   // The route loader has already primed all four, so these resolve from cache
   // on first paint. They stay `useQuery` rather than suspense so that a later
   // refetch (after a scan, say) re-renders in place instead of unmounting the
   // page into a fallback.
   const countQuery = useQuery(watchlistCountQueryOptions(profileId));
   const artistsQuery = useQuery(watchlistArtistsQueryOptions(profileId));
-  const scanStatusQuery = useQuery(watchlistScanStatusQueryOptions(profileId));
   const globalConfigQuery = useQuery(watchlistGlobalConfigQueryOptions(profileId));
 
   const artists = useMemo(() => artistsQuery.data ?? [], [artistsQuery.data]);
   const count = countQuery.data?.count ?? artists.length;
-  const nextRunInSeconds = countQuery.data?.nextRunInSeconds ?? 0;
-  const scanStatus = scanStatusQuery.data;
+
+  // The socket is the primary source of scan frames, exactly as in the vanilla
+  // page; the polled status is the fallback and the initial value on load.
+  const { frame: liveFrame, needsPolling } = useLiveWatchlistScan();
+  const scanStatus = liveFrame ?? scanStatusQuery.data;
+  const isScanning = scanStatus?.status === 'scanning';
+
+  const countdown = useCountdown(countQuery.data?.nextRunInSeconds ?? 0);
+
+  useEffect(() => {
+    setPollWhileScanning(isScanning && needsPolling);
+  }, [isScanning, needsPolling]);
+
+  // A finished scan changes the artist rows (last_scan_timestamp) and the
+  // wishlist, so refresh once on the transition rather than on every frame.
+  const previousScanStatus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const status = scanStatus?.status;
+    if (previousScanStatus.current === 'scanning' && status && status !== 'scanning') {
+      void queryClient.invalidateQueries({ queryKey: WATCHLIST_QUERY_KEY });
+      try {
+        window.updateWatchlistButtonCount?.();
+      } catch {
+        /* non-fatal */
+      }
+    }
+    previousScanStatus.current = status;
+  }, [scanStatus?.status, queryClient]);
 
   const visibleArtists = useMemo(
     () => sortArtists(filterArtists(artists, search.q), search.sort),
@@ -144,6 +182,22 @@ export function WatchlistPage() {
     [visibleArtists],
   );
 
+  const startScan = useMutation({
+    mutationFn: () => startWatchlistScan(),
+    onError: (error: Error) =>
+      // The vanilla path used a raw alert() here; toast matches the rest of
+      // the page and the project's no-alert rule.
+      window.showToast?.(`Error starting scan: ${error.message}`, 'error'),
+  });
+
+  const cancelScan = useMutation({
+    mutationFn: () => cancelWatchlistScan(),
+    onSuccess: () =>
+      window.showToast?.('Cancel request sent — scan will stop after current artist', 'info'),
+    onError: (error: Error) =>
+      window.showToast?.(`Error cancelling scan: ${error.message}`, 'error'),
+  });
+
   const batchRemove = useMutation({
     mutationFn: (artistIds: string[]) => removeWatchlistArtistsBatch(artistIds),
     onSuccess: async () => {
@@ -199,14 +253,64 @@ export function WatchlistPage() {
           </h2>
           <div className="watchlist-page-meta">
             <span className="wl-meta-chip">{headerCount}</span>
-            <span className="wl-meta-chip wl-meta-chip--accent">
-              {formatCountdown(nextRunInSeconds)}
-            </span>
+            <span className="wl-meta-chip wl-meta-chip--accent">{formatCountdown(countdown)}</span>
           </div>
         </div>
       </div>
 
       <div className="watchlist-page-actions">
+        <button
+          type="button"
+          className={`wl-chip wl-chip--cta${isScanning ? ' btn-processing' : ''}`}
+          disabled={isScanning || startScan.isPending}
+          onClick={() => startScan.mutate()}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          {startScan.isPending
+            ? 'Starting scan...'
+            : isScanning
+              ? 'Scanning...'
+              : 'Scan for New Releases'}
+          <span className="wl-chip-shimmer" />
+        </button>
+
+        {isScanning ? (
+          <button
+            type="button"
+            className="wl-chip wl-chip--red"
+            disabled={cancelScan.isPending}
+            onClick={() => cancelScan.mutate()}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
+            </svg>
+            {cancelScan.isPending ? 'Cancelling...' : 'Cancel Scan'}
+          </button>
+        ) : null}
+
         <button
           type="button"
           className={`wl-chip wl-chip--slate${
@@ -289,6 +393,8 @@ export function WatchlistPage() {
           Labels
         </button>
       </div>
+
+      {scanStatus ? <WatchlistScanDeck frame={scanStatus} /> : null}
 
       {isLabelsTab ? (
         <WatchlistLabelsTab profileId={profileId} />

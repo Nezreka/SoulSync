@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -797,6 +797,100 @@ describe('watchlist route', () => {
     });
 
     expect(screen.getByRole('button', { name: 'View Discography' })).toBeDisabled();
+  });
+
+  it('starts a scan and shows Cancel only while one is running', async () => {
+    const calls = stubFetch();
+    renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /Cancel Scan/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Scan for New Releases/ }));
+    await waitFor(() => {
+      expect(calls.some((url) => url.endsWith('/api/watchlist/scan'))).toBe(true);
+    });
+  });
+
+  it('renders the live deck from a pushed socket frame', async () => {
+    stubFetch();
+    renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+
+    // core.js re-broadcasts scan:watchlist on this window event; the page must
+    // pick it up without any polling.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('ss:watchlist-scan', {
+          detail: {
+            success: true,
+            status: 'scanning',
+            current_artist_name: 'Boards of Canada',
+            current_album: 'Geogaddi',
+            current_track_name: 'Dandelion',
+            current_phase: 'checking_album_2_of_5',
+            current_artist_index: 3,
+            total_artists: 40,
+            tracks_found_this_scan: 7,
+            tracks_added_this_scan: 2,
+            recent_wishlist_additions: [{ track_name: 'Roygbiv', artist_name: 'Boards of Canada' }],
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('4 / 40 artists')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Checking album 2 of 5')).toBeInTheDocument();
+    expect(screen.getByText('Geogaddi')).toBeInTheDocument();
+    expect(screen.getByText('Dandelion')).toBeInTheDocument();
+    expect(screen.getByText('Roygbiv')).toBeInTheDocument();
+    // Cancel appears only while scanning.
+    expect(screen.getByRole('button', { name: /Cancel Scan/ })).toBeInTheDocument();
+  });
+
+  it('shows the completion summary and the track ledger when a scan finishes', async () => {
+    stubFetch();
+    renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('ss:watchlist-scan', {
+          detail: {
+            success: true,
+            status: 'completed',
+            summary: {
+              total_artists: 40,
+              successful_scans: 38,
+              new_tracks_found: 19,
+              tracks_added_to_wishlist: 10,
+            },
+            scan_track_events: [
+              { track_name: 'Roygbiv', artist_name: 'Boards of Canada', status: 'added' },
+              { track_name: 'Xtal', artist_name: 'Aphex Twin', status: 'skipped' },
+            ],
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'Scan completed: 38/40 artists scanned, found 19 new tracks, added 10 to wishlist',
+        ),
+      ).toBeInTheDocument();
+    });
+
+    // The ledger is collapsed until asked for.
+    expect(screen.queryByText('Roygbiv')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /Show tracks/ }));
+    expect(screen.getByText('Added to wishlist (1)')).toBeInTheDocument();
+    expect(screen.getByText(/already queued or blocklisted \(1\)/)).toBeInTheDocument();
   });
 
   it('redirects away when the profile may not see the watchlist', async () => {
