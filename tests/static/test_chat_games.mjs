@@ -602,6 +602,47 @@ describe('endings', () => {
     });
 });
 
+describe('leaving — withdrawing vs resigning', () => {
+    // Setting up a table and getting bored of it is not losing. Resigning
+    // hands the opponent a win, which is nonsense when nobody ever sat down.
+    test('the creator can withdraw a game nobody joined', () => {
+        const g = one([opened(), ev('boulder', { k: 'gm.cancel', g: 'g001' }, T0 + 5000)]);
+        assert.equal(g.status, 'over');
+        assert.equal(g.reason, 'cancelled');
+        assert.equal(g.result, null, 'no result: nobody played');
+        assert.equal(g.winner, '');
+    });
+    test('a withdrawn game never reaches the ladder', () => {
+        const evs = [opened(), ev('boulder', { k: 'gm.cancel', g: 'g001' }, T0 + 5000)];
+        assert.deepEqual(JSON.parse(JSON.stringify(G.ratings(G.reduceGames(evs)))), []);
+    });
+    test('once someone has joined you owe them a resignation', () => {
+        const g = one([opened(), joined(),
+            ev('boulder', { k: 'gm.cancel', g: 'g001' }, T0 + 5000)]);
+        assert.equal(g.status, 'live', 'withdrawing is refused on a live game');
+        const r = one([opened(), joined(), ev('boulder', { k: 'gm.res', g: 'g001' }, T0 + 5000)]);
+        assert.equal(r.winner, 'kazimir', 'resigning still hands over the win');
+    });
+    test('only the creator can withdraw their table', () => {
+        const g = one([opened(), ev('sella', { k: 'gm.cancel', g: 'g001' }, T0 + 5000)]);
+        assert.equal(g.status, 'open');
+    });
+    test('a withdrawn table cannot be joined afterwards', () => {
+        const g = one([opened(), ev('boulder', { k: 'gm.cancel', g: 'g001' }, T0 + 5000),
+            joined('g001', 'kazimir', T0 + 6000)]);
+        assert.equal(g.black, '');
+        assert.equal(g.status, 'over');
+    });
+    test('a table nobody sat at reads as gone cold', () => {
+        const DAY = G.OPEN_EXPIRY_MS;
+        assert.equal(G.reduceGames([opened()], T0 + DAY - 1000).games.g001.expired, false);
+        assert.equal(G.reduceGames([opened()], T0 + DAY + 1000).games.g001.expired, true);
+        // Presentation only — a late joiner is not blocked by our clock.
+        const late = one([opened(), joined('g001', 'kazimir', T0 + DAY + 5000)]);
+        assert.equal(late.status, 'live', 'they can still sit down');
+    });
+});
+
 describe('abandoned seats', () => {
     const DAY = G.ABANDON_MS;
     const base = [opened(), joined(), ...moveEvents('g001', ['boulder', 'kazimir'], ['e2e4'])];

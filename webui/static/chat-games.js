@@ -16,7 +16,10 @@
 //                            f = FEN of the resulting position. v repeats
 //                            the variant so a client that never saw gm.new
 //                            still knows what it is adopting
-//   gm.res   {g}             resign
+//   gm.res   {g}             resign (a live game -- the opponent wins)
+//   gm.cancel{g}             withdraw a game NOBODY joined. Not a resignation:
+//                            there is no opponent to hand a win to, and it
+//                            never reaches the ladder
 //   gm.draw  {g}             offer a draw; the opponent sending it agrees
 //   gm.claim {g}             take over a seat abandoned for ABANDON_MS
 //   gm.sync  {g, n, r}       "I am at ply n -- is anyone further along?"
@@ -90,6 +93,9 @@
     var MAX_GAMES = 40;          // most recently active kept; bounds memory
     var MAX_MOVES = 600;         // no real game is longer; stops a flood
     var ABANDON_MS = 24 * 60 * 60 * 1000;
+    // An open challenge nobody took is not a game, it is litter. Derived, not
+    // a state change -- see `expired` at the bottom of the fold.
+    var OPEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
     var VOTE_DEFAULT = 2, VOTE_MAX = 9;
     // How many INDEPENDENT clients must report the same position before it can
     // overrule ours. Every SoulSync client in the room folds every game, so the
@@ -611,6 +617,22 @@
                 return;
             }
 
+            if (k === 'gm.cancel') {
+                // Withdrawing before anyone joined. Deliberately NOT a
+                // resignation: nobody is sitting opposite to be handed a win,
+                // and an unplayed game has no business on the ladder. Once
+                // someone has joined you owe them a resignation instead.
+                if (game.status !== 'open') return;
+                if (user !== game.createdBy) return;
+                game.status = 'over';
+                game.result = null;
+                game.reason = 'cancelled';
+                game.winner = '';
+                game.winnerColor = '';
+                game.lastAt = at;
+                return;
+            }
+
             if (k === 'gm.res') {
                 if (game.status !== 'live') return;
                 var rseat = _seatOf(game, user);
@@ -669,6 +691,11 @@
             order.forEach(function (id) {
                 var g = games[id];
                 g.stale = g.status === 'live' && (now - g.lastAt) >= ABANDON_MS;
+                // A table nobody ever sat down at. Presentation only, like
+                // `stale`: the creator can still cancel it properly, and a
+                // late joiner is not blocked by our clock disagreeing with
+                // theirs about the exact minute it went cold.
+                g.expired = g.status === 'open' && (now - g.createdAt) >= OPEN_EXPIRY_MS;
             });
         }
 
@@ -791,6 +818,7 @@
         STATE_QUORUM: STATE_QUORUM,
         ELO_START: ELO_START,
         ABANDON_MS: ABANDON_MS,
+        OPEN_EXPIRY_MS: OPEN_EXPIRY_MS,
         MAX_GAMES: MAX_GAMES,
         MAX_MOVES: MAX_MOVES,
         GID_RE: GID_RE,

@@ -1399,6 +1399,13 @@
     }
 
     function arcDraw(gid) { sendProtocol('gm.draw', { g: gid }).then(_arcAfterSend(gid)); }
+
+    // Withdraw a game nobody joined. No confirm: nothing is lost, and making
+    // someone confirm away a table they set up and got bored of is friction
+    // for its own sake. Resigning a LIVE game still confirms.
+    function arcCancel(gid) {
+        sendProtocol('gm.cancel', { g: gid }).then(_arcAfterSend(gid));
+    }
     function arcClaim(gid) { sendProtocol('gm.claim', { g: gid }).then(_arcAfterSend(gid)); }
 
     // Send a move with the ply it occupies and the position it produces.
@@ -1464,9 +1471,13 @@
             var badge = '';
             if (g.status === 'over') {
                 badge = '<span class="chat-arc-badge chat-arc-badge--done">' +
-                    esc(g.result || '') + ' · ' + esc(g.reason || 'finished') + '</span>';
+                    (g.result ? esc(g.result) + ' · ' : '') +
+                    esc(g.reason || 'finished') + '</span>';
             } else if (g.status === 'open') {
-                badge = '<span class="chat-arc-badge chat-arc-badge--open">waiting for an opponent</span>';
+                badge = g.expired
+                    ? '<span class="chat-arc-badge chat-arc-badge--stale">nobody joined — ' +
+                      'this table has gone cold</span>'
+                    : '<span class="chat-arc-badge chat-arc-badge--open">waiting for an opponent</span>';
             } else if (_arcMyMove(g)) {
                 badge = '<span class="chat-arc-badge chat-arc-badge--you">your move</span>';
             } else if (g.stale) {
@@ -1484,6 +1495,12 @@
                 actions += '<button class="chat-arc-btn" type="button" ' +
                     'data-chat-arc-claim="' + attr(g.id) + '" ' +
                     'title="This seat has been idle for 24 hours — take it over">Take the seat</button>';
+            }
+            if (g.status === 'open' && g.createdBy === state.selfName && can) {
+                actions += '<button class="chat-arc-btn" type="button" ' +
+                    'data-chat-arc-cancel="' + attr(g.id) + '" ' +
+                    'title="Take the table away — nobody joined, so nobody wins">' +
+                    'Withdraw</button>';
             }
             return '<button class="chat-arc-card' + (mySeat ? ' chat-arc-card--mine' : '') +
                 '" type="button" data-chat-arc-open="' + attr(g.id) + '">' +
@@ -1700,6 +1717,10 @@
         if (state.canSend && !mySeat && game.status === 'live' && game.stale) {
             actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
                 attr(game.id) + '">Take the idle seat</button>';
+        }
+        if (state.canSend && game.status === 'open' && game.createdBy === state.selfName) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-cancel="' +
+                attr(game.id) + '">Withdraw</button>';
         }
 
         var offer = (game.drawOffer && game.status === 'live')
@@ -3726,6 +3747,8 @@
                 if (state.arcade) { state.arcade.reveal = !state.arcade.reveal; renderArcade(); }
                 return;
             }
+            t = e.target.closest('[data-chat-arc-cancel]');
+            if (t) { arcCancel(t.getAttribute('data-chat-arc-cancel')); return; }
             t = e.target.closest('[data-chat-arc-sync]');
             if (t) { arcSync(t.getAttribute('data-chat-arc-sync'), false); return; }
             t = e.target.closest('[data-chat-arc-accept]');
