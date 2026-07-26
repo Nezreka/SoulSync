@@ -1968,3 +1968,124 @@ werden.
 
 **Umgesetzt am 26. Juli 2026** — siehe
 [status.md §26](library-v2-status.md#26-native-repair-subject-ausrichtung-und-abbau-der-test-schuld-26-juli).
+
+---
+
+## 15. Erster Lauf gegen die reale Produktiv-DB (26. Juli 2026)
+
+Der in §20/§22/§26 und in [status.md §9](library-v2-status.md#9-aktuelle-release-einschätzung)
+wiederholt als ausstehend geführte Lauf gegen die echte Bibliothek des Nutzers
+ist erstmals ausgeführt worden — auf einem `sqlite3.backup()`-Snapshot der
+Live-Datei, nie auf der Live-Datei selbst (Guide §6.1). Die Datenbank enthält
+5 Artists, 273 lib2-Alben, 2.048 lib2-Tracks und 270 lib2-Files.
+
+### <a name="realdb25-01"></a> Finding 1 — Der Album-Twin-Pass läuft nur für frisch gemergte Artists
+
+**Ort:** `core/library2/dedup_repair.py::repair_duplicate_artists`, Schleife
+`for artist_id in touched_artists`.
+
+`touched_artists` enthält ausschließlich Artists, die im selben Lauf durch
+einen Namens- oder Provider-ID-Merge **entstanden** sind. Ein Artist, dessen
+Zeile sauber und einmalig ist, wird nie besucht — sein
+`_fold_albums_within_artist` läuft nicht, seine Album-Twins werden also weder
+gefoldet noch als `lib2_release_group_review`-Finding erfasst.
+
+Die Annahme dahinter („Album-Duplikate entstehen als Folge eines
+Artist-Duplikats") stimmt für den §62.5-Entstehungsweg, aber nicht allgemein.
+Zwei Katalogzeilen für dieselbe Release entstehen auch ohne jedes
+Artist-Duplikat: eine Discography-Expansion liefert eine zweite Provider-
+Edition, oder ein Legacy-Reimport landet neben einer bereits nativ angelegten
+Zeile.
+
+Genau das ist der reale Zustand. Der Lauf meldete
+`artists_merged=0` → `touched_artists` leer → `albums_folded=0`,
+`album_review=0`, während gleichzeitig drei echte Album-Twins in der DB lagen:
+
+| Artist | Titel | Zeilen | `stable_id` |
+|---|---|---|---|
+| Justin Bieber | SWAG II | 1174 / 1344 | identisch |
+| Hiroyuki Sawano | TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック | 1163 / 1229 | identisch |
+| Hiroyuki Sawano | TV Anime "Attack on Titan" Original Soundtrack | 1169 / 1230 | identisch |
+
+Der identische `stable_id` ist der harte Beleg: Er wird deterministisch aus
+(Artist, Titel, Album-Typ) gebildet, zwei Zeilen mit demselben Wert sind per
+Definition dieselbe Release. Für die beiden Sawano-Paare existierte bereits ein
+Review-Finding — die haben es über den MB-Release-Group-Reconcile (§62.6 Stufe
+3) bekommen, der von der Artist-Seite aus läuft. Das Bieber-Paar hatte keins:
+Für diesen Artist war weder ein Merge noch ein MB-Reconcile gelaufen, und damit
+war das Duplikat für den Nutzer **unsichtbar**.
+
+Anzumerken: Selbst bei Aufruf hätten alle drei Paare **nicht** automatisch
+gefoldet werden dürfen — beide Seiten tragen echte Files, `_is_pristine` ist
+für jede Seite `False`. Der Fehler ist also nicht ein verweigerter Merge,
+sondern ein Pass, der gar nicht erst stattfindet und deshalb auch das
+Review-Finding schuldig bleibt.
+
+**Korrekturvertrag:** Der Album-Pass läuft für jeden Artist, der einen
+Titel-Twin hält, nicht nur für Merge-Survivor. Die Fold-Regeln selbst bleiben
+unverändert (pristine + kompatible Counts, sonst Review) — es ändert sich nur,
+für wen sie überhaupt ausgewertet werden. Die Kandidatenermittlung darf keine
+Query-Flut werden (BR-08): ein einziger Scan über
+`lib2_album_artists ⋈ lib2_albums`, danach die teure Detailquery nur für die
+Artists mit echtem Twin.
+
+### <a name="realdb25-02"></a> Finding 2 — 112 physische Dateien hängen an mehreren Katalog-Tracks — offen
+
+`core/library2/integrity_reconciler.py::build_integrity_report` (LV2-013,
+read-only) meldet auf derselben DB 113 Findings:
+
+| Code | Anzahl |
+|---|---:|
+| `lib2_path_multiple_tracks` | 112 |
+| `lib2_active_file_missing` | 1 |
+
+Die 112 zerfallen in zwei sehr verschiedene Populationen:
+
+- **103 Gruppen über Albumgrenzen hinweg.** Ganz überwiegend die drei
+  Album-Twins aus Finding 1 (43 + 32 + 16 Files); der Rest sind Album↔Single-
+  Paare (SWAG/DAISIES, SWAG/YUKON …), bei denen dieselbe Datei den Albumtrack
+  und die gleichnamige Single bedient. Letzteres ist nach DD-G1 **kein**
+  Duplikat: Album und Single sind getrennte Katalogentitäten.
+- **21 Gruppen innerhalb desselben Albums.** Hier hat ein Album zwei bis drei
+  Track-Zeilen für denselben Song, die auf dieselbe Datei zeigen — Album 1064
+  („SWAG") führt 41 Track-Zeilen bei `track_count=21`. Über den gesamten
+  Katalog: 80 Album/Titel-Paare mit mehr als einer Zeile, 122 doppelte
+  `lib2_tracks.stable_id`. Ein Beispiel:
+
+  | Track | Album | Titel | `track_number` | `legacy_track_id` |
+  |---|---|---|---:|---|
+  | 633 | 1064 SWAG | DAISIES | 1 | 820355018 |
+  | 2677 | 1064 SWAG | DAISIES | 2 | 452943367 |
+
+  Beide zeigen auf `…/02 - DAISIES.flac`, beide sind `monitored=1`.
+
+**Warum hier kein Fix mitgeliefert wird:** Das Falten von Track-Zeilen ist
+nicht der Album-Fall in klein. Ein Track trägt Monitor-Rules, die
+Wanted-Projektion, History, Quality-Zuweisung und potenziell mehrere Files;
+welche Zeile überlebt und was mit dem Intent der anderen geschieht, ist eine
+Produktentscheidung wie in [§7](#orphan-bug)/§16 — und Guide-Arbeitsregel 3
+plus Regel 7 verbieten dafür einen Platzhalter-MVP. Sichtbar ist der Zustand
+bereits: Der Integritätsreport ist genau dafür da und meldet jede dieser
+Gruppen einzeln.
+
+**Nicht verwechseln mit `lib2_active_file_missing` (1×):** Diese eine Zeile
+zeigt auf eine Datei unter `Transfer/The Jacksons - …`, die auf einem gesunden
+Root fehlt — der normale Missing-Lifecycle aus LV2-010, kein Duplikatthema.
+
+### <a name="realdb25-03"></a> Finding 3 — Bestätigungen, die der Lauf mitgeliefert hat
+
+Kein Fehlerbild, sondern die eigentliche Ausbeute des Laufs:
+
+- **§26 auf echten Daten bestätigt.** `missing_cover_art` scannte 33 Alben
+  (9 Legacy + 24 V2-nativ), `metadata_gap_filler` 424 Tracks — beide mit
+  `errors=0`. Die reale `albums`-Tabelle trägt alle vier optionalen
+  Provider-ID-Spalten, die Pad-Breite ist also 4: Vor dem Fix wäre der Scan
+  beim **ersten** nativen Album mit `IndexError` abgebrochen.
+- **§23 auf echten Daten bestätigt.** Die additive Migration hat
+  `acquisition_request_id`, `acquisition_candidate_id`,
+  `acquisition_download_id` und `idx_lh_acquisition_request` auf einer
+  bestehenden, gewachsenen `library_history` angelegt.
+- **§20 ohne Befund.** `path_drift_reconcile` fand 2 unauflösbare Zeilen und
+  keinen Drift-Kandidaten — diese Bibliothek hat den LV2-017-Desync nicht.
+- **§22 ohne Befund.** Der Orphan-Detector scannte 144 Dateien und meldete
+  keinen Orphan.

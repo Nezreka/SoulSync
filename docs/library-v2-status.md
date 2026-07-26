@@ -8,8 +8,10 @@ Diagnosen.
 Stand: 26. Juli 2026, einschließlich Foundation-Rebase (§14), der an diesem
 Tag umgesetzten Korrekturen §20–§24 (Pfad-Desync, Manual-Match-Timeout,
 Orphan-Approve-Materialisierung, F-10-Korrelation, Artwork-Kaltstart-
-Nachlieferung) und §26 (nativer Subject-Row-Versatz in den Repair-Scannern,
-Abbau der vorbestehenden Testfehler). Playlist UI bleibt geparkt.
+Nachlieferung), §26 (nativer Subject-Row-Versatz in den Repair-Scannern,
+Abbau der vorbestehenden Testfehler) und §27 (erster Lauf gegen einen Snapshot
+der Produktiv-DB, Album-Twin-Scan für jeden Artist, Frontend-Gate).
+Playlist UI bleibt geparkt.
 
 ## 1. Statusbegriffe
 
@@ -37,12 +39,12 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-04](library-v2-features.md#feat-discography) | Discography, Tracklists, `monitor_new_items` | Verified | `2249f5d7`, `8f965d31` (später gesquasht) | Content-Filter und nie manuell expandierte Artists abgedeckt |
 | [F-05](library-v2-features.md#feat-bootstrap) | Automatischer Initialimport | Verified | Review 4/5, `c2d99eda`, `e9730afe` | Bounded Transactions und Streaming; Owner-/Fresh-Install-Fixes im Regression-Checkpoint |
 | [F-06](library-v2-features.md#feat-alias) | Artist Alias Registry und Scope | Verified | `ce7b4516`, `a95e5309` | Listen, Suche, Totals und artist-weite Actions gezielt geprüft |
-| [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3 | Code und gezielte Tests vorhanden; produktive Datenreparatur bleibt Backup/Dry-Run-abhängig |
+| [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3, §27 | Album-Twin-Pass läuft seit §27 für jeden Artist, nicht nur für Merge-Survivor; Dry Run gegen die Produktiv-DB gelaufen. Rest: Track-Zeilen-Duplikate (§27 Teil 3) brauchen eine Produktentscheidung |
 | [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11 | Enrich/Smart-Split und globale Suche abgedeckt |
 | [F-09](library-v2-features.md#feat-playlists) | Library-v2-Playlist-Oberfläche | Deferred | `library-v2-playlist-ui` | Vollständig aus dem aktiven Overhaul entfernt und separat geparkt |
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
-| [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Implemented | Regression-Checkpoint `ee30247a`, im aktuellen Squash `fb0096ce` | `import-review`-Route, Queue/Detail, Assignments und Resolve/Rescan/Resume vorhanden; vollständiger Browser-E2E fehlt |
+| [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Implemented | Regression-Checkpoint `ee30247a`, im aktuellen Squash `fb0096ce` | `import-review`-Route, Queue/Detail, Assignments und Resolve/Rescan/Resume vorhanden; Konfliktliste benennt seit §27 den betroffenen Track/Pfad statt nur den Code; vollständiger Browser-E2E fehlt |
 | [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Implemented | §29/§53/§55/§60/§71 | Scoped/Transient Search, Force-Audit und gemeinsame Pipeline gezielt geprüft |
 | [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1 | Gemeinsamer Delete-Vertrag, File-Scope und Pfadsync abgedeckt |
 | [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Verified | §28–§37, Review 9/10/17 | Review-spezifische Regressionen plus WebUI-Suite |
@@ -191,7 +193,7 @@ keinen vollständigen externen E2E.
 | [LV2-009](library-v2-issues.md#lv2-009) | Verified | Recovery-Journal und Resume |
 | [LV2-010](library-v2-issues.md#lv2-010) | Verified | `missing_suspected` UI/API |
 | [LV2-011](library-v2-issues.md#lv2-011) | Verified | `w/` Parsing |
-| [LV2-012](library-v2-issues.md#lv2-012) | Partial | Code verified; produktiver Merge/Datenrepair erfordert Backup und Dry Run |
+| [LV2-012](library-v2-issues.md#lv2-012) | Partial | Code verified; Dry Run gegen einen Produktiv-Snapshot in §27 gelaufen (keine Merge-Kandidaten), schreibender Lauf weiterhin Backup-pflichtig |
 | [LV2-013](library-v2-issues.md#lv2-013) | Verified | bewusst read-only Integritätsreport |
 | [LV2-014](library-v2-issues.md#lv2-014) | Implemented | später über Regression M-11 geschlossen |
 | [LV2-015](library-v2-issues.md#lv2-015) | Deferred | Historische Diagnose; aktive Library-v2-Playlist-Integration wurde geparkt |
@@ -369,17 +371,24 @@ Production-Release-Zertifikat dokumentiert, solange folgende Punkte fehlen
 oder nicht erneut auf dem finalen Clean HEAD belegt sind:
 
 - vollständige Python-Suite ohne Async-Bridge-Blockade;
-- vollständiger kombinierter Frontend Check/Build auf finalem HEAD;
+- ~~vollständiger kombinierter Frontend Check/Build auf finalem HEAD~~ —
+  erledigt, §27 Teil 4 (Check Exit 0, 269 Tests, Production Build);
 - realer Soulseek-/Torrent-/Usenet-E2E;
 - Restart während Transfer, Quarantäne, Bundle-Review und Bootstrap;
-- Migrations-/Soak-Test auf einer Kopie einer produktiven großen DB;
+- Migrations-/Soak-Test auf einer Kopie einer produktiven großen DB — die
+  **Migration** ist in §27 Teil 1 auf einem Produktiv-Snapshot fehlerfrei
+  gelaufen; der Soak-Test steht weiter aus;
 - Windows-/Docker-Path-Mapping und Root-Ausfall;
-- produktiver LV2-012/LV2-017 Datenrepair ausschließlich nach Dry Run;
+- produktiver LV2-012/LV2-017 Datenrepair ausschließlich nach Dry Run — der
+  Dry Run ist in §27 Teil 1 gelaufen (LV2-012: keine Merge-Kandidaten;
+  LV2-017: kein Drift), der schreibende Lauf bleibt offen;
 - F-12 Acquisition-Review-Browser-E2E mit mehrdeutigem Bundle und Restart;
-- Bestätigung oder Widerlegung des Quarantäne-Approve-Orphan-Bugs.
+- ~~Bestätigung oder Widerlegung des Quarantäne-Approve-Orphan-Bugs~~ —
+  bestätigt (§16) und korrigiert (§22).
 
 **Einstufung:** Review-Remediation verifiziert; vollständiger Release-Gate
-noch nicht belegt.
+noch nicht belegt. Neu offen aus dem Produktiv-Lauf: die Track-Zeilen-
+Duplikate aus §27 Teil 3 (Produktentscheidung).
 
 ---
 
@@ -1090,7 +1099,133 @@ Fehlschläge:
 Frontend blieb unangetastet (kein `webui/`-Diff), daher kein Frontend-Lauf.
 
 **Einstufung:** Implementiert und gezielt geprüft. Damit ist die in §14/§25
-geführte Liste vorbestehender Fehlschläge vollständig abgebaut; ein Lauf des
-Cover-Art-/Metadata-Gap-Scanners gegen die reale Produktiv-DB des Nutzers steht
-weiterhin aus (beide Jobs bleiben Review-Jobs, sie schreiben nichts ohne
-Freigabe).
+geführte Liste vorbestehender Fehlschläge vollständig abgebaut. Der Lauf beider
+Scanner gegen einen Snapshot der realen Produktiv-DB ist in §27 Teil 1
+nachgeholt: 33 Alben bzw. 424 Tracks, `errors=0`, Pad-Breite real 4 — ohne den
+Fix wäre der Scan beim ersten der 24 nativen Alben abgebrochen.
+
+---
+
+## 27. Erster Produktiv-DB-Lauf, Album-Twin-Scan und Frontend-Gate (26. Juli)
+
+Diese Session hat den in §9 und in §20/§22/§26 wiederholt offen geführten Lauf
+gegen die reale Bibliothek des Nutzers erstmals durchgeführt, die dabei
+gefundene echte Lücke geschlossen und zwei kleinere Frontend-Rückstände
+abgebaut. Diagnosen in
+[issues.md §15](library-v2-issues.md#15-erster-lauf-gegen-die-reale-produktiv-db-26-juli-2026).
+
+### Teil 1 — Lauf gegen einen Snapshot der Produktiv-DB
+
+Ausgeführt auf einem `sqlite3.backup()`-Snapshot (98 MB, 5 Artists, 273
+lib2-Alben, 2.048 lib2-Tracks, 270 lib2-Files); die Live-Datei wurde nie zum
+Schreiben geöffnet. Ergebnis:
+
+| Prüfung | Ergebnis | schließt |
+|---|---|---|
+| Schema-Migration auf der gewachsenen DB | fehlerfrei | §9 „Migrations-Test auf einer Kopie einer produktiven DB" (Soak weiterhin offen) |
+| `missing_cover_art` | 33 Alben (9 Legacy + 24 nativ), `errors=0` | §26 „Lauf gegen die reale Produktiv-DB steht aus" |
+| `metadata_gap_filler` | 424 Tracks, `errors=0` | dito |
+| §23-Korrelationsspalten auf `library_history` | alle drei plus Index vorhanden | §23 |
+| `path_drift_reconcile` | 2 unauflösbare Zeilen, 0 Drift-Kandidaten | §20 |
+| `orphan_file_detector` | 144 Dateien, 0 Orphans | §22 |
+| `build_integrity_report` (read-only) | 113 Findings, siehe Teil 3 | LV2-013 |
+| `repair_duplicate_artists` (Dry Run auf der Kopie) | 0 Merges — und deckte damit Teil 2 auf | LV2-012 / F-07 |
+
+Die Pad-Breite auf der realen `albums`-Tabelle ist 4 (alle vier optionalen
+Provider-ID-Spalten vorhanden). Vor §26 wäre der Cover-Art-Scan also beim
+**ersten** der 24 nativen Alben mit `IndexError` abgebrochen — der Fix ist
+damit nicht nur gegen die neue Fixture, sondern gegen echte Daten belegt.
+
+### Teil 2 — Album-Twin-Pass läuft jetzt für jeden Artist
+
+[realdb25-01](library-v2-issues.md#realdb25-01):
+`core/library2/dedup_repair.py::repair_duplicate_artists` rief
+`_fold_albums_within_artist` nur für `touched_artists` auf — also nur für
+Artists, die im selben Lauf aus einem Merge hervorgegangen waren. Ein Artist
+mit einer sauberen, einmaligen Zeile wurde nie besucht, seine Album-Twins
+folglich weder gefoldet noch als Review-Finding erfasst. Auf der realen DB war
+das die gesamte Population: drei Album-Paare mit jeweils **identischer**
+`stable_id`, davon eines (Justin Bieber „SWAG II") ohne jedes Finding, weil für
+diesen Artist auch nie ein MB-Release-Group-Reconcile gelaufen war.
+
+Neu: `_artists_with_album_twins` ermittelt in **einem** Scan über
+`lib2_album_artists ⋈ lib2_albums`, welche Artists überhaupt einen
+Titel-Twin halten; der Pass läuft dann für die Vereinigung aus diesen und den
+Merge-Survivorn. Bewusste Grenzen:
+
+- Die Fold-Regeln sind unverändert. `_is_pristine` und `_counts_compatible`
+  entscheiden weiter; alle drei realen Paare tragen auf beiden Seiten Files und
+  werden deshalb korrekt **nicht** gemerged, sondern als
+  `duplicate_title_unmerged` gemeldet. Der Fix ändert, *für wen* ausgewertet
+  wird, nicht *wie*.
+- Die Kandidatensuche ist bewusst ein einzelner Scan statt einer
+  `_album_rows_for_artist`-Query pro Artist — diese Query trägt zwei
+  korrelierte Subselects, und ein Aufruf pro Artist wäre genau die
+  Leerlauf-Query-Flut aus [BR-08](library-v2-issues.md#br-08).
+- Ein leerer Titelschlüssel gruppiert nie: zwei unbenannte Zeilen sind kein
+  Beleg für dieselbe Release.
+
+Verifikation: vier neue Tests in `tests/library2/test_dedup_repair.py` (Fold
+ohne Artist-Merge; Review-Finding ohne Artist-Merge; Album vs. gleichnamige
+Single bleiben getrennt — DD-G1-Bucket; leere Titel gruppieren nicht). Die
+ersten beiden schlugen vor dem Fix fehl. Zusätzlich gegen einen frischen
+Snapshot der Produktiv-DB: das bisher unsichtbare „SWAG II"-Paar erscheint
+jetzt als Review-Finding (3 → 4 offene Findings), Artist-, Album-, Track- und
+File-Zahlen bleiben unverändert — es wurde nichts gemerged und nichts gelöscht.
+
+### Teil 3 — Was der Integritätsreport zusätzlich zeigt (offen)
+
+[realdb25-02](library-v2-issues.md#realdb25-02): 112 Dateien hängen an mehr als
+einem Katalog-Track. 103 Gruppen sind die Album-Twins aus Teil 2 plus
+legitime Album↔Single-Paare (DD-G1). Die restlichen **21 Gruppen liegen
+innerhalb desselben Albums** — Album 1064 führt 41 Track-Zeilen bei
+`track_count=21`; katalogweit 80 Album/Titel-Paare mit Mehrfachzeilen und 122
+doppelte `lib2_tracks.stable_id`.
+
+Bewusst **kein** Fix in dieser Session: Das Falten von Track-Zeilen berührt
+Monitor-Rules, Wanted-Projektion, History und Quality-Zuweisung und braucht
+dieselbe Art Produktentscheidung wie §16/§18 (welche Zeile überlebt, was mit
+dem Intent der anderen geschieht). Der Zustand ist über den Integritätsreport
+bereits sichtbar. **Status: Pending — Produktentscheidung ausstehend.**
+
+### Teil 4 — Frontend-Gate und zwei Altitude-Rückstände
+
+- `npm run check` läuft erstmals seit dem Foundation-Rebase mit Exit-Code 0.
+  Die in §25 als „fremde Zeilen" eingeordnete Formatabweichung in
+  `artist-refresh.test.tsx` war eine Fehleinordnung: Die Datei existiert nur
+  auf diesem Branch (`cea13f6f`), gehört also uns. Damit ist der §9-Punkt
+  „vollständiger kombinierter Frontend Check/Build auf finalem HEAD" belegt:
+  Check sauber, 269 Tests in 45 Dateien grün, Production Build erfolgreich.
+- `detail.rejections` war `Array<Record<string, unknown>>` und wurde per
+  `String()` gerendert. Das erzeugte die zwei `no-base-to-string`-Warnungen aus
+  §25 und — schwerwiegender — eine unbrauchbare Review-Liste: Der häufigste
+  Konflikt `missing_expected_track` trägt keinen Pfad, stand also als nacktes
+  „missing expected track" da, ohne zu sagen, **welcher** Track fehlt. Das ist
+  genau die Information, für die es die F-12-Review-Oberfläche gibt. Neu:
+  `LibraryV2AcquisitionRejection` bildet die tatsächliche Payload von
+  `bundle_matching.py::match_bundle` ab, und
+  `-ui/acquisition-rejection.ts::describeRejection` erzeugt pro Code die
+  identifizierende Zeile (Position + Titel beim fehlenden Track, Pfad + Grund
+  bei `ambiguous_position`, Prozentwerte bei `ambiguous_title`/
+  `low_confidence`). 9 neue Tests, inklusive des Falls, dass ein verschachtelter
+  Wert nie als „[object Object]" ins DOM gelangt.
+- `TrackPlayButton` nahm eine `albumId`-Prop entgegen, die nirgends benutzt
+  wurde (die Bridge bekommt bewusst `album_id: null`, weil ihr Slot eine
+  Legacy-ID erwartet — [H-14](library-v2-issues.md#h-14)). Prop entfernt, die
+  Begründung steht jetzt als Kommentar am Nullwert.
+
+### Gemeinsamer Testlauf
+
+- `tests/library2`: **1032 passed** (1028 + 4 neue), 0 failed;
+- `tests/imports tests/wishlist`: **913 passed**;
+- `tests/repair tests/repair_jobs tests/acquisition tests/search`:
+  **568 passed, 3 skipped**, 0 failed;
+- Ruff über alle geänderten Python-Dateien: sauber;
+- Frontend: `npm run check` Exit 0, **269 Tests in 45 Dateien**, Production
+  Build erfolgreich.
+
+**Einstufung:** Teil 1 und 2 implementiert und sowohl gezielt als auch gegen
+einen Snapshot der Produktiv-DB geprüft; Teil 4 implementiert und geprüft.
+Teil 3 bleibt offen und braucht eine Nutzerentscheidung. Der übrige §9-Gate-
+Stand (realer Client-E2E, Restart-Szenarien, Windows-/Docker-Path-Mapping,
+F-12-Browser-E2E) ist unverändert.
