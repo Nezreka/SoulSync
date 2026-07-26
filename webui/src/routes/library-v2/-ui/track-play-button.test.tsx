@@ -61,12 +61,7 @@ describe('library v2 track play button (H1)', () => {
 
   it('reuses the Legacy player via the shell bridge on click', () => {
     renderWithClient(
-      <TrackPlayButton
-        track={track()}
-        albumId={42}
-        albumTitle="Some Album"
-        artistName="Some Artist"
-      />,
+      <TrackPlayButton track={track()} albumTitle="Some Album" artistName="Some Artist" />,
     );
 
     fireEvent.click(screen.getByTitle('Play track'));
@@ -92,7 +87,6 @@ describe('library v2 track play button (H1)', () => {
     renderWithClient(
       <TrackPlayButton
         track={track({ file: null, file_status: 'missing' })}
-        albumId={42}
         albumTitle="Some Album"
         artistName="Some Artist"
       />,
@@ -108,7 +102,6 @@ describe('library v2 track play button (H1)', () => {
     renderWithClient(
       <TrackPlayButton
         track={track({ id: null, file: null })}
-        albumId={42}
         albumTitle="Some Album"
         artistName="Some Artist"
       />,

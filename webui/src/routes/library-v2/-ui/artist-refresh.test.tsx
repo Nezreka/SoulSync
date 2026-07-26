@@ -20,8 +20,7 @@ describe('library v2 artist refresh mutation', () => {
         return HttpResponse.json({
           job_id: jobId,
           running: false,
-          error:
-            jobId === 'refresh-1' ? 'Music root is temporarily unavailable' : null,
+          error: jobId === 'refresh-1' ? 'Music root is temporarily unavailable' : null,
           result: jobId === 'refresh-1' ? null : { refreshed_albums: 3, scanned: 8 },
         });
       }),

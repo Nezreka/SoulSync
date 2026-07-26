@@ -108,11 +108,28 @@ export interface LibraryV2AcquisitionExpectedTrack {
   expected_duration_seconds: number | null;
 }
 
+/** One bundle-matching conflict from `bundle_matching.py::match_bundle`.
+ *  `code` is always present; which of the rest travels with it depends on the
+ *  code (a missing track knows its position, an unmatched file knows its path).
+ */
+export interface LibraryV2AcquisitionRejection {
+  code: string;
+  relative_path?: string | null;
+  reason?: string | null;
+  title?: string | null;
+  expected_key?: string | null;
+  expected_title?: string | null;
+  disc_number?: number | null;
+  track_number?: number | null;
+  similarity?: number | null;
+  confidence?: number | null;
+}
+
 export interface LibraryV2AcquisitionImportDetail extends LibraryV2AcquisitionImportSummary {
   inventory: LibraryV2AcquisitionInventoryFile[];
   expected_tracks: LibraryV2AcquisitionExpectedTrack[];
   matches: Array<{ relative_path: string; track_id: number | null }>;
-  rejections: Array<Record<string, unknown>>;
+  rejections: LibraryV2AcquisitionRejection[];
   quarantined: Array<Record<string, unknown>>;
   processed_count: number;
   quarantined_count: number;

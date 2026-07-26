@@ -103,6 +103,7 @@ import {
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
+import { describeRejection } from './acquisition-rejection';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { InteractiveSearchModal } from './interactive-search';
@@ -3950,12 +3951,15 @@ function AcquisitionImportReviewView() {
                   <div className={styles.reviewConflicts} role="status">
                     <strong>{detail.rejections.length} matching conflict(s)</strong>
                     <ul>
-                      {detail.rejections.map((rejection, index) => (
-                        <li key={`${String(rejection.code ?? 'conflict')}-${index}`}>
-                          {String(rejection.code ?? 'Unresolved match').replaceAll('_', ' ')}
-                          {rejection.relative_path ? ` · ${String(rejection.relative_path)}` : ''}
-                        </li>
-                      ))}
+                      {detail.rejections.map((rejection, index) => {
+                        const line = describeRejection(rejection);
+                        return (
+                          <li key={`${line.label}-${line.detail}-${index}`}>
+                            {line.label}
+                            {line.detail ? ` · ${line.detail}` : ''}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 ) : null}
@@ -6569,7 +6573,6 @@ function TrackRow({
           <td key="play" className={styles.colPlay}>
             <TrackPlayButton
               track={track}
-              albumId={entityBase.albumId}
               albumTitle={albumTitle}
               artistName={track.artists.map((a) => a.name).join(', ')}
             />
@@ -6646,12 +6649,10 @@ function TrackRow({
  *  makes. Opt-in column (§36), disabled when there's no file to play. */
 export function TrackPlayButton({
   track,
-  albumId,
   albumTitle,
   artistName,
 }: {
   track: LibraryV2Track;
-  albumId: number | undefined;
   albumTitle: string;
   artistName: string;
 }) {
@@ -6675,6 +6676,9 @@ export function TrackPlayButton({
             file_path: filePath,
             bitrate: track.file?.bitrate ?? null,
             artist_id: null,
+            // Legacy ids, and library-v2 only holds lib2 ones. Feeding a lib2
+            // album id into a legacy slot is the H-14 confusion; the player
+            // gets the display strings below instead.
             album_id: null,
           },
           albumTitle,
