@@ -72206,6 +72206,11 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     display: flex; gap: 10px; padding: 12px 14px;
     border-top: 1px solid rgba(255,255,255,0.07);
 }
+/* display:flex above beats the browser's own [hidden] { display: none }, so
+   form.hidden = true did nothing at all — the composer stayed on screen in
+   the Arcade (where there is no message to send) and behind the join gate.
+   Same trap as #track-detail-overlay further up this file. */
+.chat-composer[hidden] { display: none !important; }
 .chat-input {
     flex: 1; padding: 11px 14px; border-radius: 10px; font-size: 14px; color: #fff;
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
@@ -72327,6 +72332,58 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.62); max-width: 62ch;
 }
 .chat-arc-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chat-arc-hero-top { display: flex; align-items: flex-start; gap: 18px; }
+.chat-arc-hero-top > div:first-child { flex: 1; min-width: 0; }
+/* the purse reads as a physical thing rather than another stat line */
+.chat-arc-purse {
+    flex: none; display: flex; flex-direction: column; align-items: center; gap: 1px;
+    padding: 10px 16px; border-radius: 12px;
+    background: rgba(0,0,0,0.28); border: 1px solid rgba(255,213,79,0.28);
+}
+.chat-arc-purse-coin { font-size: 17px; line-height: 1; }
+.chat-arc-purse-amt {
+    font-size: 20px; font-weight: 800; color: #ffd54f; font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+}
+.chat-arc-purse-sub {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
+    color: rgba(255,255,255,0.4);
+}
+.chat-arc-hero-turn {
+    margin-top: 12px; display: inline-block; padding: 4px 11px; border-radius: 20px;
+    background: rgba(29,185,84,0.18); color: #1db954; font-size: 12px; font-weight: 800;
+}
+
+/* game picker — tiles rather than a row of look-alike buttons */
+.chat-arc-tiles {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 10px; margin-bottom: 6px;
+}
+.chat-arc-tile {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+    padding: 14px 14px 13px; cursor: pointer; text-align: left;
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.035); color: inherit;
+    transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+.chat-arc-tile:hover {
+    background: rgba(29,185,84,0.1); border-color: rgba(29,185,84,0.45);
+    transform: translateY(-2px);
+}
+.chat-arc-tile-icon { font-size: 26px; line-height: 1.1; }
+.chat-arc-tile-name { font-size: 14px; font-weight: 800; color: #fff; }
+.chat-arc-tile-blurb { font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.35; }
+.chat-arc-tilefoot { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
+.chat-arc-inline {
+    border: none; background: none; padding: 0; cursor: pointer; font: inherit;
+    color: #1db954; text-decoration: underline dotted rgba(29,185,84,0.5);
+    text-underline-offset: 2px;
+}
+.chat-arc-blank {
+    text-align: center; padding: 26px 16px; border-radius: 12px;
+    border: 1px dashed rgba(255,255,255,0.12); color: rgba(255,255,255,0.42);
+    font-size: 13px; margin-top: 14px;
+}
 
 .chat-arc-sectitle {
     display: flex; align-items: center; gap: 8px;

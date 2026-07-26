@@ -1536,37 +1536,66 @@
         }
 
         var empty = (!mine.length && !open.length && !live.length && !done.length);
+        var yours = _arcMyTurnCount();
+
+        // The bank was only ever drawn inside the slot machine, so the balance
+        // was invisible everywhere else. It belongs on the front page.
+        var sl = _slotState();
+        if (!sl.bank) _slotLoadBank();
+        var bank = sl.bank;
+
+        function tile(attrs, icon, name, blurb) {
+            return '<button class="chat-arc-tile" type="button" ' + attrs + '>' +
+                '<span class="chat-arc-tile-icon">' + icon + '</span>' +
+                '<span class="chat-arc-tile-name">' + esc(name) + '</span>' +
+                '<span class="chat-arc-tile-blurb">' + esc(blurb) + '</span>' +
+            '</button>';
+        }
+
         return '<div class="chat-arc-lobby">' +
             '<div class="chat-arc-hero">' +
-                '<div class="chat-arc-hero-title">The Arcade</div>' +
-                '<div class="chat-arc-hero-sub">No server. Every board here is folded ' +
-                    'out of chat messages in this Soulseek room — yours and your ' +
-                    'opponent\'s clients each compute it independently.</div>' +
-                (state.canSend
-                    ? '<div class="chat-arc-hero-actions">' +
-                        '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
-                            'data-chat-arc-new="w">♔ Chess as white</button>' +
-                        '<button class="chat-arc-btn" type="button" ' +
-                            'data-chat-arc-new="b">♚ as black</button>' +
-                        '<button class="chat-arc-btn" type="button" ' +
-                            'data-chat-arc-new="w" data-chat-arc-variant="connect4">' +
-                            '🔴 Connect 4</button>' +
-                        '<button class="chat-arc-btn" type="button" ' +
-                            'data-chat-arc-new="w" data-chat-arc-variant="battleship">' +
-                            '🚢 Battleship</button>' +
-                        '<button class="chat-arc-btn" type="button" data-chat-slot-open>' +
-                            '🎰 Slots</button>' +
-                        '<button class="chat-arc-btn" type="button" ' +
-                            'data-chat-arc-new="w" data-chat-arc-room="1" ' +
-                            'title="You against everyone else — the room votes on its ' +
-                            'moves">🗳 You vs the room</button>' +
-                      '</div>'
-                    : '<div class="chat-arc-hero-sub">Sending is admin-only on this ' +
-                      'server, so you can watch but not play.</div>') +
+                '<div class="chat-arc-hero-top">' +
+                    '<div>' +
+                        '<div class="chat-arc-hero-title">The Arcade</div>' +
+                        '<div class="chat-arc-hero-sub">No server anywhere. Every board ' +
+                            'here is folded out of chat messages in this Soulseek room — ' +
+                            'your client and your opponent\'s each work it out ' +
+                            'independently.</div>' +
+                    '</div>' +
+                    '<div class="chat-arc-purse" title="Play money, kept on this machine. ' +
+                        'Tops back up every midnight.">' +
+                        '<span class="chat-arc-purse-coin">🪙</span>' +
+                        '<span class="chat-arc-purse-amt">' +
+                            (bank ? bank.balance.toLocaleString() : '·····') + '</span>' +
+                        '<span class="chat-arc-purse-sub">play money</span>' +
+                    '</div>' +
+                '</div>' +
+                (yours
+                    ? '<div class="chat-arc-hero-turn">' + yours + ' game' +
+                      (yours === 1 ? '' : 's') + ' waiting on you</div>'
+                    : '') +
             '</div>' +
+            (state.canSend
+                ? '<div class="chat-arc-tiles">' +
+                    tile('data-chat-arc-new="w"', '♟', 'Chess',
+                         'turn by turn, no clock') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="connect4"', '🔴',
+                         'Connect 4', 'four in a row, quick') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="battleship"', '🚢',
+                         'Battleship', 'hidden fleets, checked at the end') +
+                    tile('data-chat-arc-new="w" data-chat-arc-room="1"', '🗳',
+                         'You vs the room', 'everyone else votes their move') +
+                    tile('data-chat-slot-open', '🎰', 'Slots',
+                         'solo, against your own luck') +
+                  '</div>' +
+                  '<div class="chat-arc-tilefoot">Chess starts you as white — ' +
+                      '<button class="chat-arc-inline" type="button" ' +
+                      'data-chat-arc-new="b">open one as black</button> instead.</div>'
+                : '<div class="chat-arc-note">Sending is admin-only on this server, ' +
+                  'so you can watch every game here but not play.</div>') +
             (empty
-                ? '<div class="chat-empty">No games yet — start one and it appears ' +
-                  'for everyone in the room.</div>'
+                ? '<div class="chat-arc-blank">Nothing on the tables yet. Start ' +
+                  'something and it shows up for everyone in the room.</div>'
                 : section('Your games', mine) + section('Looking for an opponent', open) +
                   section('In progress', live) + section('Finished', done.slice(0, 10))) +
             _arcLadderHtml() +
@@ -1868,13 +1897,24 @@
         return state.arcade.slot;
     }
 
+    var _bankPending = 0;      // in flight, or backing off after a failure
+
+    // Rendering triggers this, so it MUST be idempotent and must not retry in
+    // a loop: without the guard a failing endpoint meant one request per
+    // render, which is the request flood all over again.
     function _slotLoadBank(then) {
+        var now = Date.now();
+        if (_bankPending && now - _bankPending < 15000) { if (then) then(); return; }
+        _bankPending = now;
         getJSON('/api/chat/arcade/bank').then(function (r) {
-            if (r.ok && r.body && typeof r.body.balance === 'number') {
+            if (r && r.ok && r.body && typeof r.body.balance === 'number') {
                 _slotState().bank = r.body;
+                _bankPending = 0;                  // got it; free to refresh later
             }
             if (then) then();
             else renderArcade();
+        }).catch(function () {
+            if (then) then();                      // stays backed off for 15s
         });
     }
 
@@ -4052,6 +4092,11 @@
         if (!input) return;
         var text = (input.value || '').trim();
         if (!text || !state.canSend) return;
+        // Belt and braces: the composer is hidden in the Arcade, but a stray
+        // Enter must not post into whichever channel was last open — the user
+        // is looking at a chessboard, not at that channel, so the message
+        // would vanish from their view the moment it sent.
+        if (_arcOn()) { input.value = ''; return; }
         state.lastTypSentAt = 0;
         if (state.view === 'room' && text[0] === '/') {
             var slash = _runSlash(text);

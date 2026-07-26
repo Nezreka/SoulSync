@@ -31,6 +31,14 @@ globalThis.document = {
     dispatchEvent: () => {},
 };
 globalThis.MutationObserver = class { observe() {} };
+// Rendering the lobby asks the server for the play-money balance. There is no
+// server here, so answer it locally — otherwise node tries to fetch a relative
+// URL and throws an unhandled rejection that would mask a real failure.
+globalThis.fetch = async () => ({
+    ok: true, status: 200, json: async () => ({ balance: 8450, allowance: 10000,
+        refilled_on: '2026-07-26', lifetime_won: 0, lifetime_lost: 0 }),
+    text: async () => '',
+});
 globalThis.window = {};
 
 // The Arcade reads both of these off window and hides itself if either is
@@ -158,7 +166,9 @@ const NASTY = '<img src=x onerror=alert(1)>';
     const lobby = CP._arcLobbyHtml();
     check('read-only: no New game button', !lobby.includes('data-chat-arc-new'), lobby);
     check('read-only: no Join button', !lobby.includes('data-chat-arc-join'), lobby);
-    check('read-only: says why', lobby.includes('watch but not play'), lobby);
+    check('read-only: says why', lobby.includes('admin-only') &&
+          lobby.includes('not play'), lobby);
+    check('read-only: no game tiles at all', !lobby.includes('chat-arc-tile'), lobby);
 }
 
 // ── finished and frozen games say so ────────────────────────────────────
@@ -589,6 +599,28 @@ const NASTY = '<img src=x onerror=alert(1)>';
     CP._bsPlaceAt(7);                       // carrier of 5 from column h
     check('place: a ship cannot hang off the edge',
           CP._bsDraft().board === before, CP._bsDraft().board);
+}
+
+// ── the lobby front page ────────────────────────────────────────────────
+{
+    setRoom([], 'boulder');
+    const lobby = CP._arcLobbyHtml();
+    check('lobby: the purse is on the front page, not just in the slots',
+          lobby.includes('chat-arc-purse'), lobby);
+    check('lobby: says the money is play money',
+          lobby.includes('play money'), lobby);
+    check('lobby: every game is offered as a tile',
+          (lobby.match(/chat-arc-tile"/g) || []).length === 5, lobby);
+    check('lobby: an empty room says so', lobby.includes('Nothing on the tables'), lobby);
+    check('lobby: chess as black is still reachable',
+          lobby.includes('data-chat-arc-new="b"'), lobby);
+
+    // A game waiting on you is called out at the top rather than buried.
+    const mine = [ev('boulder', { k: 'gm.new', g: 'trn1', v: 'chess' }),
+                  ev('kazimir', { k: 'gm.join', g: 'trn1' }, T0 + 1000)];
+    setRoom(mine, 'boulder');
+    check('lobby: waiting-on-you is surfaced',
+          CP._arcLobbyHtml().includes('waiting on you'), CP._arcLobbyHtml());
 }
 
 // ── a card's buttons are reachable, not swallowed by the card ───────────

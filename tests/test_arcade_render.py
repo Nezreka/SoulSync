@@ -75,6 +75,16 @@ class TestWiring:
 
     def test_composer_is_hidden_in_the_arcade(self):
         assert "if (_arcOn()) { form.hidden = true; return; }" in _CHAT_JS
+        # ...and `hidden` has to actually hide it. .chat-composer sets
+        # display:flex, which beats the browser's own [hidden] rule, so
+        # setting the attribute alone left the composer on screen.
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8")
+        assert ".chat-composer[hidden] { display: none !important; }" in css
+
+    def test_a_stray_send_in_the_arcade_posts_nothing(self):
+        # The user is looking at a board, not at a channel — a message sent
+        # here would vanish from their own view the instant it went out.
+        assert "if (_arcOn()) { input.value = ''; return; }" in _CHAT_JS
 
     def test_moves_are_never_applied_optimistically(self):
         # Our own carrier comes back through the room like everyone else's.
