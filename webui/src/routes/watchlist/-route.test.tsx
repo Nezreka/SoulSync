@@ -473,6 +473,60 @@ describe('watchlist route', () => {
     expect(screen.getByText('0 labels')).toBeInTheDocument();
   });
 
+  it('opens global settings from the URL and saves', async () => {
+    const calls = stubFetch({ globalOverride: true });
+    renderWatchlistRoute(['/watchlist?settings=true']);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Global Watchlist Settings' })).toBeInTheDocument();
+    });
+
+    // Populated from the loaded config, not from blank defaults.
+    const overrideToggle = screen.getByRole('checkbox', { name: /Enable Global Override/ });
+    expect(overrideToggle).toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+
+    await waitFor(() => {
+      const posts = calls.filter((url) => url.includes('/api/watchlist/global-config'));
+      expect(posts.length).toBeGreaterThan(1);
+    });
+  });
+
+  it('refuses to save an override with no release type, and says why', async () => {
+    stubFetch({ globalOverride: true });
+    window.showToast = vi.fn();
+    renderWatchlistRoute(['/watchlist?settings=true']);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Global Watchlist Settings' })).toBeInTheDocument();
+    });
+
+    // The accessible name is the whole label, icon included ("💿Albums Full-length
+    // studio albums"), so these match on a distinctive substring.
+    for (const label of [/Full-length studio albums/, /Extended plays/, /Single tracks and/]) {
+      const box = screen.getByRole('checkbox', { name: label });
+      if ((box as HTMLInputElement).checked) fireEvent.click(box);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+
+    await waitFor(() => {
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Please select at least one release type',
+        'error',
+      );
+    });
+  });
+
+  it('the Global Settings button reports an active override', async () => {
+    stubFetch({ globalOverride: true });
+    renderWatchlistRoute();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Global Override ON/ })).toBeInTheDocument();
+    });
+  });
+
   it('redirects away when the profile may not see the watchlist', async () => {
     stubFetch();
     window.SoulSyncWebShellBridge = createShellBridge({
