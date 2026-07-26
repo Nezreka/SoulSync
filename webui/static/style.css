@@ -72020,6 +72020,11 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     display: flex; align-items: center; justify-content: center;
     font-size: 13px; font-weight: 800;
 }
+/* The cell already has a fixed 32px box, so the image can fill it without the
+   circular height dependency that collapsed the avatar picker. */
+.chat-userpanel-av--img { background: none; overflow: hidden; padding: 0; }
+.chat-userpanel-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-guild-logo { width: 30px; height: 30px; object-fit: contain; display: block; }
 .chat-userpanel-main { flex: 1; min-width: 0; }
 .chat-userpanel-name {
     font-size: 13px; font-weight: 700; color: #fff;

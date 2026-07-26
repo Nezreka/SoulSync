@@ -883,13 +883,19 @@
         var html = rooms.map(function (r) {
             var on = state.view === 'room' && state.room === r.name;
             var initials = String(r.name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
+            // The community room is the app's own room, so it gets the app's
+            // mark. Every other room is somebody else's and keeps initials.
+            var face = r.home
+                ? '<img class="chat-guild-logo" src="/static/trans2.png" alt="" ' +
+                  'aria-hidden="true">'
+                : esc(initials);
             // The rail is the ONLY room switcher now (the sidebar lists channels,
             // not rooms), so leaving has to live here too — × on hover, home room
             // excluded, same rule the old sidebar list used.
             return '<span class="chat-guild-wrap">' +
                 '<button class="chat-guild' + (on ? ' chat-guild--on' : '') + '" type="button" ' +
                     'data-chat-open-room="' + attr(r.name) + '" title="' + attr(r.name) + '">' +
-                    esc(initials) + '</button>' +
+                    face + '</button>' +
                 (!r.home && state.canManage
                     ? '<button class="chat-guild-leave" type="button" data-chat-leave-room="' +
                         attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
@@ -1899,8 +1905,14 @@
         if (!host) return;
         var name = state.selfName || 'You';
         var initials = String(name).replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+        // Your own strip was the one place the chosen avatar never reached —
+        // message rows, the member list and the picker all had it.
+        var av = _myAvatar();
         host.innerHTML =
-            '<div class="chat-userpanel-av">' + esc(initials) + '</div>' +
+            '<div class="chat-userpanel-av' + (av ? ' chat-userpanel-av--img' : '') + '">' +
+                (av ? '<img src="/static/avatar/' + av + '.png" alt="" loading="lazy">'
+                    : esc(initials)) +
+            '</div>' +
             '<div class="chat-userpanel-main">' +
                 '<div class="chat-userpanel-name">' + esc(name) + '</div>' +
                 '<div class="chat-userpanel-sub">' +
@@ -2940,6 +2952,7 @@
         try { localStorage.setItem('chat_avatar', String(n)); } catch (e) { /* private mode */ }
         postJSON('/api/chat/settings', { avatar: n }).catch(function () { /* local still applies */ });
         renderAvatarPicker();
+        renderUserPanel();          // the account strip carries it too
         // Announce it now so the room repaints without waiting for us to talk.
         if (state.canSend && state.view === 'room') {
             try { sendProtocol('hello', n ? { av: n } : {}); } catch (e) { /* not in a room */ }
@@ -4953,6 +4966,7 @@
                         // Soulseek, so the same escaping contract applies here
                         _arcLobbyHtml: _arcLobbyHtml, _arcBoardHtml: _arcBoardHtml,
                         _arcSidebarHtml: _arcSidebarHtml, _arcPgn: _arcPgn,
+                        renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });
