@@ -643,6 +643,28 @@ const NASTY = '<img src=x onerror=alert(1)>';
           board.includes('data-chat-arc-cancel'), board);
 }
 
+// ── a room game offers a way out before anyone has voted ────────────────
+{
+    const roomNew = [ev('boulder', { k: 'gm.new', g: 'rmwd', v: 'chess', r: 1 })];
+    setRoom(roomNew, 'boulder');
+    check('room game: Withdraw offered in the lobby',
+          CP._arcLobbyHtml().includes('data-chat-arc-cancel'), CP._arcLobbyHtml());
+    CP._testSetState({ arcade: { game: 'rmwd', sel: -1, promo: null, flip: false } });
+    check('room game: Withdraw offered on the board',
+          CP._arcBoardHtml(game(roomNew, 'rmwd')).includes('data-chat-arc-cancel'), '');
+
+    // Withdrawing it leaves nothing behind, like any untouched table.
+    const gone = roomNew.concat([ev('boulder', { k: 'gm.cancel', g: 'rmwd' }, T0 + 1000)]);
+    setRoom(gone, 'boulder');
+    check('room game: withdrawn leaves no card',
+          !CP._arcLobbyHtml().includes('rmwd'), CP._arcLobbyHtml());
+
+    // Someone else's room game gets no Withdraw button.
+    setRoom(roomNew, 'kazimir');
+    check('room game: not yours, no Withdraw',
+          !CP._arcLobbyHtml().includes('data-chat-arc-cancel'), CP._arcLobbyHtml());
+}
+
 // ── the Arcade hides itself if its libraries are absent ─────────────────
 {
     // chat.js must not throw when chess-engine.js / chat-games.js failed to

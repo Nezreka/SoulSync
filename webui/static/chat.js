@@ -1229,6 +1229,16 @@
         }).slice(0, 12);
     }
 
+    // Withdrawing is for a game nothing has happened in. An open table
+    // qualifies, and so does a room game nobody has voted in yet — those are
+    // 'live' from creation, so without this they could only be escaped by
+    // resigning to an opponent who does not exist.
+    function _arcCanWithdraw(game) {
+        if (!game || !state.canSend || game.createdBy !== state.selfName) return false;
+        if (game.status === 'open') return true;
+        return !!(game.roomSeat && game.status === 'live' && game.ply === 0);
+    }
+
     function _arcMyTurnCount() {
         var st = _gamesState();
         var n = 0;
@@ -1505,7 +1515,7 @@
                     'data-chat-arc-claim="' + attr(g.id) + '" ' +
                     'title="This seat has been idle for 24 hours — take it over">Take the seat</button>';
             }
-            if (g.status === 'open' && g.createdBy === state.selfName && can) {
+            if (_arcCanWithdraw(g)) {
                 actions += '<button class="chat-arc-btn" type="button" ' +
                     'data-chat-arc-cancel="' + attr(g.id) + '" ' +
                     'title="Take the table away — nobody joined, so nobody wins">' +
@@ -1762,7 +1772,7 @@
             actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
                 attr(game.id) + '">Take the idle seat</button>';
         }
-        if (state.canSend && game.status === 'open' && game.createdBy === state.selfName) {
+        if (_arcCanWithdraw(game)) {
             actions += '<button class="chat-arc-btn" type="button" data-chat-arc-cancel="' +
                 attr(game.id) + '">Withdraw</button>';
         }
@@ -2203,7 +2213,7 @@
                         : '') +
                     // Setup returns early with its own action row, so without
                     // this the creator lands here and has no way back out.
-                    (game.status === 'open' && game.createdBy === state.selfName
+                    (_arcCanWithdraw(game)
                         ? '<button class="chat-arc-btn" type="button" ' +
                           'data-chat-arc-cancel="' + attr(game.id) + '">Withdraw</button>'
                         : '') +
@@ -2285,7 +2295,7 @@
         }
         // The board had no way out at all: no withdraw before anyone joined,
         // and nothing to take an idle seat with.
-        if (state.canSend && game.status === 'open' && game.createdBy === state.selfName) {
+        if (_arcCanWithdraw(game)) {
             actions += '<button class="chat-arc-btn" type="button" data-chat-arc-cancel="' +
                 attr(game.id) + '">Withdraw</button>';
         }

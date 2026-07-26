@@ -859,7 +859,13 @@
                 // resignation: nobody is sitting opposite to be handed a win,
                 // and an unplayed game has no business on the ladder. Once
                 // someone has joined you owe them a resignation instead.
-                if (game.status !== 'open') return;
+                // A room game is 'live' the moment it is created -- there is
+                // no opponent to wait for -- so it could never be withdrawn at
+                // all, and the only way out was resigning to nobody at ply 0,
+                // which recorded a loss for a game that never started. It can
+                // be withdrawn while untouched, exactly like an open table.
+                var untouched = game.roomSeat && game.status === 'live' && game.ply === 0;
+                if (game.status !== 'open' && !untouched) return;
                 if (user !== game.createdBy) return;
                 game.status = 'over';
                 game.result = null;

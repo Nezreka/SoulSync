@@ -633,6 +633,28 @@ describe('leaving — withdrawing vs resigning', () => {
         assert.equal(g.black, '');
         assert.equal(g.status, 'over');
     });
+    test('an untouched room game can be withdrawn', () => {
+        // A room game is 'live' from creation — there is no opponent to wait
+        // for — so it could never be withdrawn, and the only way out was
+        // resigning to nobody, recording a loss for a game that never started.
+        const roomNew = ev('boulder', { k: 'gm.new', g: 'g001', v: 'chess', r: 1 });
+        assert.equal(one([roomNew]).status, 'live', 'live from the off');
+        const g = one([roomNew, ev('boulder', { k: 'gm.cancel', g: 'g001' }, T0 + 1000)]);
+        assert.equal(g.status, 'over');
+        assert.equal(g.reason, 'cancelled');
+        assert.equal(g.result, null, 'not a resignation to an empty seat');
+    });
+    test('a room game that has been voted in must be resigned, not withdrawn', () => {
+        const evs = [ev('boulder', { k: 'gm.new', g: 'g001', v: 'chess', r: 1 }),
+                     ...moveEvents('g001', ['boulder', ''], ['e2e4']),
+                     ev('boulder', { k: 'gm.cancel', g: 'g001' }, T0 + 99000)];
+        assert.equal(one(evs).status, 'live', 'play started; see it out');
+    });
+    test('only the creator can withdraw a room game', () => {
+        const g = one([ev('boulder', { k: 'gm.new', g: 'g001', v: 'chess', r: 1 }),
+                       ev('sella', { k: 'gm.cancel', g: 'g001' }, T0 + 1000)]);
+        assert.equal(g.status, 'live');
+    });
     test('a table nobody sat at reads as gone cold', () => {
         const DAY = G.OPEN_EXPIRY_MS;
         assert.equal(G.reduceGames([opened()], T0 + DAY - 1000).games.g001.expired, false);
