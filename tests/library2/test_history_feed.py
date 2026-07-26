@@ -197,6 +197,32 @@ def test_previous_file_replaced_surfaces_in_the_feed(imported_conn):
     assert replaced["detail"] == "quality_upgrade"
 
 
+def test_human_verification_decisions_surface_in_the_feed(imported_conn):
+    """F-10's two human steps: an approve/reject that happens long after the
+    download must land in the same correlated story, not a separate silo."""
+    from core.acquisition.history import record_history_event
+
+    drake = _drake_ids(imported_conn)
+    request_id = _acquisition_grab(
+        imported_conn, scope="recording", entity_id=drake["recording_id"]
+    )
+    record_history_event(
+        imported_conn, "human_verified", request_id=request_id,
+        payload={"actor": "profile:1", "library_history_id": 7},
+    )
+    record_history_event(
+        imported_conn, "rejected", request_id=request_id,
+        reason_code="human_rejected", payload={"actor": "profile:1"},
+    )
+    imported_conn.commit()
+
+    history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
+    verified = next(e for e in history if e["event_type"] == "human_verified")
+    rejected = next(e for e in history if e["event_type"] == "rejected")
+    assert (verified["title"], verified["category"]) == ("Verified by you", "imported")
+    assert (rejected["title"], rejected["category"]) == ("Rejected by you", "failed")
+
+
 def test_artist_missing_scope_does_not_leak_into_a_different_artist(imported_conn):
     drake = _drake_ids(imported_conn)
     rihanna = _second_artist(imported_conn)

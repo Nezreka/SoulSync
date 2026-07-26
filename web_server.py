@@ -9363,6 +9363,17 @@ def approve_verification_item(history_id):
             )
             conn.commit()
         tag_written = bool(on_disk) and write_verification_status(on_disk, HUMAN_VERIFIED)
+        # F-10: the human step of the pipeline story. Fail-open — a history row
+        # without acquisition correlation (ordinary library import) writes
+        # nothing and never blocks the approval itself.
+        try:
+            from core.acquisition.pipeline_callback import notify_verification_decision
+            notify_verification_decision(
+                history_id, decision="human_verified",
+                actor=f"profile:{get_current_profile_id()}",
+            )
+        except Exception as journal_error:  # noqa: BLE001
+            logger.debug("[Verification] approve journal skipped: %s", journal_error)
         return jsonify({
             "success": True,
             "tag_written": tag_written,
@@ -9390,6 +9401,17 @@ def delete_verification_item(history_id):
             os.remove(on_disk)
             file_deleted = True
             logger.info(f"[Verification] Deleted rejected file: {on_disk}")
+        # F-10: journal the rejection BEFORE the row (and with it the stored
+        # acquisition correlation) is deleted — afterwards there is nothing
+        # left to correlate against. Fail-open as everywhere else.
+        try:
+            from core.acquisition.pipeline_callback import notify_verification_decision
+            notify_verification_decision(
+                history_id, decision="rejected", reason_code="human_rejected",
+                actor=f"profile:{get_current_profile_id()}",
+            )
+        except Exception as journal_error:  # noqa: BLE001
+            logger.debug("[Verification] reject journal skipped: %s", journal_error)
         db.delete_library_history_rows([history_id])
         return jsonify({"success": True, "file_deleted": file_deleted})
     except Exception as e:

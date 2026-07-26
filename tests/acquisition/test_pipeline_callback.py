@@ -362,3 +362,137 @@ def test_quarantine_sidecar_preserves_acquisition_markers():
     assert restored["_acquisition_relative_path"] == "Disc 1/01.flac"
     assert restored["_acquisition_track_id"] == 42
     assert restored["track_info"]["quality_profile_id"] == 7
+
+
+def _library_history_table(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS library_history (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               event_type TEXT NOT NULL,
+               title TEXT NOT NULL,
+               file_path TEXT,
+               verification_status TEXT)"""
+    )
+
+
+def test_history_correlation_is_persisted_onto_the_library_history_row(tmp_path):
+    """F-10 decision (features.md): ``library_history`` gains a persistent
+    acquisition correlation, so a verification decision made days later can
+    still be journaled against the same request/candidate/download. Until now
+    the only link was the in-memory ``context['_history_id']`` of that one
+    pipeline run."""
+    from core.acquisition.pipeline_callback import persist_history_correlation
+
+    database_path = tmp_path / "correlation.sqlite"
+
+    def factory():
+        conn = sqlite3.connect(database_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    conn = factory()
+    ensure_acquisition_schema(conn)
+    _library_history_table(conn)
+    importing, request = _importing_record(conn)
+    conn.execute("INSERT INTO library_history(id, event_type, title) "
+                 "VALUES(7, 'download', 'Nonstop')")
+    conn.commit()
+    conn.close()
+
+    assert persist_history_correlation(
+        {"_acquisition_import_id": importing.id}, 7, connection_factory=factory,
+    ) is True
+
+    conn = factory()
+    row = conn.execute(
+        "SELECT acquisition_request_id, acquisition_candidate_id, "
+        "       acquisition_download_id FROM library_history WHERE id=7"
+    ).fetchone()
+    conn.close()
+    assert row["acquisition_request_id"] == request.id
+    assert row["acquisition_download_id"] == importing.download_id
+    assert row["acquisition_candidate_id"] == importing.candidate_id
+
+
+def test_history_correlation_is_a_noop_for_ordinary_imports():
+    from core.acquisition.pipeline_callback import persist_history_correlation
+
+    assert persist_history_correlation({}, 7) is False
+
+
+def test_verification_decision_journals_human_verified_and_rejected(tmp_path):
+    """The two F-10 steps that were unreachable before: an approve/reject that
+    happens long after the pipeline run now finds its correlation on the
+    history row itself."""
+    from core.acquisition.pipeline_callback import (
+        notify_verification_decision,
+        persist_history_correlation,
+    )
+
+    database_path = tmp_path / "verification.sqlite"
+
+    def factory():
+        conn = sqlite3.connect(database_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    conn = factory()
+    ensure_acquisition_schema(conn)
+    _library_history_table(conn)
+    importing, request = _importing_record(conn)
+    conn.execute("INSERT INTO library_history(id, event_type, title, file_path) "
+                 "VALUES(7, 'download', 'Nonstop', '/library/01.flac')")
+    conn.commit()
+    conn.close()
+    persist_history_correlation(
+        {"_acquisition_import_id": importing.id}, 7, connection_factory=factory)
+
+    assert notify_verification_decision(
+        7, decision="human_verified", actor="profile:1",
+        connection_factory=factory,
+    ) is True
+    assert notify_verification_decision(
+        7, decision="rejected", reason_code="wrong_track",
+        connection_factory=factory,
+    ) is True
+
+    conn = factory()
+    events = {event.event_type: event
+              for event in list_history_events(conn, request_id=request.id)}
+    conn.close()
+    assert events["human_verified"].download_id == importing.download_id
+    assert events["human_verified"].candidate_id == importing.candidate_id
+    assert events["rejected"].reason_code == "wrong_track"
+    assert events["rejected"].payload["library_history_id"] == 7
+
+
+def test_verification_decision_without_correlation_writes_nothing(tmp_path):
+    """A plain library import has no acquisition side — the decision must stay
+    a zero-write no-op rather than inventing a correlation."""
+    from core.acquisition.pipeline_callback import notify_verification_decision
+
+    database_path = tmp_path / "uncorrelated.sqlite"
+
+    def factory():
+        conn = sqlite3.connect(database_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    conn = factory()
+    ensure_acquisition_schema(conn)
+    _library_history_table(conn)
+    conn.execute("INSERT INTO library_history(id, event_type, title) "
+                 "VALUES(9, 'download', 'Untracked')")
+    conn.commit()
+    conn.close()
+
+    assert notify_verification_decision(9, decision="human_verified",
+                                        connection_factory=factory) is False
+
+
+def test_verification_decision_rejects_an_unknown_decision(tmp_path):
+    from core.acquisition.pipeline_callback import notify_verification_decision
+
+    assert notify_verification_decision(1, decision="maybe") is False

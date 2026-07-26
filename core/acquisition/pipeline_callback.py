@@ -779,9 +779,174 @@ def notify_previous_file_replaced(
         conn.close()
 
 
+VERIFICATION_DECISIONS = {"human_verified", "rejected"}
+
+# Persistent acquisition correlation on the legacy ``library_history`` row.
+# Prefixed because that table already carries unrelated ``source_track_id``/
+# ``download_source`` columns and an unqualified ``request_id`` there would
+# read like a legacy concept.
+_HISTORY_CORRELATION_COLUMNS = (
+    "acquisition_request_id",
+    "acquisition_candidate_id",
+    "acquisition_download_id",
+)
+
+
+def ensure_library_history_correlation_columns(conn: Any) -> bool:
+    """Add the acquisition correlation columns to ``library_history``.
+
+    Idempotent and safe on an old database. Returns False when the table does
+    not exist at all (fresh Library-v2-only fixtures), so callers can stay
+    fail-open.
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_history'"
+    ).fetchone()
+    if not exists:
+        return False
+    present = {row[1] for row in conn.execute("PRAGMA table_info(library_history)")}
+    for column in _HISTORY_CORRELATION_COLUMNS:
+        if column not in present:
+            conn.execute(f"ALTER TABLE library_history ADD COLUMN {column} TEXT")
+    return True
+
+
+def persist_history_correlation(
+    context: Mapping[str, Any],
+    history_id: Any,
+    *,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Pin this import's acquisition ids onto its ``library_history`` row.
+
+    ``context['_history_id']`` only ever lived for the duration of one
+    pipeline run, so the later verification routes — which see nothing but a
+    ``library_history.id`` — had no way back to the acquisition side and F-10's
+    ``human_verified``/``rejected`` steps could not be journaled at all.
+    Writing the correlation down at import time closes that gap.
+
+    Same fail-open contract as every other callback here: an ordinary,
+    non-acquisition import is a zero-write no-op.
+    """
+    try:
+        history_id = int(history_id)
+    except (TypeError, ValueError):
+        return False
+    if history_id <= 0:
+        return False
+    if not _context_value(context, "_acquisition_import_id"):
+        from core.acquisition.manual_grab import GRAB_MARKER
+
+        if not _context_value(context, GRAB_MARKER):
+            return False
+    if connection_factory is None:
+        from database.music_database import get_database
+
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        correlation = _pipeline_correlation(conn, context)
+        if correlation is None:
+            return False
+        if not ensure_library_history_correlation_columns(conn):
+            return False
+        cursor = conn.execute(
+            """UPDATE library_history
+                  SET acquisition_request_id=?, acquisition_candidate_id=?,
+                      acquisition_download_id=?
+                WHERE id=?""",
+            (correlation["request_id"], correlation["candidate_id"],
+             correlation["download_id"], history_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception:
+        conn.rollback()
+        logger.exception("library history correlation write failed (%s)", history_id)
+        return False
+    finally:
+        conn.close()
+
+
+def notify_verification_decision(
+    history_id: Any,
+    *,
+    decision: str,
+    reason_code: Optional[str] = None,
+    message: Optional[str] = None,
+    actor: Optional[str] = None,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Journal a human verification decision as an acquisition history event.
+
+    F-10 wants the whole attempt visible, including what a person decided
+    about the file afterwards. The correlation comes from the columns
+    :func:`persist_history_correlation` wrote at import time; a row without
+    them belongs to an import that acquisition never tracked and stays a
+    zero-write no-op rather than getting an invented correlation.
+    """
+    decision = str(decision or "").strip().lower()
+    if decision not in VERIFICATION_DECISIONS:
+        return False
+    try:
+        history_id = int(history_id)
+    except (TypeError, ValueError):
+        return False
+    if connection_factory is None:
+        from database.music_database import get_database
+
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        if not ensure_library_history_correlation_columns(conn):
+            return False
+        row = conn.execute(
+            """SELECT acquisition_request_id, acquisition_candidate_id,
+                      acquisition_download_id, file_path
+                 FROM library_history WHERE id=?""",
+            (history_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        request_id = row["acquisition_request_id"]
+        download_id = row["acquisition_download_id"]
+        if not request_id and not download_id:
+            return False
+        from core.acquisition.history import record_history_event
+
+        record_history_event(
+            conn,
+            decision,
+            request_id=request_id,
+            candidate_id=row["acquisition_candidate_id"],
+            download_id=download_id,
+            reason_code=reason_code,
+            message=message,
+            payload={
+                "actor": actor or "user",
+                "library_history_id": history_id,
+                "file_path": row["file_path"],
+            },
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        logger.exception("verification decision journal failed (%s)", history_id)
+        return False
+    finally:
+        conn.close()
+
+
 __all__ = [
     "CHECK_EVENT_TYPES",
     "CHECK_STATUSES",
+    "VERIFICATION_DECISIONS",
+    "ensure_library_history_correlation_columns",
+    "notify_verification_decision",
+    "persist_history_correlation",
     "notify_manual_grab_import_success",
     "notify_manual_grab_quarantined",
     "notify_correlated_grab_cancelled",

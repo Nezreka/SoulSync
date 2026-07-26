@@ -43,6 +43,11 @@ EVENT_TYPES = frozenset({
     "import_completed",
     "import_failed",
     "previous_file_replaced",
+    # F-10's two human steps. Reachable since ``library_history`` carries its
+    # own acquisition correlation — before that, an approve/reject arriving
+    # long after the pipeline run had nothing to journal against.
+    "human_verified",
+    "rejected",
 })
 
 ACQUISITION_HISTORY_DDL = """

@@ -57,6 +57,8 @@ EVENT_CATEGORY = {
     "import_completed": ("imported", "Imported"),
     "import_failed": ("failed", "Import failed"),
     "previous_file_replaced": ("imported", "Previous file replaced"),
+    "human_verified": ("imported", "Verified by you"),
+    "rejected": ("failed", "Rejected by you"),
 }
 
 ENTITY_EVENT_LABEL = {

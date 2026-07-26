@@ -274,6 +274,17 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         # library_history row (the Unverified review queue needs it).
         if isinstance(_history_id, int) and _history_id > 0:
             context["_history_id"] = _history_id
+            # F-10: that stash is in-memory only and gone by the time a user
+            # approves or rejects the file. Persist the acquisition
+            # correlation on the row itself so the later decision can still
+            # be journaled. Fail-open — an ordinary import writes nothing.
+            try:
+                from core.acquisition.pipeline_callback import (
+                    persist_history_correlation,
+                )
+                persist_history_correlation(context, _history_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("history correlation persist failed: %s", exc)
     except Exception as e:
         logger.debug("library history record failed: %s", e)
 

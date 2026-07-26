@@ -833,6 +833,20 @@ class MusicDatabase:
                     logger.info(f"Added {_col} column to library_history")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_origin ON library_history (origin, created_at DESC)")
 
+            # Migration (F-10): persistent acquisition correlation. The import
+            # pipeline knows which request/candidate/download produced a row,
+            # but that link only lived in the run's in-memory context — so a
+            # verification approve/reject arriving later had no way back to
+            # the acquisition side and its history step could not be recorded.
+            for _col in ['acquisition_request_id', 'acquisition_candidate_id',
+                         'acquisition_download_id']:
+                if _col not in lh_cols:
+                    cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
+                    logger.info(f"Added {_col} column to library_history")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_lh_acquisition_request "
+                "ON library_history (acquisition_request_id)")
+
             # Watchlist scan history (#831 round 2) — one row per scan run with
             # its full track ledger (added/skipped), so the Watchlist page can
             # show what every past run did. Wishlist rows erode as tracks
