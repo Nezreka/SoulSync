@@ -30,6 +30,7 @@ import {
 import { WATCHLIST_SORT_VALUES, type WatchlistArtist } from '../-watchlist.types';
 import { Route } from '../route';
 import { WatchlistArtistConfigModal } from './watchlist-artist-config-modal';
+import { WatchlistArtistDetail } from './watchlist-artist-detail';
 import { WatchlistGlobalSettingsModal } from './watchlist-global-settings-modal';
 import { WatchlistLabelsTab } from './watchlist-labels-tab';
 import styles from './watchlist-page.module.css';
@@ -244,6 +245,22 @@ export function WatchlistPage() {
           artistId={search.configId}
           globalOverrideActive={globalOverrideActive}
           onClose={() => void navigate({ search: (prev) => ({ ...prev, configId: undefined }) })}
+        />
+      ) : null}
+
+      {search.detailId ? (
+        <WatchlistArtistDetail
+          profileId={profileId}
+          artistId={search.detailId}
+          onClose={() => void navigate({ search: (prev) => ({ ...prev, detailId: undefined }) })}
+          // Settings replaces the detail view with the config modal, so the
+          // panel cannot sit on top of it — the vanilla code removed the
+          // overlay before opening the modal for the same reason.
+          onOpenSettings={() =>
+            void navigate({
+              search: (prev) => ({ ...prev, detailId: undefined, configId: search.detailId }),
+            })
+          }
         />
       ) : null}
 

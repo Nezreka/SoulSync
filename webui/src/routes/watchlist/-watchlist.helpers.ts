@@ -151,7 +151,20 @@ export interface WatchlistPill {
   kind: 'active' | 'filter';
 }
 
-export function artistPills(artist: WatchlistArtist): WatchlistPill[] {
+/** Accepts anything carrying the include flags — a grid row or a fetched
+ *  per-artist config, which are separate shapes with the same fields. */
+export type PillSource = Pick<
+  WatchlistArtist,
+  | 'include_albums'
+  | 'include_eps'
+  | 'include_singles'
+  | 'include_live'
+  | 'include_remixes'
+  | 'include_acoustic'
+  | 'include_compilations'
+>;
+
+export function artistPills(artist: PillSource): WatchlistPill[] {
   const pills: WatchlistPill[] = [];
   if (artist.include_albums) pills.push({ label: 'Albums', kind: 'active' });
   if (artist.include_eps) pills.push({ label: 'EPs', kind: 'active' });

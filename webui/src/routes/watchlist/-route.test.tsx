@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -61,6 +61,8 @@ interface StubOptions {
   globalOverride?: boolean;
   labels?: Record<string, unknown>[];
   scanCompletedAt?: string | null;
+  /** false = an artist matched on no provider at all, which the server allows. */
+  configProviderIds?: boolean;
 }
 
 function stubFetch(options: StubOptions = {}) {
@@ -71,6 +73,7 @@ function stubFetch(options: StubOptions = {}) {
     globalOverride = false,
     labels = [],
     scanCompletedAt = null,
+    configProviderIds = true,
   } = options;
 
   const calls: string[] = [];
@@ -145,9 +148,9 @@ function stubFetch(options: StubOptions = {}) {
             popularity: 71,
             genres: ['idm', 'ambient', 'braindance', 'electronic'],
           },
-          spotify_artist_id: 'sp-aphex',
+          spotify_artist_id: configProviderIds ? 'sp-aphex' : null,
           itunes_artist_id: null,
-          deezer_artist_id: 'dz-aphex',
+          deezer_artist_id: configProviderIds ? 'dz-aphex' : null,
           discogs_artist_id: null,
           amazon_artist_id: null,
           musicbrainz_artist_id: null,
@@ -727,6 +730,73 @@ describe('watchlist route', () => {
         screen.getByText(/these per-artist settings are currently ignored during scans/),
       ).toBeInTheDocument();
     });
+  });
+
+  it('opens the artist detail panel with releases and watchlist info', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    // The panel shell mounts before its config query resolves, so wait on a
+    // value that only exists once the payload has landed.
+    await waitFor(() => {
+      expect(screen.getByText('1,234,567')).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: '← Back to Watchlist' })).toBeInTheDocument();
+    // The detail hero shows ALL genres, unlike the config modal which caps at 3.
+    expect(screen.getByText('electronic')).toBeInTheDocument();
+
+    // The grid stays mounted underneath, so "Albums" legitimately appears
+    // twice — scope the pill assertions to the panel itself.
+    const panel = document.querySelector('.watchlist-artist-detail-overlay');
+    expect(panel).not.toBeNull();
+    const inPanel = within(panel as HTMLElement);
+    expect(inPanel.getByText('Albums')).toBeInTheDocument();
+    expect(inPanel.getByText('Singles')).toBeInTheDocument();
+    expect(inPanel.queryByText('EPs')).not.toBeInTheDocument();
+  });
+
+  it('Settings swaps the detail panel for the config modal', async () => {
+    stubFetch();
+    const { router } = renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toMatchObject({ configId: 'sp-aphex' });
+    });
+    // The panel must close, or it would sit on top of the modal.
+    expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
+  });
+
+  it('removes the artist from the detail panel', async () => {
+    const calls = stubFetch();
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Remove from Watchlist' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from Watchlist' }));
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(true);
+    });
+  });
+
+  it('disables View Discography for an artist with no provider ids', async () => {
+    stubFetch({ configProviderIds: false });
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'View Discography' })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: 'View Discography' })).toBeDisabled();
   });
 
   it('redirects away when the profile may not see the watchlist', async () => {
