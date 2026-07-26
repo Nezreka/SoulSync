@@ -16,6 +16,15 @@ declare global {
       cancelText?: string;
       destructive?: boolean;
     }) => Promise<boolean>;
+    /**
+     * Refreshes the watchlist nav badge and hero-button count.
+     *
+     * Owned by the vanilla shell (api-monitor.js) because those elements live
+     * outside any React route — Library and Artist Detail call it too. The
+     * React watchlist page calls it after a mutation for the same reason the
+     * vanilla page did, and treats a failure as non-fatal.
+     */
+    updateWatchlistButtonCount?: () => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;

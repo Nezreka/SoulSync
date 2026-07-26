@@ -164,6 +164,46 @@ export function artistPills(artist: WatchlistArtist): WatchlistPill[] {
 }
 
 /**
+ * State of the "Select All" checkbox for the currently VISIBLE cards.
+ *
+ * Visible-only is the load-bearing part, ported from the vanilla page: it
+ * skipped any card whose `style.display` was 'none', i.e. one hidden by the
+ * filter. So filtering to "Aphex", ticking Select All and hitting Remove takes
+ * out the filtered artist, not the whole watchlist.
+ */
+export interface BatchSelectionState {
+  selectedCount: number;
+  allSelected: boolean;
+  indeterminate: boolean;
+}
+
+export function batchSelectionState(
+  visibleArtists: WatchlistArtist[],
+  selectedIds: ReadonlySet<string>,
+): BatchSelectionState {
+  const visibleIds = visibleArtists
+    .map((artist) => primaryArtistId(artist))
+    .filter((id): id is string => id !== null);
+  const selectedCount = visibleIds.filter((id) => selectedIds.has(id)).length;
+
+  return {
+    selectedCount,
+    allSelected: visibleIds.length > 0 && selectedCount === visibleIds.length,
+    indeterminate: selectedCount > 0 && selectedCount < visibleIds.length,
+  };
+}
+
+/** The ids Remove Selected acts on — selected AND currently visible. */
+export function selectedVisibleIds(
+  visibleArtists: WatchlistArtist[],
+  selectedIds: ReadonlySet<string>,
+): string[] {
+  return visibleArtists
+    .map((artist) => primaryArtistId(artist))
+    .filter((id): id is string => id !== null && selectedIds.has(id));
+}
+
+/**
  * Provider badge label and its style.css class.
  *
  * The class is spelled out rather than derived from the label: `iTunes` and

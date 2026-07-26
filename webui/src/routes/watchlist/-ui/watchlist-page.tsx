@@ -1,29 +1,35 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import {
+  removeWatchlistArtistsBatch,
+  WATCHLIST_QUERY_KEY,
   watchlistArtistsQueryOptions,
   watchlistCountQueryOptions,
   watchlistGlobalConfigQueryOptions,
+  watchlistLabelsQueryOptions,
   watchlistScanStatusQueryOptions,
 } from '../-watchlist.api';
 import {
   artistPills,
   artistSourceKeys,
+  batchSelectionState,
   filterArtists,
   formatArtistCount,
   formatCountdown,
   formatRelativeScanTime,
   formatTimeAgo,
   primaryArtistId,
+  selectedVisibleIds,
   sortArtists,
   WATCHLIST_SOURCE_BADGES,
 } from '../-watchlist.helpers';
 import { WATCHLIST_SORT_VALUES, type WatchlistArtist } from '../-watchlist.types';
 import { Route } from '../route';
+import { WatchlistLabelsTab } from './watchlist-labels-tab';
 import styles from './watchlist-page.module.css';
 
 const SORT_LABELS: Record<(typeof WATCHLIST_SORT_VALUES)[number], string> = {
@@ -40,6 +46,12 @@ export function WatchlistPage() {
   const { profileId } = useProfile();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
+  const queryClient = useQueryClient();
+
+  // Selection is keyed by primary artist id rather than row index so that a
+  // refetch which reorders or drops rows cannot silently reassign a tick to a
+  // different artist.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   // The route loader has already primed all four, so these resolve from cache
   // on first paint. They stay `useQuery` rather than suspense so that a later
@@ -63,6 +75,106 @@ export function WatchlistPage() {
   const globalOverrideActive = Boolean(globalConfigQuery.data?.global_override_enabled);
   const isLabelsTab = search.tab === 'labels';
 
+  // The header chip counts labels while the Labels tab is open, exactly as the
+  // vanilla `switchWatchlistTab` rewrote it. `enabled` keeps the artists tab
+  // from paying for the labels round trip; the tab body shares this cache entry.
+  const labelsQuery = useQuery({
+    ...watchlistLabelsQueryOptions(profileId),
+    enabled: isLabelsTab,
+  });
+  const labelCount = labelsQuery.data?.length ?? 0;
+  const headerCount = isLabelsTab
+    ? `${labelCount} label${labelCount !== 1 ? 's' : ''}`
+    : formatArtistCount(count);
+
+  const selection = useMemo(
+    () => batchSelectionState(visibleArtists, selectedIds),
+    [visibleArtists, selectedIds],
+  );
+
+  // A tick on an artist that has since been removed (or filtered away by a
+  // refetch) must not linger and get swept into the next batch remove.
+  useEffect(() => {
+    setSelectedIds((previous) => {
+      if (previous.size === 0) return previous;
+      const live = new Set(
+        artists.map((artist) => primaryArtistId(artist)).filter((id): id is string => id !== null),
+      );
+      const next = new Set([...previous].filter((id) => live.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [artists]);
+
+  const toggleArtist = useCallback((artistId: string) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(artistId)) {
+        next.delete(artistId);
+      } else {
+        next.add(artistId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(
+    (checked: boolean) => {
+      // Only the VISIBLE cards, matching the vanilla behaviour: with a filter
+      // applied, Select All means "all of what I can see", never the whole
+      // watchlist.
+      const visibleIds = visibleArtists
+        .map((artist) => primaryArtistId(artist))
+        .filter((id): id is string => id !== null);
+
+      setSelectedIds((previous) => {
+        const next = new Set(previous);
+        for (const id of visibleIds) {
+          if (checked) {
+            next.add(id);
+          } else {
+            next.delete(id);
+          }
+        }
+        return next;
+      });
+    },
+    [visibleArtists],
+  );
+
+  const batchRemove = useMutation({
+    mutationFn: (artistIds: string[]) => removeWatchlistArtistsBatch(artistIds),
+    onSuccess: async () => {
+      setSelectedIds(new Set());
+      await queryClient.invalidateQueries({ queryKey: WATCHLIST_QUERY_KEY });
+      // Nav badge + hero count, and any artist cards on other pages. Both are
+      // vanilla-owned DOM outside this route.
+      try {
+        window.updateWatchlistButtonCount?.();
+      } catch {
+        /* non-fatal */
+      }
+    },
+    onError: (error: Error) => {
+      // The vanilla path used a raw alert() here; the app's toast is the
+      // house style and matches every other error in this page.
+      window.showToast?.(`Error removing artists: ${error.message}`, 'error');
+    },
+  });
+
+  const onBatchRemove = async () => {
+    const ids = selectedVisibleIds(visibleArtists, selectedIds);
+    if (ids.length === 0) return;
+
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Remove Artists',
+      message: `Remove ${ids.length} artist${ids.length !== 1 ? 's' : ''} from your watchlist?`,
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (confirmed === false) return;
+    batchRemove.mutate(ids);
+  };
+
   const lastScanText = useMemo(() => {
     if (!scanStatus?.completed_at || !scanStatus.summary) return null;
     const found = scanStatus.summary.new_tracks_found || 0;
@@ -83,7 +195,7 @@ export function WatchlistPage() {
             Watchlist
           </h2>
           <div className="watchlist-page-meta">
-            <span className="wl-meta-chip">{formatArtistCount(count)}</span>
+            <span className="wl-meta-chip">{headerCount}</span>
             <span className="wl-meta-chip wl-meta-chip--accent">
               {formatCountdown(nextRunInSeconds)}
             </span>
@@ -117,7 +229,9 @@ export function WatchlistPage() {
         </button>
       </div>
 
-      {isLabelsTab ? null : (
+      {isLabelsTab ? (
+        <WatchlistLabelsTab profileId={profileId} />
+      ) : (
         <>
           {lastScanText ? (
             <div className="watchlist-last-scan-strip">
@@ -186,10 +300,53 @@ export function WatchlistPage() {
                 </select>
               </div>
 
+              <div className="watchlist-batch-bar">
+                <label
+                  className="watchlist-select-all-label"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <SelectAllCheckbox
+                    checked={selection.allSelected}
+                    indeterminate={selection.indeterminate}
+                    onChange={toggleSelectAll}
+                  />
+                  <span>Select All</span>
+                </label>
+                <span className="watchlist-batch-count">
+                  {selection.selectedCount > 0 ? `${selection.selectedCount} selected` : ''}
+                </span>
+                {selection.selectedCount > 0 ? (
+                  <button
+                    type="button"
+                    className="btn btn--secondary watchlist-batch-remove-btn"
+                    disabled={batchRemove.isPending}
+                    onClick={() => void onBatchRemove()}
+                  >
+                    Remove Selected
+                  </button>
+                ) : null}
+              </div>
+
               <div className="watchlist-artists-grid">
-                {visibleArtists.map((artist) => (
-                  <WatchlistArtistCard key={artist.id} artist={artist} />
-                ))}
+                {visibleArtists.map((artist) => {
+                  const artistId = primaryArtistId(artist);
+                  return (
+                    <WatchlistArtistCard
+                      key={artist.id}
+                      artist={artist}
+                      selected={artistId !== null && selectedIds.has(artistId)}
+                      onToggleSelect={() => artistId && toggleArtist(artistId)}
+                      onOpenConfig={() =>
+                        artistId &&
+                        void navigate({ search: (prev) => ({ ...prev, configId: artistId }) })
+                      }
+                      onOpenDetail={() =>
+                        artistId &&
+                        void navigate({ search: (prev) => ({ ...prev, detailId: artistId }) })
+                      }
+                    />
+                  );
+                })}
               </div>
             </>
           )}
@@ -199,13 +356,54 @@ export function WatchlistPage() {
   );
 }
 
-function WatchlistArtistCard({ artist }: { artist: WatchlistArtist }) {
+interface WatchlistArtistCardProps {
+  artist: WatchlistArtist;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onOpenConfig: () => void;
+  onOpenDetail: () => void;
+}
+
+function WatchlistArtistCard({
+  artist,
+  selected,
+  onToggleSelect,
+  onOpenConfig,
+  onOpenDetail,
+}: WatchlistArtistCardProps) {
   const pills = artistPills(artist);
   const sources = artistSourceKeys(artist);
   const artistId = primaryArtistId(artist);
 
   return (
-    <div className="watchlist-artist-card" data-artist-id={artistId ?? ''}>
+    <div className="watchlist-artist-card" data-artist-id={artistId ?? ''} onClick={onOpenDetail}>
+      {/* The checkbox and the gear sit inside the card, so both stop the click
+          from also opening the detail view — the vanilla handler bailed on
+          `closest('.watchlist-card-gear')` / `.watchlist-card-checkbox`. */}
+      <label className="watchlist-card-checkbox" onClick={(event) => event.stopPropagation()}>
+        <input
+          type="checkbox"
+          className="watchlist-select-cb"
+          checked={selected}
+          onChange={onToggleSelect}
+          aria-label={`Select ${artist.artist_name}`}
+        />
+        <span className="watchlist-checkbox-custom" />
+      </label>
+      <button
+        type="button"
+        className="watchlist-card-gear"
+        title="Artist settings"
+        aria-label={`Settings for ${artist.artist_name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenConfig();
+        }}
+      >
+        <svg viewBox="0 0 24 24">
+          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84a.48.48 0 00-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87a.48.48 0 00.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.6 3.6 0 0112 15.6z" />
+        </svg>
+      </button>
       <div className="watchlist-card-image">
         <ArtistImage url={artist.image_url} name={artist.artist_name} />
       </div>
@@ -237,6 +435,38 @@ function WatchlistArtistCard({ artist }: { artist: WatchlistArtist }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Select All, including its half-ticked state.
+ *
+ * `indeterminate` is a DOM property with no HTML attribute, so React cannot set
+ * it from JSX — it has to be assigned to the node directly after every render.
+ */
+function SelectAllCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={(event) => onChange(event.target.checked)}
+      aria-label="Select all visible artists"
+    />
   );
 }
 

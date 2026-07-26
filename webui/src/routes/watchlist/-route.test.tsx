@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -292,6 +292,185 @@ describe('watchlist route', () => {
 
     // The artist grid belongs to the other tab and must not be on screen.
     expect(screen.queryByText('Aphex Twin')).not.toBeInTheDocument();
+  });
+
+  it('selects an artist and removes it, hitting remove-batch with its id', async () => {
+    const calls = stubFetch({
+      artists: [
+        artistRow({ id: 1, artist_name: 'Aphex Twin', spotify_artist_id: 'sp-1' }),
+        artistRow({ id: 2, artist_name: 'Boards of Canada', spotify_artist_id: 'sp-2' }),
+      ],
+    });
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+
+    // Remove Selected is hidden until something is ticked.
+    expect(screen.queryByRole('button', { name: 'Remove Selected' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Select Aphex Twin'));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Selected' }));
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/api/watchlist/remove-batch'))).toBe(true);
+    });
+    expect(window.showConfirmDialog).toHaveBeenCalled();
+  });
+
+  it('does not remove anything when the confirm is declined', async () => {
+    const calls = stubFetch();
+    window.showConfirmDialog = vi.fn(async () => false);
+    renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Select Aphex Twin'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Selected' }));
+
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(calls.some((url) => url.includes('remove-batch'))).toBe(false);
+  });
+
+  it('Select All takes only the visible artists when a filter is applied', async () => {
+    stubFetch({
+      artists: [
+        artistRow({ id: 1, artist_name: 'Aphex Twin', spotify_artist_id: 'sp-1' }),
+        artistRow({ id: 2, artist_name: 'Boards of Canada', spotify_artist_id: 'sp-2' }),
+        artistRow({ id: 3, artist_name: 'Clark', spotify_artist_id: 'sp-3' }),
+      ],
+    });
+    renderWatchlistRoute(['/watchlist?q=canada']);
+
+    await waitFor(() => expect(screen.getByText('Boards of Canada')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('Select all visible artists'));
+
+    // One visible, so one selected — not all three. This is what stops a
+    // filtered Select All from wiping the whole watchlist.
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+  });
+
+  it('ticking the checkbox does not also open the artist detail view', async () => {
+    stubFetch();
+    const { router } = renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Select Aphex Twin'));
+
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    // detailId in the router state is what opens the detail view; the checkbox
+    // has to stop the card's own click from firing. Asserted on router state
+    // rather than window.location, which memory history never touches.
+    expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
+  });
+
+  it('the gear opens artist config, the card body opens artist detail', async () => {
+    stubFetch();
+    const { router } = renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings for Aphex Twin' }));
+    await waitFor(() => {
+      expect(router.state.location.search).toMatchObject({ configId: 'sp-aphex' });
+    });
+    // The gear must not also trip the card's detail click.
+    expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
+
+    fireEvent.click(screen.getByText('Aphex Twin'));
+    await waitFor(() => {
+      expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
+    });
+  });
+
+  it('renders followed labels and switches the count chip to labels', async () => {
+    stubFetch({
+      labels: [
+        {
+          id: 5,
+          musicbrainz_label_id: 'mb-warp',
+          discogs_label_id: null,
+          label_name: 'Warp Records',
+          source: 'musicbrainz',
+          backlog: true,
+          date_added: '2026-01-01T00:00:00Z',
+          last_scan_timestamp: null,
+        },
+      ],
+    });
+    renderWatchlistRoute(['/watchlist?tab=labels']);
+
+    await waitFor(() => expect(screen.getByText('Warp Records')).toBeInTheDocument());
+
+    expect(screen.getByText('1 label')).toBeInTheDocument();
+    expect(screen.getByText('Full backlog')).toBeInTheDocument();
+    expect(screen.getByText('Not scanned yet')).toBeInTheDocument();
+  });
+
+  it('toggles label backlog without opening the label', async () => {
+    const calls = stubFetch({
+      labels: [
+        {
+          id: 5,
+          musicbrainz_label_id: 'mb-warp',
+          discogs_label_id: null,
+          label_name: 'Warp Records',
+          source: 'musicbrainz',
+          backlog: false,
+          date_added: null,
+          last_scan_timestamp: null,
+        },
+      ],
+    });
+    renderWatchlistRoute(['/watchlist?tab=labels']);
+
+    await waitFor(() => expect(screen.getByText('Warp Records')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle('Monitoring new releases only — click for full backlog'));
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/api/labels/watchlist/backlog'))).toBe(true);
+    });
+    // The action buttons sit inside the card; they must not navigate.
+    expect(window.SoulSyncWebShellBridge?.navigateToLabelDetail).not.toHaveBeenCalled();
+  });
+
+  it('opens the label when the card body is clicked', async () => {
+    stubFetch({
+      labels: [
+        {
+          id: 5,
+          musicbrainz_label_id: 'mb-warp',
+          discogs_label_id: null,
+          label_name: 'Warp Records',
+          source: 'musicbrainz',
+          backlog: false,
+          date_added: null,
+          last_scan_timestamp: null,
+        },
+      ],
+    });
+    renderWatchlistRoute(['/watchlist?tab=labels']);
+
+    await waitFor(() => expect(screen.getByText('Warp Records')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Warp Records'));
+
+    expect(window.SoulSyncWebShellBridge?.navigateToLabelDetail).toHaveBeenCalledWith(
+      'mb-warp',
+      'Warp Records',
+    );
+  });
+
+  it('shows the labels empty state when nothing is followed', async () => {
+    stubFetch({ labels: [] });
+    renderWatchlistRoute(['/watchlist?tab=labels']);
+
+    await waitFor(() => {
+      expect(screen.getByText('No labels followed yet')).toBeInTheDocument();
+    });
+    expect(screen.getByText('0 labels')).toBeInTheDocument();
   });
 
   it('redirects away when the profile may not see the watchlist', async () => {

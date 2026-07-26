@@ -5,12 +5,14 @@ import type { WatchlistArtist } from './-watchlist.types';
 import {
   artistPills,
   artistSourceKeys,
+  batchSelectionState,
   filterArtists,
   formatArtistCount,
   formatCountdown,
   formatRelativeScanTime,
   formatTimeAgo,
   primaryArtistId,
+  selectedVisibleIds,
   sortArtists,
   timestampValue,
 } from './-watchlist.helpers';
@@ -162,6 +164,71 @@ describe('filterArtists', () => {
 
   it('returns nothing when nothing matches', () => {
     expect(filterArtists(list, 'zzz')).toEqual([]);
+  });
+});
+
+describe('batchSelectionState / selectedVisibleIds', () => {
+  const a = artist({ id: 1, artist_name: 'Aphex Twin', spotify_artist_id: 'sp-1' });
+  const b = artist({ id: 2, artist_name: 'Boards of Canada', spotify_artist_id: 'sp-2' });
+  const c = artist({ id: 3, artist_name: 'Clark', spotify_artist_id: 'sp-3' });
+  const all = [a, b, c];
+
+  it('reports nothing selected on an untouched grid', () => {
+    expect(batchSelectionState(all, new Set())).toEqual({
+      selectedCount: 0,
+      allSelected: false,
+      indeterminate: false,
+    });
+  });
+
+  it('reports a partial selection as indeterminate', () => {
+    expect(batchSelectionState(all, new Set(['sp-1']))).toEqual({
+      selectedCount: 1,
+      allSelected: false,
+      indeterminate: true,
+    });
+  });
+
+  it('reports a full selection as all-selected and not indeterminate', () => {
+    expect(batchSelectionState(all, new Set(['sp-1', 'sp-2', 'sp-3']))).toEqual({
+      selectedCount: 3,
+      allSelected: true,
+      indeterminate: false,
+    });
+  });
+
+  it('counts only what is visible', () => {
+    // This is the bit that protects against a filtered Select All nuking the
+    // whole watchlist: with only Aphex visible, a selection that also holds
+    // ids for hidden artists still reads as "1 of 1 visible".
+    const visible = [a];
+    expect(batchSelectionState(visible, new Set(['sp-1', 'sp-2', 'sp-3']))).toEqual({
+      selectedCount: 1,
+      allSelected: true,
+      indeterminate: false,
+    });
+    expect(selectedVisibleIds(visible, new Set(['sp-1', 'sp-2', 'sp-3']))).toEqual(['sp-1']);
+  });
+
+  it('is not all-selected when nothing is visible', () => {
+    // An empty grid must not render a ticked Select All.
+    expect(batchSelectionState([], new Set(['sp-1']))).toEqual({
+      selectedCount: 0,
+      allSelected: false,
+      indeterminate: false,
+    });
+  });
+
+  it('ignores artists with no provider id', () => {
+    // They render without a usable id and cannot be acted on, so they must not
+    // make Select All permanently un-tickable.
+    const unmatched = artist({ id: 4, artist_name: 'Unmatched' });
+    expect(batchSelectionState([a, unmatched], new Set(['sp-1']))).toEqual({
+      selectedCount: 1,
+      allSelected: true,
+      indeterminate: false,
+    });
+    expect(selectedVisibleIds([a, unmatched], new Set(['sp-1']))).toEqual(['sp-1']);
   });
 });
 
