@@ -162,6 +162,12 @@ function stubFetch(options: StubOptions = {}) {
           ],
         });
       }
+      if (url.includes('/api/watchlist/update-similar-artists')) {
+        return createResponse({ success: true });
+      }
+      if (url.includes('/api/watchlist/similar-artists-status')) {
+        return createResponse({ success: true, status: 'running', artists_processed: 2 });
+      }
       if (url.includes('/api/library/search-service')) {
         return createResponse({
           success: true,
@@ -196,6 +202,9 @@ describe('watchlist route', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     delete window.SoulSyncWebShellBridge;
+    delete window.openDownloadOriginsModal;
+    delete window.openWatchlistHistoryModal;
+    delete window.openBlocklistModal;
   });
 
   it('renders the artist grid with counts, pills and source badges', async () => {
@@ -891,6 +900,44 @@ describe('watchlist route', () => {
     fireEvent.click(screen.getByRole('button', { name: /Show tracks/ }));
     expect(screen.getByText('Added to wishlist (1)')).toBeInTheDocument();
     expect(screen.getByText(/already queued or blocklisted \(1\)/)).toBeInTheDocument();
+  });
+
+  it('opens the shared vanilla modals from the action bar', async () => {
+    stubFetch();
+    window.openDownloadOriginsModal = vi.fn();
+    window.openWatchlistHistoryModal = vi.fn();
+    window.openBlocklistModal = vi.fn();
+    renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Download Origins/ }));
+    fireEvent.click(screen.getByRole('button', { name: /History/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Blocklist/ }));
+
+    // These modals live in other vanilla files and are shared with other
+    // pages, so the React page invokes them rather than reimplementing them.
+    expect(window.openDownloadOriginsModal).toHaveBeenCalledWith('watchlist');
+    expect(window.openWatchlistHistoryModal).toHaveBeenCalled();
+    expect(window.openBlocklistModal).toHaveBeenCalledWith('artist');
+  });
+
+  it('runs the similar-artists update and blocks Scan while it works', async () => {
+    const calls = stubFetch();
+    renderWatchlistRoute();
+
+    await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Update Similar Artists/ }));
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/api/watchlist/update-similar-artists'))).toBe(true);
+    });
+
+    // Both drive the same worker, so Scan is disabled until it reports done.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Scan for New Releases/ })).toBeDisabled();
+    });
   });
 
   it('redirects away when the profile may not see the watchlist', async () => {

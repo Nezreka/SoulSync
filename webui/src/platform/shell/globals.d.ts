@@ -25,6 +25,14 @@ declare global {
      * vanilla page did, and treats a failure as non-fatal.
      */
     updateWatchlistButtonCount?: () => void;
+    /**
+     * Shared modals owned by other vanilla files and used from several pages
+     * (origin-history.js, watchlist-history.js, blocklist.js). Declared as
+     * top-level `function`s in classic scripts, so they are window properties.
+     */
+    openDownloadOriginsModal?: (tab: string) => void;
+    openWatchlistHistoryModal?: () => void;
+    openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;

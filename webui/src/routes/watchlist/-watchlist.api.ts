@@ -164,6 +164,33 @@ export async function cancelWatchlistScan(): Promise<void> {
   assertSuccess(payload, 'Failed to cancel watchlist scan');
 }
 
+export async function startSimilarArtistsUpdate(): Promise<void> {
+  const payload = await readJson<SuccessResponse>(
+    apiClient.post('watchlist/update-similar-artists'),
+  );
+  assertSuccess(payload, 'Failed to update similar artists');
+}
+
+export interface SimilarArtistsStatus {
+  status?: string;
+  artists_processed?: number;
+  total_artists?: number;
+  current_artist?: string | null;
+}
+
+export function similarArtistsStatusQueryOptions(profileId: number, enabled: boolean) {
+  return queryOptions({
+    queryKey: [...WATCHLIST_QUERY_KEY, 'similar-artists', profileId] as const,
+    queryFn: async () =>
+      await readJson<SimilarArtistsStatus & { success?: boolean }>(
+        apiClient.get('watchlist/similar-artists-status'),
+      ),
+    // Polled only while an update is running, mirroring pollSimilarArtistsUpdate.
+    refetchInterval: enabled ? 2000 : false,
+    enabled,
+  });
+}
+
 export async function saveWatchlistGlobalConfig(
   config: WatchlistGlobalConfig,
 ): Promise<WatchlistGlobalConfig> {

@@ -7,6 +7,8 @@ import { useProfile, useReactPageShell } from '@/platform/shell/route-controller
 import {
   cancelWatchlistScan,
   removeWatchlistArtistsBatch,
+  similarArtistsStatusQueryOptions,
+  startSimilarArtistsUpdate,
   startWatchlistScan,
   WATCHLIST_QUERY_KEY,
   watchlistArtistsQueryOptions,
@@ -198,6 +200,36 @@ export function WatchlistPage() {
       window.showToast?.(`Error cancelling scan: ${error.message}`, 'error'),
   });
 
+  // Similar-artists update: kicked off here, then polled until it reports done.
+  // It shares the scan worker, so the Scan button is disabled while it runs —
+  // the same coupling the vanilla page enforced by disabling both chips.
+  const [similarRunning, setSimilarRunning] = useState(false);
+  const similarStatus = useQuery(similarArtistsStatusQueryOptions(profileId, similarRunning));
+
+  useEffect(() => {
+    if (!similarRunning) return;
+    const status = similarStatus.data?.status;
+    if (status === 'completed') {
+      setSimilarRunning(false);
+      window.showToast?.(
+        `Updated similar artists for ${similarStatus.data?.artists_processed || 0} artists!`,
+        'success',
+      );
+    } else if (status === 'error') {
+      setSimilarRunning(false);
+      window.showToast?.('Error updating similar artists', 'error');
+    }
+  }, [similarRunning, similarStatus.data?.status, similarStatus.data?.artists_processed]);
+
+  const startSimilar = useMutation({
+    mutationFn: () => startSimilarArtistsUpdate(),
+    onSuccess: () => {
+      setSimilarRunning(true);
+      window.showToast?.('Updating similar artists in background...', 'success');
+    },
+    onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
+  });
+
   const batchRemove = useMutation({
     mutationFn: (artistIds: string[]) => removeWatchlistArtistsBatch(artistIds),
     onSuccess: async () => {
@@ -262,7 +294,8 @@ export function WatchlistPage() {
         <button
           type="button"
           className={`wl-chip wl-chip--cta${isScanning ? ' btn-processing' : ''}`}
-          disabled={isScanning || startScan.isPending}
+          // Also blocked while similar-artists runs: both drive the same worker.
+          disabled={isScanning || startScan.isPending || similarRunning}
           onClick={() => startScan.mutate()}
         >
           <svg
@@ -313,6 +346,30 @@ export function WatchlistPage() {
 
         <button
           type="button"
+          className={`wl-chip wl-chip--slate${similarRunning ? ' btn-processing' : ''}`}
+          disabled={similarRunning || startSimilar.isPending || isScanning}
+          onClick={() => startSimilar.mutate()}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+          {similarRunning ? 'Updating...' : 'Update Similar Artists'}
+        </button>
+
+        <button
+          type="button"
           className={`wl-chip wl-chip--slate${
             globalOverrideActive ? ' watchlist-global-settings-active' : ''
           }`}
@@ -332,6 +389,80 @@ export function WatchlistPage() {
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
           {globalOverrideActive ? 'Global Override ON' : 'Global Settings'}
+        </button>
+
+        {/* These three open modals owned by other vanilla files
+            (origin-history.js, watchlist-history.js, blocklist.js) and shared
+            with other pages. They stay where they are and are invoked as
+            globals — unlike `socket`, top-level `function` declarations in a
+            classic script ARE window properties. Porting them belongs to
+            whichever page migration owns those modals. */}
+        <button
+          type="button"
+          className="wl-chip wl-chip--slate"
+          title="See every track your watchlist downloaded"
+          onClick={() => window.openDownloadOriginsModal?.('watchlist')}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Download Origins
+        </button>
+
+        <button
+          type="button"
+          className="wl-chip wl-chip--slate"
+          title="Every past scan and the tracks it added to the wishlist"
+          onClick={() => window.openWatchlistHistoryModal?.()}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 3v5h5" />
+            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+            <polyline points="12 7 12 12 15 15" />
+          </svg>
+          History
+        </button>
+
+        <button
+          type="button"
+          className="wl-chip wl-chip--red"
+          title="Block artists, albums or tracks from ever being downloaded"
+          onClick={() => window.openBlocklistModal?.('artist')}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="4.9" y1="4.9" x2="19.1" y2="19.1" />
+          </svg>
+          Blocklist
         </button>
       </div>
 
