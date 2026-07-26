@@ -12124,6 +12124,7 @@
     <!-- Arcade: the chess rules engine and the game lifecycle fold. Both are
          pure and self-contained (no DOM, no fetch); chat.js reads them off
          window and simply hides the Arcade if either failed to load. -->
+    <script src="{{ url_for('static', filename='chat-hash.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chess-engine.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat-games.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>

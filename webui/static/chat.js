@@ -1279,7 +1279,8 @@
 
     function arcNewGame(color, opponent, variant, vsRoom) {
         var gid = _newGid();
-        var f = { g: gid, v: variant === 'connect4' ? 'connect4' : 'chess',
+        var known = { connect4: 1, battleship: 1 };
+        var f = { g: gid, v: known[variant] ? variant : 'chess',
                   c: color === 'b' ? 'b' : 'w' };
         if (vsRoom) f.r = 1;
         if (opponent) f.o = String(opponent).slice(0, 64);
@@ -1543,6 +1544,9 @@
                             'data-chat-arc-new="w" data-chat-arc-variant="connect4">' +
                             '🔴 Connect 4</button>' +
                         '<button class="chat-arc-btn" type="button" ' +
+                            'data-chat-arc-new="w" data-chat-arc-variant="battleship">' +
+                            '🚢 Battleship</button>' +
+                        '<button class="chat-arc-btn" type="button" ' +
                             'data-chat-arc-new="w" data-chat-arc-room="1" ' +
                             'title="You against everyone else — the room votes on its ' +
                             'moves">🗳 You vs the room</button>' +
@@ -1586,6 +1590,7 @@
 
     function _arcBoardHtml(game) {
         if (game.variant === 'connect4') return _arcC4BoardHtml(game);
+        if (game.variant === 'battleship') return _arcBsBoardHtml(game);
         var E = window.ChessEngine;
         var CG = window.ChatGames;
         // game.fen is our OWN fold's output, not wire data — it has already
@@ -1800,6 +1805,271 @@
         '</div>';
     }
 
+    // ── Battleship ──────────────────────────────────────────────────────
+    //
+    // Your fleet never goes on the wire until the reveal, so it lives in
+    // localStorage keyed by game id: it has to survive a reload, and it must
+    // not be reconstructible by anyone else from the message stream.
+    //
+    // Answers are AUTOMATIC. Your client can see your own board, so it
+    // replies truthfully to a shot without asking you anything — no "were you
+    // hit?" prompt to sit unanswered for an hour, and no opportunity to lie by
+    // accident. A determined cheater edits their client, which is the threat
+    // model this game already accepts and catches at the reveal.
+    var BS_W = 10, BS_H = 10;
+    var BS_FLEET = [
+        { id: '1', name: 'Carrier', len: 5 },
+        { id: '2', name: 'Battleship', len: 4 },
+        { id: '3', name: 'Cruiser', len: 3 },
+        { id: '4', name: 'Submarine', len: 3 },
+        { id: '5', name: 'Destroyer', len: 2 },
+    ];
+    var _bsAnswered = {};      // gid|shotCount -> already replied
+
+    function _bsCellName(i) {
+        return 'abcdefghij'[i % BS_W] + String(Math.floor(i / BS_W) + 1);
+    }
+
+    function _bsSecret(gid, save) {
+        var key = 'chat_bs_' + gid;
+        try {
+            if (save === undefined) {
+                var raw = localStorage.getItem(key);
+                return raw ? JSON.parse(raw) : null;
+            }
+            localStorage.setItem(key, JSON.stringify(save));
+            return save;
+        } catch (e) { return null; }
+    }
+
+    // Can `len` cells starting at `idx` going `horiz` sit on this board?
+    function _bsFits(cells, idx, horiz, len) {
+        var col = idx % BS_W, row = Math.floor(idx / BS_W);
+        if (horiz && col + len > BS_W) return false;
+        if (!horiz && row + len > BS_H) return false;
+        for (var i = 0; i < len; i++) {
+            if (cells[idx + (horiz ? i : i * BS_W)] !== '.') return false;
+        }
+        return true;
+    }
+
+    function _bsRandomBoard() {
+        var cells = new Array(BS_W * BS_H).fill('.');
+        for (var f = 0; f < BS_FLEET.length; f++) {
+            var ship = BS_FLEET[f];
+            for (var tries = 0; tries < 500; tries++) {
+                var horiz = Math.random() < 0.5;
+                var idx = Math.floor(Math.random() * BS_W * BS_H);
+                if (!_bsFits(cells, idx, horiz, ship.len)) continue;
+                for (var i = 0; i < ship.len; i++) {
+                    cells[idx + (horiz ? i : i * BS_W)] = ship.id;
+                }
+                break;
+            }
+        }
+        return cells.join('');
+    }
+
+    // The placement in progress, before it is committed.
+    function _bsDraft() {
+        var arc = state.arcade;
+        if (!arc.bs) {
+            arc.bs = { board: _bsRandomBoard(), next: 0, horiz: true, manual: false };
+        }
+        return arc.bs;
+    }
+
+    function _bsPlacedCount(board) {
+        var n = 0;
+        for (var f = 0; f < BS_FLEET.length; f++) {
+            if (board.indexOf(BS_FLEET[f].id) >= 0) n++;
+        }
+        return n;
+    }
+
+    // Answer a shot at us, truthfully, from the board only we hold.
+    function _bsAutoAnswer(game) {
+        if (!game || game.variant !== 'battleship' || game.status !== 'live') return;
+        var seat = _arcSeat(game);
+        if (!seat || !state.canSend) return;
+        var st;
+        try { st = JSON.parse(game.fen); } catch (e) { return; }
+        if (st.pending !== seat) return;
+        var secret = _bsSecret(game.id);
+        if (!secret || !secret.board) return;
+        var foe = seat === 'w' ? 'b' : 'w';
+        var shots = st.shots[foe] || [];
+        var idx = shots[shots.length - 1];
+        if (idx === undefined) return;
+        var key = game.id + '|' + shots.length;
+        if (_bsAnswered[key]) return;                 // one answer per shot
+        _bsAnswered[key] = 1;
+
+        var board = secret.board;
+        var res = 'miss';
+        if (board[idx] !== '.') {
+            var ship = board[idx], hit = 0, len = 0;
+            for (var i = 0; i < board.length; i++) {
+                if (board[i] !== ship) continue;
+                len++;
+                if (shots.indexOf(i) >= 0) hit++;
+            }
+            res = hit >= len ? 'sunk' : 'hit';
+        }
+        arcMove(game.id, 'r:' + res);
+    }
+
+    // Once our fleet is down we owe a reveal; send it without ceremony.
+    function _bsAutoReveal(game) {
+        if (!game || game.variant !== 'battleship' || game.status !== 'live') return;
+        var seat = _arcSeat(game);
+        if (!seat || !state.canSend) return;
+        var st;
+        try { st = JSON.parse(game.fen); } catch (e) { return; }
+        if (!st.sunkAll || st.reveal[seat]) return;
+        var secret = _bsSecret(game.id);
+        if (!secret || !secret.board || !secret.salt) return;
+        arcMove(game.id, 'v:' + secret.salt + ':' + secret.board);
+    }
+
+    function _bsTick() {
+        if (!_arcReady()) return;
+        var st = _gamesState();
+        st.order.forEach(function (id) {
+            var g = st.games[id];
+            if (!g || g.variant !== 'battleship') return;
+            _bsAutoAnswer(g);
+            _bsAutoReveal(g);
+        });
+    }
+
+    function _arcBsBoardHtml(game) {
+        var arc = state.arcade;
+        var seat = _arcSeat(game);
+        var st;
+        try { st = JSON.parse(game.fen); } catch (e) {
+            return '<div class="chat-empty">This board could not be read.</div>';
+        }
+        var foe = seat === 'w' ? 'b' : 'w';
+        var secret = _bsSecret(game.id);
+        var committed = seat ? !!st.commits[seat] : false;
+
+        // ── setup ──
+        if (seat && !committed) {
+            var draft = _bsDraft();
+            var placed = _bsPlacedCount(draft.board);
+            var nextShip = BS_FLEET[draft.next];
+            var cells = [];
+            for (var i = 0; i < BS_W * BS_H; i++) {
+                var v = draft.board[i];
+                cells.push('<div class="chat-bs-cell' + (v !== '.' ? ' chat-bs-cell--ship' : '') +
+                    '" data-chat-bs-place="' + i + '" title="' + attr(_bsCellName(i)) + '"></div>');
+            }
+            return '<div class="chat-arc-board-wrap">' +
+                '<div class="chat-bs-title">Lay out your fleet</div>' +
+                '<div class="chat-bs-grid chat-bs-grid--own">' + cells.join('') + '</div>' +
+                '<div class="chat-bs-fleetbar">' +
+                    BS_FLEET.map(function (sh, n) {
+                        var done = draft.board.indexOf(sh.id) >= 0;
+                        return '<span class="chat-bs-ship' + (done ? ' chat-bs-ship--set' : '') +
+                            (n === draft.next && !done ? ' chat-bs-ship--next' : '') + '">' +
+                            esc(sh.name) + ' <b>' + sh.len + '</b></span>';
+                    }).join('') +
+                '</div>' +
+                '<div class="chat-arc-actions">' +
+                    '<button class="chat-arc-btn" type="button" data-chat-bs-random>🎲 Random</button>' +
+                    '<button class="chat-arc-btn" type="button" data-chat-bs-rotate>' +
+                        (draft.horiz ? '↔ Horizontal' : '↕ Vertical') + '</button>' +
+                    '<button class="chat-arc-btn" type="button" data-chat-bs-clear>Clear</button>' +
+                    (placed === BS_FLEET.length
+                        ? '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                          'data-chat-bs-commit="' + attr(game.id) + '">Commit fleet</button>'
+                        : '') +
+                '</div>' +
+                '<div class="chat-arc-note">Your layout stays on this machine. Only a ' +
+                    'fingerprint of it goes to the room now — the fleet itself is revealed ' +
+                    'at the end, and every answer you gave is checked against it.</div>' +
+                (nextShip && placed < BS_FLEET.length
+                    ? '<div class="chat-arc-status">Place your ' + esc(nextShip.name) +
+                      ' (' + nextShip.len + ' cells) — click a square.</div>'
+                    : '<div class="chat-arc-status">Fleet ready.</div>') +
+                _arcRevealHtml(game) +
+            '</div>';
+        }
+
+        // ── waiting for the opponent to finish placing ──
+        var bothIn = st.commits.w && st.commits.b;
+        var myShots = seat ? (st.shots[seat] || []) : (st.shots.w || []);
+        var myResults = seat ? (st.results[seat] || []) : (st.results.w || []);
+        var theirShots = seat ? (st.shots[foe] || []) : (st.shots.b || []);
+
+        // their waters — what we have fired at
+        var theirs = [];
+        for (var t = 0; t < BS_W * BS_H; t++) {
+            var at2 = myShots.indexOf(t);
+            var mark = at2 >= 0 ? (myResults[at2] || '') : '';
+            var cls = 'chat-bs-cell';
+            if (mark === 'miss') cls += ' chat-bs-cell--miss';
+            else if (mark === 'hit' || mark === 'sunk') cls += ' chat-bs-cell--hit';
+            var live = bothIn && seat && !st.pending && !st.sunkAll &&
+                       st.turn === seat && at2 < 0 && game.status === 'live' && state.canSend;
+            theirs.push('<div class="' + cls + (live ? ' chat-bs-cell--fire' : '') + '"' +
+                (live ? ' data-chat-bs-fire="' + t + '"' : '') +
+                ' title="' + attr(_bsCellName(t)) + '"></div>');
+        }
+        // our waters — our fleet plus where they have fired
+        var ourBoard = (secret && secret.board) || '.'.repeat(BS_W * BS_H);
+        var ours = [];
+        for (var o = 0; o < BS_W * BS_H; o++) {
+            var cls2 = 'chat-bs-cell';
+            if (ourBoard[o] !== '.') cls2 += ' chat-bs-cell--ship';
+            if (theirShots.indexOf(o) >= 0) {
+                cls2 += ourBoard[o] !== '.' ? ' chat-bs-cell--hit' : ' chat-bs-cell--miss';
+            }
+            ours.push('<div class="' + cls2 + '" title="' + attr(_bsCellName(o)) + '"></div>');
+        }
+
+        var status;
+        if (game.status === 'over') {
+            status = game.reason === 'cheating'
+                ? esc(game.winner) + ' wins — the other fleet did not match what was committed'
+                : esc(game.winner) + ' wins — fleet sunk';
+        } else if (!bothIn) {
+            status = 'Waiting for the other fleet to be laid out.';
+        } else if (st.sunkAll) {
+            status = 'All ships down. Both fleets are being revealed and checked.';
+        } else if (st.pending) {
+            status = st.pending === seat ? 'Answering…' : 'Waiting for their answer.';
+        } else if (seat && st.turn === seat) {
+            status = 'Your shot — pick a square in their waters.';
+        } else {
+            status = 'Waiting on ' + esc(window.ChatGames.toMove(game) || 'them') + '.';
+        }
+
+        var actions = '';
+        if (state.canSend && seat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !seat && game.status === 'open') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-bs-title">Their waters</div>' +
+            '<div class="chat-bs-grid chat-bs-grid--foe">' + theirs.join('') + '</div>' +
+            '<div class="chat-bs-title">Your fleet' +
+                (secret ? '' : ' <span class="chat-bs-lost">(this browser no longer has your ' +
+                 'layout — it was stored locally)</span>') + '</div>' +
+            '<div class="chat-bs-grid chat-bs-grid--own">' + ours.join('') + '</div>' +
+            '<div class="chat-arc-status">' + status + '</div>' +
+            (actions ? '<div class="chat-arc-actions">' + actions + _arcSyncActions(game) + '</div>'
+                     : '') +
+            _arcRevealHtml(game) +
+        '</div>';
+    }
+
     // Connect 4 board. Same shell as chess — players line, board, status,
     // actions, exports, reveal — so everything around it is shared. The board
     // itself is a 7x6 grid where the whole COLUMN is the click target: you
@@ -1888,6 +2158,53 @@
             })() +
             _arcRevealHtml(game) +
         '</div>';
+    }
+
+    // Click a square to drop the next unplaced ship there.
+    function _bsPlaceAt(idx) {
+        var draft = _bsDraft();
+        if (!(idx >= 0 && idx < BS_W * BS_H)) return;
+        // Clicking a placed ship picks it back up, so a misplacement is one
+        // click to undo rather than a full Clear.
+        var occupant = draft.board[idx];
+        if (occupant !== '.') {
+            draft.board = draft.board.split('').map(function (c) {
+                return c === occupant ? '.' : c;
+            }).join('');
+            for (var f = 0; f < BS_FLEET.length; f++) {
+                if (BS_FLEET[f].id === occupant) draft.next = f;
+            }
+            renderArcade();
+            return;
+        }
+        // Next ship still needing a home.
+        var ship = null;
+        for (var i = 0; i < BS_FLEET.length; i++) {
+            if (draft.board.indexOf(BS_FLEET[i].id) < 0) { ship = BS_FLEET[i]; draft.next = i; break; }
+        }
+        if (!ship) return;
+        var cells = draft.board.split('');
+        if (!_bsFits(cells, idx, draft.horiz, ship.len)) {
+            if (typeof showToast === 'function') showToast('It does not fit there', 'error');
+            return;
+        }
+        for (var j = 0; j < ship.len; j++) {
+            cells[idx + (draft.horiz ? j : j * BS_W)] = ship.id;
+        }
+        draft.board = cells.join('');
+        renderArcade();
+    }
+
+    // Publish only the fingerprint. The fleet itself stays here until the end.
+    function _bsCommit(gid) {
+        var draft = _bsDraft();
+        if (_bsPlacedCount(draft.board) !== BS_FLEET.length) return;
+        var H = window.ChatHash;
+        if (!H) return;
+        var salt = H.salt();
+        _bsSecret(gid, { salt: salt, board: draft.board });
+        state.arcade.bs = null;
+        arcMove(gid, 'c:' + H.commit(salt, draft.board));
     }
 
     function _arcColumnClick(col) {
@@ -3747,6 +4064,33 @@
                 if (state.arcade) { state.arcade.reveal = !state.arcade.reveal; renderArcade(); }
                 return;
             }
+            t = e.target.closest('[data-chat-bs-place]');
+            if (t) { _bsPlaceAt(parseInt(t.getAttribute('data-chat-bs-place'), 10)); return; }
+            t = e.target.closest('[data-chat-bs-fire]');
+            if (t) {
+                var fg = state.arcade && state.arcade.game ? _arcGame(state.arcade.game) : null;
+                if (fg) arcMove(fg.id, 's:' + _bsCellName(
+                    parseInt(t.getAttribute('data-chat-bs-fire'), 10)));
+                return;
+            }
+            t = e.target.closest('[data-chat-bs-random]');
+            if (t) {
+                var d = _bsDraft();
+                d.board = _bsRandomBoard(); d.next = BS_FLEET.length;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-bs-rotate]');
+            if (t) { _bsDraft().horiz = !_bsDraft().horiz; renderArcade(); return; }
+            t = e.target.closest('[data-chat-bs-clear]');
+            if (t) {
+                var d2 = _bsDraft();
+                d2.board = '.'.repeat(BS_W * BS_H); d2.next = 0;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-bs-commit]');
+            if (t) { _bsCommit(t.getAttribute('data-chat-bs-commit')); return; }
             t = e.target.closest('[data-chat-arc-cancel]');
             if (t) { arcCancel(t.getAttribute('data-chat-arc-cancel')); return; }
             t = e.target.closest('[data-chat-arc-sync]');
@@ -4355,6 +4699,7 @@
     // Every surface reduced from the protocol bus, painted together.
     function renderBusUI() {
         _arcMaybeSync();         // ask, if a game has gone quiet on us
+        _bsTick();               // answer shots at us, and reveal when sunk
         renderArcade();          // no-op unless the Arcade view is open
         renderJukebox();
         renderPinbar();
@@ -5139,6 +5484,7 @@
                         // Soulseek, so the same escaping contract applies here
                         _arcLobbyHtml: _arcLobbyHtml, _arcBoardHtml: _arcBoardHtml,
                         _arcSidebarHtml: _arcSidebarHtml, _arcPgn: _arcPgn,
+                        _arcBsBoardHtml: _arcBsBoardHtml,
                         renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {

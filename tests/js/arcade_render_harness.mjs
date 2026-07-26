@@ -35,6 +35,7 @@ globalThis.window = {};
 
 // The Arcade reads both of these off window and hides itself if either is
 // missing, so load them the way the page does — before chat.js.
+(0, eval)(read('chat-hash.js'));
 (0, eval)(read('chess-engine.js'));
 (0, eval)(read('chat-games.js'));
 (0, eval)(read('chat.js'));
@@ -470,6 +471,73 @@ const NASTY = '<img src=x onerror=alert(1)>';
     check('frozen: does not offer a plain sync instead',
           !board.includes('data-chat-arc-sync'), board);
     check('frozen: no acknowledgement line', !board.includes('acknowledged'), board);
+}
+
+// ── battleship ──────────────────────────────────────────────────────────
+{
+    const H = globalThis.window.ChatHash;
+    const mk = spec => { const b = new Array(100).fill('.');
+        for (const [id, start, horiz, len] of spec)
+            for (let i = 0; i < len; i++) b[start + (horiz ? i : i * 10)] = id;
+        return b.join(''); };
+    const FLEET = mk([['1', 0, true, 5], ['2', 10, true, 4], ['3', 20, true, 3],
+                      ['4', 30, true, 3], ['5', 40, true, 2]]);
+
+    const evs = [ev('boulder', { k: 'gm.new', g: 'bs01', v: 'battleship' }),
+                 ev('kazimir', { k: 'gm.join', g: 'bs01' }, T0 + 1000)];
+
+    // Setup: a player who has not committed gets the placement board.
+    setRoom(evs, 'boulder');
+    CP._testSetState({ arcade: { game: 'bs01', sel: -1, promo: null, flip: false } });
+    let board = CP._arcBsBoardHtml(game(evs, 'bs01'));
+    check('bs: setup offers a placement grid',
+          board.includes('Lay out your fleet'), board);
+    check('bs: 100 placement cells',
+          (board.match(/data-chat-bs-place=/g) || []).length === 100, board.length);
+    check('bs: the whole fleet is listed', ['Carrier', 'Battleship', 'Cruiser',
+          'Submarine', 'Destroyer'].every(n => board.includes(n)), board);
+    check('bs: says the layout stays local', board.includes('stays on this machine'), board);
+    check('bs: cannot fire during setup', !board.includes('data-chat-bs-fire'), board);
+
+    // Both committed: two grids, and only the player to move can fire.
+    const salt = H.salt();
+    const live = evs.concat([
+        ev('boulder', { k: 'gm.move', g: 'bs01', v: 'battleship', n: 0,
+                        m: 'c:' + H.commit(salt, FLEET), f: null }, T0 + 2000),
+    ]);
+    // Build the committed state honestly through the fold instead of by hand.
+    const G2 = globalThis.window.ChatGames;
+    let g0 = game(evs, 'bs01');
+    const p1 = G2.previewMove(g0, 'c:' + H.commit(salt, FLEET), 'w');
+    const evs2 = evs.concat([ev('boulder', { k: 'gm.move', g: 'bs01', v: 'battleship',
+        n: 0, m: 'c:' + H.commit(salt, FLEET), f: p1.fen }, T0 + 2000)]);
+    let g1 = game(evs2, 'bs01');
+    const p2 = G2.previewMove(g1, 'c:' + H.commit('other', FLEET), 'b');
+    const evs3 = evs2.concat([ev('kazimir', { k: 'gm.move', g: 'bs01', v: 'battleship',
+        n: 1, m: 'c:' + H.commit('other', FLEET), f: p2.fen }, T0 + 3000)]);
+
+    setRoom(evs3, 'boulder');
+    CP._testSetState({ arcade: { game: 'bs01', sel: -1, promo: null, flip: false } });
+    board = CP._arcBsBoardHtml(game(evs3, 'bs01'));
+    check('bs: two grids once both fleets are in',
+          (board.match(/chat-bs-grid/g) || []).length >= 2, board.length);
+    check('bs: white is invited to shoot', board.includes('Your shot'), board);
+    check('bs: firing targets exist', board.includes('data-chat-bs-fire'), board);
+
+    // The opponent must not be able to fire on white's turn.
+    setRoom(evs3, 'kazimir');
+    CP._testSetState({ arcade: { game: 'bs01', sel: -1, promo: null, flip: false } });
+    board = CP._arcBsBoardHtml(game(evs3, 'bs01'));
+    check('bs: not your turn means no targets',
+          !board.includes('data-chat-bs-fire'), board);
+
+    // A spectator sees the game but never a fleet or a trigger.
+    setRoom(evs3, 'sella');
+    CP._testSetState({ arcade: { game: 'bs01', sel: -1, promo: null, flip: false } });
+    board = CP._arcBsBoardHtml(game(evs3, 'bs01'));
+    check('bs: spectators cannot fire', !board.includes('data-chat-bs-fire'), board);
+    check('bs: spectators are not shown a fleet',
+          !board.includes('chat-bs-cell--ship'), board);
 }
 
 // ── the Arcade hides itself if its libraries are absent ─────────────────

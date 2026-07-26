@@ -72452,6 +72452,43 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-ack { font-size: 12px; color: rgba(255,255,255,0.45); }
 .chat-arc-ack--seen { color: #1db954; }
 
+/* ── battleship (arcade P9) ── */
+.chat-bs-title {
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
+    color: rgba(255,255,255,0.45); margin-top: 4px;
+}
+.chat-bs-lost { text-transform: none; letter-spacing: 0; color: #ffc107; font-weight: 600; }
+.chat-bs-grid {
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px;
+    aspect-ratio: 1 / 1; width: 100%; padding: 6px; border-radius: 10px;
+    background: #0d2438; border: 1px solid rgba(255,255,255,0.1);
+}
+/* their waters read cooler and emptier; yours warmer, because you can see it */
+.chat-bs-grid--foe { background: #0a1c2c; }
+.chat-bs-cell {
+    border-radius: 3px; background: rgba(120,180,230,0.09); position: relative;
+}
+.chat-bs-cell--ship { background: rgba(255,255,255,0.32); }
+.chat-bs-cell--fire { cursor: crosshair; }
+.chat-bs-cell--fire:hover { background: rgba(29,185,84,0.55); }
+.chat-bs-cell--miss::after {
+    content: ''; position: absolute; inset: 34%; border-radius: 50%;
+    background: rgba(255,255,255,0.4);
+}
+.chat-bs-cell--hit { background: #d63a2f; }
+.chat-bs-cell--hit::after {
+    content: ''; position: absolute; inset: 22%; border-radius: 50%;
+    background: rgba(255,220,120,0.9);
+}
+.chat-bs-fleetbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-bs-ship {
+    font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55);
+}
+.chat-bs-ship b { color: rgba(255,255,255,0.8); }
+.chat-bs-ship--set { background: rgba(29,185,84,0.16); color: #1db954; }
+.chat-bs-ship--next { box-shadow: 0 0 0 1px rgba(255,255,255,0.35); color: #fff; }
+
 /* ── room ballot (arcade P5) ── */
 .chat-arc-ballot {
     background: rgba(255,255,255,0.04); border-radius: 8px; padding: 9px 11px;
