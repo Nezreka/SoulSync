@@ -1124,6 +1124,63 @@
         return _gamesState().games[id] || null;
     }
 
+    // Every carrier in this room that belongs to a game — what the reveal
+    // shows. Cheap: the protocol log is already in memory.
+    function _arcCarriers(gid) {
+        return _roomEvents().filter(function (e) {
+            return e && e.p && typeof e.p.k === 'string' &&
+                   e.p.k.slice(0, 3) === 'gm.' && e.p.g === gid;
+        });
+    }
+
+    // A .pgn the room can load into Lichess. A game played over Soulseek
+    // being a normal chess file is the entire joke, so this is a real export
+    // and not a text dump: toPGN writes the seven-tag roster, and for a game
+    // adopted mid-stream it emits SetUp/FEN so the partial move list still
+    // describes a valid game rather than a wrong one.
+    function _arcPgn(game) {
+        var E = window.ChessEngine;
+        return E.toPGN(game.moves, {
+            White: game.white || '?', Black: game.black || '?',
+            Result: game.result || '*',
+            Site: 'Soulseek/' + (state.room || 'SoulSync'),
+        }, game.startFen);
+    }
+
+    function arcDownloadPgn(gid) {
+        var game = _arcGame(gid);
+        if (!game) return;
+        try {
+            var blob = new Blob([_arcPgn(game)], { type: 'application/x-chess-pgn' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'soulsync-' + gid + '.pgn';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Could not build the PGN', 'error');
+        }
+    }
+
+    function arcCopyPgn(gid) {
+        var game = _arcGame(gid);
+        if (!game) return;
+        var text = _arcPgn(game);
+        var done = function () {
+            if (typeof showToast === 'function') showToast('PGN copied', 'success');
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, function () {
+                if (typeof showToast === 'function') showToast('Could not copy', 'error');
+            });
+        } else if (typeof showToast === 'function') {
+            showToast('Clipboard unavailable in this browser', 'error');
+        }
+    }
+
     // 8 chars of [a-z0-9]. A collision only means the second gm.new is
     // ignored, so this needs to be unlikely, not guaranteed.
     function _newGid() {
@@ -1345,8 +1402,34 @@
                   'for everyone in the room.</div>'
                 : section('Your games', mine) + section('Looking for an opponent', open) +
                   section('In progress', live) + section('Finished', done.slice(0, 10))) +
+            _arcLadderHtml() +
         '</div>';
     }
+
+    // The room ladder. Persistent ratings with no server and no database of
+    // record — a second fold over the results the first fold produced.
+    function _arcLadderHtml() {
+        var table = window.ChatGames.ratings(_gamesState());
+        if (!table.length) return '';
+        return '<div class="chat-arc-sectitle">Room ladder' +
+                '<span class="chat-arc-count">' + table.length + '</span></div>' +
+            '<div class="chat-arc-ladder">' +
+                table.slice(0, 15).map(function (r, i) {
+                    return '<div class="chat-arc-ladrow' +
+                        (r.name === state.selfName ? ' chat-arc-ladrow--me' : '') + '">' +
+                        '<span class="chat-arc-ladno">' + (i + 1) + '</span>' +
+                        '<span class="chat-arc-ladname">' + esc(r.name) + '</span>' +
+                        '<span class="chat-arc-ladwl">' + r.wins + 'W ' + r.losses +
+                            'L ' + r.draws + 'D</span>' +
+                        '<span class="chat-arc-ladelo">' + r.rating + '</span>' +
+                    '</div>';
+                }).join('') +
+                '<div class="chat-arc-ladnote">Elo from ' + ELO_NOTE + '</div>' +
+            '</div>';
+    }
+    var ELO_NOTE = 'finished games in this room, folded the same way on every ' +
+        'client — everyone starts at 1200. Games this client joined mid-way ' +
+        'are not rated: their seats were deduced, not observed.';
 
     function _arcBoardHtml(game) {
         var E = window.ChessEngine;
@@ -1508,6 +1591,40 @@
             '<div class="chat-arc-status">' + statusLine + '</div>' +
             (actions ? '<div class="chat-arc-actions">' + actions + '</div>' : '') +
             '<div class="chat-arc-moves">' + sanRows + '</div>' +
+            '<div class="chat-arc-exports">' +
+                '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+                    'data-chat-arc-pgn="' + attr(game.id) + '" ' +
+                    'title="Download a .pgn — it opens in Lichess like any other game">' +
+                    '⤓ PGN</button>' +
+                '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+                    'data-chat-arc-pgncopy="' + attr(game.id) + '">Copy PGN</button>' +
+            '</div>' +
+            _arcRevealHtml(game) +
+        '</div>';
+    }
+
+    // The trick, made visible. People assume there is a server; showing the
+    // actual chat messages the board was computed from is the whole point of
+    // building it this way.
+    function _arcRevealHtml(game) {
+        var carriers = _arcCarriers(game.id);
+        var open = !!(state.arcade && state.arcade.reveal);
+        var head = '<button class="chat-arc-reveal-btn" type="button" data-chat-arc-reveal>' +
+            '⚡ no server · this board folded from ' + carriers.length +
+            ' room message' + (carriers.length === 1 ? '' : 's') +
+            '<span class="chat-arc-reveal-caret">' + (open ? '⌃' : '⌄') + '</span></button>';
+        if (!open) return '<div class="chat-arc-reveal">' + head + '</div>';
+        var rows = carriers.slice(-40).map(function (e) {
+            return '<div class="chat-arc-rawrow">' +
+                '<span class="chat-arc-rawwho">' + esc(e.username || '?') + '</span>' +
+                '<code>' + esc(JSON.stringify(e.p)) + '</code>' +
+            '</div>';
+        }).join('') || '<div class="chat-arc-rawrow">nothing in this client\'s log</div>';
+        return '<div class="chat-arc-reveal chat-arc-reveal--open">' + head +
+            '<div class="chat-arc-rawnote">These are real messages in the Soulseek ' +
+                'room. Every SoulSync client folds them into the same position; a ' +
+                'plain Soulseek client just sees them as text it ignores.</div>' +
+            '<div class="chat-arc-raw">' + rows + '</div>' +
         '</div>';
     }
 
@@ -3260,6 +3377,15 @@
             if (t) { arcResign(t.getAttribute('data-chat-arc-resign')); return; }
             t = e.target.closest('[data-chat-arc-draw]');
             if (t) { arcDraw(t.getAttribute('data-chat-arc-draw')); return; }
+            t = e.target.closest('[data-chat-arc-pgn]');
+            if (t) { arcDownloadPgn(t.getAttribute('data-chat-arc-pgn')); return; }
+            t = e.target.closest('[data-chat-arc-pgncopy]');
+            if (t) { arcCopyPgn(t.getAttribute('data-chat-arc-pgncopy')); return; }
+            t = e.target.closest('[data-chat-arc-reveal]');
+            if (t) {
+                if (state.arcade) { state.arcade.reveal = !state.arcade.reveal; renderArcade(); }
+                return;
+            }
             t = e.target.closest('[data-chat-arc-flip]');
             if (t) {
                 if (state.arcade) { state.arcade.flip = !state.arcade.flip; renderArcade(); }
@@ -4631,7 +4757,7 @@
                         // Arcade HTML builders — usernames and results come off
                         // Soulseek, so the same escaping contract applies here
                         _arcLobbyHtml: _arcLobbyHtml, _arcBoardHtml: _arcBoardHtml,
-                        _arcSidebarHtml: _arcSidebarHtml,
+                        _arcSidebarHtml: _arcSidebarHtml, _arcPgn: _arcPgn,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });

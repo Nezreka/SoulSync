@@ -72443,6 +72443,52 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-moverow--none { color: rgba(255,255,255,0.4); grid-template-columns: 1fr; }
 .chat-arc-moveno { color: rgba(255,255,255,0.35); }
 
+/* ── ladder + the reveal (arcade P4) ── */
+.chat-arc-ladder {
+    background: rgba(255,255,255,0.03); border-radius: 10px; padding: 8px 10px;
+}
+.chat-arc-ladrow {
+    display: grid; grid-template-columns: 26px 1fr auto auto; gap: 10px; align-items: center;
+    padding: 5px 4px; font-size: 13px; color: rgba(255,255,255,0.78);
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.chat-arc-ladrow:last-of-type { border-bottom: none; }
+.chat-arc-ladrow--me { color: #1db954; font-weight: 700; }
+.chat-arc-ladno { color: rgba(255,255,255,0.35); text-align: right; }
+.chat-arc-ladname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-arc-ladwl { font-size: 11px; color: rgba(255,255,255,0.4); }
+.chat-arc-ladelo { font-weight: 800; font-variant-numeric: tabular-nums; }
+.chat-arc-ladnote {
+    font-size: 11px; color: rgba(255,255,255,0.38); line-height: 1.5; padding: 8px 4px 2px;
+}
+
+.chat-arc-exports { display: flex; gap: 8px; }
+.chat-arc-reveal { margin-top: 4px; }
+.chat-arc-reveal-btn {
+    display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer;
+    border-radius: 8px; padding: 8px 11px; font-size: 12px; font-weight: 700;
+    border: 1px dashed rgba(29,185,84,0.35); background: rgba(29,185,84,0.07);
+    color: #1db954; text-align: left;
+}
+.chat-arc-reveal-btn:hover { background: rgba(29,185,84,0.13); }
+.chat-arc-reveal-caret { margin-left: auto; }
+.chat-arc-rawnote {
+    font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.5; padding: 8px 4px 4px;
+}
+.chat-arc-raw {
+    max-height: 240px; overflow: auto; border-radius: 8px;
+    background: rgba(0,0,0,0.28); padding: 8px 10px;
+}
+.chat-arc-rawrow {
+    display: flex; gap: 8px; align-items: baseline; padding: 2px 0;
+    font-size: 11px; color: rgba(255,255,255,0.55);
+}
+.chat-arc-rawrow code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-all; color: rgba(255,255,255,0.75);
+}
+.chat-arc-rawwho { flex: none; color: #1db954; font-weight: 700; }
+
 /* a game in the sidebar where it is your move */
 .chat-thread--turn { color: #1db954; }
 

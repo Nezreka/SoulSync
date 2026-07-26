@@ -426,6 +426,123 @@ describe('determinism', () => {
     });
 });
 
+describe('ratings — a ladder with no server', () => {
+    // Elo is order-dependent, so the whole risk here is two clients folding
+    // the same results into different numbers.
+    const DAY = 24 * 60 * 60 * 1000;
+
+    // A finished game between two named players, ending in `result`.
+    function finished(id, white, black, result, at) {
+        const evs = [
+            ev(white, { k: 'gm.new', g: id, v: 'chess' }, at),
+            ev(black, { k: 'gm.join', g: id }, at + 1),
+        ];
+        // Resignation is the cheapest way to land an exact result.
+        if (result === '1-0') evs.push(ev(black, { k: 'gm.res', g: id }, at + 2));
+        else if (result === '0-1') evs.push(ev(white, { k: 'gm.res', g: id }, at + 2));
+        else {
+            evs.push(ev(white, { k: 'gm.draw', g: id }, at + 2));
+            evs.push(ev(black, { k: 'gm.draw', g: id }, at + 3));
+        }
+        return evs;
+    }
+    const rate = evs => G.ratings(G.reduceGames(evs));
+
+    test('an unplayed room has an empty ladder', () => {
+        assert.deepEqual(JSON.parse(JSON.stringify(rate([opened()]))), []);
+    });
+    test('a win moves both players symmetrically off 1200', () => {
+        const table = rate(finished('aaaa', 'boulder', 'kazimir', '1-0', T0));
+        const w = table.find(r => r.name === 'boulder');
+        const b = table.find(r => r.name === 'kazimir');
+        assert.equal(w.rating, G.ELO_START + 16, 'even match, K=32, full point');
+        assert.equal(b.rating, G.ELO_START - 16);
+        assert.equal(w.wins, 1); assert.equal(b.losses, 1);
+        assert.equal(table[0].name, 'boulder', 'sorted by rating');
+    });
+    test('a draw between equals moves nobody', () => {
+        const table = rate(finished('aaaa', 'boulder', 'kazimir', '1/2-1/2', T0));
+        assert.equal(table[0].rating, G.ELO_START);
+        assert.equal(table[1].rating, G.ELO_START);
+        assert.equal(table[0].draws, 1);
+    });
+    test('near-simultaneous games order identically despite clock skew', () => {
+        // Finish times come from each user's own slskd, so they differ by
+        // latency. Comparing at millisecond resolution would let two clients
+        // rate the same two games in a different order and reach different
+        // numbers. Rounding to whole seconds plus an id tiebreak fixes it.
+        const a = finished('aaaa', 'boulder', 'kazimir', '1-0', T0);
+        const b = finished('bbbb', 'kazimir', 'sella', '1-0', T0 + 300);
+        const base = JSON.stringify(rate([...a, ...b]));
+        // Same games, the other client's copy jittered by a few hundred ms.
+        const jitter = ms => finished('aaaa', 'boulder', 'kazimir', '1-0', T0 + ms);
+        for (const ms of [-400, -120, 120, 400]) {
+            assert.equal(JSON.stringify(rate([...jitter(ms), ...b])), base, `skew ${ms}ms`);
+        }
+    });
+    test('the id breaks a tie so the order is total', () => {
+        const a = finished('aaaa', 'boulder', 'kazimir', '1-0', T0);
+        const b = finished('bbbb', 'kazimir', 'sella', '1-0', T0);
+        // Same second: whichever order the events arrive in, the ladder is
+        // computed in id order and so comes out the same.
+        assert.equal(JSON.stringify(rate([...a, ...b])), JSON.stringify(rate([...b, ...a])));
+    });
+    test('results compound in order rather than being averaged', () => {
+        const evs = [
+            ...finished('aaaa', 'boulder', 'kazimir', '1-0', T0),
+            ...finished('bbbb', 'boulder', 'kazimir', '1-0', T0 + 60000),
+            ...finished('cccc', 'boulder', 'kazimir', '1-0', T0 + 120000),
+        ];
+        const w = rate(evs).find(r => r.name === 'boulder');
+        assert.equal(w.games, 3);
+        assert.equal(w.wins, 3);
+        // Each win is worth less than the last as the gap opens up.
+        assert.ok(w.rating > G.ELO_START + 16 * 2 && w.rating < G.ELO_START + 16 * 3,
+                  `diminishing returns, got ${w.rating}`);
+    });
+    test('unfinished, abandoned and one-sided games are not rated', () => {
+        assert.deepEqual(JSON.parse(JSON.stringify(rate([opened(), joined()]))), [],
+                         'a live game is not a result');
+        // A game nobody joined has no opponent to rate against.
+        assert.deepEqual(JSON.parse(JSON.stringify(rate([
+            opened('aaaa', 'boulder'),
+            ev('boulder', { k: 'gm.res', g: 'aaaa' }, T0 + 5),
+        ]))), []);
+    });
+    test('a game adopted mid-stream is not rated', () => {
+        // Its seats were deduced from whoever moved, not observed from
+        // gm.new, so the ladder stays out of it.
+        const midFen = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 3';
+        const evs = [
+            ev('kazimir', { k: 'gm.move', g: 'aaaa', v: 'chess', n: 7, m: 'e7e5', f: midFen }, T0),
+            ev('boulder', { k: 'gm.move', g: 'aaaa', n: 8, m: 'g1f3' }, T0 + 1000),
+            ev('boulder', { k: 'gm.res', g: 'aaaa' }, T0 + 2000),
+        ];
+        const g = G.reduceGames(evs).games.aaaa;
+        assert.equal(g.status, 'over', 'the game really did finish');
+        assert.deepEqual(JSON.parse(JSON.stringify(rate(evs))), [], 'but it is unrated');
+    });
+    test('a seat claimed after abandonment rates its final occupant', () => {
+        const base = [opened(), joined(),
+            ...moveEvents('g001', ['boulder', 'kazimir'], ['e2e4'])];
+        const lastAt = T0 + 60000;
+        const evs = [...base,
+            ev('sella', { k: 'gm.claim', g: 'g001' }, lastAt + DAY + 1000),
+            ev('sella', { k: 'gm.res', g: 'g001' }, lastAt + DAY + 2000)];
+        const table = rate(evs);
+        assert.ok(table.find(r => r.name === 'sella'), 'the player who actually finished it');
+        assert.ok(!table.find(r => r.name === 'kazimir'), 'not the one who walked away');
+    });
+    test('folding twice gives the same table', () => {
+        const evs = [
+            ...finished('aaaa', 'boulder', 'kazimir', '1-0', T0),
+            ...finished('bbbb', 'sella', 'boulder', '0-1', T0 + 60000),
+            ...finished('cccc', 'kazimir', 'sella', '1/2-1/2', T0 + 120000),
+        ];
+        assert.equal(JSON.stringify(rate(evs)), JSON.stringify(rate(evs)));
+    });
+});
+
 describe('toMove — what drives the "your move" badge', () => {
     test('follows the position, not ply parity', () => {
         // An adopted game takes its ply from the wire. A wrong or hostile

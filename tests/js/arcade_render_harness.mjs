@@ -232,6 +232,90 @@ const NASTY = '<img src=x onerror=alert(1)>';
           !CP._arcSidebarHtml().includes('chat-chan--unread'), CP._arcSidebarHtml());
 }
 
+// ── PGN export is a real chess file ─────────────────────────────────────
+{
+    const evs = [
+        ev('boulder', { k: 'gm.new', g: 'kkkk', v: 'chess' }),
+        ev('kazimir', { k: 'gm.join', g: 'kkkk' }, T0 + 1000),
+    ];
+    let pos = E.newGame();
+    ['e2e4', 'e7e5', 'g1f3'].forEach((uci, i) => {
+        const mover = pos.turn === 'w' ? 'boulder' : 'kazimir';
+        pos = E.makeMove(pos, E.uciToMove(pos, uci));
+        evs.push(ev(mover, { k: 'gm.move', g: 'kkkk', n: i, m: uci, f: E.toFEN(pos) },
+                    T0 + 2000 + i));
+    });
+    setRoom(evs, 'boulder');
+    const pgn = CP._arcPgn(game(evs, 'kkkk'));
+    check('pgn: names the players', pgn.includes('[White "boulder"]') &&
+          pgn.includes('[Black "kazimir"]'), pgn);
+    check('pgn: real algebraic movetext', pgn.includes('1. e4 e5 2. Nf3'), pgn);
+    check('pgn: says where it was played', pgn.includes('Soulseek'), pgn);
+    check('pgn: a full game needs no SetUp tag', !pgn.includes('[SetUp'), pgn);
+
+    // A game adopted mid-stream has a partial move list, so the PGN must
+    // carry the position it starts from or it describes a different game.
+    const mid = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 3';
+    const part = [
+        ev('kazimir', { k: 'gm.move', g: 'llll', v: 'chess', n: 7, m: 'e7e5', f: mid }),
+        ev('boulder', { k: 'gm.move', g: 'llll', n: 8, m: 'g1f3' }, T0 + 1000),
+    ];
+    setRoom(part, 'boulder');
+    const ppgn = CP._arcPgn(game(part, 'llll'));
+    check('pgn: a partial game declares its start position',
+          ppgn.includes('[SetUp "1"]') && ppgn.includes(mid), ppgn);
+}
+
+// ── the ladder ──────────────────────────────────────────────────────────
+{
+    const evs = [
+        ev('boulder', { k: 'gm.new', g: 'mmmm', v: 'chess' }),
+        ev('kazimir', { k: 'gm.join', g: 'mmmm' }, T0 + 1),
+        ev('kazimir', { k: 'gm.res', g: 'mmmm' }, T0 + 2),
+    ];
+    setRoom(evs, 'boulder');
+    const lobby = CP._arcLobbyHtml();
+    check('ladder: shown once there is a result', lobby.includes('Room ladder'), lobby);
+    check('ladder: winner rated above the start', lobby.includes('1216'), lobby);
+    check('ladder: explains what it is', lobby.includes('everyone starts at 1200'), lobby);
+
+    // No results yet -> no ladder at all, rather than a table of 1200s.
+    setRoom([ev('boulder', { k: 'gm.new', g: 'nnnn', v: 'chess' })], 'boulder');
+    check('ladder: hidden until someone finishes a game',
+          !CP._arcLobbyHtml().includes('Room ladder'), '');
+}
+
+// ── the reveal ──────────────────────────────────────────────────────────
+{
+    const evs = [
+        ev('boulder', { k: 'gm.new', g: 'oooo', v: 'chess' }),
+        ev('kazimir', { k: 'gm.join', g: 'oooo' }, T0 + 1),
+    ];
+    setRoom(evs, 'boulder');
+    CP._testSetState({ arcade: { game: 'oooo', sel: -1, promo: null, flip: false } });
+    let board = CP._arcBoardHtml(game(evs, 'oooo'));
+    check('reveal: counts the carriers this board came from',
+          board.includes('folded from 2 room messages'), board);
+    check('reveal: collapsed by default', !board.includes('chat-arc-reveal--open'), board);
+
+    CP._testSetState({ arcade: { game: 'oooo', sel: -1, promo: null, flip: false, reveal: true } });
+    board = CP._arcBoardHtml(game(evs, 'oooo'));
+    check('reveal: opens to the raw carriers', board.includes('chat-arc-reveal--open'), board);
+    check('reveal: shows the actual payload', board.includes('gm.new'), board);
+    check('reveal: escapes the raw payload too', !board.includes('<img src=x'), board);
+
+    // The count is per-game, not the whole room.
+    const noisy = evs.concat([
+        ev('sella', { k: 'gm.new', g: 'pppp', v: 'chess' }, T0 + 5),
+        ev('sella', { k: 'jbx.vote', o: 'xyz' }, T0 + 6),
+    ]);
+    setRoom(noisy, 'boulder');
+    CP._testSetState({ arcade: { game: 'oooo', sel: -1, promo: null, flip: false } });
+    check('reveal: counts only this game\'s carriers',
+          CP._arcBoardHtml(game(noisy, 'oooo')).includes('folded from 2 room messages'),
+          CP._arcBoardHtml(game(noisy, 'oooo')));
+}
+
 // ── the Arcade hides itself if its libraries are absent ─────────────────
 {
     // chat.js must not throw when chess-engine.js / chat-games.js failed to

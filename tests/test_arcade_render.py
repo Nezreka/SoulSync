@@ -101,6 +101,19 @@ class TestWiring:
         assert "_arcSquareClick" in _CHAT_JS
         assert "Drag is an ALTERNATIVE to click" in _CHAT_JS
 
+    def test_ratings_order_is_not_client_local(self):
+        # Elo is order-dependent, so the fold order must not come from
+        # anything that differs between clients. Finish times arrive from
+        # each user's own slskd, so they are compared at whole-second
+        # resolution with the game id as a total tiebreak.
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "Math.floor(a.lastAt / 1000)" in games_js
+        assert "a.id < b.id ? -1" in games_js
+
+    def test_adopted_games_are_not_rated(self):
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "!g.partial" in games_js
+
     def test_promotion_is_asked_not_assumed(self):
         # Under-promotion is occasionally the only winning move.
         assert "state.arcade.promo = { from: from, to: to };" in _CHAT_JS

@@ -378,9 +378,84 @@
         return game.turn === 'b' ? game.black : game.white;
     }
 
+    // ── Ratings ─────────────────────────────────────────────────────────
+    //
+    // A room Elo ladder with no server and no database of record: it is a
+    // second fold, this time over the finished games the first fold produced.
+    // Everyone starts at 1200.
+    //
+    // Elo is ORDER-DEPENDENT — rating A before B gives different numbers than
+    // B before A — and every client has to land on the same table, so the
+    // order cannot come from anything client-local. Games are sorted by
+    // finish time rounded to WHOLE SECONDS, then by game id. The rounding
+    // matters: finish times come from each user's own slskd, so they differ
+    // by network latency, and comparing them at millisecond resolution would
+    // let two clients disagree about which of two near-simultaneous games
+    // came first. The id tiebreak then makes the order total.
+    //
+    // Only games this client watched from the opening are rated. A game
+    // adopted mid-stream has seats inferred from whoever moved rather than
+    // observed from gm.new, and rating a result whose players we deduced is
+    // not something the ladder should be doing.
+    var ELO_START = 1200;
+
+    function _k(games) { return games < 30 ? 32 : 24; }
+
+    function ratings(foldOut) {
+        var out = {};
+        var games = (foldOut && foldOut.games) || {};
+
+        var rated = Object.keys(games).map(function (id) { return games[id]; })
+            .filter(function (g) {
+                return g.status === 'over' && !g.desync && !g.partial &&
+                       g.white && g.black && g.white !== g.black && g.result;
+            })
+            .sort(function (a, b) {
+                var as = Math.floor(a.lastAt / 1000), bs = Math.floor(b.lastAt / 1000);
+                if (as !== bs) return as - bs;
+                return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+            });
+
+        function seat(name) {
+            return out[name] || (out[name] = {
+                name: name, rating: ELO_START, games: 0, wins: 0, losses: 0, draws: 0,
+            });
+        }
+
+        rated.forEach(function (g) {
+            var w = seat(g.white), b = seat(g.black);
+            // Score from white's point of view.
+            var score = g.result === '1-0' ? 1 : (g.result === '0-1' ? 0 : 0.5);
+            var expW = 1 / (1 + Math.pow(10, (b.rating - w.rating) / 400));
+            var kw = _k(w.games), kb = _k(b.games);
+            var rw = w.rating + kw * (score - expW);
+            var rb = b.rating + kb * ((1 - score) - (1 - expW));
+            w.rating = rw; b.rating = rb;
+            w.games++; b.games++;
+            if (score === 1) { w.wins++; b.losses++; }
+            else if (score === 0) { w.losses++; b.wins++; }
+            else { w.draws++; b.draws++; }
+        });
+
+        return Object.keys(out).map(function (n) {
+            var r = out[n];
+            // Round only on the way out — rounding as we go would compound.
+            return {
+                name: r.name, rating: Math.round(r.rating), games: r.games,
+                wins: r.wins, losses: r.losses, draws: r.draws,
+            };
+        }).sort(function (a, b) {
+            if (b.rating !== a.rating) return b.rating - a.rating;
+            if (b.games !== a.games) return b.games - a.games;
+            return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+        });
+    }
+
     window.ChatGames = {
         reduceGames: reduceGames,
+        ratings: ratings,
         toMove: toMove,
+        ELO_START: ELO_START,
         ABANDON_MS: ABANDON_MS,
         MAX_GAMES: MAX_GAMES,
         MAX_MOVES: MAX_MOVES,
