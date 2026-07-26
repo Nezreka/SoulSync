@@ -503,6 +503,8 @@ export interface LibraryV2TrackTableColumns {
   quality: boolean;
   features: boolean;
   metadata: boolean;
+  /** T-10: AcoustID/human verification provenance as its own column. */
+  verification: boolean;
   file_path: boolean;
   /** H1: row play button, reuses the Legacy player via the shell bridge. */
   play: boolean;

@@ -42,6 +42,10 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "quality": True,
             "features": True,
             "metadata": True,
+            # issues.md T-10: how a file was verified (AcoustID pass / human
+            # approval / bypass) was only a sub-badge inside the quality cell.
+            # Opt-in like file_path — it is a diagnostic, not everyday info.
+            "verification": False,
             "file_path": False,
             # H1: row play button (reuses the Legacy player via the shell
             # bridge) — opt-in like file_path, not everyone wants it visible.
@@ -57,6 +61,7 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "quality",
             "features",
             "metadata",
+            "verification",
             "file_path",
         ],
         "show_all_match_providers": False,

@@ -114,6 +114,7 @@ def test_column_order_defaults_and_customization():
         "quality",
         "features",
         "metadata",
+        "verification",
         "file_path",
     ]
     # Patch overrides it completely since lists are leaf values.

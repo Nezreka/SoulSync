@@ -541,6 +541,18 @@ def _manual_art_override_url(conn, kind: str, entity_id: int) -> Optional[str]:
     return str(override.value) if override and override.value else None
 
 
+def manual_art_override_url(conn, kind: str, entity_id: int) -> Optional[str]:
+    """Public read of the user-picked artwork override.
+
+    Callers outside the build path need the same answer ``build_artwork`` uses
+    when deciding whether artwork *exists* for an entity — e.g. the retag write
+    (issues.md T-04/T-05), which must not claim a cover is available when it
+    isn't, nor miss one the user pinned by hand. Unlike ``_provider_art_url``
+    this is a pure DB read, cheap enough for a per-row check.
+    """
+    return _manual_art_override_url(conn, kind, entity_id)
+
+
 def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
                   *, force: bool = False) -> Optional[str]:
     """Resolve + cache artwork for an artist/album; return the on-disk jpg path.

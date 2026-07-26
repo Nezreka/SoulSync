@@ -5441,6 +5441,7 @@ const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
   quality: true,
   features: true,
   metadata: true,
+  verification: false,
   file_path: false,
   play: false,
 };
@@ -5454,6 +5455,7 @@ const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string
   quality: 'Quality',
   features: 'Features',
   metadata: 'Metadata',
+  verification: 'Verification',
   file_path: 'File path',
   play: 'Play button',
 };
@@ -6120,6 +6122,7 @@ export function AlbumTrackTable({
     'quality',
     'features',
     'metadata',
+    'verification',
     'file_path',
   ];
   const columnOrder = prefsQuery.data?.track_table.column_order ?? defaultOrder;
@@ -6194,6 +6197,8 @@ export function AlbumTrackTable({
         );
       case 'metadata':
         return <th key="metadata">Metadata</th>;
+      case 'verification':
+        return <th key="verification">Verification</th>;
       case 'file_path':
         return <th key="file_path">File</th>;
       case 'play':
@@ -6340,11 +6345,21 @@ export function TrackMetadataGapsCell({
   const mutation = useMutation({
     mutationFn: async () => {
       const jobId = await writeLibraryV2Tags([track.id as number]);
-      const jobError = await awaitBulkJob(queryClient, jobId);
-      if (jobError) throw new Error(jobError);
+      const state = await awaitBulkJobState(queryClient, jobId);
+      if (state.error) throw new Error(state.error);
+      return Number(state.result?.written ?? 0);
     },
-    onSuccess: () => {
-      window.showToast?.('Tags written to file.', 'success');
+    onSuccess: (written) => {
+      // The endpoint reports success even when it wrote to no file — a gap the
+      // catalogue itself cannot fill (no genre stored on the album) leaves
+      // nothing to write. Claiming "Tags written" there is what made the same
+      // gaps look permanent after an apparently successful click (T-03).
+      if (written > 0) window.showToast?.('Tags written to file.', 'success');
+      else
+        window.showToast?.(
+          'Nothing to write — the library has no value for these tags yet.',
+          'info',
+        );
     },
     onError: (error) => {
       window.showToast?.(mutationErrorMessage(error, 'Write tags failed'), 'error');
@@ -6559,6 +6574,28 @@ function TrackRow({
               <TrackMetadataGapsCell track={track} onOpenTags={() => setDetailTab('tags')} />
             ) : (
               <span className={styles.muted}>—</span>
+            )}
+          </td>
+        );
+      case 'verification':
+        return (
+          <td key="verification">
+            {!missing && track.file?.verification_status ? (
+              <TrackVerificationBadge file={track.file} />
+            ) : (
+              // A file with no recorded provenance is a real, actionable state
+              // (T-09), not an empty cell: it says "nothing in this library
+              // knows how this file was checked".
+              <span
+                className={styles.muted}
+                title={
+                  missing || !track.file
+                    ? 'No file'
+                    : 'No verification recorded — run Refresh & Scan to adopt the file’s own tag, or the AcoustID Scanner to check it'
+                }
+              >
+                —
+              </span>
             )}
           </td>
         );

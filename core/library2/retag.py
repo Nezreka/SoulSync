@@ -23,6 +23,9 @@ logger = get_logger("library2.retag")
 # path processes any number of tracks in MAX_TRACKS-sized query batches.
 MAX_TRACKS = 500
 
+# "argument not supplied" — distinct from a supplied NULL image_url.
+_UNSET = object()
+
 
 def _track_rows(conn, track_ids: List[int]) -> List[Any]:
     """Track+album metadata rows for the given ids (single query batch).
@@ -42,6 +45,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
                    t.spotify_id, t.musicbrainz_id, t.album_id,
                    al.title AS album_title, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
+                   al.image_url AS album_image_url,
                    ar.name AS album_artist_name,
                    (SELECT tf.id FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
@@ -89,6 +93,32 @@ def _credited_artists(conn, track_id: int) -> List[str]:
           WHERE ta.track_id=? ORDER BY ta.position""", (track_id,))]
 
 
+def _album_cover_source(
+    conn, album_id: int, image_url: Any = _UNSET,
+) -> Optional[str]:
+    """A usable album-cover URL, or None — the user's manual override first,
+    then the album's stored provider ``image_url`` (Guide §2.1 order).
+
+    A *presence* signal only: ``_album_cover_data`` owns the actual resolution.
+    Deliberately DB-only — ``artwork._provider_art_url`` would issue a live
+    provider lookup, and this runs once per track of a preview.
+
+    ``image_url`` may be passed in when the caller already selected it, so a
+    500-track preview does not re-query one row per track.
+    """
+    from core.library2.artwork import manual_art_override_url
+
+    override = manual_art_override_url(conn, "album", int(album_id))
+    if override:
+        return override
+    if image_url is _UNSET:
+        row = conn.execute(
+            "SELECT image_url FROM lib2_albums WHERE id=?", (int(album_id),)
+        ).fetchone()
+        image_url = row["image_url"] if row else None
+    return str(image_url).strip() or None if image_url else None
+
+
 def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
     """Shape a lib2 track row into the ``db_data`` dict core/tag_writer reads."""
     artists = _credited_artists(conn, row["id"])
@@ -105,6 +135,15 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         "disc_number": row["disc_number"],
         "track_count": row["expected_track_count"] or row["track_count"],
     }
+    # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
+    # it the preview claimed "Cover Art: None → None, unchanged" for every lib2
+    # track, so a file with no embedded art still reported "Tags match" while
+    # the gap column said the cover was missing (T-04). Any usable album cover
+    # counts here — the cached artwork file OR the provider image_url that
+    # ``_album_cover_data`` can still materialize.
+    cover_source = _album_cover_source(conn, row["album_id"], row["album_image_url"])
+    if cover_source:
+        data["thumb_url"] = cover_source
     if len(artists) > 1:
         data["artists_list"] = artists
     if row["spotify_id"]:
@@ -169,15 +208,53 @@ def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _album_cover_data(database, album_id: int) -> Optional[Tuple[bytes, str]]:
-    """The lib2 artwork cache file for an album, as (bytes, mime) for embedding."""
+    """The album's cover as ``(bytes, mime)`` for embedding, or None.
+
+    The cached artwork file is the fast path. It is frequently absent — a cold
+    cache, an ``invalidate_artwork`` after a repair, or a "Refresh & Scan",
+    which *deletes* exactly these files before rescanning. ``artwork_file`` only
+    builds a path, so the old cache-only lookup returned None in all of those
+    cases and no cover was ever embedded, even when the album carried a valid
+    provider ``image_url`` (T-05).
+
+    The fallback delegates to ``build_artwork``, the one resolver that honours
+    Guide §2.1's order (manual override → embedded art → provider) and its own
+    per-entity single-flight lock — no second download path here. It is only
+    entered when a cover source actually exists, so a routine full-library
+    retag over art-less albums still costs nothing.
+    """
+    from core.library2 import artwork as artwork_mod
+
     try:
-        from core.library2.artwork import artwork_file
-        path = artwork_file(database, "album", album_id)
+        path = artwork_mod.artwork_file(database, "album", album_id)
         if path.exists():
             return path.read_bytes(), "image/jpeg"
     except Exception as e:  # noqa: BLE001
         logger.debug("album cover read failed (%s): %s", album_id, e)
-    return None
+        return None
+
+    conn = database._get_connection()
+    try:
+        if not _album_cover_source(conn, album_id):
+            return None
+        from config.settings import config_manager
+
+        built = artwork_mod.build_artwork(
+            database, conn, config_manager, "album", int(album_id),
+        )
+    except Exception as e:  # noqa: BLE001 — a provider hiccup is not a write failure
+        logger.debug("album cover build failed (%s): %s", album_id, e)
+        return None
+    finally:
+        conn.close()
+    if not built:
+        return None
+    try:
+        with open(built, "rb") as handle:
+            return handle.read(), "image/jpeg"
+    except OSError as e:
+        logger.debug("built album cover unreadable (%s): %s", album_id, e)
+        return None
 
 
 def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any]) -> bool:
@@ -246,11 +323,19 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
             if not file_tags.get("error"):
                 diff = build_tag_diff(file_tags, db_data)
                 text_changed = any(d.get("changed") for d in diff)
-                # Only worth the cover-cache lookup when force_cover might turn
-                # an otherwise-unchanged file into a write — the common case
-                # (nothing changed, embed_cover=True from a routine full-library
-                # retag) must not pay for reading every album's cover file.
-                if not text_changed and not (force_cover and embed_cover and _cover()):
+                # A file with NO embedded art is the case the "N tag gaps" cell
+                # sends here, and build_tag_diff never reports cover art as a
+                # text change — so the old fastpath skipped exactly the gap the
+                # user clicked on and still reported success (T-03). Missing
+                # art is now its own reason to write; ``force_cover`` stays for
+                # *replacing* art that is already there (a newly picked cover).
+                cover_missing = embed_cover and not file_tags.get("has_cover_art")
+                # The cover lookup can materialize a cold cache, so only reach
+                # for it when it could actually change the outcome — a routine
+                # full-library retag over already-arted files pays nothing.
+                if not text_changed and not (
+                    (cover_missing or (force_cover and embed_cover)) and _cover()
+                ):
                     _persist_file_tags(database, row["file_id"], file_tags)
                     stats["skipped"] += 1
                     continue

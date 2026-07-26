@@ -272,3 +272,106 @@ def test_write_closes_snapshot_connection_before_file_io(
 
     assert stats["skipped"] == 1
     assert state == {"active": 0, "opened": 2}
+
+
+def test_db_data_carries_the_album_cover_for_the_preview(imported_conn, legacy_db):
+    """issues.md T-04: build_tag_diff builds its Cover Art row from
+    ``db_data['thumb_url']``. lib2 never supplied it, so Preview Retag reported
+    'Cover Art: None -> None, unchanged' — i.e. "Tags match" — for a file that
+    demonstrably had no embedded cover."""
+    from core.tag_writer import build_tag_diff
+
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    conn.execute("UPDATE lib2_albums SET image_url='http://cdn/cover.jpg' WHERE id=?",
+                 (album_id,))
+    conn.commit()
+
+    row = retag._track_rows(conn, [track_id])[0]
+    data = retag._db_data_for_row(conn, row)
+    assert data["thumb_url"]
+
+    cover_row = next(
+        d for d in build_tag_diff({"has_cover_art": False}, data)
+        if d["file_key"] == "cover_art"
+    )
+    assert cover_row["changed"] is True
+
+
+def test_missing_cover_is_embedded_without_an_explicit_force(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """issues.md T-03: clicking "N tag gaps" reached write_tags without
+    force_cover, and the unchanged-text fastpath skipped the file — so the one
+    gap the user clicked on could never close, while the UI reported success."""
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, album_id, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")
+
+    from core.library2.artwork import artwork_file
+    artwork_file(legacy_db, "album", album_id).write_bytes(b"cover-bytes")
+
+    file_tags = {
+        "title": "One Dance", "artist": "Drake; Wizkid",
+        "album_artist": "Drake", "album": "Views", "year": "2016-04-29",
+        "genre": "rap, pop", "track_number": 1, "disc_number": 1,
+        "has_cover_art": False, "error": None,
+    }
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: file_tags)
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [])
+    captured = {}
+
+    def _fake_write(path, db_data, *, embed_cover, cover_data):
+        captured["cover_data"] = cover_data
+        return {"success": True}
+
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file", _fake_write)
+
+    stats = retag.write_tags(legacy_db, [track_id], embed_cover=True)
+
+    assert stats["written"] == 1
+    assert captured["cover_data"] == (b"cover-bytes", "image/jpeg")
+
+
+def test_cover_source_falls_back_to_the_album_provider_image(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """issues.md T-05: ``artwork_file`` is a path builder, not a builder. On a
+    cold artwork cache — including right after Refresh & Scan, which deletes
+    those files — _album_cover_data returned None and no cover was ever
+    embedded, although lib2_albums.image_url held a valid provider URL."""
+    conn = imported_conn
+    _, album_id, _track_id = _seed_album_with_files(conn)
+    conn.execute("UPDATE lib2_albums SET image_url='http://cdn/cover.jpg' WHERE id=?",
+                 (album_id,))
+    conn.commit()
+
+    built = []
+
+    def _fake_build(database, db_conn, config_manager, kind, entity_id, **kwargs):
+        built.append((kind, entity_id))
+        path = retag_artwork.artwork_file(database, kind, entity_id)
+        path.write_bytes(b"built-cover")
+        return str(path)
+
+    from core.library2 import artwork as retag_artwork
+    monkeypatch.setattr(retag_artwork, "build_artwork", _fake_build)
+
+    assert retag._album_cover_data(legacy_db, album_id) == (b"built-cover", "image/jpeg")
+    assert built == [("album", album_id)]
+
+
+def test_cover_build_is_not_attempted_for_an_album_without_any_source(
+        imported_conn, legacy_db, monkeypatch):
+    """No cover source anywhere → no provider walk, no write. Guards the
+    routine full-library retag against paying a build per album."""
+    conn = imported_conn
+    _, album_id, _track_id = _seed_album_with_files(conn)
+
+    from core.library2 import artwork as retag_artwork
+
+    def _must_not_run(*_args, **_kwargs):
+        raise AssertionError("build_artwork must not run without a cover source")
+
+    monkeypatch.setattr(retag_artwork, "build_artwork", _must_not_run)
+    assert retag._album_cover_data(legacy_db, album_id) is None

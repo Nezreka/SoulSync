@@ -300,3 +300,143 @@ def test_root_health_requires_every_configured_library_mount(tmp_path):
     assert missing_path_root_is_healthy("/remote/Artist/song.flac", config)
     config.roots.append(str(tmp_path / "offline-mount"))
     assert not missing_path_root_is_healthy("/remote/Artist/song.flac", config)
+
+
+def _tags(**overrides):
+    base = {
+        "title": "Album One", "artist": "A", "album": "Album One",
+        "album_artist": "A", "track_number": 1, "disc_number": 1,
+        "year": "2026", "genre": "Pop", "has_cover_art": True, "error": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def _verification(conn, path="/m/a.flac"):
+    return conn.execute(
+        "SELECT verification_status FROM lib2_track_files WHERE path=?", (path,)
+    ).fetchone()[0]
+
+
+def test_scan_heals_verification_status_from_the_file_tag(
+        scoped_conn, tmp_path, monkeypatch):
+    """issues.md T-09: every file the download pipeline finalized carries a
+    SOULSYNC_VERIFICATION tag, and rescan already reads it — it was simply
+    dropped on the way into the tag cache, so 194 of 268 production files had
+    a NULL verification_status the UI could not show."""
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    file_path = tmp_path / "a.flac"
+    file_path.write_bytes(b"audio")
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _p: None)
+    monkeypatch.setattr(
+        "core.tag_writer.read_file_tags",
+        lambda _p: _tags(verification_status="verified"),
+    )
+
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    assert _verification(conn) == "verified"
+
+
+def test_scan_never_downgrades_a_human_verification(
+        scoped_conn, tmp_path, monkeypatch):
+    """A human approval is a stronger statement than whatever the pipeline
+    stamped into the file. The file pass observes, it does not re-judge."""
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    conn.execute(
+        "UPDATE lib2_track_files SET verification_status='human_verified' "
+        "WHERE path='/m/a.flac'"
+    )
+    conn.commit()
+    file_path = tmp_path / "a.flac"
+    file_path.write_bytes(b"audio")
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _p: None)
+    monkeypatch.setattr(
+        "core.tag_writer.read_file_tags",
+        lambda _p: _tags(verification_status="unverified"),
+    )
+
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    assert _verification(conn) == "human_verified"
+
+
+def test_scan_leaves_verification_alone_when_the_file_carries_no_tag(
+        scoped_conn, tmp_path, monkeypatch):
+    """An untagged file is no evidence — never clear a status the catalogue
+    already knows (e.g. one the AcoustID scanner wrote)."""
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    conn.execute(
+        "UPDATE lib2_track_files SET verification_status='verified' "
+        "WHERE path='/m/a.flac'"
+    )
+    conn.commit()
+    file_path = tmp_path / "a.flac"
+    file_path.write_bytes(b"audio")
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _p: None)
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _p: _tags())
+
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    assert _verification(conn) == "verified"
+
+
+def test_unknown_verification_tag_value_is_ignored(scoped_conn, tmp_path, monkeypatch):
+    """Only the four known states are accepted; a hand-edited tag must not
+    invent a fifth one the UI cannot render."""
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    file_path = tmp_path / "a.flac"
+    file_path.write_bytes(b"audio")
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _p: None)
+    monkeypatch.setattr(
+        "core.tag_writer.read_file_tags",
+        lambda _p: _tags(verification_status="totally-made-up"),
+    )
+
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    assert _verification(conn) is None

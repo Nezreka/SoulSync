@@ -251,6 +251,36 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     );
   });
 
+  it('reports a write that changed nothing instead of claiming the gaps were closed', async () => {
+    // issues.md T-03: the endpoint answers 200/no-error even when it wrote to
+    // no file at all (a genre gap the catalogue cannot fill). Reporting that as
+    // "Tags written" is how the same two gaps kept coming back after a click
+    // that looked successful.
+    server.use(
+      http.post('/api/library/v2/tags/write', () =>
+        HttpResponse.json({ success: true, job_id: 'retag-job-3' }),
+      ),
+      http.get('/api/library/v2/jobs/status', () =>
+        HttpResponse.json({ running: false, result: { written: 0, skipped: 1, failed: 0 } }),
+      ),
+    );
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({ metadata_scan_status: 'scanned', metadata_gaps: ['genre'] })}
+        onOpenTags={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '1 tag gaps' }));
+
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Nothing to write — the library has no value for these tags yet.',
+        'info',
+      ),
+    );
+  });
+
   it('surfaces a failed tag write as the button title without claiming "tags ✓"', async () => {
     server.use(
       http.post('/api/library/v2/tags/write', () =>

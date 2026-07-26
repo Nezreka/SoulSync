@@ -115,6 +115,36 @@ def _persist_missing_observation(
         conn.close()
 
 
+def _persist_verification_observation(conn, file_id: int, file_tags: Dict[str, Any]) -> None:
+    """Adopt the file's own ``SOULSYNC_VERIFICATION`` tag into the catalogue.
+
+    Every file the download pipeline finalizes gets this tag written
+    (``core/imports/pipeline._persist_verification_status``) precisely so the
+    information survives a DB reset and travels with the file. The rescan
+    already reads it — dropping it left ``lib2_track_files.verification_status``
+    NULL for everything imported outside the autolink callback, so the UI had
+    nothing to show (issues.md T-09).
+
+    This is an *observation*, not a new judgement:
+
+    - an unknown tag value is ignored (never invent a fifth state);
+    - a file without the tag never clears a status the catalogue already has;
+    - ``human_verified`` is a person's decision and outranks any machine
+      state stamped into the file, so it is never overwritten.
+    """
+    from core.matching.verification_status import ALL_STATUSES, HUMAN_VERIFIED
+
+    status = str(file_tags.get("verification_status") or "").strip()
+    if status not in ALL_STATUSES:
+        return
+    conn.execute(
+        """UPDATE lib2_track_files
+              SET verification_status=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND COALESCE(verification_status,'') NOT IN (?, ?)""",
+        (status, int(file_id), status, HUMAN_VERIFIED),
+    )
+
+
 def _persist_present_observation(
     database,
     file_id: int,
@@ -144,6 +174,7 @@ def _persist_present_observation(
             (int(file_id),),
         )
         persist_tag_cache(conn, int(file_id), file_tags)
+        _persist_verification_observation(conn, int(file_id), file_tags)
         if quality is not None:
             conn.execute(
                 """UPDATE lib2_track_files SET

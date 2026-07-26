@@ -107,11 +107,16 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                     result['bpm'] = float(bpm_val)
                 except (ValueError, TypeError):
                     pass
-            if isinstance(audio, FLAC):
-                result['has_cover_art'] = bool(audio.pictures)
-            else:
-                # OGG doesn't have a standard picture field we can easily check
-                result['has_cover_art'] = False
+            # One truth about embedded art across FLAC/Ogg: picture blocks OR
+            # the standard Vorbis-comment `metadata_block_picture`. Reporting
+            # False for Ogg (as this did) contradicted
+            # ``core.metadata.art_apply``, which has always read that comment —
+            # so an arted Ogg showed a permanent "missing cover" gap that no
+            # Cover-Art-Filler scan raised and no apply could close (T-07).
+            result['has_cover_art'] = bool(
+                getattr(audio, 'pictures', None)
+                or (audio.tags is not None and 'metadata_block_picture' in audio.tags)
+            )
             result['verification_status'] = _vorbis_first(audio, 'soulsync_verification')
             result['lyrics'] = _vorbis_first(audio, 'lyrics') or _vorbis_first(audio, 'unsyncedlyrics')
 
