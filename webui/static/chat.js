@@ -1288,6 +1288,67 @@
 
     function arcJoin(gid) { sendProtocol('gm.join', { g: gid }).then(_arcAfterSend(gid)); }
 
+    // ── keeping in step ─────────────────────────────────────────────────
+    //
+    // A forward move already pulls a stale client up to date, but it needs a
+    // move to arrive. The case that fixes nothing is mutual silence: if you
+    // missed my last move, you are waiting on me and I am waiting on you, so
+    // neither of us ever sends anything. gm.sync is how we get out — ask the
+    // room where the game is instead of waiting for a message that is never
+    // coming.
+    //
+    // Every carrier is visible noise to vanilla Soulseek clients, so this is
+    // deliberately stingy: only while the chat page is open, only for a live
+    // game we are seated in, only after a long quiet spell, and at most once
+    // per game per cooldown.
+    var ARC_SYNC_QUIET = 5 * 60 * 1000;    // nothing heard for this long
+    var ARC_SYNC_EVERY = 10 * 60 * 1000;   // and ask no more often than this
+    var _arcAsked = {};                    // gid -> when we last asked (ms)
+    var _arcAnswered = {};                 // gid|user|n -> already answered
+
+    function arcSync(gid, accept) {
+        var g = _arcGame(gid);
+        if (!g) return;
+        _arcAsked[gid] = Date.now();
+        var f = { g: gid, n: g.ply };
+        if (accept) f.r = 1;
+        sendProtocol('gm.sync', f).then(_arcAfterSend(gid));
+    }
+
+    // Answer somebody else's request, if we actually know more than they do.
+    function _arcAnswerSyncs(fresh) {
+        if (!_arcReady() || !state.canSend || !state.selfName) return;
+        var st = _gamesState();
+        (fresh || []).forEach(function (e) {
+            if (!e || !e.p || e.p.k !== 'gm.sync') return;
+            if (e.username === state.selfName) return;          // not our own
+            var g = st.games[e.p.g];
+            if (!g || g.status !== 'live') return;
+            if (_arcSeat(g) === '') return;                     // only players answer
+            if (!(g.ply > e.p.n) && !e.p.r) return;             // they are not behind
+            var key = g.id + '|' + e.username + '|' + e.p.n;
+            if (_arcAnswered[key]) return;                      // asked and answered
+            _arcAnswered[key] = 1;
+            sendProtocol('gm.state', { g: g.id, n: g.ply, f: g.fen });
+        });
+    }
+
+    // Ask, when a wait has gone on long enough to be suspicious.
+    function _arcMaybeSync() {
+        if (!_arcReady() || !state.canSend || !state.selfName || !_chanRoom()) return;
+        var st = _gamesState();
+        var now = Date.now();
+        st.order.forEach(function (id) {
+            var g = st.games[id];
+            if (!g || g.status !== 'live' || g.desync) return;
+            if (!_arcSeat(g)) return;                           // only our own games
+            if (_arcMyMove(g)) return;                          // the ball is with us
+            if (now - g.lastAt < ARC_SYNC_QUIET) return;
+            if (now - (_arcAsked[id] || 0) < ARC_SYNC_EVERY) return;
+            arcSync(id, false);
+        });
+    }
+
     // Vote for the room's move. Nobody owns that seat, so this is not a move
     // — the fold commits it once enough distinct people have picked the same
     // one, which every client works out from the same stream.
@@ -1649,7 +1710,11 @@
             '</div>' +
             promo + offer + partial + _arcBallotHtml(game) +
             '<div class="chat-arc-status">' + statusLine + '</div>' +
-            (actions ? '<div class="chat-arc-actions">' + actions + '</div>' : '') +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = actions + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
             '<div class="chat-arc-moves">' + sanRows + '</div>' +
             '<div class="chat-arc-exports">' +
                 '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
@@ -1769,7 +1834,11 @@
             '</div>' +
             partial + _arcBallotHtml(game) +
             '<div class="chat-arc-status">' + statusLine + '</div>' +
-            (actions ? '<div class="chat-arc-actions">' + actions + '</div>' : '') +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = actions + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
             _arcRevealHtml(game) +
         '</div>';
     }
@@ -1808,6 +1877,45 @@
         if (_arcCanVote(game)) arcVote(game.id, uci);
         else arcMove(game.id, uci);
         return true;
+    }
+
+    // "Have they seen it?" — free, from carriers we already send. Any move,
+    // sync or state a player emits proves what they knew at the time, so no
+    // acknowledgement round trip is needed to show this.
+    function _arcAckHtml(game) {
+        if (!game || game.status !== 'live' || game.desync) return '';
+        var mySeat = _arcSeat(game);
+        if (!mySeat || game.roomSeat) return '';
+        var opp = mySeat === 'w' ? game.black : game.white;
+        if (!opp) return '';
+        if (_arcMyMove(game)) return '';            // it is our turn; nothing to confirm
+        var mine = game.ply - 1;                    // the ply our last move occupied
+        if (mine < 0) return '';
+        var seen = (game.ack[opp] || -1) >= mine;
+        if (seen) {
+            return '<div class="chat-arc-ack chat-arc-ack--seen">✓ ' + esc(opp) +
+                ' has seen your move</div>';
+        }
+        var mins = Math.floor((Date.now() - game.lastAt) / 60000);
+        return '<div class="chat-arc-ack">◌ not acknowledged yet' +
+            (mins >= 5 ? ' · ' + (mins >= 120 ? Math.floor(mins / 60) + 'h' : mins + 'm') +
+                         ' — asking the room where the game is' : '') +
+        '</div>';
+    }
+
+    // Actions that exist on every board regardless of variant.
+    function _arcSyncActions(game) {
+        if (!state.canSend || !_arcSeat(game)) return '';
+        if (game.desync) {
+            return '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-accept="' + attr(game.id) + '" ' +
+                'title="Take your opponent\'s position and carry on — the only ' +
+                'thing that unfreezes a disagreement">Accept their position</button>';
+        }
+        if (game.status !== 'live') return '';
+        return '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+            'data-chat-arc-sync="' + attr(game.id) + '" ' +
+            'title="Ask the room where this game actually is">⟳ Sync</button>';
     }
 
     // The room's ballot for the current ply: what has been picked so far and
@@ -3592,6 +3700,20 @@
                 if (state.arcade) { state.arcade.reveal = !state.arcade.reveal; renderArcade(); }
                 return;
             }
+            t = e.target.closest('[data-chat-arc-sync]');
+            if (t) { arcSync(t.getAttribute('data-chat-arc-sync'), false); return; }
+            t = e.target.closest('[data-chat-arc-accept]');
+            if (t) {
+                var agid = t.getAttribute('data-chat-arc-accept');
+                showConfirmDialog({
+                    title: 'Accept their position?',
+                    message: 'This board and your opponent\'s disagreed, so the game was ' +
+                             'frozen rather than guessing which was right. Accepting takes ' +
+                             'their position and continues from there.',
+                    confirmText: 'Accept and continue',
+                }).then(function (ok) { if (ok) arcSync(agid, true); });
+                return;
+            }
             t = e.target.closest('[data-chat-arc-flip]');
             if (t) {
                 if (state.arcade) { state.arcade.flip = !state.arcade.flip; renderArcade(); }
@@ -4104,6 +4226,7 @@
             // presence: a protocol event proves SoulSync — refresh buckets
             renderUsersList();
             renderBusUI();
+            _arcAnswerSyncs(fresh);
             try {
                 document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
                     { detail: { events: fresh } }));
@@ -4182,6 +4305,7 @@
 
     // Every surface reduced from the protocol bus, painted together.
     function renderBusUI() {
+        _arcMaybeSync();         // ask, if a game has gone quiet on us
         renderArcade();          // no-op unless the Arcade view is open
         renderJukebox();
         renderPinbar();

@@ -19,6 +19,11 @@
 //   gm.res   {g}             resign
 //   gm.draw  {g}             offer a draw; the opponent sending it agrees
 //   gm.claim {g}             take over a seat abandoned for ABANDON_MS
+//   gm.sync  {g, n, r}       "I am at ply n -- is anyone further along?"
+//                            r:1 also means "I accept whatever you say",
+//                            which is the ONLY thing that un-freezes a game
+//                            whose checkpoint disagreed
+//   gm.state {g, n, f}       a seated player answering with the position
 //   gm.vote  {g, n, m}       ROOM-VS-PLAYER only: vote for the room's move at
 //                            ply n. gm.new {r: 1} makes the seat opposite the
 //                            creator belong to the whole room instead of one
@@ -39,6 +44,20 @@
 // position we computed, somebody is wrong, and we freeze the game rather
 // than silently pick a winner. Adopting theirs would let a hostile client
 // rewrite the board; ignoring the mismatch would fork the game invisibly.
+//
+// ── Why gm.sync exists ──────────────────────────────────────────────────
+//
+// A forward gm.move resyncs a client that fell behind, but only if a move
+// actually arrives. The case it cannot fix is mutual silence: if you missed
+// my last move, you think it is my turn and I think it is yours, so NEITHER
+// of us sends anything and nothing ever triggers the catch-up. Both boards
+// look completely normal. gm.sync is the way out -- ask the room where the
+// game is, rather than waiting for a message that is never coming.
+//
+// It is also the only recovery from a desync freeze, and deliberately so:
+// an automatic answer never resolves a disagreement (that would let whoever
+// re-broadcasts last simply win), so a frozen game moves only when a human
+// sends gm.sync with r:1, which means "I accept your position".
 //
 // ── Time ────────────────────────────────────────────────────────────────
 //
@@ -297,6 +316,8 @@
                     invited: invited,
                     isPrivate: !!invited,
                     roomSeat: roomSeat,
+                    ack: {},             // username -> highest ply they have shown they know
+                    syncReq: null,       // latest gm.sync seen for this game
                     voteK: voteK,
                     votes: {},           // uci -> distinct voters, current ply
                     voteBy: {},          // username -> uci, current ply
@@ -341,7 +362,8 @@
                     white: '', black: '',
                     createdBy: '', createdAt: at, lastAt: at,
                     invited: '', isPrivate: false,
-                    roomSeat: '', voteK: VOTE_DEFAULT, votes: {}, voteBy: {},
+                    roomSeat: '', ack: {}, syncReq: null,
+                    voteK: VOTE_DEFAULT, votes: {}, voteBy: {},
                     fen: ad2.fen(adopted),
                     // `moves` below is empty and only collects what arrives
                     // AFTER adoption, so replaying it has to start here --
@@ -366,9 +388,12 @@
                 return;
             }
 
-            if (!game || game.desync) return;
+            if (!game) return;
             var adapter2 = VARIANTS[game.variant];
             if (!adapter2) return;
+            // Everything else is inert on a frozen game; sync/state are how it
+            // gets unfrozen, so they run.
+            if (game.desync && k !== 'gm.sync' && k !== 'gm.state') return;
 
             if (k === 'gm.join') {
                 if (game.roomSeat) return;        // that seat belongs to everyone
@@ -452,6 +477,7 @@
                 }
 
                 states[gid] = applied.state;
+                game.ack[user] = Math.max(game.ack[user] || 0, n);
                 game.moves.push(uci);
                 game.ply++;
                 game.fen = ourFen;
@@ -463,6 +489,55 @@
                 if (applied.over) {
                     _finish(game, applied.result, applied.reason, applied.winnerColor);
                 }
+                return;
+            }
+
+            if (k === 'gm.sync') {
+                // A request changes nothing about the game. It records who
+                // asked and how far along they said they were, which is also
+                // free proof that they have seen everything up to that ply.
+                var sn = p.n;
+                if (typeof sn !== 'number' || !isFinite(sn) || sn < 0 || sn > MAX_MOVES) return;
+                game.ack[user] = Math.max(game.ack[user] || 0, Math.floor(sn));
+                game.syncReq = { by: user, n: Math.floor(sn), at: at, reset: !!p.r };
+                return;
+            }
+
+            if (k === 'gm.state') {
+                // Only a seated player may speak for the game; otherwise
+                // anyone in the room could restate the board as they liked.
+                if (!_seatOf(game, user)) return;
+                var tn = p.n;
+                if (typeof tn !== 'number' || !isFinite(tn) || tn < 0 || tn > MAX_MOVES) return;
+                tn = Math.floor(tn);
+                game.ack[user] = Math.max(game.ack[user] || 0, tn);
+
+                var newSt = adapter2.adopt(String(p.f || ''));
+                if (!newSt) return;
+
+                if (game.desync) {
+                    // Never resolve a disagreement on our own: only a human
+                    // saying "I accept yours" (gm.sync r:1) can break the tie,
+                    // and not from the same client that is answering.
+                    var pending = game.syncReq && game.syncReq.reset &&
+                                  game.syncReq.by !== user;
+                    if (!pending) return;
+                } else if (tn <= game.ply) {
+                    return;                       // nothing we do not already have
+                }
+
+                states[gid] = newSt;
+                game.fen = adapter2.fen(newSt);
+                game.turn = adapter2.turn(newSt);
+                game.startFen = game.fen;
+                game.moves = [];
+                game.ply = tn;
+                game.partial = true;
+                game.desync = false;
+                game.syncReq = null;
+                game.drawOffer = '';
+                game.votes = {}; game.voteBy = {};
+                game.lastAt = at;
                 return;
             }
 

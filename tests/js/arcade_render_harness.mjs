@@ -411,6 +411,67 @@ const NASTY = '<img src=x onerror=alert(1)>';
           CP._arcLobbyHtml());
 }
 
+// ── sync + acknowledgement ──────────────────────────────────────────────
+{
+    let pos = E.newGame();
+    const evs = [ev('boulder', { k: 'gm.new', g: 'ssss', v: 'chess' }),
+                 ev('kazimir', { k: 'gm.join', g: 'ssss' }, T0 + 1000)];
+    const push = (uci, i) => { const who = pos.turn === 'w' ? 'boulder' : 'kazimir';
+        pos = E.makeMove(pos, E.uciToMove(pos, uci));
+        evs.push(ev(who, { k: 'gm.move', g: 'ssss', n: i, m: uci, f: E.toFEN(pos) },
+                    T0 + 2000 + i)); };
+    push('e2e4', 0);
+
+    // boulder moved and kazimir has not answered: not acknowledged.
+    setRoom(evs, 'boulder');
+    CP._testSetState({ arcade: { game: 'ssss', sel: -1, promo: null, flip: false } });
+    let board = CP._arcBoardHtml(game(evs, 'ssss'));
+    check('ack: waiting is shown honestly', board.includes('not acknowledged yet'), board);
+    check('ack: a Sync button is offered', board.includes('data-chat-arc-sync'), board);
+
+    // Their sync carrier doubles as a read receipt: it says how far along
+    // they are, which proves they have our move — without them moving, and
+    // without any dedicated acknowledgement message.
+    const acked = evs.concat([ev('kazimir', { k: 'gm.sync', g: 'ssss', n: 1 }, T0 + 5000)]);
+    setRoom(acked, 'boulder');
+    CP._testSetState({ arcade: { game: 'ssss', sel: -1, promo: null, flip: false } });
+    board = CP._arcBoardHtml(game(acked, 'ssss'));
+    check('ack: their sync proves receipt', board.includes('has seen your move'), board);
+
+    // Once they reply with a move it is our turn again, so there is nothing
+    // left to confirm and the line goes away.
+    push('e7e5', 1);
+    setRoom(evs, 'boulder');
+    CP._testSetState({ arcade: { game: 'ssss', sel: -1, promo: null, flip: false } });
+    board = CP._arcBoardHtml(game(evs, 'ssss'));
+    check('ack: nothing to confirm on our own turn',
+          !board.includes('acknowledged') && !board.includes('has seen'), board);
+
+    // A spectator is not shown either — it is not their game.
+    setRoom(evs, 'sella');
+    CP._testSetState({ arcade: { game: 'ssss', sel: -1, promo: null, flip: false } });
+    board = CP._arcBoardHtml(game(evs, 'ssss'));
+    check('ack: nothing for a spectator', !board.includes('acknowledged'), board);
+    check('sync: no button for a spectator', !board.includes('data-chat-arc-sync'), board);
+}
+
+// ── a frozen game offers the only way out ───────────────────────────────
+{
+    const frozen = [ev('boulder', { k: 'gm.new', g: 'tttt', v: 'chess' }),
+        ev('kazimir', { k: 'gm.join', g: 'tttt' }, T0 + 1000),
+        ev('boulder', { k: 'gm.move', g: 'tttt', n: 0, m: 'e2e4',
+                        f: '4k3/8/8/8/8/8/8/4K2R b - - 0 1' }, T0 + 2000)];
+    setRoom(frozen, 'kazimir');
+    CP._testSetState({ arcade: { game: 'tttt', sel: -1, promo: null, flip: true } });
+    const board = CP._arcBoardHtml(game(frozen, 'tttt'));
+    check('frozen: explains itself', board.includes('disagreed'), board);
+    check('frozen: offers to accept their position',
+          board.includes('data-chat-arc-accept'), board);
+    check('frozen: does not offer a plain sync instead',
+          !board.includes('data-chat-arc-sync'), board);
+    check('frozen: no acknowledgement line', !board.includes('acknowledged'), board);
+}
+
 // ── the Arcade hides itself if its libraries are absent ─────────────────
 {
     // chat.js must not throw when chess-engine.js / chat-games.js failed to

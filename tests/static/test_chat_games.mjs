@@ -319,6 +319,125 @@ describe('catching up after missing moves', () => {
     });
 });
 
+describe('gm.sync — breaking the mutual-wait deadlock', () => {
+    // The case a forward gm.move cannot fix: if you missed my last move, you
+    // think it is my turn and I think it is yours, so NEITHER of us sends
+    // anything and the catch-up never triggers. Both boards look normal.
+    const players = ['boulder', 'kazimir'];
+    const full = [opened(), joined(),
+        ...moveEvents('g001', players, ['e2e4', 'e7e5', 'g1f3'])];
+    const behind = full.slice(0, 4);             // missed the third move
+    const ahead = one(full);
+
+    test('the deadlock is real: each waits on the other', () => {
+        const b = one(behind);
+        assert.equal(G.toMove(ahead), 'kazimir');
+        assert.equal(G.toMove(b), 'boulder');
+        assert.equal(b.desync, false, 'and neither is flagged as wrong');
+    });
+    test('a state answer pulls the stale client forward', () => {
+        const g = one([...behind,
+            ev('kazimir', { k: 'gm.sync', g: 'g001', n: 2 }, T0 + 900000),
+            ev('boulder', { k: 'gm.state', g: 'g001', n: ahead.ply, f: ahead.fen },
+               T0 + 900001)]);
+        assert.equal(g.fen, ahead.fen);
+        assert.equal(g.ply, ahead.ply);
+        assert.equal(G.toMove(g), 'kazimir', 'and now it knows it is its own move');
+    });
+    test('only a seated player may state the position', () => {
+        const g = one([...behind,
+            ev('sella', { k: 'gm.state', g: 'g001', n: ahead.ply, f: ahead.fen }, T0 + 9e5)]);
+        assert.equal(g.ply, 2, 'a spectator cannot restate the board');
+    });
+    test('a forged position is refused even from a player', () => {
+        const g = one([...behind,
+            ev('boulder', { k: 'gm.state', g: 'g001', n: 5,
+                            f: '4k3/8/8/8/8/8/4P3/4K3 w - d3 0 1' }, T0 + 9e5)]);
+        assert.equal(g.ply, 2);
+    });
+    test('a state we are already past is ignored', () => {
+        const g = one([...full,
+            ev('boulder', { k: 'gm.state', g: 'g001', n: 1, f: E.START_FEN }, T0 + 9e5)]);
+        assert.equal(g.ply, ahead.ply, 'no rewind');
+        assert.equal(g.fen, ahead.fen);
+    });
+    test('a sync request on its own changes nothing', () => {
+        const g = one([...full, ev('kazimir', { k: 'gm.sync', g: 'g001', n: 0 }, T0 + 9e5)]);
+        assert.equal(g.fen, ahead.fen);
+        assert.equal(g.ply, ahead.ply);
+        assert.equal(g.syncReq.by, 'kazimir', 'but it is recorded so a client can answer');
+    });
+    test('malformed requests and answers are dropped', () => {
+        for (const bad of [undefined, -1, 1e9, 'two', null]) {
+            assert.equal(one([...full, ev('kazimir',
+                { k: 'gm.sync', g: 'g001', n: bad }, T0 + 9e5)]).syncReq, null, String(bad));
+        }
+    });
+});
+
+describe('un-freezing a desynced game', () => {
+    // A checkpoint disagreement freezes the game on purpose, and nothing
+    // automatic may resolve it -- otherwise whoever re-broadcast last would
+    // simply win. Only a human saying "I accept yours" breaks the tie.
+    const frozen = [opened(), joined(),
+        ev('boulder', { k: 'gm.move', g: 'g001', n: 0, m: 'e2e4',
+                        f: '4k3/8/8/8/8/8/8/4K2R b - - 0 1' }, T0 + 5000)];
+    let good = E.newGame();
+    good = E.makeMove(good, E.uciToMove(good, 'e2e4'));
+
+    test('it really is frozen', () => {
+        assert.equal(one(frozen).desync, true);
+    });
+    test('an ordinary state answer does NOT un-freeze it', () => {
+        const g = one([...frozen,
+            ev('boulder', { k: 'gm.state', g: 'g001', n: 1, f: E.toFEN(good) }, T0 + 6000)]);
+        assert.equal(g.desync, true, 'automatic sync never settles a disagreement');
+    });
+    test('accepting their position does un-freeze it', () => {
+        const g = one([...frozen,
+            ev('kazimir', { k: 'gm.sync', g: 'g001', n: 0, r: 1 }, T0 + 6000),
+            ev('boulder', { k: 'gm.state', g: 'g001', n: 1, f: E.toFEN(good) }, T0 + 6001)]);
+        assert.equal(g.desync, false);
+        assert.equal(g.fen, E.toFEN(good));
+        assert.equal(g.ply, 1);
+    });
+    test('you cannot answer your own acceptance', () => {
+        const g = one([...frozen,
+            ev('boulder', { k: 'gm.sync', g: 'g001', n: 0, r: 1 }, T0 + 6000),
+            ev('boulder', { k: 'gm.state', g: 'g001', n: 1, f: E.toFEN(good) }, T0 + 6001)]);
+        assert.equal(g.desync, true);
+    });
+    test('moves stay inert while frozen', () => {
+        const g = one([...frozen,
+            ...moveEvents('g001', ['boulder', 'kazimir'], ['e2e4', 'e7e5'])]);
+        assert.equal(g.desync, true);
+        assert.equal(g.ply, 0);
+    });
+});
+
+describe('acknowledgement — free, from carriers we already send', () => {
+    // "Has my opponent seen my move" needs no extra round trip: any carrier
+    // they send proves what they knew at the time.
+    test('a move proves receipt of everything before it', () => {
+        const g = one([opened(), joined(),
+            ...moveEvents('g001', ['boulder', 'kazimir'], ['e2e4', 'e7e5'])]);
+        assert.equal(g.ack.kazimir, 1, 'kazimir answered at ply 1');
+        assert.equal(g.ack.boulder, 0);
+    });
+    test('a sync request proves it too', () => {
+        const g = one([opened(), joined(),
+            ...moveEvents('g001', ['boulder', 'kazimir'], ['e2e4']),
+            ev('kazimir', { k: 'gm.sync', g: 'g001', n: 1 }, T0 + 9e5)]);
+        assert.equal(g.ack.kazimir, 1, 'they told us how far along they are');
+    });
+    test('acknowledgement never goes backwards', () => {
+        const g = one([opened(), joined(),
+            ...moveEvents('g001', ['boulder', 'kazimir'], ['e2e4', 'e7e5']),
+            ev('kazimir', { k: 'gm.sync', g: 'g001', n: 0 }, T0 + 9e5)]);
+        assert.equal(g.ack.kazimir, 1);
+    });
+});
+
 describe('endings', () => {
     test('checkmate ends the game and names the winner', () => {
         // Fool's mate: black delivers it on ply 3.

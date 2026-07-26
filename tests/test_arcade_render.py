@@ -102,6 +102,33 @@ class TestWiring:
         # The opponent is playing against the room and gets no ballot.
         assert "if (_seatOf(game, user)) return;               // the opponent does not vote" in games_js
 
+    def test_sync_is_stingy(self):
+        # Every carrier is visible noise to vanilla Soulseek clients, so the
+        # heartbeat only fires after a long quiet spell and no more than once
+        # per game per cooldown.
+        assert "ARC_SYNC_QUIET" in _CHAT_JS and "ARC_SYNC_EVERY" in _CHAT_JS
+        assert "if (_arcMyMove(g)) return;                          // the ball is with us" in _CHAT_JS
+        assert "if (!_arcSeat(g)) return;                           // only our own games" in _CHAT_JS
+
+    def test_only_players_answer_a_sync(self):
+        assert "if (_arcSeat(g) === '') return;                     // only players answer" in _CHAT_JS
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "if (!_seatOf(game, user)) return;" in games_js
+
+    def test_automatic_sync_never_settles_a_disagreement(self):
+        # Otherwise whoever re-broadcast last would simply win. A frozen game
+        # moves only when a human sends gm.sync with r:1.
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "var pending = game.syncReq && game.syncReq.reset &&" in games_js
+        assert "game.syncReq.by !== user;" in games_js
+        assert "data-chat-arc-accept" in _CHAT_JS
+
+    def test_acknowledgement_costs_nothing(self):
+        # Derived from carriers we already send -- no ack round trip.
+        assert "_arcAckHtml" in _CHAT_JS
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "game.ack[user] = Math.max(game.ack[user] || 0" in games_js
+
     def test_connect4_moves_are_throttled(self):
         # Every move is a real room message that vanilla Soulseek clients see
         # as noise; chess is slow enough not to care, taps are not.
