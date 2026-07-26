@@ -1238,7 +1238,7 @@
 
     function openArcade(gid) {
         if (!_arcReady()) return;
-        state.arcade = { game: gid || null, sel: -1, promo: null, flip: false };
+        state.arcade = { game: gid || null, sel: -1, promo: null, flip: false, slots: false };
         var g = gid ? _arcGame(gid) : null;
         // Black sees the board from black's side, like every chess site.
         if (g && _arcSeat(g) === 'b') state.arcade.flip = true;
@@ -1443,6 +1443,9 @@
         if (!_arcOn()) return;
         var host = q('[data-chat-messages]');
         if (!host) return;
+        // The slot machine is solo: it has no carriers, no opponent and no
+        // entry in the fold, so it is a destination rather than a game id.
+        if (state.arcade.slots) { host.innerHTML = _arcSlotHtml(); return; }
         var g = state.arcade.game ? _arcGame(state.arcade.game) : null;
         host.innerHTML = g ? _arcBoardHtml(g) : _arcLobbyHtml();
     }
@@ -1546,6 +1549,8 @@
                         '<button class="chat-arc-btn" type="button" ' +
                             'data-chat-arc-new="w" data-chat-arc-variant="battleship">' +
                             '🚢 Battleship</button>' +
+                        '<button class="chat-arc-btn" type="button" data-chat-slot-open>' +
+                            '🎰 Slots</button>' +
                         '<button class="chat-arc-btn" type="button" ' +
                             'data-chat-arc-new="w" data-chat-arc-room="1" ' +
                             'title="You against everyone else — the room votes on its ' +
@@ -1802,6 +1807,167 @@
                 'room. Every SoulSync client folds them into the same position; a ' +
                 'plain Soulseek client just sees them as text it ignores.</div>' +
             '<div class="chat-arc-raw">' + rows + '</div>' +
+        '</div>';
+    }
+
+    // ── The slot machine ────────────────────────────────────────────────
+    //
+    // The one Arcade game with no opponent, which is exactly why it can use
+    // the play-money bank: there is nobody to defraud but yourself. It is NOT
+    // on the protocol bus — a solo pull is nobody else's business and would
+    // only be noise in the room.
+    //
+    // The reel strip is weighted by repetition rather than by a probability
+    // table: the symbol you want most simply appears least. Easier to reason
+    // about, and the odds are visible in the payout list rather than buried.
+    var SLOT_REEL = [
+        '🍒', '🍒', '🍒', '🍒', '🍒', '🍒',
+        '🍋', '🍋', '🍋', '🍋', '🍋',
+        '🔔', '🔔', '🔔', '🔔',
+        '💿', '💿', '💿',
+        '🎧', '🎧',
+        '💎',
+    ];
+    var SLOT_PAYS = {
+        '💎': { three: 200, two: 12 },
+        '🎧': { three: 60, two: 6 },
+        '💿': { three: 25, two: 3 },
+        '🔔': { three: 12, two: 2 },
+        '🍋': { three: 6, two: 1 },
+        '🍒': { three: 4, two: 1 },
+    };
+    var SLOT_STAKES = [5, 25, 100, 500];
+
+    function _slotPayout(reels, stake) {
+        var a = reels[0], b = reels[1], c = reels[2];
+        if (a === b && b === c) return stake * (SLOT_PAYS[a].three || 0);
+        // Two of a kind only pays on the first two reels — the usual rule, and
+        // it keeps the maths obvious when you are staring at the result.
+        if (a === b) return stake * (SLOT_PAYS[a].two || 0);
+        return 0;
+    }
+
+    function _slotSpin() {
+        var out = [];
+        for (var i = 0; i < 3; i++) {
+            out.push(SLOT_REEL[Math.floor(Math.random() * SLOT_REEL.length)]);
+        }
+        return out;
+    }
+
+    function _slotState() {
+        if (!state.arcade.slot) {
+            state.arcade.slot = { reels: ['🍒', '🍋', '🔔'], stake: 25, spinning: false,
+                                  last: null, bank: null };
+        }
+        return state.arcade.slot;
+    }
+
+    function _slotLoadBank(then) {
+        getJSON('/api/chat/arcade/bank').then(function (r) {
+            if (r.ok && r.body && typeof r.body.balance === 'number') {
+                _slotState().bank = r.body;
+            }
+            if (then) then();
+            else renderArcade();
+        });
+    }
+
+    function _slotPull() {
+        var sl = _slotState();
+        if (sl.spinning) return;
+        if (!sl.bank || sl.bank.balance < sl.stake) {
+            if (typeof showToast === 'function') showToast('Not enough in the bank', 'error');
+            return;
+        }
+        sl.spinning = true;
+        sl.last = null;
+        renderArcade();
+
+        // Debit first, then settle the win. Two calls rather than one net
+        // adjustment so a spin that is interrupted halfway costs you the
+        // stake rather than silently paying out.
+        postJSON('/api/chat/arcade/bank', { delta: -sl.stake }).then(function (r) {
+            if (!r.ok) {
+                sl.spinning = false;
+                if (typeof showToast === 'function') {
+                    showToast((r.body && r.body.error) || 'The bank said no', 'error');
+                }
+                renderArcade();
+                return;
+            }
+            sl.bank = r.body;
+            var reels = _slotSpin();
+            var win = _slotPayout(reels, sl.stake);
+            // A beat of spinning so it reads as a pull rather than a number
+            // changing. Purely cosmetic; the result is already decided.
+            var ticks = 0;
+            var timer = setInterval(function () {
+                _slotState().reels = _slotSpin();
+                renderArcade();
+                if (++ticks < 8) return;
+                clearInterval(timer);
+                var s2 = _slotState();
+                s2.reels = reels;
+                s2.spinning = false;
+                s2.last = { win: win, stake: sl.stake };
+                if (win > 0) {
+                    postJSON('/api/chat/arcade/bank', { delta: win }).then(function (r2) {
+                        if (r2.ok) s2.bank = r2.body;
+                        renderArcade();
+                    });
+                } else {
+                    renderArcade();
+                }
+            }, 90);
+        });
+    }
+
+    function _arcSlotHtml() {
+        var sl = _slotState();
+        if (!sl.bank) _slotLoadBank();
+        var bal = sl.bank ? sl.bank.balance : null;
+        var last = sl.last;
+        return '<div class="chat-slot-wrap">' +
+            '<div class="chat-slot-cab' + (sl.spinning ? ' chat-slot-cab--spin' : '') + '">' +
+                '<div class="chat-slot-reels">' +
+                    sl.reels.map(function (r) {
+                        return '<div class="chat-slot-reel">' + r + '</div>';
+                    }).join('') +
+                '</div>' +
+                '<div class="chat-slot-verdict' +
+                    (last && last.win > 0 ? ' chat-slot-verdict--win' : '') + '">' +
+                    (sl.spinning ? '…'
+                        : last ? (last.win > 0 ? '+' + last.win.toLocaleString() : 'no luck')
+                               : 'pull to play') +
+                '</div>' +
+            '</div>' +
+            '<div class="chat-slot-bank">' +
+                '<span class="chat-slot-balance">' +
+                    (bal === null ? '…' : bal.toLocaleString()) + '</span>' +
+                '<span class="chat-slot-banklabel">in the bank · tops back up to ' +
+                    (sl.bank ? sl.bank.allowance.toLocaleString() : '10,000') +
+                    ' at midnight</span>' +
+            '</div>' +
+            '<div class="chat-slot-stakes">' +
+                SLOT_STAKES.map(function (v) {
+                    return '<button class="chat-arc-btn' + (v === sl.stake ? ' chat-arc-btn--go' : '') +
+                        '" type="button" data-chat-slot-stake="' + v + '">' + v + '</button>';
+                }).join('') +
+                '<button class="chat-arc-btn chat-arc-btn--go chat-slot-pull" type="button" ' +
+                    'data-chat-slot-pull' + (sl.spinning ? ' disabled' : '') + '>Pull</button>' +
+            '</div>' +
+            '<div class="chat-slot-pays">' +
+                Object.keys(SLOT_PAYS).map(function (sym) {
+                    var p = SLOT_PAYS[sym];
+                    return '<div class="chat-slot-payrow"><span>' + sym + sym + sym + '</span>' +
+                        '<b>' + p.three + '×</b><span class="chat-slot-paytwo">' + sym + sym +
+                        '</span><b>' + p.two + '×</b></div>';
+                }).join('') +
+            '</div>' +
+            '<div class="chat-arc-note">Play money, kept on this machine only. It is ' +
+                'not worth anything and cannot be staked against another player — ' +
+                'nobody else can see it, so nobody else could trust it.</div>' +
         '</div>';
     }
 
@@ -2414,10 +2580,11 @@
         // search, pins, jukebox, the SoulSync-only filter) all act on the
         // message list, and there is no message list here.
         if (_arcOn()) {
-            head.innerHTML = (state.arcade.game
+            head.innerHTML = ((state.arcade.game || state.arcade.slots)
                 ? '<button class="chat-thread-back" type="button" data-chat-arc-home ' +
                       'title="Back to the Arcade">&larr;</button>' +
-                  '<span class="chat-head-title">🎲 game</span>'
+                  '<span class="chat-head-title">' +
+                      (state.arcade.slots ? '🎰 slots' : '🎲 game') + '</span>'
                 : '<span class="chat-head-title">🎲 arcade</span>') +
                 '<span class="chat-head-sub">no server — every board here is folded ' +
                     'out of this room&rsquo;s messages</span>' +
@@ -4064,6 +4231,20 @@
                 if (state.arcade) { state.arcade.reveal = !state.arcade.reveal; renderArcade(); }
                 return;
             }
+            t = e.target.closest('[data-chat-slot-open]');
+            if (t) {
+                if (state.arcade) { state.arcade.slots = true; state.arcade.game = null; }
+                renderArcade(); renderHead(); renderChannels();
+                return;
+            }
+            t = e.target.closest('[data-chat-slot-stake]');
+            if (t) {
+                _slotState().stake = parseInt(t.getAttribute('data-chat-slot-stake'), 10) || 5;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-slot-pull]');
+            if (t) { _slotPull(); return; }
             t = e.target.closest('[data-chat-bs-place]');
             if (t) { _bsPlaceAt(parseInt(t.getAttribute('data-chat-bs-place'), 10)); return; }
             t = e.target.closest('[data-chat-bs-fire]');
@@ -5484,7 +5665,8 @@
                         // Soulseek, so the same escaping contract applies here
                         _arcLobbyHtml: _arcLobbyHtml, _arcBoardHtml: _arcBoardHtml,
                         _arcSidebarHtml: _arcSidebarHtml, _arcPgn: _arcPgn,
-                        _arcBsBoardHtml: _arcBsBoardHtml,
+                        _arcBsBoardHtml: _arcBsBoardHtml, _arcSlotHtml: _arcSlotHtml,
+                        _slotPayout: function (r, s2) { return _slotPayout(r, s2); },
                         renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {

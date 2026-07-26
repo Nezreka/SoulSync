@@ -449,6 +449,21 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_game_carriers_room "
                            "ON chat_game_carriers (room, timestamp)")
+            # Arcade play-money bank. Local and per profile, refilled to the
+            # daily allowance the first time it is read on a new local day.
+            # DELIBERATELY not authoritative for anything between players: a
+            # balance nobody else can verify cannot back a bet. It exists for
+            # solo games (the slot machine) where there is nobody to defraud.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS arcade_bank (
+                    profile_id INTEGER PRIMARY KEY,
+                    balance INTEGER NOT NULL DEFAULT 0,
+                    refilled_on TEXT NOT NULL DEFAULT '',
+                    lifetime_won INTEGER NOT NULL DEFAULT 0,
+                    lifetime_lost INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # Local, private notes on Soulseek users ("great jazz rips") —
             # shown on the chat user card. Never leaves this install.
             cursor.execute("""
@@ -10792,6 +10807,7 @@ class MusicDatabase:
 
     _CHAT_ARCHIVE_KEEP = 5000     # per room — plenty of scrollback, bounded disk
     _CHAT_GAME_KEEP = 2000        # per room — a 60-move game is ~62 carriers
+    ARCADE_DAILY = 10000          # play money, refilled every local midnight
 
     def get_chat_user_note(self, username: str) -> str:
         """The local note for a Soulseek username ('' when none)."""
@@ -10960,6 +10976,79 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error archiving chat game carriers: %s", e)
             return 0
+
+    def get_arcade_bank(self, profile_id: int) -> Dict[str, Any]:
+        """The profile's play-money balance, refilling it if the local day has
+        turned over. Reading is what triggers a refill — there is no scheduler
+        involved and none is wanted: a bank nobody has looked at does not need
+        to be topped up."""
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT balance, refilled_on, lifetime_won, lifetime_lost "
+                    "FROM arcade_bank WHERE profile_id = ?", (int(profile_id),)).fetchone()
+                if row is None:
+                    conn.execute(
+                        "INSERT INTO arcade_bank (profile_id, balance, refilled_on) "
+                        "VALUES (?, ?, ?)", (int(profile_id), self.ARCADE_DAILY, today))
+                    conn.commit()
+                    return {"balance": self.ARCADE_DAILY, "allowance": self.ARCADE_DAILY,
+                            "refilled_on": today, "lifetime_won": 0, "lifetime_lost": 0}
+                row = dict(row)
+                if row["refilled_on"] != today:
+                    # A new day tops you back up to the allowance. It does not
+                    # ADD to a balance you never spent — otherwise leaving it
+                    # alone for a month would make you rich for doing nothing.
+                    conn.execute(
+                        "UPDATE arcade_bank SET balance = ?, refilled_on = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE profile_id = ?",
+                        (self.ARCADE_DAILY, today, int(profile_id)))
+                    conn.commit()
+                    row["balance"] = self.ARCADE_DAILY
+                    row["refilled_on"] = today
+                return {"balance": int(row["balance"]), "allowance": self.ARCADE_DAILY,
+                        "refilled_on": row["refilled_on"],
+                        "lifetime_won": int(row["lifetime_won"] or 0),
+                        "lifetime_lost": int(row["lifetime_lost"] or 0)}
+        except Exception as e:
+            logger.error("Error reading arcade bank: %s", e)
+            return {"balance": 0, "allowance": self.ARCADE_DAILY, "refilled_on": "",
+                    "lifetime_won": 0, "lifetime_lost": 0, "error": True}
+
+    def adjust_arcade_bank(self, profile_id: int, delta: int) -> Dict[str, Any]:
+        """Move the balance by ``delta``. Refuses to go negative — you cannot
+        stake what you do not have, which is the only rule this bank enforces
+        and the only one it can."""
+        cur = self.get_arcade_bank(profile_id)
+        if cur.get("error"):
+            return cur
+        try:
+            delta = int(delta)
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError is the infinity case — int(float('inf')) raises it
+            # rather than ValueError, so leaving it out let junk through.
+            return cur
+        if delta < 0 and cur["balance"] + delta < 0:
+            return dict(cur, refused=True)
+        new_balance = cur["balance"] + delta
+        won = cur["lifetime_won"] + (delta if delta > 0 else 0)
+        lost = cur["lifetime_lost"] + (-delta if delta < 0 else 0)
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE arcade_bank SET balance = ?, lifetime_won = ?, "
+                    "lifetime_lost = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE profile_id = ?",
+                    (new_balance, won, lost, int(profile_id)))
+                conn.commit()
+        except Exception as e:
+            logger.error("Error updating arcade bank: %s", e)
+            return cur
+        return {"balance": new_balance, "allowance": self.ARCADE_DAILY,
+                "refilled_on": cur["refilled_on"], "lifetime_won": won,
+                "lifetime_lost": lost}
 
     def get_chat_game_carriers(self, room: str, limit: int = 200) -> List[Dict[str, Any]]:
         """Archived game carriers, OLDEST-first — the order the fold expects."""

@@ -392,6 +392,41 @@ def _oembed_fetch(video_id):
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
+    # ── Arcade bank (play money) ─────────────────────────────────────────
+    # Per profile, local, refilled every local midnight. It is NOT authoritative
+    # for anything between players and is not meant to be: a balance only your
+    # own machine can see cannot back a bet against somebody else. It exists so
+    # the solo games (the slot machine) have stakes, where there is nobody to
+    # defraud but yourself.
+    _ARCADE_MAX_STAKE = 1000
+
+    @bp.route("/api/chat/arcade/bank", methods=["GET"])
+    def arcade_bank_get():
+        db = _db()
+        if db is None:
+            return jsonify({"error": "Database unavailable"}), 503
+        return jsonify(db.get_arcade_bank(int(getattr(g, "profile_id", 1) or 1)))
+
+    @bp.route("/api/chat/arcade/bank", methods=["POST"])
+    def arcade_bank_adjust():
+        """Stake or collect. Bounded per call so a typo (or a bug) cannot mint
+        a fortune in one request; going below zero is refused outright, which
+        is the one rule a bank like this can actually enforce."""
+        db = _db()
+        if db is None:
+            return jsonify({"error": "Database unavailable"}), 503
+        data = request.json or {}
+        try:
+            delta = int(data.get("delta"))
+        except (TypeError, ValueError, OverflowError):
+            return jsonify({"error": "delta must be a whole number"}), 400
+        if abs(delta) > _ARCADE_MAX_STAKE * 100:
+            return jsonify({"error": "Amount out of range"}), 400
+        out = db.adjust_arcade_bank(int(getattr(g, "profile_id", 1) or 1), delta)
+        if out.get("refused"):
+            return jsonify(dict(out, error="Not enough in the bank")), 400
+        return jsonify(out)
+
     @bp.route("/api/chat/settings", methods=["GET"])
     def chat_settings_get():
         """The chat settings for the cog modal (admin-only — these are
