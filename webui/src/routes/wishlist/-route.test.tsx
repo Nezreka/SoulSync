@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -121,6 +121,148 @@ describe('wishlist route', () => {
 
     await waitFor(() => expect(screen.getAllByText('Aphex Twin').length).toBeGreaterThan(0));
     expect(screen.queryByText(/failing/)).not.toBeInTheDocument();
+  });
+
+  it('expands one orb at a time and reveals its album fan', async () => {
+    stubFetch({
+      albums: [
+        albumRow('Aphex Twin', 'SAW', 'Xtal'),
+        albumRow('Boards of Canada', 'MHTRTC', 'Roygbiv'),
+      ],
+    });
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelectorAll('.wl-orb-group')).toHaveLength(2));
+    const orbs = () => [...document.querySelectorAll('.wl-orb-group')];
+    expect(orbs().filter((o) => o.classList.contains('expanded'))).toHaveLength(0);
+
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    expect(orbs()[0].classList.contains('expanded')).toBe(true);
+
+    // Accordion: opening the second closes the first.
+    fireEvent.click(orbs()[1].querySelector('.wl-orb')!);
+    expect(orbs()[0].classList.contains('expanded')).toBe(false);
+    expect(orbs()[1].classList.contains('expanded')).toBe(true);
+
+    // Clicking the open one closes it.
+    fireEvent.click(orbs()[1].querySelector('.wl-orb')!);
+    expect(orbs()[1].classList.contains('expanded')).toBe(false);
+  });
+
+  it('opening the artist link does not also expand the orb', async () => {
+    stubFetch();
+    window._navigateToArtistFromWishlist = vi.fn();
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelector('.wl-orb-label')).toBeTruthy());
+    fireEvent.click(document.querySelector('.wl-orb-label')!);
+
+    expect(window._navigateToArtistFromWishlist).toHaveBeenCalledWith('Aphex Twin');
+    expect(document.querySelector('.wl-orb-group')!.classList.contains('expanded')).toBe(false);
+  });
+
+  it('filters orbs by the query in the URL', async () => {
+    stubFetch({
+      albums: [
+        albumRow('Aphex Twin', 'SAW', 'Xtal'),
+        albumRow('Boards of Canada', 'MHTRTC', 'Roygbiv'),
+      ],
+    });
+    renderRoute(['/wishlist?q=canada']);
+
+    await waitFor(() => expect(document.querySelectorAll('.wl-orb-group')).toHaveLength(1));
+    expect(screen.getAllByText('Boards of Canada').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Aphex Twin')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter wishlist')).toHaveValue('canada');
+  });
+
+  it('the failing chip narrows to artists with stuck tracks', async () => {
+    stubFetch({
+      albums: [
+        albumRow('Aphex Twin', 'SAW', 'Xtal', 5),
+        albumRow('Boards of Canada', 'MHTRTC', 'Roygbiv', 0),
+      ],
+    });
+    renderRoute(['/wishlist?failing=true']);
+
+    await waitFor(() => expect(document.querySelectorAll('.wl-orb-group')).toHaveLength(1));
+    expect(screen.getAllByText('Aphex Twin').length).toBeGreaterThan(0);
+  });
+
+  it('removing an album confirms first, removing a track does not', async () => {
+    const calls: string[] = [];
+    stubFetch();
+    // capture POSTs on top of the standard stub
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('remove-album') || url.includes('remove-track')) {
+          calls.push(url);
+          return res({ success: true });
+        }
+        return base(i, init);
+      }),
+    );
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelector('.wl-orb')).toBeTruthy());
+    fireEvent.click(document.querySelector('.wl-orb')!);
+
+    const tile = document.querySelector('.wl-album-tile')!;
+    expect(tile.classList.contains('tile-expanded')).toBe(false);
+
+    fireEvent.click(screen.getByLabelText('Remove album SAW'));
+    await waitFor(() => expect(calls.some((u) => u.includes('remove-album'))).toBe(true));
+    expect(window.showConfirmDialog).toHaveBeenCalled();
+    // The remove button sits INSIDE the clickable tile, so it must not also
+    // toggle the tile open — that is what its stopPropagation is for.
+    expect(document.querySelector('.wl-album-tile')!.classList.contains('tile-expanded')).toBe(
+      false,
+    );
+
+    // Track removal is deliberately confirm-free, matching the vanilla handler.
+    const confirmCallsBefore = (window.showConfirmDialog as ReturnType<typeof vi.fn>).mock.calls
+      .length;
+    fireEvent.click(screen.getByLabelText('Remove Xtal'));
+    await waitFor(() => expect(calls.some((u) => u.includes('remove-track'))).toBe(true));
+    expect((window.showConfirmDialog as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      confirmCallsBefore,
+    );
+  });
+
+  it('declining the album confirm removes nothing', async () => {
+    const calls: string[] = [];
+    stubFetch();
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('remove-album')) {
+          calls.push(url);
+          return res({ success: true });
+        }
+        return base(i, init);
+      }),
+    );
+    window.showConfirmDialog = vi.fn(async () => false);
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelector('.wl-orb')).toBeTruthy());
+    fireEvent.click(document.querySelector('.wl-orb')!);
+    fireEvent.click(screen.getByLabelText('Remove album SAW'));
+
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(calls).toEqual([]);
   });
 
   it('redirects away when the profile may not see the wishlist', async () => {

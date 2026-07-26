@@ -25,12 +25,22 @@ declare global {
      * vanilla page did, and treats a failure as non-fatal.
      */
     updateWatchlistButtonCount?: () => void;
+    /** Wishlist twin of updateWatchlistButtonCount — nav badge + hero count. */
+    updateWishlistCount?: () => void;
     /**
      * Shared modals owned by other vanilla files and used from several pages
      * (origin-history.js, watchlist-history.js, blocklist.js). Declared as
      * top-level `function`s in classic scripts, so they are window properties.
      */
     openDownloadOriginsModal?: (tab: string) => void;
+    /**
+     * Wishlist -> search-page handoffs. These drive the VANILLA search page's
+     * DOM (polling for the Soulseek source icon, filling #enhanced-search-input),
+     * so they stay where they are rather than being reimplemented in React —
+     * the same call they made from the vanilla wishlist page.
+     */
+    _searchWishlistTrackManually?: (artistName: string, trackName: string) => void;
+    _navigateToArtistFromWishlist?: (artistName: string) => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
