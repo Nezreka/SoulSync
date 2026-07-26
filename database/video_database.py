@@ -1527,6 +1527,40 @@ class VideoDatabase:
             if service == "tmdb":
                 oc = "movie_id" if tbl == "movies" else "show_id"
                 conn.execute(f"DELETE FROM credits WHERE {oc}=?", (item_id,))
+
+            # Episodes need exactly the same treatment, and were missed:
+            # backfill_episodes gap-fills (COALESCE(NULLIF(col,''), ?)) so the
+            # WRONG show's episode list can never self-correct either. Re-matching
+            # "Lucky (2026)" left episodes 3-8 of a 2022 series sitting under it,
+            # because the new show only has two and an UPSERT never prunes.
+            #
+            # Split by ownership, because the two kinds of row mean different
+            # things:
+            #   has_file=0 — invented by the old match as "missing". Not a fact
+            #                about THIS show at all; delete it.
+            #   has_file=1 — a real file the server has. The row is a fact and
+            #                stays (the Silo E03 rule: demote, never delete), but
+            #                its TEXT came from the wrong title, so clear that and
+            #                let the fresh backfill refill it. Ownership and watch
+            #                state are untouched.
+            # A scan that finds a file gone still demotes rather than deletes —
+            # this is a different operation, and only runs when the identity
+            # itself changed.
+            if tbl == "shows" and service in ("tmdb", "tvdb"):
+                conn.execute("DELETE FROM episodes WHERE show_id=? AND COALESCE(has_file, 0)=0",
+                             (item_id,))
+                ep_cols = {r[1] for r in conn.execute("PRAGMA table_info(episodes)").fetchall()}
+                wipe = [c for c in ("title", "overview", "air_date", "still_url",
+                                    "rating", "runtime_minutes") if c in ep_cols]
+                if wipe:
+                    conn.execute(
+                        f"UPDATE episodes SET {', '.join(c + '=NULL' for c in wipe)} "
+                        "WHERE show_id=?", (item_id,))
+                # Seasons the old match invented, now with nothing left in them.
+                conn.execute(
+                    "DELETE FROM seasons WHERE show_id=? AND id NOT IN "
+                    "(SELECT DISTINCT season_id FROM episodes WHERE show_id=? AND season_id IS NOT NULL)",
+                    (item_id, item_id))
             conn.commit()
             return True
         finally:
