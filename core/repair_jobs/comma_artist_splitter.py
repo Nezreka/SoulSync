@@ -19,7 +19,8 @@ The fix re-tags the affected files: display artist becomes "A; B", the
 per-artist list is written to the multi-value Artists tag (Picard convention,
 same frames as issue #587), and an album-artist equal to the combined string
 becomes the primary (first) artist. The server's next scan then credits each
-artist individually and the dummy dissolves. Report-only (auto_fix = False).
+artist individually and the dummy dissolves. Dry run is enabled by default;
+disabling it applies verified splits immediately.
 
 Supported separators: comma (,), semicolon (;), ampersand (&), forward slash (/).
 """
@@ -60,10 +61,11 @@ TRACK_SAMPLE_LIMIT = 40
 _API_SOURCES = ('deezer', 'itunes', 'spotify')
 
 
-def normalize_artist_name(name: str, symbols: list) -> str:
+def normalize_artist_name(name: str, symbols: list = None) -> str:
     """Casefold + whitespace-collapse for exact-name comparison. Separator spacing
     is normalized too ("Tyler,The Creator" == "Tyler, The Creator") so a
     missing space after the separator can't dodge the whitelist / API match."""
+    symbols = symbols or [',', ';', '/', '&']
     text = re.sub(r'\s*[{}]\s*'.format(''.join(symbols)), ', ', str(name or ''))
     return ' '.join(text.casefold().split())
 
@@ -91,27 +93,29 @@ class CommaArtistSplitterJob(RepairJob):
         'like "Tyler, The Creator" is recognized and skipped.\n'
         '2. Every part must itself be a known artist (in your own library, or an exact API '
         'match). If any part can\'t be verified, nothing is flagged.\n\n'
-        'Each finding shows exactly how the artist would be split. Approving the fix re-tags '
-        'the affected files with a properly separated artist list (the same multi-artist tag '
-        'convention Picard uses). After your media server rescans, each artist is credited '
-        'individually and the combined dummy artist disappears.\n\n'
-        'Nothing is changed until you approve a finding.'
+        'In dry run mode (default), each finding shows exactly how the artist would be split; '
+        'approving it re-tags the affected files with a properly separated artist list (the '
+        'same multi-artist tag convention Picard uses). Disable dry run to apply every '
+        'verified split automatically. After your media server rescans, each artist is '
+        'credited individually and the combined dummy artist disappears.\n\n'
         'Settings:\n'
         '- Comma Splitter: Enable splitting commas (,)\n'
         '- Semicolon Splitter: Enable splitting semicolons (;)\n'
         '- Forward Slash Splitter: Enable splitting forward slashes (/)\n'
         '- Ampersand Splitter: Enable splitting ampersands (&)\n'
+        '- Dry Run: When enabled, only reports issues without modifying files'
     )
     icon = 'repair-icon-artist'
     default_enabled = False
     default_interval_hours = 168  # Weekly
-    auto_fix = False
     default_settings = {
         'comma_splitter': True,
         'semicolon_splitter': True,
         'forward_slash_splitter': True,
         'ampersand_splitter': True,
+        'dry_run': True,
     }
+    auto_fix = True
 
     def estimate_scope(self, context: JobContext) -> int:
         try:
@@ -154,6 +158,7 @@ class CommaArtistSplitterJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         settings = self._get_settings(context)
+        dry_run = settings.get('dry_run', True)
         symbols: list = self._get_symbols(settings)
 
         tracks = []
@@ -284,6 +289,13 @@ class CommaArtistSplitterJob(RepairJob):
                 logger.debug("Error scanning track %s: %s", file_path, e)
                 result.errors += 1
 
+        fixer = None
+        if not dry_run:
+            from core.repair_worker import RepairWorker
+
+            fixer = RepairWorker(context.db, transfer_folder=context.transfer_folder)
+            fixer._config_manager = context.config_manager
+
         # Create findings from the map
         for combined_name, info in sorted(findings_map.items(),
                                          key=lambda x: len(x[1]['files']),
@@ -299,7 +311,22 @@ class CommaArtistSplitterJob(RepairJob):
                     log_line=f'"{combined_name}" → {len(info["parts"])} artists ({len(info["files"])} track(s))',
                     log_type='warning')
 
-            if context.create_finding:
+            details = {
+                'combined_name': combined_name,
+                'split_artists': info['parts'],
+                'primary_artist': info['primary'],
+                'new_display_artist': info['display'],
+                'db_artist_id': info['artist_id'],
+                'db_artist_name': info['db_artist_name'],
+                'artist_thumb_url': info['thumb_url'],
+                'parts_resolution': info['parts_resolution'],
+                'checked_sources': info['checked_sources'],
+                'file_count': len(info['files']),
+                'files': sample_files,
+                'all_files': info['files'],
+            }
+
+            if dry_run and context.create_finding:
                 try:
                     inserted = context.create_finding(
                         job_id=self.job_id,
@@ -314,20 +341,7 @@ class CommaArtistSplitterJob(RepairJob):
                             f're-tags {len(info["files"])} track(s) so each artist is credited '
                             f'individually'
                         ),
-                        details={
-                            'combined_name': combined_name,
-                            'split_artists': info['parts'],
-                            'primary_artist': info['primary'],
-                            'new_display_artist': info['display'],
-                            'db_artist_id': info['artist_id'],
-                            'db_artist_name': info['db_artist_name'],
-                            'artist_thumb_url': info['thumb_url'],
-                            'parts_resolution': info['parts_resolution'],
-                            'checked_sources': info['checked_sources'],
-                            'file_count': len(info['files']),
-                            'files': sample_files,
-                            'all_files': info['files'],  # Store all file paths for the fix
-                        },
+                        details=details,
                     )
                     if inserted:
                         result.findings_created += 1
@@ -336,6 +350,15 @@ class CommaArtistSplitterJob(RepairJob):
                 except Exception as e:
                     logger.debug("Error creating finding for %s: %s", combined_name, e)
                     result.errors += 1
+            elif not dry_run:
+                applied = fixer._fix_comma_artist_split(
+                    'track', combined_name, None, details)
+                if applied.get('success') and applied.get('action') == 'artists_split':
+                    result.auto_fixed += applied.get('fixed', 0)
+                elif not applied.get('success'):
+                    result.errors += 1
+                    logger.warning("Could not auto-apply comma-artist split for %s: %s",
+                                   combined_name, applied.get('error'))
 
             if context.sleep_or_stop(0.15):
                 return result
@@ -344,8 +367,10 @@ class CommaArtistSplitterJob(RepairJob):
             context.update_progress(len(tracks), len(tracks))
         if context.report_progress:
             context.report_progress(
-                phase=f'Done — {result.findings_created} splittable artist(s) found',
-                log_line=f'{result.findings_created} finding(s), '
+                phase=(f'Done — {result.findings_created} splittable artist(s) found'
+                       if dry_run else f'Done — {result.auto_fixed} track(s) re-tagged'),
+                log_line=(f'{result.findings_created} finding(s), '
+                          if dry_run else f'{result.auto_fixed} track(s) fixed, ') +
                          f'{result.skipped} skipped, {result.scanned} checked',
                 log_type='success')
         return result

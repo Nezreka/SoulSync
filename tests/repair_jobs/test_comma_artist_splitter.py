@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -38,6 +39,7 @@ def _make_flac(path, tags=None):
     """Minimal but real FLAC with synthetic frames — survives the atomic
     save's frame byte-compare (same recipe as test_atomic_audio_save)."""
     from mutagen.flac import FLAC
+    path = Path(path)
     si = bytearray(34)
     si[0:2] = struct.pack(">H", 4096)
     si[2:4] = struct.pack(">H", 4096)
@@ -248,6 +250,29 @@ def test_dedup_counts_when_create_finding_returns_false(tmp_path, monkeypatch):
     result = CommaArtistSplitterJob().scan(ctx)
     assert result.findings_created == 0
     assert result.findings_skipped_dedup == 1
+
+
+def test_live_mode_applies_verified_splits_without_creating_findings(tmp_path, monkeypatch):
+    from mutagen.flac import FLAC
+
+    db = _db(tmp_path)
+    file_path = str(tmp_path / 'a.flac')
+    _add_track(db, 'T1', 'DUMMY', file_path, file_artist='Camellia, Toby Fox')
+    _patch_clients(monkeypatch, {'deezer': _FakeArtistClient()})
+    job = CommaArtistSplitterJob()
+    monkeypatch.setattr(job, '_get_settings', lambda context: {
+        **job.default_settings, 'dry_run': False,
+    })
+    findings = []
+
+    result = job.scan(_ctx(db, findings, tmp_path))
+
+    assert result.findings_created == 0
+    assert findings == []
+    assert result.auto_fixed == 1
+    audio = FLAC(file_path)
+    assert audio['artist'] == ['Camellia; Toby Fox']
+    assert audio['artists'] == ['Camellia', 'Toby Fox']
 
 
 def test_artist_without_files_not_scanned(tmp_path, monkeypatch):

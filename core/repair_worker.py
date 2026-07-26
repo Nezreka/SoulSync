@@ -1249,7 +1249,7 @@ class RepairWorker:
             if extras:
                 msg += f' ({", ".join(extras)})'
             logger.info("Comma-artist split: %s → %s — %s", combined, parts, msg)
-            return {'success': True, 'action': 'artists_split', 'message': msg}
+            return {'success': True, 'action': 'artists_split', 'message': msg, 'fixed': fixed}
         if stale and not errors and not missing:
             return {'success': False,
                     'error': f'All {stale} file(s) no longer carry "{combined}" — '
