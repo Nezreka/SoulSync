@@ -180,8 +180,11 @@ def _unwrap_room_messages(messages):
     and attached. REACTION carriers (empty-text envelopes with 're') are
     pulled OUT of the visible list into a {target_key: {emoji: [users]}} map.
     PROTOCOL carriers (envelopes with 'p' — jukebox votes, beacons, pins) are
-    pulled out into an event list: machine coordination, never rendered,
-    never archived. Returns (messages, reactions_map, protocol_events)."""
+    pulled out into an event list: machine coordination, never rendered. Most
+    are live-only; the Arcade's gm.* carriers are the exception and DO get
+    archived (see chat_game_carriers) because a game is durable state that
+    happens to travel as messages. Returns (messages, reactions_map,
+    protocol_events)."""
     from core import chat_codec
     out = []
     reactions: dict = {}
@@ -996,17 +999,38 @@ def create_blueprint() -> Blueprint:
                 if now - _INGEST_AT.get(room, 0) > 60:
                     _INGEST_AT[room] = now
                     db.add_chat_messages(room, live)
+                # Game carriers ride every hydrate rather than the 60s throttle:
+                # they are rare (usually none at all), the natural-key UNIQUE
+                # makes repeats free, and losing one loses a move.
+                db.add_chat_game_carriers(room, protocol_events)
                 arch = db.get_chat_messages(room, limit=100)
                 if arch:
                     out = arch
             except Exception:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
+        # Games outlive slskd's buffer: replay the archived gm.* carriers
+        # ahead of the live feed so a match survives a restart even when nobody
+        # in the room is still holding it. Asking the room is always the first
+        # move (see gm.sync); this is the backstop for a cold room. Deduped on
+        # the same natural key the client uses, and ordered oldest-first
+        # because the fold depends on stream order.
+        feed = protocol_events
+        if db is not None:
+            try:
+                seen = {(e.get("username"), e.get("timestamp"),
+                         (e.get("p") or {}).get("k")) for e in protocol_events}
+                revived = [e for e in db.get_chat_game_carriers(room)
+                           if (e["username"], e["timestamp"], e["p"].get("k")) not in seen]
+                if revived:
+                    feed = revived + protocol_events
+            except Exception:
+                logger.debug("chat: game carrier replay unavailable", exc_info=True)
         return jsonify({"room": room, "joined": True,
                         "messages": _attach_reactions(out, reactions),
                         "users": users or [], "can_send": _can_send(),
                         # machine coordination events (jukebox/polls/beacons)
-                        # from the live buffer — the page's protocol feed
-                        "protocol": protocol_events})
+                        # from the live buffer, plus replayed game carriers
+                        "protocol": feed})
 
     @bp.route("/api/chat/room/protocol", methods=["POST"])
     def chat_room_protocol_send():
