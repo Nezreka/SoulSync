@@ -2771,7 +2771,7 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
             return;
         }
 
-        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, amazon_artist_id, musicbrainz_artist_id, watchlist_name } = data;
+        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, amazon_artist_id, musicbrainz_artist_id, watchlist_name, quality_profiles } = data;
 
         // Populate linked provider section (use DB watchlist_name for mismatch comparison)
         _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist, deezer_artist_id, discogs_artist_id, amazon_artist_id, musicbrainz_artist_id);
@@ -2835,6 +2835,18 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-include-compilations').checked = config.include_compilations || false;
         document.getElementById('config-include-instrumentals').checked = config.include_instrumentals || false;
         document.getElementById('config-lookback-days').value = config.lookback_days != null ? String(config.lookback_days) : '';
+        const qualityProfileSelect = document.getElementById('config-quality-profile');
+        if (qualityProfileSelect) {
+            // Explicit "Use default" so an artist with no saved profile (or one whose
+            // saved profile was since deleted) never silently defaults to the first
+            // listed profile on save. The save path maps an empty value back to null.
+            qualityProfileSelect.innerHTML = '<option value="">Use default</option>' + (quality_profiles || []).map(profile =>
+                `<option value="${profile.id}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (Default)' : ''}</option>`
+            ).join('');
+            qualityProfileSelect.value = config.quality_profile_id != null ? String(config.quality_profile_id) : '';
+            // Stored profile no longer exists (deleted) → fall back to "Use default", not blank.
+            if (qualityProfileSelect.selectedIndex < 0) qualityProfileSelect.value = '';
+        }
 
         // Populate metadata source selector
         const sourceSelector = document.getElementById('config-metadata-source-selector');
@@ -3315,6 +3327,8 @@ async function saveWatchlistArtistConfig(artistId) {
         const includeInstrumentals = document.getElementById('config-include-instrumentals').checked;
         const autoDownloadEl = document.getElementById('config-auto-download');
         const autoDownload = autoDownloadEl ? autoDownloadEl.checked : true;
+        const qualityProfileEl = document.getElementById('config-quality-profile');
+        const qualityProfileId = qualityProfileEl?.value ? parseInt(qualityProfileEl.value, 10) : null;
         const lookbackDaysVal = document.getElementById('config-lookback-days').value;
         const lookbackDays = lookbackDaysVal !== '' ? parseInt(lookbackDaysVal) : null;
         const activeSourceBtn = document.querySelector('#config-metadata-source-selector .config-msrc-btn.active');
@@ -3347,6 +3361,7 @@ async function saveWatchlistArtistConfig(artistId) {
                 include_compilations: includeCompilations,
                 include_instrumentals: includeInstrumentals,
                 auto_download: autoDownload,
+                quality_profile_id: qualityProfileId,
                 lookback_days: lookbackDays,
                 preferred_metadata_source: preferredMetadataSource,
             })

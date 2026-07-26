@@ -375,6 +375,7 @@ def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
 
         enhanced_count = 0
         failed_count = 0
+        skipped_count = 0
         failed_tracks = []
 
         for track_id in track_ids:
@@ -468,25 +469,40 @@ def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
                 'artist_name': artist_name,
             }
 
-            success = wishlist_service.add_spotify_track_to_wishlist(
+            # Enhance is explicitly re-runnable, so a track that is ALREADY on
+            # the wishlist gets its row refreshed rather than inserted. That is
+            # a success; counting it as 'Wishlist add failed' reported every
+            # repeat run as broken (R2-03).
+            outcome = wishlist_service.add_spotify_track_to_wishlist(
                 spotify_track_data=matched_track_data,
                 failure_reason=f"Quality enhance - upgrading from {tier_name.replace('_', ' ').title()}",
                 source_type='enhance',
                 source_context=source_context,
-                profile_id=profile_id
+                profile_id=profile_id,
+                detailed=True,
             )
 
-            if success:
+            if outcome['applied']:
                 enhanced_count += 1
                 logger.info(f"[Enhance] Queued for upgrade: {artist_name} - {title} ({tier_name})")
+            elif outcome['status'] == 'skipped':
+                skipped_count += 1
+                logger.info(
+                    "[Enhance] Skipped %s - %s (%s)", artist_name, title,
+                    outcome.get('reason') or 'not eligible',
+                )
             else:
                 failed_count += 1
-                failed_tracks.append({'track_id': track_id, 'title': title, 'reason': 'Wishlist add failed'})
+                failed_tracks.append({
+                    'track_id': track_id, 'title': title,
+                    'reason': outcome.get('reason') or 'Wishlist add failed',
+                })
 
         return {
             'success': True,
             'enhanced_count': enhanced_count,
             'failed_count': failed_count,
+            'skipped_count': skipped_count,
             'failed_tracks': failed_tracks
         }, 200
     except Exception as e:

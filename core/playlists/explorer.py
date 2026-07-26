@@ -54,6 +54,9 @@ class PlaylistExplorerDeps:
     get_metadata_fallback_client: Callable[[], Any]
     get_metadata_fallback_source: Callable[[], str]
     get_metadata_cache: Callable[[], Any]
+    #: Active SoulSync profile. The mirror lookup below is request-facing, so it
+    #: must be owner-scoped exactly like ``_owned_mirrored_playlist`` (R2-02).
+    get_current_profile_id: Callable[[], int] = lambda: 1
 
 
 def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
@@ -75,11 +78,15 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
             return deps.flask_jsonify({"success": False, "error": "mode must be 'albums' or 'discographies'"}), 400
 
         database = deps.get_database()
-        playlist = database.get_mirrored_playlist(playlist_id)
+        # A mirror pk is a small guessable integer, so this request-facing
+        # lookup is scoped to the active profile: a foreign mirror is reported
+        # exactly like a missing one (R2-02).
+        active_profile_id = int(deps.get_current_profile_id() or 1)
+        playlist = database.get_mirrored_playlist(playlist_id, profile_id=active_profile_id)
         if not playlist:
             return deps.flask_jsonify({"success": False, "error": "Playlist not found"}), 404
 
-        tracks = database.get_mirrored_playlist_tracks(playlist_id)
+        tracks = database.get_mirrored_playlist_tracks(playlist_id, profile_id=active_profile_id)
         if not tracks:
             return deps.flask_jsonify({"success": False, "error": "Playlist has no tracks"}), 400
 

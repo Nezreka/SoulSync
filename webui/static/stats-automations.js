@@ -597,6 +597,9 @@ function renderMirroredCard(p, container) {
                 ${phaseHtml}
             </div>
         </div>
+        ${typeof playlistQualityProfileSelectHtml === 'function'
+            ? playlistQualityProfileSelectHtml(p.source_playlist_id, p.source, true)
+            : ''}
         ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escJs(p.name)}')" title="Clear discovery data">↺</button>` : ''}
         <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
         <button class="mirrored-card-rename" onclick="event.stopPropagation(); editMirroredCustomName(${p.id}, '${_escJs(p.name)}', '${_escJs(p.custom_name || '')}')" title="Rename (changes the name shown here and used when syncing)">✏️</button>
@@ -639,6 +642,13 @@ function renderMirroredCard(p, container) {
         }
     });
     container.appendChild(card);
+    if (typeof hydratePlaylistQualityProfileSelects === 'function') {
+        void hydratePlaylistQualityProfileSelects(
+            p.source_playlist_id,
+            p.source,
+            p.quality_profile_id,
+        );
+    }
 
     if (pipelineState && pipelineState.status === 'running' && !mirroredPipelinePollers[hash]) {
         pollMirroredPipelineStatus(p.id, p.name);

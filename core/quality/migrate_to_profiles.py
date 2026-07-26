@@ -401,4 +401,65 @@ def apply_pending_quality_profile_config_writes(database) -> None:
         conn.close()
 
 
-__all__ = ["materialize_default_profile_and_backfill", "apply_pending_quality_profile_config_writes"]
+#: config.json keys that hold a quality_profiles.id. A deleted profile must not
+#: stay referenced here — the pipeline falls back correctly either way, but the
+#: Settings UI would keep showing a profile that no longer exists.
+QUALITY_PROFILE_CONFIG_KEYS = ("auto_import.quality_profile_id",)
+
+
+def reconcile_stale_quality_profile_config(database) -> int:
+    """Clear config references to Quality Profiles that no longer exist.
+
+    Audit finding P3-02: deleting a profile commits the database transaction and
+    only then clears the matching Auto-Import override. A DB commit and a
+    config-file write cannot be atomic, so that second step can fail and leave a
+    dangling id behind.
+
+    The recovery contract is: **the database is the source of truth, and the
+    config cleanup is idempotent and retried on every startup.** This function is
+    that retry. It is safe to call at any time, reads only, and writes only the
+    keys it actually needs to clear. Returns the number of keys cleared.
+    """
+    cleared = 0
+    try:
+        from config.settings import config_manager
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Quality-profile config reconcile skipped (no config): %s", e)
+        return 0
+    conn = database._get_connection()
+    try:
+        for key in QUALITY_PROFILE_CONFIG_KEYS:
+            try:
+                referenced = config_manager.get(key)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Could not read %s: %s", key, e)
+                continue
+            if referenced in (None, ""):
+                continue
+            try:
+                exists = conn.execute(
+                    "SELECT 1 FROM quality_profiles WHERE id = ?", (int(referenced),)
+                ).fetchone() is not None
+            except (TypeError, ValueError):
+                exists = False  # not even an int — definitely stale
+            except Exception as e:  # noqa: BLE001
+                # Can't tell — leave it alone rather than clearing a valid value.
+                logger.debug("Could not verify %s=%r: %s", key, referenced, e)
+                continue
+            if not exists:
+                config_manager.set(key, None)
+                cleared += 1
+                logger.info("Cleared stale Quality Profile reference %s=%r", key, referenced)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Quality-profile config reconcile failed — will retry next startup: %s", e)
+    finally:
+        conn.close()
+    return cleared
+
+
+__all__ = [
+    "materialize_default_profile_and_backfill",
+    "apply_pending_quality_profile_config_writes",
+    "reconcile_stale_quality_profile_config",
+    "QUALITY_PROFILE_CONFIG_KEYS",
+]

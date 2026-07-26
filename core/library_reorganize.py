@@ -421,6 +421,101 @@ _FEAT_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Detection only (does a title carry ANY feat credit?) — word-boundary so
+# "Defeat"/"Lift" never trip it. Used to avoid double-crediting.
+_FEAT_DETECT_RE = re.compile(r"\b(?:feat|ft|featuring)\b", re.IGNORECASE)
+
+
+def _feat_in_title_enabled() -> bool:
+    """Whether the user asked featured artists to live in the track title
+    (Settings → Metadata). Read live so the reorganize honors the same
+    switch the download path does. Isolated in a helper so tests can
+    monkeypatch it without a full config manager."""
+    try:
+        from config.settings import config_manager
+        return bool(config_manager.get("metadata_enhancement.tags.feat_in_title", False))
+    except Exception:
+        return False
+
+
+def _preserve_casing_enabled() -> bool:
+    """Whether the reorganize leaves a title/album alone when the metadata
+    source differs from the user's file only by letter-case (#1078 QT3496:
+    already-organized files were flagged for cosmetic re-casing). Default on.
+    Isolated so tests can monkeypatch without a config manager."""
+    try:
+        from config.settings import config_manager
+        return bool(config_manager.get("library.reorganize_preserve_casing", True))
+    except Exception:
+        return True
+
+
+def _keep_user_year(api_release_date, user_year):
+    """Prefer the user's own album year over the source's original-release
+    year when preserving is on (#1080 QT3496: a file imported as [2023] — a
+    reissue/edition year the user chose — was being 'corrected' to the
+    source's 2020 original). Returns a release_date string the path builder
+    reads for $year; falls back to the source value."""
+    if not _preserve_casing_enabled():
+        return api_release_date
+    uy = str(user_year or "").strip()
+    if len(uy) == 4 and uy.isdigit():
+        src_year = str(api_release_date or "")[:4]
+        if uy != src_year:
+            return uy
+    return api_release_date
+
+
+def _keep_user_casing(source_value, user_value):
+    """Return the USER's string when it matches the source only by case, else
+    the source string. Case-only means identical after casefold — so genuine
+    edits (punctuation, words, feat additions) still adopt the source; only
+    cosmetic capitalization churn is suppressed."""
+    if not _preserve_casing_enabled():
+        return source_value
+    s = str(source_value or "")
+    u = str(user_value or "")
+    if u and s and s != u and s.strip().casefold() == u.strip().casefold():
+        return u
+    return source_value
+
+
+def _extract_feat_credit(title: str) -> str:
+    """The '(feat. X)' credit substring from a title (leading space trimmed),
+    or '' when there's none. Lets us carry a user's own credit forward when
+    the API only knows the primary artist."""
+    if not title:
+        return ''
+    m = _FEAT_RE.search(str(title))
+    return m.group(0).strip() if m else ''
+
+
+def _apply_feat_credit(track_name: str, normalized_artists: list, local_title: str) -> str:
+    """#1078: when feat_in_title is on, make sure the clean title the
+    reorganize builds carries the featured-artist credit — so the FILENAME
+    keeps it too (the tag writer re-adds it for the tag, but the filename is
+    built straight from this clean title and was dropping "(feat. X)").
+
+    Precedence when the API's own track name has no credit:
+      1. featured artists from the API track's artist list (canonical names),
+      2. else the credit already present in the user's file title (the API
+         only knows the primary — don't strip what the user curated).
+    A track name that already carries a credit is left untouched."""
+    name = str(track_name or '')
+    if _FEAT_DETECT_RE.search(name):
+        return name
+    featured = [
+        (a.get('name') if isinstance(a, dict) else str(a))
+        for a in (normalized_artists[1:] if normalized_artists else [])
+    ]
+    featured = [f for f in featured if f]
+    if featured:
+        return f"{name} (feat. {', '.join(featured)})".strip()
+    credit = _extract_feat_credit(local_title)
+    if credit:
+        return f"{name} {credit}".strip()
+    return name
+
 
 def _normalize_title(value) -> str:
     """Lowercase + strip cosmetic punctuation and treat brackets / dashes
@@ -901,6 +996,34 @@ def plan_album_reorganize(
                 'reason': None,
             })
 
+    # #1080 (QT3496): a SINGLE-disc user album re-matched against a MULTI-disc
+    # source edition (deluxe / 2-disc) picks up disc-2 track numbers and stamps
+    # a bogus disc prefix ("11" -> "0211"). Read the user's REAL layout from
+    # their own track numbers and, when it's unambiguously single-disc, organize
+    # by that instead of the source's disc structure. Conservative on purpose —
+    # only caps when BOTH hold, so genuine multi-disc is never flattened:
+    #   * the user's track numbers don't repeat  → single disc (a box set
+    #     numbers per-disc, so 1..13 / 1..14 REPEAT → left multi-disc, #1009);
+    #   * every user track fits within the source's disc 1  → a continuously-
+    #     numbered 2-disc set (1..25) spills past disc 1 → left multi-disc.
+    # Gated on the same preserve-my-organization setting as casing/year.
+    if total_discs > 1 and _preserve_casing_enabled():
+        try:
+            user_nums = [int(t.get('track_number')) for t in tracks
+                         if str(t.get('track_number') or '').strip().isdigit()]
+            api_disc1 = sum(1 for t in api_tracks if int(t.get('disc_number') or 1) == 1)
+            if (user_nums and len(user_nums) == len(set(user_nums))
+                    and api_disc1 and max(user_nums) <= api_disc1):
+                total_discs = 1
+                for item in items:
+                    if item.get('matched') and item.get('api_track'):
+                        # shallow copy — override only the disc, keep name/track/artists
+                        item['api_track'] = {**item['api_track'], 'disc_number': 1}
+        except Exception:
+            # never let the single-disc heuristic break the reorganize — on any
+            # odd data just fall back to the source's disc structure
+            logger.debug("single-disc cap skipped (unexpected track data)", exc_info=True)
+
     return {
         'status': 'planned',
         'source': source,
@@ -916,10 +1039,16 @@ def _build_post_process_context(
     artist_name: str,
     album_title: str,
     total_discs: int,
+    local_title: Optional[str] = None,
+    local_year: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
-    metadata in hand."""
+    metadata in hand.
+
+    ``local_title`` is the user's own current track title — used only to
+    carry a featured-artist credit forward when feat_in_title is on and the
+    API doesn't supply one (#1078)."""
     track_number = int(api_track.get('track_number') or 1)
     disc_number = int(api_track.get('disc_number') or 1)
     track_artists = api_track.get('artists') or [artist_name]
@@ -929,11 +1058,17 @@ def _build_post_process_context(
 
     api_album_id = api_album.get('id') or api_album.get('album_id') or ''
     api_album_name = api_album.get('name') or api_album.get('title') or album_title
+    # #1078: keep the user's album-folder casing when the source differs only
+    # by case (album_title is the user's own library album name).
+    api_album_name = _keep_user_casing(api_album_name, album_title)
     api_album_release = (
         api_album.get('release_date')
         or api_album.get('releaseDate')
         or ''
     )
+    # #1080: keep the user's own album year ($year) — a reissue/edition year
+    # they imported with, not the source's original-release year.
+    api_album_release = _keep_user_year(api_album_release, local_year)
     api_album_total_tracks = (
         api_album.get('total_tracks')
         or api_album.get('totalTracks')
@@ -950,6 +1085,18 @@ def _build_post_process_context(
                 api_album_image = first.get('url') or ''
 
     track_name = api_track.get('name') or api_track.get('title') or ''
+    # #1078: keep the featured-artist credit on the CLEAN title when the user
+    # asked for feat-in-title. The tag writer re-adds it to the tag, but the
+    # filename is built straight from this clean title and was silently
+    # dropping "(feat. X)" — flagging already-correct files for "correction".
+    if _feat_in_title_enabled():
+        track_name = _apply_feat_credit(track_name, normalized_artists, local_title or '')
+    # #1078: keep the user's own title casing when the source title differs
+    # ONLY by case — no cosmetic rename/re-tag on already-organized files.
+    # Runs AFTER feat so "Song (feat. X)" vs a bare source title stays a real
+    # change; this only collapses pure capitalization differences. Both the
+    # filename and the title tag are built from this string, so they agree.
+    track_name = _keep_user_casing(track_name, local_title or '')
 
     return {
         'spotify_artist': {
@@ -1155,7 +1302,9 @@ def preview_album_reorganize(
         # shares the same one).
         per_item_album = plan_item.get('api_album') or api_album
         context = _build_post_process_context(
-            per_item_album, api_track, artist_name, album_title, total_discs
+            per_item_album, api_track, artist_name, album_title, total_discs,
+            local_title=title,
+            local_year=(str(album_data.get('year')) if album_data.get('year') else None),
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1312,6 +1461,7 @@ class _RunContext:
     artist_name: str
     album_title: str
     total_discs: int
+    local_year: Optional[str]               # the user's stored album year (#1080)
     staging_album_dir: str
     state_lock: threading.Lock              # required to mutate lock-protected fields
     summary: dict                           # LOCK-PROTECTED
@@ -1406,7 +1556,8 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
     embedded album metadata."""
     api_album = per_item_api_album if per_item_api_album else ctx.api_album
     context = _build_post_process_context(
-        api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs
+        api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs,
+        local_title=title, local_year=ctx.local_year,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -1709,6 +1860,7 @@ def reorganize_album(
         artist_name=artist_name,
         album_title=album_title,
         total_discs=total_discs,
+        local_year=(str(album_data.get('year')) if album_data.get('year') else None),
         staging_album_dir=staging_album_dir,
         state_lock=state_lock,
         summary=summary,

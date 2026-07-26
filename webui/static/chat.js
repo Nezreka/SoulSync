@@ -34,14 +34,24 @@
         historyDone: false,      // no more archive pages
         selfName: '',            // our slskd username (@mention highlighting)
         users: [],               // room user names (mention autocomplete)
+        convos: [],              // latest PM conversation list (guild-rail DM badge)
+        channel: 'general',      // active virtual channel (envelope `c` tag)
+        chanSeen: {},            // channel slug → newest ts read there (unread badges)
+        chanCatClosed: {},       // sidebar category → collapsed
+        pingArmed: false,        // suppress mention pings while the archive loads
+        thread: null,            // {id, name} while viewing a thread (null = channel)
         replyTo: null,           // {u, x} while composing a reply
+        pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
         jukebox: {               // shared room listening (reduced from protocolLog)
             open: false,         //   panel visible
             tunedIn: false,      //   player exists (requires a user gesture)
             player: null,        //   YT.Player instance while tuned in
             playingId: null,     //   video id the player was last pointed at
+            playingNow: null,    //   the now-track the player is actually playing (display fallback)
+            nowSeen: null,       //   {id, localStart, base} — elapsed on OUR clock, not the DJ's
             playerAlive: false,  //   iframe API fired onReady (safe to call methods)
             results: [],         //   resolve results awaiting a pick
+            searchResults: [],   //   YouTube search modal results
             resolving: false,
             lastRendered: '',    //   reduced-state fingerprint (skip no-op renders)
             lastAdvanceAt: 0,    //   DJ double-fire guard (ms)
@@ -62,6 +72,10 @@
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
+    try {
+        var _ch = localStorage.getItem('chat_channel');
+        if (_ch) state.channel = _ch;      // validated against the config on first render
+    } catch (e) { /* ignore */ }
     try {
         state.jukebox.videoHidden = localStorage.getItem('chat_jbx_audio') === '1';
         var _v = parseInt(localStorage.getItem('chat_jbx_vol') || '100', 10);
@@ -362,6 +376,11 @@
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
                 'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
         }
+        if (state.view === 'room' && state.canSend && !state.thread && _chanRoom()) {
+            acts += '<button type="button" class="chat-line-reply" title="Start a thread on this message" ' +
+                'data-chat-thread-start="' + attr(_msgKey(m)) + '" ' +
+                'data-chat-thread-title="' + attr(String(m.message || '').slice(0, 60)) + '">🧵</button>';
+        }
         if (state.view === 'room' && state.canSend) {
             acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
                 'data-chat-pin-user="' + attr(m.username || '') + '" ' +
@@ -421,9 +440,49 @@
             (f.s ? '<span class="chat-file-size">' + esc(_fmtBytes(f.s)) + '</span>' : '') +
             '</span>' +
             preview +
+            (isAudio
+                ? '<button type="button" class="chat-embed-chip chat-file-save" ' +
+                    'data-chat-file-save="' + attr(url) + '" data-chat-file-name="' + attr(name) +
+                    '" data-chat-file-mime="' + attr(mime) + '">➕ save to library</button>'
+                : '') +
             '<a class="chat-embed-chip chat-file-dl" href="' + attr(url) +
                 '" target="_blank" rel="noopener noreferrer" download>⬇ download</a>' +
             '<div class="chat-file-slot"></div></div>';
+    }
+
+    // Save a shared audio file into the library: hand the filepost link to the
+    // server, which drops it in the import staging folder for the pipeline.
+    function _saveFileToLibrary(btn) {
+        if (!btn || btn.disabled) return;
+        var url = btn.getAttribute('data-chat-file-save');
+        var name = btn.getAttribute('data-chat-file-name') || '';
+        var mime = btn.getAttribute('data-chat-file-mime') || '';
+        btn.disabled = true;
+        var was = btn.textContent;
+        btn.textContent = 'saving…';
+        postJSON('/api/chat/files/import', { url: url, name: name, mime: mime })
+            .then(function (res) {
+                if (res.ok && res.body && res.body.ok) {
+                    btn.textContent = '✓ saved';
+                    if (typeof showToast === 'function') {
+                        showToast(res.body.auto_import
+                            ? '➕ Saved — auto-import will pick it up'
+                            : '➕ Saved to your Staging folder — import it from the Import page',
+                            'success');
+                    }
+                    return;
+                }
+                btn.disabled = false;
+                btn.textContent = was;
+                if (typeof showToast === 'function') {
+                    showToast((res.body && res.body.error) || 'Could not save that file', 'error');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.textContent = was;
+                if (typeof showToast === 'function') showToast('Could not save that file', 'error');
+            });
     }
 
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
@@ -517,6 +576,24 @@
                 shown = shown.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
                 hidden = before - shown.length;
             }
+            // Virtual channels: show only the active one. Untagged / unknown-slug
+            // messages fold into the default channel (never hidden everywhere),
+            // so vanilla-Soulseek and old-client traffic still reads in #general.
+            // Only the SoulSync room is channelled/threaded — every other room
+            // shows its stream plainly, exactly as it did before.
+            if (_chanRoom()) {
+                shown = shown.filter(function (m) { return _msgChannel(m) === state.channel; });
+                // Inside a thread: only its parent + its replies. Outside: thread
+                // replies fold away so the channel stays readable (Discord-style).
+                if (state.thread) {
+                    var tid = state.thread.id;
+                    shown = shown.filter(function (m) {
+                        return _msgThread(m) === tid || _msgKey(m) === tid;
+                    });
+                } else {
+                    shown = shown.filter(function (m) { return !_msgThread(m); });
+                }
+            }
         }
         // NEW divider: split at the frozen last-seen marker (set on room open).
         // Groups deliberately break at the divider, like Discord's red line.
@@ -599,14 +676,30 @@
         return cls;
     }
 
-    function _userBtn(n, extraClass, tunedMap) {
+    function _userBtn(n, extraClass, tunedMap, npMap) {
+        // Discord-style member row: circular avatar + presence dot, name, and an
+        // activity subline (the jukebox listen state doubles as "playing a game").
         var ign = isIgnored(n);
         var tuned = tunedMap && tunedMap[n];
+        var np = npMap && npMap[n];
+        var initials = String(n || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
             '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
             (tuned ? ' — listening to the room jukebox' : '') + '">' +
-            '<span class="chat-user-dot"></span>' + esc(n) +
-            (tuned ? '<span class="chat-user-tuned">♫</span>' : '') +
+            '<span class="chat-user-av">' + esc(initials) +
+                '<span class="chat-user-dot' + (tuned ? ' chat-user-dot--tuned' : '') + '"></span>' +
+            '</span>' +
+            '<span class="chat-user-main">' +
+                '<span class="chat-user-name">' + esc(n) + '</span>' +
+                // the shared jukebox wins the line — it's what the room is doing
+                // together; a personal now-playing shows otherwise
+                (tuned
+                    ? '<span class="chat-user-act chat-user-tuned">♫ Listening to the jukebox</span>'
+                    : (np && np.t
+                        ? '<span class="chat-user-act" title="' + attr(np.t + (np.a ? ' — ' + np.a : '')) +
+                            '">♪ ' + esc(np.t) + (np.a ? ' · ' + esc(np.a) : '') + '</span>'
+                        : '')) +
+            '</span>' +
             (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
     }
 
@@ -644,18 +737,27 @@
             else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
         });
+        var _evs = window.ChatProtocol ? _roomEvents() : [];
         var tunedMap = window.ChatProtocol
-            ? window.ChatProtocol.reduceTuned(_roomEvents()) : {};   // once, not per user
-        var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
-        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap); }).join('');
+            ? window.ChatProtocol.reduceTuned(_evs) : {};            // once, not per user
+        var npMap = (window.ChatProtocol && window.ChatProtocol.reduceNowPlaying)
+            ? window.ChatProtocol.reduceNowPlaying(_evs) : {};
+        // Discord groups members by role with a "NAME — count" header.
+        var html = '';
+        if (self.length) {
+            html += '<div class="chat-users-label chat-users-label--sub">You</div>' +
+                self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap, npMap); }).join('');
+        }
         if (apps.length) {
-            html += '<div class="chat-users-label chat-users-label--sub">SoulSync users</div>' +
-                apps.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
+            html += '<div class="chat-users-label chat-users-label--sub">SoulSync &mdash; ' + apps.length + '</div>' +
+                apps.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
         }
         if (rest.length) {
-            html += (apps.length || self.length
-                        ? '<div class="chat-users-label chat-users-label--sub">Other clients</div>' : '') +
-                rest.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
+            // NOT "Online" — the SoulSync bucket above is online too; this one
+            // is specifically everyone on a non-SoulSync client.
+            html += '<div class="chat-users-label chat-users-label--sub">Other clients &mdash; ' +
+                rest.length + '</div>' +
+                rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
@@ -664,25 +766,11 @@
     }
 
     function renderSide(convos) {
-        var rooms = q('[data-chat-rooms]');
-        if (rooms) {
-            var list = (state.rooms.length ? state.rooms
-                : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
-            rooms.innerHTML = list.map(function (r) {
-                var on = state.view === 'room' && state.room === r.name;
-                return '<div class="chat-side-room' + (on ? ' chat-side-item--on' : '') + '">' +
-                    '<button class="chat-side-item" type="button" data-chat-open-room="' +
-                        attr(r.name) + '" title="' + attr(r.name) + '"># ' + esc(r.name) + '</button>' +
-                    (!r.home && state.canManage
-                        ? '<button class="chat-side-leave" type="button" data-chat-leave-room="' +
-                            attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
-                        : '') +
-                '</div>';
-            }).join('') +
-            (state.canManage
-                ? '<button class="chat-side-item chat-side-add" type="button" data-chat-browse-rooms>+ Browse rooms</button>'
-                : '');
-        }
+        if (convos) state.convos = convos;   // guild-rail DM badge reads the latest list
+        // Rooms are rendered by renderGuilds() into the guild rail — switching,
+        // browsing and leaving all live there. They are deliberately not listed
+        // in this sidebar too (that was two Browse-rooms buttons and two room
+        // lists saying the same thing).
         var host = q('[data-chat-convos]');
         if (!host) return;
         var list = (convos || []).map(function (c) {
@@ -695,6 +783,263 @@
                 (unread ? '<span class="chat-side-dot"></span>' : '') + '</button>';
         }).join('');
         host.innerHTML = list || '<div class="chat-side-none">No conversations</div>';
+        renderGuilds();
+        renderChannels();
+        renderUserPanel();
+    }
+
+    // ── Discord-style shell: guild rail, channels, account strip ────────────
+    // CHANNELS are a client-side VIEW over the one Soulseek room: each message
+    // carries a channel slug in its envelope (see CHAT_CHANNELS / state.channel).
+    // Untagged or unknown-slug messages always fall back to #general so nothing
+    // is ever invisible — old clients and vanilla Soulseek users still land
+    // somewhere. Categories are cosmetic grouping only.
+    // No channel names a FEATURE. The jukebox is room-scoped — everyone shares
+    // one queue regardless of which channel they're reading — so filing it under
+    // a channel would imply a queue per channel. Tune-in is already its gate.
+    // Media-agnostic on purpose: SoulSync is music AND movies/TV AND YouTube,
+    // so nothing here is scoped to one side. Names avoid colliding with actual
+    // app features too — a '#requests' channel would read as the video Requests
+    // queue, and '#releases' as a SoulSync release rather than a new album.
+    // Mirrors where the real community traffic already goes.
+    var CHAT_CHANNELS = [
+        { cat: 'Community', items: [
+            { slug: 'general', name: 'general' },
+            { slug: 'off-topic', name: 'off-topic' },
+        ] },
+        { cat: 'Support', items: [
+            { slug: 'help', name: 'help' },
+            { slug: 'bugs', name: 'bugs' },
+            { slug: 'ideas', name: 'ideas' },
+        ] },
+    ];
+    var CHAT_DEFAULT_CHANNEL = 'general';
+
+    // Channels + threads are for the SoulSync community room ONLY. In any other
+    // Soulseek room nobody tags anything, so a channel rail would file every
+    // message under #general and strand the other channels empty — and the
+    // thread fold would HIDE replies with no sidebar to find them again. Other
+    // rooms therefore get plain, unfiltered chat (the jukebox / polls / pins
+    // still work there, since those are additive folds that are simply empty
+    // when nobody has used them).
+    function _chanRoom() {
+        return state.view === 'room' &&
+               (!state.homeRoom || state.room === state.homeRoom);
+    }
+
+    function _chanKnown(slug) {
+        for (var i = 0; i < CHAT_CHANNELS.length; i++) {
+            for (var j = 0; j < CHAT_CHANNELS[i].items.length; j++) {
+                if (CHAT_CHANNELS[i].items[j].slug === slug) return true;
+            }
+        }
+        return false;
+    }
+
+    // The channel a message belongs to. Unknown/absent → the default, so a
+    // message can never be swallowed by a channel nobody is looking at.
+    function _msgChannel(m) {
+        var c = m && typeof m.chan === 'string' ? m.chan : '';
+        return _chanKnown(c) ? c : CHAT_DEFAULT_CHANNEL;
+    }
+
+    function _chanUnread() {
+        // Unread per channel = messages after our last-read marker for that
+        // channel, excluding our own. Cheap fold over the loaded message list.
+        var counts = {};
+        var seen = state.chanSeen || {};
+        (state.msgs || []).forEach(function (m) {
+            if (!m || m.username === state.selfName) return;
+            var c = _msgChannel(m);
+            if (c === state.channel) return;              // looking at it now
+            var ts = m.timestamp || '';
+            if (seen[c] && ts <= seen[c]) return;
+            counts[c] = (counts[c] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function renderGuilds() {
+        var host = q('[data-chat-guilds]');
+        if (!host) return;
+        var rooms = (state.rooms.length ? state.rooms
+            : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
+        var html = rooms.map(function (r) {
+            var on = state.view === 'room' && state.room === r.name;
+            var initials = String(r.name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
+            // The rail is the ONLY room switcher now (the sidebar lists channels,
+            // not rooms), so leaving has to live here too — × on hover, home room
+            // excluded, same rule the old sidebar list used.
+            return '<span class="chat-guild-wrap">' +
+                '<button class="chat-guild' + (on ? ' chat-guild--on' : '') + '" type="button" ' +
+                    'data-chat-open-room="' + attr(r.name) + '" title="' + attr(r.name) + '">' +
+                    esc(initials) + '</button>' +
+                (!r.home && state.canManage
+                    ? '<button class="chat-guild-leave" type="button" data-chat-leave-room="' +
+                        attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
+                    : '') +
+            '</span>';
+        }).join('');
+        // PM puck — unread dot when any conversation is waiting
+        var pmUnread = (state.convos || []).filter(function (c) {
+            return c.hasUnAcknowledgedMessages || c.unAcknowledgedMessageCount > 0;
+        }).length;
+        html += '<div class="chat-guild-sep"></div>' +
+            '<button class="chat-guild' + (state.view === 'pm' ? ' chat-guild--on' : '') + '" type="button" ' +
+                'data-chat-guild-dm title="Direct messages">✉' +
+                (pmUnread ? '<span class="chat-guild-badge">' + (pmUnread > 99 ? '99+' : pmUnread) + '</span>' : '') +
+            '</button>';
+        if (state.canManage) {
+            html += '<button class="chat-guild chat-guild--add" type="button" data-chat-browse-rooms ' +
+                'title="Browse Soulseek rooms">+</button>';
+        }
+        host.innerHTML = html;
+    }
+
+    function renderChannels() {
+        // sidebar header = the "server" (the Soulseek room we're in)
+        var nameEl = q('[data-chat-side-head-name]');
+        if (nameEl) {
+            nameEl.textContent = state.view === 'pm'
+                ? 'Direct Messages'
+                : (state.room || state.homeRoom || 'SoulSync');
+        }
+        var host = q('[data-chat-channels]');
+        if (!host) return;
+        if (!_chanRoom()) { host.innerHTML = ''; return; }   // plain chat elsewhere
+        if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
+        var unread = _chanUnread();
+        var closed = state.chanCatClosed || {};
+        host.innerHTML = CHAT_CHANNELS.map(function (group) {
+            var isClosed = !!closed[group.cat];
+            var rows = isClosed ? '' : group.items.map(function (ch) {
+                var on = state.channel === ch.slug;
+                var n = unread[ch.slug] || 0;
+                var row = '<button class="chat-chan' + (on ? ' chat-chan--on' : '') +
+                    (n ? ' chat-chan--unread' : '') + '" type="button" ' +
+                    'data-chat-chan="' + attr(ch.slug) + '">' +
+                    '<span class="chat-chan-hash">#</span>' +
+                    '<span class="chat-chan-name">' + esc(ch.name) + '</span>' +
+                    (n ? '<span class="chat-chan-unread">' + (n > 99 ? '99+' : n) + '</span>' : '') +
+                '</button>';
+                // Forum-style: the active channel's threads hang beneath it.
+                if (on) {
+                    row += _threadsForChannel().map(function (t) {
+                        var tOn = state.thread && state.thread.id === t.id;
+                        return '<button class="chat-thread' + (tOn ? ' chat-thread--on' : '') +
+                            '" type="button" data-chat-thread="' + attr(t.id) + '" ' +
+                            'data-chat-thread-name="' + attr(t.name) + '" title="' + attr(t.name) + '">' +
+                            '<span class="chat-thread-branch"></span>' +
+                            '<span class="chat-thread-name">' + esc(t.name) + '</span>' +
+                        '</button>';
+                    }).join('');
+                }
+                return row;
+            }).join('');
+            return '<button class="chat-cat' + (isClosed ? ' chat-cat--closed' : '') + '" type="button" ' +
+                    'data-chat-cat="' + attr(group.cat) + '">' +
+                    '<span class="chat-cat-caret">⌄</span>' + esc(group.cat) +
+                '</button>' + rows;
+        }).join('');
+    }
+
+    // ── threads ─────────────────────────────────────────────────────────────
+    // A thread is messages tagged with a parent message key (`th`), folded out
+    // of the channel stream. Same discipline as channels: purely a view over
+    // the one room, and a thread's replies never vanish — they're still in the
+    // room for vanilla clients, just grouped here.
+    function _msgThread(m) {
+        return (m && typeof m.th === 'string' && m.th) ? m.th : null;
+    }
+
+    // Threads that belong to the ACTIVE channel, newest activity first.
+    function _threadsForChannel() {
+        var byId = {};
+        (state.msgs || []).forEach(function (m) {
+            var th = _msgThread(m);
+            if (!th) return;
+            if (_msgChannel(m) !== state.channel) return;
+            var t = byId[th] || (byId[th] = { id: th, name: '', count: 0, last: '' });
+            t.count++;
+            var ts = String(m.timestamp || '');
+            if (ts > t.last) t.last = ts;
+            if (!t.name && typeof m.tn === 'string' && m.tn) t.name = m.tn;
+        });
+        // Fall back to the parent message's text when no carried name survived.
+        var out = [];
+        for (var id in byId) {
+            if (!Object.prototype.hasOwnProperty.call(byId, id)) continue;
+            var t = byId[id];
+            if (!t.name) {
+                var parent = (state.msgs || []).filter(function (m) { return _msgKey(m) === id; })[0];
+                t.name = parent ? String(parent.message || '').slice(0, 60) : 'Thread';
+            }
+            out.push(t);
+        }
+        out.sort(function (a, b) { return b.last.localeCompare(a.last); });
+        return out;
+    }
+
+    function openThread(id, name) {
+        if (!id) return;
+        state.thread = { id: id, name: name || 'Thread' };
+        state.lastStamp = null;
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function closeThread() {
+        if (!state.thread) return;
+        state.thread = null;
+        state.lastStamp = null;
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function switchChannel(slug) {
+        state.thread = null;      // leaving the channel leaves its thread
+        if (!slug || !_chanKnown(slug) || slug === state.channel) return;
+        state.channel = slug;
+        try { localStorage.setItem('chat_channel', slug); } catch (e) { /* private mode */ }
+        // Mark everything currently loaded in this channel as read.
+        var newest = '';
+        (state.msgs || []).forEach(function (m) {
+            if (_msgChannel(m) === slug) {
+                var ts = String(m.timestamp || '');
+                if (ts > newest) newest = ts;
+            }
+        });
+        if (newest) state.chanSeen[slug] = newest;
+        state.lastStamp = null;      // force a repaint — the filter changed, not the data
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function renderUserPanel() {
+        var host = q('[data-chat-userpanel]');
+        if (!host) return;
+        var name = state.selfName || 'You';
+        var initials = String(name).replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+        host.innerHTML =
+            '<div class="chat-userpanel-av">' + esc(initials) + '</div>' +
+            '<div class="chat-userpanel-main">' +
+                '<div class="chat-userpanel-name">' + esc(name) + '</div>' +
+                '<div class="chat-userpanel-sub">' +
+                    (state.canSend ? 'Online' : 'Read-only') + '</div>' +
+            '</div>' +
+            (state.isAdmin
+                ? '<button class="chat-userpanel-btn" type="button" data-chat-settings-btn ' +
+                    'title="Chat settings">⚙</button>'
+                : '');
     }
 
     function renderHead() {
@@ -708,8 +1053,16 @@
             ? esc(topic.t)
             : (isHome ? 'the SoulSync community room on Soulseek'
                       : 'a public Soulseek room');
+        // A stale/unknown persisted slug must never strand the user on an empty
+        // view — snap back to the default before anything renders against it.
+        if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
         head.innerHTML = state.view === 'room'
-            ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
+            ? (state.thread && _chanRoom()
+                ? '<button class="chat-thread-back" type="button" data-chat-thread-close ' +
+                      'title="Back to #' + attr(state.channel) + '">&larr;</button>' +
+                  '<span class="chat-head-title">🧵 ' + esc(state.thread.name || 'Thread') + '</span>'
+                : '<span class="chat-head-title">#' +
+                      esc(_chanRoom() ? state.channel : (state.room || '')) + '</span>') +
               '<span class="chat-head-sub' + (topic ? ' chat-head-sub--topic' : '') + '"' +
                   (topic ? ' title="topic set by ' + attr(topic.by) + '"' : '') + '>' + subText +
                   (state.canSend
@@ -749,8 +1102,10 @@
         form.classList.toggle('chat-composer--locked', !state.canSend);
         input.disabled = !state.canSend;
         input.placeholder = state.canSend
-            ? (state.view === 'room' ? 'Message # ' + (state.room || '') + '…'
-                                     : 'Message ' + (state.pmUser || '') + '…')
+            ? (state.view === 'room'
+                ? 'Message #' + (_chanRoom() ? (state.channel || CHAT_DEFAULT_CHANNEL)
+                                             : (state.room || '')) + '…'
+                : 'Message ' + (state.pmUser || '') + '…')
             : 'Read-only — chat sending is admin-only on this server';
         // Formatting only exists inside the envelope — the toolbar is a ROOM
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
@@ -835,6 +1190,22 @@
     function sendReaction(target, emoji) {
         closeReactRow();
         if (!target || !emoji) return;
+        // Optimistic: show the reaction instantly instead of waiting for the
+        // round-trip AND for slskd to echo our own reaction envelope back into
+        // the room buffer (which can lag several seconds). The pending mark
+        // keeps it from flickering away on the reconcile before the echo lands.
+        var msg = null;
+        for (var i = 0; i < state.msgs.length; i++) {
+            var m = state.msgs[i];
+            if (String(m.username || '') === String(target.user || '') &&
+                    String(m.message || '') === String(target.text || '')) { msg = m; break; }
+        }
+        if (msg && state.selfName) {
+            _addReactor(msg, emoji, state.selfName);
+            state.pendingReactions[_msgKey(msg) + '|' + emoji] = 1;
+            state.lastStamp = null;
+            renderMessages(state.msgs);
+        }
         postJSON('/api/chat/room/react', {
             target_user: target.user, target_text: target.text, e: emoji,
             room: state.room || '',
@@ -843,6 +1214,8 @@
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'Reaction not sent', 'error');
                 }
+                // roll back the optimistic mark so a failed send doesn't stick
+                if (msg) delete state.pendingReactions[_msgKey(msg) + '|' + emoji];
                 return;
             }
             state.lastStamp = null;
@@ -1295,6 +1668,19 @@
             el = q('[data-chat-set-autojoin]'); if (el) el.checked = !!b.auto_join;
             el = q('[data-chat-set-membersend]'); if (el) el.checked = !!b.member_send;
             el = q('[data-chat-set-autoprove]'); if (el) el.checked = !!b.auto_prove;
+            // ping is a LOCAL preference (this browser only) — not server state
+            el = q('[data-chat-set-ping]');
+            if (el) {
+                var pOn = false;
+                try { pOn = localStorage.getItem('chat_ping') === '1'; } catch (err) { /* ignore */ }
+                el.checked = pOn;
+            }
+            el = q('[data-chat-set-np]');
+            if (el) {
+                var nOn = false;
+                try { nOn = localStorage.getItem('chat_np') === '1'; } catch (err) { /* ignore */ }
+                el.checked = nOn;
+            }
             overlay.hidden = false;
         });
     }
@@ -1315,6 +1701,19 @@
         if (fEl && fEl.value.trim()) payload.filepost_key = fEl.value.trim();
         var xEl = q('[data-chat-set-filepost-expiry]');
         if (xEl) payload.filepost_expiry = xEl.value || '';
+        // local-only: the mention ping never leaves this browser
+        var pEl = q('[data-chat-set-ping]');
+        if (pEl) {
+            try { localStorage.setItem('chat_ping', pEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+        }
+        var nEl = q('[data-chat-set-np]');
+        if (nEl) {
+            try { localStorage.setItem('chat_np', nEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+            // Turning it OFF must retract what the room already sees.
+            if (!nEl.checked && state.canSend && state.view === 'room') {
+                try { sendProtocol('np.set', {}); } catch (err) { /* not in a room */ }
+            }
+        }
         postJSON('/api/chat/settings', payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -1541,19 +1940,142 @@
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
     }
 
+    // ── now-playing sharing (opt-in) ───────────────────────────────────────
+    // The media player calls this whenever the local track changes; we relay it
+    // to the room as np.set so the member list can show what everyone's on.
+    // OFF by default and gated behind chat_np — this is a PUBLIC Soulseek room,
+    // and what you listen to is nobody's business unless you say so.
+    var _npLast = '';
+    var _npLastAt = 0;
+
+    function _npEnabled() {
+        try { return localStorage.getItem('chat_np') === '1'; } catch (e) { return false; }
+    }
+
+    window.__ssNowPlaying = function (track) {
+        if (!_npEnabled() || !state.canSend || state.view !== 'room') return;
+        var t = String((track && (track.title || track.name)) || '').slice(0, 120);
+        var a = String((track && track.artist) || '').slice(0, 80);
+        var sig = t + ' | ' + a;
+        if (sig === _npLast) return;                       // same track, no chatter
+        if (t && Date.now() - _npLastAt < 5000) return;    // rapid skipping: don't spam
+        _npLast = sig;
+        _npLastAt = Date.now();
+        sendProtocol('np.set', t ? { t: t, a: a } : {});    // empty payload = stopped
+    };
+
+    // ── mention/reply ping (opt-in) ────────────────────────────────────────
+    // Fires only for someone ELSE @-mentioning us or replying to one of our
+    // messages. Never our own text, throttled so a burst can't machine-gun,
+    // and silent until the user turns it on (chat_ping localStorage).
+    var _lastPingAt = 0;
+
+    function _pingWorthy(m) {
+        // Armed only AFTER the first merge for a room: opening a room (and
+        // paging scrollback) replays the archive through here, and every old
+        // mention would fire a ping.
+        if (!state.pingArmed || state.loadingOlder) return false;
+        if (!m || !state.selfName) return false;
+        if (m.username === state.selfName || m.self === true || m.direction === 'Out') return false;
+        if (mentionsMe(m.message)) return true;
+        return !!(m.reply && m.reply.u && m.reply.u === state.selfName);
+    }
+
+    function _chatPing() {
+        var on = false;
+        try { on = localStorage.getItem('chat_ping') === '1'; } catch (e) { /* private mode */ }
+        if (!on) return;
+        var now = Date.now();
+        if (now - _lastPingAt < 4000) return;         // one ping per burst
+        _lastPingAt = now;
+        // Synthesized two-tone blip — no asset to ship, no autoplay policy fight
+        // (the user has already interacted with the page by the time this fires).
+        try {
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            var ctx = _chatPing._ctx || (_chatPing._ctx = new Ctx());
+            if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
+            [[880, 0], [1245, 0.09]].forEach(function (pair) {
+                var osc = ctx.createOscillator(), gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = pair[0];
+                var t0 = ctx.currentTime + pair[1];
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(t0); osc.stop(t0 + 0.18);
+            });
+        } catch (e) { /* audio unavailable — stay silent */ }
+    }
+
     function mergeMessages(incoming) {
-        var known = {};
-        state.msgs.forEach(function (m) { known[_msgKey(m)] = 1; });
-        var added = 0;
+        var byKey = {};
+        state.msgs.forEach(function (m) { byKey[_msgKey(m)] = m; });
+        var added = 0, reactionsChanged = false;
         (incoming || []).forEach(function (m) {
-            if (!known[_msgKey(m)]) { known[_msgKey(m)] = 1; state.msgs.push(m); added++; }
+            var k = _msgKey(m);
+            var existing = byKey[k];
+            if (!existing) {
+                byKey[k] = m; state.msgs.push(m); added++;
+                if (_pingWorthy(m)) _chatPing();
+            } else {
+                // Reactions are server-side aggregate state that changes over a
+                // message's life. mergeMessages used to only ADD new messages,
+                // so a reaction added after we first saw a message never showed
+                // without a full page reload. Reconcile the authoritative server
+                // reactions onto the copy we already hold, then re-assert our own
+                // just-sent reaction until slskd echoes it (avoids a flicker
+                // where the optimistic chip vanishes then returns).
+                var was = JSON.stringify(existing.reactions || []);
+                existing.reactions = m.reactions || [];
+                _reapplyPendingReactions(existing);
+                if (JSON.stringify(existing.reactions || []) !== was) reactionsChanged = true;
+            }
         });
         if (added) {
             state.msgs.sort(function (a, b) {
                 return String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
             });
         }
+        state.pingArmed = true;   // the archive is in; from here on, pings are real
+        // renderMessages skips a repaint when the newest-timestamp+count is
+        // unchanged — a reaction change moves neither, so force the repaint.
+        if (reactionsChanged) state.lastStamp = null;
         return added;
+    }
+
+    // Add `me` to a message's reaction chip for `emoji` (creating it if new).
+    function _addReactor(m, emoji, me) {
+        m.reactions = m.reactions || [];
+        var chip = null;
+        m.reactions.forEach(function (r) { if (r.e === emoji) chip = r; });
+        if (!chip) {
+            m.reactions.push({ e: emoji, n: 1, users: me ? [me] : [] });
+        } else if (me && (chip.users || []).indexOf(me) === -1) {
+            chip.users = (chip.users || []).concat([me]);
+            chip.n = (chip.n || 0) + 1;
+        }
+    }
+
+    // Re-assert self-reactions the server hasn't echoed yet; drop each from the
+    // pending set once the authoritative copy contains it.
+    function _reapplyPendingReactions(m) {
+        var me = state.selfName;
+        if (!me) return;
+        var k = _msgKey(m);
+        Object.keys(state.pendingReactions).forEach(function (pk) {
+            var sep = pk.lastIndexOf('|');
+            if (pk.slice(0, sep) !== k) return;
+            var emoji = pk.slice(sep + 1);
+            var chip = null;
+            (m.reactions || []).forEach(function (r) { if (r.e === emoji) chip = r; });
+            if (chip && (chip.users || []).indexOf(me) > -1) {
+                delete state.pendingReactions[pk];      // server confirmed it
+            } else {
+                _addReactor(m, emoji, me);              // keep it visible meanwhile
+            }
+        });
     }
 
     function loadOlder() {
@@ -1651,6 +2173,7 @@
                 renderUsers(res.body.users);
                 _ingestProtocol(res.body.protocol);
                 _sendJoinBeacon();
+                _jbxWatchdog();   // drive the queue even with the panel closed
             });
         } else {
             work = getJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser))
@@ -1687,13 +2210,16 @@
         if (state.room && state.room !== nextRoom) {
             _jbxTuneOut();               // BEFORE the flip: the off event goes to the OLD room
             state.jukebox.lastRendered = '';
+            state.jukebox.nowSeen = null;   // new room, new event stream, new clock base
             state.pinsOpen = false;
             state.pollDismissedAt = null;
         }
         state.room = nextRoom;
+        state.thread = null;         // threads are per-room (and home-room only)
         state.topicEditing = false;
         state.typing = {};
         state.typingArmedAt = Date.now() + 2000;   // archive replay isn't live typing
+        state.pingArmed = false;                   // ...and archive mentions aren't new pings
         renderTyping();
         renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
@@ -1851,7 +2377,18 @@
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
         var payload = { message: text };
-        if (state.view === 'room') payload.room = state.room || '';
+        if (state.view === 'room') {
+            payload.room = state.room || '';
+            // Only the SoulSync room carries channel/thread tags — a message in
+            // any other room stays a plain room message.
+            if (_chanRoom()) {
+                payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
+                if (state.thread) {
+                    payload.thread = state.thread.id;
+                    payload.thread_name = state.thread.name || '';
+                }
+            }
+        }
         var sentReply = null;
         if (state.view === 'room' && state.replyTo) {
             payload.reply = state.replyTo;
@@ -1956,6 +2493,8 @@
                 }
                 return;
             }
+            t = e.target.closest('[data-chat-file-save]');
+            if (t) { _saveFileToLibrary(t); return; }
             t = e.target.closest('[data-chat-attach-btn]');
             if (t) { toggleAttachPanel(); return; }
             t = e.target.closest('[data-chat-spoiler]');
@@ -1980,6 +2519,37 @@
             if (t) { pickMention(t.getAttribute('data-chat-mention-pick')); return; }
             t = e.target.closest('[data-chat-settings-btn]');
             if (t) { openSettings(); return; }
+            // ── Discord shell: channel switch, category collapse, DM puck ──
+            t = e.target.closest('[data-chat-thread]');
+            if (t) {
+                openThread(t.getAttribute('data-chat-thread'),
+                           t.getAttribute('data-chat-thread-name'));
+                return;
+            }
+            t = e.target.closest('[data-chat-thread-start]');
+            if (t) {
+                openThread(t.getAttribute('data-chat-thread-start'),
+                           t.getAttribute('data-chat-thread-title') || 'Thread');
+                return;
+            }
+            t = e.target.closest('[data-chat-thread-close]');
+            if (t) { closeThread(); return; }
+            t = e.target.closest('[data-chat-chan]');
+            if (t) { switchChannel(t.getAttribute('data-chat-chan')); return; }
+            t = e.target.closest('[data-chat-cat]');
+            if (t) {
+                var cat = t.getAttribute('data-chat-cat');
+                state.chanCatClosed[cat] = !state.chanCatClosed[cat];
+                renderChannels();
+                return;
+            }
+            t = e.target.closest('[data-chat-guild-dm]');
+            if (t) {
+                // Jump to the most recent conversation; otherwise just surface the list.
+                var first = (state.convos || [])[0];
+                if (first && (first.username || first.name)) openPm(first.username || first.name);
+                return;
+            }
             t = e.target.closest('[data-chat-settings-save]');
             if (t) { saveSettings(); return; }
             t = e.target.closest('[data-chat-settings-cancel]');
@@ -2058,6 +2628,16 @@
             if (t) { sendProtocol('jbx.vote', { o: t.getAttribute('data-chat-jbx-vote') }); return; }
             t = e.target.closest('[data-chat-jbx-pick]');
             if (t) { _jbxPick(state.jukebox.results[parseInt(t.getAttribute('data-chat-jbx-pick'), 10)]); return; }
+            t = e.target.closest('[data-chat-jbx-vpick]');
+            if (t) {
+                _jbxPick(state.jukebox.searchResults[parseInt(t.getAttribute('data-chat-jbx-vpick'), 10)]);
+                _closeJbxSearchModal();
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-searchclose]');
+            if (t) { _closeJbxSearchModal(); return; }
+            var jbxSearchOv = e.target.closest('[data-chat-jbx-search-modal]');
+            if (jbxSearchOv && e.target === jbxSearchOv) { _closeJbxSearchModal(); return; }
             t = e.target.closest('[data-chat-jbx-skip]');
             if (t) { sendProtocol('jbx.skip', { o: t.getAttribute('data-chat-jbx-skip') }); return; }
             t = e.target.closest('[data-chat-jbx-unsub]');
@@ -2195,6 +2775,8 @@
         if (form) form.addEventListener('submit', function (e) { e.preventDefault(); send(); });
         var jbxForm = q('[data-chat-jbx-form]');
         if (jbxForm) jbxForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSubmit(); });
+        var jbxSearchForm = q('[data-chat-jbx-searchform]');
+        if (jbxSearchForm) jbxSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSearchModalSubmit(); });
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -2653,10 +3235,36 @@
         return CP.electCoordinator(pool) === state.selfName;
     }
 
+    // Track WHEN WE saw a now-track start, so elapsed is measured on our own
+    // clock instead of the DJ's. `at` is the publisher's wall clock, and a
+    // client whose clock runs minutes fast used to read every track as long
+    // overdue — if that client was the DJ it advanced immediately and raced
+    // through the whole queue. `at` is now only consulted when we JOIN
+    // mid-track (the one case where we genuinely need someone else's offset).
+    function _jbxNoteNow(now) {
+        if (!now) { state.jukebox.nowSeen = null; return; }
+        var s = state.jukebox.nowSeen;
+        if (s && s.id === now.id) return;                  // already timing it
+        var base = 0;
+        if (!s && typeof now.at === 'number') {
+            // Cold open: we joined with something already playing — trust `at`
+            // for the starting offset (clamped; a wild clock reads as 0).
+            var d = Math.floor(Date.now() / 1000 - now.at);
+            if (d > 0 && d < 86400) base = d;
+        }
+        // A handoff we watched happen started NOW, by our clock. No skew.
+        state.jukebox.nowSeen = { id: now.id, localStart: Date.now(), base: base };
+    }
+
     function _jbxElapsed(now) {
-        if (!now || typeof now.at !== 'number') return null;
-        var s = Math.floor(Date.now() / 1000 - now.at);
-        return (s >= 0 && s < 86400) ? s : null;
+        if (!now) return null;
+        var s = state.jukebox.nowSeen;
+        if (s && s.id === now.id) {
+            return s.base + Math.floor((Date.now() - s.localStart) / 1000);
+        }
+        if (typeof now.at !== 'number') return null;
+        var d = Math.floor(Date.now() / 1000 - now.at);
+        return (d >= 0 && d < 86400) ? d : null;
     }
 
     function _fmtSecs(s) {
@@ -2692,14 +3300,41 @@
         return Math.max(1, Math.ceil(n / 2));
     }
 
+    function _jbxHasListeners() {
+        // Is anyone actually listening? Counts ourself the instant we tune in
+        // (before our own jbx.tune echoes back). Gates auto-DJ so an unwatched
+        // room never generates an endless stream of tracks nobody hears.
+        if (state.jukebox.tunedIn) return true;
+        var CP = window.ChatProtocol;
+        return !!(CP && Object.keys(CP.reduceTuned(_roomEvents())).length);
+    }
+
     function renderJukebox() {
         var panel = q('[data-chat-jukebox]');
         if (!panel) return;
         var st = _jbxState();
         var now = st.now;
+        _jbxNoteNow(now);             // same clock base the watchdog uses
         var elapsed = _jbxElapsed(now);
         var effD = _jbxEffDuration(now);
         var ended = !!(now && effD && elapsed !== null && elapsed > effD + 5);
+        // Display honesty (Boulder): the shared now-event can scroll out of the
+        // bounded protocol log (busy room / long track), or a wrong duration
+        // can flag 'ended' while the audio is genuinely still playing — either
+        // way the panel would flip to 'Nothing playing' over a live track.
+        // If our own player is actively playing, keep showing that track.
+        if ((!now || ended) && state.jukebox.tunedIn && state.jukebox.playerAlive &&
+                state.jukebox.player && state.jukebox.playingNow) {
+            try {
+                var _ps = state.jukebox.player.getPlayerState();
+                if (_ps === 1 || _ps === 2 || _ps === 3) {   // playing / paused / buffering
+                    now = state.jukebox.playingNow;
+                    elapsed = _jbxElapsed(now);
+                    effD = _jbxEffDuration(now);
+                    ended = false;
+                }
+            } catch (e) { /* player mid-teardown */ }
+        }
         // the player follows the ROOM, not the panel — a tuned-in listener
         // reading PMs must still hear the DJ's advances (panel merely hides)
         _jbxSyncPlayer(now && !ended ? now : null);
@@ -2777,11 +3412,20 @@
                                 : '') +
                         '</div>';
                 } else {
-                    // tuned-in users keep their exit even between tracks
-                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' +
-                        (st.queue.length ? 'Waiting for the next track…'
-                                         : 'Nothing playing — add a song above and get the room voting.') +
-                        '</div>' +
+                    // tuned-in users keep their exit even between tracks.
+                    // Auto-DJ needs something to sound like: with no now-playing
+                    // and nothing in the room's history it has no seed to search
+                    // from, so say that instead of looking silently broken.
+                    var idleMsg;
+                    if (st.queue.length) {
+                        idleMsg = 'Waiting for the next track…';
+                    } else if (st.radio && !(st.history && st.history.length)) {
+                        idleMsg = 'Auto-DJ is on, but it needs a starting point — ' +
+                                  'add one song and it takes over from there.';
+                    } else {
+                        idleMsg = 'Nothing playing — add a song above and get the room voting.';
+                    }
+                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' + idleMsg + '</div>' +
                         (state.jukebox.tunedIn
                             ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>' : '');
                 }
@@ -2796,7 +3440,7 @@
                             '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
                             '<span class="chat-jbx-meta">' +
                                 (e.id === nextId ? '<b class="chat-jbx-next">up next</b> · ' : '') +
-                                (e.auto ? '📻 auto · ' : '') +
+                                (e.auto ? '📻 ' + (e.why ? esc(e.why) : 'auto') + ' · ' : '') +
                                 (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
                         '</div>' +
                         '<button class="chat-jbx-vote" type="button" data-chat-jbx-vote="' + attr(e.id) + '"' +
@@ -2860,8 +3504,15 @@
     // tab, network), ANY capable client kicks the queue after 45s — a rare
     // double-start converges (latest now wins, same track either way).
     function _jbxWatchdog() {
-        if (!state.jukebox.open) return;
+        // Drives the shared queue whenever we're viewing a room — NOT gated on
+        // the jukebox panel being open, so the elected DJ advances the room
+        // even with the panel closed (else the queue stalled until a 45s
+        // starvation fallback, or froze if the DJ never opened the panel).
+        // Called from the 5s panel timer AND the 4s room refresh; both are
+        // already behind pageVisible, so a backgrounded tab never DJs.
+        if (state.view !== 'room') return;
         var st = _jbxState();
+        _jbxNoteNow(st.now);          // stamp handoffs on OUR clock (skew guard)
         var elapsed = _jbxElapsed(st.now);
         // A tuned-in client asks the PLAYER for the truth — pasted links have
         // no duration (oEmbed doesn't give one), and the iframe's ENDED event
@@ -2877,7 +3528,10 @@
         var stale = !st.now || playerEnded || skipped ||
             (effD && elapsed !== null && elapsed > effD + 8) ||
             (!effD && elapsed !== null && elapsed > 900);   // untuned + unknown length: 15-min cap
-        if (!st.queue.length && st.radio && _jbxIsDj()) _jbxAutoQueue(st);
+        // Radio only refills for an audience — an empty, unwatched room must
+        // not spin up an endless YouTube stream nobody hears. (Advancing an
+        // EXISTING queue below is unconditional: a finite queue just drains.)
+        if (!st.queue.length && st.radio && _jbxIsDj() && _jbxHasListeners()) _jbxAutoQueue(st);
         if (!st.queue.length || !stale) { state.jukebox.starvedAt = 0; return; }
         if (_jbxIsDj()) { _jbxAdvance(st); return; }
         if (!state.jukebox.starvedAt) {
@@ -2896,22 +3550,50 @@
         if (!seed || !seed.ti) return;
         state.jukebox.lastAutoAt = Date.now();
         // strip (Official Video)-style noise so the search finds neighbors
-        var qtext = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
-            .replace(/\s+/g, ' ').trim().slice(0, 150);
-        if (!qtext) return;
+        // Video ids we must not repeat, plus the artist/title STRINGS the room
+        // just heard — the server uses those to steer away from what's been on.
         var avoid = {};
-        if (st.now) avoid[st.now.id] = 1;
-        (st.history || []).forEach(function (h) { avoid[h.id] = 1; });
-        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
-            if (!res.ok) return;                   // paste-only servers: radio just idles
-            var pick = (res.body.results || []).filter(function (r) {
-                return r && r.id && !avoid[r.id];
-            })[0];
-            if (!pick) return;
-            var p = { id: pick.id, ti: pick.title, a: 1 };
-            if (pick.duration) p.d = pick.duration;
-            sendProtocol('jbx.sub', p);
+        var avoidText = [];
+        if (st.now) { avoid[st.now.id] = 1; avoidText.push(st.now.ti || ''); }
+        (st.history || []).forEach(function (h) {
+            avoid[h.id] = 1;
+            if (h.ti) avoidText.push(h.ti);
         });
+        // Send the raw titles too — the server splits "Artist - Track" itself.
+        avoidText = avoidText.concat(avoidText.map(function (t) {
+            var i = String(t).indexOf(' - ');
+            return i > 0 ? String(t).slice(0, i) : '';
+        })).filter(Boolean).slice(0, 80);
+
+        var fallbackQ = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
+            .replace(/\s+/g, ' ').trim().slice(0, 150);
+
+        function _queueFrom(qtext, why) {
+            if (!qtext) return;
+            postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+                if (!res.ok) return;               // paste-only servers: radio idles
+                var pick = (res.body.results || []).filter(function (r) {
+                    return r && r.id && !avoid[r.id];
+                })[0];
+                if (!pick) return;
+                var p = { id: pick.id, ti: pick.title, a: 1 };
+                if (pick.duration) p.d = pick.duration;
+                if (why) p.w = String(why).slice(0, 60);   // "similar to X" credit
+                sendProtocol('jbx.sub', p);
+            });
+        }
+
+        // Ask the radio brain for a genuinely DIFFERENT next track (Last.fm
+        // similar-tracks → similar-artists → the local graph). Only if it has
+        // nothing do we fall back to the old behaviour of re-searching this
+        // track's title, which tends to surface the same song again.
+        postJSON('/api/chat/jukebox/radio', { title: seed.ti, avoid: avoidText })
+            .then(function (res) {
+                var q = res.ok && res.body && res.body.query;
+                if (q) _queueFrom(q, res.body.why);
+                else _queueFrom(fallbackQ, '');
+            })
+            .catch(function () { _queueFrom(fallbackQ, ''); });
     }
 
     function _jbxAdvance(st) {
@@ -2965,6 +3647,7 @@
         }
         state.jukebox.player = null;
         state.jukebox.playingId = null;
+        state.jukebox.playingNow = null;
         state.jukebox.playerAlive = false;
         var host = q('[data-chat-jbx-player]');
         if (host) { host.innerHTML = ''; host.hidden = true; }
@@ -2986,6 +3669,7 @@
             host.hidden = false;
             host.innerHTML = '<div data-chat-jbx-yt></div>';
             state.jukebox.playingId = now.id;
+            state.jukebox.playingNow = now;
             state.jukebox.player = new window.YT.Player(host.firstChild, {
                 width: '100%', height: '158', videoId: now.id,
                 playerVars: { autoplay: 1, start: offset, rel: 0, playsinline: 1 },
@@ -3000,6 +3684,7 @@
             });
         } else if (state.jukebox.playingId !== now.id && state.jukebox.playerAlive) {
             state.jukebox.playingId = now.id;
+            state.jukebox.playingNow = now;
             try {
                 state.jukebox.player.loadVideoById({ videoId: now.id, startSeconds: offset });
             } catch (e) { _jbxTuneOut(); }
@@ -3007,9 +3692,12 @@
     }
 
     function _jbxOnPlayerState(e) {
-        // ENDED (0): the tuned-in DJ advances the room. Non-DJs just wait —
-        // their player moves when the DJ's jbx.now arrives.
-        if (e && e.data === 0 && _jbxIsDj()) _jbxAdvance(null);
+        // ENDED (0): drop the display fallback so the panel can honestly show
+        // 'waiting for the next track', and (if we're the DJ) advance the room.
+        if (e && e.data === 0) {
+            state.jukebox.playingNow = null;
+            if (_jbxIsDj()) _jbxAdvance(null);
+        }
     }
 
     function _jbxSubmit() {
@@ -3028,21 +3716,81 @@
                 return;
             }
             var results = res.body.results;
+            if (resHost) { resHost.hidden = true; resHost.innerHTML = ''; }
             if (results.length === 1) {                 // pasted link → straight in
                 _jbxPick(results[0]);
                 return;
             }
-            state.jukebox.results = results;
-            if (resHost) resHost.innerHTML = results.map(function (r, i) {
-                return '<button class="chat-jbx-result" type="button" data-chat-jbx-pick="' + i + '">' +
-                    '<span class="chat-jbx-title">' + esc(r.title || r.id) + '</span>' +
-                    '<span class="chat-jbx-meta">' + esc(r.channel || '') +
-                        (r.duration ? ' · ' + _fmtSecs(r.duration) : '') + '</span>' +
-                '</button>';
-            }).join('');
+            _openJbxSearchModal(results, qtext);         // a search → the rich picker
         }).catch(function () {
             state.jukebox.resolving = false;
             if (resHost) resHost.innerHTML = '<div class="chat-jbx-meta">Lookup failed — try again.</div>';
+        });
+    }
+
+    // ── jukebox YouTube search modal (search-page video-card look) ──────
+    function _fmtViews(n) {
+        n = Number(n) || 0;
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n ? String(n) : '';
+    }
+
+    function _jbxSearchCards(results) {
+        return (results || []).map(function (r, i) {
+            var views = _fmtViews(r.views);
+            return '<button class="chat-jbx-vcard" type="button" data-chat-jbx-vpick="' + i + '">' +
+                '<div class="chat-jbx-vthumb">' +
+                    '<img src="' + attr(_jbxThumb(r.id)) + '" alt="" loading="lazy">' +
+                    '<span class="chat-jbx-vplay">▶</span>' +
+                    (r.duration ? '<span class="chat-jbx-vdur">' + _fmtSecs(r.duration) + '</span>' : '') +
+                '</div>' +
+                '<div class="chat-jbx-vinfo">' +
+                    '<div class="chat-jbx-vtitle" title="' + attr(r.title || r.id) + '">' + esc(r.title || r.id) + '</div>' +
+                    '<div class="chat-jbx-vchannel">' + esc(r.channel || '') +
+                        (views ? ' · ' + views + ' views' : '') + '</div>' +
+                '</div>' +
+            '</button>';
+        }).join('');
+    }
+
+    function _openJbxSearchModal(results, query) {
+        var ov = q('[data-chat-jbx-search-modal]');
+        if (!ov) { _jbxPick(results[0]); return; }   // no modal in DOM → graceful fallback
+        state.jukebox.searchResults = results;
+        var grid = q('[data-chat-jbx-searchgrid]');
+        if (grid) grid.innerHTML = _jbxSearchCards(results) ||
+            '<div class="chat-jbx-meta">Nothing found — try different words or paste a link.</div>';
+        var inp = q('[data-chat-jbx-searchinput]');
+        if (inp) inp.value = query || '';
+        ov.hidden = false;
+    }
+
+    function _closeJbxSearchModal() {
+        var ov = q('[data-chat-jbx-search-modal]');
+        if (ov) ov.hidden = true;
+        state.jukebox.searchResults = [];
+    }
+
+    function _jbxSearchModalSubmit() {
+        var inp = q('[data-chat-jbx-searchinput]');
+        var grid = q('[data-chat-jbx-searchgrid]');
+        if (!inp || state.jukebox.resolving) return;
+        var qtext = String(inp.value || '').trim();
+        if (!qtext) return;
+        state.jukebox.resolving = true;
+        if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Searching…</div>';
+        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+            state.jukebox.resolving = false;
+            var results = (res.ok && res.body.results) || [];
+            state.jukebox.searchResults = results;
+            if (grid) grid.innerHTML = results.length ? _jbxSearchCards(results) :
+                '<div class="chat-jbx-meta">' +
+                esc((res.body && res.body.error) || 'Nothing found — try different words or paste a link.') + '</div>';
+        }).catch(function () {
+            state.jukebox.resolving = false;
+            if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Search failed — try again.</div>';
         });
     }
 

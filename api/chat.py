@@ -181,6 +181,21 @@ def _unwrap_room_messages(messages):
                     continue
             m["message"] = dec["t"]
             m["rich"] = True
+            # Virtual channel tag (Discord-style channels over the one room).
+            # Unknown/absent is fine — the client falls back to #general so a
+            # message is never invisible.
+            _c = dec.get("c")
+            if isinstance(_c, str) and _c.strip():
+                m["chan"] = _c.strip()[:24]
+            # Thread membership: `th` is the parent message key (user|timestamp),
+            # `tn` the display name carried so the sidebar still has a title when
+            # the parent has scrolled out of the loaded archive.
+            _th = dec.get("th")
+            if isinstance(_th, str) and _th.strip():
+                m["th"] = _th.strip()[:160]
+                _tn = dec.get("tn")
+                if isinstance(_tn, str) and _tn.strip():
+                    m["tn"] = _tn.strip()[:80]
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
@@ -215,9 +230,12 @@ def _gif_fetch(url: str, params: dict) -> dict:
 
 
 def _resolve_track_path(db, track_id):
-    """A library track's on-disk path, tried at the usual roots (as-stored,
-    transfer folder, download folder). None when unreachable."""
-    import os as _os
+    """A library track's on-disk path. The DB stores the path as the MEDIA
+    SERVER sees it (e.g. Plex's ``/mnt/musicBackup/...``), which the SoulSync
+    process usually can't open directly — so we hand it to the shared library
+    resolver, the same one the repair/import flows use. It maps the stored
+    path onto SoulSync's actual mounts via ``library.music_paths`` +
+    transfer/download roots (suffix-matching). None when unreachable."""
     conn = None
     try:
         conn = db._get_connection()
@@ -231,20 +249,13 @@ def _resolve_track_path(db, track_id):
     fp = row["file_path"] if row else None
     if not fp:
         return None
-    candidates = [fp]
     try:
-        base = str(_config_get("soulseek.transfer_path", "") or "")
-        if base:
-            candidates.append(_os.path.join(base, fp))
-        dl = str(_config_get("soulseek.download_path", "") or "")
-        if dl:
-            candidates.append(_os.path.join(dl, fp))
+        from config.settings import config_manager
+        from core.library.path_resolver import resolve_library_file_path
+        return resolve_library_file_path(str(fp), config_manager=config_manager)
     except Exception:
-        logger.debug("chat: path candidates from config failed", exc_info=True)
-    for c in candidates:
-        if c and _os.path.isfile(c):
-            return c
-    return None
+        logger.debug("chat: library path resolve failed", exc_info=True)
+        return None
 
 
 def _filepost_upload(api_key, name, stream, expiry=None):
@@ -259,6 +270,47 @@ def _filepost_upload(api_key, name, stream, expiry=None):
                       data=data, timeout=120)
     r.raise_for_status()
     return r.json()
+
+
+_AUDIO_EXTS = (".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav",
+               ".wma", ".alac", ".aiff", ".ape")
+
+
+def _is_safe_filepost_url(url: str) -> bool:
+    """SSRF guard: only https links on filepost.dev (or a subdomain) may be
+    fetched server-side. Everything else is refused before any network call."""
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(str(url or ""))
+        host = (p.hostname or "").lower()
+        return p.scheme == "https" and (host == "filepost.dev" or host.endswith(".filepost.dev"))
+    except Exception:
+        return False
+
+
+def _fetch_url_to_file(url, dest_path, max_bytes):
+    """One seam for the file fetch (monkeypatched in tests). Streams the URL
+    to a hidden temp file next to dest, enforcing the byte cap mid-stream, then
+    atomically renames into place — a partial download is never left where the
+    auto-importer would pick it up. Raises on any failure / oversize."""
+    import os as _os
+    import requests
+    tmp = dest_path + ".part"
+    got = 0
+    with requests.get(url, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(tmp, "wb") as fh:
+            for chunk in r.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                got += len(chunk)
+                if got > max_bytes:
+                    fh.close()
+                    _os.remove(tmp)
+                    raise ValueError("file exceeds the size cap")
+                fh.write(chunk)
+    _os.replace(tmp, dest_path)
+    return got
 
 
 _YT_ID_RE = _re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -643,8 +695,10 @@ def create_blueprint() -> Blueprint:
             db = _db()
             path = _resolve_track_path(db, track_id) if db is not None else None
             if not path:
-                return jsonify({"error": "That track's file isn't reachable "
-                                         "from SoulSync"}), 404
+                return jsonify({"error": "Can't reach that track's file — it's "
+                                         "stored at your media server's path. Add "
+                                         "where SoulSync sees your music under "
+                                         "Settings → Library → Music Paths."}), 404
             import os as _os
             size = _os.path.getsize(path)
             if size > max_bytes:
@@ -679,6 +733,62 @@ def create_blueprint() -> Blueprint:
         mime = _mt.guess_type(name)[0] or ""
         return jsonify({"ok": True, "url": url, "name": name,
                         "size": size, "mime": mime})
+
+    @bp.route("/api/chat/files/import", methods=["POST"])
+    def chat_files_import():
+        """Save a shared audio file into YOUR library: fetch the filepost link
+        into the auto-import staging folder, where the import pipeline picks it
+        up (automatically if Auto-Import is on, else it's waiting on the Import
+        page). Audio only — video needs library matching, a separate flow.
+        Admin-only: it writes a file into your library's intake folder."""
+        import os as _os
+        if not bool(getattr(g, "is_admin", True)):
+            return jsonify({"error": "Saving to the library is admin-only"}), 403
+        body = request.get_json(silent=True) or {}
+        url = str(body.get("url") or "").strip()
+        name = _os.path.basename(str(body.get("name") or "").strip())
+        mime = str(body.get("mime") or "").lower()
+
+        if not _is_safe_filepost_url(url):
+            return jsonify({"error": "Only filepost.dev links can be saved"}), 400
+        is_audio = mime.startswith("audio/") or name.lower().endswith(_AUDIO_EXTS)
+        if not is_audio:
+            return jsonify({"error": "Only audio files can be saved to your "
+                                     "library right now"}), 400
+        if not name or name in (".", ".."):
+            name = "shared-track"
+            for ext in _AUDIO_EXTS:
+                if mime.endswith(ext.lstrip(".")):
+                    name += ext
+                    break
+
+        try:
+            from core.imports.paths import docker_resolve_path
+            staging = docker_resolve_path(
+                str(_config_get("import.staging_path", "./Staging") or "./Staging"))
+            _os.makedirs(staging, exist_ok=True)
+        except Exception as e:
+            logger.exception("chat: staging dir unavailable")
+            return jsonify({"error": "Couldn't reach the import staging folder: %s" % e}), 500
+
+        dest = _os.path.join(staging, name)
+        if _os.path.exists(dest):
+            return jsonify({"error": "A file named %r is already waiting to "
+                                     "import" % name}), 409
+
+        # 60MB ceiling — a little above the 50MB filepost upload cap, room for
+        # the encoding overhead a re-hosted file can carry.
+        max_bytes = 60 * 1024 * 1024
+        try:
+            got = _fetch_url_to_file(url, dest, max_bytes)
+        except Exception as e:
+            logger.warning("chat: library import fetch failed: %s", e)
+            return jsonify({"error": "Couldn't fetch that file (%s)" % e}), 502
+
+        auto = bool(_config_get("auto_import.enabled", False))
+        logger.info("chat: saved shared file to staging (%s, %d bytes, auto=%s)",
+                    name, got, auto)
+        return jsonify({"ok": True, "name": name, "bytes": got, "auto_import": auto})
 
     @bp.route("/api/chat/rooms", methods=["GET"])
     def chat_rooms():
@@ -926,8 +1036,173 @@ def create_blueprint() -> Blueprint:
                 "title": str(getattr(v, "title", "") or "")[:120],
                 "channel": str(getattr(v, "channel", "") or "")[:80],
                 "duration": int(getattr(v, "duration", 0) or 0),
+                "views": int(getattr(v, "view_count", 0) or 0),
             })
         return jsonify({"results": results})
+
+    # ── Auto-DJ radio brain ────────────────────────────────────────────────
+    # The old radio searched YouTube for the PLAYING TRACK'S OWN TITLE, so the
+    # top surviving hit was usually the same song again (another upload, a live
+    # cut, a cover). This picks a genuinely different NEXT track using the
+    # similarity data SoulSync already owns, best source first:
+    #   1. Last.fm similar TRACKS  — a real track-level radio graph
+    #   2. Last.fm similar ARTISTS — neighbour artist, let YouTube pick the song
+    #   3. the local similar_artists graph (built by watchlist scans)
+    # `avoid` (artist/track strings the room heard recently) is honoured at
+    # every tier, so radio keeps moving instead of circling. Returns a search
+    # QUERY; the client resolves it through /jukebox/resolve like any add.
+    _RADIO_NOISE = _re.compile(
+        r"\((?:[^)]*\b(?:official|lyric|lyrics|audio|video|visualizer|hd|4k|mv|remaster[^)]*)\b[^)]*)\)"
+        r"|\[[^\]]*\]", _re.I)
+
+    # Plenty of what gets pasted isn't a song at all — mixes, DJ sets, genre
+    # essays ("this is what deep ambient techno is supposed to feel like |
+    # PART II"). Those have no artist to branch from, but they DO have a genre,
+    # which is the better thing to follow anyway.
+    _RADIO_MIXY = _re.compile(
+        r"\b(mix|mixtape|set|dj\s*set|liveset|live\s*set|playlist|compilation|"
+        r"session|sessions|radio|episode|ep\.?\s*\d|vol\.?\s*\d|part\s+\w+|pt\.?\s*\d|"
+        r"hour|hours|minutes|continuous|mixed\s+by|selected\s+by|full\s+album)\b", _re.I)
+    # phrase-y titles that are describing a feeling/genre, not naming a track
+    _RADIO_ESSAY = _re.compile(
+        r"\b(this is what|sounds? like|feel like|feels like|music (?:to|for)|"
+        r"songs? (?:to|for)|when you|that make)\b", _re.I)
+    _RADIO_STOP = _re.compile(
+        r"\b(this|is|what|are|the|a|an|of|to|for|and|you|your|when|it|its|"
+        r"supposed|feel|feels|like|sounds?|music|songs?|track|tracks|"
+        r"mix|mixtape|set|playlist|compilation|session|sessions|radio|"
+        r"part|pt|vol|volume|episode|full|album|best|top|new|old|dj|"
+        r"hour|hours|minute|minutes|continuous|official|video|audio|"
+        # roman numerals trailing a series title ("… | PART II") would other-
+        # wise poison the tag lookup ("deep ambient techno II" matches nothing)
+        r"i{1,3}|iv|v|vi{1,3}|ix|x)\b", _re.I)
+
+    def _radio_parse(raw):
+        """('track'|'vibe', artist, track, vibe) from a YouTube-style title.
+
+        'track' → a real song we can branch from by artist/track.
+        'vibe'  → a mix/genre video; follow its GENRE instead.
+        """
+        t = _RADIO_NOISE.sub(" ", str(raw or ""))
+        t = _re.sub(r"\s+", " ", t).strip()
+        if not t:
+            return "vibe", "", "", ""
+        mixy = bool(_RADIO_MIXY.search(t) or _RADIO_ESSAY.search(t))
+        # Only a dash separates artist from track. '|' and '~' are YouTube title
+        # decoration ("... | PART II") and must never be read as an artist.
+        if not mixy:
+            for sep in (" - ", " – ", " — "):
+                if sep in t:
+                    left, right = t.split(sep, 1)
+                    left, right = left.strip()[:80], right.strip()[:80]
+                    # An artist name is short. A sentence on the left means this
+                    # is a phrase, not "Artist - Track".
+                    if left and right and len(left) <= 40 and len(left.split()) <= 6:
+                        return "track", left, right, ""
+                    break
+        # Vibe: strip the filler words and keep the genre-ish remainder.
+        words = [w for w in _re.split(r"[^A-Za-z0-9']+", t) if w]
+        keep = [w for w in words if not _RADIO_STOP.fullmatch(w) and not w.isdigit()]
+        return "vibe", "", "", " ".join(keep[:6])[:80]
+
+    @bp.route("/api/chat/jukebox/radio", methods=["POST"])
+    def chat_jukebox_radio():
+        if not _can_send():
+            return jsonify({"error": "Chat sending is admin-only on this server"}), 403
+        body = request.get_json(silent=True) or {}
+        kind, artist, track, vibe = _radio_parse(body.get("title"))
+        avoid = set()
+        for x in (body.get("avoid") or [])[:80]:
+            s = str(x or "").strip().lower()
+            if s:
+                avoid.add(s)
+        if not artist and not track and not vibe:
+            return jsonify({"query": None, "why": "no seed"})
+
+        def _fresh(a, t=""):
+            """Skip anything the room just heard (either field matching)."""
+            al, tl = str(a or "").strip().lower(), str(t or "").strip().lower()
+            if al and al in avoid:
+                return False
+            if tl and tl in avoid:
+                return False
+            return bool(al or tl)
+
+        lastfm = None
+        try:
+            from core.lastfm_client import LastFMClient
+            from config.settings import config_manager as _cfg
+            _key = _cfg.get("lastfm.api_key", "")
+            if _key:
+                lastfm = LastFMClient(api_key=_key)
+        except Exception:   # noqa: BLE001 - radio degrades, never breaks the room
+            logger.debug("chat radio: lastfm unavailable", exc_info=True)
+
+        # 0) VIBE seeds (a mix, a DJ set, a "this is what X feels like" video).
+        # There's no artist to branch from, but the GENRE is the better thread
+        # to pull anyway: ask Last.fm who defines that tag and play them.
+        if kind == "vibe" and vibe:
+            if lastfm:
+                try:
+                    for cand in (lastfm.get_tag_top_artists(vibe, limit=40) or []):
+                        ca = str(cand.get("name") or "")
+                        if _fresh(ca):
+                            return jsonify({"query": ca, "why": "%s" % vibe})
+                except Exception:   # noqa: BLE001
+                    logger.debug("chat radio: tag lookup failed", exc_info=True)
+            # Unknown tag (or no Last.fm): stay in the same lane by searching
+            # for more of the same KIND of thing rather than the same video.
+            return jsonify({"query": "%s mix" % vibe, "why": vibe})
+
+        # 1) similar TRACKS — the closest thing to a real station
+        if lastfm and artist and track:
+            try:
+                for cand in (lastfm.get_similar_tracks(artist, track, limit=30) or []):
+                    ca = str((cand.get("artist") or {}).get("name")
+                             if isinstance(cand.get("artist"), dict) else cand.get("artist") or "")
+                    ct = str(cand.get("name") or cand.get("title") or "")
+                    if _fresh(ca, ct):
+                        return jsonify({"query": ("%s %s" % (ca, ct)).strip(),
+                                        "why": "similar to %s" % (track or artist)})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: similar-tracks failed", exc_info=True)
+
+        # 2) similar ARTISTS — hand YouTube a neighbour and let it choose
+        if lastfm and artist:
+            try:
+                for cand in (lastfm.get_similar_artists(artist, limit=30) or []):
+                    ca = str(cand.get("name") or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "similar to %s" % artist})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: similar-artists failed", exc_info=True)
+
+        # 3) the local similar-artist graph the watchlist scan already built.
+        # It's keyed by the user's OWN artist ids, so join through artists to
+        # match on the playing artist's name (only hits when they own them).
+        if artist:
+            conn = None
+            try:
+                conn = _db()._get_connection()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT sa.similar_artist_name FROM similar_artists sa "
+                    "JOIN artists a ON a.id = sa.source_artist_id "
+                    "WHERE LOWER(a.name) = LOWER(?) "
+                    "ORDER BY sa.similarity_rank LIMIT 30",
+                    (artist,),
+                )
+                for row in cur.fetchall():
+                    ca = str(row[0] or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "similar to %s" % artist})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: local graph unavailable", exc_info=True)
+            finally:
+                if conn:
+                    conn.close()
+
+        return jsonify({"query": None, "why": "no similar data"})
 
     @bp.route("/api/chat/room/history", methods=["GET"])
     def chat_room_history():
@@ -985,6 +1260,21 @@ def create_blueprint() -> Blueprint:
         if fmeta:
             extra = dict(extra or {})
             extra["f"] = fmeta
+        # Virtual channel tag. Slug-validated here so a hostile client can't
+        # stuff arbitrary text into the envelope; the default channel is left
+        # untagged so old clients (and vanilla Soulseek) read it as #general.
+        chan = str(body.get("chan") or "").strip().lower()[:24]
+        if chan and chan != "general" and _re.fullmatch(r"[a-z0-9][a-z0-9-]*", chan):
+            extra = dict(extra or {})
+            extra["c"] = chan
+        # Thread membership (parent message key + carried display name).
+        thread = str(body.get("thread") or "").strip()[:160]
+        if thread:
+            extra = dict(extra or {})
+            extra["th"] = thread
+            tname = str(body.get("thread_name") or "").strip()[:80]
+            if tname:
+                extra["tn"] = tname
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

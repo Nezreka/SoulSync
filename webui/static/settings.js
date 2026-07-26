@@ -1721,6 +1721,10 @@ async function loadSettingsData() {
         const _musicPaths = settings.library?.music_paths || [];
         renderMusicPaths(_musicPaths);
 
+        // Library Organize: preserve the user's casing (default on)
+        const _pcEl = document.getElementById('reorganize-preserve-casing');
+        if (_pcEl) _pcEl.checked = settings.library?.reorganize_preserve_casing !== false;
+
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
@@ -2859,6 +2863,22 @@ async function saveQualityProfile() {
 let _qpAutoImportProfileId = null; // cached so re-renders don't re-fetch
 let _qpProfileRows = [];
 
+/**
+ * Set the Settings-page profile cache AND drop the app-wide one.
+ *
+ * Every acquisition/playlist Quality Profile dropdown reads a module-level
+ * cache in shared-helpers.js that used to live for the whole page. Creating,
+ * renaming or deleting a profile here therefore left every other selector
+ * offering a stale list — a deleted id came back as a 400 and a new profile
+ * stayed invisible until a full reload (R2-11).
+ */
+function _qpSetProfileRows(rows) {
+    _qpProfileRows = rows || [];
+    if (typeof invalidatePlaylistQualityProfiles === 'function') {
+        invalidatePlaylistQualityProfiles();
+    }
+}
+
 function normalizeQualityProfileId(profileId) {
     if (profileId === null || profileId === undefined || profileId === '' || profileId === 0 || profileId === '0') {
         return null;
@@ -2879,7 +2899,7 @@ async function loadCustomQualityProfiles() {
             _qpAutoImportProfileId = normalizeQualityProfileId(aiData.quality_profile_id);
         }
         if (data.success) {
-            _qpProfileRows = data.profiles || [];
+            _qpSetProfileRows(data.profiles);
             renderCustomQualityProfiles(_qpProfileRows);
         }
     } catch (error) {
@@ -3089,7 +3109,7 @@ function qpStartRename(row, profile) {
             });
             const data = await response.json();
             if (data.success) {
-                _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+                _qpSetProfileRows(data.profiles); // keep both caches in sync — see saveCurrentAsQualityProfile
                 renderCustomQualityProfiles(_qpProfileRows);
                 renderQualityProfileManager();
                 showToast(`Renamed to '${newName}'`, 'success');
@@ -3219,7 +3239,7 @@ async function saveCurrentAsQualityProfile(name) {
             // seeing the list from before this profile existed, which is
             // exactly what made a freshly created profile look like it
             // "vanished" / previewed as an unresolvable "this profile".
-            _qpProfileRows = data.profiles || [];
+            _qpSetProfileRows(data.profiles);
             // The tiles already show exactly what was just saved — treat the
             // new profile as the one now being previewed, same as clicking
             // its row would.
@@ -3259,7 +3279,7 @@ async function updateCustomQualityProfile(profileId, name) {
         });
         const data = await response.json();
         if (data.success) {
-            _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+            _qpSetProfileRows(data.profiles); // keep both caches in sync — see saveCurrentAsQualityProfile
             renderCustomQualityProfiles(_qpProfileRows);
             renderQualityProfileManager();
             showToast(`Updated '${name}'`, 'success');
@@ -4590,7 +4610,8 @@ async function saveSettings(quiet = false) {
         },
         library: {
             music_paths: collectMusicPaths(),
-            music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
+            music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
+            reorganize_preserve_casing: document.getElementById('reorganize-preserve-casing')?.checked !== false
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,

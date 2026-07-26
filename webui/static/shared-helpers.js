@@ -1074,19 +1074,34 @@ function playlistDetailsOrganizeCheckboxId(playlistRef) {
     return `playlist-organize-${playlistRef}`;
 }
 
-/** Infer mirrored-playlist API source from a UI playlist / virtual id. */
+/**
+ * The provider a UI playlist / virtual id demonstrably belongs to, or null.
+ *
+ * Only prefixes we actually recognise produce an answer. Everything else —
+ * youtube_*, tidal_*, beatport_*, artist_album_*, library_* … — is genuinely
+ * unknown from the ref alone.
+ */
+function knownPlaylistSourceForRef(playlistRef) {
+    const ref = String(playlistRef || '');
+    if (ref.startsWith('spotify_public_')) return 'spotify_public';
+    if (ref.startsWith('deezer_arl_')) return 'deezer';
+    return null;
+}
+
+/**
+ * Infer mirrored-playlist API source from a UI playlist / virtual id.
+ *
+ * Falls back to 'spotify' because the organize-preference endpoints have always
+ * required a source and treat it as a lookup key. Do NOT use this for the
+ * mirror-resolution `source` hint — there the fabricated 'spotify' is taken as
+ * decisive and can pick the wrong mirror (R2-14); use
+ * `knownPlaylistSourceForRef` instead.
+ */
 function playlistOrganizeSourceForRef(playlistRef, explicitSource = null) {
     if (explicitSource) {
         return explicitSource;
     }
-    const ref = String(playlistRef || '');
-    if (ref.startsWith('spotify_public_')) {
-        return 'spotify_public';
-    }
-    if (ref.startsWith('deezer_arl_')) {
-        return 'deezer';
-    }
-    return 'spotify';
+    return knownPlaylistSourceForRef(playlistRef) || 'spotify';
 }
 
 /** Map UI playlist ids (e.g. deezer_arl_123) to mirrored-playlist resolve refs. */
@@ -1101,6 +1116,188 @@ function normalizePlaylistOrganizeRef(playlistRef, source = 'spotify') {
     return ref;
 }
 
+let _playlistQualityProfilesPromise = null;
+
+/**
+ * Drop the cached profile list so the next selector re-fetches it.
+ *
+ * Must be called whenever a Quality Profile is created, renamed or deleted.
+ * The cache used to live for the whole page, so after a change in Settings
+ * every dropdown kept offering the old list: a deleted id was posted back and
+ * rejected with 400, and a new profile stayed unusable until a full reload
+ * (R2-11).
+ */
+function invalidatePlaylistQualityProfiles() {
+    _playlistQualityProfilesPromise = null;
+}
+
+async function fetchPlaylistQualityProfiles() {
+    if (!_playlistQualityProfilesPromise) {
+        _playlistQualityProfilesPromise = fetch('/api/quality-profile/custom')
+            .then(res => {
+                if (!res.ok) throw new Error(`Quality profiles: ${res.status}`);
+                return res.json();
+            })
+            .then(data => Array.isArray(data) ? data : (data.profiles || []))
+            .catch(err => {
+                _playlistQualityProfilesPromise = null;
+                throw err;
+            });
+    }
+    return _playlistQualityProfilesPromise;
+}
+
+function playlistQualityProfileSelectHtml(playlistRef, source = 'spotify', compact = false) {
+    const ref = escapeHtml(String(playlistRef || ''));
+    const src = escapeHtml(String(source || 'spotify'));
+    return `
+        <label class="playlist-quality-profile-control ${compact ? 'compact' : ''}" onclick="event.stopPropagation();">
+            <span>Quality Profile</span>
+            <select class="playlist-quality-profile-select" data-playlist-ref="${ref}" data-playlist-source="${src}"
+                onchange="onPlaylistQualityProfileChange(this)">
+                <option value="">Loading…</option>
+            </select>
+        </label>`;
+}
+
+// ── Shared acquisition Quality Profile selector ──────────────────────────────
+//
+// Audit P1-01: the persisted selector above only exists on playlist/mirror
+// surfaces. Every OTHER manual acquisition path — Search, Discover, Library,
+// album, single, top tracks, discography, playlist explorer — had no way to
+// choose a profile, so all of them silently used the global default and the
+// same track got different rules depending on where you clicked.
+//
+// This selector is deliberately NOT persisted: it is the intent for ONE action.
+// It preselects the mirror/watchlist assignment when the surface has one, and
+// the default profile otherwise. The chosen id rides along in the request as
+// `quality_profile_id` and outranks the server-side mirror lookup for that
+// action only.
+
+const ACQUISITION_QUALITY_PROFILE_SELECT_ID = 'acquisition-quality-profile-select';
+
+function acquisitionQualityProfileSelectHtml(selectId = ACQUISITION_QUALITY_PROFILE_SELECT_ID) {
+    const id = escapeHtml(String(selectId));
+    return `
+        <label class="acquisition-quality-profile-control" for="${id}"
+               title="Which Quality Profile this download / wishlist entry must satisfy">
+            <span>Quality Profile</span>
+            <select id="${id}" class="acquisition-quality-profile-select" disabled>
+                <option value="">Loading…</option>
+            </select>
+        </label>`;
+}
+
+// Per-select hydration generation. Two hydrations can be in flight for the SAME
+// select — the modal fires one on open (with a real mirror round-trip) and a
+// caller can immediately request a preselect (no round-trip, so it settles
+// first). Without this guard the slower, older call's continuation ran last and
+// overwrote the user's choice with the mirror/default (R2-05).
+const _acquisitionQualityProfileGeneration = new Map();
+
+/**
+ * Fill an acquisition selector and preselect the effective profile.
+ *
+ * P2-05: a value the server never accepted must never look active. On any
+ * failure the control is disabled and says so, rather than sitting there
+ * showing whatever option happened to be first.
+ */
+async function hydrateAcquisitionQualityProfileSelect(
+    selectId = ACQUISITION_QUALITY_PROFILE_SELECT_ID,
+    { playlistRef = null, source = null, preselectId = null } = {},
+) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const generation = (_acquisitionQualityProfileGeneration.get(selectId) || 0) + 1;
+    _acquisitionQualityProfileGeneration.set(selectId, generation);
+    const isStale = () => _acquisitionQualityProfileGeneration.get(selectId) !== generation;
+    try {
+        // Only a provider we actually recognise may be handed to the mirror
+        // lookup; a guess makes the server pick the wrong mirror (R2-14).
+        const resolvedSource = playlistRef
+            ? (source || knownPlaylistSourceForRef(playlistRef))
+            : null;
+        const [profiles, mirror] = await Promise.all([
+            fetchPlaylistQualityProfiles(),
+            (preselectId == null && playlistRef)
+                ? fetchMirroredPlaylistPreference(playlistRef, resolvedSource)
+                : Promise.resolve(null),
+        ]);
+        if (isStale()) return;
+        if (!profiles.length) {
+            select.innerHTML = '<option value="">No Quality Profiles configured</option>';
+            select.disabled = true;
+            return;
+        }
+        select.innerHTML = profiles.map(profile =>
+            `<option value="${profile.id}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (Default)' : ''}</option>`
+        ).join('');
+
+        // Mirror/watchlist assignment wins over the plain default — but only if
+        // that profile still exists; a deleted one must not silently resolve to
+        // "whatever is first in the list".
+        const wanted = preselectId ?? mirror?.quality_profile_id;
+        const available = profiles.some(profile => String(profile.id) === String(wanted));
+        if (wanted != null && available) {
+            select.value = String(wanted);
+        } else {
+            const fallback = profiles.find(profile => profile.is_default) || profiles[0];
+            select.value = String(fallback.id);
+        }
+        select.disabled = false;
+    } catch (err) {
+        if (isStale()) return;
+        console.warn('Could not load Quality Profiles for this dialog:', err);
+        select.innerHTML = '<option value="">Quality Profiles unavailable — using default</option>';
+        select.disabled = true;
+    }
+}
+
+/**
+ * The chosen profile id, or null when the user has no usable choice.
+ *
+ * null means "server decides" (mirror assignment, then global default), which
+ * is exactly the pre-P1-01 behaviour — so an unavailable selector degrades to
+ * the old contract instead of sending a bogus id.
+ */
+function getAcquisitionQualityProfileId(selectId = ACQUISITION_QUALITY_PROFILE_SELECT_ID) {
+    const select = document.getElementById(selectId);
+    if (!select || select.disabled) return null;
+    const value = parseInt(select.value, 10);
+    return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * Per-download-modal selector markup. Each modal owns its own control keyed by
+ * the (virtual) playlist id, so several open modals cannot fight over one id.
+ */
+function downloadModalQualityProfileSelectId(playlistId) {
+    return `download-quality-profile-${playlistId}`;
+}
+
+function downloadModalQualityProfileSelectHtml(playlistId) {
+    return acquisitionQualityProfileSelectHtml(downloadModalQualityProfileSelectId(playlistId));
+}
+
+function hydrateDownloadModalQualityProfileSelect(playlistId, options = {}) {
+    return hydrateAcquisitionQualityProfileSelect(
+        downloadModalQualityProfileSelectId(playlistId),
+        { playlistRef: playlistId, ...options },
+    );
+}
+
+/** Preselect a profile the user already chose upstream (e.g. in the wishlist modal). */
+function setDownloadModalQualityProfile(playlistId, qualityProfileId) {
+    return hydrateDownloadModalQualityProfileSelect(playlistId, {
+        preselectId: qualityProfileId,
+    });
+}
+
+/** The profile chosen for this download modal, or null for "server decides". */
+function getDownloadModalQualityProfileId(playlistId) {
+    return getAcquisitionQualityProfileId(downloadModalQualityProfileSelectId(playlistId));
+}
+
 function downloadMissingModalOrganizeCheckboxHtml(playlistId) {
     const safeId = String(playlistId).replace(/'/g, "\\'");
     return `
@@ -1108,7 +1305,8 @@ function downloadMissingModalOrganizeCheckboxHtml(playlistId) {
             <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync"
                 onchange="onPlaylistOrganizePreferenceChange('${safeId}', this.checked, playlistOrganizeSourceForRef('${safeId}'))">
             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
-        </label>`;
+        </label>
+        ${playlistQualityProfileSelectHtml(playlistId, playlistOrganizeSourceForRef(playlistId))}`;
 }
 
 function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
@@ -1120,6 +1318,7 @@ function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
                 onchange="onPlaylistOrganizePreferenceChange('${safeRef}', this.checked, '${safeSource}')">
             <span>Organize by playlist</span>
         </label>
+        ${playlistQualityProfileSelectHtml(playlistRef, source)}
     `;
 }
 
@@ -1137,7 +1336,7 @@ function isPlaylistOrganizeEnabled(playlistRef) {
     return downloadMissingCb ? downloadMissingCb.checked : false;
 }
 
-async function fetchMirroredOrganizePreference(playlistRef, source = null) {
+async function fetchMirroredPlaylistPreference(playlistRef, source = null) {
     try {
         const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
         const resolveRef = normalizePlaylistOrganizeRef(playlistRef, resolvedSource);
@@ -1145,10 +1344,135 @@ async function fetchMirroredOrganizePreference(playlistRef, source = null) {
             `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(resolvedSource)}`
         );
         const data = await res.json();
-        return !!(data.found && data.playlist?.organize_by_playlist);
+        return data.found ? data.playlist : null;
     } catch (err) {
-        console.debug('Could not load organize-by-playlist preference:', err);
-        return false;
+        console.debug('Could not load mirrored-playlist preference:', err);
+        return null;
+    }
+}
+
+async function fetchMirroredOrganizePreference(playlistRef, source = null) {
+    const playlist = await fetchMirroredPlaylistPreference(playlistRef, source);
+    return !!playlist?.organize_by_playlist;
+}
+
+/** Put a persisted selector into an explicit, visibly inert unavailable state. */
+function markPlaylistQualityProfileSelectUnavailable(select, message) {
+    select.innerHTML = `<option value="">${escapeHtml(message)}</option>`;
+    select.disabled = true;
+    select.dataset.effectiveProfileId = '';
+    select.title = message;
+}
+
+/**
+ * Fill the PERSISTED (mirror-owned) selectors for one playlist.
+ *
+ * P2-05: this control writes to the server, so it must never display a value the
+ * server does not hold. Three states are now explicit instead of silently
+ * showing option zero:
+ *
+ *  - no mirror row yet  -> disabled, "Mirror playlist first" (nothing to save to)
+ *  - load failed        -> disabled, "unavailable"
+ *  - profile deleted    -> reconciled to the real default rather than list order
+ *
+ * The last value the server confirmed is remembered in
+ * ``dataset.effectiveProfileId`` so a failed save can roll back to it.
+ */
+async function hydratePlaylistQualityProfileSelects(
+    playlistRef,
+    source = null,
+    knownQualityProfileId = null,
+) {
+    const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+    const matching = [...document.querySelectorAll('.playlist-quality-profile-select')].filter(
+        select => String(select.dataset.playlistRef) === String(playlistRef)
+            && String(select.dataset.playlistSource) === String(resolvedSource)
+    );
+    if (!matching.length) return;
+    try {
+        // A caller that already has the mirror's quality_profile_id read it off a
+        // mirror row, so the mirror provably exists — don't spend one resolve
+        // request per card just to re-learn that (the Auto-Sync board renders
+        // dozens at once).
+        const mirrorKnown = knownQualityProfileId != null;
+        const [profiles, playlist] = await Promise.all([
+            fetchPlaylistQualityProfiles(),
+            mirrorKnown
+                ? Promise.resolve({ id: true, quality_profile_id: knownQualityProfileId })
+                : fetchMirroredPlaylistPreference(playlistRef, resolvedSource),
+        ]);
+        if (!profiles.length) {
+            matching.forEach(select =>
+                markPlaylistQualityProfileSelectUnavailable(select, 'No Quality Profiles configured'));
+            return;
+        }
+        if (!playlist?.id) {
+            // Nothing to persist to yet — showing a selected profile here would
+            // be a lie, because changing it cannot be saved.
+            matching.forEach(select =>
+                markPlaylistQualityProfileSelectUnavailable(select, 'Mirror playlist first'));
+            return;
+        }
+
+        const wanted = knownQualityProfileId ?? playlist.quality_profile_id;
+        const available = profiles.some(profile => String(profile.id) === String(wanted));
+        // A profile deleted between two renders must resolve to the default the
+        // server will actually use, not to whichever option sorts first.
+        const effective = available
+            ? wanted
+            : (profiles.find(profile => profile.is_default) || profiles[0]).id;
+
+        matching.forEach(select => {
+            select.innerHTML = profiles.map(profile =>
+                `<option value="${profile.id}">${escapeHtml(profile.name || `Profile ${profile.id}`)}${profile.is_default ? ' (Default)' : ''}</option>`
+            ).join('');
+            select.value = String(effective);
+            select.dataset.effectiveProfileId = String(effective);
+            select.disabled = false;
+            select.title = '';
+        });
+    } catch (err) {
+        console.warn('Could not load playlist Quality Profiles:', err);
+        matching.forEach(select =>
+            markPlaylistQualityProfileSelectUnavailable(select, 'Quality Profiles unavailable'));
+    }
+}
+
+async function onPlaylistQualityProfileChange(select) {
+    const playlistRef = select.dataset.playlistRef;
+    const source = select.dataset.playlistSource || 'spotify';
+    const previous = select.dataset.effectiveProfileId || '';
+    const qualityProfileId = parseInt(select.value, 10);
+    if (!Number.isInteger(qualityProfileId)) return;
+    select.disabled = true;
+    try {
+        const playlist = await fetchMirroredPlaylistPreference(playlistRef, source);
+        if (!playlist?.id) {
+            // Roll the DOM back: an unsaved selection must not keep looking active.
+            showToast('Mirror this playlist before assigning a Quality Profile', 'warning');
+            if (previous) select.value = previous;
+            await hydratePlaylistQualityProfileSelects(playlistRef, source);
+            return;
+        }
+        const response = await fetch(`/api/mirrored-playlists/${playlist.id}/preferences`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quality_profile_id: qualityProfileId }),
+        });
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || 'Could not save Quality Profile');
+        // Re-read from the response so the displayed value is the SERVER's, not
+        // ours — e.g. if it was clamped or the row moved meanwhile.
+        await hydratePlaylistQualityProfileSelects(
+            playlistRef, source, data.playlist?.quality_profile_id ?? qualityProfileId,
+        );
+        showToast('Playlist Quality Profile saved', 'success');
+    } catch (err) {
+        showToast(`Could not save Quality Profile: ${err.message}`, 'error');
+        if (previous) select.value = previous;
+        await hydratePlaylistQualityProfileSelects(playlistRef, source);
+    } finally {
+        select.disabled = false;
     }
 }
 
@@ -1184,6 +1508,7 @@ async function loadPlaylistOrganizePreferenceIntoModal(playlistRef, source = nul
     const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
     const enabled = await fetchMirroredOrganizePreference(playlistRef, resolvedSource);
     syncPlaylistOrganizeCheckboxes(playlistRef, enabled);
+    await hydratePlaylistQualityProfileSelects(playlistRef, resolvedSource);
 }
 
 async function onPlaylistOrganizePreferenceChange(playlistRef, enabled, source = 'spotify') {
@@ -1600,6 +1925,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
                         </label>
                         ` : ''}
+                        ${downloadModalQualityProfileSelectHtml(virtualPlaylistId)}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
@@ -1640,6 +1966,11 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
     `;
 
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
+    // Fill the Quality Profile selector once the markup is in the DOM. Preselects
+    // the mirror's persisted assignment for a playlist, the default otherwise
+    // (P1-01); on failure it renders disabled rather than showing a value the
+    // server never accepted (P2-05).
+    void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 

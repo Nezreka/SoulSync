@@ -713,6 +713,15 @@ function renderAutoSyncScheduleModal() {
     `;
     populateAutoSyncHistoryList(overlay);
     bindAutoSyncHistoryCardInteractions(overlay);
+    playlists.filter(p => !p._personalized).forEach(p => {
+        if (typeof hydratePlaylistQualityProfileSelects === 'function') {
+            void hydratePlaylistQualityProfileSelects(
+                p.source_playlist_id,
+                p.source,
+                p.quality_profile_id,
+            );
+        }
+    });
 
     if (_prevScroll != null) {
         const nl = overlay.querySelector('.auto-sync-tab-panel.active .auto-sync-lanes');
@@ -1075,6 +1084,15 @@ function setAutoSyncSidebarFilter(value) {
     if (!panel) return;
     const { playlists, playlistSchedules } = _autoSyncScheduleState;
     panel.innerHTML = renderAutoSyncSchedulePanel(playlists, playlistSchedules);
+    playlists.filter(p => !p._personalized).forEach(p => {
+        if (typeof hydratePlaylistQualityProfileSelects === 'function') {
+            void hydratePlaylistQualityProfileSelects(
+                p.source_playlist_id,
+                p.source,
+                p.quality_profile_id,
+            );
+        }
+    });
     // Restore focus to the search input + caret position at end.
     const input = panel.querySelector('.auto-sync-sidebar-search');
     if (input) {
@@ -1906,6 +1924,9 @@ function autoSyncOrganizeToggleHtml(playlist) {
             <input type="checkbox" ${checked} onchange="setAutoSyncOrganizeByPlaylist(${playlist.id}, this.checked)">
             <span>Organize by playlist</span>
         </label>
+        ${typeof playlistQualityProfileSelectHtml === 'function'
+            ? playlistQualityProfileSelectHtml(playlist.source_playlist_id, playlist.source, true)
+            : ''}
     `;
 }
 

@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from core.imports.track_number import read_embedded_track_number, resolve_track_number
+from core.imports.track_number import (
+    read_embedded_track_number,
+    resolve_track_number,
+    track_number_from_directory_order,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -336,3 +340,42 @@ def test_read_embedded_never_raises():
 
 def test_read_embedded_empty_path_returns_none():
     assert read_embedded_track_number('') is None
+
+
+# ---------------------------------------------------------------------------
+# §16.3(a): scan-order fallback — when NO source carries a per-track number,
+# the file's sorted position among its audio siblings keeps a whole album from
+# collapsing onto track 1 (album-bundle stages all files into one directory).
+# ---------------------------------------------------------------------------
+
+
+def test_directory_order_assigns_distinct_positions(tmp_path):
+    for name in ("b_song.flac", "a_song.flac", "c_song.mp3"):
+        (tmp_path / name).write_bytes(b"x")
+    assert track_number_from_directory_order(str(tmp_path / "a_song.flac")) == 1
+    assert track_number_from_directory_order(str(tmp_path / "b_song.flac")) == 2
+    assert track_number_from_directory_order(str(tmp_path / "c_song.mp3")) == 3
+
+
+def test_directory_order_ignores_non_audio_siblings(tmp_path):
+    (tmp_path / "cover.jpg").write_bytes(b"x")
+    (tmp_path / "notes.txt").write_bytes(b"x")
+    (tmp_path / "01.flac").write_bytes(b"x")
+    (tmp_path / "02.flac").write_bytes(b"x")
+    # Non-audio files never shift a track's ordinal.
+    assert track_number_from_directory_order(str(tmp_path / "02.flac")) == 2
+
+
+def test_directory_order_single_audio_file_returns_none(tmp_path):
+    (tmp_path / "cover.jpg").write_bytes(b"x")
+    (tmp_path / "only.flac").write_bytes(b"x")
+    # Nothing to disambiguate → let the caller keep its own default.
+    assert track_number_from_directory_order(str(tmp_path / "only.flac")) is None
+
+
+def test_directory_order_missing_dir_returns_none():
+    assert track_number_from_directory_order("/no/such/dir/file.flac") is None
+
+
+def test_directory_order_empty_path_returns_none():
+    assert track_number_from_directory_order("") is None

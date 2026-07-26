@@ -161,7 +161,11 @@ def handle_event(event_type: str, data: Dict[str, Any]) -> None:
         from api.video import get_video_db
         conns = [c for c in load_connections(get_video_db())
                  if c["enabled"] and event_type in c["events"]]
-    except Exception:   # noqa: BLE001
+    except Exception:   # noqa: BLE001 - a notification must never break a publisher
+        # ...but it must not vanish silently either. Without this, a failed
+        # connection lookup makes every notification for the event disappear
+        # with zero trace, which is indistinguishable from "nobody subscribed".
+        logger.debug("notify %s: connection lookup failed", event_type, exc_info=True)
         return
     if not conns:
         return

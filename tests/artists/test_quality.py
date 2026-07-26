@@ -71,9 +71,17 @@ class _FakeWishlist:
     def __init__(self):
         self.added = []
 
-    def add_spotify_track_to_wishlist(self, **kwargs):
+    def add_spotify_track_to_wishlist(self, detailed=False, **kwargs):
         self.added.append(kwargs)
-        return True
+        if not detailed:
+            return True
+        return {
+            "status": "created",
+            "created": True,
+            "applied": True,
+            "track_id": (kwargs.get("spotify_track_data") or {}).get("id"),
+            "reason": None,
+        }
 
 
 class _FakeDatabase:

@@ -3482,16 +3482,17 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.7': [
-        { date: 'July 2026 · 3.1.7' },
-        { title: 'The room jukebox', desc: 'listen together in any chat room. paste a YouTube link or search, the room votes on what plays next, and everyone who tunes in hears the same track at the same spot. no server runs it — every SoulSync client reduces the same hidden message stream to the same queue, so it stays in sync on its own.' },
-        { title: 'Jukebox, fully loaded', desc: 'vote to skip the current track, thumbnails everywhere with a now-playing progress bar and an "up next" highlight, recently-played with one-click requeue, pull your own submission back out, an audio-only toggle + a local volume slider, and auto-DJ — flip it on and the queue keeps itself fed with related tracks when it runs dry.' },
-        { title: 'Chat file sharing', desc: 'upload a file or pick a track straight from your library, and it lands in chat as a rich card you can preview inline. powered by filepost.dev (drop in your API key on the chat settings).' },
-        { title: 'Polls, pins, topics, presence', desc: 'ask the room a question with live vote bars, 📌 any message to a shared board, set a room topic, see typing indicators, and a ♫ next to whoever\'s tuned into the jukebox.' },
-        { title: 'Slash commands', desc: 'type / in the composer for autocomplete: /play, /skip, /tune, /topic, /poll, /pin, /gif, /shrug. plus the chat modals got rebuilt to match SoulSync\'s actual design instead of the old flat gray.' },
-        { title: 'HiFi failover (#1073)', desc: 'HiFi requests that hit a rate limit or a blocked instance now rotate to another instance instead of just failing — the way the monochrome instances do. thanks Lain2077.' },
-        { title: 'Track Repair, version + disc aware (#1075)', desc: 'repair stripped "(Why Us? Version)"-style qualifiers before matching, so different versions of a song looked identical and it grabbed the wrong disc\'s copy — the full title breaks ties now. multi-disc repairs also write the disc tag (so per-disc numbering can\'t create duplicate track numbers), and the change tells you when a number is disc-relative: "Track number: 1 → 10 (disc 2 of 3)". thanks Lain2077. heads up: multi-disc albums missing disc tags will show new findings — that\'s the fix tagging the whole album.' },
-        { title: 'Earlier versions', desc: '3.1.6 made video downloads land atomically (the skipping-playback fix) + redesigned automations. 3.1.5 made chat best-in-class + added the discography source picker. 3.1.4 added the Comma Artist Splitter. 3.1.3 added record-label following.' },
+    '3.1.8': [
+        { date: 'July 2026 · 3.1.8' },
+        { title: 'Chat looks and works like Discord', desc: 'the chat page is rebuilt into a Discord-style shell: a server rail down the left (every Soulseek room you\'ve joined, plus a DM puck), a channel sidebar with collapsible categories, the message column, and a member list with avatars, presence dots and what each person is up to. all of it over the one Soulseek room.' },
+        { title: 'Channels + threads', desc: 'the room now has channels (#general, #jukebox, #requests, #releases, #off-topic) with unread badges — they\'re tags carried in the SoulSync envelope, so untagged and vanilla-client messages always land in #general and nothing is ever hidden. 🧵 any message to start a thread; a channel\'s threads hang beneath it in the sidebar and open in their own view.' },
+        { title: 'Mention ping', desc: 'optional sound when someone @-mentions you or replies to you. off by default, throttled, and it won\'t fire while a room\'s history is loading. flip it on in the chat settings cog.' },
+        { title: 'Quality Profiles that actually govern downloads (#1076)', desc: 'quality profiles used to be decorative — only auto-import could use a named one. now every watchlist artist and every mirrored playlist gets its own profile, and it\'s honored everywhere a download starts: manual search/discover/library, auto-sync, playlist sync, download-missing, and retries. an explicit per-action pick beats the saved assignment beats the global default, in that order, on every path. edit a profile\'s rules and everything assigned to it changes at once. thanks nick2000713.' },
+        { title: 'Preview + pick tracks from Mixes & ListenBrainz (#1079)', desc: 'open a Mix or a ListenBrainz recommendation and each track now has a play button to preview it and a checkbox — select the ones you like and Download selected instead of grabbing the whole playlist. thanks andreamassaro9.' },
+        { title: 'Discover loads faster', desc: 'the page fired ~20 section requests at once and choked the backend; it now loads the top of the page first and streams the rest in, so it\'s usable in a couple seconds instead of half a minute. also fixed the sidebar header showing through the artist map.' },
+        { title: 'Help & Docs covers the video side', desc: 'the Help page documented only the music side — it now has full guide sections for the whole video app (library, downloads, watchlist, wishlist, calendar, collections, overlays, repair, youtube channels, and more) plus a video API reference, matching the music-side format.' },
+        { title: 'Library v2 fixes (#1055)', desc: 'a batch pulled from the Library v2 work: simple downloads only fill blank/placeholder tags now (never overwrite good ones), and a stuck usenet job gives up cleanly instead of polling for hours. thanks nick2000713.' },
+        { title: 'Earlier versions', desc: '3.1.7 turned chat into a hangout with a shared room jukebox + file sharing + polls/pins. 3.1.6 made video downloads land atomically + redesigned automations. 3.1.5 made chat best-in-class. 3.1.4 added the Comma Artist Splitter.' },
     ],
 };
 
@@ -3522,7 +3523,22 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.7: the chat jukebox release",
+        title: "3.1.8: chat becomes discord, quality profiles start working",
+        description: "chat gets rebuilt into a real discord-style app — server rail, channels, threads, a proper member list — all riding one soulseek room. and quality profiles stop being decorative: pin one to any watchlist artist or mirrored playlist and it governs every download that title triggers. plus preview + pick from your mixes, a much faster discover page, and the whole video app documented.",
+        features: [
+            "chat looks and behaves like discord: a server rail of every soulseek room you've joined (plus a DM puck with unread counts), a channel sidebar with collapsible categories and an account strip, the message column, and a member list with avatars, presence dots and an activity line showing who's listening to the jukebox",
+            "channels + threads: the room now has #general, #jukebox, #requests, #releases and #off-topic with unread badges — they're tags carried inside the SoulSync envelope, so untagged messages and anything from a vanilla soulseek client always land in #general and nothing is ever invisible. 🧵 any message to start a thread; a channel's threads hang beneath it in the sidebar and open in their own view",
+            "mention ping: an optional sound when someone @-mentions you or replies to you — off by default, throttled, and silent while a room's history is loading",
+            "quality profiles everywhere (#1076, thanks nick2000713): every watchlist artist and mirrored playlist gets its own named quality profile, honored at every point a download starts — manual search/discover/library, auto-sync, playlist sync, download-missing, and retries. an explicit per-action choice beats the saved assignment beats the global default, always in that order. nothing copies the rules around, so editing a profile in Settings changes everything assigned to it at once",
+            "preview + pick from Mixes & ListenBrainz (#1079, thanks andreamassaro9): each track in a Mix or ListenBrainz recommendation gets a preview play button and a checkbox — audition the picks and Download selected instead of grabbing the whole playlist",
+            "discover loads fast: the page used to fire ~20 section requests at once and contend itself into a ~30s load; it now loads above-the-fold sections first and streams the rest, usable in a couple seconds. plus the sidebar header no longer bleeds through the artist map overlay",
+            "the video side is documented: Help & Docs now has full guide sections for the whole video app plus a video API reference, matching the music-side format (screenshots to follow)",
+            "library v2 fixes (#1055, thanks nick2000713): simple downloads only fill blank/placeholder tags instead of clobbering good ones, and a stuck usenet job gives up cleanly instead of polling for hours",
+        ],
+        usage_note: "channels + threads live on the Chat page; the mention ping is behind the chat settings cog. assign a quality profile from a watchlist artist's or a mirrored playlist's settings, or pick one per-download in the Add to Wishlist / Download Missing dialogs. the Mix preview + select controls are inside the Mix / ListenBrainz playlist modals.",
+    },
+    {
+        title: "Earlier in 3.1.7 — the chat jukebox release",
         description: "chat turns into a place you actually hang out — a shared room jukebox you listen to together and vote on, file sharing, polls, pins, typing indicators, slash commands. plus a hifi failover fix and a version + disc aware track repair.",
         features: [
             "the room jukebox: listen to music together in any chat room. paste a youtube link or search, the room votes on what plays next, and everyone who tunes in hears the same track at the same spot. no server runs it — every soulsync client folds the same hidden message stream into the same queue, so it stays in sync on its own",

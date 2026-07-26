@@ -595,13 +595,22 @@ def add_album_track_to_wishlist(
     album: Dict[str, Any] | None,
     source_type: str = "album",
     source_context: Dict[str, Any] | None = None,
+    quality_profile_id: int | None = None,
 ) -> tuple[Dict[str, Any], int]:
-    """Add a single album track to the wishlist."""
+    """Add a single album track to the wishlist.
+
+    ``quality_profile_id`` is the durable acquisition intent chosen in the
+    shared "Tracks to Add to Wishlist" dialog. It travels all the way to the
+    stored row so the same track gets the same rules regardless of which page
+    the user started from (P1-01). ``None`` keeps the app-wide default.
+    """
     try:
         if not track or not artist or not album:
             return {"success": False, "error": "Missing required fields: track, artist, album"}, 400
 
         track_data = _build_track_data(track, album)
+        if quality_profile_id is not None:
+            track_data["quality_profile_id"] = quality_profile_id
 
         # #825: don't add a track that's already in the library, unless the user
         # has opted into duplicates. The manual album "add to wishlist" modal
@@ -649,6 +658,7 @@ def add_album_track_to_wishlist(
             # ignore-list, even if the user previously cancelled this track
             # (otherwise the add is silently dropped — carlosjfcasero, #897).
             user_initiated=True,
+            quality_profile_id=quality_profile_id,
         )
 
         if success:

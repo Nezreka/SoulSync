@@ -8842,6 +8842,24 @@
                                 </div>
                             </div>
 
+                            <!-- Library Organize casing -->
+                            <div class="settings-group" data-stg="library">
+                                <h3>Library Organize</h3>
+                                <label class="toggle-row">
+                                    <input type="checkbox" id="reorganize-preserve-casing">
+                                    <span>Preserve my casing, year &amp; disc layout</span>
+                                </label>
+                                <div class="help-text" style="margin-top: 6px;">
+                                    When the Library Organize tool re-matches a track, the metadata source often
+                                    differs from files you've already organized: capitalization, release year (a
+                                    reissue [2023] "corrected" to the source's 2020), or disc layout (a single-disc
+                                    album matched to a deluxe 2-disc edition, stamping a bogus "0211" prefix). With
+                                    this on (default), a title/album differing <em>only</em> by letter-case, your own
+                                    album year, and a genuinely single-disc album's numbering are all left alone —
+                                    no needless renames. Turn off to match the metadata source exactly.
+                                </div>
+                            </div>
+
                             </div><!-- end Paths & Organization body -->
 
                             <!-- ═══ POST-PROCESSING ═══ -->
@@ -10066,11 +10084,25 @@
                         </div>
                     </div>
                     <div class="chat-shell">
+                        <!-- Discord-style guild rail: every joined Soulseek room is an
+                             "server" icon; PMs get their own puck. Purely a nav view over
+                             the rooms/convos the sidebar already lists. -->
+                        <nav class="chat-guilds" data-chat-guilds></nav>
                         <aside class="chat-side">
-                            <div class="chat-side-label">Rooms</div>
-                            <div class="chat-side-list" data-chat-rooms></div>
-                            <div class="chat-side-label">Messages</div>
-                            <div class="chat-side-list" data-chat-convos></div>
+                            <div class="chat-side-head" data-chat-side-head>
+                                <span class="chat-side-head-name" data-chat-side-head-name>SoulSync</span>
+                                <span class="chat-side-head-caret">⌄</span>
+                            </div>
+                            <div class="chat-side-scroll">
+                                <!-- virtual channels (client-side tags over the one room).
+                                     Rooms live in the guild rail, Discord-style — they are
+                                     deliberately NOT listed again here. -->
+                                <div class="chat-side-list chat-chanlist" data-chat-channels></div>
+                                <div class="chat-side-label">Direct Messages</div>
+                                <div class="chat-side-list" data-chat-convos></div>
+                            </div>
+                            <!-- bottom-left user panel (Discord's account strip) -->
+                            <div class="chat-userpanel" data-chat-userpanel></div>
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
@@ -10117,6 +10149,21 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- jukebox YouTube search: rich pop-in, search-page video-card look -->
+                            <div class="chat-settings-overlay" data-chat-jbx-search-modal hidden>
+                                <div class="chat-settings-modal chat-jbx-search-modal">
+                                    <h3 class="chat-settings-title">♫ Add to the jukebox</h3>
+                                    <form class="chat-jbx-searchform" data-chat-jbx-searchform>
+                                        <input class="chat-input" data-chat-jbx-searchinput type="text" maxlength="200"
+                                               placeholder="Search YouTube, or paste a link…" autocomplete="off">
+                                        <button type="submit" class="chat-send-btn">Search</button>
+                                    </form>
+                                    <div class="chat-jbx-searchgrid" data-chat-jbx-searchgrid></div>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-jbx-searchclose>Close</button>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- admin settings modal (cog in the room head) -->
                             <div class="chat-settings-overlay" data-chat-settings-modal hidden>
                                 <div class="chat-settings-modal">
@@ -10148,6 +10195,10 @@
                                         Auto-join the community room</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
                                         Let non-admin profiles send messages</label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-ping>
+                                        Play a sound when someone mentions or replies to me</label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-np>
+                                        Share what I'm playing in the room (everyone in the Soulseek room can see it)</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
                                         Auto-answer "prove you're human" download challenges</label>
                                     <div class="chat-settings-actions">
@@ -11284,6 +11335,18 @@
                 </div>
 
                 <div class="add-to-wishlist-modal-footer">
+                    <!-- Quality Profile for THIS acquisition. Applies to both
+                         buttons below so "Add to Wishlist" and "Download Now"
+                         can never disagree about the rules (audit P1-01). -->
+                    <label class="acquisition-quality-profile-control"
+                        for="wishlist-modal-quality-profile"
+                        title="Which Quality Profile these tracks must satisfy">
+                        <span>Quality Profile</span>
+                        <select id="wishlist-modal-quality-profile"
+                            class="acquisition-quality-profile-select" disabled>
+                            <option value="">Loading&hellip;</option>
+                        </select>
+                    </label>
                     <div class="wishlist-modal-actions">
                         <button class="btn btn--secondary"
                             onclick="closeAddToWishlistModal()">
@@ -11379,6 +11442,14 @@
                     <div class="config-section">
                         <h3 class="config-section-title">Download Preferences</h3>
                         <p class="config-section-subtitle">Select which types of releases to monitor for this artist</p>
+
+                        <div class="form-group" style="margin: 12px 0 16px;">
+                            <label for="config-quality-profile" style="display:block;margin-bottom:6px;font-weight:600;">Quality Profile</label>
+                            <select id="config-quality-profile" class="form-select">
+                                <option value="">Loading profiles…</option>
+                            </select>
+                            <small style="display:block;margin-top:6px;opacity:.7;">All Albums, EPs and Singles queued by this Watchlist artist use this profile.</small>
+                        </div>
 
                         <div class="config-options">
                             <label class="config-option">

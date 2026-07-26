@@ -1637,6 +1637,604 @@ const DOCS_SECTIONS = [
         `
     },
     {
+        id: 'video-overview',
+        title: 'Video: Overview',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vid-what', title: 'What the Video Side Is' },
+            { id: 'vid-switch', title: 'Switching Sides' },
+            { id: 'vid-server', title: 'Connecting a Media Server' },
+            { id: 'vid-sources', title: 'Download Sources' },
+            { id: 'vid-access', title: 'Per-Profile Side Access' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vid-what">
+                <h3 class="docs-subsection-title">What the Video Side Is</h3>
+                <p class="docs-text">SoulSync's <strong>Video</strong> side is a self-hosted movies &amp; TV manager that lives inside the same app as the music side but runs as an <strong>isolated application</strong> &mdash; its own database, its own pages, its own API blueprint. Think of it as a Sonarr + Radarr + overlay/collection manager built into SoulSync. It connects to <strong>Plex</strong> or <strong>Jellyfin/Emby</strong> to read your movie and TV libraries, enriches every title from <strong>TMDB</strong>, <strong>TVDB</strong>, <strong>OMDb</strong>, <strong>fanart.tv</strong>, <strong>OpenSubtitles</strong> and more, and can search, grab, organize, and upgrade downloads to fill the gaps.</p>
+                <div class="docs-features">
+                    <div class="docs-feature-card"><h4>&#x1F3AC; Movies &amp; TV</h4><p>Browse your Plex/Jellyfin library, enriched with posters, backdrops, cast, ratings, awards, and format badges (HDR / Atmos / channels).</p></div>
+                    <div class="docs-feature-card"><h4>&#x2B07;&#xFE0F; Arr-Class Downloading</h4><p>Quality profiles, custom formats, import lists, blocklist, upgrade-until-cutoff, RSS-speed grabbing, and a live download queue.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F440; Watchlist &amp; Wishlist</h4><p>Follow people and studios, auto-add their upcoming titles, and track everything wanted or below cutoff in one place.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F5BC;&#xFE0F; Overlay &amp; Collection Studios</h4><p>A Kometa-style overlay template editor and a collection builder that write badges and collections straight back to Plex/Jellyfin.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F527; Library Maintenance</h4><p>Repair jobs that scan for problems (missing art, ghosts, orphans, un-monitored gaps) and fix them, with rich findings.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F4FA; YouTube Channels</h4><p>Follow YouTube channels and playlists like shows and pull new uploads into the video download pipeline.</p></div>
+                </div>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>The video side keeps its own database (<code>video_library.db</code>) completely separate from the music library. Nothing you do on the video side touches your music, and vice-versa.</div></div>
+            </div>
+            <div class="docs-subsection" id="vid-switch">
+                <h3 class="docs-subsection-title">Switching Sides</h3>
+                <p class="docs-text">Use the <strong>side switcher</strong> in the sidebar to flip between the Music and Video apps. Each side has its own navigation, its own pages, and its own settings. A handful of pages are <strong>shared</strong> across both sides &mdash; <strong>Settings</strong>, <strong>Chat</strong>, <strong>Issues</strong>, and this <strong>Help &amp; Docs</strong> page &mdash; so you land on the same page no matter which side you were on.</p>
+                ${docsImg('video-side-switch.jpg', 'Switching between the Music and Video sides')}
+            </div>
+            <div class="docs-subsection" id="vid-server">
+                <h3 class="docs-subsection-title">Connecting a Media Server</h3>
+                <p class="docs-text">The video side reads your libraries from <strong>Plex</strong> or <strong>Jellyfin/Emby</strong>. Configure the connection under <strong>Video &rarr; Settings</strong>, pick which libraries to include, then run a scan to import them. SoulSync stores a lightweight copy of every movie/show/episode row and enriches it in the background &mdash; it never modifies your server's files during a scan.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Server</th><th>What SoulSync reads</th><th>Auth</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Plex</strong></td><td>Movie &amp; TV libraries, watch state, collections, incremental delta via <code>updatedAt</code></td><td>URL + Token</td></tr>
+                        <tr><td><strong>Jellyfin / Emby</strong></td><td>Movie &amp; TV libraries, watch state, BoxSets, incremental delta via <code>MinDateLastSaved</code></td><td>URL + API Key (+ user for watch state)</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>An <strong>incremental</strong> scan only re-reads titles modified since the last full scan, so routine refreshes are fast. A <strong>full</strong> / <strong>deep</strong> scan re-reads everything &mdash; use it after a big library change.</div></div>
+            </div>
+            <div class="docs-subsection" id="vid-sources">
+                <h3 class="docs-subsection-title">Download Sources</h3>
+                <p class="docs-text">Video downloads flow through your configured indexers and clients &mdash; usenet (SABnzbd-class), torrents, <strong>slskd</strong>, and <strong>yt-dlp</strong> for YouTube. Grabs are ranked by your <strong>quality profile</strong> and <strong>custom formats</strong>, then handed to the client, monitored to completion, organized into your library folder, and (optionally) sent to your server for a scan.</p>
+            </div>
+            <div class="docs-subsection" id="vid-access">
+                <h3 class="docs-subsection-title">Per-Profile Side Access</h3>
+                <p class="docs-text">With multi-profile enabled, each profile can be granted access to <strong>Music</strong>, <strong>Video</strong>, or <strong>both</strong>. A music-only profile can't see or reach the video side at all &mdash; the whole Video navigation is hidden and the video API rejects its requests server-side. Admins always have both sides. See <strong>Video: Settings</strong> and <strong>Multi-Profile</strong> for how to set this per profile.</p>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>Side access is enforced on the server, not just hidden in the UI &mdash; a music-only profile that tries to hit a <code>/api/video/*</code> URL directly gets a <code>403</code>.</div></div>
+            </div>
+        `
+    },
+    {
+        id: 'video-dashboard',
+        title: 'Video: Dashboard',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vdash-overview', title: 'Overview & Health' },
+            { id: 'vdash-continue', title: 'Continue Watching' },
+            { id: 'vdash-activity', title: 'Recent & Activity' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vdash-overview">
+                <h3 class="docs-subsection-title">Overview &amp; Health</h3>
+                <p class="docs-text">The Video <strong>Dashboard</strong> is your at-a-glance home for the video side: library counts (movies, shows, episodes), download activity, enrichment coverage, and a health strip that flags whether your media server, indexers, and download clients are reachable.</p>
+                ${docsImg('video-dashboard.jpg', 'Video dashboard overview')}
+            </div>
+            <div class="docs-subsection" id="vdash-continue">
+                <h3 class="docs-subsection-title">Continue Watching</h3>
+                <p class="docs-text">A <strong>Continue Watching</strong> rail surfaces partially-watched movies and the next unwatched episode of shows in progress, drawn from the watch state SoulSync ingests from your server. Each card jumps straight to the title's detail page with a <strong>Next Up</strong> call-to-action.</p>
+            </div>
+            <div class="docs-subsection" id="vdash-activity">
+                <h3 class="docs-subsection-title">Recent &amp; Activity</h3>
+                <p class="docs-text">Recently added titles and a running activity feed (scans, grabs, imports, upgrades) keep you current on what the video side has been doing without opening every page.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-search',
+        title: 'Video: Search & Studios',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vsearch-search', title: 'Searching' },
+            { id: 'vsearch-trending', title: 'Trending' },
+            { id: 'vsearch-studios', title: 'Studios' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vsearch-search">
+                <h3 class="docs-subsection-title">Searching</h3>
+                <p class="docs-text">Search across <strong>movies</strong>, <strong>TV shows</strong>, <strong>people</strong>, and <strong>studios</strong> from one bar. Results are source-agnostic and show whether you already own a title, so you can jump to a detail page, add something to your wishlist, or open a person/studio to browse their catalog.</p>
+                ${docsImg('video-search.jpg', 'Video search results')}
+            </div>
+            <div class="docs-subsection" id="vsearch-trending">
+                <h3 class="docs-subsection-title">Trending</h3>
+                <p class="docs-text">A <strong>Trending</strong> feed highlights what's popular right now, giving you a fast way to spot new releases worth adding.</p>
+            </div>
+            <div class="docs-subsection" id="vsearch-studios">
+                <h3 class="docs-subsection-title">Studios</h3>
+                <p class="docs-text">Search for a production company (studio) and open its <strong>Studio detail</strong> page to browse its full filmography, paged from TMDB. <strong>Studio presets</strong> give quick access to well-known studios, and you can <strong>follow</strong> a studio to have its new releases auto-added (see <strong>Video: Watchlist</strong>).</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-discover',
+        title: 'Video: Discover',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vdisc-hero', title: 'Cinematic Hero' },
+            { id: 'vdisc-foryou', title: 'For You & Taste' },
+            { id: 'vdisc-more', title: 'More Like This & Gaps' },
+            { id: 'vdisc-browse', title: 'Genres & Browsing' },
+            { id: 'vdisc-prefs', title: 'Preferences' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vdisc-hero">
+                <h3 class="docs-subsection-title">Cinematic Hero</h3>
+                <p class="docs-text">Discover opens on a full-bleed <strong>billboard</strong> that rotates through standout titles with logos, backdrops, and a one-click <strong>trailer</strong>. It's built to feel like a streaming home screen rather than a database.</p>
+                ${docsImg('video-discover.jpg', 'Video discover hero billboard')}
+            </div>
+            <div class="docs-subsection" id="vdisc-foryou">
+                <h3 class="docs-subsection-title">For You &amp; Taste</h3>
+                <p class="docs-text"><strong>For You</strong> rows are personalized from your library's <strong>taste</strong> profile &mdash; the genres, people, and studios you already own most. The more SoulSync knows about your library, the sharper these get.</p>
+            </div>
+            <div class="docs-subsection" id="vdisc-more">
+                <h3 class="docs-subsection-title">More Like This &amp; Gaps</h3>
+                <p class="docs-text"><strong>More Like This</strong> pulls recommendations from titles you own, and <strong>Gaps</strong> highlights missing entries in collections and franchises you've partially collected &mdash; a fast path to completing a series.</p>
+            </div>
+            <div class="docs-subsection" id="vdisc-browse">
+                <h3 class="docs-subsection-title">Genres &amp; Browsing</h3>
+                <p class="docs-text">Browse by <strong>genre tiles</strong> and live-filter an endless grid. The feed pages honestly (no duplicate padding) and keeps scrolling as far as you want to go.</p>
+            </div>
+            <div class="docs-subsection" id="vdisc-prefs">
+                <h3 class="docs-subsection-title">Preferences</h3>
+                <p class="docs-text">Tune Discover to your region and services: set preferred <strong>languages</strong>, restrict recommendations to your streaming <strong>providers</strong>, and <strong>ignore</strong> titles you never want to see again. These preferences persist per profile.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-library',
+        title: 'Video: Library',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vlib-browse', title: 'Browsing & Filters' },
+            { id: 'vlib-manage', title: 'Manage Panel' },
+            { id: 'vlib-bulk', title: 'Bulk Operations' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vlib-browse">
+                <h3 class="docs-subsection-title">Browsing &amp; Filters</h3>
+                <p class="docs-text">The <strong>Library</strong> page is your owned movies and shows as a poster wall. Filter by <strong>resolution</strong>, <strong>genre</strong>, monitored state, and more; sort by title, added date, release year, or rating; and the page remembers your scroll position when you come back.</p>
+                ${docsImg('video-library.jpg', 'Video library poster grid')}
+            </div>
+            <div class="docs-subsection" id="vlib-manage">
+                <h3 class="docs-subsection-title">Manage Panel</h3>
+                <p class="docs-text">Open any title's <strong>Manage</strong> panel to edit metadata, lock fields against enrichment overwrites, change its quality profile, mark it monitored/unmonitored, report an issue, or trigger a targeted re-scan. Locked fields are respected by every future enrichment pass.</p>
+            </div>
+            <div class="docs-subsection" id="vlib-bulk">
+                <h3 class="docs-subsection-title">Bulk Operations</h3>
+                <p class="docs-text">Select multiple titles to act on them at once &mdash; bulk monitor/unmonitor, bulk quality-profile assignment, bulk metadata edits, and mass mark-watched. Large bulk jobs run in the background so the UI stays responsive.</p>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>Library edits, deletes, re-matches, and bulk jobs are <strong>admin-only</strong> &mdash; content views can read everything, but mutating the library requires an admin profile.</div></div>
+            </div>
+        `
+    },
+    {
+        id: 'video-detail',
+        title: 'Video: Detail Pages',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vdet-layout', title: 'Movie & Show Pages' },
+            { id: 'vdet-watch', title: 'Watch State & History' },
+            { id: 'vdet-meta', title: 'Metadata Edit & Lock' },
+            { id: 'vdet-quality', title: 'Per-Title Quality & Series Type' },
+            { id: 'vdet-people', title: 'People & Studios' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vdet-layout">
+                <h3 class="docs-subsection-title">Movie &amp; Show Pages</h3>
+                <p class="docs-text">Every title has a rich <strong>detail page</strong>: hero art, overview, cast &amp; crew, ratings, awards, a post-credits/stinger flag, format badges (HDR / Dolby Vision / Atmos / channel layout), and &mdash; for shows &mdash; a full season/episode breakdown. Movies and shows can come from either server and render the same way.</p>
+                ${docsImg('video-detail.jpg', 'Video show detail page')}
+            </div>
+            <div class="docs-subsection" id="vdet-watch">
+                <h3 class="docs-subsection-title">Watch State &amp; History</h3>
+                <p class="docs-text">SoulSync ingests per-episode and per-movie <strong>watch state</strong> from your server, drives the <strong>Continue Watching</strong> rail and a <strong>Next Up</strong> CTA, and lets you toggle watched/unwatched right on the page. A per-title <strong>History</strong> tab shows grabs, imports, and upgrades over time.</p>
+            </div>
+            <div class="docs-subsection" id="vdet-meta">
+                <h3 class="docs-subsection-title">Metadata Edit &amp; Lock</h3>
+                <p class="docs-text">Edit any metadata field and <strong>lock</strong> it so enrichment never overwrites your change. You can also <strong>refresh art</strong> to pull fresh posters/backdrops, or pick a specific poster from the available options.</p>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>A re-match changes the title's identity and can update its name and art; it does <strong>not</strong> silently wipe your locked fields. Episodes are treated as facts &mdash; a scan that no longer sees an episode <em>demotes</em> it to missing rather than deleting the row.</div></div>
+            </div>
+            <div class="docs-subsection" id="vdet-quality">
+                <h3 class="docs-subsection-title">Per-Title Quality &amp; Series Type</h3>
+                <p class="docs-text">Assign a title its own <strong>quality profile</strong> (e.g. "this show is always 1080p, that movie is 4K") and set a show's <strong>series type</strong> (standard / daily / anime) so numbering and matching behave correctly. Both ride the download pipeline for every future grab and upgrade.</p>
+            </div>
+            <div class="docs-subsection" id="vdet-people">
+                <h3 class="docs-subsection-title">People &amp; Studios</h3>
+                <p class="docs-text"><strong>Person</strong> pages show an actor/director's filmography with what you own highlighted; <strong>Studio</strong> pages show a production company's catalog. From either you can follow them to your watchlist so new releases are auto-added.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-watchlist',
+        title: 'Video: Watchlist',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vwatch-follow', title: 'Following People & Studios' },
+            { id: 'vwatch-settings', title: 'Per-Follow Settings' },
+            { id: 'vwatch-scan', title: 'Release Scanning' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vwatch-follow">
+                <h3 class="docs-subsection-title">Following People &amp; Studios</h3>
+                <p class="docs-text">The video <strong>Watchlist</strong> is how you tell SoulSync "keep an eye on this." Follow an <strong>actor</strong>, <strong>director</strong>, or <strong>studio</strong> and their upcoming and newly-released titles are automatically added to your <strong>Wishlist</strong> so the download pipeline can go find them.</p>
+                ${docsImg('video-watchlist.jpg', 'Video watchlist tabs')}
+            </div>
+            <div class="docs-subsection" id="vwatch-settings">
+                <h3 class="docs-subsection-title">Per-Follow Settings</h3>
+                <p class="docs-text">Each follow has its own settings cog &mdash; decide whether to auto-add movies, TV, or both, and how far back to reach. This keeps a prolific studio from flooding your wishlist while still catching the titles you care about.</p>
+            </div>
+            <div class="docs-subsection" id="vwatch-scan">
+                <h3 class="docs-subsection-title">Release Scanning</h3>
+                <p class="docs-text">A scan automation walks your follows on a schedule, finds anything new, and writes it into the wishlist with poster art and season metadata so it renders correctly and is ready to grab. You can also trigger a check on demand.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-wishlist',
+        title: 'Video: Wishlist',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vwish-wanted', title: 'Wanted & Cutoff-Unmet' },
+            { id: 'vwish-search', title: 'Search Now & Status' },
+            { id: 'vwish-upgrade', title: 'Upgrade Until Cutoff' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vwish-wanted">
+                <h3 class="docs-subsection-title">Wanted &amp; Cutoff-Unmet</h3>
+                <p class="docs-text">The <strong>Wishlist</strong> is everything the video side wants but doesn't have at the quality you asked for &mdash; titles you don't own yet (<strong>wanted</strong>) and titles you own below their profile's cutoff (<strong>cutoff-unmet</strong>). It's the video equivalent of a Sonarr/Radarr "Wanted" queue.</p>
+                ${docsImg('video-wishlist.jpg', 'Video wishlist')}
+            </div>
+            <div class="docs-subsection" id="vwish-search">
+                <h3 class="docs-subsection-title">Search Now &amp; Status</h3>
+                <p class="docs-text"><strong>Search Now</strong> kicks off an immediate hunt for a wishlist entry instead of waiting for the next automation pass. Status is shown honestly &mdash; searching, found, grabbed, failed with an attempt counter &mdash; so you always know where each title stands. Missing art can be backfilled for movies and shows in bulk.</p>
+            </div>
+            <div class="docs-subsection" id="vwish-upgrade">
+                <h3 class="docs-subsection-title">Upgrade Until Cutoff</h3>
+                <p class="docs-text">Titles below their profile's cutoff stay on the wishlist and are re-grabbed only when a <strong>strictly better</strong> release appears. When an upgrade lands it replaces the file in place, in the real library folder, using the video path resolver &mdash; so you upgrade quality without duplicating files or breaking your server's paths.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-downloads',
+        title: 'Video: Downloads',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vdl-queue', title: 'The Download Queue' },
+            { id: 'vdl-quality', title: 'Quality Profiles & Formats' },
+            { id: 'vdl-lists', title: 'Import Lists' },
+            { id: 'vdl-blocklist', title: 'Blocklist & Recycle Bin' },
+            { id: 'vdl-history', title: 'History' },
+            { id: 'vdl-organize', title: 'Organization & Rename' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vdl-queue">
+                <h3 class="docs-subsection-title">The Download Queue</h3>
+                <p class="docs-text">The <strong>Downloads</strong> page is a live queue of everything in flight &mdash; per-item speed, ETA, progress, and state. Grab a release manually, retry a failed one, cancel, or clear completed. Grabs are evaluated against your quality profile and custom formats before they're accepted, then monitored to completion and organized into your library.</p>
+                ${docsImg('video-downloads.jpg', 'Video downloads queue')}
+            </div>
+            <div class="docs-subsection" id="vdl-quality">
+                <h3 class="docs-subsection-title">Quality Profiles &amp; Formats</h3>
+                <p class="docs-text">A <strong>quality profile</strong> is a Radarr-class ladder: an ordered list of allowed qualities, a <strong>cutoff</strong> (stop upgrading once you reach it), rejects, and preferences. <strong>Custom formats</strong> are scored release matchers that nudge the ranker toward (or away from) specific releases &mdash; release groups, HDR flavors, audio, and so on. YouTube grabs get their own quality selector.</p>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>Profiles, custom formats, server/indexer/client config, and the slskd credentials are <strong>admin-only</strong> &mdash; their reads can expose tokens, so both GET and write are gated to admins. The download modal's read-only meta lookups stay open so any allowed profile can queue a grab.</div></div>
+            </div>
+            <div class="docs-subsection" id="vdl-lists">
+                <h3 class="docs-subsection-title">Import Lists</h3>
+                <p class="docs-text"><strong>Import lists</strong> sync an external list &mdash; Trakt, IMDb, a Plex Watchlist &mdash; into your wishlist on a schedule, so a list you curate elsewhere becomes titles SoulSync goes and gets.</p>
+            </div>
+            <div class="docs-subsection" id="vdl-blocklist">
+                <h3 class="docs-subsection-title">Blocklist &amp; Recycle Bin</h3>
+                <p class="docs-text">When a grab turns out to be a bad file, SoulSync <strong>blocklists</strong> that specific release (by username + filename) so it's never grabbed again, and filters it out at the ranker, retry, and re-query stages. A manual grab always overrides the blocklist. Replaced files land in a <strong>recycle bin</strong> rather than being destroyed outright.</p>
+            </div>
+            <div class="docs-subsection" id="vdl-history">
+                <h3 class="docs-subsection-title">History</h3>
+                <p class="docs-text">A permanent <strong>download history</strong> archives every grab with its outcome, viewable from a History modal. A post-download scan cheaply probes your server and skips a full crawl when it can already see the newest grab.</p>
+            </div>
+            <div class="docs-subsection" id="vdl-organize">
+                <h3 class="docs-subsection-title">Organization &amp; Rename</h3>
+                <p class="docs-text">Set your naming scheme and folder layout, then use <strong>mass rename</strong> with a preview to bring existing files in line before applying. Failed imports can be manually placed or dismissed from the <strong>Import</strong> tools.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-requests',
+        title: 'Video: Requests',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vreq-flow', title: 'Request → Approve → Wishlist' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vreq-flow">
+                <h3 class="docs-subsection-title">Request &rarr; Approve &rarr; Wishlist</h3>
+                <p class="docs-text">The <strong>Requests</strong> system lets non-admin members ask for a movie or show. An admin reviews the queue and <strong>approves</strong> (which drops the title straight onto the wishlist for the pipeline to fulfill) or <strong>denies</strong> it. A counts badge keeps admins aware of pending requests, and resolved requests can be cleared.</p>
+                ${docsImg('video-requests.jpg', 'Video requests queue')}
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Members submit and see their own requests; approve/deny and viewing everyone's requests are admin actions.</div></div>
+            </div>
+        `
+    },
+    {
+        id: 'video-calendar',
+        title: 'Video: Calendar',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vcal-grid', title: 'Week Grid & Air Times' },
+            { id: 'vcal-movie', title: 'Movie Lane' },
+            { id: 'vcal-ical', title: 'iCal Feed' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vcal-grid">
+                <h3 class="docs-subsection-title">Week Grid &amp; Air Times</h3>
+                <p class="docs-text">The <strong>Calendar</strong> lays out upcoming episodes on a week grid with air times, a per-day agenda, and a click-through modal &mdash; the same shape as the Sonarr/Radarr calendars. Everything is scoped per media server so you only see what's relevant.</p>
+                ${docsImg('video-calendar.jpg', 'Video calendar week grid')}
+            </div>
+            <div class="docs-subsection" id="vcal-movie">
+                <h3 class="docs-subsection-title">Movie Lane</h3>
+                <p class="docs-text">A dedicated <strong>movie lane</strong> tracks upcoming film releases (theatrical / digital / physical windows) alongside the TV grid so both live in one view.</p>
+            </div>
+            <div class="docs-subsection" id="vcal-ical">
+                <h3 class="docs-subsection-title">iCal Feed</h3>
+                <p class="docs-text">Subscribe to the calendar from any calendar app via the <strong>iCal</strong> feed (<code>/api/video/calendar.ics</code>) to see upcoming airings and releases outside SoulSync.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-automations',
+        title: 'Video: Automations',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vauto-shared', title: 'Shared System Automations' },
+            { id: 'vauto-events', title: 'Event Triggers' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vauto-shared">
+                <h3 class="docs-subsection-title">Shared System Automations</h3>
+                <p class="docs-text">The video side surfaces the same SYSTEM automation engine the music side uses &mdash; scheduled tasks and event-driven workflows &mdash; minus the music-only kinds (Beatport, user, playlist). Use it to schedule library refreshes, wishlist scans, watchlist checks, and enrichment passes.</p>
+                ${docsImg('video-automations.jpg', 'Video automations')}
+            </div>
+            <div class="docs-subsection" id="vauto-events">
+                <h3 class="docs-subsection-title">Event Triggers</h3>
+                <p class="docs-text">A generic <strong>event bus</strong> lets video events (a grab completes, a scan finishes, a title is added) trigger downstream blocks, so you can chain workflows &mdash; for example, "after a scan, run enrichment, then refresh art."</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-youtube',
+        title: 'Video: YouTube Channels',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vyt-follow', title: 'Following Channels' },
+            { id: 'vyt-import', title: 'Import Subscriptions' },
+            { id: 'vyt-downloaded', title: 'Downloaded State' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vyt-follow">
+                <h3 class="docs-subsection-title">Following Channels</h3>
+                <p class="docs-text">Follow a <strong>YouTube channel</strong> (or a specific <strong>playlist</strong>) like a show. SoulSync uses <strong>yt-dlp</strong> to track new uploads and bridges them into the video wishlist/watchlist so they flow through the same download pipeline as everything else. It's visual-first &mdash; channels get art and a proper detail page.</p>
+                ${docsImg('video-youtube.jpg', 'YouTube channels tab')}
+            </div>
+            <div class="docs-subsection" id="vyt-import">
+                <h3 class="docs-subsection-title">Import Subscriptions</h3>
+                <p class="docs-text">Bring your existing subscriptions in bulk: <strong>preview</strong> a subscription list, then <strong>import</strong> the channels you want to follow, with live progress. Per-channel settings control how many recent videos to pull and how far back to reach.</p>
+            </div>
+            <div class="docs-subsection" id="vyt-downloaded">
+                <h3 class="docs-subsection-title">Downloaded State</h3>
+                <p class="docs-text">Ownership is tracked by your actual download history, so a channel's video list honestly shows what you already have versus what's still available &mdash; the extractor's title is treated as authoritative to avoid mismatches.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-tools',
+        title: 'Video: Tools',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vtool-overlays', title: 'Overlay Studio' },
+            { id: 'vtool-collections', title: 'Collection Manager' },
+            { id: 'vtool-repair', title: 'Library Maintenance' },
+            { id: 'vtool-enrichment', title: 'Enrichment' },
+            { id: 'vtool-activity', title: 'Server Activity' },
+            { id: 'vtool-backups', title: 'Backups' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vtool-overlays">
+                <h3 class="docs-subsection-title">Overlay Studio</h3>
+                <p class="docs-text">A visual, Kometa-style <strong>overlay template editor</strong>. Design badges (resolution, HDR, ratings, audio, awards, custom text, logo packs) on a live preview, assign templates to filtered sets of titles, and <strong>apply</strong> them &mdash; SoulSync renders the overlays with Pillow and writes them straight back to Plex/Jellyfin posters. A cleanup tool removes overlays again when you want the originals back.</p>
+                ${docsImg('video-overlay-studio.jpg', 'Overlay Studio editor')}
+            </div>
+            <div class="docs-subsection" id="vtool-collections">
+                <h3 class="docs-subsection-title">Collection Manager</h3>
+                <p class="docs-text">Build <strong>collections</strong> from smart filters or hand-picked titles and sync them to your server as Plex <strong>Collections</strong> or Jellyfin <strong>BoxSets</strong>, complete with generated posters. Preview membership, see what's missing, wishlist the gaps in one click, import/export collection definitions, and adopt collections that already exist on the server.</p>
+                ${docsImg('video-collections.jpg', 'Collection Manager')}
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>The Overlay and Collection studios are management surfaces &mdash; they're <strong>admin-only</strong> for both reads and writes.</div></div>
+            </div>
+            <div class="docs-subsection" id="vtool-repair">
+                <h3 class="docs-subsection-title">Library Maintenance</h3>
+                <p class="docs-text"><strong>Library Maintenance</strong> is a set of repair jobs that scan the video library for problems and fix them &mdash; missing art, ghost/orphan rows, un-monitored gaps, YouTube ghosts, stale watched state, and more. Each job produces rich, lazy-loaded <strong>findings</strong> you can fix individually, in bulk, resolve, or dismiss, with a run history and live progress.</p>
+                ${docsImg('video-repair.jpg', 'Library Maintenance jobs and findings')}
+            </div>
+            <div class="docs-subsection" id="vtool-enrichment">
+                <h3 class="docs-subsection-title">Enrichment</h3>
+                <p class="docs-text">Background <strong>enrichment workers</strong> fill in metadata from TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, Return-YouTube-Dislike, SponsorBlock and more. Watch per-service coverage and status, pause/resume a service, re-prioritize, test credentials, inspect unmatched items, and manually re-match a stubborn title.</p>
+            </div>
+            <div class="docs-subsection" id="vtool-activity">
+                <h3 class="docs-subsection-title">Server Activity</h3>
+                <p class="docs-text">A Tautulli-style <strong>Server Activity</strong> drawer shows live Plex streams and recent watch history app-wide, so you can see what's playing without leaving SoulSync.</p>
+            </div>
+            <div class="docs-subsection" id="vtool-backups">
+                <h3 class="docs-subsection-title">Backups</h3>
+                <p class="docs-text">Take on-demand or scheduled <strong>backups</strong> of the video database and restore or download them when needed. Because a restore replaces the whole database, backup endpoints are admin-only.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-import',
+        title: 'Video: Import',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vimp-failed', title: 'Failed Imports' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vimp-failed">
+                <h3 class="docs-subsection-title">Failed Imports</h3>
+                <p class="docs-text">When a completed download can't be automatically placed into the library (ambiguous match, unexpected layout), it lands in <strong>Failed Imports</strong>. From there an admin can manually <strong>place</strong> it into the right title, or <strong>dismiss</strong> it. This is the video equivalent of the music side's manual import step.</p>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>Manual import placement is admin-only, since it mutates the library on disk.</div></div>
+            </div>
+        `
+    },
+    {
+        id: 'video-settings',
+        title: 'Video: Settings & Side Access',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vset-server', title: 'Server & Libraries' },
+            { id: 'vset-services', title: 'Enrichment Services & Keys' },
+            { id: 'vset-notify', title: 'Notifications' },
+            { id: 'vset-access', title: 'Side Access' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vset-server">
+                <h3 class="docs-subsection-title">Server &amp; Libraries</h3>
+                <p class="docs-text">Configure your Plex/Jellyfin connection, test it, and pick which <strong>libraries</strong> the video side manages. For Jellyfin you can select the user whose watch state to read. Server and library config is written from the admin-only Settings page.</p>
+                ${docsImg('video-settings.jpg', 'Video settings')}
+            </div>
+            <div class="docs-subsection" id="vset-services">
+                <h3 class="docs-subsection-title">Enrichment Services &amp; Keys</h3>
+                <p class="docs-text">Enter API keys for TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles and the rest, set service priority, and manage indexer/download-client credentials (usenet, torrents, slskd). These endpoints return raw tokens, so they're admin-gated for both reads and writes.</p>
+            </div>
+            <div class="docs-subsection" id="vset-notify">
+                <h3 class="docs-subsection-title">Notifications</h3>
+                <p class="docs-text">Wire up event <strong>notifications</strong> (Discord, webhook, Telegram) for grabs, imports, and upgrades, and send a test. Notification config exposes webhook URLs/bot tokens, so it's admin-only.</p>
+            </div>
+            <div class="docs-subsection" id="vset-access">
+                <h3 class="docs-subsection-title">Side Access</h3>
+                <p class="docs-text">Under multi-profile, an admin grants each profile access to <strong>Music</strong>, <strong>Video</strong>, or <strong>both</strong> when creating or editing the profile. A music-only profile has the entire video side hidden and blocked server-side. See <strong>Multi-Profile</strong> for the full permission model.</p>
+            </div>
+        `
+    },
+    {
+        id: 'video-api',
+        title: 'Video: API Reference',
+        icon: '/static/video/video-nav.jpg',
+        children: [
+            { id: 'vapi-auth', title: 'Auth Model' },
+            { id: 'vapi-content', title: 'Library, Detail & Discover' },
+            { id: 'vapi-acquire', title: 'Downloads, Wishlist & Watchlist' },
+            { id: 'vapi-manage', title: 'Studios (Overlays/Collections/Repair)' },
+            { id: 'vapi-settings', title: 'Settings & Enrichment' },
+            { id: 'vapi-youtube', title: 'YouTube' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="vapi-auth">
+                <h3 class="docs-subsection-title">Auth Model</h3>
+                <p class="docs-text">The video API lives under <code>/api/video</code> and is <strong>session-authenticated</strong> &mdash; it uses your logged-in browser session and active profile, <em>not</em> the <code>sk_</code> API keys the public <a onclick="document.getElementById('docs-api').scrollIntoView()">REST API</a> uses. It's the app's own internal API; there is no key-authenticated public surface for the video side. A single blueprint-level gate enforces three rules on every request:</p>
+                <table class="docs-table">
+                    <thead><tr><th>Rule</th><th>Effect</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Side access</strong></td><td>A non-admin profile without video access gets <code>403</code> on <em>every</em> <code>/api/video/*</code> route.</td></tr>
+                        <tr><td><strong>Admin-only surfaces</strong></td><td>Management &amp; credential endpoints (overlays, collections, repair, import, server/library config, slskd, enrichment config, notifications, backups) require an admin profile for <em>both</em> reads and writes &mdash; their GETs can leak tokens or expose server config.</td></tr>
+                        <tr><td><strong>Admin-only writes</strong></td><td>Config the Settings page writes but content views legitimately read (server presence, quality tiers, library metadata edits, monitor, blocklist, poster set, per-title quality/series-type, per-show sync) is gated on writes only.</td></tr>
+                        <tr><td><strong>Download permission</strong></td><td>Actions that trigger a download (grab, retry, YouTube download, wishlist/watchlist add) require the profile's <code>can_download</code> flag.</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>The tables below are a reference of the available routes. Because these run against your live library and some are destructive, there's no in-page "try it" runner for the video API (unlike the public REST API).</div></div>
+            </div>
+            <div class="docs-subsection" id="vapi-content">
+                <h3 class="docs-subsection-title">Library, Detail &amp; Discover</h3>
+                <p class="docs-text">Read-only content endpoints (open to any video-enabled profile). Base path <code>/api/video</code>.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/dashboard</code></td><td>Dashboard tiles: counts, activity, continue-watching, health</td></tr>
+                        <tr><td>GET</td><td><code>/library</code></td><td>Owned movies &amp; shows with filters, sort, pagination</td></tr>
+                        <tr><td>GET</td><td><code>/library/resolutions</code>, <code>/library/genres</code></td><td>Facet values for the library filters</td></tr>
+                        <tr><td>GET</td><td><code>/detail/{show|movie}/{id}</code></td><td>Full detail record (seasons/episodes for shows)</td></tr>
+                        <tr><td>GET</td><td><code>/detail/{kind}/{id}/history</code>, <code>/extras</code></td><td>Per-title grab/import history and extras</td></tr>
+                        <tr><td>GET</td><td><code>/tmdb/{kind}/{tmdb_id}</code>, <code>/episode/...</code>, <code>/person/{id}</code></td><td>Live TMDB lookups for detail, seasons, episodes, people</td></tr>
+                        <tr><td>GET</td><td><code>/search</code>, <code>/search/studios</code>, <code>/trending</code></td><td>Search movies/shows/people/studios; trending feed</td></tr>
+                        <tr><td>GET</td><td><code>/studio/{id}</code>, <code>/studio/{id}/movies</code>, <code>/studio/presets</code></td><td>Studio detail, paged filmography, preset studios</td></tr>
+                        <tr><td>GET</td><td><code>/discover/{hero|foryou|taste|morelike|gaps|genres|list|trailer}</code></td><td>Discover feed surfaces</td></tr>
+                        <tr><td>GET/POST</td><td><code>/discover/{ignore|languages|providers-pref}</code></td><td>Per-profile discover preferences</td></tr>
+                        <tr><td>GET</td><td><code>/calendar</code>, <code>/calendar.ics</code></td><td>Upcoming airings/releases (JSON + iCal feed)</td></tr>
+                        <tr><td>GET</td><td><code>/poster/{kind}/{id}</code>, <code>/backdrop/...</code>, <code>/img</code></td><td>Poster/backdrop/art proxy</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="docs-subsection" id="vapi-acquire">
+                <h3 class="docs-subsection-title">Downloads, Wishlist &amp; Watchlist</h3>
+                <p class="docs-text">Acquisition. Download <em>triggers</em> require <code>can_download</code>; config writes and library mutations require admin.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Auth</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/downloads/active</code>, <code>/downloads/status</code>, <code>/downloads/history</code></td><td>Live queue &amp; history</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/downloads/search</code>, <code>/downloads/evaluate</code></td><td>Find &amp; rank releases</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/downloads/grab</code>, <code>/downloads/grab-pack</code>, <code>/downloads/retry</code></td><td>Queue a grab / retry</td><td>can_download</td></tr>
+                        <tr><td>POST</td><td><code>/downloads/cancel</code>, <code>/downloads/clear</code></td><td>Cancel / clear queue items</td><td>video</td></tr>
+                        <tr><td>GET/POST</td><td><code>/downloads/quality</code>, <code>/downloads/quality/profiles</code>, <code>/downloads/quality/formats</code></td><td>Quality profiles &amp; custom formats</td><td>admin (write)</td></tr>
+                        <tr><td>GET/POST</td><td><code>/downloads/config</code>, <code>/downloads/config/import-lists</code></td><td>Download &amp; import-list config</td><td>admin (write)</td></tr>
+                        <tr><td>GET/POST/DELETE</td><td><code>/downloads/blocklist</code></td><td>Release blocklist</td><td>admin</td></tr>
+                        <tr><td>GET/POST</td><td><code>/downloads/slskd</code></td><td>slskd credentials/config</td><td>admin</td></tr>
+                        <tr><td>GET</td><td><code>/wishlist</code>, <code>/wishlist/counts</code></td><td>Wanted &amp; cutoff-unmet</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/wishlist/search</code>, <code>/wishlist/search-all</code></td><td>Search Now for wishlist items</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/wishlist/add</code></td><td>Add to wishlist</td><td>can_download</td></tr>
+                        <tr><td>POST</td><td><code>/wishlist/remove</code>, <code>/wishlist/clear</code>, <code>/wishlist/backfill-art</code></td><td>Manage wishlist</td><td>video</td></tr>
+                        <tr><td>GET</td><td><code>/watchlist</code>, <code>/watchlist/counts</code></td><td>Followed people/studios</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/watchlist/add</code></td><td>Follow a person/studio</td><td>can_download</td></tr>
+                        <tr><td>POST</td><td><code>/watchlist/remove</code>, <code>/watchlist/{person|studio}/{id}/settings</code></td><td>Manage follows</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/requests</code></td><td>Submit a member request</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/requests/{id}/{approve|deny}</code>, DELETE <code>/requests/{id}</code></td><td>Resolve requests</td><td>admin</td></tr>
+                        <tr><td>POST</td><td><code>/scan/request</code>, <code>/scan/server</code>, <code>/scan/stop</code></td><td>Trigger / stop a library scan</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/monitor</code>, <code>/bulk/start</code></td><td>Monitor toggle &amp; bulk jobs</td><td>admin</td></tr>
+                        <tr><td>PUT/POST</td><td><code>/detail/{kind}/{id}/{metadata|lock|quality-profile|series-type|watched}</code></td><td>Edit / lock / configure a title (watched is open)</td><td>admin (watched: video)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="docs-subsection" id="vapi-manage">
+                <h3 class="docs-subsection-title">Studios: Overlays, Collections &amp; Repair</h3>
+                <p class="docs-text">Management surfaces &mdash; <strong>admin-only</strong> for every method.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET/POST/PUT/DELETE</td><td><code>/overlays/templates...</code></td><td>Overlay template CRUD, duplicate, thumbnails</td></tr>
+                        <tr><td>GET/PUT</td><td><code>/overlays/assignments</code></td><td>Assign templates to filtered title sets</td></tr>
+                        <tr><td>POST</td><td><code>/overlays/apply</code>, <code>/overlays/cleanup</code>, <code>/overlays/filter/preview</code></td><td>Render &amp; write overlays to the server; remove them</td></tr>
+                        <tr><td>GET/POST</td><td><code>/overlays/{logopack|upload|preview...}</code></td><td>Logo packs, uploads, preview filmstrip</td></tr>
+                        <tr><td>GET/POST/PUT/DELETE</td><td><code>/collections...</code></td><td>Collection CRUD, presets, preview, members, missing</td></tr>
+                        <tr><td>POST</td><td><code>/collections/{id}/sync</code>, <code>/collections/sync</code>, <code>/collections/server/adopt</code></td><td>Sync collections to Plex/Jellyfin; adopt existing</td></tr>
+                        <tr><td>POST</td><td><code>/collections/{id}/wishlist_missing</code>, <code>/collections/posters/regenerate</code></td><td>Wishlist gaps; regenerate posters</td></tr>
+                        <tr><td>GET/POST/PUT</td><td><code>/repair/jobs...</code>, <code>/repair/{status|toggle|pause|resume}</code></td><td>Library Maintenance jobs &amp; scheduler</td></tr>
+                        <tr><td>GET/POST</td><td><code>/repair/findings...</code></td><td>Findings: fix, bulk-fix, resolve, dismiss, clear</td></tr>
+                        <tr><td>GET/POST</td><td><code>/import/failed</code>, <code>/import/{id}/{place|dismiss}</code></td><td>Manual import of failed downloads</td></tr>
+                        <tr><td>GET/POST/DELETE</td><td><code>/backups...</code></td><td>Create, restore, download, delete backups</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="docs-subsection" id="vapi-settings">
+                <h3 class="docs-subsection-title">Settings &amp; Enrichment</h3>
+                <p class="docs-text">Server, library, enrichment, and notification config. Credential-exposing endpoints are <strong>admin (any method)</strong>; content-read config is admin-on-write.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Auth</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET/POST</td><td><code>/server</code>, <code>/server-config</code>, <code>/server-config/test</code></td><td>Media-server connection</td><td>admin</td></tr>
+                        <tr><td>GET/POST</td><td><code>/libraries</code>, <code>/jellyfin/users</code>, <code>/jellyfin/user</code></td><td>Managed libraries &amp; Jellyfin user</td><td>admin</td></tr>
+                        <tr><td>GET</td><td><code>/service-status</code></td><td>Reachability of server/indexers/clients</td><td>video</td></tr>
+                        <tr><td>GET/POST</td><td><code>/enrichment/config</code>, <code>/enrichment/priority</code></td><td>Enrichment keys &amp; ordering</td><td>admin</td></tr>
+                        <tr><td>GET</td><td><code>/enrichment/{services|coverage|status-all}</code></td><td>Coverage &amp; per-service status</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/enrichment/{service}/{pause|resume|test|retry}</code>, <code>/enrichment/retry-all-failed</code></td><td>Control an enrichment service</td><td>admin</td></tr>
+                        <tr><td>POST</td><td><code>/enrichment/matches/{kind}/{id}/{search|apply}</code></td><td>Manually re-match a title</td><td>admin</td></tr>
+                        <tr><td>GET/POST/DELETE</td><td><code>/notifications...</code>, <code>/notifications/test</code></td><td>Event notification connectors</td><td>admin</td></tr>
+                        <tr><td>GET/POST</td><td><code>/organization</code>, <code>/organization/rename/...</code></td><td>Naming scheme &amp; mass rename</td><td>admin</td></tr>
+                        <tr><td>POST</td><td><code>/poster/set</code>, <code>/poster/options/{kind}/{id}</code></td><td>Choose/refresh a title's poster</td><td>admin (set)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="docs-subsection" id="vapi-youtube">
+                <h3 class="docs-subsection-title">YouTube</h3>
+                <p class="docs-text">Channel/playlist following and downloads under <code>/api/video/youtube</code>.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Auth</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/youtube/channels</code>, <code>/youtube/channel/{id}</code>, <code>/youtube/wishlist</code></td><td>Followed channels &amp; their videos</td><td>video</td></tr>
+                        <tr><td>GET</td><td><code>/youtube/{search|resolve}</code>, <code>/youtube/video/{id}</code>, <code>/youtube/playlist/{id}</code></td><td>Search &amp; resolve YouTube content</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/youtube/{follow|unfollow}</code>, <code>/youtube/playlist/{follow|unfollow}</code></td><td>Follow/unfollow a channel or playlist</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/youtube/subscriptions/{preview|import}</code></td><td>Bulk-import subscriptions</td><td>video</td></tr>
+                        <tr><td>POST</td><td><code>/youtube/download</code>, <code>/youtube/wishlist/add</code></td><td>Download a video / add to wishlist</td><td>can_download</td></tr>
+                        <tr><td>GET/POST</td><td><code>/youtube/channel/{id}/settings</code></td><td>Per-channel pull settings</td><td>video</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        `
+    },
+    {
         id: 'api',
         title: 'REST API',
         icon: '/static/settings.jpg',
@@ -1649,6 +2247,7 @@ const DOCS_SECTIONS = [
             { id: 'api-playlists', title: 'Playlists' },
             { id: 'api-watchlist', title: 'Watchlist' },
             { id: 'api-wishlist', title: 'Wishlist' },
+            { id: 'api-request', title: 'Requests' },
             { id: 'api-discover', title: 'Discover' },
             { id: 'api-profiles', title: 'Profiles' },
             { id: 'api-settings', title: 'Settings & Keys' },
@@ -1883,6 +2482,22 @@ const DOCS_SECTIONS = [
                         }),
                         E('POST', '/wishlist/process', 'Trigger wishlist download processing', [], null, {
                             response: '{\n  "success": true,\n  "data": { "message": "Wishlist processing started." }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-request', title: 'Requests', desc: 'Submit a one-off "find and download this" request (for external clients like Discord bots) and poll its status. The search/match/download runs asynchronously.',
+                    endpoints: [
+                        E('POST', '/request', 'Queue a search-and-download request', [], [
+                            P('query', 'string', true, 'What to find, e.g. "Radiohead Karma Police"'),
+                            P('notify_url', 'string', false, 'Optional callback URL POSTed with the final status'),
+                            P('metadata', 'object', false, 'Optional passthrough metadata echoed back')
+                        ], {
+                            request: '{\n  "query": "Radiohead Karma Police",\n  "notify_url": "https://example.com/hook"\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "request_id": "b1e7...",\n    "status": "queued",\n    "query": "Radiohead Karma Police"\n  }\n}'
+                        }),
+                        E('GET', '/request/{request_id}', 'Poll the status of a request', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "request_id": "b1e7...",\n    "status": "downloading",\n    "download_id": "abc123",\n    "error": null,\n    "completed_at": null\n  }\n}'
                         })
                     ]
                 },

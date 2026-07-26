@@ -14,6 +14,20 @@ class _FakeWishlistDatabase:
         self.add_calls.append(kwargs)
         return True
 
+    def add_to_wishlist_detailed(self, **kwargs):
+        self.add_calls.append(kwargs)
+        return self._wishlist_outcome("created", kwargs.get("track_data", {}).get("id"))
+
+    @staticmethod
+    def _wishlist_outcome(status, track_id=None, reason=None):
+        return {
+            "status": status,
+            "created": status in ("created", "satisfied"),
+            "applied": status in ("created", "updated", "satisfied"),
+            "track_id": track_id,
+            "reason": reason,
+        }
+
     def get_wishlist_tracks(self, limit=None, profile_id=1):
         self.track_queries.append(("get_wishlist_tracks", limit, profile_id))
         tracks = list(self.tracks)
@@ -109,6 +123,23 @@ def test_add_spotify_track_to_wishlist_accepts_track_data_alias():
     assert fake_db.add_calls[0]["failure_reason"] == "Download failed"
     assert fake_db.add_calls[0]["source_type"] == "manual"
     assert fake_db.add_calls[0]["profile_id"] == 2
+
+
+def test_failed_track_forwards_embedded_quality_profile():
+    fake_db = _FakeWishlistDatabase()
+    service = _build_service(fake_db)
+
+    assert service.add_failed_track_from_modal({
+        "quality_profile_id": 42,
+        "spotify_track": {
+            "id": "sp-42",
+            "name": "Profiled Song",
+            "artists": [{"name": "Artist"}],
+            "album": {"name": "Album"},
+        },
+    }) is True
+
+    assert fake_db.add_calls[0]["quality_profile_id"] == 42
 
 
 def test_get_wishlist_tracks_for_download_formats_modal_shape():
