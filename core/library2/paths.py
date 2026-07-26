@@ -47,6 +47,27 @@ def resolve_lib2_path(file_path: Any, config_manager: Any = None) -> Optional[st
         return file_path if os.path.exists(file_path) else None
 
 
+def resolve_lib2_directory(file_path: Any, config_manager: Any = None) -> Optional[str]:
+    """Resolve the directory that *would* hold a stored path, or ``None``.
+
+    The shared resolver's suffix walk tests ``os.path.exists``, which is true
+    for directories too — so the same mapping that finds a file also finds its
+    folder when only the filename drifted (pathdrift25-01). Used to look for a
+    replacement next to where the catalogue expects the file; never used to
+    conclude a file is present.
+    """
+    if not isinstance(file_path, str) or not file_path:
+        return None
+    normalized = file_path.replace("\\", "/")
+    if "/" not in normalized:
+        return None
+    parent = normalized.rsplit("/", 1)[0]
+    if not parent:
+        return None
+    resolved = resolve_lib2_path(parent, config_manager)
+    return resolved if resolved and os.path.isdir(resolved) else None
+
+
 def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> bool:
     """Whether absence is credible enough to advance the missing lifecycle.
 
@@ -75,4 +96,8 @@ def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> 
     return bool(roots) and all(os.path.isdir(root) for root in roots)
 
 
-__all__ = ["missing_path_root_is_healthy", "resolve_lib2_path"]
+__all__ = [
+    "missing_path_root_is_healthy",
+    "resolve_lib2_directory",
+    "resolve_lib2_path",
+]

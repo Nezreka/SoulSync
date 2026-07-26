@@ -1350,6 +1350,7 @@ class RepairWorker:
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
             'comma_artist_split': self._fix_comma_artist_split,
+            'stale_index_path': self._fix_stale_index_path,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -1359,6 +1360,36 @@ class RepairWorker:
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_stale_index_path(self, entity_type, entity_id, file_path, details):
+        """pathdrift25-01 — repoint one index row at the file it describes.
+
+        Index-only: the proposal named a file that is already on disk, so this
+        moves nothing. Ambiguous findings carry no proposal and stay
+        unfixable on purpose — the operator resolves those by renaming or by
+        re-running the scan, never by the worker guessing."""
+        file_id = _lib2_id(entity_id)
+        if file_id is None:
+            return {'success': False, 'error': 'Finding has no Library v2 file id'}
+        proposed = str((details or {}).get('proposed_path') or '').strip()
+        if not proposed:
+            return {'success': False,
+                    'error': 'Finding is ambiguous — no single file was proposed'}
+        from core.library2.path_drift import apply_path_drift_fix
+
+        result = apply_path_drift_fix(
+            self.db, file_id, proposed, config_manager=self._config_manager,
+        )
+        if result.get('success'):
+            logger.info("Stale index path repointed: file %s -> %s",
+                        file_id, result.get('path'))
+            return {
+                'success': True,
+                'action': 'path_repointed',
+                'message': f'Index now points at {os.path.basename(proposed)}',
+                'library_v2_path': result.get('path'),
+            }
+        return result
 
     def _fix_genre_cleanup(self, entity_type, entity_id, file_path, details):
         """#1057 — rewrite a stored genre list to only its whitelisted genres.

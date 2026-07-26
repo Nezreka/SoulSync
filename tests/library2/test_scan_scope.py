@@ -71,7 +71,7 @@ def test_rescan_files_with_empty_scope_probes_nothing(scoped_conn, tmp_path):
 
     db_path = str(tmp_path / "lib2.db")
     stats = rescan_files(_Shim(db_path), album_ids=[])
-    assert stats == {"scanned": 0, "updated": 0, "missing": 0}
+    assert stats == {"scanned": 0, "updated": 0, "missing": 0, "path_drift": 0}
 
 
 def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
@@ -110,7 +110,7 @@ def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
         """SELECT tags_json, missing_tags_json, metadata_gaps_json
              FROM lib2_track_files WHERE path='/m/a.flac'"""
     ).fetchone()
-    assert stats == {"scanned": 1, "updated": 0, "missing": 0}
+    assert stats == {"scanned": 1, "updated": 0, "missing": 0, "path_drift": 0}
     assert json.loads(row["tags_json"])["title"] == "Album One"
     assert json.loads(row["missing_tags_json"]) == ["genre", "cover"]
     assert json.loads(row["metadata_gaps_json"]) == ["genre", "cover"]
@@ -164,7 +164,7 @@ def test_rescan_closes_snapshot_connection_before_file_io(
 
     stats = rescan_files(_Shim(), album_ids=[album_ids[0]])
 
-    assert stats == {"scanned": 1, "updated": 0, "missing": 0}
+    assert stats == {"scanned": 1, "updated": 0, "missing": 0, "path_drift": 0}
     assert state == {"active": 0, "opened": 2}
 
 

@@ -44,7 +44,7 @@ def _file_rows_in_scope(
             return []
         marks = ",".join("?" for _ in file_ids)
         return conn.execute(
-            f"""SELECT id, path, file_state, missing_scan_count
+            f"""SELECT id, path, size, file_state, missing_scan_count
                   FROM lib2_track_files
                  WHERE id IN ({marks}) AND path IS NOT NULL AND path <> ''
                    AND COALESCE(file_state,'active')<>'deleted'""",
@@ -55,7 +55,7 @@ def _file_rows_in_scope(
             return []
         marks = ",".join("?" for _ in album_ids)
         return conn.execute(
-            f"""SELECT tf.id, tf.path, tf.file_state, tf.missing_scan_count
+            f"""SELECT tf.id, tf.path, tf.size, tf.file_state, tf.missing_scan_count
                   FROM lib2_track_files tf
                JOIN lib2_tracks t ON t.id = tf.track_id
                WHERE t.album_id IN ({marks}) AND tf.path IS NOT NULL AND tf.path <> ''
@@ -63,14 +63,24 @@ def _file_rows_in_scope(
             album_ids,
         ).fetchall()
     return conn.execute(
-        """SELECT id, path, file_state, missing_scan_count
+        """SELECT id, path, size, file_state, missing_scan_count
              FROM lib2_track_files WHERE path IS NOT NULL AND path <> ''
               AND COALESCE(file_state,'active')<>'deleted'"""
     ).fetchall()
 
 
-def _persist_missing_observation(database, file_id: int, *, root_healthy: bool) -> None:
-    """Persist one missing-path observation in a short transaction."""
+def _persist_missing_observation(
+    database, file_id: int, *, root_healthy: bool, allow_confirm: bool = True,
+) -> None:
+    """Persist one missing-path observation in a short transaction.
+
+    ``allow_confirm=False`` caps the row at ``missing_suspected`` no matter how
+    many misses it has: pathdrift25-01: a stale *filename* leaves the parent
+    directory perfectly healthy, so the miss looks credible and the row used to
+    reach ``missing_confirmed`` while the song sat in that very folder under a
+    slightly different name.  The miss is still counted — once the reconcile
+    candidate disappears, the next scan confirms immediately.
+    """
     if not root_healthy:
         return
     from core.library2.track_files import set_file_state
@@ -88,7 +98,7 @@ def _persist_missing_observation(database, file_id: int, *, root_healthy: bool) 
         misses = int(row["missing_scan_count"] or 0) + 1
         state = (
             "missing_confirmed"
-            if misses >= MISSING_CONFIRMATION_SCANS
+            if misses >= MISSING_CONFIRMATION_SCANS and allow_confirm
             else "missing_suspected"
         )
         conn.execute(
@@ -184,6 +194,7 @@ def rescan_files(
     would report the whole library "missing".
     """
     from core.imports.file_ops import probe_audio_quality
+    from core.library2.path_drift import has_drift_candidate
     from core.library2.paths import (
         missing_path_root_is_healthy,
         resolve_lib2_path,
@@ -191,7 +202,7 @@ def rescan_files(
     from core.library2.status import quality_tier
     from core.library2.tag_cache import read_tag_snapshot
 
-    stats = {"scanned": 0, "updated": 0, "missing": 0}
+    stats = {"scanned": 0, "updated": 0, "missing": 0, "path_drift": 0}
     conn = database._get_connection()
     try:
         # sqlite3.Row values remain tied to the result shape, so materialize
@@ -212,10 +223,24 @@ def rescan_files(
         path = resolve_lib2_path(row["path"])
         if not path:
             stats["missing"] += 1
+            # pathdrift25-01: "unresolvable" and "gone" are not the same thing.
+            # A drifted filename leaves a healthy directory holding the very
+            # file this row describes; confirming that as missing hands a
+            # present song to the wanted/redownload logic.  Only worth probing
+            # when the root is healthy — an unhealthy one never advances the
+            # lifecycle anyway, and on a fully unmounted library this would
+            # otherwise double the failed resolves for every single row.
+            root_healthy = missing_path_root_is_healthy(row["path"])
+            drifted = root_healthy and has_drift_candidate(
+                row["path"], expected_size=row.get("size"),
+            )
+            if drifted:
+                stats["path_drift"] += 1
             _persist_missing_observation(
                 database,
                 row["id"],
-                root_healthy=missing_path_root_is_healthy(row["path"]),
+                root_healthy=root_healthy,
+                allow_confirm=not drifted,
             )
             continue
 

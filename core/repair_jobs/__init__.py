@@ -40,6 +40,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'library_reorganize': 'lib2',
     'genre_cleanup': 'lib2',
     'comma_artist_splitter': 'lib2',
+    'path_drift_reconcile': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -93,6 +94,9 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # Re-tags the affected files' embedded artist fields; the DB artist row
     # itself isn't touched by the fix.
     'comma_artist_splitter': frozenset({'observe', 'tags'}),
+    # Repoints a stale index row at a file that is already on disk. 'path' is
+    # the stored-path change; no file is ever moved, created or deleted.
+    'path_drift_reconcile': frozenset({'observe', 'path'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -212,6 +216,7 @@ _JOB_MODULES = [
     'core.repair_jobs.monitoring_list_reconcile',
     'core.repair_jobs.expired_download_cleaner',
     'core.repair_jobs.library_reorganize',
+    'core.repair_jobs.path_drift_reconcile',
     # Overrides mature job identities with P3-native catalogue boundaries.
     'core.repair_jobs.native_p3',
 ]
