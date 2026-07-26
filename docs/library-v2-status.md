@@ -9,9 +9,16 @@ Stand: 26. Juli 2026, einschließlich Foundation-Rebase (§14), der an diesem
 Tag umgesetzten Korrekturen §20–§24 (Pfad-Desync, Manual-Match-Timeout,
 Orphan-Approve-Materialisierung, F-10-Korrelation, Artwork-Kaltstart-
 Nachlieferung), §26 (nativer Subject-Row-Versatz in den Repair-Scannern,
-Abbau der vorbestehenden Testfehler) und §27 (erster Lauf gegen einen Snapshot
-der Produktiv-DB, Album-Twin-Scan für jeden Artist, Frontend-Gate).
-Playlist UI bleibt geparkt.
+Abbau der vorbestehenden Testfehler), §27 (erster Lauf gegen einen Snapshot
+der Produktiv-DB, Album-Twin-Scan für jeden Artist, Frontend-Gate), §28
+(Reconcile-Unmapped-Artists-Diagnose: Namens-only-Matching, fehlender
+Cooldown — beide Pending, Korrektur folgt vor dem geplanten
+Post-Import-Autotrigger) und §29 (Werkzeug-↔-V2-Konvergenz: Legacy-Findings,
+Cover-/Tag-Schreibpfad, Verification-Spalte — fünf Korrekturen, Genre-Lücke
+als Produktentscheidung offen).
+Playlist UI bleibt geparkt. Der werkzeugweise Integrations-Deep-Dive über alle
+25 registrierten Repair-Jobs ist beauftragt und offen
+([issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17)).
 
 ## 1. Statusbegriffe
 
@@ -40,7 +47,7 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-05](library-v2-features.md#feat-bootstrap) | Automatischer Initialimport | Verified | Review 4/5, `c2d99eda`, `e9730afe` | Bounded Transactions und Streaming; Owner-/Fresh-Install-Fixes im Regression-Checkpoint |
 | [F-06](library-v2-features.md#feat-alias) | Artist Alias Registry und Scope | Verified | `ce7b4516`, `a95e5309` | Listen, Suche, Totals und artist-weite Actions gezielt geprüft |
 | [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3, §27 | Album-Twin-Pass läuft seit §27 für jeden Artist, nicht nur für Merge-Survivor; Dry Run gegen die Produktiv-DB gelaufen. Rest: Track-Zeilen-Duplikate (§27 Teil 3) brauchen eine Produktentscheidung |
-| [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11 | Enrich/Smart-Split und globale Suche abgedeckt |
+| [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11, §28 | Enrich/Smart-Split und globale Suche abgedeckt; Reconcile-Job bleibt namensbasiert ohne Strong-ID-Cross-Check und ohne Cooldown, siehe §28 |
 | [F-09](library-v2-features.md#feat-playlists) | Library-v2-Playlist-Oberfläche | Deferred | `library-v2-playlist-ui` | Vollständig aus dem aktiven Overhaul entfernt und separat geparkt |
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
@@ -1229,3 +1236,253 @@ einen Snapshot der Produktiv-DB geprüft; Teil 4 implementiert und geprüft.
 Teil 3 bleibt offen und braucht eine Nutzerentscheidung. Der übrige §9-Gate-
 Stand (realer Client-E2E, Restart-Szenarien, Windows-/Docker-Path-Mapping,
 F-12-Browser-E2E) ist unverändert.
+
+---
+
+## 28. Reconcile Unmapped Artists — Root Cause dokumentiert, Korrektur ausstehend (26. Juli 2026)
+
+Ausgangspunkt war der Nutzerwunsch, den "Reconcile Unmapped Artists"-Job
+([F-08](#2-feature-status)) automatisch nach abgeschlossenen Imports laufen
+zu lassen. Bei der Prüfung, ob der Job dafür zuverlässig genug ist, wurden
+zwei Root Causes bestätigt; Diagnose und Korrekturverträge stehen in
+[issues.md §16](library-v2-issues.md#16-reconcile-unmapped-artists-namensbasiertes-matching-ignoriert-vorhandene-starke-ids-26-juli-2026).
+
+| # | Finding | Status | Referenz |
+|---:|---|---|---|
+| 1 | Namens-Resolve ignoriert bereits vorhandene starke Provider-IDs auf Album/Track des Artists; stoppt zudem bei der ersten Quelle statt alle durch eine sichere Anker-ID belegten Quellen zu übernehmen | Implemented → [§30](#30-werkzeugweiser-deep-dive-t-11-t-12-und-der-post-import-trigger-26-juli-2026-nacht) | [issues.md Finding 1](library-v2-issues.md#unmappedreconcile26-01) |
+| 2 | Keine `last_attempted_at`/Cooldown-Markierung — ein automatisierter, wiederholter Trigger würde dauerhaft ungematchte Artists bei jedem Lauf erneut gegen alle konfigurierten Provider abfragen | Implemented → [§30](#30-werkzeugweiser-deep-dive-t-11-t-12-und-der-post-import-trigger-26-juli-2026-nacht) | [issues.md Finding 2](library-v2-issues.md#unmappedreconcile26-02) |
+
+**Einstufung (Stand dieses Eintrags):** Beide Root Causes bestätigt und
+dokumentiert, keine Korrektur in dieser Session. Der vom Nutzer gewünschte
+automatische Post-Import-Trigger dieses Jobs baut auf diesen beiden
+Korrekturen auf: Finding 1 senkt das Fehlmatch-Risiko eines unbeaufsichtigten
+(nicht mehr manuell per Button ausgelösten) Laufs, Finding 2 verhindert
+unkontrollierte wiederholte Provider-Anfragen bei hoher Import-Frequenz.
+
+**Nachtrag:** Beide Korrekturen und der Trigger selbst sind in §30 umgesetzt.
+Der offene Trigger-Zeitpunkt wurde am 26. Juli vom Nutzer entschieden: nach
+**jedem** abgeschlossenen Import, abgesichert durch Debounce und den Cooldown
+aus Finding 2.
+
+---
+
+## 29. Werkzeug-↔-Library-V2-Konvergenz: sechs Korrekturen (26. Juli 2026, Abend)
+
+Nutzer-Bugreport: Cover-Art-Finding korrekt erkannt, aber „Fix Finding",
+„Refresh & Scan" und Browser-Neustart lassen „2 tag gaps" (`genre`, `cover`)
+stehen; ein Klick auf die Lückenzahl meldet „Tags written" und ändert nichts;
+„Preview Retag" behauptet „Tags match"; keine Spalte zeigt, **wie** eine Datei
+verifiziert wurde. Diagnose und Korrekturverträge stehen in
+[issues.md §17](library-v2-issues.md#17-werkzeuge-und-library-v2-konvergieren-nicht-nutzer-bugreport-vom-26-juli-2026-abend);
+diese Tabelle enthält ausschließlich den Bearbeitungsstand.
+
+| # | Finding | Status | Umsetzung |
+|---|---|---|---|
+| [T-01](library-v2-issues.md#tool26-01) | Findings mit Legacy-Entity-ID erreichen Library V2 nie (`subject_unlinked`) | Implemented | `_resolve_links` löst zusätzlich über `legacy_artist_id`/`legacy_album_id`/`legacy_track_id` auf (Textvergleich, kein `int()`); Track-Subjects ohne benanntes File ziehen ihre Files nach, aber nur wenn kein File benannt war (ADR-03) |
+| [T-02](library-v2-issues.md#tool26-02) | Nicht-Konvergenz gilt als Erfolg | Implemented | `sync_repair_change` liefert `converged`; `fix_finding` setzt `library_v2_converged=False` und loggt eine Warnung, statt still zu resolven |
+| [T-03](library-v2-issues.md#tool26-03) | „N tag gaps" schreibt strukturell nichts, meldet aber Erfolg | Implemented | Fehlendes Cover ist im `write_tags`-Fastpath ein eigener Schreibgrund; die Gap-Zelle liest `written` und meldet „Nothing to write", wenn nichts geschrieben wurde |
+| [T-04](library-v2-issues.md#tool26-04) | Preview meldet „Tags match" trotz fehlendem Cover | Implemented | `_db_data_for_row` trägt `thumb_url` nach (Override → `lib2_albums.image_url`), damit `build_tag_diff` die Cover-Zeile ehrlich rendert |
+| [T-05](library-v2-issues.md#tool26-05) | `write_tags` kennt nur die Artwork-Cache-Datei | Implemented | `_album_cover_data` materialisiert über `build_artwork` (Guide §2.1-Reihenfolge, eigener Single-Flight-Lock) und nur, wenn überhaupt eine Cover-Quelle existiert |
+| [T-06](library-v2-issues.md#tool26-06) | Genre-Lücke katalogseitig unfüllbar | **Bewusst offen** → [§30](#30-werkzeugweiser-deep-dive-t-11-t-12-und-der-post-import-trigger-26-juli-2026-nacht) | Der naheliegende Vertrag („Album-Genres beim Provider holen") wurde gegen die echten Alben geprüft und **widerlegt** — keine Quelle liefert Genres. Der Nutzer hat die drei Entwurfsfragen am 26. Juli mit „offen lassen" beantwortet |
+| [T-07](library-v2-issues.md#tool26-07) | Ogg/Opus meldet dauerhaft ein fehlendes Cover | Implemented | `read_file_tags` erkennt `metadata_block_picture` wie `art_apply` — eine Wahrheit für Gap-Anzeige, Scan und Apply |
+| [T-08](library-v2-issues.md#tool26-08) | „Refresh & Scan" erneuert keine Provider-Metadaten | Partial | Der Datei-Pass leistet Tags + Quality-Probe + Missing-Lifecycle und seit T-09 auch die Verification; der Katalog-Refresh bleibt bewusst Sache von Enrich/Discography-Refresh (UI-Benennung offen) |
+| [T-09](library-v2-issues.md#tool26-09) | Verification-Tag wird gelesen und weggeworfen | Implemented | `_persist_verification_observation` adoptiert `SOULSYNC_VERIFICATION`; unbekannte Werte ignoriert, fehlender Tag löscht nichts, `human_verified` wird nie überschrieben |
+| [T-10](library-v2-issues.md#tool26-10) | Keine Verification-Spalte | Implemented | Opt-in-Spalte `verification` in `track_table`; leere Zelle erklärt im Tooltip, wie sich der Wert beschaffen lässt |
+| [T-11](library-v2-issues.md#tool26-11) | `genre_cleanup`/`comma_artist_splitter` sind legacy-only | Pending | Teil des werkzeugweisen Deep-Dive, [issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17) |
+
+### Verifikation
+
+Alle Belege stammen aus Läufen gegen einen `sqlite3.backup()`-Snapshot der
+realen Produktiv-DB mit den echten Audiodateien; die Live-DB wurde nie
+schreibend geöffnet.
+
+**Ende-zu-Ende, echte FLAC (Cover + Genre-Tag entfernt), vorher → nachher:**
+
+| Schritt | vorher | nachher |
+|---|---|---|
+| Refresh & Scan erkennt | `["genre","cover"]` | `["genre","cover"]` (unverändert korrekt) |
+| Preview Retag | `has_changes False` („Tags match") | `Cover Art: None → Available, changed=True` |
+| Klick „N tag gaps" | `written 0, skipped 1` | `written 1` |
+| Gaps danach | `["genre","cover"]` | `["genre"]` |
+
+Der verbleibende Genre-Gap ist T-06 und bleibt bewusst offen.
+
+**T-01 gegen die drei real offenen Produktiv-Findings** (vorher alle
+`subject_unlinked`):
+
+```
+finding 15 album_tag_consistency entity='630009860' -> artists=[30] albums=[1066] tracks=34 files=2
+finding 18 album_tag_consistency entity='709335827' -> artists=[28] albums=[1064] tracks=41 files=41
+finding 19 library_reorganize    entity='234986381' -> artists=[28] albums=[1174,1344] tracks=2 files=2
+```
+
+**T-09, ein einzelner `rescan_files`-Lauf über die Produktiv-Kopie:**
+
+| `verification_status` | vorher | nachher |
+|---|---:|---:|
+| `(null)` | 199 | **5** |
+| `verified` | 57 | 219 |
+| `unverified` | 6 | 29 |
+| `human_verified` | 8 | 17 |
+
+(Die verbleibenden 5 sind 2 physisch fehlende Dateien und 3 ohne Tag.)
+
+**Testläufe auf diesem Stand:**
+
+- `tests/library2`: 1.050 bestanden (neu: 4 Konvergenz-, 4 Retag-Cover-,
+  4 Verification-Heilungs-Tests);
+- `tests/repair`, `tests/repair_jobs`, Tag-Writer-Suiten: 170 bestanden;
+- `tests/test_tag_writer_cover_detection.py` (neu, echte ffmpeg-Fixtures):
+  3 bestanden;
+- WebUI-Gesamtsuite: 270 Tests in 45 Dateien bestanden;
+- `npm run check` (oxfmt + oxlint --type-check): 0 Fehler, 2 vorbestehende
+  Warnungen in unberührten Dateien.
+
+### Einstufung
+
+Die vom Nutzer beschriebene Kette „Werkzeug erkennt richtig → Fix → Library V2
+zeigt es trotzdem nicht" ist an fünf Stellen geschlossen und an einer
+(T-06 Genre) bewusst offen und ehrlich beschriftet. Der werkzeugweise
+Deep-Dive über alle 25 registrierten Jobs ist beauftragt und steht als
+[issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17)
+bereit; T-11 ist sein erster Eintrag.
+
+---
+
+## 30. Werkzeugweiser Deep-Dive: T-11, T-12 und der Post-Import-Trigger (26. Juli 2026, Nacht)
+
+Diese Session hat den in §29 beauftragten Deep-Dive über alle 25 registrierten
+Jobs durchgeführt, seine beiden Identitätslücken geschlossen und den in §28
+offenen Reconcile-Automatismus fertiggebaut. Das Auditergebnis steht in
+[issues.md §19](library-v2-issues.md#19-ergebnis-des-werkzeugweisen-deep-dive-26-juli-2026-nacht),
+diese Tabelle enthält nur den Bearbeitungsstand.
+
+| # | Punkt | Status | Umsetzung |
+|---|---|---|---|
+| [T-06](library-v2-issues.md#tool26-06) | Genre-Lücke katalogseitig unfüllbar | **Bewusst offen (Nutzerentscheidung)** | Der Nutzer hat am 26. Juli aus vier vorgelegten Verträgen „offen lassen" gewählt. Kein Artist-Genre-Fallback, kein `metadata_cache_entities`-Rückgriff, kein Schreiben nach `lib2_albums.genres`. Die Gap-Zelle meldet weiterhin ehrlich „Nothing to write" |
+| [T-11](library-v2-issues.md#tool26-11) | `genre_cleanup`/`comma_artist_splitter` deklarieren `lib2`, lesen Legacy | Implemented | Beide bekommen eine native Überschreibung in `native_p3.py`; Basisklassen behalten ihre Legacy-Körper für das Rollback-Fenster |
+| [T-12](library-v2-issues.md#tool26-12) | `library_reorganize` mintet nackte native IDs | Implemented | Beide `create_finding`-Aufrufe schreiben `lib2:<id>` plus `details['library_v2']` |
+| [§16 F1](library-v2-issues.md#unmappedreconcile26-01) | Namens-Resolve ignoriert vorhandene starke IDs | Implemented | Anker-Resolve über Album-/Track-Provider-IDs vor der Namenssuche; jede belegte Quelle wird geschrieben, nicht nur die erste |
+| [§16 F2](library-v2-issues.md#unmappedreconcile26-02) | Kein Cooldown für dauerhaft ungematchte Artists | Implemented | `unmapped_last_attempted_at` + `cooldown_hours`-Parameter; jeder Versuch wird gestempelt, auch der fehlgeschlagene |
+| §28 | Automatischer Post-Import-Trigger | Implemented | `core/library2/unmapped_trigger.py`, verdrahtet in den Post-Import-Side-Effects |
+| §27 Teil 3 | Doppelte Track-Zeilen in der Produktiv-DB | **Zurückgestellt (Nutzerentscheidung)** | Der Nutzer hat klargestellt, dass die lokale DB reines Testmaterial ist und nicht repariert werden muss. Kein Fold-Pass gebaut; der Zustand bleibt über den Integritätsreport sichtbar |
+
+### Teil 1 — T-11: die letzten beiden Legacy-Leser
+
+Beide Basisklassen haben genau vier Stellen, an denen sie den Katalog
+berühren. Diese sind zu Methoden extrahiert (`_genre_rows`,
+`_comma_artist_rows`, `_finding_identity`, `_library_artist_id`,
+`_sample_tracks`, `estimate_scope`) und in `native_p3.py` überschrieben — das
+Muster der sechs bereits nativen Job-Identitäten. Bewusst **nicht** angefasst:
+
+- Die Semantik. Genre Cleanup entfernt weiterhin nur (#1057) und erfindet
+  nichts; der Comma Splitter behält Whitelist, Voll-String-API-Prüfung und die
+  Regel „ein nicht auflösbarer Bestandteil kippt das Finding".
+- Die Legacy-Körper. Sie bleiben als Basisimplementierung stehen, weil das
+  Rollback-Fenster laut Guide §1 noch offen ist.
+
+Native Besonderheiten: Ein Artist „hält" eine Datei, wenn er auf dem Track
+kreditiert **oder** Primary-Artist von dessen Album ist — die zwei Wege, auf
+denen der Importer einen komma-verbundenen Tag-String ablegt. Und der leere
+Genre-Wert ist nativ `'[]'`, nicht `NULL`: `lib2_artists.genres` und
+`lib2_albums.genres` sind `NOT NULL DEFAULT '[]'`, der Fix schreibt daher
+immer eine JSON-Liste.
+
+Zusätzlich brauchte T-11 eine Erweiterung an `_resolve_links`: Ein
+Artist-Subject ohne Album/Track/File zieht jetzt die Dateien dieses Artists
+nach — aber nur, wenn der Job `tags`, `path` oder `new_file` deklariert. Ohne
+das liefe nach dem Comma-Split kein `rescan_files` und die Tag-Snapshots
+zeigten weiter den alten kombinierten Artist. Mit der Effekt-Schranke bleibt
+Genre Cleanup (`observe`, `metadata`) schmal und schleppt keine Diskografie in
+einen Rescan (BR-08).
+
+Damit `JOB_DATA_BASIS` nicht wieder zu einem ungeprüften Versprechen wird
+(genau die T-11-Ursache), pinnt ein neuer Test in
+`tests/repair/test_job_data_basis.py` die Menge der Identitäten, deren
+registrierte Implementierung aus `native_p3` stammt — jetzt acht statt sechs.
+
+### Teil 2 — T-12: eine nackte Zahl ist seit T-01 eine Legacy-ID
+
+Im Audit neu gefunden. `library_reorganize` liest nativ, schrieb seine
+Zeilen-IDs aber unpräfixiert; seit T-01 wird das als Legacy-Rückverweis
+interpretiert. Der Reproduktionsfall steht in issues.md §19.2: Track 9 trägt
+`legacy_track_id=4`, das Finding gilt Track 4 — vor dem Fix lieferte die
+Auflösung beide. Weil `annotate_finding_details` schon beim Erzeugen läuft,
+wurde der falsche Verweis gespeichert, nicht erst beim Fix errechnet.
+
+### Teil 3 — §16: Anker vor Namen, und ein Backoff für das Unlösbare
+
+Finding 1 (Anker-Resolve) war beim Sessionbeginn bereits im Worktree, aber
+undokumentiert; §28 führte ihn noch als „Pending". Der Vertrag ist
+eingelöst: `_artist_catalog_anchors` sammelt in zwei Queries jede starke
+Provider-ID von Alben und Tracks des Artists, `resolve_and_enrich_native_artist`
+fragt **jede** so belegte Quelle per ID-Lookup ab und schreibt alle Treffer.
+Nur ein Artist ganz ohne Anker fällt auf die alte Namenssuche zurück — dort
+bewusst weiter mit Stopp beim ersten Treffer.
+
+Finding 2 ist neu: `unmapped_last_attempted_at` existierte als Spalte, aber
+niemand las oder schrieb sie. Jetzt stempelt jeder Versuch — auch der, dessen
+Provider-Aufruf geworfen hat, und zwar **nach** dem Rollback, damit ein
+kaputter Provider nicht bei jedem Trigger erneut befragt wird.
+`_pending_unmapped_artists` filtert nur, wenn ein `cooldown_hours` übergeben
+wurde: der manuelle Button bleibt „ganzer Backlog", der Automatismus bekommt
+das Fenster.
+
+### Teil 4 — §28: der automatische Trigger
+
+`core/library2/unmapped_trigger.py` hängt in den Post-Import-Side-Effects
+direkt hinter dem Library-v2-Autolink — der Stelle, an der neue native
+Artists tatsächlich entstehen. Damit deckt ein Hook alle Importwege ab
+(Auto-Import, manueller Import, Wishlist-Download, Manual Grab), statt zwei
+`import_completed`-Emitter zu patchen und den Download-Pfad zu verfehlen.
+
+Zwei Eigenschaften machen das tragbar:
+
+- **Coalescing.** Der Hook feuert pro Datei; ein 30-Track-Album-Import ergibt
+  über ein Debounce-Fenster (Default 120 s) genau einen Lauf. Ein Trigger, der
+  *während* eines laufenden Passes eintrifft, wird nicht verworfen, sondern neu
+  armiert — der laufende Pass hat seine Kandidatenliste vor diesen Artists
+  gelesen.
+- **Backoff.** Der Lauf übergibt `cooldown_hours` (Default 168).
+
+Konfigurierbar über `library_v2.unmapped_reconcile.auto_after_import`,
+`.debounce_seconds` und `.cooldown_hours`; ohne Eintrag gelten die Defaults.
+Der Hook kann nie in die Pipeline werfen — die Datei liegt zu diesem Zeitpunkt
+bereits importiert auf der Platte.
+
+Bewusst so gewählte Konsequenz für den **Bootstrap-Import**: Das Debounce ist
+leading-edge und armiert sich während eines stundenlangen Massenimports immer
+wieder neu, der Job läuft also mehrfach statt einmal am Ende. Die Provider-Last
+bleibt trotzdem bei etwa einem Lookup pro neuem unmapped Artist, weil der
+Cooldown jede Zeile nach ihrem ersten Versuch für eine Woche ausschließt. Der
+Alternativentwurf (nur einmal nach Abschluss der Bootstrap-Phase) wurde
+verworfen, weil „die Bootstrap-Phase ist zu Ende" kein Signal ist, das die
+Pipeline heute liefert.
+
+### Verifikation
+
+- `tests/library2`: **1.064 bestanden** (1.050 + 5 Cooldown-, 7 Trigger-,
+  2 Fan-out-Tests);
+- `tests/repair`, `tests/repair_jobs`: **120 bestanden** (108 + 8 T-11-,
+  3 T-12-, 1 Registry-Test);
+- `tests/imports`: unverändert grün (gemeinsamer Lauf mit den beiden obigen,
+  Exit-Code 0);
+- Ruff über alle geänderten Dateien: sauber.
+
+Nicht Teil dieses Laufs: das Frontend. Diese Session hat kein `webui/`-File
+angefasst; der letzte Stand ist der aus §29.
+
+Neue Testdateien: `tests/library2/test_unmapped_trigger.py`,
+`tests/repair_jobs/test_native_genre_and_comma_split.py` (inkl. eines
+Ende-zu-Ende-Falls mit echten ffmpeg-FLACs),
+`tests/repair_jobs/test_library_reorganize_identity.py`.
+
+### Einstufung
+
+Der §18-Auftrag ist abgearbeitet: kein registrierter Job trägt mehr das
+Verdikt *legacy*, und die Finding-Typ-Matrix ist vollständig aufgenommen. Zwei
+Punkte bleiben bewusst offen, beide auf ausdrückliche Nutzerentscheidung
+(T-06 Genre-Beschaffung, §27 Teil 3 Track-Zeilen-Dedup). Nicht geprüft und
+weiterhin Teil des §9-Gates: Failure-Injection pro Werkzeug (Restart im Apply,
+read-only Root, Windows-/Docker-Pfad-Mapping) sowie ein realer Lauf des
+Post-Import-Triggers gegen laufende Importe.

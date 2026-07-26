@@ -2089,3 +2089,708 @@ Kein Fehlerbild, sondern die eigentliche Ausbeute des Laufs:
   keinen Drift-Kandidaten — diese Bibliothek hat den LV2-017-Desync nicht.
 - **§22 ohne Befund.** Der Orphan-Detector scannte 144 Dateien und meldete
   keinen Orphan.
+
+---
+
+## 16. Reconcile Unmapped Artists: namensbasiertes Matching ignoriert vorhandene starke IDs (26. Juli 2026)
+
+Diskussion beim Review des "Reconcile Unmapped Artists"-Jobs
+([features F-08](library-v2-features.md#feat-unmapped),
+`core/library2/native_enrich.py::reconcile_unmapped_native_artists`) im
+Rahmen der geplanten Automatisierung dieses Jobs nach abgeschlossenen
+Imports (siehe [status.md §28](library-v2-status.md#28-reconcile-unmapped-artists-root-cause-dokumentiert-korrektur-ausstehend-26-juli-2026)).
+
+### <a name="unmappedreconcile26-01"></a> Finding 1 — Kein Cross-Check gegen bereits gematchte Alben/Tracks des Artists
+
+**Ort:** `core/library2/native_enrich.py::resolve_and_enrich_native_artist` →
+`core/metadata/album_tracks.py::resolve_artist_identity`.
+
+`resolve_and_enrich_native_artist` liest für den Artist ausschließlich die
+`name`-Spalte aus `lib2_artists` und übergibt nur diesen String an
+`resolve_artist_identity`. Es gibt keinen Blick auf `lib2_albums`/
+`lib2_tracks` desselben Artists — weder auf `lib2_albums.spotify_id`/
+`musicbrainz_id`/`external_ids` noch auf `lib2_tracks.spotify_id`/`isrc`/
+`musicbrainz_id`/`external_ids` —, obwohl diese Spalten existieren und bei
+Alben/Tracks, die über Wishlist-Add, Download-Match oder
+Discography-Expansion entstanden sind, oft längst gefüllt sind (Schema-
+Kommentar: `tracks.spotify_id -- for wishlist mirroring`).
+
+`resolve_artist_identity` läuft stattdessen für jede konfigurierte Quelle
+eine Namenssuche über den Artist-Search-Endpunkt und nimmt den ersten
+Treffer, den `_pick_best_artist_match` als hinreichend sicher einstuft
+(exakter Normalisierungstreffer, bei mehreren exakten Treffern
+Katalog-Gewicht-Tiebreak, sonst Fuzzy ≥ 0,85). Genau dieser
+Vorsichtsapparat existiert nur, **weil** eine Namenssuche mehrdeutig sein
+kann — Provider liefern Fragment-Duplikate unter identischem Namen (5×
+"Hiroyuki Sawano" bei Deezer, real nur eine mit 104 statt 4 Alben) und
+historisch griff eine blinde erste Trefferannahme daneben (Bug #988:
+Deezer-Namenssuche nach "The Outfield" lieferte "The Beatles"). Eine
+bereits vorhandene starke ID auf einem Album/Track desselben Artists macht
+diese ganze Unsicherheit überflüssig: Ein direkter ID-Abruf des
+Albums/Tracks bei der Quelle liefert die Artist-Identität aus der
+Provider-Antwort selbst, ohne Namenssuche, ohne Fuzzy-Schwelle. Das ist
+exakt der in Guide §2.5 verlangte Vorrang ("Starke IDs schlagen
+Namensheuristiken"), der hier für native Artists nicht eingehalten wird.
+
+**Korrekturvertrag:** Vor dem Namens-Resolve prüfen, ob der Artist
+mindestens ein Album/Track mit einer starken Provider-ID trägt. Für jede
+so gefundene Quelle den Artist über den Album-/Track-Response dieser
+Quelle auflösen (ID-Lookup, keine Namenssuche) — und dabei **nicht** wie
+der bisherige Namens-Resolve bei der ersten erfolgreichen Quelle stoppen:
+Jede Quelle, für die eine 100%-sichere Anker-ID (Album oder Track dieses
+Artists) existiert, wird abgefragt und ihre Artist-ID geschrieben, nicht
+nur eine einzelne. Anders als beim Namens-Resolve ist das hier ungefährlich,
+weil jede einzelne Zuordnung durch eine bereits bestätigte Track-/Album-ID
+belegt ist, nicht durch eine Heuristik. Nur wenn **kein** Album/Track des
+Artists irgendeine starke ID trägt, fällt das System auf den bisherigen
+Namens-Resolve zurück — und behält dort bewusst das Stop-bei-erstem-Treffer-
+Verhalten, weil mehrere unabhängige Namens-Fuzzy-Treffer über verschiedene
+Quellen das Fehlmatch-Risiko eher vervielfachen als senken würden.
+
+**Status: Pending** — Root Cause bestätigt, keine Korrektur in dieser
+Session.
+
+### <a name="unmappedreconcile26-02"></a> Finding 2 — Kein Cooldown für dauerhaft ungematchte Artists
+
+**Ort:** `core/library2/native_enrich.py::_pending_unmapped_artists`,
+`reconcile_unmapped_native_artists`.
+
+Die Kandidatenauswahl selektiert ausschließlich danach, ob am Artist noch
+keine Provider-ID gespeichert ist. Es gibt keine Markierung, die einen nie
+versuchten Artist von einem unterscheidet, der beim letzten Lauf an jeder
+konfigurierten Quelle **und** an jeder Smart-Split-Komponente gescheitert
+ist (z. B. ein echter Collab-Name, dessen Bestandteile selbst keine
+Provider-Treffer sind). Jeder Reconcile-Lauf attackiert deshalb erneut den
+gesamten Backlog, einschließlich der Zeilen, die strukturell dauerhaft
+unlösbar sind.
+
+Solange der Job nur per Button manuell ausgelöst wird, ist das ein
+akzeptabler Klick-Preis. Sobald er automatisch und wiederholt nach
+abgeschlossenen Imports läuft (siehe status.md §28), wird derselbe
+dauerhaft ungematchte Name bei jedem Trigger erneut gegen alle
+konfigurierten externen Provider abgefragt — Frequenz und Rate-Limit-Kosten
+hängen dann unkontrolliert davon ab, wie oft Imports abschließen.
+
+**Korrekturvertrag:** Eine `last_attempted_at`/`attempt_count`-Markierung
+pro Artist, die es einem automatisierten Lauf erlaubt, kürzlich
+gescheiterte Zeilen für ein Backoff-Fenster zu überspringen, statt sie bei
+jedem Trigger erneut anzufragen.
+
+**Status: Pending** — Root Cause bestätigt, keine Korrektur in dieser
+Session; wird relevant, sobald der automatische Post-Import-Trigger
+umgesetzt wird.
+
+---
+
+## 17. Werkzeuge und Library V2 konvergieren nicht: Nutzer-Bugreport vom 26. Juli 2026 (Abend)
+
+Nutzerbeobachtung: Der Cover Art Filler erkennt eine Lücke korrekt, Library V2
+zeigt für denselben Song „2 tag gaps" (`genre`, `cover`) — nach „Fix Finding",
+„Refresh & Scan", Browser-Reload und Browser-Neustart stehen beide Lücken
+weiterhin da. Ein Klick auf „2 tag gaps" meldet „Tags written", ändert aber
+nichts; „Preview Retag" behauptet „Tags match". Zusätzlich fehlt eine sichtbare
+Spalte dafür, **wie** eine Datei verifiziert wurde, obwohl jede Datei aus dem
+Download-Pfad einen Verification-Marker bekommt.
+
+Alle Befunde dieses Abschnitts sind gegen einen Snapshot der realen Produktiv-DB
+(`database/music_library.db`, 273 `lib2_albums`, 2.048 `lib2_tracks`,
+270 `lib2_track_files`) reproduziert, nicht aus synthetischen Fixtures
+abgeleitet. Der Reproduktionsaufbau folgt
+[§15](#15-erster-lauf-gegen-die-reale-produktiv-db-26-juli-2026): `sqlite3.backup()`
+in den Scratchpad, `MusicDatabase(copy)`, echte Audiodateien.
+
+### <a name="tool26-00"></a> Was nachweislich funktioniert
+
+Damit der Rest nicht als Generalverdacht gelesen wird — folgender Pfad wurde
+Ende-zu-Ende gegen echte Dateien durchgespielt und ist **korrekt**:
+
+1. Einer echten FLAC wurden Cover und Genre-Tag entfernt.
+2. `rescan_files` (= „Refresh & Scan") liest die Datei neu und schreibt
+   `missing_tags_json = ["genre","cover"]` — die Erkennung stimmt.
+3. `NativeMissingCoverArtJob`-Finding → `_fix_missing_cover_art` bettet das
+   Cover ein (`embedded 1/1`, `cover_written True`).
+4. `sync_repair_change` löst über `entity_id='lib2:<album>'` Album → Tracks →
+   Files auf und ruft `rescan_files(file_ids=…)`.
+5. Ergebnis: `["genre","cover"]` → `["genre"]`.
+
+Der *native* Cover-Art-Pfad konvergiert also. Die Symptome des Nutzers entstehen
+an den elf Stellen darunter, an denen genau dieser Kreis nicht geschlossen ist.
+
+### <a name="tool26-01"></a> T-01 — Findings mit Legacy-Entity-ID können Library V2 nie erreichen
+
+**Ort:** `core/library2/maintenance_sync.py::_resolve_links`.
+
+`_resolve_links` kennt genau drei Wege zu einer nativen Identität: eine
+ausdrücklich native `lib2:<id>`-Entity-ID, ein `details['library_v2']`-Block
+und einen Dateipfad. `_native_entity_id` verwirft eine nackte Zahl bewusst
+(„Bare numeric IDs remain ambiguous"). Eine Auflösung über die vorhandenen
+Rückverweise `lib2_albums.legacy_album_id`, `lib2_tracks.legacy_track_id` und
+`lib2_track_files.legacy_track_id` findet **nicht** statt.
+
+Belegt in der Produktiv-DB — alle drei dort offenen Findings sind genau dieser
+Fall, und alle drei ließen sich über den Rückverweis auflösen:
+
+| Finding | Job | `entity_id` | `details.library_v2` | Rückverweis vorhanden |
+|---|---|---|---|---|
+| 15 | `album_tag_consistency` | `'630009860'` | `None` | `lib2_albums.id=1066` (Thriller 40) |
+| 18 | `album_tag_consistency` | `'709335827'` | `None` | `lib2_albums.id=1064` (SWAG) |
+| 19 | `library_reorganize` | `'234986381'` | `None` | `lib2_tracks.id=2659` (OH MAN) |
+
+Solche Zeilen entstehen aus zwei Quellen: aus Läufen **vor** dem P3-Cutover
+(die nativen Überschreibungen in `core/repair_jobs/native_p3.py` schreiben
+inzwischen `lib2:`-IDs) und aus den Jobs, die bis heute rein legacy scannen
+(→ [T-11](#tool26-11)).
+
+Konsequenz beim „Fix Finding": Die Datei auf der Platte wird geändert, aber
+`sync_repair_change` bricht mit `reason='subject_unlinked'` ab — **kein**
+`rescan_files`, **keine** Artwork-Invalidierung, **kein** Maintenance-Event.
+Der Tag-/Gap-Cache in `lib2_track_files` bleibt auf dem Stand von vor der
+Reparatur stehen. Genau das ist das vom Nutzer beschriebene Bild „Finding
+gefixt, Library V2 zeigt die Lücke weiter".
+
+**Korrekturvertrag:** `_resolve_links` löst eine nicht-native `entity_id`
+zusätzlich über `legacy_album_id`/`legacy_track_id` auf, bevor es aufgibt.
+Der Rückverweis ist eine harte, beim Import geschriebene ID — kein Namensraten,
+also mit Guide §2.5 vereinbar. Legacy-IDs bleiben dabei opaques `TEXT`
+(Guide §5): der Vergleich läuft als String, nie über `int()`.
+
+### <a name="tool26-02"></a> T-02 — `subject_unlinked` gilt als Erfolg
+
+**Ort:** `core/repair_worker.py::fix_finding`.
+
+`fix_finding` wertet ausschließlich `reason == 'error'` als
+Konvergenzfehler und lässt das Finding dann als Retry-Anker offen. Jeder
+andere Rückgabewert — einschließlich `subject_unlinked` und `schema_missing` —
+führt dazu, dass das Finding als `resolved` markiert wird. Nicht-Konvergenz
+ist damit still: Der Nutzer sieht „gefixt", Library V2 weiß nichts davon, und
+das Finding, das den Retry hätte tragen können, ist weg.
+
+**Korrekturvertrag:** `subject_unlinked` bleibt kein Fehlerabbruch (es gibt
+legitime Fälle — z. B. `empty_folder_cleaner` ohne jede Katalogzeile), muss
+aber im Fix-Ergebnis sichtbar sein, damit UI und Logs „auf Platte repariert,
+Katalog nicht angefasst" von „vollständig konvergiert" unterscheiden können.
+
+### <a name="tool26-03"></a> T-03 — Klick auf „N tag gaps" schreibt strukturell nichts
+
+**Ort:** `webui/…/library-v2-page.tsx::TrackMetadataGapsCell` →
+`POST /api/library/v2/tags/write` (`api/library_v2.py::lib2_write_tags`) →
+`core/library2/retag.py::write_tags`.
+
+Gemessen an der oben präparierten echten Datei:
+
+```
+write_tags(db, [track], embed_cover=True)  -> {'written': 0, 'skipped': 1, 'failed': 0}
+gaps davor:  ["genre", "cover"]
+gaps danach: ["genre", "cover"]
+```
+
+Ursachenkette:
+
+1. `write_tags` bricht früh ab, wenn `build_tag_diff` keine **Text**-Änderung
+   findet (`text_changed` false → `skipped`). Cover ist keine Textänderung.
+2. Der einzige Ausweg wäre `force_cover=True` — `lib2_write_tags` übergibt
+   diesen Parameter nicht. Nur der Album-Art-Apply
+   (`api/library_v2.py`, `lib2_album_art_apply`) setzt ihn.
+3. Die Gap-Zelle meldet trotzdem unbedingt „Tags written to file." — der
+   `onSuccess`-Handler wertet die Job-Statistik (`written`/`skipped`/`failed`)
+   nicht aus.
+
+Damit ist die Affordance „klick die Lückenzahl an, um sie zu schließen"
+für genau die zwei häufigsten Lückenarten (`cover`, `genre`) wirkungslos —
+und meldet zusätzlich Erfolg.
+
+### <a name="tool26-04"></a> T-04 — „Preview Retag" meldet „Tags match", obwohl das Cover fehlt
+
+**Ort:** `core/library2/retag.py::_db_data_for_row` →
+`core/tag_writer.py::build_tag_diff`.
+
+`build_tag_diff` bildet die Cover-Zeile aus `db_data['thumb_url']`:
+
+```python
+'file_value': 'Embedded' if file_tags.get('has_cover_art') else 'None',
+'db_value':   'Available' if db_data.get('thumb_url') else 'None',
+'changed':    not file_tags.get('has_cover_art') and bool(db_data.get('thumb_url')),
+```
+
+`_db_data_for_row` liefert `title/artist_name/track_artist/album_title/year/
+release_date/genres/track_number/disc_number/track_count` und optional
+Spotify-/MusicBrainz-IDs — **kein `thumb_url`**. Die Cover-Zeile lautet
+deshalb in Library V2 immer `None → None, changed=False`. Gemessen an
+derselben präparierten Datei:
+
+```
+FULL diff: … ('Genre','','',False), ('Cover Art','None','None',False)
+has_changes: False        # UI: "Tags match"
+```
+
+Der Widerspruch, den der Nutzer sieht („Preview sagt match, die Seite sagt 2
+Lücken"), ist damit kein Anzeigefehler in der Gap-Spalte, sondern eine echte
+Blindstelle der Preview: Sie **kann** einen Cover-Unterschied nicht anzeigen.
+
+**Korrekturvertrag:** `_db_data_for_row` trägt eine Cover-Verfügbarkeit
+(Artwork-Cache-Datei bzw. `lib2_albums.image_url`) als `thumb_url` nach, damit
+Preview und Write dieselbe Wahrheit über das Cover benutzen.
+
+### <a name="tool26-05"></a> T-05 — `write_tags` kennt als Cover-Quelle nur die Cache-Datei
+
+**Ort:** `core/library2/retag.py::_album_cover_data`.
+
+```python
+path = artwork_file(database, "album", album_id)     # nur ein Pfad
+if path.exists(): return path.read_bytes(), "image/jpeg"
+```
+
+`artwork_file` ist ein reiner Pfad-Builder; er baut nichts. Existiert die
+Cache-Datei (noch) nicht — der Normalfall auf einem kalten Artwork-Cache, nach
+`invalidate_artwork` oder direkt nach „Refresh & Scan", das die Cache-Dateien
+gerade gelöscht hat — liefert `_album_cover_data` `None`. Gemessen:
+
+```
+write_tags(…, force_cover=True) -> {'written': 0, 'skipped': 1}
+```
+
+Also: Auch mit korrekt gesetztem `force_cover` wird nichts geschrieben. Und
+das, obwohl im selben Album `lib2_albums.image_url` eine gültige
+Provider-Cover-URL trägt (im Testfall eine Deezer-1000×1000-URL).
+
+**Korrekturvertrag:** `_album_cover_data` materialisiert den Cache über
+`build_artwork` bzw. fällt auf `lib2_albums.image_url` zurück, bevor es
+aufgibt — einmal pro Album, wie schon heute über das `covers`-Dict gecacht.
+Guide §2.1 bleibt gewahrt: Reihenfolge Override → eingebettetes Cover →
+Provider-Artwork, kein Media-Server.
+
+### <a name="tool26-06"></a> T-06 — Die Genre-Lücke ist katalogseitig unfüllbar
+
+**Ort:** Katalogzustand + `core/repair_jobs/*`.
+
+Messung auf der Produktiv-DB:
+
+| Kennzahl | Wert |
+|---|---|
+| `lib2_albums` gesamt | 273 |
+| davon mit leerem `genres` (`'[]'`) | **265** |
+| `lib2_track_files` mit Gap `["genre"]` | 61 von 270 |
+
+`write_tags` schreibt Genres aus `lib2_albums.genres` (`_db_data_for_row`).
+Ist die Spalte leer, gibt es nichts zu schreiben — der Genre-Gap ist über
+„N tag gaps" prinzipiell nicht schließbar, unabhängig von jedem der obigen
+Fehler. Kein registriertes Werkzeug füllt diese Spalte:
+
+- **Genre Tag Cleanup** (`genre_cleanup`) *entfernt* nur Genres außerhalb der
+  Whitelist — und liest ausschließlich Legacy-Tabellen (→ [T-11](#tool26-11)).
+- **Metadata Gap Filler** (`NativeMetadataGapFillerJob`) füllt ausschließlich
+  `isrc` und `musicbrainz_recording_id`; `_fix_metadata_gap` kennt als
+  schreibbare native Spalten `isrc/musicbrainz_id/spotify_id/bpm/explicit/
+  style/mood` — **kein `genres`**.
+- Der Enrich-Pfad (`native_enrich`, `enrich`) füllt Genres nur beim Import
+  bzw. bei einem ausdrücklichen Provider-Enrich einer Entity.
+
+Damit trifft die Nutzererwartung „ich klicke die Lücke an, es sucht ein Cover
+und schreibt das Genre" auf ein Werkzeugset, in dem für Genre gar keine
+Beschaffungsstelle existiert.
+
+**Gemessene Zusatzbedingung — der naheliegende Korrekturvertrag greift nicht.**
+Der erste Entwurf lautete: „Metadata Gap Filler bekommt `fill_genres`, holt die
+Album-Genres über die vorhandenen Provider-Clients, `_fix_metadata_gap` schreibt
+`lib2_albums.genres`." Dieser Vertrag wurde gegen die realen Alben geprüft und
+**widerlegt**: `get_album_for_source` liefert für die betroffenen Alben von
+keiner konfigurierten Quelle Genres.
+
+```
+album 1163 'TVアニメ「進撃の巨人」…'  musicbrainz -> None   deezer -> genres: None   itunes -> genres: None
+album 1169 'TV Anime "Attack on Titan" …'                 deezer -> genres: None
+album 1174 'SWAG II'                                      deezer -> genres: None   (Artist-Genres: ["Pop"])
+album 1231 'ZUMA HOUSE'                                   keine Provider-ID        (Artist-Genres: ["Pop"])
+```
+
+Ein so gebauter Job fände **null** Alben. Genres liegen in dieser Installation
+auf der *Artist*-Ebene (`lib2_artists.genres`: 4 von 5 Artists gefüllt) und in
+`metadata_cache_entities` (1.716 Zeilen mit Genres — überwiegend Beatport-
+*Tracks*), nicht auf der Album-Ebene, aus der `write_tags` liest. Der legacy
+Write-Tags-Pfad (`web_server._build_library_tag_db_data`) hat exakt dieselbe
+Beschränkung, ist hier also kein Vorbild.
+
+**Offener Entwurf statt Korrekturvertrag.** Vor einer Umsetzung ist eine
+Produktentscheidung nötig, die diese Session nicht allein treffen soll:
+
+1. Darf ein Artist-Genre als Album-Genre gelten, wenn das Album selbst keines
+   hat (die pragmatische Variante — sie würde in dieser Bibliothek sofort
+   greifen), oder ist das eine unzulässige Vermischung zweier Ebenen?
+2. Falls ja: als abgeleiteter Lesewert im Retag-`db_data` (nichts wird
+   gespeichert, jederzeit revidierbar) oder als geschriebener
+   `lib2_albums.genres`-Wert mit Provenance (ADR-06)?
+3. Sollen die vorhandenen Track-Genres aus `metadata_cache_entities`
+   (Beatport u. a.) eine dritte Quelle sein?
+
+Bis diese Entscheidung gefallen ist, bleibt die Genre-Lücke ehrlich offen —
+sichtbar, aber nicht schließbar. Genau deshalb meldet die Gap-Zelle seit
+T-03 „Nothing to write" statt „Tags written", wenn nichts geschrieben wurde.
+
+### <a name="tool26-07"></a> T-07 — Ogg/Opus meldet dauerhaft ein fehlendes Cover
+
+**Ort:** `core/tag_writer.py::read_file_tags`.
+
+```python
+if isinstance(audio, FLAC):
+    result['has_cover_art'] = bool(audio.pictures)
+else:
+    # OGG doesn't have a standard picture field we can easily check
+    result['has_cover_art'] = False
+```
+
+`core/metadata/art_apply.py::_audio_has_art` prüft für dieselben Formate sehr
+wohl `metadata_block_picture`. Damit widersprechen sich die drei Instanzen:
+
+| Instanz | Ogg mit `metadata_block_picture` |
+|---|---|
+| `read_file_tags` → `metadata_gaps` | Cover **fehlt** |
+| `file_has_embedded_art` (Cover-Art-Filler-Scan) | Cover **vorhanden** → kein Finding |
+| `apply_art_to_album_files` (Apply) | Cover **vorhanden** → `skipped` |
+
+Ergebnis: ein Gap, der angezeigt wird, für den nie ein Finding entsteht und
+den kein Apply je schließen kann. Reines Anzeigeartefakt — aber ein dauerhaft
+unauflösbares.
+
+**Korrekturvertrag:** `read_file_tags` benutzt für Vorbis-Comment-Formate
+dieselbe Erkennung wie `art_apply` (`pictures` bzw.
+`metadata_block_picture`), damit Gap-Anzeige, Scan und Apply eine einzige
+Wahrheit haben.
+
+### <a name="tool26-08"></a> T-08 — „Refresh & Scan" erneuert keine Katalog-/Provider-Metadaten
+
+**Ort:** `api/library_v2.py::lib2_refresh`, `core/library2/scan.py::rescan_files`.
+
+Was der Job heute tut: Artwork-Cache-Dateien des Scopes löschen →
+`rescan_files` über alle Album-Files → pro Datei `read_file_tags` (Tags,
+ReplayGain, Lyrics) plus `probe_audio_quality` (Format, Bitrate, Sample Rate,
+Bit-Tiefe, Größe, `quality_tier`) plus Missing-Lifecycle.
+
+Datei-Tags und Quality werden also tatsächlich neu gelesen — die
+Nutzeranforderung „prüfen, ob die Datei da ist, welche Quality sie erfüllt,
+alle Tags auslesen" ist für die *Datei* erfüllt. Nicht erfüllt ist sie für
+den *Katalog*: `lib2_albums.genres`, `release_date`, `image_url`, Tracklist
+und Provider-IDs werden nicht neu geholt. Ein Album ohne Genres bleibt nach
+beliebig vielen „Refresh & Scan"-Läufen ohne Genres — was den in
+[T-06](#tool26-06) beschriebenen Genre-Gap dauerhaft macht.
+
+Zusätzlich nicht neu abgeleitet, obwohl die Daten vorliegen:
+`verification_status` (→ [T-09](#tool26-09)), `content_hash` und die
+Primary-File-Wahl (`is_primary`, ADR-03).
+
+**Korrekturvertrag:** Getrennt halten, aber sichtbar machen. „Refresh & Scan"
+bleibt der Datei-Pass; ein Katalog-Refresh (Provider-Metadaten) ist die
+Aufgabe von Enrich/Discography-Refresh. Was der Button leistet, muss in der
+UI benannt sein, und alles, was aus der *bereits gelesenen* Datei ableitbar
+ist — Verification-Tag voran — gehört in den Datei-Pass.
+
+### <a name="tool26-09"></a> T-09 — Der Verification-Tag wird gelesen und weggeworfen
+
+**Ort:** `core/library2/tag_cache.py::normalized_tag_snapshot`.
+
+`read_file_tags` liefert `verification_status` aus dem eingebetteten
+`SOULSYNC_VERIFICATION`-Tag (TXXX / Vorbis-Comment / MP4-Freeform) —
+`core/tag_writer.py` Zeilen 49, 88, 115, 137. `normalized_tag_snapshot`
+übernimmt aus diesem Ergebnis `title/artist/album/albumartist/track_number/
+disc_number/year/genre/cover` sowie Lyrics und ReplayGain — und lässt
+`verification_status` fallen. `rescan_files` liest den Wert also bei **jedem**
+Refresh & Scan aus jeder Datei und verwirft ihn.
+
+Messung über alle 268 real vorhandenen Dateien der Produktiv-DB:
+
+| Kennzahl | Wert |
+|---|---|
+| Dateien mit `SOULSYNC_VERIFICATION`-Tag | **264** |
+| `lib2_track_files.verification_status` gesetzt | **70** |
+| daraus direkt heilbar | **194** |
+| `library_history`-Zeilen mit Verification | 173 (`verified` 147, `unverified` 16, `human_verified` 10) |
+
+`lib2_track_files.verification_status` wird heute nur vom Importer (aus
+`tracks.verification_status`, dort selbst nur 7 Zeilen gefüllt), vom
+Autolink-Import-Callback, vom AcoustID-Scanner und vom Human-Approve
+geschrieben. Für alles, was vor diesen Pfaden importiert wurde, bleibt die
+Spalte `NULL` — obwohl die Wahrheit in der Datei steht.
+
+**Korrekturvertrag:** Der Datei-Pass persistiert den gelesenen
+Verification-Wert. Er ist eine Beobachtung der Datei, kein neues Urteil: ein
+bereits gesetzter, *stärkerer* Zustand (`human_verified`) darf nicht von einem
+älteren Tag-Wert überschrieben werden.
+
+### <a name="tool26-10"></a> T-10 — Keine eigene Verification-Spalte in der Track-Tabelle
+
+**Ort:** `core/library2/ui_preferences.py::DEFAULT_PREFERENCES`,
+`webui/…/library-v2-page.tsx`.
+
+`TrackVerificationBadge` existiert und rendert vier Zustände
+(`verified` / `human_verified` / `force_imported` / `unverified`), wird aber
+ausschließlich als vierte Zeile **innerhalb der Quality-Zelle** gezeigt. Die
+wählbaren Spalten sind `disc, artists, duration, bpm, match, quality,
+features, metadata, file_path, play` — eine Verification-Spalte gibt es nicht.
+Wer nach „wie wurde das verifiziert?" sortieren oder scannen will, muss die
+Quality-Spalte eingeschaltet lassen und in jeder Zeile suchen. Zusammen mit
+[T-09](#tool26-09) (72 % der Zeilen ohne Wert) erklärt das die Nutzeraussage
+„es wird nie wirklich angezeigt".
+
+Der Datenpfad ist vollständig: `queries.py` legt `verification_status`,
+`acoustid_status` und `pipeline_result` bereits in `track.file`.
+
+**Korrekturvertrag:** Eine eigene, opt-in Spalte `verification` in
+`track_table.columns`/`column_order` mit demselben Badge.
+
+### <a name="tool26-11"></a> T-11 — Zwei Jobs deklarieren `lib2`, lesen aber nur Legacy
+
+**Ort:** `core/repair_jobs/__init__.py::JOB_DATA_BASIS` vs.
+`core/repair_jobs/genre_cleanup.py`, `core/repair_jobs/comma_artist_splitter.py`.
+
+`JOB_DATA_BASIS` führt beide als `'lib2'`; `register_job` erzwingt diese
+Deklaration, prüft sie aber nicht gegen den tatsächlichen Code. `native_p3.py`
+überschreibt sechs Job-Identitäten mit nativen Implementierungen
+(`track_number_repair`, `acoustid_scanner`, `album_tag_consistency`,
+`metadata_gap_filler`, `missing_cover_art`, `live_commentary_cleaner`) —
+diese beiden sind nicht dabei:
+
+| Job | gelesene Tabellen | Abdeckung in der Produktiv-DB |
+|---|---|---|
+| `genre_cleanup` | `artists`, `albums` | 5 von 5 Artists, **9 von 273 Alben** |
+| `comma_artist_splitter` | `artists`, `tracks`, `albums` | **156 von 2.048 Tracks** |
+
+Genre Tag Cleanup ist damit für ~97 % des Katalogs wirkungslos — und
+gleichzeitig das einzige Genre-Werkzeug (→ [T-06](#tool26-06)). Der Comma
+Artist Splitter sieht ~8 % der Tracks. Beide erzeugen zudem Findings mit
+Legacy-Entity-IDs und laufen damit direkt in [T-01](#tool26-01).
+
+**Korrekturvertrag:** Beide auf `active_file_subjects`/native Artist- bzw.
+Albumzeilen umstellen (Muster: `native_p3.py`), oder — falls die Umstellung
+eigenständig gescoped werden soll — bis dahin ehrlich als `filesystem`/legacy
+kennzeichnen, statt eine nicht eingelöste `lib2`-Deklaration zu führen.
+
+---
+
+## 18. Auftrag: werkzeugweiser Integrations-Deep-Dive (offen, nach §17)
+
+Ausdrücklicher Nutzerauftrag vom 26. Juli 2026: Nachdem die wichtigsten
+Findings aus §17 abgearbeitet sind, ist **jedes einzelne registrierte Werkzeug**
+gegen Library V2 zu prüfen. Die Werkzeugliste ist unübersichtlich geworden;
+der Deep-Dive soll das auflösen, nicht nur Bugs sammeln.
+
+**Pro Werkzeug zu beantworten:**
+
+1. Liest es native `lib2_*`-Subjects oder noch Legacy-Tabellen? (Abgleich mit
+   `JOB_DATA_BASIS` — die Deklaration ist heute ungeprüft, siehe T-11.)
+2. Erzeugt es Findings mit auflösbarer nativer Identität (`lib2:<id>` oder
+   `details['library_v2']`)?
+3. Stimmt sein `JOB_LIBRARY_V2_EFFECTS`-Eintrag mit dem überein, was der Fix
+   real anfasst — und löst `sync_repair_change` daraus die richtige
+   Nachbereitung aus (Rescan, Artwork-Invalidierung, Wanted, History)?
+4. Ergibt die Integration fachlich Sinn, oder ist der Job ein reines
+   Betriebs-/Dateiwerkzeug ohne Katalogbezug (`cache_evictor`,
+   `empty_folder_cleaner`, `expired_download_cleaner`)?
+5. Welche Fehlerbilder sind konstruktiv möglich (Pfad-Mapping, Multi-File,
+   Alias-Gruppen, Editionen, read-only Root, Restart mitten im Apply)?
+6. Welche Funktionalität ist gegenüber dem Legacy-Stand verloren gegangen?
+   (Bezugspunkt: [status.md §7](library-v2-status.md#7-tool-migration-und-cutover)
+   und `RETIRED_JOB_IDS`.)
+7. Überlappt der Job mit einem anderen? Wenn ja: Welcher ist die
+   Beschaffungsstelle, welcher der Aufräumer?
+
+**Vollständige Prüfliste (25 registrierte Jobs, Stand 26. Juli 2026).**
+Die Namen in Klammern sind die in der UI sichtbaren Bezeichnungen.
+
+| `job_id` | UI-Name | `data_basis` | erklärte V2-Effekte |
+|---|---|---|---|
+| `path_drift_reconcile` | Stale Index Paths | lib2 | observe, path |
+| `metadata_gap_filler` | Metadata Gap Filler | lib2 | observe, metadata, tags |
+| `missing_cover_art` | Cover Art Filler | lib2 | observe, metadata, tags, artwork |
+| `dead_file_cleaner` | Dead File Cleaner | lib2 | observe, delete |
+| `orphan_file_detector` | Orphan File Detector | lib2 | observe, path, new_file, delete |
+| `track_number_repair` | Track Number Repair | lib2 | metadata, tags, path |
+| `cache_evictor` | Cache Maintenance | filesystem | none |
+| `acoustid_scanner` | AcoustID Scanner | lib2 | observe, tags, metadata |
+| `missing_lyrics` | Lyrics Filler | lib2 | observe, tags |
+| `replaygain_filler` | ReplayGain Filler | lib2 | observe, tags |
+| `fake_lossless_detector` | Fake Lossless Detector | lib2 | observe |
+| `empty_folder_cleaner` | Empty Folder Cleaner | filesystem | none |
+| `short_preview_track` | Preview Clip Cleanup | lib2 | observe, delete, wanted |
+| `genre_cleanup` | Genre Tag Cleanup | lib2 (falsch, T-11) | observe, metadata |
+| `album_tag_consistency` | Album Tag Consistency | lib2 | observe, metadata, tags |
+| `monitoring_list_reconcile` | Monitoring List Reconcile | lib2 | wanted |
+| `library_reorganize` | Library Reorganize | lib2 | observe, path |
+| `comma_artist_splitter` | Comma Artist Splitter | lib2 (falsch, T-11) | observe, tags |
+| `audio_corruption_detector` | Corrupt File Detector | lib2 | observe, delete, wanted |
+| `lossy_converter` | Lossy Converter | lib2 | observe, new_file, tags |
+| `live_commentary_cleaner` | Live/Commentary Cleaner | lib2 | observe, delete, wanted |
+| `expired_download_cleaner` | Expired Download Cleaner | filesystem | delete, wanted |
+| `quality_info_backfill` | Quality Info Backfill | lib2 | metadata |
+| `quality_upgrade_scan` | Quality Upgrade Scan (monitored) | lib2 | observe, wanted |
+| `monitored_discography_refresh` | Monitored Discography Refresh | lib2 | discography, wanted |
+| `skip_audit_cleanup` | Skip-Audit Cleanup | lib2 | none |
+
+**Bereits bekannte Einstiegspunkte für den Deep-Dive** (nicht als vollständig
+zu behandeln — sie sind das Ergebnis der §17-Stichprobe, nicht des Audits):
+
+- `genre_cleanup`, `comma_artist_splitter`: legacy-only (T-11);
+- `library_reorganize`, `album_tag_consistency`: erzeugen im Bestand Findings
+  mit Legacy-IDs (T-01);
+- `metadata_gap_filler`: keine Genre-Beschaffung (T-06);
+- alle Jobs mit `tags`-Effekt hängen an der Cover-/Tag-Wahrheit aus
+  T-04/T-05/T-07.
+
+**Ergebnisform:** je Werkzeug ein kurzer Absatz mit Verdikt
+(*integriert* / *teilintegriert* / *legacy* / *bewusst katalogfrei*), den
+konkreten Fehlerbildern und — falls vorhanden — dem Korrekturvertrag. Neue
+Bugs kommen in diese Datei, der Bearbeitungsstand ausschließlich in
+`library-v2-status.md`.
+
+---
+
+## 19. Ergebnis des werkzeugweisen Deep-Dive (26. Juli 2026, Nacht)
+
+Durchführung des Auftrags aus [§18](#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17)
+über alle 25 registrierten Jobs. Bearbeitungsstand in
+[status.md §30](library-v2-status.md#30-werkzeugweiser-deep-dive-t-11-t-12-und-der-post-import-trigger-26-juli-2026-nacht).
+
+### 19.1 Was das Audit als Ganzes ergeben hat
+
+Der Katalogboden ist besser, als die §17-Stichprobe vermuten ließ: 23 der 25
+Jobs lasen bereits native Subjects. Die Lücken lagen an zwei Stellen, und beide
+sind **Identitäts-**, keine Datenbasisprobleme:
+
+1. **Zwei Jobs lasen wirklich Legacy** — `genre_cleanup` und
+   `comma_artist_splitter` ([T-11](#tool26-11)).
+2. **Ein Job mintet native IDs in nackter Form** — `library_reorganize`
+   ([T-12](#tool26-12), in diesem Audit neu gefunden). Seit T-01 ist eine
+   nackte Zahl ausdrücklich eine *Legacy*-ID; ein nativ gemeinter Wert
+   verlinkt damit potenziell eine fremde Zeile.
+
+Alle übrigen 22 Jobs schreiben entweder `lib2:<id>`, gar keine Entity-ID
+(Dateisystem-Werkzeuge) oder erzeugen überhaupt keine Findings.
+
+**Vollständige Finding-Typ-Matrix** (Erzeuger → Fix-Handler in
+`core/repair_worker.py::_fix_handlers`):
+
+| Finding-Typ | Erzeuger | Fix | Bemerkung |
+|---|---|---|---|
+| `acoustid_mismatch` | `acoustid_scanner` | ✅ | |
+| `album_tag_inconsistency` | `album_tag_consistency` | ✅ | |
+| `comma_artist_split` | `comma_artist_splitter` | ✅ | seit T-11 nativ |
+| `corrupt_audio` | `audio_corruption_detector` | ✅ | |
+| `dead_file` | `dead_file_cleaner` | ✅ | |
+| `empty_folder` | `empty_folder_cleaner` | ✅ | katalogfrei |
+| `expired_download` | `expired_download_cleaner` | ✅ | |
+| `fake_lossless` | `fake_lossless_detector` | — | **bewusst report-only** |
+| `genre_cleanup` | `genre_cleanup` | ✅ | seit T-11 nativ |
+| `metadata_gap` | `metadata_gap_filler` | ✅ | |
+| `missing_cover_art` | `missing_cover_art` | ✅ | |
+| `missing_discography_release` | `monitored_discography_refresh` | ✅ | |
+| `missing_lossy_copy` | `lossy_converter` | ✅ | |
+| `missing_lyrics` | `missing_lyrics` | ✅ | |
+| `missing_replaygain` / `replaygain_retag` | `replaygain_filler` | ✅ | |
+| `orphan_file` | `orphan_file_detector` | ✅ | |
+| `path_mismatch` | `library_reorganize` | ✅ | |
+| `quality_below_cutoff` | `quality_upgrade_scan` | ✅ | |
+| `reorganize_unavailable` | `library_reorganize` | — | **bewusst report-only** |
+| `short_preview_track` | `short_preview_track` | ✅ | |
+| `stale_index_path` | `path_drift_reconcile` | ✅ | |
+| `track_number_mismatch` | `track_number_repair` | ✅ | |
+| `unwanted_content` | `live_commentary_cleaner` | ✅ | |
+
+Drei Handler haben **keinen** Erzeuger mehr: `quality_upgrade`,
+`missing_discography_track`, `canonical_version`. Das ist kein Fehler, sondern
+die Kompatibilitätsfläche für `PRESERVED_RETIRED_FINDING_IDS` bzw. für
+Findings des zurückgezogenen `canonical_version_resolve` — offene
+Review-Zeilen aus der Zeit vor dem Rückbau bleiben bedienbar.
+
+### 19.2 <a name="tool26-12"></a> T-12 — `library_reorganize` mintet nackte native IDs
+
+**Ort:** `core/repair_jobs/library_reorganize.py` (beide `create_finding`-Aufrufe).
+
+Der Job liest `lib2_albums`/`lib2_tracks` — seine `data_basis`-Deklaration ist
+also ehrlich —, schrieb die Zeilen-ID aber unpräfixiert:
+`entity_id=str(lib2_track_id)` bzw. `entity_id=str(album_id)`. Seit
+[T-01](#tool26-01) löst `_resolve_links` eine nackte Zahl über
+`lib2_tracks.legacy_track_id`/`lib2_albums.legacy_album_id` auf. Trägt
+irgendeine andere native Zeile diese Zahl als Legacy-Rückverweis, wird sie
+zum Subjekt der Reparatur.
+
+Das ist keine theoretische Kollision: `annotate_finding_details` läuft bereits
+**bei der Finding-Erzeugung**, der falsche Verweis wird also in die
+gespeicherten `details` eingebrannt und nicht erst beim Fix errechnet.
+Reproduziert (`tests/repair_jobs/test_library_reorganize_identity.py`): Track 4
+ist Gegenstand des Findings, Track 9 trägt `legacy_track_id=4` — ohne Fix
+liefert die Auflösung `track_ids=[4, 9]`.
+
+Praktische Folgen bleiben begrenzt, weil `_fix_path_mismatch` ausschließlich
+aus `details['from_abs']/['to_abs']` arbeitet und `reorganize_unavailable`
+überhaupt keinen Fix hat. Was leidet, ist die Nachbereitung: ein zusätzliches
+Maintenance-Event, ein überflüssiger `rescan_files` und eine Historie, die
+einen unbeteiligten Track als repariert ausweist.
+
+**Korrekturvertrag:** Beide Aufrufe schreiben `lib2:<id>` und zusätzlich einen
+`details['library_v2']`-Block. Bereits gespeicherte Findings der alten Form
+bleiben unangetastet — sie werden beim nächsten Scan in der neuen Form neu
+erzeugt.
+
+### 19.3 Verdikte je Werkzeug
+
+**Integriert (nativ, auflösbare Identität, korrekte Nachbereitung).**
+
+- `path_drift_reconcile` — liest `lib2_track_files`, Finding `lib2:<file_id>`,
+  Fix bewegt nichts und repointet nur den Index. Fehlerbild: eine mehrdeutige
+  Zeile trägt bewusst keinen Vorschlag und bleibt unfixbar.
+- `metadata_gap_filler`, `missing_cover_art`, `track_number_repair`,
+  `acoustid_scanner`, `album_tag_consistency`, `live_commentary_cleaner` —
+  die sechs `native_p3`-Überschreibungen. Subjects aus
+  `active_file_subjects`/`active_album_subjects`, Findings `lib2:`, Details mit
+  `subject_details`.
+- `dead_file_cleaner` — meldet ausschließlich `file_state='missing_confirmed'`
+  und stützt sich damit auf den Missing-Lifecycle aus `rescan_files`. Der
+  Drift-Schutz greift also vor dem Löschvorschlag: eine nur umbenannte Datei
+  wird `missing_suspected` und nie bestätigt (Guide §5).
+- `orphan_file_detector` — Finding ohne Entity-ID, Subjekt ist der Pfad; genau
+  richtig, denn eine Waise hat per Definition keine Katalogzeile.
+- `fake_lossless_detector`, `short_preview_track`, `audio_corruption_detector`,
+  `lossy_converter`, `missing_lyrics`, `replaygain_filler` — alle über
+  `active_file_subjects`, alle mit `lib2:`-Identität.
+- `quality_upgrade_scan`, `monitored_discography_refresh`, `skip_audit_cleanup`,
+  `monitoring_list_reconcile`, `quality_info_backfill` — lesen und schreiben
+  ausschließlich `lib2_*` und brauchen keinen Fix-Umweg: sie mutieren im Scan
+  und sind damit ihre eigene Konvergenz.
+- `expired_download_cleaner` — `data_basis` ist `filesystem`, aber der Job
+  ruft vor jedem Löschen `annotate_finding_details` und bricht ab, wenn die
+  V2-Subjekte nicht erfasst werden können. Vorbildlich: Löschen ohne
+  auflösbares Subjekt findet nicht statt.
+- `library_reorganize` — nach T-12 integriert. Der Auto-Modus konvergiert
+  ohnehin nicht über den Job, sondern über `core/reorganize_runner.py`, das
+  `lib2_track_files.path` selbst fortschreibt und `sync_repair_change` ruft.
+- `genre_cleanup`, `comma_artist_splitter` — nach T-11 integriert.
+
+**Bewusst katalogfrei.**
+
+- `cache_evictor` — löscht Cache-Dateien, `effects={'none'}`. Kein Katalogbezug,
+  keine Integration nötig oder erwünscht.
+- `empty_folder_cleaner` — `entity_id` ist ein Verzeichnispfad. `subject_unlinked`
+  ist hier der **korrekte** Ausgang und genau der Grund, warum
+  [T-02](#tool26-02) diesen Zustand meldet statt ihn zum Fehler zu erklären.
+
+**Kein Job mehr mit Verdikt *legacy*.**
+
+### 19.4 Überlappungen (Frage 7) — wer beschafft, wer räumt auf
+
+| Domäne | Beschaffung | Aufräumer | Bemerkung |
+|---|---|---|---|
+| Cover | `missing_cover_art` | — | `album_tag_consistency` prüft nur Konsistenz |
+| Genres | **niemand** | `genre_cleanup` | die Asymmetrie hinter [T-06](#tool26-06) |
+| Provider-IDs | `metadata_gap_filler` | — | füllt `isrc`/`musicbrainz_recording_id` |
+| Index ↔ Disk | `orphan_file_detector` (adoptiert) | `dead_file_cleaner` (löscht) | `path_drift_reconcile` sitzt bewusst **davor**: es repointet, bevor irgendwer löscht |
+| Dateiqualität | `quality_upgrade_scan` | `audio_corruption_detector`, `short_preview_track` | `fake_lossless_detector` meldet nur |
+| Wanted-Projektion | `monitoring_list_reconcile` | `skip_audit_cleanup` | |
+
+Die einzige echte Lücke dieser Tabelle ist die Genre-Zeile: ein Aufräumer ohne
+Beschaffungsstelle. Sie bleibt nach der Nutzerentscheidung vom 26. Juli
+bewusst offen ([T-06](#tool26-06), status.md §30).
+
+### 19.5 Was das Audit **nicht** geprüft hat
+
+Die Fehlerbild-Frage (§18 Punkt 5) ist pro Werkzeug nur konstruktiv
+beantwortet, nicht durch Injektion belegt: Restart mitten im Apply,
+read-only Root und Windows-/Docker-Pfad-Mapping bleiben Teil des
+§9-Release-Gates und sind für keinen der 25 Jobs einzeln durchgespielt worden.
