@@ -54,6 +54,9 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
     expect(getShellRouteByPageId('import')?.kind).toBe('react');
     expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
+    // Watchlist has a React route file that is deliberately still dormant: the
+    // manifest, not the presence of the route, decides who renders the page.
+    expect(getShellRouteByPageId('watchlist')?.kind).toBe('legacy');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['import', 'stats', 'issues']);
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(true);
   });

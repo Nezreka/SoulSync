@@ -36,6 +36,9 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'search', path: '/search', kind: 'legacy' },
   { pageId: 'discover', path: '/discover', kind: 'legacy' },
   { pageId: 'playlist-explorer', path: '/playlist-explorer', kind: 'legacy' },
+  // Migration in progress: the React route under routes/watchlist exists and is
+  // tested, but stays dormant until it reaches feature parity with the vanilla
+  // page. Flipping this one word is what hands /watchlist to React.
   { pageId: 'watchlist', path: '/watchlist', kind: 'legacy' },
   { pageId: 'wishlist', path: '/wishlist', kind: 'legacy' },
   { pageId: 'automations', path: '/automations', kind: 'legacy' },
