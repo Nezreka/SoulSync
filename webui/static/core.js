@@ -625,9 +625,27 @@ function handleServiceStatusUpdate(data) {
     if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
     // Spotify rate limit / cooldown / recovery
-    if (data.spotify?.rate_limited && data.spotify.rate_limit) {
+    //
+    // Only worth interrupting someone when the official API is actually
+    // serving their metadata. On Deezer (or any other source) a ban changes
+    // nothing they can see, so the modal announced that search and enrichment
+    // were paused when neither was — pure noise.
+    //
+    // Gate on the SOURCE, not on `authenticated`: during a ban the client
+    // deliberately reports authenticated=true (it means "you are connected,
+    // just throttled"), so an auth check would never suppress anything.
+    //
+    // The ban itself is untouched — it still suppresses calls and still
+    // protects against hammering. This only stops it interrupting people it
+    // does not apply to.
+    const _spotifyMattersHere = (data.metadata_source?.source || 'spotify') === 'spotify';
+    if (data.spotify?.rate_limited && data.spotify.rate_limit && _spotifyMattersHere) {
         handleSpotifyRateLimit(data.spotify.rate_limit);
         _spotifyInCooldown = false;
+    } else if (data.spotify?.rate_limited && !_spotifyMattersHere) {
+        // Banned but irrelevant to this install — make sure a modal raised
+        // before the account went away does not linger.
+        if (_spotifyRateLimitShown) { _spotifyRateLimitShown = false; closeRateLimitModal(); }
     } else if (data.spotify?.post_ban_cooldown > 0) {
         if (_spotifyRateLimitShown && !_spotifyInCooldown) {
             _spotifyRateLimitShown = false;
