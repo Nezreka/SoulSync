@@ -1462,6 +1462,11 @@
         var mine = [], open = [], live = [], done = [];
         st.order.forEach(function (id) {
             var g = st.games[id];
+            // A withdrawn table never had an opponent and never had a result,
+            // so it does not belong in "Finished" beside real games — nothing
+            // finished. The carriers stay in the room (they cannot be unsent),
+            // but there is nothing here worth showing anyone.
+            if (g.reason === 'cancelled') return;
             if (g.status === 'over') { done.push(g); return; }
             if (_arcSeat(g)) { mine.push(g); return; }
             if (g.status === 'open') { open.push(g); return; }

@@ -540,6 +540,26 @@ const NASTY = '<img src=x onerror=alert(1)>';
           !board.includes('chat-bs-cell--ship'), board);
 }
 
+// ── a withdrawn table leaves no trace in the lobby ──────────────────────
+{
+    const evs = [ev('boulder', { k: 'gm.new', g: 'wdrw', v: 'chess' }),
+                 ev('boulder', { k: 'gm.cancel', g: 'wdrw' }, T0 + 5000)];
+    setRoom(evs, 'boulder');
+    const lobby = CP._arcLobbyHtml();
+    check('withdrawn: gone from the lobby', !lobby.includes('wdrw'), lobby);
+    check('withdrawn: not filed under Finished', !lobby.includes('Finished'), lobby);
+    check('withdrawn: gone from the sidebar too',
+          !CP._arcSidebarHtml().includes('wdrw'), CP._arcSidebarHtml());
+
+    // A game that was actually PLAYED and ended still belongs in Finished.
+    const played = [ev('boulder', { k: 'gm.new', g: 'dfin', v: 'chess' }),
+                    ev('kazimir', { k: 'gm.join', g: 'dfin' }, T0 + 1000),
+                    ev('boulder', { k: 'gm.res', g: 'dfin' }, T0 + 2000)];
+    setRoom(played, 'boulder');
+    check('resigned games are still listed', CP._arcLobbyHtml().includes('Finished'),
+          CP._arcLobbyHtml());
+}
+
 // ── the Arcade hides itself if its libraries are absent ─────────────────
 {
     // chat.js must not throw when chess-engine.js / chat-games.js failed to
