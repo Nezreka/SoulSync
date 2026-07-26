@@ -2045,7 +2045,11 @@
     function _bsDraft() {
         var arc = state.arcade;
         if (!arc.bs) {
-            arc.bs = { board: _bsRandomBoard(), next: 0, horiz: true, manual: false };
+            // Empty, not a random fleet. Starting full meant there was nothing
+            // left to place: clicking open water did nothing, and rotate
+            // looked broken because no placement ever happened. Random is one
+            // button away for anyone who does not want to lay it out.
+            arc.bs = { board: '.'.repeat(BS_W * BS_H), next: 0, horiz: true };
         }
         return arc.bs;
     }
@@ -2149,8 +2153,9 @@
                 '</div>' +
                 '<div class="chat-arc-actions">' +
                     '<button class="chat-arc-btn" type="button" data-chat-bs-random>🎲 Random</button>' +
-                    '<button class="chat-arc-btn" type="button" data-chat-bs-rotate>' +
-                        (draft.horiz ? '↔ Horizontal' : '↕ Vertical') + '</button>' +
+                    '<button class="chat-arc-btn" type="button" data-chat-bs-rotate ' +
+                        'title="Which way the next ship lies">↻ Rotate — laying ' +
+                        (draft.horiz ? '↔ across' : '↕ down') + '</button>' +
                     '<button class="chat-arc-btn" type="button" data-chat-bs-clear>Clear</button>' +
                     (placed === BS_FLEET.length
                         ? '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
@@ -2162,8 +2167,10 @@
                     'at the end, and every answer you gave is checked against it.</div>' +
                 (nextShip && placed < BS_FLEET.length
                     ? '<div class="chat-arc-status">Place your ' + esc(nextShip.name) +
-                      ' (' + nextShip.len + ' cells) — click a square.</div>'
-                    : '<div class="chat-arc-status">Fleet ready.</div>') +
+                      ' (' + nextShip.len + ' cells, lying ' +
+                      (draft.horiz ? 'across' : 'down') + ') — click where it starts. ' +
+                      'Click a placed ship to pick it up again.</div>'
+                    : '<div class="chat-arc-status">Fleet ready — commit when you are.</div>') +
                 _arcRevealHtml(game) +
             '</div>';
         }
@@ -5671,6 +5678,7 @@
                         _arcLobbyHtml: _arcLobbyHtml, _arcBoardHtml: _arcBoardHtml,
                         _arcSidebarHtml: _arcSidebarHtml, _arcPgn: _arcPgn,
                         _arcBsBoardHtml: _arcBsBoardHtml, _arcSlotHtml: _arcSlotHtml,
+                        _bsPlaceAt: _bsPlaceAt, _bsDraft: _bsDraft,
                         _slotPayout: function (r, s2) { return _slotPayout(r, s2); },
                         renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
                         _testSetSelf: function (n) { state.selfName = n; },

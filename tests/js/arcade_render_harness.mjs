@@ -560,6 +560,37 @@ const NASTY = '<img src=x onerror=alert(1)>';
           CP._arcLobbyHtml());
 }
 
+// ── battleship placement: the board starts empty and rotation works ─────
+{
+    setRoom([], 'boulder');
+    CP._testSetState({ arcade: { game: 'zz01', sel: -1, promo: null, flip: false } });
+    const d = CP._bsDraft();
+    check('place: the board starts EMPTY',
+          d.board.replace(/\./g, '').length === 0, d.board);
+
+    CP._bsPlaceAt(0);
+    const carrier = [...CP._bsDraft().board].map((c, i) => c === '1' ? i : null).filter(v => v !== null);
+    check('place: horizontal runs along the row',
+          carrier.join(',') === '0,1,2,3,4', carrier.join(','));
+
+    CP._bsDraft().horiz = false;
+    CP._bsPlaceAt(20);
+    const bship = [...CP._bsDraft().board].map((c, i) => c === '2' ? i : null).filter(v => v !== null);
+    check('place: rotated runs down the column',
+          bship.join(',') === '20,30,40,50', bship.join(','));
+
+    CP._bsPlaceAt(0);
+    check('place: clicking a placed ship picks it up',
+          CP._bsDraft().board.indexOf('1') < 0, CP._bsDraft().board);
+
+    // A ship that would hang off the edge is refused rather than wrapping.
+    CP._bsDraft().horiz = true;
+    const before = CP._bsDraft().board;
+    CP._bsPlaceAt(7);                       // carrier of 5 from column h
+    check('place: a ship cannot hang off the edge',
+          CP._bsDraft().board === before, CP._bsDraft().board);
+}
+
 // ── the Arcade hides itself if its libraries are absent ─────────────────
 {
     // chat.js must not throw when chess-engine.js / chat-games.js failed to
