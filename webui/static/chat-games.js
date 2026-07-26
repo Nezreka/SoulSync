@@ -399,10 +399,41 @@
                     seat = turnColor;
                 }
                 if (!seat) return;                            // not a player
+
+                // Catch up BEFORE judging whose turn it is: once we have
+                // missed moves our idea of the turn is stale by definition,
+                // so checking it first would reject the very message that
+                // could fix us. A client that closes the tab for an afternoon
+                // comes back behind and slskd never replays what it did not
+                // receive, so without this it rejects every later move as
+                // off-ply and sits on a stale board forever, silently, while
+                // its opponent plays on. The checkpoint exists for this.
+                var pn = p.n;
+                if (typeof pn === 'number' && isFinite(pn) && pn > game.ply) {
+                    var reFen = typeof p.f === 'string' ? p.f : '';
+                    var reSt = reFen ? adapter2.adopt(reFen) : null;
+                    if (!reSt) return;                        // no way to catch up
+                    // Only a seated player can pull the game forward, and only
+                    // onto the side the checkpoint says just moved.
+                    var reMoved = adapter2.turn(reSt) === 'w' ? 'b' : 'w';
+                    if (seat !== reMoved) return;
+                    states[gid] = reSt;
+                    game.fen = adapter2.fen(reSt);
+                    game.turn = adapter2.turn(reSt);
+                    game.startFen = game.fen;      // the move list restarts here
+                    game.moves = [];
+                    game.ply = pn + 1;
+                    game.partial = true;           // history is no longer ours to vouch for
+                    game.lastAt = at;
+                    game.drawOffer = '';
+                    game.votes = {}; game.voteBy = {};
+                    return;
+                }
+
                 if (seat !== turnColor) return;               // not your turn
                 var n = p.n;
                 if (typeof n !== 'number' || !isFinite(n)) return;
-                if (n !== game.ply) return;                   // dupe, or out of order
+                if (n < game.ply) return;                     // a duplicate or a replay
                 if (game.ply >= MAX_MOVES) return;
 
                 var uci = String(p.m || '');

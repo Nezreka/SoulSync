@@ -237,6 +237,88 @@ describe('adoption — surviving the rolling archive', () => {
     });
 });
 
+describe('catching up after missing moves', () => {
+    // THE async failure mode. slskd only receives room messages while it is
+    // joined and never replays what it missed, so a client that closes the
+    // tab for an afternoon comes back behind. Before the resync it rejected
+    // every later move for being off-ply and sat on a stale board forever,
+    // silently, while its opponent played on.
+    const players = ['boulder', 'kazimir'];
+    const ucis = ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1b5', 'a7a6'];
+    const full = [opened(), joined(), ...moveEvents('g001', players, ucis)];
+    const caughtUp = one(full);
+
+    test('a client that missed the middle converges on the same board', () => {
+        const behind = one([...full.slice(0, 4), full[full.length - 1]]);
+        assert.equal(behind.fen, caughtUp.fen);
+        assert.equal(behind.ply, caughtUp.ply);
+        assert.equal(behind.partial, true, 'flagged: the history is no longer ours');
+    });
+    test('it keeps playing normally afterwards', () => {
+        // The point of catching up is being able to move again.
+        const behind = [...full.slice(0, 4), full[full.length - 1]];
+        let pos = E.fromFEN(caughtUp.fen);
+        const mv = E.uciToMove(pos, 'b5c6');
+        pos = E.makeMove(pos, mv);
+        const g = one([...behind, ev('boulder',
+            { k: 'gm.move', g: 'g001', n: 6, m: 'b5c6', f: E.toFEN(pos) }, T0 + 999999)]);
+        assert.equal(g.ply, 7);
+        assert.equal(g.fen, E.toFEN(pos));
+    });
+    test('the move list restarts at the catch-up point rather than lying', () => {
+        const behind = one([...full.slice(0, 4), full[full.length - 1]]);
+        assert.deepEqual(JSON.parse(JSON.stringify(behind.moves)), [],
+                         'we did not witness these moves');
+        assert.equal(behind.startFen, behind.fen, 'so the list starts here');
+    });
+    test('only a seated player can pull the game forward', () => {
+        // Otherwise anyone in the room could fast-forward a game to a
+        // position of their choosing.
+        const spoofed = { ...full[full.length - 1] };
+        spoofed.username = 'mallory';
+        assert.equal(one([...full.slice(0, 4), spoofed]).ply, 2, 'spectator refused');
+    });
+    test('and only onto the side the checkpoint says just moved', () => {
+        // boulder is white; a checkpoint showing black to move means WHITE
+        // moved, so a claim from black is inconsistent.
+        const wrongSeat = { ...full[full.length - 1] };
+        wrongSeat.username = 'boulder';       // white claiming black's move
+        assert.equal(one([...full.slice(0, 4), wrongSeat]).ply, 2);
+    });
+    test('a forward move with no checkpoint cannot resync', () => {
+        const noFen = ev('kazimir', { k: 'gm.move', g: 'g001', n: 5, m: 'a7a6' }, T0 + 999);
+        assert.equal(one([...full.slice(0, 4), noFen]).ply, 2);
+    });
+    test('a forged checkpoint cannot resync either', () => {
+        const forged = ev('kazimir', { k: 'gm.move', g: 'g001', n: 5, m: 'a7a6',
+            f: '4k3/8/8/8/8/8/4P3/4K3 w - d3 0 1' }, T0 + 999);
+        assert.equal(one([...full.slice(0, 4), forged]).ply, 2);
+    });
+    test('a replayed older move still cannot rewind the board', () => {
+        const g = one([...full, full[2], full[3]]);
+        assert.equal(g.ply, caughtUp.ply);
+        assert.equal(g.fen, caughtUp.fen);
+    });
+    test('Connect 4 catches up the same way', () => {
+        const evs = [ev('boulder', { k: 'gm.new', g: 'c001', v: 'connect4' }),
+                     ev('kazimir', { k: 'gm.join', g: 'c001' }, T0 + 1000)];
+        const heights = new Array(7).fill(0);
+        const cells = new Array(42).fill('.');
+        [3, 3, 4, 2, 4, 4].forEach((col, i) => {
+            const who = i % 2 === 0 ? 'w' : 'b';
+            cells[heights[col] * 7 + col] = who;
+            heights[col]++;
+            evs.push(ev(i % 2 === 0 ? 'boulder' : 'kazimir',
+                { k: 'gm.move', g: 'c001', v: 'connect4', n: i, m: String(col),
+                  f: cells.join('') + ' ' + (who === 'w' ? 'b' : 'w') }, T0 + 2000 + i));
+        });
+        const whole = G.reduceGames(evs).games.c001;
+        const behind = G.reduceGames([...evs.slice(0, 4), evs[evs.length - 1]]).games.c001;
+        assert.equal(behind.fen, whole.fen);
+        assert.equal(behind.ply, whole.ply);
+    });
+});
+
 describe('endings', () => {
     test('checkmate ends the game and names the winner', () => {
         // Fool's mate: black delivers it on ply 3.
