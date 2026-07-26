@@ -31,7 +31,20 @@ _MAX_MESSAGE_LEN = 1000
 # Preset chat avatars live at webui/static/avatar/1.png .. <AVATAR_COUNT>.png.
 # The id is only ever an INDEX into that fixed set — remote input must never
 # reach a filesystem path.
-AVATAR_COUNT = 99
+AVATAR_COUNT = 100
+# Avatars only their owner may wear. The picker hides them from everyone else,
+# but the envelope is client-controlled, so ownership is ALSO enforced on send
+# here and on render in chat.js — a forged id can't put someone else's face on
+# your name. Keys are avatar ids, values the slskd username (compared casefold).
+RESERVED_AVATARS = {100: "boulderbadgedad"}
+
+
+def _avatar_allowed(av: int, username: str) -> bool:
+    """True unless `av` is reserved for someone other than `username`."""
+    owner = RESERVED_AVATARS.get(int(av or 0))
+    if owner is None:
+        return True
+    return str(username or "").strip().casefold() == owner
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
 _SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
 _AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-min TTL)
@@ -413,7 +426,11 @@ def create_blueprint() -> Blueprint:
                 _av = int(body.get("avatar") or 0)
             except (TypeError, ValueError):
                 _av = 0
-            _config_set("soulseek.chat_avatar", _av if 1 <= _av <= AVATAR_COUNT else 0)
+            if not (1 <= _av <= AVATAR_COUNT):
+                _av = 0
+            elif not _avatar_allowed(_av, _self_username(_client())):
+                _av = 0          # reserved for someone else — don't store it
+            _config_set("soulseek.chat_avatar", _av)
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
@@ -1297,7 +1314,7 @@ def create_blueprint() -> Blueprint:
         # messages (so no extra line noise for vanilla Soulseek clients).
         try:
             _av = int(body.get("avatar"))
-            if 1 <= _av <= AVATAR_COUNT:
+            if 1 <= _av <= AVATAR_COUNT and _avatar_allowed(_av, _self_username(client)):
                 extra = dict(extra or {})
                 extra["av"] = _av
         except (TypeError, ValueError):

@@ -1960,11 +1960,22 @@
     // set and is bounds-checked everywhere it crosses the wire — it must never
     // be interpolated into a path. Unknown/absent falls back to initials, so a
     // missing file or an old client never renders broken.
-    var CHAT_AVATARS = 99;
+    var CHAT_AVATARS = 100;
+    // Avatars only their owner may wear (id -> slskd username, casefolded).
+    // Hidden from everyone else's picker AND refused at render, because the
+    // envelope is client-controlled — otherwise anyone could forge the id and
+    // wear someone else's face. Mirrored in api/chat.py (RESERVED_AVATARS).
+    var RESERVED_AVATARS = { 100: 'boulderbadgedad' };
 
     function _avatarId(raw) {
         var n = parseInt(raw, 10);
         return (n >= 1 && n <= CHAT_AVATARS) ? n : 0;      // 0 = none
+    }
+
+    function _avatarAllowed(id, username) {
+        var owner = RESERVED_AVATARS[_avatarId(id)];
+        if (!owner) return true;
+        return String(username || '').trim().toLowerCase() === owner;
     }
 
     function _myAvatar() {
@@ -1983,6 +1994,11 @@
             if (n && typeof m.username === 'string') out[m.username] = n;
         });
         if (state.selfName && _myAvatar()) out[state.selfName] = _myAvatar();
+        // Drop any reserved avatar claimed by someone who doesn't own it —
+        // they fall back to initials rather than wearing another user's face.
+        Object.keys(out).forEach(function (u) {
+            if (!_avatarAllowed(out[u], u)) delete out[u];
+        });
         return out;
     }
 
@@ -2004,13 +2020,26 @@
     function renderAvatarPicker() {
         var host = q('[data-chat-avpicker]');
         if (!host) return;
+        // Reserved avatars are gated on our slskd name, so if it hasn't loaded
+        // yet, fetch it and repaint — otherwise the owner's own avatar would be
+        // hidden from them on a cold open.
+        if (!state.selfName) {
+            getJSON('/api/chat/status').then(function (res) {
+                if (res.ok && res.body && res.body.username) {
+                    state.selfName = String(res.body.username);
+                    renderAvatarPicker();
+                }
+            });
+        }
         var cur = _myAvatar();
         var cells = ['<button type="button" class="chat-avpick' + (cur ? '' : ' chat-avpick--on') +
             ' chat-avpick--none" data-chat-avpick="0" title="No avatar (use initials)">&times;</button>'];
         for (var i = 1; i <= CHAT_AVATARS; i++) {
+            // reserved avatars only appear for the account they belong to
+            if (!_avatarAllowed(i, state.selfName)) continue;
             cells.push('<button type="button" class="chat-avpick' + (i === cur ? ' chat-avpick--on' : '') +
                 '" data-chat-avpick="' + i + '" title="Avatar ' + i + '">' +
-                // lazy so opening settings doesn't pull all 99 at once
+                // lazy so opening settings doesn't pull them all at once
                 '<img src="/static/avatar/' + i + '.png" alt="" loading="lazy"></button>');
         }
         host.innerHTML = cells.join('');
