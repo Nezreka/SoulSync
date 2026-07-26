@@ -199,6 +199,18 @@ describe('adoption — surviving the rolling archive', () => {
         assert.equal(g.status, 'live');
         assert.equal(g.black, 'kazimir', 'the mover held the side now waiting');
     });
+    test('an adopted game records where IT started, not the opening', () => {
+        // `moves` only collects what arrives after adoption, so without this
+        // a renderer replaying them from the standard start position would
+        // claim the game opened with them.
+        const g = one([ev('kazimir', { k: 'gm.move', g: 'g001', v: 'chess', n: 7,
+                                       m: 'e7e5', f: midFen }, T0)]);
+        assert.equal(g.startFen, midFen);
+        assert.deepEqual(JSON.parse(JSON.stringify(g.moves)), []);
+    });
+    test('a game opened normally starts from the standard position', () => {
+        assert.equal(one([opened()]).startFen, E.START_FEN);
+    });
     test('an adopted game learns the other seat from a legal move', () => {
         // Without this the opponent's next move would be rejected as
         // "not a player" and the game would stall forever.

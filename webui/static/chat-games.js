@@ -174,6 +174,7 @@
                     invited: invited,
                     isPrivate: !!invited,
                     fen: adapter.fen(st),
+                    startFen: adapter.fen(st),
                     turn: adapter.turn(st),
                     ply: 0,
                     moves: [],
@@ -214,6 +215,10 @@
                     createdBy: '', createdAt: at, lastAt: at,
                     invited: '', isPrivate: false,
                     fen: ad2.fen(adopted),
+                    // `moves` below is empty and only collects what arrives
+                    // AFTER adoption, so replaying it has to start here --
+                    // not from the opening position this client never saw.
+                    startFen: ad2.fen(adopted),
                     turn: ad2.turn(adopted),
                     ply: ply + 1,
                     moves: [],

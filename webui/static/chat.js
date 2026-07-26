@@ -70,6 +70,7 @@
         pinsOpen: false,         // pin board expanded
         topicEditing: false,     // head shows the topic input (renderHead pauses)
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
+        arcade: null,            // {game, sel, promo, flip} when the Arcade view is open
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
     try {
@@ -559,6 +560,10 @@
     function renderMessages(list) {
         var host = q('[data-chat-messages]');
         if (!host) return;
+        // The Arcade takes over the message column, so it hangs off the same
+        // entry point every caller already uses rather than needing each of
+        // them to know about it.
+        if (_arcOn()) { renderArcade(); return; }
         if (!list || !list.length) {
             host.innerHTML = '<div class="chat-empty">No messages yet — say hi 👋</div>';
             return;
@@ -796,6 +801,7 @@
         renderGuilds();
         renderChannels();
         renderUserPanel();
+        _arcBindDrag();       // idempotent; the page element outlives every render
     }
 
     // ── Discord-style shell: guild rail, channels, account strip ────────────
@@ -950,7 +956,43 @@
                     'data-chat-cat="' + attr(group.cat) + '">' +
                     '<span class="chat-cat-caret">⌄</span>' + esc(group.cat) +
                 '</button>' + rows;
-        }).join('');
+        }).join('') + _arcSidebarHtml();
+    }
+
+    // The Arcade's sidebar block. It sits below the channels and looks like
+    // one, but it is a view rather than a tag — see the Arcade section.
+    // Active games hang beneath it the way threads hang beneath a channel.
+    function _arcSidebarHtml() {
+        if (!_arcReady()) return '';
+        var closed = (state.chanCatClosed || {}).Games;
+        var on = !!state.arcade;
+        if (closed) {
+            return '<button class="chat-cat chat-cat--closed" type="button" data-chat-cat="Games">' +
+                '<span class="chat-cat-caret">⌄</span>Games</button>';
+        }
+        var turns = _arcMyTurnCount();
+        var row = '<button class="chat-chan' + (on && !state.arcade.game ? ' chat-chan--on' : '') +
+            (turns ? ' chat-chan--unread' : '') + '" type="button" data-chat-arc-home>' +
+            '<span class="chat-chan-hash">🎲</span>' +
+            '<span class="chat-chan-name">arcade</span>' +
+            (turns ? '<span class="chat-chan-unread">' + turns + '</span>' : '') +
+        '</button>';
+        if (on) {
+            row += _arcSidebarGames().map(function (g) {
+                var gOn = state.arcade.game === g.id;
+                var label = (g.white || '?') + ' vs ' + (g.black || 'open');
+                return '<button class="chat-thread' + (gOn ? ' chat-thread--on' : '') +
+                    (_arcMyMove(g) ? ' chat-thread--turn' : '') +
+                    '" type="button" data-chat-arc-open="' + attr(g.id) + '" ' +
+                    'title="' + attr(label) + '">' +
+                    '<span class="chat-thread-branch"></span>' +
+                    '<span class="chat-thread-name">' + esc(label) + '</span>' +
+                    (_arcMyMove(g) ? '<span class="chat-chan-unread">!</span>' : '') +
+                '</button>';
+            }).join('');
+        }
+        return '<button class="chat-cat" type="button" data-chat-cat="Games">' +
+            '<span class="chat-cat-caret">⌄</span>Games</button>' + row;
     }
 
     // ── threads ─────────────────────────────────────────────────────────────
@@ -1028,10 +1070,525 @@
         if (newest) state.chanSeen[slug] = newest;
         state.lastStamp = null;      // force a repaint — the filter changed, not the data
         state.newMarker = null;
+        state.arcade = null;      // leaving for a channel leaves the arcade
         renderMessages(state.msgs);
         renderHead();
         renderComposer();
         renderChannels();
+    }
+
+    // ── The Arcade ──────────────────────────────────────────────────────────
+    //
+    // Games are a VIEW, deliberately not a channel. A channel is a tag carried
+    // on messages, and every tag must resolve to somewhere a message is
+    // readable — that is the "nothing is ever invisible" invariant. A channel
+    // whose column renders a chessboard instead of messages would break it, so
+    // the arcade sits beside the channel list with its own state flag and the
+    // message-channel logic is left completely alone.
+    //
+    // Everything on screen is a pure fold of the room's protocol carriers
+    // (see chat-games.js). There is no server: the board you are looking at
+    // was computed locally from chat messages, and so was your opponent's.
+    var ARC_GLYPH = {
+        K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
+        k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
+    };
+    var ARC_PROMO = [['q', '♕'], ['r', '♖'], ['b', '♗'], ['n', '♘']];
+
+    function _arcReady() { return !!(window.ChessEngine && window.ChatGames); }
+    function _arcOn() { return !!state.arcade && _chanRoom() && _arcReady(); }
+
+    // The fold is cheap (~3ms for a 400-move game) but it runs on every bus
+    // repaint, so it is cached. The key is the log ARRAY ITSELF plus its
+    // length, not the length alone: ingestion appends (length moves), and
+    // anything that replaces the log hands us a different array. Keying on
+    // length alone would serve a stale fold whenever a different log happened
+    // to be the same size — which is exactly what the render harness caught.
+    // `stale` depends on the wall clock, but only at 24h granularity, so a
+    // cached value is never meaningfully wrong.
+    var _arcCache = { ref: null, n: -1, room: null, out: null };
+
+    function _gamesState() {
+        if (!_arcReady()) return { games: {}, order: [] };
+        var log = state.protocolLog || [];
+        if (_arcCache.out && _arcCache.ref === log && _arcCache.n === log.length &&
+            _arcCache.room === state.room) {
+            return _arcCache.out;
+        }
+        var out = window.ChatGames.reduceGames(_roomEvents(), Date.now());
+        _arcCache = { ref: log, n: log.length, room: state.room, out: out };
+        return out;
+    }
+
+    function _arcGame(id) {
+        return _gamesState().games[id] || null;
+    }
+
+    // 8 chars of [a-z0-9]. A collision only means the second gm.new is
+    // ignored, so this needs to be unlikely, not guaranteed.
+    function _newGid() {
+        var abc = 'abcdefghijklmnopqrstuvwxyz0123456789', s = '';
+        for (var i = 0; i < 8; i++) s += abc[Math.floor(Math.random() * abc.length)];
+        return s;
+    }
+
+    function _arcSeat(game) {
+        if (!game || !state.selfName) return '';
+        if (game.white === state.selfName) return 'w';
+        if (game.black === state.selfName) return 'b';
+        return '';
+    }
+
+    function _arcMyMove(game) {
+        return !!(game && window.ChatGames.toMove(game) &&
+                  window.ChatGames.toMove(game) === state.selfName);
+    }
+
+    // Games worth showing in the sidebar: mine first, then anything live or
+    // waiting for an opponent. Finished games stay in the lobby only.
+    function _arcSidebarGames() {
+        var st = _gamesState();
+        return st.order.map(function (id) { return st.games[id]; }).filter(function (g) {
+            return g.status !== 'over';
+        }).slice(0, 12);
+    }
+
+    function _arcMyTurnCount() {
+        var st = _gamesState();
+        var n = 0;
+        st.order.forEach(function (id) { if (_arcMyMove(st.games[id])) n++; });
+        return n;
+    }
+
+    function openArcade(gid) {
+        if (!_arcReady()) return;
+        state.arcade = { game: gid || null, sel: -1, promo: null, flip: false };
+        var g = gid ? _arcGame(gid) : null;
+        // Black sees the board from black's side, like every chess site.
+        if (g && _arcSeat(g) === 'b') state.arcade.flip = true;
+        state.thread = null;
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function closeArcade() {
+        if (!state.arcade) return;
+        state.arcade = null;
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    // ── Arcade actions (each is one carrier on the bus) ──────────────────
+    // Nothing is applied optimistically. Our own carrier comes back through
+    // the room like everyone else's and the fold picks it up, so what we see
+    // is always what the room saw — an optimistic board could disagree with
+    // the fold and there would be no way to tell which was right.
+
+    function _arcAfterSend(gid) {
+        return function (r) {
+            if (!r || !r.ok) {
+                if (typeof showToast === 'function') showToast('Could not reach the room', 'error');
+                return;
+            }
+            if (gid) state.arcade = Object.assign(state.arcade || {}, { game: gid, sel: -1 });
+            refresh();
+        };
+    }
+
+    function arcNewGame(color, opponent) {
+        var gid = _newGid();
+        var f = { g: gid, v: 'chess', c: color === 'b' ? 'b' : 'w' };
+        if (opponent) f.o = String(opponent).slice(0, 64);
+        sendProtocol('gm.new', f).then(_arcAfterSend(gid));
+    }
+
+    function arcJoin(gid) { sendProtocol('gm.join', { g: gid }).then(_arcAfterSend(gid)); }
+
+    function arcResign(gid) {
+        showConfirmDialog({
+            title: 'Resign this game?',
+            message: 'Your opponent takes the win. This cannot be undone.',
+            confirmText: 'Resign',
+            destructive: true,
+        }).then(function (ok) {
+            if (ok) sendProtocol('gm.res', { g: gid }).then(_arcAfterSend(gid));
+        });
+    }
+
+    function arcDraw(gid) { sendProtocol('gm.draw', { g: gid }).then(_arcAfterSend(gid)); }
+    function arcClaim(gid) { sendProtocol('gm.claim', { g: gid }).then(_arcAfterSend(gid)); }
+
+    // Send a move with the ply it occupies and the position it produces.
+    // Both are what let a client that missed the opening still follow along,
+    // and what lets a client that has the history catch a disagreement.
+    function arcMove(gid, uci) {
+        var g = _arcGame(gid);
+        if (!g) return;
+        var E = window.ChessEngine;
+        var pos = E.fromFEN(g.fen);
+        var move = pos && E.uciToMove(pos, uci);
+        if (!move) return;                       // never put an illegal move on the bus
+        var after = E.makeMove(pos, move);
+        state.arcade.sel = -1;
+        state.arcade.promo = null;
+        sendProtocol('gm.move', {
+            g: gid, v: g.variant, n: g.ply, m: uci, f: E.toFEN(after),
+        }).then(_arcAfterSend(gid));
+        renderArcade();                          // clear the selection immediately
+    }
+
+    // ── Arcade rendering ────────────────────────────────────────────────
+
+    function renderArcade() {
+        if (!_arcOn()) return;
+        var host = q('[data-chat-messages]');
+        if (!host) return;
+        var g = state.arcade.game ? _arcGame(state.arcade.game) : null;
+        host.innerHTML = g ? _arcBoardHtml(g) : _arcLobbyHtml();
+    }
+
+    function _arcWho(name, colorGlyph, isTurn) {
+        return '<span class="chat-arc-who' + (isTurn ? ' chat-arc-who--turn' : '') + '">' +
+            '<span class="chat-arc-who-dot">' + colorGlyph + '</span>' +
+            esc(name || 'open seat') + '</span>';
+    }
+
+    function _arcLobbyHtml() {
+        var st = _gamesState();
+        var CG = window.ChatGames;
+        var mine = [], open = [], live = [], done = [];
+        st.order.forEach(function (id) {
+            var g = st.games[id];
+            if (g.status === 'over') { done.push(g); return; }
+            if (_arcSeat(g)) { mine.push(g); return; }
+            if (g.status === 'open') { open.push(g); return; }
+            live.push(g);
+        });
+
+        function card(g) {
+            var toMove = CG.toMove(g);
+            var mySeat = _arcSeat(g);
+            var can = state.canSend;
+            var badge = '';
+            if (g.status === 'over') {
+                badge = '<span class="chat-arc-badge chat-arc-badge--done">' +
+                    esc(g.result || '') + ' · ' + esc(g.reason || 'finished') + '</span>';
+            } else if (g.status === 'open') {
+                badge = '<span class="chat-arc-badge chat-arc-badge--open">waiting for an opponent</span>';
+            } else if (_arcMyMove(g)) {
+                badge = '<span class="chat-arc-badge chat-arc-badge--you">your move</span>';
+            } else if (g.stale) {
+                badge = '<span class="chat-arc-badge chat-arc-badge--stale">idle 24h · seat claimable</span>';
+            } else if (g.desync) {
+                badge = '<span class="chat-arc-badge chat-arc-badge--bad">positions disagreed</span>';
+            }
+            var actions = '';
+            if (g.status === 'open' && !mySeat && can &&
+                (!g.isPrivate || g.invited === state.selfName)) {
+                actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                    'data-chat-arc-join="' + attr(g.id) + '">Join</button>';
+            }
+            if (g.status === 'live' && !mySeat && g.stale && can) {
+                actions += '<button class="chat-arc-btn" type="button" ' +
+                    'data-chat-arc-claim="' + attr(g.id) + '" ' +
+                    'title="This seat has been idle for 24 hours — take it over">Take the seat</button>';
+            }
+            return '<button class="chat-arc-card' + (mySeat ? ' chat-arc-card--mine' : '') +
+                '" type="button" data-chat-arc-open="' + attr(g.id) + '">' +
+                '<span class="chat-arc-card-top">' +
+                    _arcWho(g.white, '♔', toMove && toMove === g.white) +
+                    '<span class="chat-arc-vs">vs</span>' +
+                    _arcWho(g.black, '♚', toMove && toMove === g.black) +
+                '</span>' +
+                '<span class="chat-arc-card-sub">' +
+                    esc(g.variant) + ' · move ' + (Math.floor(g.ply / 2) + 1) +
+                    (g.isPrivate ? ' · private' : '') +
+                    (g.partial ? ' · joined mid-game' : '') +
+                '</span>' +
+                badge +
+                (actions ? '<span class="chat-arc-card-actions">' + actions + '</span>' : '') +
+            '</button>';
+        }
+
+        function section(title, list) {
+            if (!list.length) return '';
+            return '<div class="chat-arc-sectitle">' + esc(title) +
+                '<span class="chat-arc-count">' + list.length + '</span></div>' +
+                list.map(card).join('');
+        }
+
+        var empty = (!mine.length && !open.length && !live.length && !done.length);
+        return '<div class="chat-arc-lobby">' +
+            '<div class="chat-arc-hero">' +
+                '<div class="chat-arc-hero-title">The Arcade</div>' +
+                '<div class="chat-arc-hero-sub">No server. Every board here is folded ' +
+                    'out of chat messages in this Soulseek room — yours and your ' +
+                    'opponent\'s clients each compute it independently.</div>' +
+                (state.canSend
+                    ? '<div class="chat-arc-hero-actions">' +
+                        '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                            'data-chat-arc-new="w">New game as ♔ white</button>' +
+                        '<button class="chat-arc-btn" type="button" ' +
+                            'data-chat-arc-new="b">as ♚ black</button>' +
+                      '</div>'
+                    : '<div class="chat-arc-hero-sub">Sending is admin-only on this ' +
+                      'server, so you can watch but not play.</div>') +
+            '</div>' +
+            (empty
+                ? '<div class="chat-empty">No games yet — start one and it appears ' +
+                  'for everyone in the room.</div>'
+                : section('Your games', mine) + section('Looking for an opponent', open) +
+                  section('In progress', live) + section('Finished', done.slice(0, 10))) +
+        '</div>';
+    }
+
+    function _arcBoardHtml(game) {
+        var E = window.ChessEngine;
+        var CG = window.ChatGames;
+        // game.fen is our OWN fold's output, not wire data — it has already
+        // been through fromWireFEN if it was ever adopted.
+        var pos = E.fromFEN(game.fen);
+        if (!pos) return '<div class="chat-empty">This board could not be read.</div>';
+
+        var arc = state.arcade;
+        var mySeat = _arcSeat(game);
+        var myMove = _arcMyMove(game);
+        var sel = arc.sel;
+
+        // Legal destinations from the selected square, so the board can show
+        // dots instead of making people guess.
+        var dests = {};
+        if (sel >= 0 && myMove) {
+            E.legalMoves(pos).forEach(function (m) {
+                if (m.from === sel) dests[m.to] = 1;
+            });
+        }
+        var lastMove = null;
+        if (game.moves.length) {
+            var lu = game.moves[game.moves.length - 1];
+            lastMove = { from: E.fromAlg(lu.slice(0, 2)), to: E.fromAlg(lu.slice(2, 4)) };
+        }
+        var checkSq = -1;
+        if (E.inCheck(pos, pos.turn)) {
+            for (var s = 0; s < 128; s++) {
+                if (!E.onBoard(s)) { s += 7; continue; }
+                if (pos.board[s] === (pos.turn === 'w' ? 'K' : 'k')) { checkSq = s; break; }
+            }
+        }
+
+        var ranks = [7, 6, 5, 4, 3, 2, 1, 0];
+        var files = [0, 1, 2, 3, 4, 5, 6, 7];
+        if (arc.flip) { ranks = ranks.slice().reverse(); files = files.slice().reverse(); }
+
+        var cells = [];
+        ranks.forEach(function (r) {
+            files.forEach(function (f) {
+                var sq = E.sqOf(f, r);
+                var piece = pos.board[sq];
+                var cls = 'chat-arc-sq chat-arc-sq--' + ((f + r) % 2 === 1 ? 'light' : 'dark');
+                if (sq === sel) cls += ' chat-arc-sq--sel';
+                if (dests[sq]) cls += piece ? ' chat-arc-sq--take' : ' chat-arc-sq--dest';
+                if (lastMove && (sq === lastMove.from || sq === lastMove.to)) cls += ' chat-arc-sq--last';
+                if (sq === checkSq) cls += ' chat-arc-sq--check';
+                var mineToDrag = piece && myMove &&
+                    E.colorOf(piece) === mySeat && game.status === 'live';
+                cells.push('<div class="' + cls + '" data-chat-arc-sq="' + sq + '"' +
+                    (mineToDrag ? ' draggable="true"' : '') +
+                    ' title="' + attr(E.toAlg(sq)) + '">' +
+                    (piece ? '<span class="chat-arc-pc chat-arc-pc--' +
+                        (E.colorOf(piece) === 'w' ? 'w' : 'b') + '">' +
+                        ARC_GLYPH[piece] + '</span>' : '') +
+                '</div>');
+            });
+        });
+
+        // Move list in real algebraic notation. It replays from the game's
+        // OWN start position, not from the opening: a game adopted mid-stream
+        // only collects the moves that arrived after this client picked it up,
+        // so numbering those from move 1 would claim the game began with them.
+        var walk = E.fromFEN(game.startFen || E.START_FEN) || E.newGame();
+        var rows = [];
+        var pending = null;
+        game.moves.forEach(function (uci) {
+            var mv = E.uciToMove(walk, uci);
+            if (!mv) return;
+            var san = E.toSAN(walk, mv);
+            var no = walk.fullmove;
+            if (walk.turn === 'w') {
+                pending = { no: no, w: san, b: '' };
+                rows.push(pending);
+            } else if (pending && pending.no === no) {
+                pending.b = san;
+            } else {
+                pending = { no: no, w: '…', b: san };   // resumed on black's move
+                rows.push(pending);
+            }
+            walk = E.makeMove(walk, mv);
+        });
+        var sanRows = rows.map(function (r) {
+            return '<div class="chat-arc-moverow"><span class="chat-arc-moveno">' +
+                r.no + '.</span><span>' + esc(r.w) + '</span><span>' +
+                esc(r.b) + '</span></div>';
+        }).join('') || '<div class="chat-arc-moverow chat-arc-moverow--none">no moves yet</div>';
+
+        var toMove = CG.toMove(game);
+        var statusLine;
+        if (game.status === 'over') {
+            statusLine = game.winner
+                ? esc(game.winner) + ' wins by ' + esc(game.reason)
+                : 'Draw — ' + esc(game.reason);
+        } else if (game.desync) {
+            statusLine = 'Frozen: a move arrived with a position that disagreed with ' +
+                'this one, and neither can be proven right.';
+        } else if (game.status === 'open') {
+            statusLine = 'Waiting for an opponent to join.';
+        } else if (myMove) {
+            statusLine = 'Your move.' + (E.inCheck(pos, pos.turn) ? ' You are in check.' : '');
+        } else {
+            statusLine = 'Waiting on ' + esc(toMove) + '.' +
+                (E.inCheck(pos, pos.turn) ? ' They are in check.' : '');
+        }
+
+        var actions = '';
+        if (state.canSend && mySeat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-draw="' +
+                attr(game.id) + '">' +
+                (game.drawOffer && game.drawOffer !== state.selfName
+                    ? 'Accept draw' : 'Offer draw') + '</button>';
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'open' &&
+            (!game.isPrivate || game.invited === state.selfName)) {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
+        }
+
+        var offer = (game.drawOffer && game.status === 'live')
+            ? '<div class="chat-arc-note">' + esc(game.drawOffer) + ' offered a draw.</div>' : '';
+        var partial = game.partial
+            ? '<div class="chat-arc-note">Picked up mid-game — the room archive had ' +
+              'already rolled past the opening, so the move list starts where this ' +
+              'client joined (numbered from the real move, not from 1).</div>' : '';
+
+        var promo = arc.promo
+            ? '<div class="chat-arc-promo"><span>Promote to</span>' +
+                ARC_PROMO.map(function (p) {
+                    return '<button class="chat-arc-promobtn" type="button" ' +
+                        'data-chat-arc-promo="' + p[0] + '">' + p[1] + '</button>';
+                }).join('') +
+                '<button class="chat-arc-btn" type="button" data-chat-arc-promo="">Cancel</button>' +
+              '</div>'
+            : '';
+
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(arc.flip ? game.white : game.black, arc.flip ? '♔' : '♚',
+                        toMove === (arc.flip ? game.white : game.black)) +
+            '</div>' +
+            '<div class="chat-arc-board' + (game.status === 'over' ? ' chat-arc-board--over' : '') +
+                '" data-chat-arc-board="' + attr(game.id) + '">' + cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(arc.flip ? game.black : game.white, arc.flip ? '♚' : '♔',
+                        toMove === (arc.flip ? game.black : game.white)) +
+                '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+                    'data-chat-arc-flip title="Flip the board">⇅</button>' +
+            '</div>' +
+            promo + offer + partial +
+            '<div class="chat-arc-status">' + statusLine + '</div>' +
+            (actions ? '<div class="chat-arc-actions">' + actions + '</div>' : '') +
+            '<div class="chat-arc-moves">' + sanRows + '</div>' +
+        '</div>';
+    }
+
+    // ── Board interaction ───────────────────────────────────────────────
+    // Click-to-select then click-to-move, with drag as an alternative. Click
+    // first because it is the only one that works on a phone.
+
+    function _arcTryMove(game, from, to) {
+        var E = window.ChessEngine;
+        var pos = E.fromFEN(game.fen);
+        if (!pos) return false;
+        // A pawn reaching the last rank needs a piece chosen before the move
+        // can be sent — under-promotion is occasionally the only winning move,
+        // so we ask rather than assuming a queen.
+        var needsPromo = E.legalMoves(pos).some(function (m) {
+            return m.from === from && m.to === to && m.promo;
+        });
+        if (needsPromo) {
+            state.arcade.promo = { from: from, to: to };
+            renderArcade();
+            return true;
+        }
+        var uci = E.toAlg(from) + E.toAlg(to);
+        if (!E.uciToMove(pos, uci)) return false;
+        arcMove(game.id, uci);
+        return true;
+    }
+
+    function _arcSquareClick(sq) {
+        var arc = state.arcade;
+        var game = arc && arc.game ? _arcGame(arc.game) : null;
+        if (!game || game.status !== 'live') return;
+        var E = window.ChessEngine;
+        var pos = E.fromFEN(game.fen);
+        if (!pos) return;
+        var mySeat = _arcSeat(game);
+        if (!_arcMyMove(game) || !state.canSend) return;   // spectators just look
+
+        var piece = pos.board[sq];
+        if (arc.sel >= 0 && _arcTryMove(game, arc.sel, sq)) return;
+        // Selecting one of your own pieces (or re-selecting) never fails.
+        if (piece && E.colorOf(piece) === mySeat) {
+            arc.sel = (arc.sel === sq) ? -1 : sq;
+        } else {
+            arc.sel = -1;
+        }
+        renderArcade();
+    }
+
+    // Drag is an ALTERNATIVE to click, never the only way in: click-to-move
+    // is the one that works on a phone, so drag is bound as an enhancement on
+    // top of it and both funnel into the same _arcTryMove.
+    function _arcBindDrag() {
+        var page = document.getElementById('chat-page');
+        if (!page || page._arcDragBound) return;
+        page._arcDragBound = true;
+        var from = -1;
+        page.addEventListener('dragstart', function (e) {
+            var sq = e.target.closest && e.target.closest('[data-chat-arc-sq]');
+            if (!sq || !_arcOn()) { return; }
+            from = parseInt(sq.getAttribute('data-chat-arc-sq'), 10);
+            if (state.arcade) { state.arcade.sel = from; renderArcade(); }
+            try { e.dataTransfer.setData('text/plain', String(from)); } catch (err) { /* ok */ }
+        });
+        page.addEventListener('dragover', function (e) {
+            if (!_arcOn()) return;
+            if (e.target.closest && e.target.closest('[data-chat-arc-sq]')) e.preventDefault();
+        });
+        page.addEventListener('drop', function (e) {
+            if (!_arcOn()) return;
+            var sq = e.target.closest && e.target.closest('[data-chat-arc-sq]');
+            if (!sq) return;
+            e.preventDefault();
+            var to = parseInt(sq.getAttribute('data-chat-arc-sq'), 10);
+            var game = state.arcade.game ? _arcGame(state.arcade.game) : null;
+            if (game && game.status === 'live' && from >= 0 && to >= 0 &&
+                state.canSend && _arcMyMove(game)) {
+                _arcTryMove(game, from, to);
+            }
+            from = -1;
+        });
     }
 
     function renderUserPanel() {
@@ -1066,6 +1623,21 @@
         // A stale/unknown persisted slug must never strand the user on an empty
         // view — snap back to the default before anything renders against it.
         if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
+        // The Arcade owns the whole head: the room controls below (history
+        // search, pins, jukebox, the SoulSync-only filter) all act on the
+        // message list, and there is no message list here.
+        if (_arcOn()) {
+            head.innerHTML = (state.arcade.game
+                ? '<button class="chat-thread-back" type="button" data-chat-arc-home ' +
+                      'title="Back to the Arcade">&larr;</button>' +
+                  '<span class="chat-head-title">🎲 game</span>'
+                : '<span class="chat-head-title">🎲 arcade</span>') +
+                '<span class="chat-head-sub">no server — every board here is folded ' +
+                    'out of this room&rsquo;s messages</span>' +
+                (state.isAdmin ? '<button class="chat-cog-btn" type="button" ' +
+                    'data-chat-settings-btn title="Chat settings">⚙</button>' : '');
+            return;
+        }
         head.innerHTML = state.view === 'room'
             ? (state.thread && _chanRoom()
                 ? '<button class="chat-thread-back" type="button" data-chat-thread-close ' +
@@ -1108,6 +1680,9 @@
         var form = q('[data-chat-composer]');
         var input = q('[data-chat-input]');
         if (!form || !input) return;
+        // The Arcade is a view, not a channel — there is no message to send
+        // into it, and a composer would imply one.
+        if (_arcOn()) { form.hidden = true; return; }
         form.hidden = false;   // the join gate hides it; every normal render restores it
         form.classList.toggle('chat-composer--locked', !state.canSend);
         input.disabled = !state.canSend;
@@ -2346,6 +2921,7 @@
         }
         state.room = nextRoom;
         state.thread = null;         // threads are per-room (and home-room only)
+        state.arcade = null;         // ditto the Arcade — games are room-scoped
         state.topicEditing = false;
         state.typing = {};
         state.typingArmedAt = Date.now() + 2000;   // archive replay isn't live typing
@@ -2669,6 +3245,44 @@
             if (t) { closeThread(); return; }
             t = e.target.closest('[data-chat-chan]');
             if (t) { switchChannel(t.getAttribute('data-chat-chan')); return; }
+            // ── Arcade ──
+            t = e.target.closest('[data-chat-arc-home]');
+            if (t) { openArcade(null); return; }
+            t = e.target.closest('[data-chat-arc-open]');
+            if (t) { openArcade(t.getAttribute('data-chat-arc-open')); return; }
+            t = e.target.closest('[data-chat-arc-new]');
+            if (t) { arcNewGame(t.getAttribute('data-chat-arc-new')); return; }
+            t = e.target.closest('[data-chat-arc-join]');
+            if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
+            t = e.target.closest('[data-chat-arc-claim]');
+            if (t) { arcClaim(t.getAttribute('data-chat-arc-claim')); return; }
+            t = e.target.closest('[data-chat-arc-resign]');
+            if (t) { arcResign(t.getAttribute('data-chat-arc-resign')); return; }
+            t = e.target.closest('[data-chat-arc-draw]');
+            if (t) { arcDraw(t.getAttribute('data-chat-arc-draw')); return; }
+            t = e.target.closest('[data-chat-arc-flip]');
+            if (t) {
+                if (state.arcade) { state.arcade.flip = !state.arcade.flip; renderArcade(); }
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-promo]');
+            if (t) {
+                var pick = t.getAttribute('data-chat-arc-promo');
+                if (!state.arcade) return;
+                var pg = state.arcade.promo;
+                var pgame = pg && state.arcade.game ? _arcGame(state.arcade.game) : null;
+                state.arcade.promo = null;
+                state.arcade.sel = -1;
+                if (pick && pg && pgame) {
+                    arcMove(pgame.id, window.ChessEngine.toAlg(pg.from) +
+                                      window.ChessEngine.toAlg(pg.to) + pick);
+                } else {
+                    renderArcade();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-sq]');
+            if (t) { _arcSquareClick(parseInt(t.getAttribute('data-chat-arc-sq'), 10)); return; }
             t = e.target.closest('[data-chat-cat]');
             if (t) {
                 var cat = t.getAttribute('data-chat-cat');
@@ -3234,6 +3848,7 @@
 
     // Every surface reduced from the protocol bus, painted together.
     function renderBusUI() {
+        renderArcade();          // no-op unless the Arcade view is open
         renderJukebox();
         renderPinbar();
         renderPoll();
@@ -4013,6 +4628,10 @@
                         // exported for the node render harness (XSS contract tests)
                         renderRich: renderRich, renderPlain: renderPlain,
                         renderGroups: renderGroups,
+                        // Arcade HTML builders — usernames and results come off
+                        // Soulseek, so the same escaping contract applies here
+                        _arcLobbyHtml: _arcLobbyHtml, _arcBoardHtml: _arcBoardHtml,
+                        _arcSidebarHtml: _arcSidebarHtml,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });

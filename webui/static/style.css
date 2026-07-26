@@ -72302,6 +72302,150 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     .chat-rail { display: none; }
 }
 
+/* ── The Arcade (chat P3) ────────────────────────────────────────────────
+   Games take over the message column. Accent is the same #1db954 the rest of
+   chat uses; the board is deliberately desaturated so the green reads as
+   "your turn" and nothing else competes with it.
+
+   The board sizes itself off the column width with an aspect-ratio grid, so
+   it stays square at any width without JS. Note the cells do NOT set their
+   own height — the grid rows do — which is what stops the collapse the avatar
+   picker hit (a cell height depending on content that depends on the cell). */
+.chat-arc-lobby { padding: 12px 16px 24px; overflow-y: auto; }
+.chat-arc-hero {
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 18px;
+    background: linear-gradient(135deg, rgba(29,185,84,0.14), rgba(255,255,255,0.03));
+    border: 1px solid rgba(29,185,84,0.22);
+}
+.chat-arc-hero-title { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.chat-arc-hero-sub {
+    font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.62); max-width: 62ch;
+}
+.chat-arc-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.chat-arc-sectitle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
+    color: rgba(255,255,255,0.45); margin: 18px 2px 8px;
+}
+.chat-arc-count {
+    background: rgba(255,255,255,0.08); border-radius: 8px; padding: 1px 7px;
+    font-size: 11px; letter-spacing: 0;
+}
+
+.chat-arc-card {
+    display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left;
+    padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.03); color: inherit;
+}
+.chat-arc-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14); }
+.chat-arc-card--mine { border-color: rgba(29,185,84,0.3); }
+.chat-arc-card-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chat-arc-card-sub { font-size: 12px; color: rgba(255,255,255,0.45); }
+.chat-arc-card-actions { display: flex; gap: 8px; margin-top: 4px; }
+.chat-arc-vs { font-size: 11px; color: rgba(255,255,255,0.35); text-transform: uppercase; }
+
+.chat-arc-who {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 700; color: rgba(255,255,255,0.8);
+}
+.chat-arc-who--turn { color: #1db954; }
+.chat-arc-who-dot { font-size: 17px; line-height: 1; }
+
+.chat-arc-badge {
+    align-self: flex-start; border-radius: 6px; padding: 2px 8px;
+    font-size: 11px; font-weight: 700;
+    background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.6);
+}
+.chat-arc-badge--you { background: rgba(29,185,84,0.18); color: #1db954; }
+.chat-arc-badge--open { background: rgba(88,166,255,0.16); color: #8ab4f8; }
+.chat-arc-badge--stale { background: rgba(255,193,7,0.15); color: #ffc107; }
+.chat-arc-badge--bad { background: rgba(244,67,54,0.15); color: #ff6b5e; }
+.chat-arc-badge--done { background: rgba(255,255,255,0.06); }
+
+.chat-arc-btn {
+    border-radius: 8px; padding: 7px 13px; cursor: pointer; font-size: 13px; font-weight: 700;
+    border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.85);
+}
+.chat-arc-btn:hover { background: rgba(255,255,255,0.1); }
+.chat-arc-btn--go { background: #1db954; border-color: #1db954; color: #06130a; }
+.chat-arc-btn--go:hover { filter: brightness(1.08); background: #1db954; }
+.chat-arc-btn--bad { border-color: rgba(244,67,54,0.4); color: #ff6b5e; }
+.chat-arc-btn--slim { padding: 4px 9px; font-size: 12px; }
+
+/* ── board ── */
+.chat-arc-board-wrap {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px 16px 24px; overflow-y: auto; max-width: 640px; margin: 0 auto; width: 100%;
+}
+.chat-arc-players { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chat-arc-board {
+    display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    aspect-ratio: 1 / 1; width: 100%;
+    border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12);
+    user-select: none;
+}
+.chat-arc-board--over { opacity: 0.75; }
+.chat-arc-sq {
+    display: flex; align-items: center; justify-content: center; position: relative;
+    cursor: pointer;
+}
+.chat-arc-sq--light { background: #6f7c86; }
+.chat-arc-sq--dark { background: #46525c; }
+.chat-arc-sq--last { box-shadow: inset 0 0 0 100px rgba(255,193,7,0.16); }
+.chat-arc-sq--sel { box-shadow: inset 0 0 0 3px #1db954; }
+.chat-arc-sq--check { box-shadow: inset 0 0 0 100px rgba(244,67,54,0.35); }
+/* A legal empty square gets a dot; a legal capture gets a ring, so the two
+   read differently at a glance the way they do on every chess site. */
+.chat-arc-sq--dest::after {
+    content: ''; position: absolute; width: 28%; height: 28%; border-radius: 50%;
+    background: rgba(29,185,84,0.55);
+}
+.chat-arc-sq--take::after {
+    content: ''; position: absolute; inset: 6%; border-radius: 50%;
+    border: 4px solid rgba(29,185,84,0.6);
+}
+.chat-arc-pc {
+    font-size: clamp(20px, 6.2vw, 44px); line-height: 1; position: relative; z-index: 1;
+    pointer-events: none;
+}
+.chat-arc-pc--w { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.chat-arc-pc--b { color: #14181c; text-shadow: 0 1px 1px rgba(255,255,255,0.18); }
+
+.chat-arc-status { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
+.chat-arc-note {
+    font-size: 12px; color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.04);
+    border-left: 3px solid rgba(255,193,7,0.5); border-radius: 4px; padding: 7px 10px;
+}
+.chat-arc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-arc-promo {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.3);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700;
+}
+.chat-arc-promobtn {
+    font-size: 24px; line-height: 1; padding: 2px 10px; cursor: pointer; color: #fff;
+    border-radius: 6px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06);
+}
+.chat-arc-promobtn:hover { background: rgba(255,255,255,0.14); }
+
+.chat-arc-moves {
+    display: flex; flex-direction: column; gap: 1px; font-size: 13px;
+    background: rgba(255,255,255,0.03); border-radius: 8px; padding: 8px 10px;
+    max-height: 220px; overflow-y: auto;
+}
+.chat-arc-moverow {
+    display: grid; grid-template-columns: 40px 1fr 1fr; gap: 8px;
+    color: rgba(255,255,255,0.8); padding: 2px 0;
+}
+.chat-arc-moverow--none { color: rgba(255,255,255,0.4); grid-template-columns: 1fr; }
+.chat-arc-moveno { color: rgba(255,255,255,0.35); }
+
+/* a game in the sidebar where it is your move */
+.chat-thread--turn { color: #1db954; }
+
 /* message-this-user links (chat P4) — any surface can render one */
 .chat-user-link {
     border: none; background: transparent; padding: 0; cursor: pointer;
