@@ -10,6 +10,7 @@ import {
   watchlistArtistConfigQueryOptions,
 } from '../-watchlist.api';
 import { artistPills, formatRelativeScanTime } from '../-watchlist.helpers';
+import { hideOnError } from './hide-on-error';
 import { formatFollowers } from './watchlist-artist-config-modal';
 
 /**
@@ -73,6 +74,7 @@ export function WatchlistArtistDetail({ profileId, artistId, onClose, onOpenSett
   // The panel slides in; the vanilla code added .visible on the next frame so
   // the transition had a starting state to animate from.
   const [visible, setVisible] = useState(false);
+  const [bannerFailed, setBannerFailed] = useState(false);
   useEffect(() => {
     const frame = requestAnimationFrame(() => setVisible(true));
     return () => cancelAnimationFrame(frame);
@@ -112,9 +114,11 @@ export function WatchlistArtistDetail({ profileId, artistId, onClose, onOpenSett
 
   return (
     <div className={`watchlist-artist-detail-overlay${visible ? ' visible' : ''}`}>
-      {artist?.banner_url ? (
+      {artist?.banner_url && !bannerFailed ? (
         <div className="watchlist-detail-banner">
-          <img src={artist.banner_url} alt="" />
+          {/* The vanilla markup removed the whole banner block on error, not
+              just the img, so the fade overlay does not linger over nothing. */}
+          <img src={artist.banner_url} alt="" onError={() => setBannerFailed(true)} />
           <div className="watchlist-detail-banner-fade" />
         </div>
       ) : null}
@@ -125,7 +129,9 @@ export function WatchlistArtistDetail({ profileId, artistId, onClose, onOpenSett
         </button>
 
         <div className="watchlist-detail-hero">
-          {artist?.image_url ? <img src={artist.image_url} alt={artist.name} /> : null}
+          {artist?.image_url ? (
+            <img src={artist.image_url} alt={artist.name} onError={hideOnError} />
+          ) : null}
           <div className="watchlist-detail-hero-info">
             <h2 className="watchlist-detail-hero-name">{artist?.name ?? ''}</h2>
             {artist?.followers || artist?.popularity ? (

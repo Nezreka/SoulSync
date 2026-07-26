@@ -13,6 +13,7 @@ import {
   WATCHLIST_QUERY_KEY,
   watchlistArtistConfigQueryOptions,
 } from '../-watchlist.api';
+import { hideOnError } from './hide-on-error';
 
 const PROVIDER_ROWS: {
   key: WatchlistProvider;
@@ -204,7 +205,12 @@ export function WatchlistLinkedProviders({ profileId, artistId, payload }: Props
               ? results?.map((result) => (
                   <div key={result.id} className="watchlist-linked-search-result">
                     {result.image ? (
-                      <img src={result.image} alt="" className="watchlist-linked-result-img" />
+                      <img
+                        src={result.image}
+                        alt=""
+                        className="watchlist-linked-result-img"
+                        onError={hideOnError}
+                      />
                     ) : (
                       <div className="watchlist-linked-result-img-placeholder">🎵</div>
                     )}

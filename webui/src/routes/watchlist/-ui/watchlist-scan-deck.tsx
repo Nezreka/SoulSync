@@ -8,6 +8,7 @@ import {
   scanProgressText,
   type WatchlistScanFrame,
 } from '../-watchlist.scan';
+import { hideOnError } from './hide-on-error';
 
 /**
  * The live "scan deck" and the completion summary.
@@ -59,11 +60,16 @@ function ScanningDeck({ frame }: { frame: WatchlistScanFrame }) {
               {/* Hidden rather than left stale when THIS artist has no photo,
                   so the previous artist's portrait does not linger. */}
               {frame.current_artist_image_url ? (
-                <img className="wl-scan-portrait-img" src={frame.current_artist_image_url} alt="" />
+                <img
+                  className="wl-scan-portrait-img"
+                  src={frame.current_artist_image_url}
+                  alt=""
+                  onError={hideOnError}
+                />
               ) : null}
               <div className="wl-scan-album-thumb">
                 {frame.current_album_image_url ? (
-                  <img src={frame.current_album_image_url} alt="" />
+                  <img src={frame.current_album_image_url} alt="" onError={hideOnError} />
                 ) : null}
               </div>
             </div>
@@ -86,7 +92,9 @@ function ScanningDeck({ frame }: { frame: WatchlistScanFrame }) {
                     key={`${item.track_name ?? ''}-${index}`}
                     className="watchlist-live-addition-item"
                   >
-                    {item.album_image_url ? <img src={item.album_image_url} alt="" /> : null}
+                    {item.album_image_url ? (
+                      <img src={item.album_image_url} alt="" onError={hideOnError} />
+                    ) : null}
                     <div className="watchlist-live-addition-item-info">
                       <div className="watchlist-live-addition-item-track">
                         {item.track_name || ''}
@@ -124,7 +132,10 @@ function ScanCompletion({ frame }: { frame: WatchlistScanFrame }) {
             : scanCompletionMessage(summary)}
         </div>
         <div style={{ fontSize: 13, opacity: 0.8 }}>
-          <span className="sync-stat">Artists: {summary.total_artists || 0}</span>
+          {/* A cancelled run labels this "Scanned"; a completed one "Artists". */}
+          <span className="sync-stat">
+            {cancelled ? 'Scanned' : 'Artists'}: {summary.total_artists || 0}
+          </span>
           <span className="sync-separator"> • </span>
           <span className="sync-stat">New tracks: {summary.new_tracks_found || 0}</span>
           <span className="sync-separator"> • </span>
@@ -178,7 +189,9 @@ function LedgerSection({ label, list }: { label: string; list: LedgerEvent[] }) 
       </div>
       {list.map((event, index) => (
         <div key={`${event.track_name ?? ''}-${index}`} className="watchlist-live-addition-item">
-          {event.album_image_url ? <img src={event.album_image_url} alt="" /> : null}
+          {event.album_image_url ? (
+            <img src={event.album_image_url} alt="" onError={hideOnError} />
+          ) : null}
           <div className="watchlist-live-addition-item-info">
             <div className="watchlist-live-addition-item-track">{event.track_name || ''}</div>
             <div className="watchlist-live-addition-item-artist">
