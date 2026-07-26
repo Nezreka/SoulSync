@@ -195,7 +195,7 @@ keinen vollständigen externen E2E.
 | [LV2-015](library-v2-issues.md#lv2-015) | Deferred | Historische Diagnose; aktive Library-v2-Playlist-Integration wurde geparkt |
 | [LV2-016](library-v2-issues.md#lv2-016) | Verified | Default 0 plus Reconcile/Repair |
 | [LV2-017](library-v2-issues.md#lv2-017) | Implemented | später über H-13 und Review 1 gehärtet; produktiver Backfill bleibt Dry-Run-abhängig |
-| [Orphan Approve](library-v2-issues.md#orphan-bug) | Pending | Hypothese noch durch den beschriebenen Zwei-Pfad-Reproduktionstest zu bestätigen |
+| [Orphan Approve](library-v2-issues.md#orphan-bug) | Pending | Root Cause bestätigt (§16); Korrektur braucht noch eine Produktentscheidung |
 
 Historische Bugcluster-Prüfung:
 
@@ -645,3 +645,31 @@ tests/wishlist tests/quality`: 1490 passed, 2 vorbestehend fehlschlagend
 
 **Einstufung:** Implementiert und gezielt geprüft; kein Browser-E2E gegen
 eine echte Watchlist-UI.
+
+---
+
+## 16. Orphan-Approve Root Cause bestätigt, Korrektur offen (26. Juli)
+
+Die in [library-v2-issues.md §7](library-v2-issues.md#orphan-bug)
+beschriebene Arbeitshypothese ist jetzt durch einen deterministischen Test
+bewiesen: `tests/library2/test_autolink.py::
+test_simple_download_never_gets_a_file_row` (grün — pinnt den bestätigten
+Fehler, kein Regressions-Fix in dieser Session).
+
+**Wichtiger Scope-Fund:** Der Fehler ist **nicht quarantäne-spezifisch**.
+Jeder erfolgreiche Simple Download (`is_simple_download=True`, kein
+Titel/Artist-Match) überspringt `link_download_into_library_v2` strukturell
+und bekommt nie eine `lib2_track_files`-Row — Quarantäne-Approve reproduziert
+das nur, weil er denselben lückenhaften Context originalgetreu zurückspielt.
+Die Sidecar-Serialisierung selbst ist nicht die Ursache (bereits vorher
+empirisch ausgeschlossen).
+
+Die Korrektur selbst ist bewusst **nicht** in dieser Session implementiert:
+sie braucht eine Produktentscheidung zwischen "Simple Downloads ohne Match in
+lib2 materialisieren" und "Orphan Detector um Legacy-Provenance-Erkennung
+härten" (Details in der Issue-Datei). Ein roter/beweisender Test allein
+autorisiert laut Guide-Arbeitsregel 3 noch keine Korrektur ohne diese
+Entscheidung.
+
+**Einstufung:** Root Cause bestätigt und gezielt geprüft; Korrektur bleibt
+offen bis zur Produktentscheidung.

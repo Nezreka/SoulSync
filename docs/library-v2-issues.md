@@ -1037,7 +1037,11 @@ nicht; der Reimport berechnet das Ziel frisch.
 Staging“-Fallback für dünne Sidecars. Hier gibt es keinen Crash: Import wirkt
 erfolgreich, erst später fehlt die Katalogzuordnung.
 
-### Arbeitshypothese
+### Bestätigte Root Cause (26. Juli)
+
+Bewiesen durch `tests/library2/test_autolink.py::
+test_simple_download_never_gets_a_file_row` (grün — pinnt den bestätigten
+Fehler deterministisch, siehe Status §16).
 
 `link_download_into_library_v2()` bricht ohne direkte V2-ID und ohne
 Titel+Artist ab:
@@ -1047,29 +1051,42 @@ if not direct_track_id and not direct_album_id and (not title or not artist_name
     return None
 ```
 
-Legacy-Registrierung und History können trotzdem erfolgreich sein; nur
+Legacy-Registrierung und History (`core/imports/side_effects.py::
+record_download_provenance`) sind trotzdem erfolgreich, weil sie denselben
+`title`/`artist_name`-Ausfall nicht als Abbruchgrund behandeln — nur
 `lib2_track_files` fehlt. Der native Orphan Detector baut bekannte Pfade aus
 aktiven V2-Subjects und V2-Tag-/Filename-Fallbacks. Ohne Entity/File-Row kann
 er den Song nicht finden.
 
-Simple Downloads verwenden in vorhandenen Tests ausdrücklich leeres
-`track_info`. Ob der reale Approve-Fall aus genau diesem Eingang stammt, ist
-die noch zu beweisende Verbindung.
+**Wichtige Korrektur gegenüber der ursprünglichen Diagnose:** Das ist **kein
+quarantäne-spezifischer Bug**. Simple Downloads (`search_result.
+is_simple_download=True`) haben strukturell nie ein `track_info` mit
+Titel/Artist UND nie eine `lib2_entity`/`source_info`-ID — der Early-Return
+greift bei jedem erfolgreichen Simple Download, unabhängig davon, ob er
+jemals in Quarantäne war. Ein Quarantäne-Approve reproduziert die Lücke nur,
+weil er denselben (bereits vorher lückenhaften) Context originalgetreu
+zurückspielt — die Sidecar-Serialisierung selbst bleibt verlustfrei (wie
+bereits empirisch ausgeschlossen, siehe oben).
 
-### Reproduktion vor Fix
+### Offene Korrekturentscheidung
 
-Den bestehenden Harness in `tests/imports/test_import_pipeline.py` nutzen:
+Ein roter/beweisender Test allein autorisiert noch keine Korrektur — die
+Korrektur selbst braucht eine Produktentscheidung, weil zwei grundsätzlich
+verschiedene Richtungen technisch beide tragfähig sind:
 
-1. echte Quarantäne via Integrity-Check erzwingen;
-2. `approve_quarantine_entry()` real aufrufen;
-3. Reimport mit restauriertem Context und dem echten Approve-Bypass ausführen;
-4. `link_download_into_library_v2` beobachten;
-5. `lib2_track_files` und anschließenden Orphan-Scan prüfen;
-6. Matrix aus Simple Download mit leerem `track_info` und regulärem Match mit
-   vollständigem Context.
+1. **Materialisieren:** Simple Downloads ohne Titel/Artist-Match bekommen eine
+   Fallback-Entity in lib2 (Muster ähnlich der V2-nativen/Unmapped-Artist-
+   Behandlung aus [F-08](library-v2-features.md#feat-unmapped)) statt
+   stillschweigend übersprungen zu werden.
+2. **Orphan Detector härten:** Der Scan erkennt Files, die zwar keine
+   `lib2_track_files`-Row haben, aber eine reale
+   `record_download_provenance`/`library_history`-Zeile — und flaggt sie
+   nicht als Orphan, statt lib2 künstlich vollständig zu machen.
 
-Erst ein roter Test, der die Kette beweist, autorisiert eine Korrektur. Eine
-unbestätigte Hypothese darf nicht zur Datenmodellmutation werden.
+Beide sind technisch tragfähig, unterscheiden sich aber im Produktverhalten
+(Simple Downloads danach in Library v2 sichtbar vs. weiterhin unsichtbar,
+aber sicher). Diese Entscheidung steht noch aus; bis dahin bleibt nur die
+Diagnose bestätigt, keine Korrektur implementiert.
 
 ### Relevante Pfade
 

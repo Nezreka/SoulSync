@@ -79,6 +79,37 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
+def test_simple_download_never_gets_a_file_row(lib2_enabled, imported_conn):
+    """Confirms the root cause behind the "Quarantine Approve later flagged as
+    Orphan" report (docs/library-v2-issues.md §7): a Simple Download's
+    ``search_result`` carries ``is_simple_download`` but no title/artist, and
+    ``track_info`` is structurally empty ``{}`` (see
+    tests/imports/test_import_pipeline.py). autolink's early-exit guard
+    (``not direct_track_id and not direct_album_id and (not title or not
+    artist_name)``) then unconditionally skips the file — with NO
+    quarantine involved at all. The legacy/history write path (
+    core/imports/side_effects.py::record_download_provenance) has no such
+    guard and records the download regardless, so the import "succeeds" from
+    the user's point of view while lib2 never learns the file exists. A later
+    orphan scan (core/repair_jobs/orphan_file_detector.py) — which only knows
+    about active lib2 subjects — has no way to recognize the file as
+    legitimately owned and reports it as an orphan.
+
+    This is NOT a quarantine-context-serialization bug (already ruled out —
+    the sidecar round-trips losslessly) and NOT quarantine-approve-specific:
+    it reproduces on a plain, non-quarantined Simple Download."""
+    ctx = _context(
+        track_info={},
+        search_result={"is_simple_download": True,
+                       "filename": "Some Artist - Some Song.flac"},
+    )
+    assert A.link_download_into_library_v2(ctx) is None
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_track_files WHERE path=?",
+        (ctx["_final_processed_path"],),
+    ).fetchone()[0] == 0
+
+
 def test_new_autolink_artist_is_not_monitored_without_watchlist(lib2_enabled, imported_conn):
     ctx = _context(_final_processed_path="/music/Newcomer/Debut/01 First.flac")
     ctx["track_info"] = {
