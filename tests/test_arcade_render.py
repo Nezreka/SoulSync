@@ -83,12 +83,29 @@ class TestWiring:
         assert "Nothing is applied optimistically" in _CHAT_JS
 
     def test_illegal_moves_never_reach_the_bus(self):
-        assert "if (!move) return;                       // never put an illegal move on the bus" in _CHAT_JS
+        # The fold owns "what does this move produce", so this holds for
+        # every variant rather than just chess.
+        assert "if (!next) return;                       // never put an illegal move on the bus" in _CHAT_JS
+        assert "window.ChatGames.previewMove(g, uci)" in _CHAT_JS
 
     def test_move_carries_ply_and_checkpoint(self):
         # Without `n` a duplicate delivery double-applies; without `f` a
         # client that missed the opening can never join the game.
-        assert "g: gid, v: g.variant, n: g.ply, m: uci, f: E.toFEN(after)," in _CHAT_JS
+        assert "g: gid, v: g.variant, n: g.ply, m: uci, f: next.fen," in _CHAT_JS
+
+    def test_the_room_seat_has_no_owner(self):
+        # Nobody can emit gm.move for the room, so the fold commits its move
+        # once enough distinct people vote for the same one.
+        games_js = (_ROOT / "webui" / "static" / "chat-games.js").read_text(encoding="utf-8")
+        assert "if (game.roomSeat) return;        // that seat belongs to everyone" in games_js
+        assert "if (tally[vuci] < game.voteK) return;" in games_js
+        # The opponent is playing against the room and gets no ballot.
+        assert "if (_seatOf(game, user)) return;               // the opponent does not vote" in games_js
+
+    def test_connect4_moves_are_throttled(self):
+        # Every move is a real room message that vanilla Soulseek clients see
+        # as noise; chess is slow enough not to care, taps are not.
+        assert "if (nowMs - _arcLastMoveAt < 600) return;" in _CHAT_JS
 
     def test_fold_cache_is_keyed_on_the_log_itself(self):
         # Keying on length alone served a stale fold whenever a different log

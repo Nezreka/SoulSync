@@ -426,6 +426,261 @@ describe('determinism', () => {
     });
 });
 
+describe('connect 4 — the variant seam', () => {
+    // The whole point: a second game with no change to the lifecycle. These
+    // check that the shared machinery (seats, turns, endings, adoption) still
+    // behaves, and that a hand-written position cannot smuggle in a disc.
+    const EMPTY = '.'.repeat(42);
+    const c4new = (gid = 'c001', by = 'boulder') =>
+        ev(by, { k: 'gm.new', g: gid, v: 'connect4' });
+    const c4join = (gid = 'c001', by = 'kazimir') =>
+        ev(by, { k: 'gm.join', g: gid }, T0 + 1000);
+
+    // Drop discs, computing each checkpoint honestly, alternating players.
+    function drops(cols, players = ['boulder', 'kazimir'], gid = 'c001') {
+        const heights = new Array(7).fill(0);
+        const cells = new Array(42).fill('.');
+        const out = [];
+        cols.forEach((col, i) => {
+            const who = i % 2 === 0 ? 'w' : 'b';
+            cells[heights[col] * 7 + col] = who;
+            heights[col]++;
+            out.push(ev(players[i % 2],
+                { k: 'gm.move', g: gid, v: 'connect4', n: i, m: String(col),
+                  f: cells.join('') + ' ' + (who === 'w' ? 'b' : 'w') },
+                T0 + 2000 + i));
+        });
+        return out;
+    }
+    const c4 = evs => G.reduceGames(evs).games.c001;
+
+    test('a new game starts empty with white to move', () => {
+        const g = c4([c4new(), c4join()]);
+        assert.equal(g.variant, 'connect4');
+        assert.equal(g.fen, EMPTY + ' w');
+        assert.equal(G.toMove(g), 'boulder');
+    });
+    test('a disc falls to the lowest empty cell in its column', () => {
+        const g = c4([c4new(), c4join(), ...drops([3])]);
+        assert.equal(g.fen[3], 'w', 'bottom row, column 3');
+        assert.equal(g.ply, 1);
+        assert.equal(G.toMove(g), 'kazimir');
+    });
+    test('discs stack', () => {
+        const g = c4([c4new(), c4join(), ...drops([3, 3, 3])]);
+        assert.equal(g.fen.slice(0, 42).split('').filter(c => c !== '.').length, 3);
+        assert.equal(g.fen[3], 'w');
+        assert.equal(g.fen[3 + 7], 'b');
+        assert.equal(g.fen[3 + 14], 'w');
+    });
+    test('four in a row wins, horizontally', () => {
+        // w: 0,1,2,3 along the bottom; b answers in row 2 each time.
+        const g = c4([c4new(), c4join(), ...drops([0, 0, 1, 1, 2, 2, 3])]);
+        assert.equal(g.status, 'over');
+        assert.equal(g.reason, 'four in a row');
+        assert.equal(g.result, '1-0');
+        assert.equal(g.winner, 'boulder');
+    });
+    test('four in a row wins, vertically', () => {
+        const g = c4([c4new(), c4join(), ...drops([0, 1, 0, 1, 0, 1, 0])]);
+        assert.equal(g.status, 'over');
+        assert.equal(g.result, '1-0');
+    });
+    test('four in a row wins, diagonally', () => {
+        // Builds a rising diagonal for white from (0,0) to (3,3).
+        const g = c4([c4new(), c4join(),
+            ...drops([0, 1, 1, 2, 2, 3, 2, 3, 3, 6, 3])]);
+        assert.equal(g.status, 'over', G.reduceGames([c4new(), c4join(),
+            ...drops([0, 1, 1, 2, 2, 3, 2, 3, 3, 6, 3])]).games.c001.fen);
+        assert.equal(g.result, '1-0');
+    });
+    test('three in a row is not a win', () => {
+        const g = c4([c4new(), c4join(), ...drops([0, 0, 1, 1, 2, 2])]);
+        assert.equal(g.status, 'live');
+    });
+    test('a full column rejects another disc', () => {
+        const g = c4([c4new(), c4join(),
+            ...drops([0, 0, 0, 0, 0, 0]),                    // column 0 now full
+            ev('boulder', { k: 'gm.move', g: 'c001', v: 'connect4', n: 6, m: '0' }, T0 + 9000)]);
+        assert.equal(g.ply, 6);
+    });
+    test('a column outside the board is not a move', () => {
+        for (const m of ['7', '-1', '', 'x', '10', 'e2e4', '3.5']) {
+            const g = c4([c4new(), c4join(),
+                ev('boulder', { k: 'gm.move', g: 'c001', v: 'connect4', n: 0, m }, T0 + 5000)]);
+            assert.equal(g.ply, 0, JSON.stringify(m));
+        }
+    });
+    test('the shared lifecycle still applies', () => {
+        // Resignation, spectators and turn order are variant-agnostic.
+        assert.equal(c4([c4new(), c4join(),
+            ev('boulder', { k: 'gm.res', g: 'c001' }, T0 + 5000)]).winner, 'kazimir');
+        assert.equal(c4([c4new(), c4join(),
+            ev('sella', { k: 'gm.move', g: 'c001', v: 'connect4', n: 0, m: '3' },
+               T0 + 5000)]).ply, 0, 'spectator cannot drop');
+        assert.equal(c4([c4new(), c4join(),
+            ev('kazimir', { k: 'gm.move', g: 'c001', v: 'connect4', n: 0, m: '3' },
+               T0 + 5000)]).ply, 0, 'black cannot move first');
+    });
+
+    describe('adoption refuses a hand-written position', () => {
+        // Same job as the chess engine's forged-en-passant gate: every client
+        // would accept a fake board identically, so nothing would ever notice.
+        const adopt = f => G.reduceGames([
+            ev('mallory', { k: 'gm.move', g: 'c001', v: 'connect4', n: 3, m: '3', f }, T0),
+        ]).order.length;
+
+        test('a real position is accepted', () => {
+            const cells = new Array(42).fill('.');
+            cells[0] = 'w'; cells[1] = 'b'; cells[7] = 'w';   // 2 w, 1 b -> black to move
+            assert.equal(adopt(cells.join('') + ' b'), 1);
+        });
+        test('a floating disc is refused', () => {
+            const cells = new Array(42).fill('.');
+            cells[7] = 'w';                                   // row 1 with row 0 empty
+            assert.equal(adopt(cells.join('') + ' b'), 0);
+        });
+        test('impossible move counts are refused', () => {
+            const cells = new Array(42).fill('.');
+            cells[0] = 'w'; cells[1] = 'w'; cells[2] = 'w';   // 3 w, 0 b
+            assert.equal(adopt(cells.join('') + ' b'), 0);
+        });
+        test('a turn that contradicts the counts is refused', () => {
+            const cells = new Array(42).fill('.');
+            cells[0] = 'w';                                   // 1 w, 0 b -> must be black
+            assert.equal(adopt(cells.join('') + ' w'), 0);
+        });
+        test('malformed strings are refused', () => {
+            for (const f of ['', '.'.repeat(42), '.'.repeat(41) + ' w', '.'.repeat(43) + ' w',
+                             '.'.repeat(42) + ' x', 'x'.repeat(42) + ' w',
+                             '.'.repeat(42) + ' w extra']) {
+                assert.equal(adopt(f), 0, JSON.stringify(f.slice(0, 20)));
+            }
+        });
+    });
+});
+
+describe('room vs player — a seat with no owner', () => {
+    // The room's seat belongs to nobody, so no client can emit gm.move for
+    // it. The FOLD commits the move once enough distinct people have voted,
+    // which every client computes identically from the same stream.
+    const roomGame = (extra = {}) =>
+        ev('boulder', { k: 'gm.new', g: 'g001', v: 'chess', r: 1, ...extra });
+    const vote = (by, uci, n = 0, at = T0 + 1000) =>
+        ev(by, { k: 'gm.vote', g: 'g001', n, m: uci }, at);
+
+    test('the room seat is filled from the start — nothing to join', () => {
+        const g = one([roomGame()]);
+        assert.equal(g.status, 'live');
+        assert.equal(g.white, 'boulder');
+        assert.equal(g.black, '', 'the room has no username');
+        assert.equal(g.roomSeat, 'b');
+        assert.equal(G.toMove(g), 'boulder', 'the human moves first');
+    });
+    test('nobody can join or claim the room seat', () => {
+        assert.equal(one([roomGame(), joined('g001', 'kazimir')]).black, '');
+        const played = [roomGame(), ...moveEvents('g001', ['boulder', ''], ['e2e4'])];
+        const g = one([...played,
+            ev('sella', { k: 'gm.claim', g: 'g001' }, T0 + 60000 + G.ABANDON_MS + 1)]);
+        assert.equal(g.black, '', 'the room never goes idle, so there is nothing to take');
+    });
+    test('a vote below the threshold only tallies', () => {
+        const g = one([roomGame(), ...moveEvents('g001', ['boulder', ''], ['e2e4']),
+            vote('kazimir', 'e7e5', 1, T0 + 70000)]);
+        assert.equal(g.ply, 1, 'not committed on one vote');
+        assert.equal(g.votes.e7e5, 1);
+        assert.equal(G.isRoomTurn(g), true);
+        assert.equal(G.toMove(g), '', 'nobody personally owns this move');
+    });
+    test('the first move to reach the threshold is played by the fold', () => {
+        const g = one([roomGame(), ...moveEvents('g001', ['boulder', ''], ['e2e4']),
+            vote('kazimir', 'e7e5', 1, T0 + 70000),
+            vote('sella', 'e7e5', 1, T0 + 71000)]);
+        assert.equal(g.ply, 2, 'committed with no gm.move from anyone');
+        assert.deepEqual(JSON.parse(JSON.stringify(g.moves)), ['e2e4', 'e7e5']);
+        assert.equal(g.turn, 'w', 'back to the human');
+        assert.deepEqual(JSON.parse(JSON.stringify(g.votes)), {}, 'ballot cleared');
+    });
+    test('a split vote carries nothing until one side reaches the threshold', () => {
+        const base = [roomGame(), ...moveEvents('g001', ['boulder', ''], ['e2e4'])];
+        let g = one([...base,
+            vote('kazimir', 'e7e5', 1, T0 + 70000),
+            vote('sella', 'c7c5', 1, T0 + 71000)]);
+        assert.equal(g.ply, 1, 'one each, nothing carries');
+        g = one([...base,
+            vote('kazimir', 'e7e5', 1, T0 + 70000),
+            vote('sella', 'c7c5', 1, T0 + 71000),
+            vote('lain', 'c7c5', 1, T0 + 72000)]);
+        assert.equal(g.ply, 2);
+        assert.equal(g.moves[1], 'c7c5');
+    });
+    test('changing your mind moves your vote instead of adding one', () => {
+        const g = one([roomGame(), ...moveEvents('g001', ['boulder', ''], ['e2e4']),
+            vote('kazimir', 'e7e5', 1, T0 + 70000),
+            vote('kazimir', 'c7c5', 1, T0 + 71000)]);
+        assert.equal(g.ply, 1, 'one person cannot carry a vote alone');
+        assert.equal(g.votes.e7e5, undefined);
+        assert.equal(g.votes.c7c5, 1);
+    });
+    test('the human opponent does not get a vote in the room', () => {
+        const g = one([roomGame(), ...moveEvents('g001', ['boulder', ''], ['e2e4']),
+            vote('boulder', 'e7e5', 1, T0 + 70000),
+            vote('kazimir', 'e7e5', 1, T0 + 71000)]);
+        assert.equal(g.ply, 1, 'only kazimir counted');
+        assert.equal(g.votes.e7e5, 1);
+    });
+    test('illegal and stale ballots are dropped', () => {
+        const base = [roomGame(), ...moveEvents('g001', ['boulder', ''], ['e2e4'])];
+        assert.equal(one([...base,
+            vote('kazimir', 'e2e4', 1, T0 + 70000),
+            vote('sella', 'e2e4', 1, T0 + 71000)]).ply, 1, 'not a legal black move');
+        assert.equal(one([...base,
+            vote('kazimir', 'e7e5', 0, T0 + 70000),
+            vote('sella', 'e7e5', 0, T0 + 71000)]).ply, 1, 'ballot for a finished ply');
+    });
+    test('nobody may vote while the human is on move', () => {
+        const g = one([roomGame(),
+            vote('kazimir', 'e2e4', 0, T0 + 1000),
+            vote('sella', 'e2e4', 0, T0 + 2000)]);
+        assert.equal(g.ply, 0);
+    });
+    test('the threshold is configurable and clamped', () => {
+        const g = one([roomGame({ kv: 1 }), ...moveEvents('g001', ['boulder', ''], ['e2e4']),
+            vote('kazimir', 'e7e5', 1, T0 + 70000)]);
+        assert.equal(g.ply, 2, 'kv:1 commits on a single vote');
+        assert.equal(one([roomGame({ kv: 999 })]).voteK, 9);
+        assert.equal(one([roomGame({ kv: 0 })]).voteK, 1);
+        assert.equal(one([roomGame({ kv: 'lots' })]).voteK, 2, 'nonsense falls back');
+    });
+    test('a vote can deliver checkmate', () => {
+        // Fool's mate with the room playing black.
+        const evs = [roomGame(),
+            ...moveEvents('g001', ['boulder', ''], ['f2f3'])];
+        const g = one([...evs,
+            vote('kazimir', 'e7e5', 1, T0 + 70000), vote('sella', 'e7e5', 1, T0 + 71000),
+            ev('boulder', { k: 'gm.move', g: 'g001', n: 2, m: 'g2g4' }, T0 + 72000),
+            vote('kazimir', 'd8h4', 3, T0 + 73000), vote('sella', 'd8h4', 3, T0 + 74000)]);
+        assert.equal(g.status, 'over');
+        assert.equal(g.reason, 'checkmate');
+        assert.equal(g.result, '0-1');
+        assert.equal(g.winner, '', 'the room won, and the room is not a username');
+        assert.equal(g.winnerColor, 'b');
+    });
+    test('a room game is not rated — one side is not a person', () => {
+        const g = one([roomGame(), ev('boulder', { k: 'gm.res', g: 'g001' }, T0 + 5000)]);
+        assert.equal(g.status, 'over');
+        assert.deepEqual(JSON.parse(JSON.stringify(G.ratings(G.reduceGames([
+            roomGame(), ev('boulder', { k: 'gm.res', g: 'g001' }, T0 + 5000),
+        ])))), []);
+    });
+    test('votes never touch an ordinary two-player game', () => {
+        const g = one([opened(), joined(),
+            vote('sella', 'e2e4', 0, T0 + 5000), vote('lain', 'e2e4', 0, T0 + 6000)]);
+        assert.equal(g.ply, 0);
+        assert.equal(g.roomSeat, '');
+    });
+});
+
 describe('ratings — a ladder with no server', () => {
     // Elo is order-dependent, so the whole risk here is two clients folding
     // the same results into different numbers.

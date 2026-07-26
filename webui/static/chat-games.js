@@ -19,6 +19,11 @@
 //   gm.res   {g}             resign
 //   gm.draw  {g}             offer a draw; the opponent sending it agrees
 //   gm.claim {g}             take over a seat abandoned for ABANDON_MS
+//   gm.vote  {g, n, m}       ROOM-VS-PLAYER only: vote for the room's move at
+//                            ply n. gm.new {r: 1} makes the seat opposite the
+//                            creator belong to the whole room instead of one
+//                            person, and kv sets how many distinct voters it
+//                            takes to commit (default 2)
 //
 // ── Why each field is there ─────────────────────────────────────────────
 //
@@ -52,6 +57,7 @@
     var MAX_GAMES = 40;          // most recently active kept; bounds memory
     var MAX_MOVES = 600;         // no real game is longer; stops a flood
     var ABANDON_MS = 24 * 60 * 60 * 1000;
+    var VOTE_DEFAULT = 2, VOTE_MAX = 9;
 
     function _ts(ev) {
         var t = ev && ev.timestamp;
@@ -104,7 +110,116 @@
         },
     };
 
-    var VARIANTS = { chess: CHESS };
+    // ── Connect 4 ───────────────────────────────────────────────────────
+    //
+    // The point of the adapter seam: a whole second game with no change to
+    // the lifecycle above. Seats, joining, resigning, draw offers, seat
+    // claims, the ladder and the reveal all work already.
+    //
+    // Position string: 42 cells then a space then the side to move. Index is
+    // row * 7 + col with row 0 at the BOTTOM, so a drop is "the lowest empty
+    // cell in this column". A move is a single digit, the column.
+    //
+    // The adopt() validation is doing the same job as the chess engine's
+    // forged-en-passant check. A hand-written position could float a disc in
+    // mid-air or give one player three extra moves, and every client would
+    // accept it identically, so there would be no desync to notice. Because
+    // discs are never removed, the whole position is determined by the move
+    // counts — which makes it cheap to verify and impossible to fake.
+    var C4_COLS = 7, C4_ROWS = 6, C4_CELLS = 42, C4_WIN = 4;
+
+    function _c4At(cells, col, row) {
+        if (col < 0 || col >= C4_COLS || row < 0 || row >= C4_ROWS) return null;
+        return cells[row * C4_COLS + col] || '';
+    }
+
+    function _c4Winner(cells) {
+        var dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
+        for (var col = 0; col < C4_COLS; col++) {
+            for (var row = 0; row < C4_ROWS; row++) {
+                var who = _c4At(cells, col, row);
+                if (!who) continue;
+                for (var d = 0; d < dirs.length; d++) {
+                    var n = 1;
+                    while (n < C4_WIN &&
+                           _c4At(cells, col + dirs[d][0] * n, row + dirs[d][1] * n) === who) n++;
+                    if (n === C4_WIN) return who;
+                }
+            }
+        }
+        return '';
+    }
+
+    var C4 = {
+        start: function () {
+            var cells = [];
+            for (var i = 0; i < C4_CELLS; i++) cells.push('');
+            return { cells: cells, turn: 'w' };
+        },
+        fen: function (st) {
+            return st.cells.map(function (c) { return c || '.'; }).join('') + ' ' + st.turn;
+        },
+        turn: function (st) { return st.turn; },
+        adopt: function (fen) {
+            var parts = String(fen || '').split(' ');
+            if (parts.length !== 2) return null;
+            var body = parts[0], turn = parts[1];
+            if (body.length !== C4_CELLS) return null;
+            if (turn !== 'w' && turn !== 'b') return null;
+            if (!/^[.wb]+$/.test(body)) return null;
+
+            var cells = body.split('').map(function (c) { return c === '.' ? '' : c; });
+            var nw = 0, nb = 0;
+            for (var i = 0; i < C4_CELLS; i++) {
+                if (cells[i] === 'w') nw++;
+                else if (cells[i] === 'b') nb++;
+            }
+            // White moves first, so the counts are either level or one ahead,
+            // and they fix whose turn it is exactly.
+            if (nw !== nb && nw !== nb + 1) return null;
+            if ((nw === nb ? 'w' : 'b') !== turn) return null;
+            // No floating discs: above the first gap in a column, all empty.
+            for (var col = 0; col < C4_COLS; col++) {
+                var seenGap = false;
+                for (var row = 0; row < C4_ROWS; row++) {
+                    var filled = !!_c4At(cells, col, row);
+                    if (!filled) seenGap = true;
+                    else if (seenGap) return null;
+                }
+            }
+            return { cells: cells, turn: turn };
+        },
+        apply: function (st, uci) {
+            var col = -1;
+            if (typeof uci === 'string' && /^[0-6]$/.test(uci)) col = parseInt(uci, 10);
+            if (col < 0) return null;
+            var row = -1;
+            for (var r = 0; r < C4_ROWS; r++) {
+                if (!_c4At(st.cells, col, r)) { row = r; break; }
+            }
+            if (row < 0) return null;                      // column is full
+
+            var cells = st.cells.slice();
+            cells[row * C4_COLS + col] = st.turn;
+            var next = { cells: cells, turn: st.turn === 'w' ? 'b' : 'w' };
+
+            var win = _c4Winner(cells);
+            if (win) {
+                return {
+                    state: next, over: true, winnerColor: win,
+                    result: win === 'w' ? '1-0' : '0-1', reason: 'four in a row',
+                };
+            }
+            var full = cells.every(function (c) { return !!c; });
+            if (full) {
+                return { state: next, over: true, winnerColor: '',
+                         result: '1/2-1/2', reason: 'board full' };
+            }
+            return { state: next, over: false, winnerColor: '', result: null, reason: '' };
+        },
+    };
+
+    var VARIANTS = { chess: CHESS, connect4: C4 };
 
     // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -161,6 +276,14 @@
                 // also what "creator goes first" means.
                 var creatorColor = p.c === 'b' ? 'b' : 'w';
                 var invited = typeof p.o === 'string' ? p.o.slice(0, 64) : '';
+                // Room-vs-player: the seat opposite the creator belongs to
+                // nobody, so it is never filled with a username and gm.join
+                // has nothing to take. The room moves by vote instead.
+                var roomSeat = p.r ? (creatorColor === 'w' ? 'b' : 'w') : '';
+                var voteK = VOTE_DEFAULT;
+                if (typeof p.kv === 'number' && isFinite(p.kv)) {
+                    voteK = Math.max(1, Math.min(VOTE_MAX, Math.floor(p.kv)));
+                }
 
                 states[gid] = st;
                 games[gid] = {
@@ -173,12 +296,16 @@
                     lastAt: at,
                     invited: invited,
                     isPrivate: !!invited,
+                    roomSeat: roomSeat,
+                    voteK: voteK,
+                    votes: {},           // uci -> distinct voters, current ply
+                    voteBy: {},          // username -> uci, current ply
                     fen: adapter.fen(st),
                     startFen: adapter.fen(st),
                     turn: adapter.turn(st),
                     ply: 0,
                     moves: [],
-                    status: 'open',
+                    status: roomSeat ? 'live' : 'open',
                     result: null,
                     reason: '',
                     winner: '',
@@ -214,6 +341,7 @@
                     white: '', black: '',
                     createdBy: '', createdAt: at, lastAt: at,
                     invited: '', isPrivate: false,
+                    roomSeat: '', voteK: VOTE_DEFAULT, votes: {}, voteBy: {},
                     fen: ad2.fen(adopted),
                     // `moves` below is empty and only collects what arrives
                     // AFTER adoption, so replaying it has to start here --
@@ -243,6 +371,7 @@
             if (!adapter2) return;
 
             if (k === 'gm.join') {
+                if (game.roomSeat) return;        // that seat belongs to everyone
                 if (game.status !== 'open') return;
                 if (game.white === user || game.black === user) return;   // no self-play
                 if (game.isPrivate && game.invited !== user) return;
@@ -298,8 +427,48 @@
                 game.turn = adapter2.turn(applied.state);
                 game.lastAt = at;
                 game.drawOffer = '';                          // any move withdraws it
+                game.votes = {};                              // ballots are per-ply
+                game.voteBy = {};
                 if (applied.over) {
                     _finish(game, applied.result, applied.reason, applied.winnerColor);
+                }
+                return;
+            }
+
+            if (k === 'gm.vote') {
+                // The room's move is decided by the fold, not by any one
+                // client emitting gm.move: the seat has no owner, so there is
+                // nobody whose move it would be. The first move to reach
+                // voteK DISTINCT current voters is applied right here, which
+                // every client computes identically from the same stream.
+                if (game.status !== 'live' || !game.roomSeat) return;
+                if (adapter2.turn(states[gid]) !== game.roomSeat) return;
+                if (p.n !== game.ply) return;                  // a stale ballot
+                if (_seatOf(game, user)) return;               // the opponent does not vote
+                var vuci = String(p.m || '');
+                var vpre = adapter2.apply(states[gid], vuci);
+                if (!vpre) return;                             // not a legal move
+
+                game.voteBy[user] = vuci;                      // latest vote wins
+                var tally = {};
+                Object.keys(game.voteBy).forEach(function (u) {
+                    tally[game.voteBy[u]] = (tally[game.voteBy[u]] || 0) + 1;
+                });
+                game.votes = tally;
+                game.lastAt = at;
+                if (tally[vuci] < game.voteK) return;          // not carried yet
+
+                // Carried: commit it exactly as a played move would be.
+                states[gid] = vpre.state;
+                game.moves.push(vuci);
+                game.ply++;
+                game.fen = adapter2.fen(vpre.state);
+                game.turn = adapter2.turn(vpre.state);
+                game.drawOffer = '';
+                game.votes = {};
+                game.voteBy = {};
+                if (vpre.over) {
+                    _finish(game, vpre.result, vpre.reason, vpre.winnerColor);
                 }
                 return;
             }
@@ -328,6 +497,7 @@
 
             if (k === 'gm.claim') {
                 if (game.status !== 'live') return;
+                if (game.roomSeat) return;        // the room never goes idle
                 if (_seatOf(game, user)) return;               // already playing
                 // Both timestamps come from the stream, so this is the same
                 // arithmetic on every client regardless of local clocks.
@@ -369,8 +539,15 @@
 
     // Whose move is it, as a username? '' when the game is not live or the
     // seat is empty. This is what drives the "your move" badge.
+    // Is the room itself on move? Then no single username is "to move".
+    function isRoomTurn(game) {
+        return !!(game && game.status === 'live' && game.roomSeat &&
+                  game.turn === game.roomSeat);
+    }
+
     function toMove(game) {
         if (!game || game.status !== 'live') return '';
+        if (isRoomTurn(game)) return '';        // the room, not a person
         // Read the turn the variant recorded, never ply parity. A game
         // adopted mid-stream takes its ply from the wire, so a wrong or
         // hostile `n` would otherwise badge the player who just moved --
@@ -451,8 +628,26 @@
         });
     }
 
+    // What would this move produce? Returns { fen, over } for a legal move
+    // and null for anything else, so a caller can build the checkpoint that
+    // rides with gm.move without knowing which game it is looking at -- and
+    // so an illegal move is caught before it reaches the room rather than
+    // being sent and silently dropped by everyone.
+    function previewMove(game, uci) {
+        if (!game) return null;
+        var adapter = VARIANTS[game.variant];
+        if (!adapter) return null;
+        var st = adapter.adopt(game.fen);
+        if (!st) return null;
+        var applied = adapter.apply(st, uci);
+        if (!applied) return null;
+        return { fen: adapter.fen(applied.state), over: !!applied.over };
+    }
+
     window.ChatGames = {
         reduceGames: reduceGames,
+        previewMove: previewMove,
+        isRoomTurn: isRoomTurn,
         ratings: ratings,
         toMove: toMove,
         ELO_START: ELO_START,
@@ -460,5 +655,8 @@
         MAX_GAMES: MAX_GAMES,
         MAX_MOVES: MAX_MOVES,
         GID_RE: GID_RE,
+        VARIANTS: Object.keys(VARIANTS),
+        C4_COLS: C4_COLS,
+        C4_ROWS: C4_ROWS,
     };
 })();

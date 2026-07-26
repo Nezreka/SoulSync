@@ -1201,6 +1201,19 @@
                   window.ChatGames.toMove(game) === state.selfName);
     }
 
+    // The room's move is everyone's to influence except the opponent's — they
+    // are playing against the room, so they do not get a ballot in it.
+    function _arcCanVote(game) {
+        return !!(game && state.canSend && window.ChatGames.isRoomTurn(game) &&
+                  !_arcSeat(game));
+    }
+
+    // Can this client put a piece on this board right now, either as a move
+    // or as a vote? Everything interactive keys off this.
+    function _arcActive(game) {
+        return _arcMyMove(game) || _arcCanVote(game);
+    }
+
     // Games worth showing in the sidebar: mine first, then anything live or
     // waiting for an opponent. Finished games stay in the lobby only.
     function _arcSidebarGames() {
@@ -1258,14 +1271,28 @@
         };
     }
 
-    function arcNewGame(color, opponent) {
+    function arcNewGame(color, opponent, variant, vsRoom) {
         var gid = _newGid();
-        var f = { g: gid, v: 'chess', c: color === 'b' ? 'b' : 'w' };
+        var f = { g: gid, v: variant === 'connect4' ? 'connect4' : 'chess',
+                  c: color === 'b' ? 'b' : 'w' };
+        if (vsRoom) f.r = 1;
         if (opponent) f.o = String(opponent).slice(0, 64);
         sendProtocol('gm.new', f).then(_arcAfterSend(gid));
     }
 
     function arcJoin(gid) { sendProtocol('gm.join', { g: gid }).then(_arcAfterSend(gid)); }
+
+    // Vote for the room's move. Nobody owns that seat, so this is not a move
+    // — the fold commits it once enough distinct people have picked the same
+    // one, which every client works out from the same stream.
+    function arcVote(gid, uci) {
+        var g = _arcGame(gid);
+        if (!g || !window.ChatGames.previewMove(g, uci)) return;
+        state.arcade.sel = -1;
+        state.arcade.promo = null;
+        sendProtocol('gm.vote', { g: gid, n: g.ply, m: uci }).then(_arcAfterSend(gid));
+        renderArcade();
+    }
 
     function arcResign(gid) {
         showConfirmDialog({
@@ -1284,18 +1311,27 @@
     // Send a move with the ply it occupies and the position it produces.
     // Both are what let a client that missed the opening still follow along,
     // and what lets a client that has the history catch a disagreement.
+    var _arcLastMoveAt = 0;
+
     function arcMove(gid, uci) {
         var g = _arcGame(gid);
         if (!g) return;
-        var E = window.ChessEngine;
-        var pos = E.fromFEN(g.fen);
-        var move = pos && E.uciToMove(pos, uci);
-        if (!move) return;                       // never put an illegal move on the bus
-        var after = E.makeMove(pos, move);
+        // Every move is a real message in the room, and vanilla Soulseek
+        // clients see each one as a line of noise. Chess is slow enough not
+        // to care; Connect 4 is a game of fast taps, so a short floor keeps
+        // a quick pair (or a double-click) from bursting the room.
+        var nowMs = Date.now();
+        if (nowMs - _arcLastMoveAt < 600) return;
+        _arcLastMoveAt = nowMs;
+        // The fold owns "what does this move produce" so this works for any
+        // variant, and so an illegal move is caught here rather than being
+        // sent and silently dropped by every client that receives it.
+        var next = window.ChatGames.previewMove(g, uci);
+        if (!next) return;                       // never put an illegal move on the bus
         state.arcade.sel = -1;
         state.arcade.promo = null;
         sendProtocol('gm.move', {
-            g: gid, v: g.variant, n: g.ply, m: uci, f: E.toFEN(after),
+            g: gid, v: g.variant, n: g.ply, m: uci, f: next.fen,
         }).then(_arcAfterSend(gid));
         renderArcade();                          // clear the selection immediately
     }
@@ -1310,10 +1346,10 @@
         host.innerHTML = g ? _arcBoardHtml(g) : _arcLobbyHtml();
     }
 
-    function _arcWho(name, colorGlyph, isTurn) {
+    function _arcWho(name, colorGlyph, isTurn, roomSeat) {
         return '<span class="chat-arc-who' + (isTurn ? ' chat-arc-who--turn' : '') + '">' +
             '<span class="chat-arc-who-dot">' + colorGlyph + '</span>' +
-            esc(name || 'open seat') + '</span>';
+            (roomSeat ? '🗳 the room' : esc(name || 'open seat')) + '</span>';
     }
 
     function _arcLobbyHtml() {
@@ -1390,9 +1426,16 @@
                 (state.canSend
                     ? '<div class="chat-arc-hero-actions">' +
                         '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
-                            'data-chat-arc-new="w">New game as ♔ white</button>' +
+                            'data-chat-arc-new="w">♔ Chess as white</button>' +
                         '<button class="chat-arc-btn" type="button" ' +
-                            'data-chat-arc-new="b">as ♚ black</button>' +
+                            'data-chat-arc-new="b">♚ as black</button>' +
+                        '<button class="chat-arc-btn" type="button" ' +
+                            'data-chat-arc-new="w" data-chat-arc-variant="connect4">' +
+                            '🔴 Connect 4</button>' +
+                        '<button class="chat-arc-btn" type="button" ' +
+                            'data-chat-arc-new="w" data-chat-arc-room="1" ' +
+                            'title="You against everyone else — the room votes on its ' +
+                            'moves">🗳 You vs the room</button>' +
                       '</div>'
                     : '<div class="chat-arc-hero-sub">Sending is admin-only on this ' +
                       'server, so you can watch but not play.</div>') +
@@ -1432,6 +1475,7 @@
         'are not rated: their seats were deduced, not observed.';
 
     function _arcBoardHtml(game) {
+        if (game.variant === 'connect4') return _arcC4BoardHtml(game);
         var E = window.ChessEngine;
         var CG = window.ChatGames;
         // game.fen is our OWN fold's output, not wire data — it has already
@@ -1441,13 +1485,17 @@
 
         var arc = state.arcade;
         var mySeat = _arcSeat(game);
+        var voting = _arcCanVote(game);
         var myMove = _arcMyMove(game);
+        var active = _arcActive(game);
+        // When voting, the side you are picking for is the room's, not yours.
+        var actSide = voting ? game.roomSeat : mySeat;
         var sel = arc.sel;
 
         // Legal destinations from the selected square, so the board can show
         // dots instead of making people guess.
         var dests = {};
-        if (sel >= 0 && myMove) {
+        if (sel >= 0 && active) {
             E.legalMoves(pos).forEach(function (m) {
                 if (m.from === sel) dests[m.to] = 1;
             });
@@ -1479,8 +1527,8 @@
                 if (dests[sq]) cls += piece ? ' chat-arc-sq--take' : ' chat-arc-sq--dest';
                 if (lastMove && (sq === lastMove.from || sq === lastMove.to)) cls += ' chat-arc-sq--last';
                 if (sq === checkSq) cls += ' chat-arc-sq--check';
-                var mineToDrag = piece && myMove &&
-                    E.colorOf(piece) === mySeat && game.status === 'live';
+                var mineToDrag = piece && active &&
+                    E.colorOf(piece) === actSide && game.status === 'live';
                 cells.push('<div class="' + cls + '" data-chat-arc-sq="' + sq + '"' +
                     (mineToDrag ? ' draggable="true"' : '') +
                     ' title="' + attr(E.toAlg(sq)) + '">' +
@@ -1533,6 +1581,10 @@
             statusLine = 'Waiting for an opponent to join.';
         } else if (myMove) {
             statusLine = 'Your move.' + (E.inCheck(pos, pos.turn) ? ' You are in check.' : '');
+        } else if (CG.isRoomTurn(game)) {
+            statusLine = 'The room is choosing' +
+                (voting ? ' — pick a move to vote for it.'
+                        : '. You are playing against them, so no ballot for you.');
         } else {
             statusLine = 'Waiting on ' + esc(toMove) + '.' +
                 (E.inCheck(pos, pos.turn) ? ' They are in check.' : '');
@@ -1577,17 +1629,19 @@
         return '<div class="chat-arc-board-wrap">' +
             '<div class="chat-arc-players">' +
                 _arcWho(arc.flip ? game.white : game.black, arc.flip ? '♔' : '♚',
-                        toMove === (arc.flip ? game.white : game.black)) +
+                        toMove === (arc.flip ? game.white : game.black),
+                        game.roomSeat === (arc.flip ? 'w' : 'b')) +
             '</div>' +
             '<div class="chat-arc-board' + (game.status === 'over' ? ' chat-arc-board--over' : '') +
                 '" data-chat-arc-board="' + attr(game.id) + '">' + cells.join('') + '</div>' +
             '<div class="chat-arc-players">' +
                 _arcWho(arc.flip ? game.black : game.white, arc.flip ? '♚' : '♔',
-                        toMove === (arc.flip ? game.black : game.white)) +
+                        toMove === (arc.flip ? game.black : game.white),
+                        game.roomSeat === (arc.flip ? 'b' : 'w')) +
                 '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
                     'data-chat-arc-flip title="Flip the board">⇅</button>' +
             '</div>' +
-            promo + offer + partial +
+            promo + offer + partial + _arcBallotHtml(game) +
             '<div class="chat-arc-status">' + statusLine + '</div>' +
             (actions ? '<div class="chat-arc-actions">' + actions + '</div>' : '') +
             '<div class="chat-arc-moves">' + sanRows + '</div>' +
@@ -1628,6 +1682,96 @@
         '</div>';
     }
 
+    // Connect 4 board. Same shell as chess — players line, board, status,
+    // actions, exports, reveal — so everything around it is shared. The board
+    // itself is a 7x6 grid where the whole COLUMN is the click target: you
+    // drop into a column, you do not place into a cell, and making people aim
+    // at the right cell would be pretending otherwise.
+    function _arcC4BoardHtml(game) {
+        var CG = window.ChatGames;
+        var cols = CG.C4_COLS, rows = CG.C4_ROWS;
+        var body = String(game.fen || '').split(' ')[0] || '';
+        var mySeat = _arcSeat(game);
+        var myMove = _arcMyMove(game);
+        var arc = state.arcade;
+
+        var cells = [];
+        // Render top row first so the grid reads the way the board looks.
+        for (var r = rows - 1; r >= 0; r--) {
+            for (var c = 0; c < cols; c++) {
+                var who = body[r * cols + c] || '.';
+                var full = (body[(rows - 1) * cols + c] || '.') !== '.';
+                var playable = myMove && !full && game.status === 'live' && state.canSend;
+                cells.push('<div class="chat-arc-c4cell' +
+                    (playable ? ' chat-arc-c4cell--live' : '') + '"' +
+                    (playable ? ' data-chat-arc-col="' + c + '"' : '') + '>' +
+                    '<span class="chat-arc-disc' +
+                        (who === 'w' ? ' chat-arc-disc--w' : (who === 'b' ? ' chat-arc-disc--b' : '')) +
+                    '"></span></div>');
+            }
+        }
+
+        var toMove = CG.toMove(game);
+        var statusLine;
+        if (game.status === 'over') {
+            statusLine = game.winner
+                ? esc(game.winner) + ' wins — ' + esc(game.reason)
+                : 'Draw — ' + esc(game.reason);
+        } else if (game.desync) {
+            statusLine = 'Frozen: a move arrived with a position that disagreed with ' +
+                'this one, and neither can be proven right.';
+        } else if (game.status === 'open') {
+            statusLine = 'Waiting for an opponent to join.';
+        } else if (myMove) {
+            statusLine = 'Your move — pick a column.';
+        } else {
+            statusLine = 'Waiting on ' + esc(toMove) + '.';
+        }
+
+        var actions = '';
+        if (state.canSend && mySeat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'open' &&
+            (!game.isPrivate || game.invited === state.selfName)) {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
+        }
+        var partial = game.partial
+            ? '<div class="chat-arc-note">Picked up mid-game — the room archive had ' +
+              'already rolled past the start.</div>' : '';
+
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.black, '🔵', toMove === game.black) +
+            '</div>' +
+            '<div class="chat-arc-c4board' +
+                (game.status === 'over' ? ' chat-arc-board--over' : '') + '">' +
+                cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.white, '🔴', toMove === game.white) +
+            '</div>' +
+            partial +
+            '<div class="chat-arc-status">' + statusLine + '</div>' +
+            (actions ? '<div class="chat-arc-actions">' + actions + '</div>' : '') +
+            _arcRevealHtml(game) +
+        '</div>';
+    }
+
+    function _arcColumnClick(col) {
+        var arc = state.arcade;
+        var game = arc && arc.game ? _arcGame(arc.game) : null;
+        if (!game || game.status !== 'live' || game.variant !== 'connect4') return;
+        if (!_arcMyMove(game) || !state.canSend) return;
+        if (!/^[0-6]$/.test(String(col))) return;
+        arcMove(game.id, String(col));
+    }
+
     // ── Board interaction ───────────────────────────────────────────────
     // Click-to-select then click-to-move, with drag as an alternative. Click
     // first because it is the only one that works on a phone.
@@ -1649,8 +1793,42 @@
         }
         var uci = E.toAlg(from) + E.toAlg(to);
         if (!E.uciToMove(pos, uci)) return false;
-        arcMove(game.id, uci);
+        if (_arcCanVote(game)) arcVote(game.id, uci);
+        else arcMove(game.id, uci);
         return true;
+    }
+
+    // The room's ballot for the current ply: what has been picked so far and
+    // how close each option is to carrying.
+    function _arcBallotHtml(game) {
+        var CG = window.ChatGames;
+        if (!CG.isRoomTurn(game)) return '';
+        var E = window.ChessEngine;
+        var pos = E.fromFEN(game.fen);
+        var names = Object.keys(game.votes || {});
+        if (!names.length) {
+            return '<div class="chat-arc-note">No votes yet. ' + game.voteK +
+                ' people picking the same move commits it.</div>';
+        }
+        names.sort(function (a, b) {
+            if (game.votes[b] !== game.votes[a]) return game.votes[b] - game.votes[a];
+            return a < b ? -1 : 1;
+        });
+        return '<div class="chat-arc-ballot">' +
+            '<div class="chat-arc-ballot-head">Room ballot · ' + game.voteK +
+                ' to carry</div>' +
+            names.map(function (uci) {
+                var mv = pos && E.uciToMove(pos, uci);
+                var label = mv ? E.toSAN(pos, mv) : uci;
+                var n = game.votes[uci];
+                return '<div class="chat-arc-ballotrow">' +
+                    '<span class="chat-arc-ballotmv">' + esc(label) + '</span>' +
+                    '<span class="chat-arc-ballotbar"><i style="width:' +
+                        Math.min(100, Math.round(n / game.voteK * 100)) + '%"></i></span>' +
+                    '<span class="chat-arc-ballotn">' + n + '/' + game.voteK + '</span>' +
+                '</div>';
+            }).join('') +
+        '</div>';
     }
 
     function _arcSquareClick(sq) {
@@ -1660,13 +1838,14 @@
         var E = window.ChessEngine;
         var pos = E.fromFEN(game.fen);
         if (!pos) return;
-        var mySeat = _arcSeat(game);
-        if (!_arcMyMove(game) || !state.canSend) return;   // spectators just look
+        var voting = _arcCanVote(game);
+        var actSide = voting ? game.roomSeat : _arcSeat(game);
+        if (!_arcActive(game) || !state.canSend) return;   // spectators just look
 
         var piece = pos.board[sq];
         if (arc.sel >= 0 && _arcTryMove(game, arc.sel, sq)) return;
         // Selecting one of your own pieces (or re-selecting) never fails.
-        if (piece && E.colorOf(piece) === mySeat) {
+        if (piece && E.colorOf(piece) === actSide) {
             arc.sel = (arc.sel === sq) ? -1 : sq;
         } else {
             arc.sel = -1;
@@ -1701,7 +1880,7 @@
             var to = parseInt(sq.getAttribute('data-chat-arc-sq'), 10);
             var game = state.arcade.game ? _arcGame(state.arcade.game) : null;
             if (game && game.status === 'live' && from >= 0 && to >= 0 &&
-                state.canSend && _arcMyMove(game)) {
+                state.canSend && _arcActive(game)) {
                 _arcTryMove(game, from, to);
             }
             from = -1;
@@ -3368,7 +3547,14 @@
             t = e.target.closest('[data-chat-arc-open]');
             if (t) { openArcade(t.getAttribute('data-chat-arc-open')); return; }
             t = e.target.closest('[data-chat-arc-new]');
-            if (t) { arcNewGame(t.getAttribute('data-chat-arc-new')); return; }
+            if (t) {
+                arcNewGame(t.getAttribute('data-chat-arc-new'), '',
+                           t.getAttribute('data-chat-arc-variant'),
+                           t.getAttribute('data-chat-arc-room'));
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-col]');
+            if (t) { _arcColumnClick(t.getAttribute('data-chat-arc-col')); return; }
             t = e.target.closest('[data-chat-arc-join]');
             if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
             t = e.target.closest('[data-chat-arc-claim]');
@@ -3400,8 +3586,10 @@
                 state.arcade.promo = null;
                 state.arcade.sel = -1;
                 if (pick && pg && pgame) {
-                    arcMove(pgame.id, window.ChessEngine.toAlg(pg.from) +
-                                      window.ChessEngine.toAlg(pg.to) + pick);
+                    var puci = window.ChessEngine.toAlg(pg.from) +
+                               window.ChessEngine.toAlg(pg.to) + pick;
+                    if (_arcCanVote(pgame)) arcVote(pgame.id, puci);
+                    else arcMove(pgame.id, puci);
                 } else {
                     renderArcade();
                 }

@@ -72443,6 +72443,45 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-moverow--none { color: rgba(255,255,255,0.4); grid-template-columns: 1fr; }
 .chat-arc-moveno { color: rgba(255,255,255,0.35); }
 
+/* ── room ballot (arcade P5) ── */
+.chat-arc-ballot {
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 9px 11px;
+    display: flex; flex-direction: column; gap: 5px;
+}
+.chat-arc-ballot-head {
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px;
+    color: rgba(255,255,255,0.45);
+}
+.chat-arc-ballotrow {
+    display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; align-items: center;
+    font-size: 13px; color: rgba(255,255,255,0.8);
+}
+.chat-arc-ballotmv { font-weight: 700; }
+.chat-arc-ballotbar {
+    height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden;
+}
+.chat-arc-ballotbar i { display: block; height: 100%; background: #1db954; }
+.chat-arc-ballotn {
+    font-size: 11px; color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums;
+}
+
+/* ── connect 4 (arcade P5) ── */
+.chat-arc-c4board {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+    aspect-ratio: 7 / 6; width: 100%; padding: 8px;
+    background: #2b4f8a; border-radius: 12px;
+}
+.chat-arc-c4cell {
+    display: flex; align-items: center; justify-content: center; border-radius: 50%;
+    background: rgba(0,0,0,0.28);
+}
+/* the whole COLUMN is the target — you drop into a column, not onto a cell */
+.chat-arc-c4cell--live { cursor: pointer; }
+.chat-arc-c4cell--live:hover { background: rgba(255,255,255,0.14); }
+.chat-arc-disc { width: 82%; height: 82%; border-radius: 50%; }
+.chat-arc-disc--w { background: radial-gradient(circle at 35% 30%, #ff8a80, #d63a2f); }
+.chat-arc-disc--b { background: radial-gradient(circle at 35% 30%, #82b1ff, #2962c4); }
+
 /* ── ladder + the reveal (arcade P4) ── */
 .chat-arc-ladder {
     background: rgba(255,255,255,0.03); border-radius: 10px; padding: 8px 10px;

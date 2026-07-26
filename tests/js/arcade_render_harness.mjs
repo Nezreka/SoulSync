@@ -316,6 +316,101 @@ const NASTY = '<img src=x onerror=alert(1)>';
           CP._arcBoardHtml(game(noisy, 'oooo')));
 }
 
+// ── connect 4 shares the whole shell ────────────────────────────────────
+{
+    const evs = [
+        ev('boulder', { k: 'gm.new', g: 'qqqq', v: 'connect4' }),
+        ev('kazimir', { k: 'gm.join', g: 'qqqq' }, T0 + 1000),
+    ];
+    setRoom(evs, 'boulder');
+    CP._testSetState({ arcade: { game: 'qqqq', sel: -1, promo: null, flip: false } });
+    const g = game(evs, 'qqqq');
+    const board = CP._arcBoardHtml(g);
+
+    // Count the class attribute, not the class name: a playable cell also
+    // carries chat-arc-c4cell--live and would be counted twice.
+    check('c4: 42 cells', (board.match(/class="chat-arc-c4cell/g) || []).length === 42,
+          (board.match(/class="chat-arc-c4cell/g) || []).length);
+    check('c4: no chessboard', !board.includes('chat-arc-sq'), board.slice(0, 200));
+    check('c4: your move names the action', board.includes('pick a column'), board);
+    // Only 7 columns are clickable, not 42 cells: you drop into a column.
+    const targets = new Set([...board.matchAll(/data-chat-arc-col="(\d)"/g)].map(m => m[1]));
+    check('c4: every column is a target', targets.size === 7, [...targets].join(','));
+    check('c4: the reveal works here too', board.includes('folded from'), board);
+    check('c4: resign offered', board.includes('data-chat-arc-resign'), board);
+
+    // The opponent gets no clickable columns at all.
+    setRoom(evs, 'kazimir');
+    CP._testSetState({ arcade: { game: 'qqqq', sel: -1, promo: null, flip: false } });
+    const other = CP._arcBoardHtml(g);
+    check('c4: not your move means nothing is clickable',
+          !other.includes('data-chat-arc-col'), other);
+    check('c4: told who we are waiting on', other.includes('Waiting on boulder'), other);
+}
+
+// ── a move is validated before it can reach the room ────────────────────
+{
+    // previewMove is what builds the checkpoint, and it is variant-agnostic:
+    // if it cannot produce a position the move is never sent.
+    const CGx = globalThis.window.ChatGames;
+    const chess = { variant: 'chess', fen: E.START_FEN };
+    check('preview: legal chess move produces a position',
+          !!CGx.previewMove(chess, 'e2e4'), '');
+    check('preview: illegal chess move produces nothing',
+          CGx.previewMove(chess, 'e2e5') === null, '');
+    const c4 = { variant: 'connect4', fen: '.'.repeat(42) + ' w' };
+    check('preview: legal drop produces a position', !!CGx.previewMove(c4, '3'), '');
+    check('preview: column off the board produces nothing',
+          CGx.previewMove(c4, '9') === null, '');
+    check('preview: a chess move in connect 4 produces nothing',
+          CGx.previewMove(c4, 'e2e4') === null, '');
+    check('preview: an unknown variant produces nothing',
+          CGx.previewMove({ variant: 'calvinball', fen: 'x' }, '1') === null, '');
+}
+
+// ── you vs the room ─────────────────────────────────────────────────────
+{
+    const roomGame = ev('boulder', { k: 'gm.new', g: 'rrrr', v: 'chess', r: 1 });
+    let pos = E.newGame();
+    pos = E.makeMove(pos, E.uciToMove(pos, 'e2e4'));
+    const evs = [roomGame,
+        ev('boulder', { k: 'gm.move', g: 'rrrr', n: 0, m: 'e2e4', f: E.toFEN(pos) }, T0 + 1000)];
+
+    // A room voter sees a ballot and can pick a move.
+    setRoom(evs, 'kazimir');
+    CP._testSetState({ arcade: { game: 'rrrr', sel: -1, promo: null, flip: false } });
+    let board = CP._arcBoardHtml(game(evs, 'rrrr'));
+    check('room: the seat reads as the room, not a username',
+          board.includes('the room'), board);
+    check('room: a voter is invited to pick', board.includes('pick a move to vote'), board);
+    check('room: says what it takes to carry', board.includes('commits it'), board);
+
+    // The human opponent gets no ballot — they are playing against the room.
+    setRoom(evs, 'boulder');
+    CP._testSetState({ arcade: { game: 'rrrr', sel: -1, promo: null, flip: false } });
+    board = CP._arcBoardHtml(game(evs, 'rrrr'));
+    check('room: the opponent is told they have no ballot',
+          board.includes('no ballot for you'), board);
+    check('room: the opponent cannot drag the room\'s pieces',
+          !board.includes('draggable="true"'), board);
+
+    // With votes in, the tally is shown in real notation.
+    const voted = evs.concat([
+        ev('kazimir', { k: 'gm.vote', g: 'rrrr', n: 1, m: 'e7e5' }, T0 + 2000),
+    ]);
+    setRoom(voted, 'sella');
+    CP._testSetState({ arcade: { game: 'rrrr', sel: -1, promo: null, flip: false } });
+    board = CP._arcBoardHtml(game(voted, 'rrrr'));
+    check('room: ballot shows the move in algebraic', board.includes('>e5<'), board);
+    check('room: ballot shows progress to the threshold', board.includes('1/2'), board);
+
+    // A room game never reaches the ladder — one side is not a person.
+    const done = voted.concat([ev('boulder', { k: 'gm.res', g: 'rrrr' }, T0 + 9000)]);
+    setRoom(done, 'boulder');
+    check('room: not rated', !CP._arcLobbyHtml().includes('Room ladder'),
+          CP._arcLobbyHtml());
+}
+
 // ── the Arcade hides itself if its libraries are absent ─────────────────
 {
     // chat.js must not throw when chess-engine.js / chat-games.js failed to
