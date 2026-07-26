@@ -117,6 +117,54 @@ function stubFetch(options: StubOptions = {}) {
       if (url.includes('/api/labels/watchlist')) {
         return createResponse({ labels });
       }
+      if (url.includes('/link-provider')) {
+        return createResponse({ success: true });
+      }
+      if (url.includes('/config')) {
+        return createResponse({
+          success: true,
+          config: {
+            include_albums: true,
+            include_eps: false,
+            include_singles: true,
+            include_live: false,
+            include_remixes: false,
+            include_acoustic: false,
+            include_compilations: false,
+            include_instrumentals: false,
+            lookback_days: 90,
+            preferred_metadata_source: null,
+            auto_download: true,
+            quality_profile_id: null,
+          },
+          artist: {
+            id: 'sp-aphex',
+            name: 'Aphex Twin',
+            image_url: null,
+            followers: 1234567,
+            popularity: 71,
+            genres: ['idm', 'ambient', 'braindance', 'electronic'],
+          },
+          spotify_artist_id: 'sp-aphex',
+          itunes_artist_id: null,
+          deezer_artist_id: 'dz-aphex',
+          discogs_artist_id: null,
+          amazon_artist_id: null,
+          musicbrainz_artist_id: null,
+          watchlist_name: 'Aphex Twin',
+          global_metadata_source: 'deezer',
+          quality_profiles: [
+            { id: 1, name: 'Lossless', is_default: true },
+            { id: 2, name: 'MP3 320' },
+          ],
+        });
+      }
+      if (url.includes('/api/library/search-service')) {
+        return createResponse({
+          success: true,
+          results: [{ id: 'dz-999', name: 'Aphex Twin', extra: '2.1M fans', image: null }],
+        });
+      }
 
       throw new Error(`unexpected fetch: ${url}`);
     }),
@@ -524,6 +572,160 @@ describe('watchlist route', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Global Override ON/ })).toBeInTheDocument();
+    });
+  });
+
+  it('opens artist config from the URL with the stored values', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    // Waiting on the dialog alone is not enough: it mounts before its config
+    // query resolves, so assertions on stored values would race the fetch.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('1,234,567')).toBeInTheDocument();
+    expect(screen.getByText('71/100')).toBeInTheDocument();
+    // Genres cap at three even when the payload carries four.
+    expect(screen.getByText('braindance')).toBeInTheDocument();
+    expect(screen.queryByText('electronic')).not.toBeInTheDocument();
+
+    // Stored config, not defaults: EPs off, singles on, lookback 90.
+    expect(screen.getByRole('checkbox', { name: /Extended plays/ })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Single tracks and/ })).toBeChecked();
+    expect(screen.getByLabelText('Scan lookback')).toHaveValue('90');
+  });
+
+  it('defaults the quality profile to Use default rather than the first profile', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    // Waiting on the dialog alone is not enough: it mounts before its config
+    // query resolves, so assertions on stored values would race the fetch.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
+    });
+
+    // quality_profile_id is null, so the select must sit on "" — landing on
+    // "Lossless" would silently pin a profile the user never chose.
+    expect(screen.getByLabelText('Quality Profile')).toHaveValue('');
+    expect(screen.getByRole('option', { name: 'Use default' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Lossless (Default)' })).toBeInTheDocument();
+  });
+
+  it('only offers matched providers as a scan source', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    // Waiting on the dialog alone is not enough: it mounts before its config
+    // query resolves, so assertions on stored values would race the fetch.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
+    });
+
+    // Matched on Spotify + Deezer only.
+    expect(screen.getByRole('button', { name: 'Spotify' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deezer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apple Music' })).not.toBeInTheDocument();
+    // And the global default is named, not just "Default".
+    expect(screen.getByRole('button', { name: /Default \(Deezer\)/ })).toBeInTheDocument();
+  });
+
+  it('saves the artist config with the edited values', async () => {
+    const calls = stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    // Waiting on the dialog alone is not enough: it mounts before its config
+    // query resolves, so assertions on stored values would race the fetch.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Extended plays/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+    await waitFor(() => {
+      expect(calls.filter((url) => url.includes('/config')).length).toBeGreaterThan(1);
+    });
+  });
+
+  it('refuses to save an artist with no release type', async () => {
+    stubFetch();
+    window.showToast = vi.fn();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    // Waiting on the dialog alone is not enough: it mounts before its config
+    // query resolves, so assertions on stored values would race the fetch.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Full-length studio albums/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Single tracks and/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+    await waitFor(() => {
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Please select at least one release type',
+        'error',
+      );
+    });
+  });
+
+  it('shows matched and unmatched providers, and links a new one', async () => {
+    const calls = stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    // Waiting on the dialog alone is not enough: it mounts before its config
+    // query resolves, so assertions on stored values would race the fetch.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
+    });
+
+    // Matched rows offer Fix + clear; unmatched offer Match.
+    expect(screen.getAllByRole('button', { name: 'Fix' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Match' })).toHaveLength(4);
+    expect(screen.getByLabelText('Clear Spotify match')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Match' })[0]);
+    // The search box seeds with the stored watchlist name.
+    expect(screen.getByLabelText('Search Apple Music')).toHaveValue('Aphex Twin');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => {
+      expect(screen.getByText('2.1M fans')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/link-provider'))).toBe(true);
+    });
+  });
+
+  it('clears a provider match through the same endpoint', async () => {
+    const calls = stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Clear Spotify match')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Clear Spotify match'));
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/link-provider'))).toBe(true);
+    });
+  });
+
+  it('warns inside the config modal while the global override is on', async () => {
+    stubFetch({ globalOverride: true });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/these per-artist settings are currently ignored during scans/),
+      ).toBeInTheDocument();
     });
   });
 

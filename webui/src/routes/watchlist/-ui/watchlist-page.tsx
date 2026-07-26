@@ -29,6 +29,7 @@ import {
 } from '../-watchlist.helpers';
 import { WATCHLIST_SORT_VALUES, type WatchlistArtist } from '../-watchlist.types';
 import { Route } from '../route';
+import { WatchlistArtistConfigModal } from './watchlist-artist-config-modal';
 import { WatchlistGlobalSettingsModal } from './watchlist-global-settings-modal';
 import { WatchlistLabelsTab } from './watchlist-labels-tab';
 import styles from './watchlist-page.module.css';
@@ -234,6 +235,15 @@ export function WatchlistPage() {
           profileId={profileId}
           initialConfig={globalConfigQuery.data ?? null}
           onClose={() => void navigate({ search: (prev) => ({ ...prev, settings: false }) })}
+        />
+      ) : null}
+
+      {search.configId ? (
+        <WatchlistArtistConfigModal
+          profileId={profileId}
+          artistId={search.configId}
+          globalOverrideActive={globalOverrideActive}
+          onClose={() => void navigate({ search: (prev) => ({ ...prev, configId: undefined }) })}
         />
       ) : null}
 

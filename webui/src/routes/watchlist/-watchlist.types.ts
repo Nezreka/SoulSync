@@ -173,6 +173,110 @@ export interface WatchlistGlobalConfigResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Per-artist config
+// ---------------------------------------------------------------------------
+
+/** The providers an artist can be matched against, in the order the linking
+ *  panel lists them. Amazon appears here but NOT in the metadata-source picker,
+ *  matching the vanilla modal. */
+export const WATCHLIST_PROVIDERS = [
+  'spotify',
+  'itunes',
+  'deezer',
+  'discogs',
+  'musicbrainz',
+  'amazon',
+] as const;
+
+export type WatchlistProvider = (typeof WATCHLIST_PROVIDERS)[number];
+
+/** Sources selectable as a per-artist metadata override. No Amazon. */
+export const WATCHLIST_METADATA_SOURCES = [
+  'spotify',
+  'deezer',
+  'itunes',
+  'discogs',
+  'musicbrainz',
+] as const;
+
+export type WatchlistMetadataSource = (typeof WATCHLIST_METADATA_SOURCES)[number];
+
+export interface WatchlistArtistConfig {
+  include_albums: boolean;
+  include_eps: boolean;
+  include_singles: boolean;
+  include_live: boolean;
+  include_remixes: boolean;
+  include_acoustic: boolean;
+  include_compilations: boolean;
+  include_instrumentals: boolean;
+  last_scan_timestamp?: string | null;
+  date_added?: string | null;
+  /** null = use the global window. */
+  lookback_days: number | null;
+  /** null = follow the global metadata source. */
+  preferred_metadata_source: WatchlistMetadataSource | null;
+  /** Absent on older rows, where it means true. */
+  auto_download: boolean;
+  /** null = "Use default" rather than the first profile in the list. */
+  quality_profile_id: number | null;
+}
+
+export interface WatchlistArtistInfo {
+  id: string;
+  name: string;
+  image_url: string | null;
+  followers: number;
+  popularity: number;
+  genres: string[];
+  banner_url?: string | null;
+  summary?: string | null;
+  style?: string | null;
+  mood?: string | null;
+  label?: string | null;
+}
+
+export interface WatchlistRecentRelease {
+  album_name: string;
+  release_date: string | null;
+  album_cover_url: string | null;
+  track_count: number | null;
+}
+
+export interface QualityProfileSummary {
+  id: number;
+  name?: string;
+  is_default?: boolean;
+}
+
+export interface WatchlistArtistConfigResponse {
+  success: boolean;
+  error?: string;
+  config?: WatchlistArtistConfig;
+  artist?: WatchlistArtistInfo;
+  recent_releases?: WatchlistRecentRelease[];
+  spotify_artist_id?: string | null;
+  itunes_artist_id?: string | null;
+  deezer_artist_id?: string | null;
+  discogs_artist_id?: string | null;
+  amazon_artist_id?: string | null;
+  musicbrainz_artist_id?: string | null;
+  /** The name as stored on the watchlist row, which can differ from the
+   *  provider's current name — the linking panel compares against this. */
+  watchlist_name?: string | null;
+  global_metadata_source?: string;
+  quality_profiles?: QualityProfileSummary[];
+}
+
+/** One hit from /api/library/search-service. */
+export interface ProviderSearchResult {
+  id: string;
+  name: string;
+  image?: string | null;
+  extra?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Labels
 // ---------------------------------------------------------------------------
 

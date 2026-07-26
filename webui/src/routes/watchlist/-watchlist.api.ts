@@ -3,7 +3,9 @@ import { queryOptions } from '@tanstack/react-query';
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  ProviderSearchResult,
   WatchlistArtist,
+  WatchlistArtistConfigResponse,
   WatchlistArtistsResponse,
   WatchlistCountResponse,
   WatchlistGlobalConfig,
@@ -48,6 +50,13 @@ export function watchlistGlobalConfigQueryOptions(profileId: number) {
   return queryOptions({
     queryKey: [...WATCHLIST_QUERY_KEY, 'global-config', profileId] as const,
     queryFn: () => fetchWatchlistGlobalConfig(),
+  });
+}
+
+export function watchlistArtistConfigQueryOptions(profileId: number, artistId: string) {
+  return queryOptions({
+    queryKey: [...WATCHLIST_QUERY_KEY, 'artist-config', profileId, artistId] as const,
+    queryFn: () => fetchWatchlistArtistConfig(artistId),
   });
 }
 
@@ -167,6 +176,85 @@ export async function saveWatchlistGlobalConfig(
     throw new Error(payload.error || 'Failed to save global watchlist settings');
   }
   return payload.config ?? config;
+}
+
+export async function fetchWatchlistArtistConfig(
+  artistId: string,
+): Promise<WatchlistArtistConfigResponse> {
+  const payload = await readJson<WatchlistArtistConfigResponse>(
+    apiClient.get(`watchlist/artist/${encodeURIComponent(artistId)}/config`),
+  );
+  if (!payload.success) {
+    throw new Error(payload.error || 'Failed to load artist configuration');
+  }
+  return payload;
+}
+
+/** The subset the modal actually writes. Anything omitted keeps its stored
+ *  value: the endpoint reads the current row first rather than defaulting
+ *  absent fields, so a partial POST is safe. */
+export interface WatchlistArtistConfigUpdate {
+  include_albums: boolean;
+  include_eps: boolean;
+  include_singles: boolean;
+  include_live: boolean;
+  include_remixes: boolean;
+  include_acoustic: boolean;
+  include_compilations: boolean;
+  include_instrumentals: boolean;
+  auto_download: boolean;
+  quality_profile_id: number | null;
+  lookback_days: number | null;
+  preferred_metadata_source: string | null;
+}
+
+export async function saveWatchlistArtistConfig(
+  artistId: string,
+  update: WatchlistArtistConfigUpdate,
+): Promise<void> {
+  const payload = await readJson<SuccessResponse>(
+    apiClient.post(`watchlist/artist/${encodeURIComponent(artistId)}/config`, { json: update }),
+  );
+  assertSuccess(payload, 'Failed to save artist preferences');
+}
+
+/**
+ * Point a watchlist artist at a different provider id, or clear the match.
+ *
+ * An empty provider_id is the clear operation — same endpoint, same shape, as
+ * the vanilla `_clearSourceMatch` did.
+ */
+export async function linkWatchlistProvider(
+  artistId: string,
+  provider: string,
+  providerId: string,
+): Promise<void> {
+  const payload = await readJson<SuccessResponse>(
+    apiClient.post(`watchlist/artist/${encodeURIComponent(artistId)}/link-provider`, {
+      json: { provider, provider_id: providerId },
+    }),
+  );
+  assertSuccess(payload, providerId ? 'Failed to link' : 'Failed to clear');
+}
+
+/** Search one provider for artists to link against. */
+export async function searchProviderArtists(
+  service: string,
+  query: string,
+): Promise<ProviderSearchResult[]> {
+  const payload = await readJson<{
+    success?: boolean;
+    error?: string;
+    results?: ProviderSearchResult[];
+  }>(
+    apiClient.post('library/search-service', {
+      json: { service, entity_type: 'artist', query },
+    }),
+  );
+  if (payload.success === false) {
+    throw new Error(payload.error || 'Search failed');
+  }
+  return payload.results ?? [];
 }
 
 export async function setWatchlistLabelBacklog(mbid: string, backlog: boolean): Promise<void> {
