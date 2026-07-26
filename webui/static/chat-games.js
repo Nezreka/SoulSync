@@ -113,7 +113,14 @@
     // Everything above this line is variant-agnostic. A variant supplies a
     // starting state, a move applier that reports terminal conditions, and
     // an adopt() that validates a position arriving from another machine.
-    // Connect 4 slots in here without touching the lifecycle.
+    //
+    // Two optional hooks exist for variants that chess and Connect 4 do not
+    // need, and both default to today's behaviour when absent:
+    //   apply(st, mv, actor)  -- who acted. Battleship needs it: only the
+    //                            owner of a board can answer a shot at it.
+    //   canAct(st, color)     -- whether `color` may act at all, for phases
+    //                            where "the side to move" is the wrong idea
+    //                            (both players commit their fleets at once).
 
     function _engine() { return window.ChessEngine; }
 
@@ -262,7 +269,235 @@
         },
     };
 
-    var VARIANTS = { chess: CHESS, connect4: C4 };
+    // ── Battleship ──────────────────────────────────────────────────────
+    //
+    // The first game here with hidden information, and the reason chat-hash.js
+    // exists. The fold cannot compute whether a shot hit: that depends on a
+    // board only its owner can see. So the owner ANSWERS, and the answer is a
+    // claim rather than a fact.
+    //
+    // What makes the claims worth anything is commit-reveal. Before a shot is
+    // fired each player publishes hash(salt, board). At the end the loser
+    // reveals salt + board, and every client checks two things: that the
+    // reveal matches what was committed, and that every answer given over the
+    // whole game agrees with the board now revealed. A player who lied about a
+    // single "miss" cannot produce a board that fits, so the game is marked
+    // cheated and they lose it. Cheating is DETECTED, not prevented -- which is
+    // the honest guarantee for a game whose secrets live on the players' own
+    // machines.
+    //
+    // Board string: 100 chars, row-major from a1. '.' is water, '1'..'5' are
+    // the five ships. Encoding by ship id (rather than a bare occupied flag)
+    // is what lets "sunk" be verified rather than taken on trust.
+    var BS_W = 10, BS_H = 10;
+    var BS_FLEET = [
+        { id: '1', name: 'Carrier', len: 5 },
+        { id: '2', name: 'Battleship', len: 4 },
+        { id: '3', name: 'Cruiser', len: 3 },
+        { id: '4', name: 'Submarine', len: 3 },
+        { id: '5', name: 'Destroyer', len: 2 },
+    ];
+    var BS_CELLS = BS_W * BS_H;
+
+    function _bsCell(s) {
+        // "e5" -> index. Column letter then 1-based row, and NOTHING else:
+        // a loose parseInt happily read "a1b" as a1.
+        if (typeof s !== 'string') return -1;
+        var m = /^([a-j])([1-9]|10)$/.exec(s.toLowerCase());
+        if (!m) return -1;
+        return (parseInt(m[2], 10) - 1) * BS_W + 'abcdefghij'.indexOf(m[1]);
+    }
+    function _bsName(i) {
+        return 'abcdefghij'[i % BS_W] + String(Math.floor(i / BS_W) + 1);
+    }
+
+    // Is this a legal fleet? Right pieces, right lengths, each in one straight
+    // unbroken line, nothing overlapping. Checked on every reveal, because a
+    // board that was never legal makes every answer unfalsifiable.
+    function _bsValidBoard(board) {
+        if (typeof board !== 'string' || board.length !== BS_CELLS) return false;
+        if (!/^[.12345]+$/.test(board)) return false;
+        for (var f = 0; f < BS_FLEET.length; f++) {
+            var ship = BS_FLEET[f];
+            var cells = [];
+            for (var i = 0; i < BS_CELLS; i++) if (board[i] === ship.id) cells.push(i);
+            if (cells.length !== ship.len) return false;
+            var rows = cells.map(function (c) { return Math.floor(c / BS_W); });
+            var cols = cells.map(function (c) { return c % BS_W; });
+            var sameRow = rows.every(function (r) { return r === rows[0]; });
+            var sameCol = cols.every(function (c) { return c === cols[0]; });
+            if (!sameRow && !sameCol) return false;
+            var line = (sameRow ? cols : rows).slice().sort(function (a2, b2) { return a2 - b2; });
+            for (var j = 1; j < line.length; j++) if (line[j] !== line[j - 1] + 1) return false;
+        }
+        return true;
+    }
+
+    // Does `board` agree with every answer its owner gave? `shots` are the
+    // cells fired at that board, `results` what the owner claimed each time.
+    function _bsAnswersHonest(board, shots, results) {
+        var hitCount = {};
+        for (var i = 0; i < shots.length; i++) {
+            var idx = shots[i];
+            var truth = board[idx] !== '.' ? 'hit' : 'miss';
+            var claimed = results[i];
+            if (claimed === 'sunk') {
+                if (truth !== 'hit') return false;
+                var ship = board[idx];
+                hitCount[ship] = (hitCount[ship] || 0) + 1;
+                var len = 0;
+                for (var c = 0; c < BS_CELLS; c++) if (board[c] === ship) len++;
+                if (hitCount[ship] !== len) return false;   // claimed sunk too early
+            } else {
+                if (claimed !== truth) return false;
+                if (truth === 'hit') {
+                    var sh = board[idx];
+                    hitCount[sh] = (hitCount[sh] || 0) + 1;
+                    var l2 = 0;
+                    for (var c2 = 0; c2 < BS_CELLS; c2++) if (board[c2] === sh) l2++;
+                    if (hitCount[sh] === l2) return false;  // hid a sinking
+                }
+            }
+        }
+        return true;
+    }
+
+    // State: {commits:{w,b}, shots:{w:[],b:[]}, results:{w:[],b:[]},
+    //         reveal:{w,b}, pending:'' | 'w' | 'b', turn, over, cheat}
+    // `pending` is the side that owes an ANSWER; nobody else may act until
+    // they give it. shots.w are the cells W has fired (at B's board).
+    var BS = {
+        start: function () {
+            return {
+                commits: { w: '', b: '' },
+                shots: { w: [], b: [] },
+                results: { w: [], b: [] },
+                reveal: { w: null, b: null },
+                pending: '',
+                turn: 'w',
+                sunkAll: '',
+                cheat: '',
+            };
+        },
+        fen: function (st) { return JSON.stringify(st); },
+        adopt: function (fen) {
+            var st;
+            try { st = JSON.parse(String(fen || '')); } catch (e) { return null; }
+            if (!st || typeof st !== 'object') return null;
+            if (!st.commits || !st.shots || !st.results) return null;
+            if (!Array.isArray(st.shots.w) || !Array.isArray(st.shots.b)) return null;
+            if (!Array.isArray(st.results.w) || !Array.isArray(st.results.b)) return null;
+            // Answers LAG shots by one while a shot is outstanding — that
+            // gap is the whole point of `pending`. Requiring them equal
+            // rejected every position between a shot and its answer.
+            var gapW = st.shots.w.length - st.results.w.length;
+            var gapB = st.shots.b.length - st.results.b.length;
+            if (gapW < 0 || gapW > 1 || gapB < 0 || gapB > 1) return null;
+            if (gapW + gapB > 1) return null;          // only one shot in the air
+            if (st.pending && gapW + gapB !== 1) return null;
+            if (!st.pending && gapW + gapB !== 0) return null;
+            if (st.shots.w.length + st.shots.b.length > 400) return null;
+            if (st.turn !== 'w' && st.turn !== 'b') return null;
+            return st;
+        },
+        turn: function (st) { return st.pending || st.turn; },
+        canAct: function (st, color) {
+            if (st.over) return false;
+            // Setup: both players place at once, each once.
+            if (!st.commits.w || !st.commits.b) return !st.commits[color];
+            if (st.pending) return color === st.pending;   // an answer is owed
+            if (st.sunkAll) return !st.reveal[color];      // reveals are owed
+            return color === st.turn;
+        },
+        apply: function (st, mv, actor) {
+            if (!actor || (actor !== 'w' && actor !== 'b')) return null;
+            if (st.over) return null;
+            var other2 = actor === 'w' ? 'b' : 'w';
+            var next = JSON.parse(JSON.stringify(st));
+            mv = String(mv || '');
+
+            // c:<digest> — commit a fleet
+            if (mv.slice(0, 2) === 'c:') {
+                if (st.commits[actor]) return null;               // once only
+                var digest = mv.slice(2);
+                if (!/^[0-9a-f]{32}$/.test(digest)) return null;
+                next.commits[actor] = digest;
+                return { state: next, over: false, result: null, reason: '', winnerColor: '' };
+            }
+            if (!st.commits.w || !st.commits.b) return null;       // no shooting yet
+
+            // s:<cell> — fire
+            if (mv.slice(0, 2) === 's:') {
+                if (st.pending) return null;                       // answer first
+                if (st.sunkAll) return null;
+                if (actor !== st.turn) return null;
+                var idx = _bsCell(mv.slice(2));
+                if (idx < 0) return null;
+                if (st.shots[actor].indexOf(idx) >= 0) return null;  // already fired there
+                next.shots[actor].push(idx);
+                next.pending = other2;                             // they owe an answer
+                return { state: next, over: false, result: null, reason: '', winnerColor: '' };
+            }
+
+            // r:<hit|miss|sunk> — answer the shot at my board
+            if (mv.slice(0, 2) === 'r:') {
+                if (st.pending !== actor) return null;
+                var res = mv.slice(2);
+                if (res !== 'hit' && res !== 'miss' && res !== 'sunk') return null;
+                next.results[other2].push(res);
+                next.pending = '';
+                // Seventeen cells of ship in a fleet; five sinkings ends it.
+                var sunk = next.results[other2].filter(function (r) { return r === 'sunk'; }).length;
+                if (sunk >= BS_FLEET.length) {
+                    next.sunkAll = other2;    // other2 sank actor's whole fleet
+                    next.turn = other2;
+                    return { state: next, over: false, result: null, reason: '', winnerColor: '' };
+                }
+                next.turn = actor;            // the answerer fires next; strict alternation
+                return { state: next, over: false, result: null, reason: '', winnerColor: '' };
+            }
+
+            // v:<salt>:<board> — reveal, and be judged
+            if (mv.slice(0, 2) === 'v:') {
+                if (!st.sunkAll) return null;                      // nothing to settle yet
+                if (st.reveal[actor]) return null;
+                var rest = mv.slice(2);
+                var cut = rest.indexOf(':');
+                if (cut < 0) return null;
+                var salt = rest.slice(0, cut), board = rest.slice(cut + 1);
+                var H = window.ChatHash;
+                if (!H) return null;
+                var honest = _bsValidBoard(board) &&
+                             H.verify(st.commits[actor], salt, board) &&
+                             _bsAnswersHonest(board, st.shots[other2], st.results[other2]);
+                next.reveal[actor] = { salt: salt, board: board, honest: honest };
+                if (!honest) {
+                    next.over = true;
+                    next.cheat = actor;
+                    return {
+                        state: next, over: true, reason: 'cheating',
+                        result: actor === 'w' ? '0-1' : '1-0', winnerColor: other2,
+                    };
+                }
+                // BOTH fleets are revealed before the result stands. Checking
+                // only the loser would leave the winner's answers unexamined,
+                // and the winner is precisely who gains by calling a hit a
+                // miss. The game ends when the second honest reveal lands.
+                if (next.reveal.w && next.reveal.b) {
+                    next.over = true;
+                    return {
+                        state: next, over: true, reason: 'fleet sunk',
+                        result: st.sunkAll === 'w' ? '1-0' : '0-1',
+                        winnerColor: st.sunkAll,
+                    };
+                }
+                return { state: next, over: false, result: null, reason: '', winnerColor: '' };
+            }
+            return null;
+        },
+    };
+
+    var VARIANTS = { chess: CHESS, connect4: C4, battleship: BS };
 
     // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -480,14 +715,16 @@
                     return;
                 }
 
-                if (seat !== turnColor) return;               // not your turn
+                if (adapter2.canAct
+                        ? !adapter2.canAct(states[gid], seat)
+                        : seat !== turnColor) return;             // not your turn
                 var n = p.n;
                 if (typeof n !== 'number' || !isFinite(n)) return;
                 if (n < game.ply) return;                     // a duplicate or a replay
                 if (game.ply >= MAX_MOVES) return;
 
                 var uci = String(p.m || '');
-                var applied = adapter2.apply(states[gid], uci);
+                var applied = adapter2.apply(states[gid], uci, seat);
                 if (!applied) return;                         // illegal — just dropped
 
                 // The checkpoint has to agree with what we computed. If it
@@ -590,7 +827,7 @@
                 if (p.n !== game.ply) return;                  // a stale ballot
                 if (_seatOf(game, user)) return;               // the opponent does not vote
                 var vuci = String(p.m || '');
-                var vpre = adapter2.apply(states[gid], vuci);
+                var vpre = adapter2.apply(states[gid], vuci, game.roomSeat);
                 if (!vpre) return;                             // not a legal move
 
                 game.voteBy[user] = vuci;                      // latest vote wins
@@ -798,13 +1035,13 @@
     // rides with gm.move without knowing which game it is looking at -- and
     // so an illegal move is caught before it reaches the room rather than
     // being sent and silently dropped by everyone.
-    function previewMove(game, uci) {
+    function previewMove(game, uci, actor) {
         if (!game) return null;
         var adapter = VARIANTS[game.variant];
         if (!adapter) return null;
         var st = adapter.adopt(game.fen);
         if (!st) return null;
-        var applied = adapter.apply(st, uci);
+        var applied = adapter.apply(st, uci, actor);
         if (!applied) return null;
         return { fen: adapter.fen(applied.state), over: !!applied.over };
     }
