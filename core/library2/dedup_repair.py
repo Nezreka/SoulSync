@@ -11,12 +11,22 @@ this module heals what they already left behind:
    would be a genuinely distinct same-named artist). Conflicting groups are
    soft-linked via the §40 alias registry instead, so "Update Discography"
    at least fans out over them.
-2. After a merge, same-title/same-bucket album pairs inside the survivor are
-   folded with the §62.6-Stufe-3 rules: automatically only when one side is
-   pristine (provider-only, unmonitored, trackless) and track counts are
-   compatible — its provider ids survive as alternative editions. Anything
-   else becomes a ``lib2_release_group_review`` finding
-   (``duplicate_title_unmerged``) for the user.
+2. Same-title/same-bucket album pairs inside one artist are folded with the
+   §62.6-Stufe-3 rules: automatically only when one side is pristine
+   (provider-only, unmonitored, trackless) and track counts are compatible —
+   its provider ids survive as alternative editions. Anything else becomes a
+   ``lib2_release_group_review`` finding (``duplicate_title_unmerged``) for
+   the user.
+
+Step 2 deliberately covers *every* artist holding a title twin, not only the
+survivors of step 1. An artist merge is one way to end up with two rows for
+one release, but it is not the only one: a discography expansion that answers
+with a second provider edition, or a legacy re-import landing beside an
+already-native row, produces the same pair under a single clean artist. On the
+26 July real-DB run that was the entire population — three album twins and 112
+files attached to more than one track, in a library whose artists were all
+distinct, so the pass never ran and the user never even got the review finding.
+
 
 Runs at the end of every legacy import (cheap when there is nothing to do)
 and on demand via the maintenance endpoint.
@@ -232,6 +242,35 @@ def _bucket(album_type: Any) -> str:
     return "single" if str(album_type or "").lower() == "single" else "release"
 
 
+def _artists_with_album_twins(conn: Any) -> List[int]:
+    """Artists holding two albums with the same title key and bucket.
+
+    One cheap full scan instead of ``_album_rows_for_artist`` per artist: that
+    query carries two correlated sub-selects, and running it for every artist
+    of a large library to discover that almost none of them has a twin is the
+    kind of idle query flood BR-08 already had to undo once.
+    """
+    rows = conn.execute(
+        """SELECT aa.artist_id, al.title, al.album_type
+             FROM lib2_album_artists aa
+             JOIN lib2_albums al ON al.id = aa.album_id""").fetchall()
+    seen: Dict[int, set] = {}
+    twins: set[int] = set()
+    for row in rows:
+        title_key = release_title_key(row["title"])
+        if not title_key:
+            # No identity, no twin — two untitled rows are not evidence.
+            continue
+        artist_id = int(row["artist_id"])
+        key = (title_key, _bucket(row["album_type"]))
+        keys = seen.setdefault(artist_id, set())
+        if key in keys:
+            twins.add(artist_id)
+        else:
+            keys.add(key)
+    return sorted(twins)
+
+
 def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
                                stats: Dict[str, Any]) -> None:
     from core.library2.mb_reconcile import (
@@ -368,7 +407,11 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
                 )
             touched_artists.add(int(survivor["id"]))
 
-        for artist_id in touched_artists:
+        # Merged artists first (their re-homed albums are twins that did not
+        # exist a moment ago), then every other artist a twin scan finds — the
+        # album pass is not a merge follow-up, it is its own repair.
+        for artist_id in sorted(
+                touched_artists.union(_artists_with_album_twins(conn))):
             _fold_albums_within_artist(conn, cursor, artist_id, stats)
         conn.commit()
     finally:

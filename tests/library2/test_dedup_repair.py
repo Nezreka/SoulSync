@@ -164,6 +164,85 @@ def test_post_merge_two_track_bearing_albums_become_review_finding(repair_db):
     assert finding["reason"] == "duplicate_title_unmerged"
 
 
+def test_album_twins_are_folded_without_any_artist_merge(repair_db):
+    """A library whose artists are all distinct still grows album twins.
+
+    Real-DB catch (26 July): the album pass only ever visited artists that a
+    merge had just touched, so an artist with a single clean row — the normal
+    case — never had its duplicate albums looked at at all.
+    """
+    legacy_db, conn = repair_db
+    solo = _artist(conn, "Justin Bieber", spotify_id="1uNFoZAHBGtllmzznpCI3s")
+    keeper = _album(conn, solo, "SWAG II", origin="discography",
+                    external_ids=json.dumps({"deezer": "816518541"}))
+    _album(conn, solo, "SWAG II", origin="discography")
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["artists_merged"] == 0
+    assert stats["albums_folded"] == 1
+    remaining = conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='SWAG II'").fetchall()
+    assert [r["id"] for r in remaining] == [keeper]
+
+
+def test_file_bearing_twins_of_an_unmerged_artist_become_a_review_finding(
+        repair_db):
+    """Both sides own files, so the pass reports instead of merging — but it
+    has to report, which it could not do while it never ran."""
+    legacy_db, conn = repair_db
+    solo = _artist(conn, "Hiroyuki Sawano")
+    first = _album(conn, solo, "TV Anime \"Attack on Titan\" Original Soundtrack",
+                   with_track=True)
+    second = _album(conn, solo, "TV Anime \"Attack on Titan\" Original Soundtrack",
+                    with_track=True)
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["albums_folded"] == 0
+    assert stats["album_review"] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE id IN (?,?)", (first, second)
+    ).fetchone()["c"] == 2
+    finding = conn.execute(
+        "SELECT reason FROM lib2_release_group_review").fetchone()
+    assert finding["reason"] == "duplicate_title_unmerged"
+
+
+def test_an_album_and_its_same_named_single_are_not_twins(repair_db):
+    """DD-G1's bucket separation must survive the wider scan: a single named
+    after its parent album is a different release, never a duplicate."""
+    legacy_db, conn = repair_db
+    solo = _artist(conn, "Justin Bieber")
+    _album(conn, solo, "DAISIES", origin="discography")
+    _album(conn, solo, "DAISIES", origin="discography", album_type="single")
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["albums_folded"] == 0
+    assert stats["album_review"] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE title='DAISIES'"
+    ).fetchone()["c"] == 2
+
+
+def test_untitled_albums_are_never_grouped_together(repair_db):
+    """An empty title normalizes to an empty key; two of them are not twins."""
+    legacy_db, conn = repair_db
+    solo = _artist(conn, "Various Artists")
+    _album(conn, solo, "", origin="discography")
+    _album(conn, solo, "", origin="discography")
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["albums_folded"] == 0
+    assert stats["album_review"] == 0
+
+
 def test_repair_is_idempotent(repair_db):
     legacy_db, conn = repair_db
     _artist(conn, "Hiroyuki Sawano")
