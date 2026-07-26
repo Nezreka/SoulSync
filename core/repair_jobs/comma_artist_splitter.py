@@ -25,6 +25,7 @@ disabling it applies verified splits immediately.
 Supported separators: comma (,), semicolon (;), ampersand (&), forward slash (/).
 """
 
+import json
 import re
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -62,17 +63,23 @@ _API_SOURCES = ('deezer', 'itunes', 'spotify')
 
 
 def normalize_artist_name(name: str, symbols: list = None) -> str:
-    """Casefold + whitespace-collapse for exact-name comparison. Separator spacing
-    is normalized too ("Tyler,The Creator" == "Tyler, The Creator") so a
-    missing space after the separator can't dodge the whitelist / API match."""
-    symbols = symbols or [',', ';', '/', '&']
-    text = re.sub(r'\s*[{}]\s*'.format(''.join(symbols)), ', ', str(name or ''))
+    """Casefold + whitespace-collapse for exact-name comparison.
+
+    Only comma spacing is canonicalized ("Tyler,The Creator" equals
+    "Tyler, The Creator"). Other separators stay intact so exact-name checks
+    still distinguish real acts like "Earth, Wind & Fire".
+    """
+    text = re.sub(r'\s*,\s*', ', ', str(name or ''))
     return ' '.join(text.casefold().split())
 
 
-def split_artist_parts(name: str, symbols: list) -> list:
+def split_artist_parts(name: str, symbols: list = None) -> list:
     """Split a separator-joined artist string into clean parts.
     Supports: comma (,), semicolon (;), ampersand (&), forward slash (/)."""
+    if symbols is None:
+        symbols = [',', ';', '/', '&']
+    if not symbols:
+        return [str(name or '').strip()] if str(name or '').strip() else []
     parts = re.split(r'[{}]+'.format(''.join(symbols)), str(name or ''))
     return [p.strip() for p in parts if p.strip()]
 
@@ -140,6 +147,8 @@ class CommaArtistSplitterJob(RepairJob):
         cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
         merged = self.default_settings.copy()
         merged.update(cfg)
+        if 'dry_run' not in cfg and 'apply_automatically' in cfg:
+            merged['dry_run'] = not bool(cfg.get('apply_automatically', False))
         return merged
 
     def _get_symbols(self, settings: dict) -> list:
@@ -158,8 +167,10 @@ class CommaArtistSplitterJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         settings = self._get_settings(context)
-        dry_run = settings.get('dry_run', True)
+        dry_run = bool(settings.get('dry_run', True))
         symbols: list = self._get_symbols(settings)
+        sources: list = [s for s in _API_SOURCES
+                         if not (s == 'spotify' and context.is_spotify_rate_limited())]
 
         tracks = []
         conn = None
@@ -248,7 +259,7 @@ class CommaArtistSplitterJob(RepairJob):
                     else:
                         # Check 1: is the FULL string a real artist?
                         is_real, checked_sources = self._full_string_is_real_artist(
-                            context, file_artist, search_memo, symbols)
+                            file_artist, search_memo, symbols, sources)
                         if is_real:
                             memo_splits[file_artist] = None
                         elif not checked_sources:
@@ -256,7 +267,7 @@ class CommaArtistSplitterJob(RepairJob):
                             memo_splits[file_artist] = None
                         else:
                             # Check 2: every part must resolve
-                            parts_resolution = self._resolve_parts(context, parts, search_memo, symbols)
+                            parts_resolution = self._resolve_parts(context, parts, search_memo, symbols, sources)
                             if parts_resolution is None:
                                 memo_splits[file_artist] = None
                             else:
@@ -355,6 +366,13 @@ class CommaArtistSplitterJob(RepairJob):
                     'track', combined_name, None, details)
                 if applied.get('success') and applied.get('action') == 'artists_split':
                     result.auto_fixed += applied.get('fixed', 0)
+                    self._record_resolved_finding(
+                        context=context,
+                        combined_name=combined_name,
+                        info=info,
+                        details=details,
+                        fixed_count=int(applied.get('fixed', 0)),
+                    )
                 elif not applied.get('success'):
                     result.errors += 1
                     logger.warning("Could not auto-apply comma-artist split for %s: %s",
@@ -374,6 +392,64 @@ class CommaArtistSplitterJob(RepairJob):
                          f'{result.skipped} skipped, {result.scanned} checked',
                 log_type='success')
         return result
+
+    def _record_resolved_finding(self, context: JobContext, combined_name: str, info: dict,
+                                 details: dict, fixed_count: int) -> None:
+        """Persist an auto-applied split as a resolved finding entry."""
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_findings
+                SET status = 'resolved',
+                    user_action = 'artists_split',
+                    resolved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ? AND finding_type = ? AND entity_type = ? AND entity_id = ?
+                  AND status = 'pending'
+            """, (self.job_id, 'comma_artist_split', 'track', combined_name))
+            if cursor.rowcount > 0:
+                conn.commit()
+                return
+
+            cursor.execute("""
+                SELECT id FROM repair_findings
+                WHERE job_id = ? AND finding_type = ? AND entity_type = ? AND entity_id = ?
+                  AND status IN ('resolved', 'dismissed')
+                LIMIT 1
+            """, (self.job_id, 'comma_artist_split', 'track', combined_name))
+            if cursor.fetchone():
+                conn.commit()
+                return
+
+            cursor.execute("""
+                INSERT INTO repair_findings
+                    (job_id, finding_type, severity, status, entity_type, entity_id,
+                     file_path, title, description, details_json, user_action, resolved_at)
+                VALUES (?, ?, ?, 'resolved', ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                self.job_id,
+                'comma_artist_split',
+                'warning',
+                'track',
+                combined_name,
+                None,
+                f'Combined artist: {combined_name}',
+                (
+                    f'"{combined_name}" was auto-split into {len(info["parts"])} artists — '
+                    f're-tagged {fixed_count} track(s)'
+                ),
+                json.dumps(details),
+                'artists_split',
+            ))
+            conn.commit()
+        except Exception as e:
+            logger.warning("Could not record resolved auto-split finding for %s: %s",
+                           combined_name, e)
+        finally:
+            if conn:
+                conn.close()
 
     # --- verification helpers -------------------------------------------------
 
@@ -423,18 +499,12 @@ class CommaArtistSplitterJob(RepairJob):
         memo[key] = names
         return names
 
-    def _iter_sources(self, context: JobContext):
-        for source in _API_SOURCES:
-            if source == 'spotify' and context.is_spotify_rate_limited():
-                continue
-            yield source
-
-    def _full_string_is_real_artist(self, context: JobContext, name: str, memo: dict, symbols: list):
+    def _full_string_is_real_artist(self, name: str, memo: dict, symbols: list, sources: list):
         """Returns (is_real, checked_sources). checked_sources lists sources
         that answered — empty means the check could not run at all."""
         checked = []
         norm = normalize_artist_name(name, symbols)
-        for source in self._iter_sources(context):
+        for source in sources:
             names = self._search_artist_names(source, name, memo, symbols)
             if names is None:
                 continue
@@ -443,7 +513,7 @@ class CommaArtistSplitterJob(RepairJob):
                 return True, checked
         return False, checked
 
-    def _resolve_parts(self, context: JobContext, parts: list, memo: dict, symbols: list):
+    def _resolve_parts(self, context: JobContext, parts: list, memo: dict, symbols: list, sources: list):
         """Verify every part is a known artist. Returns the resolution list
         for the finding details, or None if any part can't be verified."""
         resolution = []
@@ -457,7 +527,7 @@ class CommaArtistSplitterJob(RepairJob):
                 entry['verified_via'] = 'library'
             else:
                 norm = normalize_artist_name(part, symbols)
-                for source in self._iter_sources(context):
+                for source in sources:
                     names = self._search_artist_names(source, part, memo, symbols)
                     if names and norm in names:
                         entry['verified_via'] = source

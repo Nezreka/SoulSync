@@ -274,6 +274,51 @@ def test_live_mode_applies_verified_splits_without_creating_findings(tmp_path, m
     assert audio['artist'] == ['Camellia; Toby Fox']
     assert audio['artists'] == ['Camellia', 'Toby Fox']
 
+    with db._get_connection() as conn:
+        row = conn.execute("""
+            SELECT status, user_action FROM repair_findings
+            WHERE job_id = 'comma_artist_splitter' AND finding_type = 'comma_artist_split'
+              AND entity_id = 'Camellia, Toby Fox'
+            LIMIT 1
+        """).fetchone()
+    assert row is not None
+    assert row[0] == 'resolved'
+    assert row[1] == 'artists_split'
+
+
+def test_separator_toggles_can_disable_comma_splitting(tmp_path, monkeypatch):
+    db = _db(tmp_path)
+    file_path = str(tmp_path / 'a.flac')
+    _add_track(db, 'T1', 'DUMMY', file_path, file_artist='Camellia, Toby Fox')
+    _patch_clients(monkeypatch, {'deezer': _FakeArtistClient()})
+    job = CommaArtistSplitterJob()
+    monkeypatch.setattr(job, '_get_settings', lambda context: {
+        **job.default_settings,
+        'comma_splitter': False,
+        'semicolon_splitter': False,
+        'forward_slash_splitter': False,
+        'ampersand_splitter': False,
+    })
+    findings = []
+    result = job.scan(_ctx(db, findings, tmp_path))
+    assert result.findings_created == 0
+    assert findings == []
+
+
+def test_band_name_whitelist_still_wins_when_ampersand_enabled(tmp_path, monkeypatch):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('EWF', 'Earth, Wind & Fire', 'test')")
+        conn.execute("INSERT INTO albums (id, title, artist_id, server_source) VALUES ('AL1', 'Greatest', 'EWF', 'test')")
+        conn.commit()
+    file_path = str(tmp_path / 'ewf.flac')
+    _add_track(db, 'T1', 'EWF', file_path, file_artist='Earth, Wind & Fire')
+    client = _FakeArtistClient()
+    result, findings = _run(db, monkeypatch, {'deezer': client}, tmp_path=tmp_path)
+    assert result.findings_created == 0
+    assert findings == []
+    assert client.calls == []
+
 
 def test_artist_without_files_not_scanned(tmp_path, monkeypatch):
     db = _db(tmp_path)  # DUMMY exists but owns no tracks with files
@@ -360,9 +405,9 @@ def test_fix_already_multivalue_counts_as_stale(tmp_path):
 
 def test_fix_no_tracks_resolves_as_already_gone(tmp_path):
     db = _db(tmp_path)
-    result = _worker(db, tmp_path)._fix_comma_artist_split('artist', 'DUMMY', None, _details(str(f)))
-    assert result['success'] is True
-    assert result['action'] == 'already_gone'
+    result = _worker(db, tmp_path)._fix_comma_artist_split('artist', 'DUMMY', None, _details())
+    assert result['success'] is False
+    assert 'no file list' in result['error']
 
 
 def test_fix_rejects_finding_without_parts(tmp_path):
@@ -421,7 +466,7 @@ def test_bulk_fix_comma_artist_split_end_to_end(tmp_path):
             "entity_type, entity_id, title, details_json) VALUES "
             "('comma_artist_splitter', 'comma_artist_split', 'warning', 'pending', "
             "'artist', 'DUMMY', 'Combined artist: Camellia, Toby Fox', ?)",
-            (json.dumps(_details()),))
+            (json.dumps(_details(str(f))),))
         conn.commit()
 
     result = _worker(db, tmp_path).bulk_fix_findings(job_id='comma_artist_splitter')
