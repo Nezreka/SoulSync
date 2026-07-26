@@ -2043,6 +2043,15 @@
                 '<img src="/static/avatar/' + i + '.png" alt="" loading="lazy"></button>');
         }
         host.innerHTML = cells.join('');
+        // Show which Soulseek identity the picker is using. Reserved avatars are
+        // gated on this exact name, so when one is missing this line says why
+        // instead of the option just silently not being there.
+        var who = q('[data-chat-avwho]');
+        if (who) {
+            who.textContent = state.selfName
+                ? 'Soulseek: ' + state.selfName
+                : 'Soulseek name not reported by slskd yet';
+        }
     }
 
     function pickAvatar(raw) {

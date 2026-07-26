@@ -51,18 +51,31 @@ _AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-
 
 
 def _self_username(client) -> str:
+    """Our own Soulseek name, cached — several probes over the network.
+
+    A known name is held for the full TTL; a miss is retried much sooner so an
+    slskd that was still logging in resolves on the next page load instead of
+    making the user wait out five minutes. Failures keep the last known good
+    name rather than blanking it.
+    """
     import time as _time
     now = _time.time()
-    if _SELF["name"] and now - _SELF["at"] < 300:
+    ttl = 300 if _SELF["name"] else 45
+    if _SELF["at"] and now - _SELF["at"] < ttl:
         return _SELF["name"]
     try:
-        info = _run_async(client.get_session_info()) or {}
-        name = str(info.get("username") or "")
-        if name:
-            _SELF.update(name=name, at=now)
-        return name
-    except Exception:
+        name = str(_run_async(client.get_soulseek_username()) or "").strip()
+    except Exception as e:
+        logger.warning(f"Could not resolve our Soulseek username: {e}")
+        _SELF.update(at=now)
         return _SELF["name"]
+    if name:
+        _SELF.update(name=name, at=now)
+        return name
+    logger.warning("slskd did not report a Soulseek username; self-mention "
+                   "highlighting and reserved avatars stay off")
+    _SELF.update(at=now)
+    return _SELF["name"]
 
 # Host-injected callables (configure() below) — avoids circular imports with
 # web_server, same pattern as core/enrichment/api.py.
