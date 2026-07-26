@@ -10084,11 +10084,25 @@
                         </div>
                     </div>
                     <div class="chat-shell">
+                        <!-- Discord-style guild rail: every joined Soulseek room is an
+                             "server" icon; PMs get their own puck. Purely a nav view over
+                             the rooms/convos the sidebar already lists. -->
+                        <nav class="chat-guilds" data-chat-guilds></nav>
                         <aside class="chat-side">
-                            <div class="chat-side-label">Rooms</div>
-                            <div class="chat-side-list" data-chat-rooms></div>
-                            <div class="chat-side-label">Messages</div>
-                            <div class="chat-side-list" data-chat-convos></div>
+                            <div class="chat-side-head" data-chat-side-head>
+                                <span class="chat-side-head-name" data-chat-side-head-name>SoulSync</span>
+                                <span class="chat-side-head-caret">⌄</span>
+                            </div>
+                            <div class="chat-side-scroll">
+                                <!-- virtual channels (client-side tags over the one room).
+                                     Rooms live in the guild rail, Discord-style — they are
+                                     deliberately NOT listed again here. -->
+                                <div class="chat-side-list chat-chanlist" data-chat-channels></div>
+                                <div class="chat-side-label">Direct Messages</div>
+                                <div class="chat-side-list" data-chat-convos></div>
+                            </div>
+                            <!-- bottom-left user panel (Discord's account strip) -->
+                            <div class="chat-userpanel" data-chat-userpanel></div>
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
@@ -10181,6 +10195,13 @@
                                         Auto-join the community room</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
                                         Let non-admin profiles send messages</label>
+                                    <label class="chat-settings-label">Your avatar
+                                        <span class="chat-settings-hint" data-chat-avwho></span></label>
+                                    <div class="chat-avpicker" data-chat-avpicker></div>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-ping>
+                                        Play a sound when someone mentions or replies to me</label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-np>
+                                        Share what I'm playing in the room (everyone in the Soulseek room can see it)</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
                                         Auto-answer "prove you're human" download challenges</label>
                                     <div class="chat-settings-actions">
@@ -11317,6 +11338,18 @@
                 </div>
 
                 <div class="add-to-wishlist-modal-footer">
+                    <!-- Quality Profile for THIS acquisition. Applies to both
+                         buttons below so "Add to Wishlist" and "Download Now"
+                         can never disagree about the rules (audit P1-01). -->
+                    <label class="acquisition-quality-profile-control"
+                        for="wishlist-modal-quality-profile"
+                        title="Which Quality Profile these tracks must satisfy">
+                        <span>Quality Profile</span>
+                        <select id="wishlist-modal-quality-profile"
+                            class="acquisition-quality-profile-select" disabled>
+                            <option value="">Loading&hellip;</option>
+                        </select>
+                    </label>
                     <div class="wishlist-modal-actions">
                         <button class="btn btn--secondary"
                             onclick="closeAddToWishlistModal()">
@@ -11412,6 +11445,14 @@
                     <div class="config-section">
                         <h3 class="config-section-title">Download Preferences</h3>
                         <p class="config-section-subtitle">Select which types of releases to monitor for this artist</p>
+
+                        <div class="form-group" style="margin: 12px 0 16px;">
+                            <label for="config-quality-profile" style="display:block;margin-bottom:6px;font-weight:600;">Quality Profile</label>
+                            <select id="config-quality-profile" class="form-select">
+                                <option value="">Loading profiles…</option>
+                            </select>
+                            <small style="display:block;margin-top:6px;opacity:.7;">All Albums, EPs and Singles queued by this Watchlist artist use this profile.</small>
+                        </div>
 
                         <div class="config-options">
                             <label class="config-option">
@@ -12080,6 +12121,11 @@
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat-protocol.js', v=static_v) }}"></script>
+    <!-- Arcade: the chess rules engine and the game lifecycle fold. Both are
+         pure and self-contained (no DOM, no fetch); chat.js reads them off
+         window and simply hides the Arcade if either failed to load. -->
+    <script src="{{ url_for('static', filename='chess-engine.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='chat-games.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='label-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>

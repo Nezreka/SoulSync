@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Optional
 
 from core.runtime_state import download_tasks
 
@@ -45,6 +46,26 @@ def detect_sync_source(playlist_id: str) -> str:
     return 'spotify'
 
 
+def quality_profile_id_for_tracks(tracks) -> Optional[int]:
+    """The Quality Profile a batch of tracks is stamped with, if any.
+
+    Every track in a batch carries the same assignment, so the first stamp
+    present answers for the whole batch. This lives here — next to the writer —
+    because ``record_sync_history_start`` is called from more than one place and
+    only ``web_server`` used to do the derivation. Every other caller therefore
+    recorded ``NULL`` and a later "re-add to wishlist" fell back to the global
+    default, which is exactly the P1-04 failure the stamping was added to fix
+    (R2-06).
+    """
+    for track in tracks or []:
+        if isinstance(track, dict) and track.get('quality_profile_id') is not None:
+            try:
+                return int(track['quality_profile_id'])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def record_sync_history_start(
     database,
     batch_id: str,
@@ -56,13 +77,24 @@ def record_sync_history_start(
     artist_context,
     playlist_folder_mode: bool,
     source_page=None,
+    profile_id=None,
+    quality_profile_id=None,
 ) -> None:
     """Record a sync start to the database.
 
     If a previous sync_history row exists for the same playlist_id, update
     it in place rather than creating a duplicate.
+
+    ``profile_id``/``quality_profile_id`` record whose request this was and the
+    Quality Profile it ran under, so the history list stays per-profile and a
+    later re-add reproduces the original intent instead of admin + default
+    (P1-04). An omitted ``quality_profile_id`` is derived from the tracks
+    themselves, so no caller can accidentally record ``NULL`` for a batch that
+    is in fact stamped (R2-06).
     """
     try:
+        if quality_profile_id is None:
+            quality_profile_id = quality_profile_id_for_tracks(tracks)
         source = detect_sync_source(playlist_id)
         if playlist_id == 'wishlist':
             sync_type = 'wishlist'
@@ -87,7 +119,9 @@ def record_sync_history_start(
                     thumb_url = imgs[0].get('url') if isinstance(imgs[0], dict) else imgs[0]
 
         # Check for existing entry with same playlist_id — update instead of duplicating
-        existing = database.get_latest_sync_history_by_playlist(playlist_id)
+        existing = database.get_latest_sync_history_by_playlist(
+            playlist_id, profile_id=profile_id
+        )
         if existing:
             try:
                 conn = database._get_connection()
@@ -99,7 +133,8 @@ def record_sync_history_start(
                         tracks_json = ?, artist_context = ?, album_context = ?,
                         thumb_url = ?, total_tracks = ?, is_album_download = ?,
                         playlist_folder_mode = ?, source_page = ?, started_at = CURRENT_TIMESTAMP,
-                        completed_at = NULL, tracks_found = 0, tracks_downloaded = 0, tracks_failed = 0
+                        completed_at = NULL, tracks_found = 0, tracks_downloaded = 0, tracks_failed = 0,
+                        profile_id = ?, quality_profile_id = ?
                     WHERE id = ?
                     """,
                     (batch_id, playlist_name, source, sync_type,
@@ -107,7 +142,10 @@ def record_sync_history_start(
                      json.dumps(artist_context, ensure_ascii=False) if artist_context else None,
                      json.dumps(album_context, ensure_ascii=False) if album_context else None,
                      thumb_url, len(tracks), int(is_album_download), int(playlist_folder_mode),
-                     source_page, existing['id']),
+                     source_page,
+                     int(profile_id) if profile_id is not None else None,
+                     int(quality_profile_id) if quality_profile_id is not None else None,
+                     existing['id']),
                 )
                 conn.commit()
                 logger.info(f"Updated existing sync history entry {existing['id']} for '{playlist_name}'")
@@ -129,6 +167,8 @@ def record_sync_history_start(
             is_album_download=is_album_download,
             playlist_folder_mode=playlist_folder_mode,
             source_page=source_page,
+            profile_id=profile_id,
+            quality_profile_id=quality_profile_id,
         )
     except Exception as e:
         logger.warning(f"Failed to record sync history start: {e}")

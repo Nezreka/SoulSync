@@ -105,10 +105,10 @@ class _FakeDB:
         self._tracks = tracks or []
         self.marked_explored = False
 
-    def get_mirrored_playlist(self, pid):
+    def get_mirrored_playlist(self, pid, profile_id=None):
         return self._playlist
 
-    def get_mirrored_playlist_tracks(self, pid):
+    def get_mirrored_playlist_tracks(self, pid, profile_id=None):
         return self._tracks
 
     def mark_mirrored_playlist_explored(self, pid):

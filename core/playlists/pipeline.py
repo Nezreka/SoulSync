@@ -62,8 +62,14 @@ def run_mirrored_playlist_pipeline(
         playlist_id = config.get('playlist_id')
         process_all = config.get('all', False)
         skip_wishlist = config.get('skip_wishlist', False)
+        # Owner of this run. The manual UI trigger passes it explicitly so a
+        # background thread never falls back to admin (P0-01); scheduled
+        # automations keep the historic default.
+        owner_profile_id = config.get('profile_id')
 
-        playlists = _resolve_pipeline_playlists(db, playlist_id, process_all)
+        playlists = _resolve_pipeline_playlists(
+            db, playlist_id, process_all, profile_id=owner_profile_id
+        )
         if playlists is None:
             deps.state.set_pipeline_running(False)
             return {'status': 'error', 'error': 'No playlist specified'}
@@ -100,6 +106,7 @@ def run_mirrored_playlist_pipeline(
             db=db,
             playlist_id=playlist_id,
             process_all=process_all,
+            profile_id=owner_profile_id,
         )
 
         sync_summary = sync_and_wishlist_fn(
@@ -256,11 +263,21 @@ def _record_playlist_pipeline_history(
         )
 
 
-def _resolve_pipeline_playlists(db: Any, playlist_id: Any, process_all: bool) -> List[Dict[str, Any]] | None:
+def _resolve_pipeline_playlists(
+    db: Any,
+    playlist_id: Any,
+    process_all: bool,
+    *,
+    profile_id: Any = None,
+) -> List[Dict[str, Any]] | None:
     if process_all:
-        return db.get_mirrored_playlists()
+        return db.get_mirrored_playlists(int(profile_id)) if profile_id else db.get_mirrored_playlists()
     if playlist_id:
-        playlist = db.get_mirrored_playlist(int(playlist_id))
+        playlist = (
+            db.get_mirrored_playlist(int(playlist_id), profile_id=int(profile_id))
+            if profile_id
+            else db.get_mirrored_playlist(int(playlist_id))
+        )
         return [playlist] if playlist else []
     return None
 
@@ -320,6 +337,7 @@ def _run_discovery_phase(
     db: Any,
     playlist_id: Any,
     process_all: bool,
+    profile_id: Any = None,
 ) -> None:
     deps.update_progress(
         automation_id,
@@ -329,10 +347,9 @@ def _run_discovery_phase(
         log_type='info',
     )
 
-    if process_all:
-        disc_playlists = db.get_mirrored_playlists()
-    else:
-        disc_playlists = [db.get_mirrored_playlist(int(playlist_id))]
+    disc_playlists = _resolve_pipeline_playlists(
+        db, playlist_id, process_all, profile_id=profile_id
+    ) or []
     disc_playlists = [p for p in disc_playlists if p]
 
     disc_done = threading.Event()

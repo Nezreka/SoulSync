@@ -324,10 +324,7 @@ body.max-performance .sidebar::after {
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Above the nav (which sits at z-index:1) — a sticky header sharing the
-       nav's stacking level paints in DOM order, letting scrolled nav items
-       win over the header in some engines (#1040). */
-    z-index: 2;
+    z-index: 1;
     overflow: hidden;
     flex-shrink: 0;
 
@@ -19962,6 +19959,185 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     flex-shrink: 0;
 }
 
+/* ── Quality Profile selectors ───────────────────────────────────────────────
+   Two variants of one control, deliberately distinguishable at a glance
+   because they behave differently:
+
+   .playlist-quality-profile-control   persisted — writes to the mirror row
+   .acquisition-quality-profile-control  per-action — applies to this click only
+
+   Shared: native arrow replaced with an inline SVG caret (the platform arrow
+   renders near-black on these dark surfaces), the app's green accent on
+   hover/focus, and an explicitly inert disabled state — a Quality Profile
+   selector that cannot save must never look like it holds a value.
+   ------------------------------------------------------------------------- */
+
+.playlist-quality-profile-control,
+.acquisition-quality-profile-control {
+    --qp-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    color: rgba(255, 255, 255, .58);
+    /* Micro-label: uppercase + tracking reads as a field name at this size,
+       where sentence case just looks like stray body text next to the value. */
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    line-height: 1;
+}
+
+.playlist-quality-profile-control select,
+.acquisition-quality-profile-control select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: var(--qp-caret);
+    background-repeat: no-repeat;
+    background-position: right 11px center;
+    border-radius: 9px;
+    color: #fff;
+    font-family: inherit;
+    /* The value is the content — reset the label's uppercase micro-styling. */
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+    transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease;
+}
+
+.playlist-quality-profile-control select:hover:not(:disabled),
+.acquisition-quality-profile-control select:hover:not(:disabled) {
+    border-color: rgba(var(--accent-rgb), .5);
+}
+
+.playlist-quality-profile-control select:focus-visible,
+.acquisition-quality-profile-control select:focus-visible {
+    outline: none;
+    border-color: rgba(var(--accent-light-rgb), .85);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .18);
+}
+
+/* Firefox/Chromium honour these on Linux; elsewhere the native popup wins and
+   the defaults are already readable. */
+.playlist-quality-profile-control option,
+.acquisition-quality-profile-control option {
+    background: #17181c;
+    color: #fff;
+}
+
+/* Disabled means "nothing here is saved" — see hydrate…Unavailable() in
+   shared-helpers.js. Drop the caret so it doesn't read as openable. */
+.playlist-quality-profile-control select:disabled,
+.acquisition-quality-profile-control select:disabled {
+    background-image: none;
+    color: rgba(255, 255, 255, .42);
+    font-style: italic;
+    border-style: dashed;
+    cursor: not-allowed;
+}
+
+/* ── Persisted variant: quiet, inset, sits among other saved settings ────── */
+
+.playlist-quality-profile-control select {
+    min-width: 170px;
+    padding: 7px 30px 7px 11px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    background-color: rgba(255, 255, 255, .045);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+
+.playlist-quality-profile-control.compact {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+}
+
+.playlist-quality-profile-control.compact select {
+    min-width: 145px;
+    max-width: 190px;
+    width: 100%;
+}
+
+/* ── Per-action variant: a form field you are filling in right now ───────── */
+
+.acquisition-quality-profile-control {
+    /* Grouped on a surface of its own so the label + value read as one field
+       rather than as two loose bits of footer text — it sits next to the action
+       buttons, where a bare label would just look like stray text. */
+    gap: 10px;
+    padding: 7px 11px 7px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, .07);
+    background: rgba(255, 255, 255, .03);
+    transition: border-color .18s ease, background-color .18s ease;
+}
+
+/* Whole field goes inert together, not just the <select>. */
+.acquisition-quality-profile-control:has(select:disabled) {
+    background: rgba(255, 255, 255, .015);
+    border-color: rgba(255, 255, 255, .05);
+    color: rgba(255, 255, 255, .32);
+}
+
+.acquisition-quality-profile-control > span {
+    position: relative;
+    padding-left: 11px;
+    white-space: nowrap;
+}
+
+/* A small tick marking this as a live choice. The persisted variant has none —
+   that assignment is already decided.
+
+   It stays neutral at rest and only takes the accent on engagement: these
+   footers already carry two green action buttons, and a third resting green
+   just competes with them. Lighting up on hover/focus keeps the cue but spends
+   the colour only when the user is actually making the choice. */
+.acquisition-quality-profile-control > span::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 11px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, .26);
+    transition: background .18s ease;
+}
+
+.acquisition-quality-profile-control:hover:not(:has(select:disabled)) > span::before,
+.acquisition-quality-profile-control:focus-within > span::before {
+    background: rgba(var(--accent-light-rgb), .9);
+}
+
+.acquisition-quality-profile-control:has(select:disabled) > span::before {
+    background: rgba(255, 255, 255, .12);
+}
+
+.acquisition-quality-profile-control select {
+    min-width: 176px;
+    max-width: 240px;
+    padding: 8px 32px 8px 12px;
+    border: 1px solid rgba(255, 255, 255, .13);
+    background-color: rgba(12, 12, 14, .72);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+}
+
+@media (max-width: 640px) {
+    .acquisition-quality-profile-control {
+        width: 100%;
+        gap: 8px;
+    }
+
+    .acquisition-quality-profile-control select {
+        flex: 1;
+        min-width: 0;
+        max-width: none;
+    }
+}
+
 .playlist-modal-btn {
     padding: 12px 24px;
     border-radius: 10px;
@@ -30247,12 +30423,20 @@ div.artist-hero-badge {
     padding: 24px 28px;
     border-bottom-left-radius: 20px;
     border-bottom-right-radius: 20px;
+    /* Quality Profile selector on the left, actions on the right; wraps to two
+       rows on narrow screens rather than squashing the buttons. */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
 }
 
 .wishlist-modal-actions {
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+    margin-left: auto;
 }
 
 /* .wishlist-modal-btn* migrated to the shared .btn primitive
@@ -37757,6 +37941,88 @@ div.artist-hero-badge {
     font-size: 11px;
     color: #999;
     text-align: right;
+}
+
+/* #1079 — preview + selective download controls in Mixes / ListenBrainz modals.
+   Scoped to .has-select so the plain compact list (Build Playlist results,
+   ListenBrainz inline view) keeps its original 5-column layout untouched. */
+.discover-playlist-track-compact.has-select {
+    grid-template-columns: 24px 30px 40px 1fr 1.5fr 60px;
+}
+
+.track-compact-select {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.track-compact-check {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: #1db954;
+}
+
+.has-select .track-compact-image {
+    position: relative;
+}
+
+.track-compact-play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    margin: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.has-select .track-compact-image:hover .track-compact-play,
+.track-compact-play:focus-visible {
+    opacity: 1;
+}
+
+.mix-modal-selbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #2a2a2a;
+    background: #1a1a1a;
+}
+
+.mix-selbar-all {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #ccc;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.mix-selbar-all input {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: #1db954;
+}
+
+.mix-sel-count {
+    font-size: 12px;
+    color: #999;
+}
+
+.mix-selbar-spacer {
+    flex: 1;
 }
 
 .track-compact-block {
@@ -71625,10 +71891,151 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
    CHAT — Soulseek rooms + private messages (one page, both sidebars)
    ═══════════════════════════════════════════════════════════════════════════ */
 .chat-page-container { display: flex; flex-direction: column; height: 100%; }
+/* Discord-style 4-column shell: guild rail | channels | messages | members.
+   The rail + sidebar are flush (no gap) and share one panel surface, the way
+   Discord reads; the message column and member list keep their own cards. */
 .chat-shell {
-    display: grid; grid-template-columns: 220px 1fr 250px; gap: 16px;
+    display: grid; grid-template-columns: 72px 240px 1fr 240px; gap: 0 12px;
     flex: 1; min-height: 0; height: calc(100vh - 210px);
 }
+
+/* ── guild rail (joined rooms as pucks) ── */
+.chat-guilds {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 10px 0; overflow-y: auto; min-height: 0;
+    background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px; scrollbar-width: none;
+}
+.chat-guilds::-webkit-scrollbar { display: none; }
+.chat-guild {
+    position: relative; width: 46px; height: 46px; flex: 0 0 auto;
+    border: none; cursor: pointer; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700; letter-spacing: .3px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 16px; transition: border-radius .16s ease, background .16s ease;
+}
+.chat-guild:hover { border-radius: 14px; background: rgba(29,185,84,0.5); }
+.chat-guild--on { border-radius: 14px; background: rgba(29,185,84,0.72); }
+/* the white pill Discord slides in on the active/hovered server */
+.chat-guild::before {
+    content: ''; position: absolute; left: -11px; top: 50%; transform: translateY(-50%);
+    width: 4px; height: 0; border-radius: 0 4px 4px 0; background: #fff;
+    transition: height .16s ease;
+}
+.chat-guild:hover::before { height: 20px; }
+.chat-guild--on::before { height: 28px; }
+.chat-guild-badge {
+    position: absolute; right: -2px; bottom: -2px; min-width: 18px; height: 18px;
+    padding: 0 5px; border-radius: 9px; background: #ef4444; color: #fff;
+    font-size: 11px; font-weight: 800; line-height: 18px; text-align: center;
+    border: 2px solid #111114;
+}
+.chat-guild-wrap { position: relative; flex: 0 0 auto; display: flex; }
+.chat-guild-leave {
+    position: absolute; top: -3px; right: -3px; width: 17px; height: 17px;
+    border: 2px solid #111114; border-radius: 50%; cursor: pointer;
+    background: rgba(239,68,68,0.9); color: #fff;
+    font-size: 11px; line-height: 1; padding: 0;
+    opacity: 0; transition: opacity .15s ease;
+}
+.chat-guild-wrap:hover .chat-guild-leave { opacity: 1; }
+.chat-guild-leave:hover { background: #ef4444; }
+.chat-guild-sep { width: 32px; height: 2px; border-radius: 1px; background: rgba(255,255,255,0.1); flex: 0 0 auto; }
+.chat-guild--add { background: rgba(255,255,255,0.05); color: #1db954; font-size: 22px; font-weight: 400; }
+.chat-guild--add:hover { background: rgba(29,185,84,0.22); }
+
+/* ── channel sidebar ── */
+.chat-side { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.chat-side-head {
+    display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
+    padding: 14px 14px; font-size: 15px; font-weight: 800; color: #fff;
+    border-bottom: 1px solid rgba(0,0,0,0.4); cursor: default;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04);
+}
+.chat-side-head-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-side-head-caret { color: rgba(255,255,255,0.5); font-size: 13px; }
+.chat-side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 8px; }
+
+/* channel rows */
+.chat-chan {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 6px 8px; border-radius: 6px; border: none; background: none;
+    color: rgba(255,255,255,0.45); font-size: 14px; font-weight: 600;
+    cursor: pointer; text-align: left; margin-bottom: 1px;
+}
+.chat-chan:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.85); }
+.chat-chan--on { background: rgba(255,255,255,0.09); color: #fff; }
+.chat-chan-hash { color: rgba(255,255,255,0.3); font-size: 17px; font-weight: 500; }
+.chat-chan--on .chat-chan-hash { color: rgba(255,255,255,0.55); }
+.chat-chan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-chan-unread {
+    min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+    background: #ef4444; color: #fff; font-size: 11px; font-weight: 800;
+    line-height: 17px; text-align: center;
+}
+.chat-chan--unread { color: #fff; }
+.chat-cat {
+    display: flex; align-items: center; gap: 4px; width: 100%;
+    padding: 14px 4px 4px; border: none; background: none; cursor: pointer;
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px;
+    color: rgba(255,255,255,0.4); text-align: left;
+}
+.chat-cat:hover { color: rgba(255,255,255,0.75); }
+
+/* forum-style threads nested under their channel */
+.chat-thread {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 4px 8px 4px 22px; border-radius: 6px; border: none; background: none;
+    color: rgba(255,255,255,0.4); font-size: 13px; cursor: pointer;
+    text-align: left; margin-bottom: 1px; position: relative;
+}
+.chat-thread:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); }
+.chat-thread--on { background: rgba(255,255,255,0.09); color: #fff; }
+.chat-thread-branch {
+    position: absolute; left: 12px; top: 0; bottom: 50%; width: 8px;
+    border-left: 2px solid rgba(255,255,255,0.14);
+    border-bottom: 2px solid rgba(255,255,255,0.14);
+    border-bottom-left-radius: 6px;
+}
+.chat-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-thread-back {
+    border: none; background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7);
+    width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+    font-size: 15px; margin-right: 8px; flex: 0 0 auto;
+}
+.chat-thread-back:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.chat-cat-caret { transition: transform .15s ease; display: inline-block; }
+.chat-cat--closed .chat-cat-caret { transform: rotate(-90deg); }
+
+/* bottom-left account strip */
+.chat-userpanel {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; background: rgba(0,0,0,0.32);
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+.chat-userpanel-av {
+    width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
+    background: rgba(29,185,84,0.28); color: #1db954;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800;
+}
+/* The cell already has a fixed 32px box, so the image can fill it without the
+   circular height dependency that collapsed the avatar picker. */
+.chat-userpanel-av--img { background: none; overflow: hidden; padding: 0; }
+.chat-userpanel-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-guild-logo { width: 30px; height: 30px; object-fit: contain; display: block; }
+.chat-userpanel-main { flex: 1; min-width: 0; }
+.chat-userpanel-name {
+    font-size: 13px; font-weight: 700; color: #fff;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-userpanel-sub { font-size: 11px; color: rgba(255,255,255,0.45); }
+.chat-userpanel-btn {
+    width: 28px; height: 28px; border: none; background: none; cursor: pointer;
+    border-radius: 6px; color: rgba(255,255,255,0.55); font-size: 14px;
+}
+.chat-userpanel-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .chat-rail { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
 .chat-rail .chat-users { flex: 1 1 auto; }
 .chat-side, .chat-users {
@@ -71824,14 +72231,313 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-user:hover { background: rgba(255,255,255,0.07); color: #fff; }
 
+/* Preset chat avatars. The art is 140x165 (portrait), so these are ROUNDED
+   RECTANGLES rather than circles — a circle would crop faces. Swap the
+   border-radius to 50% if you ever ship square art. */
+.chat-av {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%; border-radius: 8px; overflow: hidden;
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.75);
+    font-size: 11px; font-weight: 800; line-height: 1;
+}
+.chat-av--img { background: rgba(0,0,0,0.25); }
+.chat-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* avatar picker (chat settings).
+   NOTE: the cell height is EXPLICIT and the image is absolutely positioned.
+   The obvious version — aspect-ratio on a flex cell with a height:100% img —
+   makes the cell's height depend on the image while the image's height depends
+   on the cell, and the images collapse to nothing. Don't reintroduce that. */
+.chat-avpicker {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 8px; max-height: 300px; overflow-y: auto; padding: 10px;
+    background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; margin-bottom: 10px;
+}
+.chat-avpick {
+    position: relative;            /* containing block for the image */
+    height: 96px;                  /* explicit — never derived from the image */
+    padding: 0; cursor: pointer; overflow: hidden;
+    border: 2px solid transparent; border-radius: 8px;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55);
+    font-size: 20px; line-height: 92px; text-align: center;
+    transition: border-color .12s ease, transform .12s ease;
+}
+.chat-avpick img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.chat-avpick:hover { border-color: rgba(255,255,255,0.4); transform: translateY(-1px); }
+.chat-avpick--on { border-color: #1db954; box-shadow: 0 0 0 2px rgba(29,185,84,0.25); }
+.chat-avpick--none { font-weight: 700; }
+
+/* Discord-style member row: avatar w/ presence dot + name over an activity line */
+.chat-user-av {
+    position: relative; width: 30px; height: 30px; flex: 0 0 auto;
+    border-radius: 50%; background: rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.75);
+}
+.chat-user--self .chat-user-av { background: rgba(29,185,84,0.28); color: #1db954; }
+.chat-user-av .chat-user-dot {
+    position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px;
+    margin: 0; border-radius: 50%; background: #3ba55d; border: 2.5px solid #16161a;
+}
+.chat-user-av .chat-user-dot--tuned { background: rgb(var(--accent-light-rgb)); }
+.chat-user-main { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.chat-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chat-user-act {
+    font-size: 11px; color: rgba(255,255,255,0.4);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 @media (max-width: 900px) {
+    /* stack: the guild rail + member list fold away, channels scroll horizontally */
     .chat-shell { grid-template-columns: 1fr; height: calc(100vh - 190px); }
-    .chat-side { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; }
+    .chat-guilds { display: none; }
+    .chat-side { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; flex-direction: row; }
+    .chat-side-head, .chat-userpanel { display: none; }
+    .chat-side-scroll { display: flex; gap: 6px; padding: 6px; overflow-x: auto; }
     .chat-side-label { display: none; }
     .chat-side-list { display: flex; gap: 6px; }
+    .chat-chanlist { display: flex; gap: 6px; }
+    .chat-cat { display: none; }
+    .chat-chan { width: auto; white-space: nowrap; }
     .chat-side-item { width: auto; white-space: nowrap; }
     .chat-rail { display: none; }
 }
+
+/* ── The Arcade (chat P3) ────────────────────────────────────────────────
+   Games take over the message column. Accent is the same #1db954 the rest of
+   chat uses; the board is deliberately desaturated so the green reads as
+   "your turn" and nothing else competes with it.
+
+   The board sizes itself off the column width with an aspect-ratio grid, so
+   it stays square at any width without JS. Note the cells do NOT set their
+   own height — the grid rows do — which is what stops the collapse the avatar
+   picker hit (a cell height depending on content that depends on the cell). */
+.chat-arc-lobby { padding: 12px 16px 24px; overflow-y: auto; }
+.chat-arc-hero {
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 18px;
+    background: linear-gradient(135deg, rgba(29,185,84,0.14), rgba(255,255,255,0.03));
+    border: 1px solid rgba(29,185,84,0.22);
+}
+.chat-arc-hero-title { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.chat-arc-hero-sub {
+    font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.62); max-width: 62ch;
+}
+.chat-arc-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.chat-arc-sectitle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
+    color: rgba(255,255,255,0.45); margin: 18px 2px 8px;
+}
+.chat-arc-count {
+    background: rgba(255,255,255,0.08); border-radius: 8px; padding: 1px 7px;
+    font-size: 11px; letter-spacing: 0;
+}
+
+.chat-arc-card {
+    display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left;
+    padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.03); color: inherit;
+}
+.chat-arc-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14); }
+.chat-arc-card--mine { border-color: rgba(29,185,84,0.3); }
+.chat-arc-card-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chat-arc-card-sub { font-size: 12px; color: rgba(255,255,255,0.45); }
+.chat-arc-card-actions { display: flex; gap: 8px; margin-top: 4px; }
+.chat-arc-vs { font-size: 11px; color: rgba(255,255,255,0.35); text-transform: uppercase; }
+
+.chat-arc-who {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 700; color: rgba(255,255,255,0.8);
+}
+.chat-arc-who--turn { color: #1db954; }
+.chat-arc-who-dot { font-size: 17px; line-height: 1; }
+
+.chat-arc-badge {
+    align-self: flex-start; border-radius: 6px; padding: 2px 8px;
+    font-size: 11px; font-weight: 700;
+    background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.6);
+}
+.chat-arc-badge--you { background: rgba(29,185,84,0.18); color: #1db954; }
+.chat-arc-badge--open { background: rgba(88,166,255,0.16); color: #8ab4f8; }
+.chat-arc-badge--stale { background: rgba(255,193,7,0.15); color: #ffc107; }
+.chat-arc-badge--bad { background: rgba(244,67,54,0.15); color: #ff6b5e; }
+.chat-arc-badge--done { background: rgba(255,255,255,0.06); }
+
+.chat-arc-btn {
+    border-radius: 8px; padding: 7px 13px; cursor: pointer; font-size: 13px; font-weight: 700;
+    border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.85);
+}
+.chat-arc-btn:hover { background: rgba(255,255,255,0.1); }
+.chat-arc-btn--go { background: #1db954; border-color: #1db954; color: #06130a; }
+.chat-arc-btn--go:hover { filter: brightness(1.08); background: #1db954; }
+.chat-arc-btn--bad { border-color: rgba(244,67,54,0.4); color: #ff6b5e; }
+.chat-arc-btn--slim { padding: 4px 9px; font-size: 12px; }
+
+/* ── board ── */
+.chat-arc-board-wrap {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px 16px 24px; overflow-y: auto; max-width: 640px; margin: 0 auto; width: 100%;
+}
+.chat-arc-players { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chat-arc-board {
+    display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    aspect-ratio: 1 / 1; width: 100%;
+    border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12);
+    user-select: none;
+}
+.chat-arc-board--over { opacity: 0.75; }
+.chat-arc-sq {
+    display: flex; align-items: center; justify-content: center; position: relative;
+    cursor: pointer;
+}
+.chat-arc-sq--light { background: #6f7c86; }
+.chat-arc-sq--dark { background: #46525c; }
+.chat-arc-sq--last { box-shadow: inset 0 0 0 100px rgba(255,193,7,0.16); }
+.chat-arc-sq--sel { box-shadow: inset 0 0 0 3px #1db954; }
+.chat-arc-sq--check { box-shadow: inset 0 0 0 100px rgba(244,67,54,0.35); }
+/* A legal empty square gets a dot; a legal capture gets a ring, so the two
+   read differently at a glance the way they do on every chess site. */
+.chat-arc-sq--dest::after {
+    content: ''; position: absolute; width: 28%; height: 28%; border-radius: 50%;
+    background: rgba(29,185,84,0.55);
+}
+.chat-arc-sq--take::after {
+    content: ''; position: absolute; inset: 6%; border-radius: 50%;
+    border: 4px solid rgba(29,185,84,0.6);
+}
+.chat-arc-pc {
+    font-size: clamp(20px, 6.2vw, 44px); line-height: 1; position: relative; z-index: 1;
+    pointer-events: none;
+}
+.chat-arc-pc--w { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.chat-arc-pc--b { color: #14181c; text-shadow: 0 1px 1px rgba(255,255,255,0.18); }
+
+.chat-arc-status { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
+.chat-arc-note {
+    font-size: 12px; color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.04);
+    border-left: 3px solid rgba(255,193,7,0.5); border-radius: 4px; padding: 7px 10px;
+}
+.chat-arc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-arc-promo {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.3);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700;
+}
+.chat-arc-promobtn {
+    font-size: 24px; line-height: 1; padding: 2px 10px; cursor: pointer; color: #fff;
+    border-radius: 6px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06);
+}
+.chat-arc-promobtn:hover { background: rgba(255,255,255,0.14); }
+
+.chat-arc-moves {
+    display: flex; flex-direction: column; gap: 1px; font-size: 13px;
+    background: rgba(255,255,255,0.03); border-radius: 8px; padding: 8px 10px;
+    max-height: 220px; overflow-y: auto;
+}
+.chat-arc-moverow {
+    display: grid; grid-template-columns: 40px 1fr 1fr; gap: 8px;
+    color: rgba(255,255,255,0.8); padding: 2px 0;
+}
+.chat-arc-moverow--none { color: rgba(255,255,255,0.4); grid-template-columns: 1fr; }
+.chat-arc-moveno { color: rgba(255,255,255,0.35); }
+
+/* ── room ballot (arcade P5) ── */
+.chat-arc-ballot {
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 9px 11px;
+    display: flex; flex-direction: column; gap: 5px;
+}
+.chat-arc-ballot-head {
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px;
+    color: rgba(255,255,255,0.45);
+}
+.chat-arc-ballotrow {
+    display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; align-items: center;
+    font-size: 13px; color: rgba(255,255,255,0.8);
+}
+.chat-arc-ballotmv { font-weight: 700; }
+.chat-arc-ballotbar {
+    height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden;
+}
+.chat-arc-ballotbar i { display: block; height: 100%; background: #1db954; }
+.chat-arc-ballotn {
+    font-size: 11px; color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums;
+}
+
+/* ── connect 4 (arcade P5) ── */
+.chat-arc-c4board {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+    aspect-ratio: 7 / 6; width: 100%; padding: 8px;
+    background: #2b4f8a; border-radius: 12px;
+}
+.chat-arc-c4cell {
+    display: flex; align-items: center; justify-content: center; border-radius: 50%;
+    background: rgba(0,0,0,0.28);
+}
+/* the whole COLUMN is the target — you drop into a column, not onto a cell */
+.chat-arc-c4cell--live { cursor: pointer; }
+.chat-arc-c4cell--live:hover { background: rgba(255,255,255,0.14); }
+.chat-arc-disc { width: 82%; height: 82%; border-radius: 50%; }
+.chat-arc-disc--w { background: radial-gradient(circle at 35% 30%, #ff8a80, #d63a2f); }
+/* Yellow, not blue: the board is blue, and a blue disc on a blue board is
+   the one colour pairing that cannot work. Red/yellow on blue is also what
+   the actual game looks like, so it reads instantly. */
+.chat-arc-disc--b { background: radial-gradient(circle at 35% 30%, #ffe082, #f2b90c); }
+
+/* ── ladder + the reveal (arcade P4) ── */
+.chat-arc-ladder {
+    background: rgba(255,255,255,0.03); border-radius: 10px; padding: 8px 10px;
+}
+.chat-arc-ladrow {
+    display: grid; grid-template-columns: 26px 1fr auto auto; gap: 10px; align-items: center;
+    padding: 5px 4px; font-size: 13px; color: rgba(255,255,255,0.78);
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.chat-arc-ladrow:last-of-type { border-bottom: none; }
+.chat-arc-ladrow--me { color: #1db954; font-weight: 700; }
+.chat-arc-ladno { color: rgba(255,255,255,0.35); text-align: right; }
+.chat-arc-ladname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-arc-ladwl { font-size: 11px; color: rgba(255,255,255,0.4); }
+.chat-arc-ladelo { font-weight: 800; font-variant-numeric: tabular-nums; }
+.chat-arc-ladnote {
+    font-size: 11px; color: rgba(255,255,255,0.38); line-height: 1.5; padding: 8px 4px 2px;
+}
+
+.chat-arc-exports { display: flex; gap: 8px; }
+.chat-arc-reveal { margin-top: 4px; }
+.chat-arc-reveal-btn {
+    display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer;
+    border-radius: 8px; padding: 8px 11px; font-size: 12px; font-weight: 700;
+    border: 1px dashed rgba(29,185,84,0.35); background: rgba(29,185,84,0.07);
+    color: #1db954; text-align: left;
+}
+.chat-arc-reveal-btn:hover { background: rgba(29,185,84,0.13); }
+.chat-arc-reveal-caret { margin-left: auto; }
+.chat-arc-rawnote {
+    font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.5; padding: 8px 4px 4px;
+}
+.chat-arc-raw {
+    max-height: 240px; overflow: auto; border-radius: 8px;
+    background: rgba(0,0,0,0.28); padding: 8px 10px;
+}
+.chat-arc-rawrow {
+    display: flex; gap: 8px; align-items: baseline; padding: 2px 0;
+    font-size: 11px; color: rgba(255,255,255,0.55);
+}
+.chat-arc-rawrow code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-all; color: rgba(255,255,255,0.75);
+}
+.chat-arc-rawwho { flex: none; color: #1db954; font-weight: 700; }
+
+/* a game in the sidebar where it is your move */
+.chat-thread--turn { color: #1db954; }
 
 /* message-this-user links (chat P4) — any surface can render one */
 .chat-user-link {
@@ -71949,6 +72655,14 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 16px; font-weight: 800; color: rgba(255,255,255,0.92);
     user-select: none; flex: none;
 }
+/* Preset-avatar variant of the message-group avatar. Rounded rectangle rather
+   than the initial's circle — the art is 140x165 portrait and a circle crops
+   faces (see .chat-av). */
+.chat-avatar--img {
+    border-radius: 9px; background: rgba(0,0,0,0.25); overflow: hidden;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+}
+.chat-avatar--img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .chat-group-body { min-width: 0; }
 .chat-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 1px; }
 .chat-group-head .chat-msg-user { font-size: 14.5px; }
