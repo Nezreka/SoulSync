@@ -104,6 +104,7 @@ import {
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
+import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
@@ -312,10 +313,14 @@ function useNavigate() {
 }
 
 const LOCAL_ARTWORK_PREFIX = '/api/library/v2/artwork/';
-// perf25-02: an uncached cover answers 404 while the server resolves it in the
-// background, so a local miss is retried a bounded number of times before the
-// placeholder becomes final. Remote provider URLs never retry.
-const ARTWORK_RETRY_DELAYS_MS = [1500, 4000, 9000];
+
+/** Set (never duplicate) the `v` cache-bust parameter on an artwork URL. */
+function withCacheBust(url: string, version: number): string {
+  const [path, query = ''] = url.split('?');
+  const params = new URLSearchParams(query);
+  params.set('v', String(version));
+  return `${path}?${params.toString()}`;
+}
 
 /** Cover/poster image with a graceful placeholder when no artwork resolves.
  *  ``thumb`` requests the small resized variant for fast list rendering. */
@@ -330,48 +335,46 @@ export function Artwork({
   className: string;
   thumb?: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Only SoulSync's artwork endpoint understands ``size=thumb``. Appending it
   // to Spotify/Deezer/CDN URLs (the previous behavior) can invalidate signed
   // URLs; it also produced ``...?v=123?size=thumb`` for cache-busted local art.
   const local = Boolean(src) && src.startsWith(LOCAL_ARTWORK_PREFIX);
   const base = src && thumb && local ? `${src}${src.includes('?') ? '&' : '?'}size=thumb` : src;
-  // rev25-12: the retry count is keyed to the base it was counted against and
-  // reset the instant `base` changes — during render, not in a `[base]`
-  // effect. An effect fires only after this render already committed, so a
-  // src change (e.g. a list refetch landing a fresh `?v=`) used to commit one
-  // frame that still carried the old base's `retry=N` suffix on the new URL,
+  // rev25-12: this state is keyed to the base it belongs to and reset the
+  // instant `base` changes — during render, not in a `[base]` effect. An
+  // effect fires only after this render already committed, so a src change
+  // (e.g. a list refetch landing a fresh `?v=`) used to commit one frame that
+  // still carried the previous base's cache-bust suffix on the new URL,
   // forcing every such change to load the image twice. Adjusting state during
   // render (React's documented pattern for this) means the corrected value is
   // what actually gets painted, never a transient wrong one.
-  const [retry, setRetry] = useState({ base, attempt: 0 });
-  if (retry.base !== base) {
-    setRetry({ base, attempt: 0 });
-    setFailed(false);
-  }
-  const attempt = retry.base === base ? retry.attempt : 0;
-  // A falsy `base` must stay falsy: `''` plus a stale retry suffix produces
-  // the truthy string `'?retry=1'`, which `<img>` resolves against the
-  // current document — a broken-image flash — instead of the placeholder.
-  const url = base && attempt > 0 ? `${base}${base.includes('?') ? '&' : '?'}retry=${attempt}` : base;
-  useEffect(
-    () => () => {
-      if (retryTimer.current) clearTimeout(retryTimer.current);
-      retryTimer.current = null;
-    },
-    [],
-  );
+  const [state, setState] = useState({ base, failed: false, version: 0 });
+  if (state.base !== base) setState({ base, failed: false, version: 0 });
+  const failed = state.base === base && state.failed;
+  const version = state.base === base ? state.version : 0;
+  // A falsy `base` must stay falsy: `''` plus a suffix produces the truthy
+  // string `'?v=1'`, which `<img>` resolves against the current document — a
+  // broken-image flash — instead of the placeholder. `v` is *replaced*, not
+  // appended: the list response already ships one for cached covers.
+  const url = base && version ? withCacheBust(base, version) : base;
+  // rev25-02: a cold cover 404s while the server builds it in the background.
+  // An `<img>` cannot read `X-Artwork-Pending`, so the wait is driven by the
+  // server: subscribe until the build is reported ready (render it) or
+  // unavailable (the placeholder is final), instead of a fixed retry ladder
+  // that expired before slow builds finished.
+  useEffect(() => {
+    if (!failed || !local) return;
+    const target = parseArtworkTarget(base);
+    if (!target) return;
+    return watchPendingArtwork(target.kind, target.id, (readyVersion) => {
+      if (readyVersion == null) return;
+      setState((current) =>
+        current.base === base ? { base, failed: false, version: readyVersion } : current,
+      );
+    });
+  }, [failed, local, base]);
   const handleError = () => {
-    setFailed(true);
-    const delay = ARTWORK_RETRY_DELAYS_MS[attempt];
-    if (!local || delay === undefined) return;
-    if (retryTimer.current) clearTimeout(retryTimer.current);
-    retryTimer.current = setTimeout(() => {
-      retryTimer.current = null;
-      setRetry((current) => (current.base === base ? { base, attempt: current.attempt + 1 } : current));
-      setFailed(false);
-    }, delay);
+    setState((current) => (current.base === base ? { ...current, failed: true } : current));
   };
   if (!url || failed) {
     return (

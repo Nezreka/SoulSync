@@ -2928,3 +2928,35 @@ def test_duplicate_findings_endpoint_lists_open_findings(api):
     assert finding["reason"] == "duplicate_title_unmerged"
     assert finding["album_title"] == "Views"
     assert finding["other_album_title"] == "Best EP"
+
+
+def test_artwork_status_reports_pending_and_ready_covers(api, monkeypatch):
+    """rev25-02: the batched poll a rendered page uses to learn that its
+    background build finished (or that there is nothing to wait for)."""
+    client, db, ids = api
+    from core.library2 import artwork
+
+    monkeypatch.setattr(
+        artwork, "artwork_build_states",
+        lambda _db, kind, entity_ids: {
+            int(entity_ids[0]): {"state": "ready", "version": 42},
+            int(entity_ids[1]): {"state": "pending"},
+        },
+    )
+    response = client.get("/api/library/v2/artwork/status?kind=artist&ids=1,2")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["states"]["1"] == {"state": "ready", "version": 42}
+    assert data["states"]["2"] == {"state": "pending"}
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_artwork_status_validates_its_input(api):
+    client, _db, _ids = api
+    assert client.get(
+        "/api/library/v2/artwork/status?kind=track&ids=1").status_code == 400
+    assert client.get(
+        "/api/library/v2/artwork/status?kind=artist&ids=abc").status_code == 400
+    assert client.get(
+        "/api/library/v2/artwork/status?kind=artist").get_json()["states"] == {}

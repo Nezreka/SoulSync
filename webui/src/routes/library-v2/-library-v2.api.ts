@@ -1876,3 +1876,33 @@ export async function autoGrabBest(
   await startSourceDownload(best, options, entity);
   return best;
 }
+
+/** rev25-02: state of a cover the server resolves in the background. */
+export type LibraryV2ArtworkState =
+  | { state: 'ready'; version: number }
+  | { state: 'pending' }
+  | { state: 'unavailable' };
+
+interface ArtworkStatusResponse {
+  success: boolean;
+  states: Record<string, LibraryV2ArtworkState>;
+}
+
+/** Ask which of these entities' covers finished building.
+ *
+ *  A cold cover answers 404 and builds off-thread, but an `<img>` cannot read
+ *  the pending header and a fixed retry ladder expires before a slow provider
+ *  walk does. One batched poll per tick replaces up to four blind retries per
+ *  image. */
+export async function fetchLibraryV2ArtworkStatus(
+  kind: 'artist' | 'album',
+  ids: number[],
+): Promise<Record<string, LibraryV2ArtworkState>> {
+  if (ids.length === 0) return {};
+  const payload = await readJson<ArtworkStatusResponse>(
+    apiClient.get('library/v2/artwork/status', {
+      searchParams: { kind, ids: ids.join(',') },
+    }),
+  );
+  return payload.states ?? {};
+}

@@ -198,3 +198,36 @@ def test_shutdown_background_executor_shuts_down_the_pool(tmp_path, monkeypatch)
     assert artwork._background_executor is None
     with pytest.raises(RuntimeError):
         executor_ref.submit(lambda: None)
+
+
+def test_build_states_report_ready_pending_and_unavailable(tmp_path, monkeypatch):
+    """rev25-02: an already-rendered page has no way to learn that its cover
+    finished building — ``<img>`` cannot read ``X-Artwork-Pending`` and three
+    fixed retries expire long before a cold provider walk does. This is the
+    server side of the answer: ask what actually happened."""
+    database = _shim(tmp_path)
+    artwork.artwork_dir(database).mkdir(parents=True, exist_ok=True)
+    ready = artwork.artwork_file(database, "artist", 1)
+    ready.write_bytes(b"jpeg-bytes")
+
+    release = threading.Event()
+    monkeypatch.setattr(artwork, "_background_executor", None)
+    monkeypatch.setattr(
+        artwork, "build_artwork",
+        lambda *_a, **_k: (release.wait(timeout=10), None)[1],
+    )
+    pending = artwork.schedule_artwork_build(database, None, "artist", 2)
+
+    states = artwork.artwork_build_states(database, "artist", [1, 2, 3])
+
+    assert states[1]["state"] == "ready"
+    assert states[1]["version"] > 0
+    assert states[2]["state"] == "pending"
+    # Never scheduled and nothing cached: there is nothing to wait for, so the
+    # client must stop polling instead of hammering the endpoint forever.
+    assert states[3]["state"] == "unavailable"
+
+    release.set()
+    pending.result(timeout=10)
+    assert artwork.artwork_build_states(
+        database, "artist", [2])[2]["state"] == "unavailable"

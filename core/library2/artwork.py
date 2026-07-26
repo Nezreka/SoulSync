@@ -763,6 +763,44 @@ def schedule_artwork_build(database, config_manager, kind: str, entity_id: int):
         return None
 
 
+def artwork_build_states(database, kind: str, entity_ids) -> Dict[int, Dict[str, Any]]:
+    """Report where each entity's artwork stands: ready, pending or nothing.
+
+    rev25-02: the placeholder contract (404 + ``X-Artwork-Pending``) told a
+    *browser* nothing an ``<img>`` could act on, and the client's three fixed
+    retries regularly expired before a cold provider walk finished — a
+    perfectly resolvable cover could stay a placeholder until the next full
+    page load.  Callers poll this instead, so the wait is bounded by the real
+    build rather than by a constant.
+
+    ``ready`` carries the cache-bust version to request.  ``unavailable`` means
+    there is nothing in flight and nothing on disk — deliberately *not* a
+    reason to schedule another walk here: repeated walks for entities with no
+    resolvable image are Finding 10's negative-cache question, which stays
+    deferred.
+    """
+    kind = str(kind or "").strip().lower()
+    out: Dict[int, Dict[str, Any]] = {}
+    with _background_guard:
+        inflight = {
+            key for key in _background_inflight
+            if key[0] == str(database.database_path) and key[1] == kind
+        }
+    for raw_id in entity_ids:
+        try:
+            entity_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        version = artwork_version(database, kind, entity_id)
+        if version:
+            out[entity_id] = {"state": "ready", "version": version}
+        elif (str(database.database_path), kind, entity_id) in inflight:
+            out[entity_id] = {"state": "pending"}
+        else:
+            out[entity_id] = {"state": "unavailable"}
+    return out
+
+
 def schedule_missing_artwork(database, config_manager, targets) -> int:
     """Warm the artwork cache for entities that just joined the library.
 
@@ -952,6 +990,7 @@ __all__ = [
     "build_artwork",
     "apply_manual_artwork",
     "artwork_file",
+    "artwork_build_states",
     "artwork_version",
     "forget_artwork_versions",
     "thumb_file",

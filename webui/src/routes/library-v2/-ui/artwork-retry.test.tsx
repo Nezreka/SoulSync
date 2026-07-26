@@ -1,70 +1,119 @@
-import { fireEvent, render, screen, act } from '@testing-library/react';
+import { fireEvent, render, screen, act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { HttpResponse, http, server } from '@/test/msw';
+
+import { resetPendingArtworkWatchers } from './artwork-pending';
 import { Artwork } from './library-v2-page';
 
-describe('Artwork placeholder retry (perf25-02)', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+/** rev25-02: a cold cover 404s while the server builds it in the background.
+ *  The client used to answer with three fixed retries (14.5s total) that
+ *  regularly expired before the build finished, leaving a resolvable cover as
+ *  a placeholder until the next full page load. The wait is now driven by the
+ *  server's own build state. */
+describe('Artwork background-build delivery (rev25-02)', () => {
+  const statusCalls: string[] = [];
 
-  it('retries a locally cached cover that is still being resolved', () => {
+  beforeEach(() => {
+    statusCalls.length = 0;
+    resetPendingArtworkWatchers();
+  });
+  afterEach(() => {
+    resetPendingArtworkWatchers();
+    vi.useRealTimers();
+  });
+
+  function serveStatus(sequence: Array<Record<string, unknown>>) {
+    let call = 0;
+    server.use(
+      http.get('/api/library/v2/artwork/status', ({ request }) => {
+        statusCalls.push(new URL(request.url).search);
+        const states = sequence[Math.min(call, sequence.length - 1)];
+        call += 1;
+        return HttpResponse.json({ success: true, states });
+      }),
+    );
+  }
+
+  it('renders the cover once the server reports the build finished', async () => {
+    serveStatus([{ '7': { state: 'pending' } }, { '7': { state: 'ready', version: 1234 } }]);
+
     render(<Artwork src="/api/library/v2/artwork/artist/7" alt="Artist" className="c" />);
+    fireEvent.error(screen.getByAltText('Artist'));
 
-    const image = screen.getByAltText('Artist') as HTMLImageElement;
-    expect(image.getAttribute('src')).toBe('/api/library/v2/artwork/artist/7');
-
-    fireEvent.error(image);
     // While the background build runs the user sees the placeholder, not a
     // broken image.
     expect(screen.getByLabelText('Artist').textContent).toBe('♪');
 
-    act(() => void vi.advanceTimersByTime(2000));
+    await waitFor(
+      () => {
+        const image = screen.queryByAltText('Artist') as HTMLImageElement | null;
+        expect(image?.getAttribute('src')).toBe('/api/library/v2/artwork/artist/7?v=1234');
+      },
+      { timeout: 15000 },
+    );
+  }, 20000);
 
-    const retried = screen.getByAltText('Artist') as HTMLImageElement;
-    expect(retried.getAttribute('src')).toContain('retry=1');
-  });
+  it('stops waiting when the server says there is nothing to build', async () => {
+    serveStatus([{ '3': { state: 'unavailable' } }]);
 
-  it('gives up after the bounded number of retries', () => {
     render(<Artwork src="/api/library/v2/artwork/album/3" alt="Album" className="c" />);
+    fireEvent.error(screen.getByAltText('Album'));
 
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const image = screen.queryByAltText('Album');
-      if (!image) break;
-      fireEvent.error(image);
-      act(() => void vi.advanceTimersByTime(30000));
-    }
-
+    await waitFor(() => expect(statusCalls.length).toBe(1), { timeout: 15000 });
+    // A settled "nothing to wait for" must not keep polling.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(statusCalls.length).toBe(1);
     expect(screen.queryByAltText('Album')).toBeNull();
     expect(screen.getByLabelText('Album').textContent).toBe('♪');
-  });
+  }, 20000);
 
-  it('does not retry remote provider images', () => {
+  it('asks for every pending cover in one batched request', async () => {
+    serveStatus([{}]);
+
+    render(
+      <>
+        <Artwork src="/api/library/v2/artwork/artist/7" alt="A" className="c" />
+        <Artwork src="/api/library/v2/artwork/artist/8" alt="B" className="c" />
+      </>,
+    );
+    fireEvent.error(screen.getByAltText('A'));
+    fireEvent.error(screen.getByAltText('B'));
+
+    await waitFor(() => expect(statusCalls.length).toBeGreaterThan(0), { timeout: 15000 });
+    expect(statusCalls[0]).toContain('ids=7%2C8');
+  }, 20000);
+
+  it('does not poll for remote provider images', async () => {
+    serveStatus([{}]);
     render(<Artwork src="https://cdn.test/cover.jpg" alt="Remote" className="c" />);
 
     fireEvent.error(screen.getByAltText('Remote'));
-    act(() => void vi.advanceTimersByTime(30000));
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
-    expect(screen.queryByAltText('Remote')).toBeNull();
+    expect(statusCalls).toEqual([]);
     expect(screen.getByLabelText('Remote').textContent).toBe('♪');
   });
 
-  it('rev25-12: does not commit a stale retry suffix onto a new base on src change', () => {
+  it('rev25-12: does not commit a stale cache-bust suffix onto a new base', async () => {
+    serveStatus([{ '7': { state: 'ready', version: 1234 } }]);
+
     const { rerender } = render(
       <Artwork src="/api/library/v2/artwork/artist/7" alt="Artist" className="c" />,
     );
     fireEvent.error(screen.getByAltText('Artist'));
-    act(() => void vi.advanceTimersByTime(2000));
-    // handleError briefly swaps in the placeholder <div> before the retry
-    // fires, so the retried <img> is a fresh DOM node — re-query for it.
-    const image = screen.getByAltText('Artist') as HTMLImageElement;
-    expect(image.getAttribute('src')).toContain('retry=1');
+    await waitFor(
+      () => {
+        const image = screen.queryByAltText('Artist') as HTMLImageElement | null;
+        expect(image?.getAttribute('src')).toContain('v=1234');
+      },
+      { timeout: 15000 },
+    );
 
-    // React flushes the base-keyed useEffect synchronously inside act(), so
-    // asserting only on the settled DOM after rerender() can't see a frame
-    // that briefly existed mid-commit. A real `<img>` element starts loading
-    // whatever `src` it's given the instant the attribute is set, before any
-    // later effect corrects it — so what matters is every value the element
-    // was ever pointed at, not just the last one. Capture that directly.
+    // A real `<img>` starts loading whatever `src` it is given the instant the
+    // attribute is set, before any later effect corrects it — so what matters
+    // is every value it was ever pointed at, not just the last one.
+    const image = screen.getByAltText('Artist') as HTMLImageElement;
     const observedSrc: string[] = [];
     const originalSetAttribute = image.setAttribute.bind(image);
     image.setAttribute = ((name: string, value: string) => {
@@ -74,25 +123,23 @@ describe('Artwork placeholder retry (perf25-02)', () => {
 
     rerender(<Artwork src="/api/library/v2/artwork/artist/7?v=99" alt="Artist" className="c" />);
 
-    // No value the element was ever pointed at during this update may still
-    // carry the previous base's retry suffix — that would force a second,
-    // guaranteed cache-missing image load for a cover that just arrived.
-    expect(observedSrc.some((value) => value.includes('retry='))).toBe(false);
+    expect(observedSrc.some((value) => value.includes('v=1234'))).toBe(false);
     expect(image.getAttribute('src')).toBe('/api/library/v2/artwork/artist/7?v=99');
-  });
+  }, 20000);
 
-  it('rev25-12: never points the element at a truthy garbage src when src goes empty mid-retry', () => {
+  it('rev25-12: never points the element at a truthy garbage src when src goes empty', async () => {
+    serveStatus([{ '7': { state: 'ready', version: 1234 } }]);
+
     const { rerender } = render(
       <Artwork src="/api/library/v2/artwork/artist/7" alt="Artist" className="c" />,
     );
     fireEvent.error(screen.getByAltText('Artist'));
-    act(() => void vi.advanceTimersByTime(2000));
-    const image = screen.getByAltText('Artist') as HTMLImageElement;
-    expect(image.getAttribute('src')).toContain('retry=1');
+    await waitFor(
+      () => expect(screen.queryByAltText('Artist')?.getAttribute('src')).toContain('v=1234'),
+      { timeout: 15000 },
+    );
 
-    // Empty base + a leftover retry count used to compute `'' + '?retry=1'`
-    // — a non-empty, truthy string that `<img>` resolves against the current
-    // document (visible as a broken-image flash) instead of the placeholder.
+    const image = screen.getByAltText('Artist') as HTMLImageElement;
     const observedSrc: string[] = [];
     const originalSetAttribute = image.setAttribute.bind(image);
     image.setAttribute = ((name: string, value: string) => {
@@ -105,19 +152,54 @@ describe('Artwork placeholder retry (perf25-02)', () => {
     expect(observedSrc.some((value) => value.startsWith('?'))).toBe(false);
     expect(screen.queryByAltText('Artist')).toBeNull();
     expect(screen.getByLabelText('Artist').textContent).toBe('♪');
-  });
+  }, 20000);
 
-  it('appends the thumb variant before the retry marker', () => {
+  it('replaces the stale cache-bust marker rather than duplicating it', async () => {
+    serveStatus([{ '9': { state: 'ready', version: 77 } }]);
+
     render(<Artwork src="/api/library/v2/artwork/artist/9?v=42" alt="Thumb" className="c" thumb />);
 
     const image = screen.getByAltText('Thumb') as HTMLImageElement;
     expect(image.getAttribute('src')).toBe('/api/library/v2/artwork/artist/9?v=42&size=thumb');
 
     fireEvent.error(image);
-    act(() => void vi.advanceTimersByTime(2000));
-
-    expect((screen.getByAltText('Thumb') as HTMLImageElement).getAttribute('src')).toBe(
-      '/api/library/v2/artwork/artist/9?v=42&size=thumb&retry=1',
+    await waitFor(
+      () =>
+        expect(
+          (screen.queryByAltText('Thumb') as HTMLImageElement | null)?.getAttribute('src'),
+        ).toBe('/api/library/v2/artwork/artist/9?v=77&size=thumb'),
+      { timeout: 15000 },
     );
+  }, 20000);
+
+  it('keeps waiting when a poll fails instead of nailing the placeholder', async () => {
+    let call = 0;
+    server.use(
+      http.get('/api/library/v2/artwork/status', () => {
+        call += 1;
+        statusCalls.push(String(call));
+        if (call === 1) return HttpResponse.error();
+        return HttpResponse.json({
+          success: true,
+          states: { '7': { state: 'ready', version: 5 } },
+        });
+      }),
+    );
+
+    render(<Artwork src="/api/library/v2/artwork/artist/7" alt="Artist" className="c" />);
+    fireEvent.error(screen.getByAltText('Artist'));
+
+    await waitFor(
+      () => expect(screen.queryByAltText('Artist')?.getAttribute('src')).toContain('v=5'),
+      { timeout: 15000 },
+    );
+    expect(statusCalls.length).toBeGreaterThan(1);
+  }, 20000);
+
+  it('act(): mounting alone never polls', () => {
+    vi.useFakeTimers();
+    render(<Artwork src="/api/library/v2/artwork/artist/7" alt="Artist" className="c" />);
+    act(() => void vi.advanceTimersByTime(30000));
+    expect(statusCalls).toEqual([]);
   });
 });

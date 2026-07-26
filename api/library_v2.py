@@ -2016,6 +2016,53 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
         return resp
 
+    # Bounded so one request can never turn into an unbounded stat sweep; a
+    # rendered page holds at most a screenful of pending covers anyway.
+    _ARTWORK_STATUS_MAX_IDS = 200
+
+    @app.route("/api/library/v2/artwork/status")
+    def lib2_artwork_status():
+        """Tell an already-rendered page what happened to its pending covers.
+
+        rev25-02: the cold path answers 404 + ``X-Artwork-Pending`` and builds
+        in the background, but an ``<img>`` cannot read a header and the
+        client's fixed retry budget expired before a cold provider walk
+        finished — a resolvable cover could stay a placeholder until the next
+        full page load.  Clients poll this one batched endpoint instead, so
+        waiting is bounded by the real build and ends decisively for entities
+        that have no image at all.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        kind = str(request.args.get("kind") or "").strip().lower()
+        if kind not in ("artist", "album"):
+            return jsonify({"success": False, "error": "kind must be artist or album"}), 400
+        raw_ids = str(request.args.get("ids") or "")
+        ids = []
+        for chunk in raw_ids.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            try:
+                value = int(chunk)
+            except ValueError:
+                return jsonify({"success": False, "error": "ids must be integers"}), 400
+            if value > 0 and value not in ids:
+                ids.append(value)
+            if len(ids) >= _ARTWORK_STATUS_MAX_IDS:
+                break
+        if not ids:
+            return jsonify({"success": True, "states": {}})
+        from core.library2.artwork import artwork_build_states
+        states = artwork_build_states(get_database(), kind, ids)
+        response = jsonify({
+            "success": True,
+            "states": {str(key): value for key, value in states.items()},
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.route("/api/library/v2/artwork/<kind>/<int:eid>")
     def lib2_artwork(kind, eid):
         guard = _guard()
