@@ -132,6 +132,43 @@ def _native_entity_id(value: Any) -> Optional[int]:
     return number if number > 0 else None
 
 
+# entity_type -> (native table, legacy backref column). ``file`` is absent on
+# purpose: ``lib2_track_files.legacy_track_id`` points at a legacy *track*, so a
+# legacy id can name several file rows and is not a file identity.
+_LEGACY_BACKREFS = {
+    "artist": ("lib2_artists", "legacy_artist_id"),
+    "album": ("lib2_albums", "legacy_album_id"),
+    "track": ("lib2_tracks", "legacy_track_id"),
+}
+
+
+def _legacy_backref_ids(conn: Any, entity_type: str, entity_id: Any) -> List[int]:
+    """Native row ids for a finding that names a *legacy* catalogue row.
+
+    Findings written before the P3 cutover — and by the jobs that still scan
+    legacy tables — carry a bare legacy id and no ``details['library_v2']``
+    block, so every other lookup in :func:`_resolve_links` misses and the repair
+    converges nowhere (issues.md T-01).  The importer stored the backref on the
+    native row, so this is a hard stored id, not a name heuristic (Guide §2.5).
+
+    Legacy ids are opaque ``TEXT`` (Guide §5) — compared as text, never
+    ``int()``-coerced.
+    """
+    lookup = _LEGACY_BACKREFS.get(entity_type)
+    text = str(entity_id or "").strip()
+    if not lookup or not text or text.startswith("lib2:"):
+        return []
+    table, column = lookup
+    try:
+        rows = conn.execute(
+            f"SELECT id FROM {table} WHERE CAST({column} AS TEXT)=?", (text,)
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001 — pre-migration schema
+        logger.debug("legacy backref lookup failed (%s.%s): %s", table, column, exc)
+        return []
+    return _as_ints(row[0] for row in rows)
+
+
 def _resolve_links(
     conn: Any,
     *,
@@ -140,6 +177,7 @@ def _resolve_links(
     file_path: Optional[str],
     details: Mapping[str, Any],
     config_manager: Any,
+    artist_files: bool = False,
 ) -> Dict[str, List[int]]:
     ids = _details_lib2_ids(details)
     artists, albums = set(ids["artists"]), set(ids["albums"])
@@ -157,6 +195,9 @@ def _resolve_links(
         table, target = entity_tables[entity_type]
         if conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (native_id,)).fetchone():
             target.add(native_id)
+    elif native_id is None and entity_type in entity_tables:
+        _, target = entity_tables[entity_type]
+        target.update(_legacy_backref_ids(conn, entity_type, entity_id))
 
     candidate_paths = {
         str(value).strip()
@@ -235,6 +276,46 @@ def _resolve_links(
                     sorted(tracks),
                 ).fetchall()
                 files.update(int(row[0]) for row in rows)
+    if artist_files and artists and not (albums or tracks or files):
+        # An artist-only subject whose repair rewrote files on disk (T-11's
+        # comma-artist split re-tags every file credited to the artist). The
+        # artist is the narrowest thing the finding named, so its files are the
+        # convergence scope. Gated on the job's declared effects — a catalogue-
+        # only repair such as genre_cleanup must not drag a whole discography
+        # into a rescan (BR-08).
+        rows = conn.execute(
+            f"""SELECT f.id FROM lib2_track_files f
+                  JOIN lib2_tracks t ON t.id=f.track_id
+             LEFT JOIN lib2_albums al ON al.id=t.album_id
+                 WHERE COALESCE(f.file_state,'active')<>'deleted'
+                   AND (al.primary_artist_id IN ({_marks(sorted(artists))})
+                        OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                                    WHERE ta.track_id=t.id
+                                      AND ta.artist_id IN
+                                          ({_marks(sorted(artists))})))""",
+            [*sorted(artists), *sorted(artists)],
+        ).fetchall()
+        files.update(int(row[0]) for row in rows)
+        if files:
+            rows = conn.execute(
+                f"SELECT DISTINCT track_id FROM lib2_track_files WHERE id IN "
+                f"({_marks(sorted(files))}) AND track_id IS NOT NULL",
+                sorted(files),
+            ).fetchall()
+            tracks.update(int(row[0]) for row in rows)
+
+    if tracks and not files:
+        # Nothing named a concrete file, so the track rows are the narrowest
+        # subject we have — take their files so a tags/path repair still gets
+        # its snapshot refresh.  Guarded on ``not files`` so a finding that DID
+        # name a file is never widened to its track's other files (ADR-03).
+        rows = conn.execute(
+            f"SELECT id FROM lib2_track_files WHERE track_id IN "
+            f"({_marks(sorted(tracks))}) AND "
+            "COALESCE(file_state,'active')<>'deleted'",
+            sorted(tracks),
+        ).fetchall()
+        files.update(int(row[0]) for row in rows)
     return {
         "artists": sorted(artists),
         "albums": sorted(albums),
@@ -423,12 +504,16 @@ def sync_repair_change(
     """Finalize one successful native repair mutation."""
 
     if not library_v2_enabled(config_manager):
-        return {"enabled": False, "reason": "feature_disabled"}
+        return {"enabled": False, "reason": "feature_disabled", "converged": False}
     details, result = dict(details or {}), dict(result or {})
     conn = database._get_connection()
     try:
         if not _table_exists(conn, "lib2_track_files"):
-            return {"enabled": True, "reason": "schema_missing"}
+            return {"enabled": True, "reason": "schema_missing", "converged": False}
+
+        from core.repair_jobs import JOB_LIBRARY_V2_EFFECTS
+
+        effects = set(JOB_LIBRARY_V2_EFFECTS.get(job_id, frozenset({"observe"})))
         links = _resolve_links(
             conn,
             entity_type=entity_type,
@@ -436,13 +521,13 @@ def sync_repair_change(
             file_path=file_path,
             details=details,
             config_manager=config_manager,
+            # Only a repair that declares it writes files earns the artist-wide
+            # file fan-out.
+            artist_files=bool(effects & {"tags", "path", "new_file"}),
         )
         if not any(links.values()):
-            return {"enabled": True, "reason": "subject_unlinked"}
+            return {"enabled": True, "reason": "subject_unlinked", "converged": False}
 
-        from core.repair_jobs import JOB_LIBRARY_V2_EFFECTS
-
-        effects = set(JOB_LIBRARY_V2_EFFECTS.get(job_id, frozenset({"observe"})))
         changed_fields: set[str] = set(effects - {"observe", "none"})
         deleting = action in _DELETE_ACTIONS or result.get("library_v2_file_deleted") is True
         if deleting and links["files"]:
@@ -541,6 +626,7 @@ def sync_repair_change(
     return {
         "enabled": True,
         "reason": "synchronized",
+        "converged": True,
         "artists": len(links["artists"]),
         "albums": len(links["albums"]),
         "tracks": len(links["tracks"]),

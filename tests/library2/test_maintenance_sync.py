@@ -1192,3 +1192,174 @@ def test_every_registered_job_declares_v2_effects():
 
     assert set(JOB_LIBRARY_V2_EFFECTS) == set(JOB_DATA_BASIS)
     assert all(effects for effects in JOB_LIBRARY_V2_EFFECTS.values())
+
+
+def test_legacy_album_finding_still_converges_into_v2(legacy_db, tmp_path):
+    """issues.md T-01: a finding created before the P3 cutover (or by a job that
+    still scans legacy rows) carries a bare legacy album id and no
+    ``details['library_v2']``.  The importer stored ``legacy_album_id`` on the
+    native row, so the subject IS resolvable — refusing to use that backref
+    left the physical repair done and the lib2 tag/gap cache stale forever."""
+    from core.library2.maintenance_sync import sync_repair_change
+
+    _import(legacy_db)
+    conn = legacy_db._get_connection()
+    try:
+        native_album_id = conn.execute(
+            "SELECT id FROM lib2_albums WHERE legacy_album_id=10"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    outcome = sync_repair_change(
+        legacy_db,
+        _Config(True),
+        job_id="album_tag_consistency",
+        finding_type="album_tag_inconsistency",
+        action="fixed_album_tags",
+        entity_type="album",
+        entity_id="10",
+        file_path=None,
+        details={},
+    )
+
+    assert outcome["reason"] == "synchronized"
+    assert outcome["albums"] == 1
+    conn = legacy_db._get_connection()
+    try:
+        event = conn.execute(
+            "SELECT lib2_album_id FROM lib2_maintenance_events "
+            "WHERE job_id='album_tag_consistency' LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert event is not None and int(event[0]) == int(native_album_id)
+
+
+def test_legacy_track_finding_still_converges_into_v2(legacy_db):
+    """Same backref rescue for a track-scoped legacy finding (library_reorganize
+    'path_mismatch' rows in the production DB look exactly like this)."""
+    from core.library2.maintenance_sync import annotate_finding_details
+
+    _import(legacy_db)
+    details = annotate_finding_details(
+        legacy_db,
+        _Config(True),
+        entity_type="track",
+        entity_id="101",          # legacy tracks.id, no file on disk
+        file_path=None,
+        details={},
+    )
+
+    conn = legacy_db._get_connection()
+    try:
+        native_track_id = conn.execute(
+            "SELECT id FROM lib2_tracks WHERE legacy_track_id=101"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert details["library_v2"]["track_id"] == int(native_track_id)
+
+
+def test_legacy_id_lookup_never_coerces_ids_to_int(legacy_db):
+    """Guide §5: legacy ids are opaque TEXT (soulsync/Deezer-generated rows are
+    not numeric).  The backref lookup must compare as text and must not raise."""
+    from core.library2.maintenance_sync import annotate_finding_details
+
+    _import(legacy_db)
+    details = annotate_finding_details(
+        legacy_db,
+        _Config(True),
+        entity_type="album",
+        entity_id="sp:6deadbeef",
+        file_path=None,
+        details={},
+    )
+    assert "library_v2" not in details
+
+
+def test_unlinked_subject_is_reported_to_the_fix_caller(legacy_db):
+    """issues.md T-02: 'repaired on disk, catalogue untouched' must be
+    distinguishable from a full convergence."""
+    from core.library2.maintenance_sync import sync_repair_change
+
+    _import(legacy_db)
+    outcome = sync_repair_change(
+        legacy_db,
+        _Config(True),
+        job_id="empty_folder_cleaner",
+        action="deleted",
+        entity_type="folder",
+        entity_id="/nowhere",
+        file_path=None,
+        details={},
+    )
+    assert outcome["reason"] == "subject_unlinked"
+    assert outcome["converged"] is False
+
+
+def test_artist_subject_pulls_its_files_for_a_tag_repair(legacy_db, tmp_path):
+    """T-11 — the comma-artist split re-tags every file under one artist.
+
+    The finding names only the artist, so without an artist -> files fan-out
+    ``rescan_files`` never runs and the lib2 tag snapshot keeps showing the old
+    combined artist right after the repair rewrote it on disk.
+    """
+    from core.library2.maintenance_sync import sync_repair_change
+
+    _import(legacy_db)
+    real_file = tmp_path / "credited.flac"
+    real_file.write_bytes(b"audio")
+    _add_v2_only_file(legacy_db, real_file, title="Credited Song")
+    conn = legacy_db._get_connection()
+    artist_id = conn.execute(
+        "SELECT id FROM lib2_artists WHERE legacy_artist_id=1"
+    ).fetchone()[0]
+    conn.close()
+
+    outcome = sync_repair_change(
+        legacy_db,
+        _Config(True),
+        job_id="comma_artist_splitter",
+        finding_type="comma_artist_split",
+        action="artists_split",
+        entity_type="artist",
+        entity_id=f"lib2:{artist_id}",
+    )
+
+    assert outcome["reason"] == "synchronized"
+    assert outcome["artists"] == 1
+    assert outcome["files"] >= 1
+    assert outcome["scan"]["scanned"] >= 1
+
+
+def test_artist_subject_of_a_metadata_only_repair_stays_narrow(legacy_db):
+    """The same fan-out must not fire for a catalogue-only repair.
+
+    Genre Tag Cleanup rewrites one ``lib2_artists.genres`` column and touches
+    no file, so widening its subject to the artist's whole discography would
+    re-probe every file for nothing (BR-08's idle-query flood).
+    """
+    from core.library2.maintenance_sync import sync_repair_change
+
+    _import(legacy_db)
+    conn = legacy_db._get_connection()
+    artist_id = conn.execute(
+        "SELECT id FROM lib2_artists WHERE legacy_artist_id=1"
+    ).fetchone()[0]
+    conn.close()
+
+    outcome = sync_repair_change(
+        legacy_db,
+        _Config(True),
+        job_id="genre_cleanup",
+        finding_type="genre_cleanup",
+        action="genres_cleaned",
+        entity_type="artist",
+        entity_id=f"lib2:{artist_id}",
+    )
+
+    assert outcome["reason"] == "synchronized"
+    assert outcome["artists"] == 1
+    assert outcome["files"] == 0
+    assert outcome["scan"]["scanned"] == 0

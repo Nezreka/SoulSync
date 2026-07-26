@@ -1305,6 +1305,20 @@ class RepairWorker:
                     )
                     result['retryable'] = True
                 else:
+                    # issues.md T-02: a repair that landed on disk but reached
+                    # no catalogue row is NOT a full success. It stays resolved
+                    # (some jobs legitimately have no lib2 subject, e.g. the
+                    # empty-folder cleaner), but the caller must be able to
+                    # tell "converged" from "file changed, catalogue untouched"
+                    # instead of reading a bare success and assuming both.
+                    if sync_state.get('converged') is False:
+                        result['library_v2_converged'] = False
+                        logger.warning(
+                            "Finding %s (%s/%s) applied without a Library-v2 "
+                            "subject (%s) — catalogue snapshots not refreshed",
+                            finding_id, job_id, finding_type,
+                            sync_state.get('reason'),
+                        )
                     self.resolve_finding(
                         finding_id, action=result.get('action', 'auto_fix'))
 
@@ -1400,15 +1414,23 @@ class RepairWorker:
         kept = details.get('kept_genres')
         if not isinstance(kept, list):
             return {'success': False, 'error': 'Finding has no kept_genres list'}
-        table = {'artist': 'artists', 'album': 'albums'}.get(entity_type)
+        # T-11: native findings name a lib2 row. The native columns are
+        # NOT NULL DEFAULT '[]', so "no genres left" is an empty list there,
+        # not the legacy NULL.
+        native_id = _lib2_id(entity_id)
+        if native_id is not None:
+            table = {'artist': 'lib2_artists', 'album': 'lib2_albums'}.get(entity_type)
+            row_id, value = native_id, json.dumps(kept)
+        else:
+            table = {'artist': 'artists', 'album': 'albums'}.get(entity_type)
+            row_id, value = entity_id, (json.dumps(kept) if kept else None)
         if table is None:
             return {'success': False, 'error': f'Unsupported entity type: {entity_type}'}
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            value = json.dumps(kept) if kept else None
-            cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (value, entity_id))  # noqa: S608 - table from fixed map
+            cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (value, row_id))  # noqa: S608 - table from fixed map
             if cursor.rowcount == 0:
                 conn.commit()
                 return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
@@ -1450,13 +1472,28 @@ class RepairWorker:
         display = details.get('new_display_artist') or '; '.join(parts)
         primary = details.get('primary_artist') or parts[0]
 
+        native_id = _lib2_id(entity_id)
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT file_path FROM tracks WHERE artist_id = ? "
-                "AND file_path IS NOT NULL AND file_path != ''", (entity_id,))
+            if native_id is not None:
+                # T-11: same "credited on the track OR primary on its album"
+                # boundary the native scan used to find the artist.
+                cursor.execute(
+                    "SELECT f.path FROM lib2_track_files f "
+                    "JOIN lib2_tracks t ON t.id = f.track_id "
+                    "LEFT JOIN lib2_albums al ON al.id = t.album_id "
+                    "WHERE COALESCE(f.file_state,'active')='active' "
+                    "  AND f.path IS NOT NULL AND f.path <> '' "
+                    "  AND (al.primary_artist_id = ? "
+                    "       OR EXISTS (SELECT 1 FROM lib2_track_artists ta "
+                    "                   WHERE ta.track_id = t.id AND ta.artist_id = ?))",
+                    (native_id, native_id))
+            else:
+                cursor.execute(
+                    "SELECT file_path FROM tracks WHERE artist_id = ? "
+                    "AND file_path IS NOT NULL AND file_path != ''", (entity_id,))
             files = [r[0] for r in cursor.fetchall()]
         except Exception as e:
             return {'success': False, 'error': str(e)}
@@ -1491,9 +1528,16 @@ class RepairWorker:
         fixed = stale = missing = errors = 0
 
         for fp in files:
-            resolved = resolve_library_file_path(
-                fp, transfer_folder=self.transfer_folder,
-                config_manager=self._config_manager)
+            if native_id is not None:
+                # Guide §5: every V2 file access goes through the lib2 resolver
+                # — the stored path can be the media-server view.
+                from core.library2.paths import resolve_lib2_path
+                resolved = fp if os.path.isfile(fp) else resolve_lib2_path(
+                    fp, config_manager=self._config_manager)
+            else:
+                resolved = resolve_library_file_path(
+                    fp, transfer_folder=self.transfer_folder,
+                    config_manager=self._config_manager)
             if not resolved or not os.path.exists(resolved):
                 missing += 1
                 continue

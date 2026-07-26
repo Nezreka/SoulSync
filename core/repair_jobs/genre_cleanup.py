@@ -69,6 +69,40 @@ class GenreCleanupJob(RepairJob):
     default_interval_hours = 24 * 7
     auto_fix = False
 
+    # --- catalogue boundary -------------------------------------------------
+    # Overridden by the native subclass (core.repair_jobs.native_p3); the base
+    # implementation is the legacy projection kept for the rollback window.
+
+    def _genre_rows(self, context: JobContext) -> list:
+        """``(kind, entity_id, name, genres, entity_thumb, album_thumb,
+        artist_id, artist_name, artist_thumb)`` for every scannable row."""
+        rows = []
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+            # ar.id doubles as the clickable-card id.
+            cursor.execute("""
+                SELECT 'artist', ar.id, ar.name, ar.genres, ar.thumb_url, NULL, ar.id, ar.name, ar.thumb_url
+                FROM artists ar
+            """)
+            rows.extend(cursor.fetchall())
+            # Albums (+ their artist for the finding card).
+            cursor.execute("""
+                SELECT 'album', al.id, al.title, al.genres, al.thumb_url, al.thumb_url, ar.id, ar.name, ar.thumb_url
+                FROM albums al
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+            """)
+            rows.extend(cursor.fetchall())
+        finally:
+            if conn:
+                conn.close()
+        return rows
+
+    def _finding_identity(self, kind: str, entity_id) -> tuple:
+        """``(entity_id, extra_details)`` for one scanned row."""
+        return str(entity_id), {}
+
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
@@ -90,31 +124,12 @@ class GenreCleanupJob(RepairJob):
         # counting them makes the number mean what users think it means. The
         # skip breakdown is logged so 'most of my library has no stored genres'
         # is a diagnosis, not a mystery.
-        rows = []
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            # ar.id doubles as the clickable-card id.
-            cursor.execute("""
-                SELECT 'artist', ar.id, ar.name, ar.genres, ar.thumb_url, NULL, ar.id, ar.name, ar.thumb_url
-                FROM artists ar
-            """)
-            rows.extend(cursor.fetchall())
-            # Albums (+ their artist for the finding card).
-            cursor.execute("""
-                SELECT 'album', al.id, al.title, al.genres, al.thumb_url, al.thumb_url, ar.id, ar.name, ar.thumb_url
-                FROM albums al
-                LEFT JOIN artists ar ON ar.id = al.artist_id
-            """)
-            rows.extend(cursor.fetchall())
+            rows = self._genre_rows(context)
         except Exception as e:
             logger.error("Error fetching stored genres: %s", e, exc_info=True)
             result.errors += 1
             return result
-        finally:
-            if conn:
-                conn.close()
 
         total = len(rows)
         no_genres = 0
@@ -151,6 +166,7 @@ class GenreCleanupJob(RepairJob):
                              + (' — would be left with none' if emptied else ''),
                     log_type='warning' if emptied else 'info')
 
+            finding_entity_id, extra_details = self._finding_identity(kind, entity_id)
             if context.create_finding:
                 try:
                     inserted = context.create_finding(
@@ -158,7 +174,7 @@ class GenreCleanupJob(RepairJob):
                         finding_type='genre_cleanup',
                         severity='info',
                         entity_type=kind,
-                        entity_id=str(entity_id),
+                        entity_id=finding_entity_id,
                         file_path=None,
                         title=f'Off-whitelist genres: {name}',
                         description=(
@@ -177,6 +193,7 @@ class GenreCleanupJob(RepairJob):
                             'artist_thumb_url': artist_thumb or None,
                             'album_thumb_url': album_thumb or None,
                             'album_title': name if kind == 'album' else None,
+                            **extra_details,
                         },
                     )
                     if inserted:

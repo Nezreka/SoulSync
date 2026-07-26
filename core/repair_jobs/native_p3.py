@@ -21,6 +21,12 @@ from core.repair_jobs import register_job
 from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
 from core.repair_jobs.album_tag_consistency import AlbumTagConsistencyJob
 from core.repair_jobs.base import JobContext, JobResult, get_scope_artist
+from core.repair_jobs.comma_artist_splitter import (
+    SCAN_ARTIST_LIMIT,
+    TRACK_SAMPLE_LIMIT,
+    CommaArtistSplitterJob,
+)
+from core.repair_jobs.genre_cleanup import GenreCleanupJob
 from core.repair_jobs.live_commentary_cleaner import (
     LiveCommentaryCleanerJob,
     _detect_content_type,
@@ -638,9 +644,150 @@ class NativeLiveCommentaryCleanerJob(LiveCommentaryCleanerJob):
         return count_active_files(context.db, context.config_manager)
 
 
+@register_job
+class NativeGenreCleanupJob(GenreCleanupJob):
+    """Whitelist the genres stored on native artist/album rows.
+
+    T-11: the inherited scan read ``artists``/``albums``, which after the P3
+    cutover is a shrinking legacy projection — 9 of 273 albums in the user's
+    real library. Only the row source and the finding identity change; the
+    removal-only semantics (#1057) are untouched.
+    """
+
+    def _genre_rows(self, context: JobContext) -> list:
+        conn = context.db._get_connection()
+        try:
+            rows = list(conn.execute(
+                """SELECT 'artist', ar.id, ar.name, ar.genres, ar.image_url,
+                          NULL, ar.id, ar.name, ar.image_url
+                     FROM lib2_artists ar"""
+            ).fetchall())
+            rows.extend(conn.execute(
+                """SELECT 'album', al.id, al.title, al.genres, al.image_url,
+                          al.image_url, ar.id, ar.name, ar.image_url
+                     FROM lib2_albums al
+                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id"""
+            ).fetchall())
+            return rows
+        finally:
+            conn.close()
+
+    def _finding_identity(self, kind: str, entity_id) -> tuple:
+        key = "artist_ids" if kind == "artist" else "album_ids"
+        return f"lib2:{entity_id}", {
+            "library_v2_native": True,
+            "library_v2": {key: [int(entity_id)]},
+        }
+
+
+@register_job
+class NativeCommaArtistSplitterJob(CommaArtistSplitterJob):
+    """Find comma-joined dummy artists among the native artist rows.
+
+    T-11: the inherited scan joined ``artists``/``tracks`` and saw 156 of 2,048
+    tracks. The verification logic (whitelist, full-string API check, per-part
+    resolution) is unchanged — only which artists are candidates, which files
+    count, and which identity the finding carries.
+    """
+
+    # A native artist "holds" a file when it is credited on the track or is the
+    # primary artist of the track's album — the two ways the importer records a
+    # comma-joined tag string. ``{artist}`` is the artist-id expression, so the
+    # same clause serves the correlated per-artist count and the sample query.
+    _FILES_FOR_ARTIST = """
+        FROM lib2_track_files f
+        JOIN lib2_tracks t ON t.id = f.track_id
+        LEFT JOIN lib2_albums al ON al.id = t.album_id
+       WHERE COALESCE(f.file_state,'active')='active'
+         AND f.path IS NOT NULL AND f.path <> ''
+         AND (al.primary_artist_id = {artist}
+              OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                          WHERE ta.track_id = t.id AND ta.artist_id = {artist}))
+    """
+
+    @classmethod
+    def _files_clause(cls, artist: str) -> str:
+        return cls._FILES_FOR_ARTIST.format(artist=artist)
+
+    def _comma_artist_rows(self, context: JobContext) -> list:
+        correlated = self._files_clause("ar.id")
+        conn = context.db._get_connection()
+        try:
+            return list(conn.execute(
+                f"""SELECT ar.id, ar.name, ar.image_url,
+                           (SELECT COUNT(*) {correlated}) AS n
+                      FROM lib2_artists ar
+                     WHERE ar.name LIKE '%,%'
+                       AND (SELECT COUNT(*) {correlated}) > 0
+                  ORDER BY n DESC
+                     LIMIT {SCAN_ARTIST_LIMIT + 1}"""
+            ).fetchall())
+        finally:
+            conn.close()
+
+    def estimate_scope(self, context: JobContext) -> int:
+        correlated = self._files_clause("ar.id")
+        try:
+            conn = context.db._get_connection()
+            try:
+                return int(conn.execute(
+                    f"""SELECT COUNT(*) FROM lib2_artists ar
+                         WHERE ar.name LIKE '%,%'
+                           AND (SELECT COUNT(*) {correlated}) > 0"""
+                ).fetchone()[0])
+            finally:
+                conn.close()
+        except Exception:  # noqa: BLE001 — scope estimates never fail a run
+            return 0
+
+    def _library_artist_id(self, context: JobContext, name: str):
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            row = conn.execute(
+                "SELECT id FROM lib2_artists WHERE LOWER(TRIM(name))=LOWER(TRIM(?)) "
+                "ORDER BY id LIMIT 1",
+                (name,),
+            ).fetchone()
+            return row[0] if row else None
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def _sample_tracks(self, context: JobContext, artist_id):
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            rows = conn.execute(
+                f"""SELECT t.title, f.path, al.title
+                    {self._files_clause('?')}
+                 ORDER BY al.title, COALESCE(t.disc_number,1),
+                          COALESCE(t.track_number, 2147483647)
+                    LIMIT {TRACK_SAMPLE_LIMIT}""",
+                (artist_id, artist_id),
+            ).fetchall()
+            return [{"title": r[0], "file_path": r[1], "album": r[2] or ""}
+                    for r in rows]
+        except Exception:  # noqa: BLE001
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def _finding_identity(self, artist_id) -> tuple:
+        return f"lib2:{artist_id}", {
+            "library_v2_native": True,
+            "library_v2": {"artist_ids": [int(artist_id)]},
+        }
+
+
 __all__ = [
     "NativeAcoustIDScannerJob",
     "NativeAlbumTagConsistencyJob",
+    "NativeCommaArtistSplitterJob",
+    "NativeGenreCleanupJob",
     "NativeLiveCommentaryCleanerJob",
     "NativeMetadataGapFillerJob",
     "NativeMissingCoverArtJob",
