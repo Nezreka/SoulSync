@@ -689,9 +689,12 @@ def test_acoustid_scanner_flags_v2_only_mismatch_with_subject(
     assert findings[0]["details"]["library_v2"]["file_id"] == file_id
 
 
-def test_cover_art_scanner_flags_v2_only_album(legacy_db, tmp_path, monkeypatch):
+def test_cover_art_scanner_flags_v2_only_album(migrated_legacy_db, tmp_path, monkeypatch):
+    """Runs on the migrated schema on purpose: the native rows are padded to the
+    width of a legacy SELECT whose optional provider-ID columns only exist there."""
     from core.repair_jobs.missing_cover_art import MissingCoverArtJob
 
+    legacy_db = migrated_legacy_db
     _import(legacy_db)
     audio = tmp_path / "v2-cover-01.flac"
     audio.write_bytes(b"audio")
@@ -726,13 +729,70 @@ def test_cover_art_scanner_flags_v2_only_album(legacy_db, tmp_path, monkeypatch)
         create_finding=lambda **kwargs: findings.append(kwargs) or True,
     )
 
-    MissingCoverArtJob().scan(context)
+    result = MissingCoverArtJob().scan(context)
 
+    assert result.errors == 0
     native = [f for f in findings if f["entity_id"] == f"lib2:{album_id}"]
     assert len(native) == 1
     assert native[0]["entity_type"] == "album"
     assert native[0]["details"]["library_v2"]["album_id"] == album_id
     assert native[0]["details"]["found_artwork_url"] == "http://found-art"
+    # A native album has no legacy artist row; the padded slot must read as that
+    # and not shift the per-source album IDs behind it out of range.
+    assert native[0]["details"]["artist_id"] is None
+    assert native[0]["details"]["spotify_album_id"] == "sp-v2-album"
+    # The legacy albums are still scanned — the migrated schema resolves.
+    assert any(f["entity_id"] == "10" for f in findings)
+
+
+def test_cover_art_scanner_covers_v2_album_on_unmigrated_legacy_schema(
+    legacy_db, tmp_path, monkeypatch
+):
+    """The other end of the padding range: zero optional provider-ID columns.
+
+    A legacy schema old enough to lack ``albums.spotify_album_id`` makes the
+    legacy SELECT fail — which must cost an error, not the native coverage.
+    """
+    from core.repair_jobs.missing_cover_art import MissingCoverArtJob
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-cover-unmigrated.flac"
+    audio.write_bytes(b"audio")
+    album_id, _artist_id, _track_id, _file_id = _add_v2_only_album(
+        legacy_db, audio, title="Artless Album"
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.get_primary_source", lambda: "spotify"
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.get_source_priority",
+        lambda primary: ["spotify"],
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.file_has_embedded_art", lambda p: False
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.missing_cover_art.folder_has_cover_sidecar", lambda d: False
+    )
+    monkeypatch.setattr(
+        MissingCoverArtJob, "_try_source",
+        lambda self, *args, **kwargs: "http://found-art",
+    )
+    monkeypatch.setattr(
+        MissingCoverArtJob, "_find_artist_art", lambda self, *args, **kwargs: None
+    )
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = MissingCoverArtJob().scan(context)
+
+    assert result.errors == 1  # the legacy SELECT, not the native walk
+    assert f"lib2:{album_id}" in [f["entity_id"] for f in findings]
 
 
 def test_cover_art_fix_applies_natively_to_v2_album(legacy_db, tmp_path):
@@ -886,11 +946,15 @@ def test_fake_lossless_scanner_covers_v2_only_file(legacy_db, tmp_path, monkeypa
     assert native[0]["details"]["library_v2"]["file_id"] == file_id
 
 
-def test_metadata_gap_scanner_covers_v2_only_track(legacy_db, tmp_path, monkeypatch):
+def test_metadata_gap_scanner_covers_v2_only_track(
+    migrated_legacy_db, tmp_path, monkeypatch
+):
+    """Migrated schema on purpose — see the cover-art scanner test above."""
     from types import SimpleNamespace
 
     from core.repair_jobs.metadata_gap_filler import MetadataGapFillerJob
 
+    legacy_db = migrated_legacy_db
     _import(legacy_db)
     audio = tmp_path / "v2-gap.flac"
     audio.write_bytes(b"audio")
@@ -914,12 +978,58 @@ def test_metadata_gap_scanner_covers_v2_only_track(legacy_db, tmp_path, monkeypa
         create_finding=lambda **kwargs: findings.append(kwargs) or True,
     )
 
-    MetadataGapFillerJob().scan(context)
+    result = MetadataGapFillerJob().scan(context)
 
+    assert result.errors == 0
     native = [f for f in findings if f["entity_id"] == f"lib2:{track_id}"]
     assert len(native) == 1
     assert native[0]["details"]["found_fields"]["musicbrainz_recording_id"] == "mb-999"
     assert native[0]["details"]["library_v2"]["track_id"] == track_id
+    # A native track has no legacy artist row; the padded slot must read as that
+    # and not shift the per-source track IDs behind it out of range.
+    assert native[0]["details"]["artist_id"] is None
+    assert native[0]["details"]["track_ids"] == {
+        "spotify": None, "itunes": None, "deezer": None,
+    }
+    # The legacy tracks are still scanned — the migrated schema resolves.
+    assert any(f["entity_id"] == "100" for f in findings)
+
+
+def test_metadata_gap_scanner_covers_v2_track_on_unmigrated_legacy_schema(
+    legacy_db, tmp_path, monkeypatch
+):
+    """Zero optional provider-ID columns — see the cover-art counterpart."""
+    from types import SimpleNamespace
+
+    from core.repair_jobs.metadata_gap_filler import MetadataGapFillerJob
+
+    _import(legacy_db)
+    audio = tmp_path / "v2-gap-unmigrated.flac"
+    audio.write_bytes(b"audio")
+    track_id, _file_id = _add_v2_only_file(legacy_db, audio, title="Gapped Song")
+    monkeypatch.setattr(
+        "core.repair_jobs.metadata_gap_filler.get_primary_source", lambda: "spotify"
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.metadata_gap_filler.get_source_priority",
+        lambda primary: ["spotify"],
+    )
+    fake_mb = SimpleNamespace(
+        search_recording=lambda title, artist_name=None, limit=1: [{"id": "mb-999"}]
+    )
+    findings = []
+    context = JobContext(
+        db=legacy_db,
+        transfer_folder=str(tmp_path),
+        config_manager=_Config(True),
+        mb_client=fake_mb,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = MetadataGapFillerJob().scan(context)
+
+    assert result.errors == 1  # the legacy SELECT, not the native walk
+    assert f"lib2:{track_id}" in [f["entity_id"] for f in findings]
 
 
 def test_metadata_gap_fix_writes_natively_to_v2_track(legacy_db, tmp_path):

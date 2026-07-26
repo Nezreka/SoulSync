@@ -153,7 +153,12 @@ class MissingCoverArtJob(RepairJob):
                 albums.append((
                     entity, subject["title"], subject["artist_name"],
                     subject.get("spotify_album_id"), subject.get("album_image"),
-                    subject.get("artist_image"), subject.get("rep_path"), *pad,
+                    subject.get("artist_image"), subject.get("rep_path"),
+                    # ``ar.id``: a native album has no legacy artist row. Omitting
+                    # this slot shifted every optional per-source ID one to the
+                    # left and pushed the last one past the end of the row.
+                    None,
+                    *pad,
                 ))
         except Exception as e:
             logger.warning("V2 album subject enumeration failed: %s", e)

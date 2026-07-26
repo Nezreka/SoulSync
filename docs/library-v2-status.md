@@ -5,10 +5,11 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 26. Juli 2026, einschließlich Foundation-Rebase (§14) und der an diesem
+Stand: 26. Juli 2026, einschließlich Foundation-Rebase (§14), der an diesem
 Tag umgesetzten Korrekturen §20–§24 (Pfad-Desync, Manual-Match-Timeout,
 Orphan-Approve-Materialisierung, F-10-Korrelation, Artwork-Kaltstart-
-Nachlieferung). Playlist UI bleibt geparkt.
+Nachlieferung) und §26 (nativer Subject-Row-Versatz in den Repair-Scannern,
+Abbau der vorbestehenden Testfehler). Playlist UI bleibt geparkt.
 
 ## 1. Statusbegriffe
 
@@ -594,20 +595,21 @@ pre-existing failed (siehe unten), 3 skipped. Frontend Library-v2-Suite:
   `t.isrc`) — vermutlich Schema-/Query-Drift in
   `missing_cover_art.py`/`metadata_gap_filler.py`. Root Cause noch nicht
   untersucht.
-  **Nachtrag 26. Juli 2026:** Beide Spalten werden auf einer real
-  migrierten DB per `ALTER TABLE` nachgezogen (`database/music_database.py`
-  Zeilen ~3065/~3880) — die beiden Tests scheitern also wahrscheinlich an
-  einer Test-Fixture ohne vollständige Migrationskette, nicht an einem
-  Produktivschema-Fehler. Nicht abschließend gegen ein reales Produktiv-
-  Schema verifiziert; bei Gelegenheit per `PRAGMA table_info(albums)` /
-  `PRAGMA table_info(tracks)` gegenprüfen.
+  ~~**Nachtrag 26. Juli 2026:** [...] die beiden Tests scheitern also
+  wahrscheinlich an einer Test-Fixture ohne vollständige Migrationskette, nicht
+  an einem Produktivschema-Fehler.~~ **Widerlegt, 26. Juli 2026:** Die
+  fehlenden Spalten waren nur der Auslöser. Dahinter lag ein echter
+  Produktfehler in beiden Scannern — die nativen Subject-Zeilen sind gegen die
+  Legacy-`SELECT`-Breite verschoben und lassen jeden Scan mit `IndexError`
+  abbrechen, **auch auf einer vollständig migrierten DB**. Diagnose in
+  [issues.md §14](library-v2-issues.md#nativepad25-01), Umsetzung in §26.
 - Ebenfalls bereits vorher fehlschlagend (8 Tests in
   `tests/test_repair_worker_album_fill.py`,
   `tests/test_repair_worker_unknown_artist_path.py`,
   `tests/test_repair_worker_duplicate_delete.py`): testen
   `_fix_unknown_artist`/`_fix_duplicates`/`_perform_album_fill`, die als Teil
   der P1/P2-Tool-Migration bereits entfernt wurden, ohne dass die
-  zugehörigen Alt-Tests entfernt/migriert wurden.
+  zugehörigen Alt-Tests entfernt/migriert wurden. **Abgebaut in §26.**
 - **Thin-Adapter (Artist-Monitoring → natives Watchlist)** war zur Hälfte
   verdrahtet: Monitor-An/Aus mirrorte korrekt, aber die geforderte
   `quality_profile_id`-Weitergabe fehlte. Bewusst nicht in dieser Reko
@@ -1010,6 +1012,85 @@ verursacht:
 
 | Test | Einordnung |
 |---|---|
-| `tests/library2/test_maintenance_sync.py::test_cover_art_scanner_flags_v2_only_album` | bereits in §14 dokumentiert (Fixture ohne vollständige Migrationskette) |
+| `tests/library2/test_maintenance_sync.py::test_cover_art_scanner_flags_v2_only_album` | bereits in §14 dokumentiert (Fixture ohne vollständige Migrationskette) — diese Einordnung ist inzwischen widerlegt, es war ein echter Produktfehler, siehe §26 |
 | `tests/library2/test_maintenance_sync.py::test_metadata_gap_scanner_covers_v2_only_track` | dito |
-| `tests/test_orphan_file_detector.py::test_native_job_is_gated_when_library_v2_is_disabled` | neu als vorbestehend identifiziert: der Test pinnt die Gating-Semantik, die H-18 bewusst entfernt hat (`features.library_v2=false` wird ignoriert). Am `git stash`-sauberen Baum reproduziert. Bisher nirgends notiert; der Test gehört an den Cutover-Vertrag angepasst oder entfernt |
+| `tests/test_orphan_file_detector.py::test_native_job_is_gated_when_library_v2_is_disabled` | neu als vorbestehend identifiziert: der Test pinnt die Gating-Semantik, die H-18 bewusst entfernt hat (`features.library_v2=false` wird ignoriert). Am `git stash`-sauberen Baum reproduziert. Bisher nirgends notiert; der Test gehört an den Cutover-Vertrag angepasst oder entfernt — umgesetzt in §26 |
+
+---
+
+## 26. Native Repair-Subject-Ausrichtung und Abbau der Test-Schuld (26. Juli)
+
+Ausgangspunkt war die in §25 als „vorbestehend" abgelegte Fehlerliste. Bei der
+Untersuchung stellte sich der erste Punkt als echter Produktfehler heraus, nicht
+als Fixture-Artefakt.
+
+**Teil 1 — nativer Subject-Row-Versatz (Produktfehler).** Diagnose in
+[issues.md §14](library-v2-issues.md#nativepad25-01).
+`core/repair_jobs/missing_cover_art.py` und
+`core/repair_jobs/metadata_gap_filler.py` hängen ihre Library-v2-nativen
+Subjects positionsgleich an die Legacy-Ergebniszeilen an, ließen dabei aber den
+`ar.id`-Slot aus. Dadurch verschob sich jede optionale Provider-ID-Spalte um
+eine Position, die letzte fiel aus dem Tupel — auf einer real migrierten DB
+endet der Scan mit `IndexError`, sobald das **erste** V2-native Album bzw. der
+erste V2-native Track drankommt, und reißt den gesamten Job inklusive der
+bereits gefundenen Legacy-Zeilen mit. Beide Zeilen setzen den Slot jetzt
+explizit auf `None` (ein natives Subject hat keine Legacy-Artist-Zeile; die
+native Artist-ID steht ohnehin im `library_v2`-Block des Findings).
+
+Warum das keine Testlücke „nur in der Fixture" war: Die beiden Regressionstests
+liefen gegen ein synthetisches Legacy-Schema ohne `albums.spotify_album_id`/
+`tracks.isrc`. Dort scheiterte schon die Legacy-Query, und der darauf folgende
+`IndexError` wurde als Schema-Drift gelesen. Neue Fixture
+`migrated_legacy_db` (`tests/library2/conftest.py`) zieht die Spalten nach, die
+eine reale Installation per `ALTER TABLE` bekommt; die schmale `legacy_db`
+bleibt unverändert, weil die meisten lib2-Tests positional inserten.
+
+Verifikation: `tests/library2/test_maintenance_sync.py` — die beiden bisher
+fehlschlagenden Tests laufen jetzt auf dem migrierten Schema und prüfen
+zusätzlich `result.errors == 0`, `details['artist_id'] is None` und die
+unverschobenen Per-Source-IDs; zwei neue Tests decken das andere Ende des
+Pad-Bereichs ab (unmigriertes Schema: Legacy-Query scheitert, native Abdeckung
+läuft trotzdem).
+
+**Teil 2 — Cutover-Vertrag statt Gating-Test.**
+`tests/test_orphan_file_detector.py::test_native_job_is_gated_when_library_v2_is_disabled`
+pinnte die von [H-18](library-v2-issues.md#h-18) bewusst entfernte
+Gating-Semantik. Ersetzt durch
+`test_deprecated_false_flag_cannot_silence_the_native_scan`: dieselbe Situation,
+aber mit der heute geltenden Erwartung — der ignorierte Flag darf den nativen
+Scan nicht stumm schalten (`scanned == 1`, keine Findings, weil die Datei dem
+Katalog bekannt ist).
+
+**Teil 3 — Alt-Tests für entfernte Handler abgebaut.** Die acht in §14
+genannten Fehlschläge testeten `_fix_unknown_artist`, `_fix_duplicates` und
+`_perform_album_fill`, die mit der P1/P2-Tool-Migration entfernt wurden. Vor dem
+Löschen wurde für jeden gepinnten Vertrag geprüft, ob er im Nachfolgepfad
+weiterlebt:
+
+| Alt-Test | Gepinnter Vertrag | Entscheidung |
+|---|---|---|
+| `test_repair_worker_unknown_artist_path.py` (2) | #978: ein Media-Server-File darf nicht in den Transfer-Ordner gezogen werden | gelöscht — der überlebende `_fix_path_mismatch` hat den Guard samt eigener Abdeckung in `tests/test_repair_worker_path_mismatch.py` |
+| `test_repair_worker_album_fill.py` (3) | Artist-Mismatch beim Kopieren eines Tracks aus einem anderen Album | gelöscht — der native Wanted-/Acquisition-Pfad kopiert nicht aus der eigenen Library, sein Artist-Gate ist das Eligibility Gate (LIB2-F01) |
+| `test_repair_worker_duplicate_delete.py` (3 von 5) | ein fehlgeschlagener physischer Delete darf nicht als Erfolg gelten (Docker-PUID, unauflösbarer Pfad) | Vertrag **übernommen**: neuer Test `test_unlink_failure_is_journalled_and_never_reported_as_success` in `tests/library2/test_file_delete.py` (Status `partial`, Item `failed` mit Fehlertext, Datei bleibt liegen, `lib2_track_files` bleibt aktiv) |
+
+Die beiden lebenden `skip_deleted_quarantine`-Tests der dritten Datei sind nach
+`tests/test_repair_deleted_quarantine_skip.py` umgezogen — der alte Dateiname
+beschrieb eine Engine, die es nicht mehr gibt.
+
+**Gemeinsamer Testlauf.** Erstmals seit dem Foundation-Rebase ohne bekannte
+Fehlschläge:
+
+- `tests/library2 tests/repair tests/repair_jobs tests/test_orphan_file_detector.py
+  tests/test_repair_deleted_quarantine_skip.py tests/test_repair_worker_path_mismatch.py`:
+  **1151 passed, 0 failed**;
+- `tests/imports tests/acquisition tests/wishlist tests/watchlist tests/quality
+  tests/search`: **1688 passed, 3 skipped, 0 failed**;
+- Ruff über alle geänderten Python-Dateien: sauber.
+
+Frontend blieb unangetastet (kein `webui/`-Diff), daher kein Frontend-Lauf.
+
+**Einstufung:** Implementiert und gezielt geprüft. Damit ist die in §14/§25
+geführte Liste vorbestehender Fehlschläge vollständig abgebaut; ein Lauf des
+Cover-Art-/Metadata-Gap-Scanners gegen die reale Produktiv-DB des Nutzers steht
+weiterhin aus (beide Jobs bleiben Review-Jobs, sie schreiben nichts ohne
+Freigabe).

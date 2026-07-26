@@ -267,6 +267,49 @@ def test_execute_journals_before_unlink_and_preserves_entity(
     ).fetchone(), "physical delete must not remove the library entity"
 
 
+def test_unlink_failure_is_journalled_and_never_reported_as_success(
+        imported_conn, legacy_db, tmp_path):
+    """A physical delete that raises must stay visible.
+
+    Inherited invariant from the retired ``duplicate_detector`` engine, whose
+    delete loop swallowed permission errors (Docker PUID/PGID mismatch) and
+    still returned success, so the finding resolved while the file sat on disk.
+    The native engine must journal the error, leave the catalogue row active and
+    roll the operation up as ``partial``.
+    """
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "locked.flac"
+    path.write_bytes(b"audio")
+    track = imported_conn.execute("SELECT id, album_id FROM lib2_tracks LIMIT 1").fetchone()
+    file_id = _set_track_path(imported_conn, track["id"], path)
+    config = _Config([str(root)])
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=track["album_id"], config_manager=config
+    )
+
+    def _unlink(resolved):
+        raise PermissionError(13, "Permission denied")
+
+    operation = delete_entity_files(
+        legacy_db,
+        entity="albums",
+        entity_id=track["album_id"],
+        preview_token=preview["preview_token"],
+        config_manager=config,
+        unlink=_unlink,
+    )
+
+    assert operation["status"] == "partial"
+    assert operation["items"][0]["status"] == "failed"
+    assert "Permission denied" in operation["items"][0]["error"]
+    assert path.exists()
+    row = imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id=?", (file_id,)
+    ).fetchone()
+    assert row["file_state"] != "deleted"
+
+
 def test_execute_rejects_stale_preview_without_journal(
         imported_conn, legacy_db, tmp_path):
     root = tmp_path / "music"

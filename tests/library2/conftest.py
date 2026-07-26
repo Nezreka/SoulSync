@@ -63,6 +63,43 @@ INSERT INTO tracks  VALUES(102,11,1,'One Dance',1,200000,'/m/single.flac',900,50
 """
 
 
+# Columns a real installation grows through the ALTER TABLE migration chain in
+# ``database/music_database.py`` (provider IDs, ISRC, disc number). The DDL above
+# deliberately stays narrow — most lib2 tests INSERT positionally — so anything
+# that has to behave like a *migrated* production DB asks for ``migrated_legacy_db``
+# instead. Consumers that SELECT these columns directly (the repair-job scanners)
+# only tell the truth when they run against this shape.
+_MIGRATED_COLUMNS = {
+    "albums": [
+        "spotify_album_id TEXT",
+        "itunes_album_id TEXT",
+        "deezer_id TEXT",
+        "discogs_id TEXT",
+        "soul_id TEXT",
+    ],
+    "tracks": [
+        "isrc TEXT",
+        "musicbrainz_recording_id TEXT",
+        "spotify_track_id TEXT",
+        "itunes_track_id TEXT",
+        "deezer_id TEXT",
+        "soul_id TEXT",
+        "disc_number INTEGER DEFAULT 1",
+    ],
+}
+
+
+def _migrate_legacy_schema(path: str) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        for table, columns in _MIGRATED_COLUMNS.items():
+            for column in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @pytest.fixture
 def legacy_db(tmp_path):
     """A populated synthetic legacy DB; yields a LegacyDBShim."""
@@ -73,6 +110,17 @@ def legacy_db(tmp_path):
     conn.commit()
     conn.close()
     yield LegacyDBShim(path)
+
+
+@pytest.fixture
+def migrated_legacy_db(legacy_db):
+    """``legacy_db`` widened to a fully migrated production schema.
+
+    Note the columns are appended, so positional ``INSERT INTO <table> VALUES``
+    no longer works on this fixture — name the columns.
+    """
+    _migrate_legacy_schema(legacy_db.path)
+    return legacy_db
 
 
 @pytest.fixture

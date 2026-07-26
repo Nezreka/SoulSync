@@ -184,7 +184,15 @@ def test_orphan_detector_accepts_picard_albumartist_folder_match(tmp_path: Path)
     assert findings == []
 
 
-def test_native_job_is_gated_when_library_v2_is_disabled(tmp_path: Path) -> None:
+def test_deprecated_false_flag_cannot_silence_the_native_scan(tmp_path: Path) -> None:
+    """H-18: the native catalogue is the cutover, not an optional feature.
+
+    ``features.library_v2=false`` used to hand native jobs an empty subject set,
+    so a disabled catalogue reported zero findings and looked exactly like a
+    clean library. The flag is deprecated and ignored now — this file is known to
+    the v2 catalogue, so the scan must see it and clear it, both with the flag on
+    (``test_library_v2_only_file_is_not_reported_as_orphan``) and off.
+    """
     db_path = tmp_path / "library.sqlite"
     _seed_library(db_path)
     audio_path = tmp_path / "Lib2 Artist" / "Lib2 Album" / "01 - Lib2 Song.mp3"
@@ -203,7 +211,7 @@ def test_native_job_is_gated_when_library_v2_is_disabled(tmp_path: Path) -> None
 
     result = OrphanFileDetectorJob().scan(context)
 
-    assert result.scanned == 0
+    assert result.scanned == 1
     assert result.findings_created == 0
     assert findings == []
 

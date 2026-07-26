@@ -135,7 +135,12 @@ class MetadataGapFillerJob(RepairJob):
                     entity, subject['title'], subject['artist_name'],
                     subject['album_title'], subject.get('isrc'),
                     subject.get('musicbrainz_recording_id'),
-                    subject.get('album_image'), subject.get('artist_image'), *pad,
+                    subject.get('album_image'), subject.get('artist_image'),
+                    # ``ar.id``: a native track has no legacy artist row. Omitting
+                    # this slot shifted every optional per-source ID one to the
+                    # left and pushed the last one past the end of the row.
+                    None,
+                    *pad,
                 ))
         except Exception as e:
             logger.warning("V2 subject enumeration failed: %s", e)

@@ -1899,3 +1899,72 @@ ausdrücklich nur die kurzfristige Notlösung, um unter das Timeout zu kommen,
 und nach der Entkopplung sieht die Latenz niemand mehr (dieselbe Abwägung wie
 in [perf25-02](#perf25-02)). Siehe
 [status.md §21](library-v2-status.md#21-manual-match-artwork-verlässt-den-request-pfad-26-juli).
+
+---
+
+## 14. Native Repair-Subjects sind gegen die Legacy-SELECT-Breite verschoben (26. Juli 2026)
+
+### <a name="nativepad25-01"></a> Finding 1 — `missing_cover_art` und `metadata_gap_filler` lassen den `ar.id`-Slot aus
+
+**Ort:** `core/repair_jobs/missing_cover_art.py:153-157` und
+`core/repair_jobs/metadata_gap_filler.py:134-139`.
+
+Beide Scanner lesen zuerst die Legacy-Tabelle und hängen danach die
+Library-v2-nativen Subjects (Entities ohne Legacy-Backref) als zusätzliche
+Zeilen an dieselbe Liste. Weil die Legacy-Zeilen `sqlite3.Row`-Tupel sind,
+werden die nativen Zeilen von Hand positionsgleich aufgebaut und mit
+`*pad` auf die Breite des Legacy-`SELECT` gebracht — der Kommentar sagt genau
+das („Rows are padded to the legacy SELECT's width").
+
+Sie waren aber um **einen** Slot zu kurz: die Legacy-Spaltenliste endet mit
+`ar.id` (dem Legacy-Artist), die native Zeile hat diesen Slot nie gesetzt.
+Alles dahinter — die optionalen, per `PRAGMA table_info` zugeschalteten
+Provider-ID-Spalten — verschob sich damit um eine Position nach links, und die
+jeweils letzte fiel hinten heraus:
+
+| Job | Basisbreite | Optionale Spalten auf migrierter DB | Zugriff, der ins Leere greift |
+|---|---:|---|---|
+| `missing_cover_art` | 8 | `itunes_album_id`, `deezer_id`, `discogs_id`, `soul_id` | `row[11]` (`hydrabase_album_id`) |
+| `metadata_gap_filler` | 9 | `spotify_track_id`, `itunes_track_id` | `row[10]` (`itunes_track_id`) |
+
+Wirkung auf einer real migrierten Installation: `IndexError: tuple index out of
+range`, sobald der Scan die **erste** native Zeile erreicht. Die Schleife läuft
+nicht in einem eigenen `try`, der Fehler verlässt also `scan()` — ein einzelnes
+V2-natives Album bzw. ein einzelner V2-nativer Track legt den kompletten Job
+lahm, inklusive der Legacy-Zeilen, die bereits gefunden waren. Zusätzlich las
+`details['artist_id']` für native Zeilen den ersten Pad-Wert statt eines
+bewussten `None`.
+
+Auf einer sehr alten, nicht durchmigrierten DB (keine optionale Spalte
+vorhanden) trat derselbe Fehler schon einen Slot früher auf, direkt bei
+`artist_id = row[7]` bzw. `row[8]`.
+
+**Warum das so lange unentdeckt blieb:** Die beiden Regressionstests
+(`tests/library2/test_maintenance_sync.py`) liefen gegen ein synthetisches
+Legacy-Schema ohne `albums.spotify_album_id` und ohne `tracks.isrc`. Dort
+scheiterte bereits die Legacy-Query, der Scanner fing das ab (`result.errors
++= 1`) — und der anschließende `IndexError` wurde als Schema-Drift der Fixture
+gelesen statt als Produktfehler. Der Nachtrag in
+[status.md §14](library-v2-status.md#14-rebase-auf-den-foundation-merge-26-juli)
+(„vermutlich Test-Fixture ohne vollständige Migrationskette") war damit nur zur
+Hälfte richtig: die Fixture ist tatsächlich unvollständig, sie hat den echten
+Bug aber nur verdeckt, nicht verursacht.
+
+**Korrekturvertrag:** Die native Zeile setzt den `ar.id`-Slot explizit auf
+`None` (ein natives Subject hat keine Legacy-Artist-Zeile; die native
+Artist-ID steht ohnehin im `library_v2`-Block des Findings). Getestet wird an
+beiden Enden des Pad-Bereichs: migriertes Schema (optionale Spalten vorhanden)
+und unmigriertes Schema (keine vorhanden, Legacy-Query scheitert, native
+Abdeckung muss trotzdem laufen).
+
+**Nebenbefund, bewusst nicht mitgeändert:** `metadata_gap_filler`s
+`column_map` sucht `t.deezer_track_id`; die Migration legt auf `tracks` aber
+`deezer_id` an (`database/music_database.py` ~Zeile 3557 — dieselbe
+Namensasymmetrie, die `core/personalized_playlists.py:178` bereits
+dokumentiert). Die Spalte existiert also nie, die Deezer-ID wird für
+ISRC-Enrichment nie herangezogen. Das ist ein eigener Funktionsbefund, kein
+Alignment-Fehler, und würde ändern, welche Provider tatsächlich abgefragt
+werden.
+
+**Umgesetzt am 26. Juli 2026** — siehe
+[status.md §26](library-v2-status.md#26-native-repair-subject-ausrichtung-und-abbau-der-test-schuld-26-juli).
