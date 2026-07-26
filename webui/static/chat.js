@@ -1693,7 +1693,8 @@
         var body = String(game.fen || '').split(' ')[0] || '';
         var mySeat = _arcSeat(game);
         var myMove = _arcMyMove(game);
-        var arc = state.arcade;
+        var voting = _arcCanVote(game);
+        var active = _arcActive(game);
 
         var cells = [];
         // Render top row first so the grid reads the way the board looks.
@@ -1701,7 +1702,7 @@
             for (var c = 0; c < cols; c++) {
                 var who = body[r * cols + c] || '.';
                 var full = (body[(rows - 1) * cols + c] || '.') !== '.';
-                var playable = myMove && !full && game.status === 'live' && state.canSend;
+                var playable = active && !full && game.status === 'live' && state.canSend;
                 cells.push('<div class="chat-arc-c4cell' +
                     (playable ? ' chat-arc-c4cell--live' : '') + '"' +
                     (playable ? ' data-chat-arc-col="' + c + '"' : '') + '>' +
@@ -1724,6 +1725,10 @@
             statusLine = 'Waiting for an opponent to join.';
         } else if (myMove) {
             statusLine = 'Your move — pick a column.';
+        } else if (CG.isRoomTurn(game)) {
+            statusLine = 'The room is choosing' +
+                (voting ? ' — pick a column to vote for it.'
+                        : '. You are playing against them, so no ballot for you.');
         } else {
             statusLine = 'Waiting on ' + esc(toMove) + '.';
         }
@@ -1748,15 +1753,15 @@
 
         return '<div class="chat-arc-board-wrap">' +
             '<div class="chat-arc-players">' +
-                _arcWho(game.black, '🔵', toMove === game.black) +
+                _arcWho(game.black, '🟡', toMove === game.black, game.roomSeat === 'b') +
             '</div>' +
             '<div class="chat-arc-c4board' +
                 (game.status === 'over' ? ' chat-arc-board--over' : '') + '">' +
                 cells.join('') + '</div>' +
             '<div class="chat-arc-players">' +
-                _arcWho(game.white, '🔴', toMove === game.white) +
+                _arcWho(game.white, '🔴', toMove === game.white, game.roomSeat === 'w') +
             '</div>' +
-            partial +
+            partial + _arcBallotHtml(game) +
             '<div class="chat-arc-status">' + statusLine + '</div>' +
             (actions ? '<div class="chat-arc-actions">' + actions + '</div>' : '') +
             _arcRevealHtml(game) +
@@ -1767,9 +1772,10 @@
         var arc = state.arcade;
         var game = arc && arc.game ? _arcGame(arc.game) : null;
         if (!game || game.status !== 'live' || game.variant !== 'connect4') return;
-        if (!_arcMyMove(game) || !state.canSend) return;
+        if (!_arcActive(game) || !state.canSend) return;
         if (!/^[0-6]$/.test(String(col))) return;
-        arcMove(game.id, String(col));
+        if (_arcCanVote(game)) arcVote(game.id, String(col));
+        else arcMove(game.id, String(col));
     }
 
     // ── Board interaction ───────────────────────────────────────────────
@@ -1804,7 +1810,7 @@
         var CG = window.ChatGames;
         if (!CG.isRoomTurn(game)) return '';
         var E = window.ChessEngine;
-        var pos = E.fromFEN(game.fen);
+        var pos = game.variant === 'chess' ? E.fromFEN(game.fen) : null;
         var names = Object.keys(game.votes || {});
         if (!names.length) {
             return '<div class="chat-arc-note">No votes yet. ' + game.voteK +
@@ -1819,7 +1825,8 @@
                 ' to carry</div>' +
             names.map(function (uci) {
                 var mv = pos && E.uciToMove(pos, uci);
-                var label = mv ? E.toSAN(pos, mv) : uci;
+                var label = mv ? E.toSAN(pos, mv)
+                    : (game.variant === 'connect4' ? 'column ' + (parseInt(uci, 10) + 1) : uci);
                 var n = game.votes[uci];
                 return '<div class="chat-arc-ballotrow">' +
                     '<span class="chat-arc-ballotmv">' + esc(label) + '</span>' +

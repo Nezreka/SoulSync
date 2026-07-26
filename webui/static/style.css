@@ -72480,7 +72480,10 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-c4cell--live:hover { background: rgba(255,255,255,0.14); }
 .chat-arc-disc { width: 82%; height: 82%; border-radius: 50%; }
 .chat-arc-disc--w { background: radial-gradient(circle at 35% 30%, #ff8a80, #d63a2f); }
-.chat-arc-disc--b { background: radial-gradient(circle at 35% 30%, #82b1ff, #2962c4); }
+/* Yellow, not blue: the board is blue, and a blue disc on a blue board is
+   the one colour pairing that cannot work. Red/yellow on blue is also what
+   the actual game looks like, so it reads instantly. */
+.chat-arc-disc--b { background: radial-gradient(circle at 35% 30%, #ffe082, #f2b90c); }
 
 /* ── ladder + the reveal (arcade P4) ── */
 .chat-arc-ladder {
