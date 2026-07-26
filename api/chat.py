@@ -383,6 +383,9 @@ def create_blueprint() -> Blueprint:
             "giphy_key_set": bool(_cfg("soulseek.chat_giphy_key", "")),
             "filepost_key_set": bool(_cfg("soulseek.chat_filepost_key", "")),
             "filepost_expiry": str(_cfg("soulseek.chat_filepost_expiry", "") or ""),
+            # Chosen preset avatar (0 = none). Server-side so it follows the
+            # account across browsers rather than living in one localStorage.
+            "avatar": int(_cfg("soulseek.chat_avatar", 0) or 0),
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
@@ -405,6 +408,12 @@ def create_blueprint() -> Blueprint:
                          ("auto_prove", "soulseek.chat_auto_prove")):
             if key in body:
                 _config_set(cfg, bool(body.get(key)))
+        if "avatar" in body:
+            try:
+                _av = int(body.get("avatar") or 0)
+            except (TypeError, ValueError):
+                _av = 0
+            _config_set("soulseek.chat_avatar", _av if 1 <= _av <= AVATAR_COUNT else 0)
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())

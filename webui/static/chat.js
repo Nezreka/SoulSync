@@ -342,7 +342,15 @@
         return h % 360;
     }
 
-    function _avatar(user) {
+    function _avatar(user, avMap) {
+        // A chosen preset wins; otherwise the original hue-tinted initial. Used
+        // by message groups, the user card and the mention picker, so upgrading
+        // it here paints faces everywhere at once.
+        var n = _avatarId((avMap || _avatarMap())[user]);
+        if (n) {
+            return '<span class="chat-avatar chat-avatar--img" aria-hidden="true">' +
+                '<img src="/static/avatar/' + n + '.png" alt="" loading="lazy"></span>';
+        }
         return '<span class="chat-avatar" style="background:hsl(' + _hue(user) +
             ',52%,40%)" aria-hidden="true">' +
             esc(String(user || '?').charAt(0).toUpperCase()) + '</span>';
@@ -489,6 +497,7 @@
     // fold under one avatar + name header, with day separators between dates.
     function renderGroups(msgs) {
         var html = '', group = null, lastDay = null, GAP = 5 * 60 * 1000;
+        var avMap = _avatarMap();      // fold once per render, not per group
         function flush() { if (group) { html += group.html + '</div></div>'; group = null; } }
         for (var i = 0; i < msgs.length; i++) {
             var m = msgs[i];
@@ -518,7 +527,7 @@
             group = { user: user, ext: ext, self: self, t: t, html:
                 '<div class="chat-group' + (self ? ' chat-group--self' : '') +
                     (ext ? ' chat-group--ext' : '') + '">' +
-                _avatar(user) +
+                _avatar(user, avMap) +
                 '<div class="chat-group-body"><div class="chat-group-head">' +
                 '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) +
                     '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
@@ -1682,6 +1691,10 @@
                 try { nOn = localStorage.getItem('chat_np') === '1'; } catch (err) { /* ignore */ }
                 el.checked = nOn;
             }
+            // server copy wins on open — it's the one that followed the account
+            if (typeof b.avatar !== 'undefined') {
+                try { localStorage.setItem('chat_avatar', String(_avatarId(b.avatar))); } catch (err) { /* ignore */ }
+            }
             renderAvatarPicker();
             overlay.hidden = false;
         });
@@ -2005,7 +2018,11 @@
 
     function pickAvatar(raw) {
         var n = _avatarId(raw);                    // 0 clears
+        // localStorage is the fast local cache every send reads; the server copy
+        // is the source of truth so the choice follows the account to another
+        // browser. Write both — the local one first so nothing waits on a fetch.
         try { localStorage.setItem('chat_avatar', String(n)); } catch (e) { /* private mode */ }
+        postJSON('/api/chat/settings', { avatar: n }).catch(function () { /* local still applies */ });
         renderAvatarPicker();
         // Announce it now so the room repaints without waiting for us to talk.
         if (state.canSend && state.view === 'room') {
