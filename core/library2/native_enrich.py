@@ -253,6 +253,56 @@ def enrich_native_artist_artwork(
     return True
 
 
+def schedule_native_artist_artwork(database: Any, artist_id: int):
+    """Run :func:`enrich_native_artist_artwork` off the caller's thread.
+
+    manualmatch25-01: the artwork walk is a chain of *blocking* provider HTTP
+    calls over every id stored on the row (same sequential shape as
+    perf25-02, but on a request-critical path).  Running it inside
+    ``PUT /manual-match`` — and, worse, before that route's ``conn.commit()`` —
+    pushed the response past the web client's 10s default timeout for every
+    artist and every source, so a match that had in fact succeeded looked
+    like "Request timed out".
+
+    Callers commit their own transaction first and then schedule here; the
+    worker opens its own connection, so it sees the committed identity and
+    cannot hold the caller's write lock.  Returns the :class:`threading.Thread`
+    (tests join it); never raises — artwork is presentation data.
+    """
+    import threading
+
+    thread = threading.Thread(
+        target=_run_native_artist_artwork,
+        args=(database, int(artist_id)),
+        name="lib2-native-artist-artwork",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def _run_native_artist_artwork(database: Any, artist_id: int) -> None:
+    conn = None
+    try:
+        try:
+            conn = database._get_connection()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("native artist artwork connection failed: %s", exc)
+            return
+        # Module-level lookup on purpose: keeps the seam patchable and picks up
+        # the same function the synchronous callers use.
+        if enrich_native_artist_artwork(conn, int(artist_id)):
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("native artist artwork fetch failed (%s): %s", artist_id, exc)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("native artist artwork close failed: %s", exc)
+
+
 def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[str]:
     """Resolve an artist image URL from stored provider ids (production adapter)."""
     from core.library2.provider_adapters import fetch_artwork_url

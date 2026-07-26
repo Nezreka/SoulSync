@@ -1658,18 +1658,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 actor=f"profile:{_profile()}",
             )
 
-            # Setting an id flips the chip but pulls no cover — the user expects
-            # artwork to appear too. Best-effort artist artwork fetch from the
-            # id just stored (native artists only; legacy-backed rows enrich via
-            # the legacy path). Never fails the match.
-            if request.method == "PUT" and entity_type in ("artist", "artists"):
-                try:
-                    from core.library2.native_enrich import enrich_native_artist_artwork
-                    enrich_native_artist_artwork(conn, int(entity_id))
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("native artist artwork fetch failed (%s): %s",
-                                 entity_id, exc)
-
             # Artist settings deliberately reuse the legacy Watchlist.  Keep a
             # supplied, identity-checked row in sync just like the legacy match
             # endpoint does.
@@ -1715,6 +1703,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": str(exc)}), 400
         finally:
             conn.close()
+
+        # Setting an id flips the chip but pulls no cover — the user expects
+        # artwork to appear too. Best-effort artist artwork fetch from the id
+        # just stored (native artists only; legacy-backed rows enrich via the
+        # legacy path).  manualmatch25-01: this is a sequential walk of
+        # blocking provider HTTP calls, so it runs *after* the commit and off
+        # the request thread — inside the request it reliably blew through the
+        # web client's 10s timeout and made a successful match look failed.
+        if request.method == "PUT" and entity_type in ("artist", "artists"):
+            try:
+                from core.library2 import native_enrich
+                native_enrich.schedule_native_artist_artwork(
+                    get_database(), int(entity_id)
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("native artist artwork scheduling failed (%s): %s",
+                             entity_id, exc)
         return jsonify({"success": True})
 
     @app.route(

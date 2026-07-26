@@ -589,6 +589,72 @@ def test_lib2_native_manual_match_route_updates_provider_identity(api):
     assert "deezer" not in external_ids
 
 
+def test_manual_match_answers_without_waiting_for_the_artwork_walk(api, monkeypatch):
+    """manualmatch25-01: the artist artwork walk is a sequential chain of
+    blocking provider HTTP calls.  Running it *before* ``conn.commit()`` pushed
+    every artist manual match past the client's 10s default timeout, so the
+    user saw "Request timed out" even though the match itself was fine."""
+    import json
+
+    client, db, ids = api
+    from core.library2 import native_enrich
+
+    started = threading.Event()
+    release = threading.Event()
+    seen: dict = {}
+
+    def _slow_enrich(conn, artist_id, **_kwargs):
+        seen["thread"] = threading.get_ident()
+        started.set()
+        release.wait(timeout=30)
+        seen["external_ids"] = conn.execute(
+            "SELECT external_ids FROM lib2_artists WHERE id=?", (int(artist_id),)
+        ).fetchone()[0]
+        return True
+
+    monkeypatch.setattr(native_enrich, "enrich_native_artist_artwork", _slow_enrich)
+
+    began = time.time()
+    response = client.put(
+        f"/api/library/v2/artists/{ids['artist']}/manual-match",
+        json={"service": "deezer", "service_id": "dz-native"},
+    )
+    elapsed = time.time() - began
+
+    # Answered while the artwork walk is still blocked mid-flight.
+    assert response.status_code == 200
+    assert elapsed < 5, f"match waited {elapsed:.1f}s on the artwork walk"
+    assert started.wait(timeout=5), "artwork enrich never ran off-thread"
+    assert seen["thread"] != threading.get_ident()
+    release.set()
+
+    deadline = time.time() + 5
+    while "external_ids" not in seen and time.time() < deadline:
+        time.sleep(0.01)
+    # The background connection is a *different* connection, so it can only see
+    # the match if the route committed before scheduling it.
+    assert json.loads(seen["external_ids"])["deezer"] == "dz-native"
+
+
+def test_manual_match_removal_schedules_no_artwork_work(api, monkeypatch):
+    """Clearing an id must not queue an artwork walk for the id just removed."""
+    client, db, ids = api
+    from core.library2 import native_enrich
+
+    scheduled = []
+    monkeypatch.setattr(
+        native_enrich, "schedule_native_artist_artwork",
+        lambda *a, **k: scheduled.append(a) or None,
+    )
+
+    response = client.delete(
+        f"/api/library/v2/artists/{ids['artist']}/manual-match",
+        json={"service": "deezer"},
+    )
+    assert response.status_code == 200
+    assert scheduled == []
+
+
 def test_eps_get_local_artwork_urls(api):
     """Every release group — including EPs — must point at the local artwork
     endpoint, never at a raw DB image_url (which may be a media-server URL)."""
