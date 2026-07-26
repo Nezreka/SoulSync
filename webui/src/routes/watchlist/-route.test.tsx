@@ -6,21 +6,6 @@ import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-// The React watchlist page is still dormant in the shipped manifest — the
-// vanilla page owns /watchlist until it reaches parity. These tests exercise
-// the React page, so they declare it owned. Everything else in the manifest is
-// left exactly as it ships.
-vi.mock('@/platform/shell/route-manifest', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/platform/shell/route-manifest')>();
-  return {
-    ...actual,
-    getShellRouteByPageId: (pageId: string) =>
-      pageId === 'watchlist'
-        ? { pageId: 'watchlist', path: '/watchlist', kind: 'react' }
-        : actual.getShellRouteByPageId(pageId as never),
-  };
-});
-
 function createResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,

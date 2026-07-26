@@ -1,8 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
 import { getProfileHomePath } from '@/platform/shell/bridge';
-import { LegacyRouteController } from '@/platform/shell/route-controllers';
-import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
 import { WatchlistPage } from './-ui/watchlist-page';
 import {
@@ -13,21 +11,6 @@ import {
   watchlistScanStatusQueryOptions,
 } from './-watchlist.api';
 import { watchlistSearchSchema } from './-watchlist.types';
-
-/**
- * Whether the shell has handed /watchlist over to React yet.
- *
- * The route file exists (and is tested) before the React page reaches parity
- * with the vanilla one. Without this check TanStack would match /watchlist to
- * the React route regardless of the manifest, and the vanilla page and the
- * React host would both activate — so until the manifest says `react`, this
- * route renders the legacy page exactly as the `/$` splat route would.
- *
- * Delete this indirection once the vanilla watchlist page is gone.
- */
-function isReactOwned(): boolean {
-  return getShellRouteByPageId('watchlist')?.kind === 'react';
-}
 
 export const Route = createFileRoute('/watchlist')({
   validateSearch: watchlistSearchSchema,
@@ -40,8 +23,6 @@ export const Route = createFileRoute('/watchlist')({
   },
   loaderDeps: ({ search }) => ({ tab: search.tab }),
   loader: async ({ context, deps }) => {
-    if (!isReactOwned()) return;
-
     const { profile } = context.shell;
     const { queryClient } = context;
 
@@ -62,12 +43,5 @@ export const Route = createFileRoute('/watchlist')({
 
     await Promise.all(pending);
   },
-  component: WatchlistRouteComponent,
+  component: WatchlistPage,
 });
-
-function WatchlistRouteComponent() {
-  if (!isReactOwned()) {
-    return <LegacyRouteController pathname="/watchlist" />;
-  }
-  return <WatchlistPage />;
-}
