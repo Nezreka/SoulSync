@@ -551,13 +551,6 @@ function updateDiscoveryProgressFromData(data) {
     if (callback) callback(data);
 }
 
-function updateWatchlistScanFromData(data) {
-    if (!data.success) return;
-    if (_lastWatchlistScanStatus === data.status && data.status !== 'scanning') return;
-    _lastWatchlistScanStatus = data.status;
-    handleWatchlistScanData(data);
-}
-
 function updateMediaScanFromData(data) {
     if (!data.success || !data.status) return;
     const status = data.status;

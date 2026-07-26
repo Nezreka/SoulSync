@@ -103,7 +103,8 @@ export function WatchlistLinkedProviders({ profileId, artistId, payload }: Props
     : '';
 
   return (
-    <div className="config-section">
+    // id restores this section's helper.js contextual-help entry.
+    <div id="watchlist-linked-provider-section" className="config-section">
       <h3 className="config-section-title">Linked Artist</h3>
       <p className="config-section-subtitle">
         The metadata provider artist linked to this watchlist entry

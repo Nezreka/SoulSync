@@ -105,10 +105,6 @@ export function formatFollowers(value: number | null | undefined): string {
   return value.toLocaleString('en-US');
 }
 
-/** Same z-index bump style.css gives #watchlist-artist-config-modal-overlay,
- *  applied directly because the React modal does not carry that id. */
-const OVERLAY_STYLE = { zIndex: 11000 } as const;
-
 interface Props {
   profileId: number;
   artistId: string;
@@ -177,8 +173,13 @@ export function WatchlistArtistConfigModal({
     METADATA_SOURCE_META[globalSource as WatchlistMetadataSource]?.label ?? globalSource;
 
   return (
-    <div className="modal-overlay" style={OVERLAY_STYLE} onClick={onClose}>
+    // The ids are load-bearing, not decoration: style.css keys the z-index
+    // bump off #watchlist-artist-config-modal-overlay, and helper.js's
+    // HELPER_CONTENT keys its contextual help off #watchlist-artist-config-modal.
+    // The vanilla markup owned them until it was deleted.
+    <div id="watchlist-artist-config-modal-overlay" className="modal-overlay" onClick={onClose}>
       <div
+        id="watchlist-artist-config-modal"
         className="watchlist-artist-config-modal"
         role="dialog"
         aria-modal="true"
