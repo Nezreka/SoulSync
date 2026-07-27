@@ -57,6 +57,34 @@ declare global {
     startWishlistCountdownTimer?: (currentCycle: string, initialSeconds: number) => void;
     openWishlistIgnoreModal?: () => void;
     cleanupWishlistOverview?: () => void;
+    /**
+     * The automation builder (create/edit) stays in stats-automations.js and is
+     * deliberately NOT ported: showVideoAutomationBuilder opens the very same
+     * builder with a video context, so a React copy would be a second
+     * implementation of something the video page still needs. The React page
+     * hands the shell over for the edit instead — see -automations.builder.ts.
+     */
+    showAutomationBuilder?: (automationId?: number) => void;
+    /**
+     * Closes the shared builder. Wrapped by the React automations page so it
+     * can reclaim the shell — every exit path (Back, Cancel, Save) calls it.
+     */
+    hideAutomationBuilder?: () => void;
+    /**
+     * Builds the Automation Hub section (pipelines, recipes, guides, reference,
+     * tips) and returns the node. Shared verbatim with the VIDEO automations
+     * page, so React mounts what it returns rather than restating its content.
+     */
+    _buildAutomationHub?: () => HTMLElement;
+    /**
+     * The "Runs: N" run-history modal. Appends itself to document.body rather
+     * than into the page container, so it works unchanged from the React page.
+     */
+    showAutomationHistory?: (
+      automationId: number,
+      automationName: string,
+      actionType: string,
+    ) => void;
     clearEntireWishlist?: () => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;

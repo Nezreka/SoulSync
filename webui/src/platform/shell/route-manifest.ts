@@ -38,7 +38,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'playlist-explorer', path: '/playlist-explorer', kind: 'legacy' },
   { pageId: 'watchlist', path: '/watchlist', kind: 'react' },
   { pageId: 'wishlist', path: '/wishlist', kind: 'react' },
-  { pageId: 'automations', path: '/automations', kind: 'legacy' },
+  { pageId: 'automations', path: '/automations', kind: 'react' },
   { pageId: 'active-downloads', path: '/active-downloads', kind: 'legacy' },
   { pageId: 'import', path: '/import', kind: 'react' },
   { pageId: 'library', path: '/library', kind: 'legacy' },

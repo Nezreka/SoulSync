@@ -3314,6 +3314,15 @@ async function loadAutomations() {
     const empty = document.getElementById('automations-empty');
     const statsBar = document.getElementById('automations-stats');
     if (!list || !empty) return;
+    // If React owns /automations, IT is the live page and this container is
+    // hidden. Repainting it would put a second copy of every section and card
+    // in the document — duplicate #auto-section-* ids and duplicate
+    // .automation-card[data-id] nodes, which document-wide getElementById /
+    // querySelector calls then resolve to instead of the visible ones.
+    //
+    // This is reachable: the shared builder's onSaved hook calls back into
+    // here after a save made from the React page.
+    if (document.getElementById('webui-react-root')?.classList.contains('active')) return;
     try {
         const res = await fetch('/api/automations');
         const payload = await res.json();
@@ -4372,7 +4381,13 @@ function updateAutomationProgressFromData(data) {
     for (const [aidStr, state] of Object.entries(data)) {
         const aid = parseInt(aidStr);
         const card = document.querySelector(`.automation-card[data-id="${aid}"]`);
-        if (!card) continue;
+        // Skip cards React owns. This query is document-wide, so once /automations
+        // is a React route it would otherwise inject .automation-output panels
+        // into React's DOM — which React then clobbers on its next render, and
+        // the two fight over the same node. React renders its own progress from
+        // the ss:automation-progress event instead. Vanilla music + video cards
+        // live outside the React root and are unaffected.
+        if (!card || card.closest('#webui-react-root')) continue;
 
         let panel = card.querySelector('.automation-output');
         if (!panel) {
