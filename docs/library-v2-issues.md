@@ -3115,3 +3115,100 @@ außerhalb des gemeldeten Scopes. Live-Verifikation im Browser gegen einen
 echten Soulseek/Usenet-Backend-Stack stand in dieser Session nicht zur
 Verfügung (kein laufender `dev.py`); empfohlen vor dem nächsten Nutzer-Test.
 
+## 22. Live-Test-Feedback zu §21/§33: Usenet-Regression, kaputte Toggle-Optik, fehlendes Timeout-Verhalten — OFFEN, Recherche läuft, 27. Juli 2026
+
+**Wichtig:** Genau die in §21 als "Live-Verifikation stand nicht zur
+Verfügung" markierte Lücke hat sich als real herausgestellt — der Nutzer hat
+§21/§33 direkt im Browser getestet und drei konkrete Probleme gemeldet.
+Alle drei Punkte sind zum Zeitpunkt dieses Eintrags **NICHT behoben** —
+Recherche wird in der nächsten Session fortgesetzt. Dieser Abschnitt hält
+den Zwischenstand der Recherche fest, damit nichts verlorengeht.
+
+### 22.1 <a name="iss27-12"></a> iss27-12 — Usenet liefert seit §21/§33 keine Ergebnisse mehr (Regression) — Offen, Root Cause noch nicht gefunden
+
+**Symptom:** Laut Nutzer lieferte die Usenet-Quelle in Interactive Search
+vor den §21/§33-Änderungen noch Ergebnisse; seit dem Umbau der
+Quellenauswahl auf Multi-Select-Chips (§21.4) liefert sie gar nichts mehr.
+
+**Bisherige Recherche (nicht abschließend):** Der naheliegendste Verdacht
+war, dass `run()` in `interactive-search.tsx` jetzt — anders als vorher —
+IMMER einen expliziten `source`-Parameter an `searchSources()` übergibt,
+auch im reinen Single-Source-Modus (vorher wurde dort `undefined`
+übergeben und die Entscheidung dem Backend überlassen). Das würde
+`core/search/basic.py::run_basic_search` vom impliziten
+`download_orchestrator.search(query)`-Pfad (Zeile ~75) auf den expliziten
+`download_orchestrator.client(source)`-Pfad (Zeile ~53-73) umlenken.
+Gegenrecherche in `core/download_orchestrator.py` zeigt aber: im
+Single-Source-Modus ist `self._client(self.mode)` (impliziter Pfad,
+`DownloadOrchestrator.search()` Zeile ~319) **dieselbe Methode** wie
+`self.client(name)`/`self.registry.get(name)` (expliziter Pfad) — beide
+lösen exakt denselben Client mit denselben effektiven Default-Argumenten
+(`timeout=None`) auf. Diese Theorie ist damit widerlegt, zumindest für den
+reinen Single-Source-Fall. Für den Hybrid-Fall (mehrere Quellen inkl.
+Usenet parallel) ändert sich durch §21.4 nichts an den gesendeten
+Requests: `activeSources.map((s) => searchSources(q, s.name))` ist bei
+leerem `excludedSources` bytgleich mit dem alten
+`allSources.map((s) => searchSources(q, s.name))`.
+
+**Nächste Schritte:** Muss mit dem echten Setup des Nutzers reproduziert
+werden (Single-Source „usenet“ vs. Hybrid mit Usenet im Chain? Welche
+Quellen sind aktuell konfiguriert? Browser-Devtools-Network-Tab: welcher
+`source`-Wert geht tatsächlich raus, welche Antwort kommt zurück —
+leeres `results: []`, ein Fehler, oder ein Timeout?). Ohne Reproduktion
+gegen einen echten Prowlarr/Usenet-Client lässt sich der Root Cause aus
+dem Code allein nicht sicher eingrenzen.
+
+### 22.2 <a name="iss27-13"></a> iss27-13 — Quality-/AcoustID-/Cutoff-Toggles rendern visuell kaputt — Offen, braucht Live-Browser-Diagnose
+
+**Symptom:** Laut Nutzer sehen die drei neuen Toggle-Switches (§21.4) "komplett
+kaputt" aus — sichtbar ist nur ein weißer Punkt, UND zusätzlich weiterhin
+eine native Checkbox-Box daneben/darunter, statt eines sauberen
+Slide-Toggles.
+
+**Einordnung:** Das ist ein reines CSS-Rendering-Problem, das durch
+Unit-/Komponententests (jsdom rendert kein echtes Box-Modell/keine echten
+Pseudo-Elemente) nicht auffindbar ist — dafür ist ein echter Browser via
+`dev.py` nötig, der in dieser Session nicht zur Verfügung stand. Verdächtig:
+`appearance: none` auf `.toggleSwitch` (`library-v2-page.module.css`)
+könnte von einer globaleren/spezifischeren Regel überschrieben werden
+(Browser-Standard-Checkbox-Rendering + das eigene `::before`
+möglicherweise gleichzeitig sichtbar), oder eine fehlende
+Browser-Prefix-/Cascade-Reihenfolge lässt die native Checkbox-Box
+durchscheinen. Muss live im Browser inspiziert (Devtools Computed Styles)
+und korrigiert werden.
+
+### 22.3 <a name="iss27-14"></a> iss27-14 — Kein progressives Rendering / unklares Timeout-Verhalten bei langsamer oder nicht-antwortender Quelle — Offen, Design-Entscheidung nötig
+
+**Symptom/Frage des Nutzers:** Was passiert, wenn eine Quelle nicht
+antwortet? Gibt es ein Timeout? Soulseek braucht/queued teils auch lange.
+
+**Ist-Zustand (recherchiert, noch nicht geändert):** Jede einzelne
+`searchSources()`-Anfrage hat ein 90s-Client-Timeout (`ky`,
+`-library-v2.api.ts::searchSources`). Im Multi-Source-Fall wartet
+`Promise.allSettled(...)` in `run()` aber auf **alle** Quellen, bevor
+überhaupt irgendein Ergebnis gerendert wird — eine einzelne hängende
+Quelle (z.B. ein langsam antwortendes/gequeutes Soulseek) verzögert damit
+die Anzeige bereits fertiger Ergebnisse anderer, schnellerer Quellen
+(z.B. Usenet) um bis zu 90 Sekunden, obwohl deren Antwort längst da wäre.
+Ein echter Ausfall (Timeout/Fehler) wird zwar sauber toleriert (die
+Quelle landet in `failed`, die anderen Ergebnisse werden trotzdem
+angezeigt — das ist die iss27-01-Fan-out-Garantie), aber die WARTEZEIT bis
+dahin blockiert die gesamte Anzeige.
+
+**Möglicher Fix-Ansatz (noch nicht umgesetzt, Nutzer-Rückfrage vor
+Umsetzung nötig):** Ergebnisse pro Quelle einzeln rendern, sobald sie
+eintreffen (`results` inkrementell befüllen statt erst nach
+`Promise.allSettled`), statt auf die langsamste Quelle zu warten. Das ist
+ein größerer UX-Umbau als eine kleine Bugfix-Änderung — bewusst nicht ad
+hoc umgesetzt, sondern hier nur recherchiert/dokumentiert, bis der Nutzer
+den Ansatz bestätigt.
+
+### Einstufung (§22)
+
+Alle drei Punkte sind als Ergebnis des ersten echten Live-Tests von §21/§33
+gemeldet worden und bleiben bis zur nächsten Session offen. iss27-12 ist
+die dringendste (funktionale Regression), iss27-13 die am einfachsten zu
+beheben sobald ein Browser verfügbar ist (reines CSS), iss27-14 braucht
+vorab eine Nutzer-Entscheidung zum gewünschten UX (progressives Rendering
+vs. aktuelles Warten-auf-alle-Verhalten).
+

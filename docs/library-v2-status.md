@@ -1641,7 +1641,48 @@ iss27-01-Abschluss). Kurzfassung:
 iss27-01 (§20.1/§31 Punkt 13a) ist jetzt vollständig — funktional UND
 visuell — abgeschlossen. Drei zusätzliche, unabhängig gefundene Probleme
 (iss27-09 Query-Bug, iss27-11 Indexer-als-Artist) sind behoben, plus eine
-neue Feedback-Funktion für den Quarantäne-Fall (iss27-10). Interactive
-Search hat damit keine bekannten offenen Funktionsblocker mehr; verbleibende
+neue Feedback-Funktion für den Quarantäne-Fall (iss27-10). Verbleibende
 §20/§31-Punkte (8, iss27-07, iss27-08) sind bewusst unangetastete
 Design-Entscheidungen außerhalb des Scopes dieser Session.
+
+**Nachtrag (§34): Der erste echte Live-Test dieser Session hat drei neue
+Probleme aufgedeckt** (Usenet-Regression, kaputte Toggle-Optik,
+Timeout-Frage) — die Aussage "keine bekannten offenen Funktionsblocker"
+oben ist damit überholt, siehe §34.
+
+## 34. Live-Test-Feedback zu §33: Usenet-Regression, kaputte Toggle-Optik, Timeout-Frage — OFFEN, 27. Juli 2026 (Fortsetzung morgen)
+
+Direkt nach dem §33-Push hat der Nutzer live im Browser getestet (statt
+wie in §33 dokumentiert nur per Unit-/Integrationstests) und drei konkrete
+Probleme gemeldet. **Alle drei sind zum jetzigen Zeitpunkt noch offen** —
+Nutzer hat die Fortsetzung auf morgen verschoben. Details unter
+`docs/library-v2-issues.md` §22 (iss27-12/13/14); Kurzfassung:
+
+- **iss27-12 (Usenet-Regression):** Liefert seit den §33-Änderungen keine
+  Ergebnisse mehr, lief davor. Verdacht "expliziter statt impliziter
+  `source`-Parameter im Single-Source-Modus" wurde durch Code-Recherche in
+  `core/download_orchestrator.py` widerlegt (beide Pfade lösen denselben
+  Client mit denselben Default-Argumenten auf) — Root Cause noch NICHT
+  gefunden, braucht Reproduktion mit dem echten Nutzer-Setup
+  (Single-Source vs. Hybrid? Network-Tab-Inspektion).
+- **iss27-13 (Toggle-Optik kaputt):** Die neuen Slide-Toggles zeigen laut
+  Nutzer nur einen weißen Punkt plus weiterhin eine sichtbare native
+  Checkbox — ein reines CSS-Problem, das nur mit einem echten Browser
+  (nicht per jsdom-Unit-Test) diagnostizierbar ist. Kein laufender `dev.py`
+  in dieser Session verfügbar gewesen.
+- **iss27-14 (Timeout-Verhalten):** Jede Quelle hat ein 90s-Client-Timeout,
+  aber `Promise.allSettled` im Multi-Source-Fan-out wartet auf ALLE
+  Quellen, bevor irgendein Ergebnis angezeigt wird — eine langsame Quelle
+  (z.B. gequeutes Soulseek) verzögert damit auch bereits fertige
+  Ergebnisse anderer, schnellerer Quellen. Möglicher Fix (progressives
+  Rendering pro Quelle) ist ein größerer UX-Umbau und braucht vorab eine
+  Nutzer-Entscheidung, bevor er umgesetzt wird.
+
+### Einstufung
+
+Dies bestätigt eine in §33 selbst benannte Lücke: die dort dokumentierte
+Test-Abdeckung (Unit-/Integrationstests, Typecheck, Lint) hat den echten
+Soulseek/Usenet/Prowlarr-Stack nicht ersetzen können. Nächste Session:
+Root-Cause-Reproduktion für iss27-12 mit echtem Setup zuerst (funktionale
+Regression, höchste Priorität), dann iss27-13 (Browser-Diagnose, sobald
+`dev.py` läuft), dann iss27-14 (nach Rückfrage zum gewünschten UX-Verhalten).
