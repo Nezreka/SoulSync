@@ -3212,3 +3212,82 @@ beheben sobald ein Browser verfügbar ist (reines CSS), iss27-14 braucht
 vorab eine Nutzer-Entscheidung zum gewünschten UX (progressives Rendering
 vs. aktuelles Warten-auf-alle-Verhalten).
 
+## 23. Neu heruntergeladener Track eines bereits gut gemappten Albums hat nur eine Metadaten-Quelle — Offen, Recherche begonnen, 27. Juli 2026
+
+**Symptom/Szenario des Nutzers:** Ein Album ist bei fast allen
+Metadaten-Quellen gematcht, ebenso der Artist — das Album ist aber nicht
+vollständig (ein Track fehlt). Der Nutzer löst für den fehlenden Track
+Automatic oder Interactive Search aus, der Track wird heruntergeladen —
+bis hierhin alles gut. Danach muss er manuell „Refresh & Scan" auslösen,
+damit die Datei überhaupt erkannt wird. Das eigentliche Problem: der neu
+heruntergeladene Track hat danach nur **eine** Metadaten-Quelle
+hinterlegt, obwohl Album und Artist bei deutlich mehr Quellen gemappt
+sind. Frage des Nutzers: Wie kann das passieren? Gibt es nicht schon ein
+Werkzeug, das die Daten vom Album/Artist übernehmen bzw. die anderen
+Quellen nachmappen kann? Falls ja, sollte es nach dem Download für genau
+diesen einen Track automatisch ausgelöst werden.
+
+**Erste Recherche (nicht abschließend, nur zur Einordnung vor der
+nächsten Session):**
+
+- Provider-IDs werden pro Entität in einer `external_ids`-JSON-Spalte
+  gehalten (`lib2_artists`, `lib2_albums`, `lib2_tracks` —
+  `core/library2/schema.py`); `spotify_id`/`musicbrainz_id` haben
+  zusätzlich eigene Spalten. Die im UI sichtbaren „Match Provider"-Chips
+  (deezer/itunes/discogs/audiodb/lastfm/genius/tidal/qobuz/amazon/
+  jiosaavn/bandcamp/…) lesen aus genau diesem JSON-Feld.
+- `core/library2/autolink.py::_find_or_create_track` (der Pfad, über den
+  ein fertig heruntergeladener Track in die Library gelinkt wird) versucht
+  aktiv, eine BESTEHENDE Track-Zeile wiederzuverwenden (erst per
+  Provider-ID-Abgleich, dann per `dedup_title_key`-Titelabgleich) und
+  merged beim Treffer nur die EINE neu bekannte Provider-ID zusätzlich
+  rein (`_adopt_external_id`), statt bestehende IDs zu überschreiben — das
+  ist grundsätzlich der richtige Mechanismus, WENN die bestehende
+  Track-Zeile (aus dem ursprünglichen Discography-Fetch) bereits eine
+  reichhaltige `external_ids`-Map hätte.
+- **Offene Kernfrage, noch nicht verifiziert:** Bekommen einzelne
+  Track-Zeilen beim initialen Discography-Fetch (dem Vorgang, der Album +
+  Artist gegen „fast alle Quellen" matcht) überhaupt schon eine
+  Multi-Provider-`external_ids`-Map, oder wird dort nur eine flache
+  Tracklist aus EINER Quelle (z.B. Spotify) angelegt, während die
+  reichhaltige Multi-Provider-Anreicherung nur auf Album-/Artist-Ebene
+  läuft? Falls letzteres zutrifft, wäre das der eigentliche Root Cause —
+  nicht ein Bug im Re-Use-Mechanismus selbst, sondern eine fehlende
+  Track-Ebene in der bestehenden Anreicherungs-Pipeline. Muss in
+  `core/library2/discography.py` (oder wo auch immer der initiale
+  Album-Track-Import passiert) nachvollzogen werden.
+- **Vergleichbares Werkzeug existiert für Artists, aber (soweit bisher
+  gesehen) NICHT für Tracks/Alben:** `core/library2/native_enrich.py::
+  reconcile_unmapped_native_artists` reconciled unabgeglichene ARTIST-IDs
+  und wird bereits automatisch nach jedem Import angestoßen
+  (`core/library2/unmapped_trigger.py`, siehe §28 Umsetzung, Commit
+  `f7303866c`) — aber nur für Artists, nicht für Alben oder einzelne
+  Tracks. `core/metadata/album_tracks.py` liefert bereits den Baustein,
+  der pro Provider die volle Tracklist eines Albums holen kann (wird u.a.
+  von `reconcile_unmapped_native_artists` und vom Tag-Gap-Fill-Endpunkt
+  aus [iss27-02](library-v2-issues.md#iss27-02) genutzt) — ob es bereits
+  einen HÖHERWERTIGEN Job gibt, der damit gezielt fehlende Track-Provider-IDs
+  für ein bereits gematchtes Album nachzieht, konnte in der verfügbaren
+  Zeit nicht abschließend verifiziert werden.
+
+**Vorschlag für die nächste Session (noch nicht umgesetzt):** Falls sich
+bestätigt, dass Tracks beim Discography-Fetch nur eine einzelne Quelle
+bekommen: einen Track-Reconcile-Job analog zu
+`reconcile_unmapped_native_artists` bauen (pro Track alle konfigurierten
+Provider über `core/metadata/album_tracks.py` abklappern, per
+`dedup_title_key`/Tracknummer matchen, gefundene IDs per
+`_adopt_external_id` mergen), und diesen — genau wie beim
+Artist-Reconcile — per Post-Import-Hook automatisch für den einzelnen
+neu importierten Track auslösen (kein manuelles „Refresh & Scan" mehr
+nötig). Vor der Umsetzung: bestätigen, ob ein Teil davon nicht doch schon
+existiert, um keine Dopplung zu bauen.
+
+### Einstufung
+
+Recherche begonnen, aber NICHT abgeschlossen — die Kernfrage (bekommen
+einzelne Tracks beim Discography-Fetch überhaupt Multi-Provider-IDs?) ist
+noch offen. Nächste Session: `core/library2/discography.py` und den
+initialen Album-Track-Anlage-Pfad nachvollziehen, dann entscheiden, ob ein
+neuer Track-Reconcile-Job nötig ist oder ob nur ein bestehendes Werkzeug
+verdrahtet werden muss.
+

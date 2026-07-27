@@ -1686,3 +1686,46 @@ Soulseek/Usenet/Prowlarr-Stack nicht ersetzen können. Nächste Session:
 Root-Cause-Reproduktion für iss27-12 mit echtem Setup zuerst (funktionale
 Regression, höchste Priorität), dann iss27-13 (Browser-Diagnose, sobald
 `dev.py` läuft), dann iss27-14 (nach Rückfrage zum gewünschten UX-Verhalten).
+
+## 35. Neu heruntergeladener Track eines gut gemappten Albums hat nur eine Metadaten-Quelle — Offen, Recherche begonnen, 27. Juli 2026
+
+Neues, unabhängiges Szenario vom Nutzer (nicht Interactive-Search-UI,
+sondern Metadaten-Vollständigkeit nach einem Download): Album + Artist
+sind bei fast allen Quellen gemappt, ein einzelner fehlender Track wird
+per Automatic/Interactive Search nachgeladen — danach hat aber genau
+dieser Track nur EINE Metadaten-Quelle hinterlegt, nicht die vom Album/
+Artist bekannten vielen. Zusätzlich muss aktuell manuell „Refresh & Scan"
+ausgelöst werden, damit die neue Datei überhaupt erkannt wird. Details
+und erste Code-Recherche unter `docs/library-v2-issues.md` §23.
+
+**Bisherige Erkenntnisse (nicht abschließend):**
+- `core/library2/autolink.py::_find_or_create_track` versucht beim
+  Datei-Import aktiv, eine bestehende Track-Zeile wiederzuverwenden
+  (Provider-ID- oder Titel-Abgleich) und merged nur die eine neu bekannte
+  Provider-ID zusätzlich rein — grundsätzlich der richtige Mechanismus,
+  sofern die bestehende Zeile schon eine reichhaltige `external_ids`-Map
+  hätte.
+- Offene Kernfrage: Bekommen einzelne Tracks beim initialen
+  Discography-Fetch überhaupt eine Multi-Provider-`external_ids`-Map, oder
+  nur eine flache Tracklist aus einer Quelle, während die
+  Multi-Provider-Anreicherung nur auf Album-/Artist-Ebene läuft? Das wäre
+  der eigentliche Root Cause, nicht der Re-Use-Mechanismus selbst.
+- Ein Analogon existiert bereits für ARTISTS:
+  `core/library2/native_enrich.py::reconcile_unmapped_native_artists`,
+  automatisch nach jedem Import angestoßen über
+  `core/library2/unmapped_trigger.py` (§28, Commit `f7303866c`,
+  27. Juli 2026 — selber Tag) — aber (soweit bisher gesehen) NICHT für
+  Alben/Tracks. Der Baustein zum Abfragen einer vollen Tracklist pro
+  Provider (`core/metadata/album_tracks.py`) existiert bereits und wird
+  anderswo genutzt (u.a. iss27-02 Tag-Gap-Fill) — ob es bereits einen
+  höherwertigen Track-Reconcile-Job darauf gibt, konnte in der
+  verfügbaren Zeit nicht abschließend verifiziert werden.
+
+### Einstufung
+
+Recherche begonnen, nicht abgeschlossen. Nächste Session:
+`core/library2/discography.py` (initialer Album-Track-Anlage-Pfad)
+nachvollziehen, um die Kernfrage zu klären, dann entscheiden, ob ein neuer
+Track-Reconcile-Job (analog zum Artist-Reconcile, ebenfalls per
+Post-Import-Hook automatisch ausgelöst) gebaut werden muss oder ob nur
+ein bestehendes Werkzeug verdrahtet werden muss.
