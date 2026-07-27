@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { WishlistStatsResponse } from './-wishlist.types';
 
+/**
+ * Fired by downloads.js after Cleanup / Clear All, which run in vanilla code
+ * and change the wishlist under the page. Without it the orbs keep showing
+ * removed tracks until you navigate away and back — the vanilla page used to
+ * refresh itself by calling its own initializer, which a React route cannot do.
+ */
+export const WISHLIST_CHANGED_EVENT = 'ss:wishlist-changed';
+
 /** How often the vanilla page polled while watching a wishlist run. */
 const POLL_MS = 5000;
 
@@ -58,6 +66,14 @@ export function useLiveWishlist(onRefresh: () => void): LiveWishlistState {
   const wasProcessing = useRef(false);
   const refresh = useRef(onRefresh);
   refresh.current = onRefresh;
+
+  // Vanilla-side changes (Cleanup, Clear All) announce themselves rather than
+  // repainting a page they no longer own.
+  useEffect(() => {
+    const onChanged = () => refresh.current();
+    window.addEventListener(WISHLIST_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(WISHLIST_CHANGED_EVENT, onChanged);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
