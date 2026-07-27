@@ -1,10 +1,10 @@
 """/library is served by React; library.js must not repaint behind it.
 
-The vanilla Library page still exists in index.html (its markup and its ~197
-functions are removed in the cleanup PR), so both could paint into the same
-document. What keeps them apart is a single guard in the one function that
-fills the grid, plus one event for the vanilla modal that still changes the
-list. Neither is visible from the React side, so they are pinned here.
+The vanilla Library list is now DELETED — markup and functions both — so the
+two can no longer paint into the same document. What survives the handoff and
+is not visible from either side alone: the ids the React page inherited (the
+guided tour anchors to them), and the one event the still-vanilla "Watch All"
+modal uses to tell React its list changed.
 """
 
 from __future__ import annotations
@@ -32,21 +32,6 @@ def test_manifest_hands_library_to_react():
     assert "{ pageId: 'library', path: '/library', kind: 'react' }" in _MANIFEST
 
 
-def test_load_library_artists_bails_out_when_react_owns_the_page():
-    """The single choke point.
-
-    loadLibraryArtists is the ONLY thing that writes #library-artists-grid, so
-    guarding it makes the vanilla filters, alphabet and pagination buttons
-    unreachable rather than merely unused — they all route through here.
-    """
-    fn = _fn(_LIBRARY_JS, "loadLibraryArtists")
-    guard = "if (document.getElementById('webui-react-root')?.classList.contains('active')) return;"
-    assert guard in fn, "the React guard is gone — vanilla would repaint under the React page"
-
-    # It must come before the fetch, not after.
-    assert fn.index(guard) < fn.index("fetch("), "the guard runs after the request"
-
-
 def test_watch_all_modal_announces_its_change_to_react():
     """The vanilla "Watch All Unwatched" modal used to refresh by calling
     loadLibraryArtists(), which the guard above now turns into a no-op. Without
@@ -65,18 +50,57 @@ def test_react_listens_for_that_exact_event():
     assert "'ss:library-changed'" in live
 
 
-def test_the_page_react_renders_claims_no_vanilla_ids():
-    """Duplicate ids would make getElementById return whichever comes first in
-    the document — the vanilla page's node, since its markup is still in
-    index.html. The React page uses the classes only."""
+def test_react_page_now_owns_the_ids_the_vanilla_page_had():
+    """Inverted by the cleanup.
+
+    While both pages existed the React page rendered classes only, because
+    getElementById returns whichever node comes first in the document and that
+    was the vanilla one. The vanilla markup is gone now, so React must carry
+    the ids — the guided tour anchors to them (helper.js HELP_CONTENT), and
+    #library-page is what tells the music controls apart from the VIDEO
+    library page, which renders .library-controls of its own.
+    """
     page = (
         _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-page.tsx"
     ).read_text(encoding="utf-8")
-    card = (
-        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-artist-card.tsx"
-    ).read_text(encoding="utf-8")
-    for name, source in (("library-page.tsx", page), ("library-artist-card.tsx", card)):
-        assert " id=" not in source, f"{name} renders an id that the vanilla page still owns"
+    for anchor in (
+        "library-page",
+        "library-search-input",
+        "watchlist-filter",
+        "alphabet-selector",
+        "library-artists-grid",
+        "library-pagination",
+        "library-artist-count",
+    ):
+        assert f'id="{anchor}"' in page, f"tour/vanilla anchor #{anchor} is not rendered anywhere"
+
+    index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    for anchor in ("library-page", "library-search-input", "library-artists-grid"):
+        assert f'id="{anchor}"' not in index, (
+            f"#{anchor} is in index.html AND the React page — duplicate ids, "
+            "getElementById would resolve to whichever comes first"
+        )
+
+
+def test_vanilla_library_list_is_gone():
+    """The list functions and their markup, deleted together — a leftover
+    definition would be unreachable code that still looks live."""
+    for name in (
+        "initializeLibraryPage",
+        "loadLibraryArtists",
+        "displayLibraryArtists",
+        "buildLibraryArtistCardHTML",
+        "toggleLibraryCardWatchlist",
+        "showLibraryEmpty",
+    ):
+        assert f"function {name}(" not in _LIBRARY_JS, f"{name} survived the cleanup"
+        assert name not in _LIBRARY_JS, f"{name} is still referenced somewhere in library.js"
+
+    index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    assert 'id="library-page"' not in index
+    # ...but the video library and artist detail must be untouched.
+    assert 'id="video-library-page"' in index
+    assert 'id="artist-detail-page"' in index
 
 
 def test_react_owned_pages_are_declared_once_each():

@@ -3292,25 +3292,10 @@ async function loadPageData(pageId) {
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;
-            case 'library':
-                // Check if we should return to artist detail view instead of list
-                if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
-                    navigateToPage('artist-detail', {
-                        artistId: artistDetailPageState.currentArtistId,
-                        artistSource: artistDetailPageState.currentArtistSource,
-                    });
-                    if (!artistDetailPageState.isInitialized) {
-                        initializeArtistDetailPage();
-                        loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
-                    }
-                    // Already initialized — DOM content persists, no reload needed
-                } else {
-                    if (!libraryPageState.isInitialized) {
-                        initializeLibraryPage();
-                    }
-                    // Already initialized — DOM content persists, no reload needed
-                }
-                break;
+            // No 'library' case: React owns /library, and loadPageData only runs
+            // for legacy-kind pages. resolvePageId() returns null for a React
+            // path and #library-page no longer exists, so neither route into
+            // here can reach it — and initializeLibraryPage is deleted.
             case 'artist-detail':
                 // Artist detail page is entered through the route handoff and legacy navigator.
                 break;
