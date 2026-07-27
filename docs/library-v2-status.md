@@ -52,7 +52,7 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Removed / Deferred | §31, Entscheidung 27. Juli | `import-review`-Route und UI-Oberfläche per Nutzerentscheidung aus dieser PR entfernt |
-| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Partial | §29/§53/§55, §31, [iss27-01](library-v2-issues.md#iss27-01) | Scoped/Transient Search vorhanden; Interactive Search aktuell defekt, Quellenauswahl-Redesign & globaler Automatic-Search-Header-Button offen |
+| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Partial | §29/§53/§55, §31/§33, [iss27-01](library-v2-issues.md#iss27-01) | Scoped/Transient Search vorhanden; Interactive Search inkl. Quellenauswahl-Redesign vollständig behoben (§33); globaler Automatic-Search-Header-Button offen |
 | [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1, §31 | Delete, File-Scope und Pfadsync abgedeckt; `Reorganize All` Ablauf bei Einstellungsänderung spezifiziert |
 | [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Partial | §28–§37, §31, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05) | Artist-scoped Refresh & Scan File Inspection, Preview Re-Tag Album-Subdivision, Tags Match Hover & Tag Gap Click Fix offen |
 | [F-16](library-v2-features.md#feat-wanted) | Wanted Views, Entity Queue, Diskspace | Verified | §72–§74, `2e227c1b` | Entity Rollups und ein Queue-Poll pro Artist-Seite geprüft |
@@ -1488,7 +1488,7 @@ Aufnahme aller am 27. Juli 2026 definierten Nutzeranforderungen, UI-Optimierunge
 | 11a | Verification Tag Reader | Backend / Feature | Pending | [F-15](library-v2-features.md#feat-metadata) | Lesen von `HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT` direkt aus Audio-Tags |
 | 11b | Verification Table Column | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Neue Tabellenspalte „Verification" / „Verified" (`verification_status`) |
 | 12 | Import Review Removal | Decision | Removed | [F-12](library-v2-features.md#feat-acq-review) | `/import-review` Route und UI-Seite vollständig aus diesem PR-Scope gelöscht |
-| 13a | Interactive Search UI Redesign & Source Filter | UI / UX | Partially implemented (§32) | [iss27-01](library-v2-issues.md#iss27-01) | Standard durchsucht jetzt alle konfigurierten Quellen parallel; Toggle-Redesign der Checkboxen bleibt offen |
+| 13a | Interactive Search UI Redesign & Source Filter | UI / UX | **Implemented** (§33) | [iss27-01](library-v2-issues.md#iss27-01) | Standard durchsucht alle konfigurierten Quellen parallel; Toggle-Redesign + Multi-Select-Quellen-Chips jetzt ebenfalls umgesetzt (§33) |
 | 13b | Interactive Search Defekt-Fix | Bugfix | **Implemented** (§32) | [iss27-01](library-v2-issues.md#iss27-01) | Garantiert-leere Anfrage für unbetitelte Tracks behoben (Fallback auf Albumtitel) |
 | 14 | Library Header Actions | UI / Feature | Pending | [F-13](library-v2-features.md#feat-search) | Button „Automatic Search" (Missing Wishlist + Cutoff Unmet Upgrade Search); `Re-Import Library` bleibt temporär |
 | 15 | Referenz auf Basic Search | Dokumentation | Verified | [iss27-01](library-v2-issues.md#iss27-01) | Querverweis in Doku aufgenommen, Basic Search für Search-Overhaul als Vorbild zu nutzen |
@@ -1582,3 +1582,66 @@ Toggle-Redesign nicht. Offen und bewusst nicht angefasst: Punkt 8
 Verification-Tag-Reader/-Spalte — 6a ist über das bestehende
 `title`-Tooltip bereits funktional abgedeckt, siehe §20.2-Notiz in
 `library-v2-issues.md`).
+
+## 33. Interactive Search „bombenfest“: 0-Treffer-Bug, Quarantäne-Feedback, Quellen-Chips, Indexer-als-Artist (27. Juli 2026, Folgesitzung)
+
+Der Nutzer meldete am selben Tag, direkt im Anschluss an §32, dass
+Interactive Search für bestimmte Titel weiterhin 0 Treffer liefert, fragte
+nach dem Quarantäne-Verhalten bei deaktivierten Checks (Quality/AcoustID),
+und meldete einen Usenet-Indexer-Namen, der als Artist angezeigt wird.
+Auftrag: Interactive Search vollständig fertigstellen (Fehler beheben +
+verbleibende §20.1/§31-UI-Punkte 4/13a abschließen), danach dokumentieren
+und committen.
+
+Details je Punkt stehen unter der jeweiligen `docs/library-v2-issues.md`
+§21-Unterüberschrift (iss27-09 bis iss27-11, plus §21.4 für den
+iss27-01-Abschluss). Kurzfassung:
+
+- **iss27-09** (0-Treffer-Bug): `buildSearchQuery`s Regex zum Entfernen des
+  „(Album)“-Suffix kannte keine verschachtelten Klammern — ein Titel mit
+  eigenem Klammer-Credit (z.B. „(feat. X)“) ließ die Regex komplett
+  fehlschlagen, wodurch der gesamte, duplizierte Tail unverändert in die
+  Suchanfrage floss. Fix: klammertiefen-bewusstes Parsing
+  (`splitTrailingParenGroup`) statt Regex.
+- **iss27-10** (Quarantäne-Feedback): der serverseitige Bypass für
+  Quality-/AcoustID-Checks war bereits korrekt (`_should_skip_quarantine_check`
+  in `core/imports/pipeline.py`) — keine Code-Änderung nötig. Die Lücke war
+  fehlendes Feedback im Fenster selbst: ein Grab zeigte nur den
+  Dispatch-Erfolg, nie den asynchronen Pipeline-Ausgang. Fix: Client pollt
+  die bestehende Merged-History (`core/library2/history_feed.py`) und zeigt
+  ein frisches Quarantäne-/Fehler-Event sofort inline an.
+- **iss27-11** (Indexer als Artist): `usenet.py`/`torrent.py` fielen bei
+  fehlendem „Artist - Title“-Trennzeichen im Release-Titel auf den
+  Indexer-Namen als Artist-Platzhalter zurück. Fix: generischer Platzhalter
+  `'Unknown Artist'` statt Indexer-Name.
+- **iss27-01 Punkt 4/13a** (Toggle-Redesign & Quellen-Chips): Dropdown durch
+  eine echte Multi-Select-Chip-Reihe ersetzt (`excludedSources`-Set statt
+  Single-Value); die drei Checkboxen sind jetzt Slide-Toggles (rein
+  CSS-visuell, `<input type="checkbox">` bleibt darunter unverändert).
+
+### Verifikation
+
+- Frontend: `npx vitest run src/routes/library-v2` — **186 von 186 Tests
+  grün** (29 Dateien); `tsc --noEmit -p tsconfig.json` und
+  `oxlint --type-check src` sauber (0 Fehler).
+- Backend: `tests/test_torrent_usenet_plugins.py` — 51/51 grün.
+- Geänderte Dateien: `webui/src/routes/library-v2/-ui/{library-v2-page,
+  interactive-search}.tsx`, `webui/src/routes/library-v2/-ui/library-v2-page.module.css`,
+  `webui/src/routes/library-v2/-ui/{build-search-query,interactive-search}.test.ts(x)`,
+  `core/download_plugins/{usenet,torrent}.py`, `tests/test_torrent_usenet_plugins.py`.
+- Nicht Teil dieser Session: eine Live-Verifikation im Browser gegen einen
+  echten Soulseek/Usenet/Prowlarr-Stack (kein laufender `dev.py` in dieser
+  Umgebung) — reine Unit-/Integrationstest-Abdeckung plus Typecheck/Lint.
+  Empfohlen: kurzer manueller Test über `dev.py` vor dem nächsten
+  Produktiv-Einsatz, insbesondere für das neue Quarantäne-Polling (History-
+  Endpunkt-Timing) und die Chip-Interaktion.
+
+### Einstufung
+
+iss27-01 (§20.1/§31 Punkt 13a) ist jetzt vollständig — funktional UND
+visuell — abgeschlossen. Drei zusätzliche, unabhängig gefundene Probleme
+(iss27-09 Query-Bug, iss27-11 Indexer-als-Artist) sind behoben, plus eine
+neue Feedback-Funktion für den Quarantäne-Fall (iss27-10). Interactive
+Search hat damit keine bekannten offenen Funktionsblocker mehr; verbleibende
+§20/§31-Punkte (8, iss27-07, iss27-08) sind bewusst unangetastete
+Design-Entscheidungen außerhalb des Scopes dieser Session.

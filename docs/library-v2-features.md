@@ -564,10 +564,10 @@ nach einer separaten, expliziten Force-Bestätigung dispatcht. „Skip AcoustID�
 und „Force Quality“ sind benannte, auditierte Overrides; sie gelten nur für
 den konkret bestätigten Check.
 
-**UI- und Quellenauswahl-Redesign:**
-- Die Checkboxen („Quality Check“, „AcoustID Check“, „Only Show Results with Cutoff“) werden visuell überarbeitet und modern gestaltet.
-- Quellenauswahl: Interactive Search soll standardmäßig alle aktivierten Quellen gleichzeitig durchsuchen. Das Umschalten/Filtern der angezeigten Quellen muss einfach und verständlich gestaltet werden, angelehnt an die bewährte Quellenauswahl der **Basic Search** (`webui/src/routes/search/` und `core/search/`).
-- **Defekt/Fix-Auftrag:** Interactive Search ist aktuell funktionsunfähig. Bei der Behebung ist die Implementierung von Basic Search als Referenz für Query-Building, Quellenauswahl und Ergebnisverarbeitung heranzuziehen. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+**UI- und Quellenauswahl-Redesign — vollständig umgesetzt (§32/§33, 27. Juli 2026):**
+- Die Checkboxen („Quality Check“, „AcoustID Check“, „Only Show Results with Cutoff“) sind als moderne Slide-Toggles gestaltet (§33/[iss27-01](library-v2-issues.md#iss27-01-toggle)).
+- Quellenauswahl: Interactive Search durchsucht standardmäßig alle aktivierten Quellen parallel; eine Multi-Select-Chip-Reihe (statt Dropdown) erlaubt beliebige Teilmengen (§33).
+- **Ursprünglicher Defekt behoben:** Es gibt (und gab nie) eine separate „Basic Search“-Implementierung unter `webui/src/routes/search/` — dieser Pfad existiert nicht; die vermeintliche Referenzimplementierung war eine Doku-Annahme, keine reale Codestelle (siehe §32-Root-Cause-Recherche). Interactive Search und der `/api/search`-Endpunkt (`core/search/basic.py::run_basic_search`) waren schon vor dieser Behebung identisch — der reale Defekt lag in der clientseitigen Query-Konstruktion (§20.1/§21, [iss27-01](library-v2-issues.md#iss27-01), [iss27-09](library-v2-issues.md#iss27-09)), nicht in einer Strukturabweichung zweier Suchimplementierungen.
 
 #### Globales Automatic Search (Library Header)
 

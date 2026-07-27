@@ -2804,7 +2804,7 @@ Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-P
 > **Wichtiger Arbeitsauftrag für die nächste Chat-Session:** Der nächste Chat muss vor der Ausführung aller in Abschnitt 20 genannten Punkte selbstständig weiter im Code recherchieren und bei etwaigen Unklarheiten oder Detailentscheidungen gezielt Gegenfragen an den Nutzer stellen!
 
 
-### 20.1 <a name="iss27-01"></a> iss27-01 — Interactive Search ist defekt und Quellenauswahl unübersichtlich — Teilweise behoben, 27. Juli 2026
+### 20.1 <a name="iss27-01"></a> iss27-01 — Interactive Search ist defekt und Quellenauswahl unübersichtlich — Vollständig behoben, 27. Juli 2026 (Nachtrag §21)
 
 **Symptom:** Klick auf Interactive Search bei Alben oder Einzel-Tracks schlägt fehl, zeigt keine Kandidaten oder bricht ab. Auch Automatic Search ist dadurch betroffen. Die Checkboxen („Quality Check“, „Acoustic ID Check“, „Only Show Results with Cutoff“) wirken optisch unansehnlich und die Quellenauswahl ist schwer verständlich.
 
@@ -2828,9 +2828,13 @@ EINE Quelle befragt („configured default“) statt aller aktivierten Quellen �
 `InteractiveSearchModal` fragt jetzt bei mehreren konfigurierten Quellen alle
 parallel ab und mergt die Ergebnisse; ein einzelner ausgefallener Source
 leert nicht mehr die gesamte Liste (`interactive-search.tsx`, Tests in
-`interactive-search.test.tsx`). Punkt 4 (Toggle-Redesign der Checkboxen) und
-die vollständige Quellenauswahl-UI (Multi-Select-Chips statt Dropdown)
-bleiben offen — reine Visual-Politur, keine Funktionsblocker.
+`interactive-search.test.tsx`).
+
+**Nachtrag (§21, 27. Juli 2026, Folgesitzung):** Punkt 4 (Toggle-Redesign)
+und die Multi-Select-Chip-Quellenauswahl sind jetzt ebenfalls umgesetzt —
+siehe [§21.4](library-v2-issues.md#iss27-01-toggle) für Details. Der Dropdown
+ist komplett durch eine Chip-Reihe ersetzt, echtes Multi-Select statt
+Single-Pick/„Alle". Damit ist iss27-01 vollständig abgeschlossen.
 
 ### 20.2 <a name="iss27-02"></a> iss27-02 — Tag Gaps Klick-Aktion löst Re-Fetch und Tag-Schreiben nicht aus — Behoben, 27. Juli 2026
 
@@ -2954,4 +2958,160 @@ dem noch nicht gebauten F-15/UI-03-Spezifikationstext. Re-verifiziert per
 **Symptom:** Werkzeuge unter Files & Tools -> Maintenance (wie Meta Gapfill, Album Tag Consistency) sind optisch versteckt, unübersichtlich und die Nomenklatur „Maintenance“ ist für Nutzer schwer verständlich.
 
 **Fix-Vertrag:** Optische Reorganisation von Maintenance: Eindeutige, verständliche Modul-Bezeichnungen, visuelle Trennung von artist-spezifischen vs. globalen Jobs und verbesserte Zugänglichkeit.
+
+## 21. Interactive Search: 0-Treffer-Bug, Quarantäne-Feedback, Quellen-Chips, Indexer-als-Artist (27. Juli 2026, Folgesitzung)
+
+Der Nutzer meldete am selben Tag, in einer Folgesitzung zu §20/§32, dass
+Interactive Search für bestimmte Titel weiterhin 0 Treffer liefert (konkretes
+Beispiel unten), fragte nach dem Quarantäne-Verhalten bei deaktivierten
+Checks, und meldete einen Indexer-Namen (z.B. „NZBGeek“), der als Artist
+angezeigt wird. Auftrag: Interactive Search „bombenfest“ machen und die in
+§20.1 offengelassenen UI-Punkte abschließen.
+
+### 21.1 <a name="iss27-09"></a> iss27-09 — Interactive Search liefert 0 Treffer bei Titeln mit verschachtelten Klammern — Behoben, 27. Juli 2026
+
+**Symptom:** Konkretes Nutzerbeispiel: „Drenchill – Freed from Desire (feat.
+Indiiana) - DNF Extended Remix (Freed from Desire (feat. Indiiana))“ liefert
+0 Suchergebnisse, obwohl der Track uneingeschränkt verfügbar ist.
+
+**Root Cause:** `buildSearchQuery` (`webui/src/routes/library-v2/-ui/library-v2-page.tsx`)
+entfernte den anhängenden „(Album)“-Kontext per Regex
+`\(([^)]*)\)\s*$` — diese kennt keine verschachtelten Klammern. Enthält der
+Album-/Tracktitel selbst eine Klammer (hier: der „(feat. Indiiana)“-Credit),
+findet die Regex keinen gültigen Abschluss mehr, und der GESAMTE Tail —
+Tracktitel UND der eigentlich zu entfernende, duplizierte Album-Kontext —
+landet unverändert in der Suchanfrage. Ergebnis: eine sehr lange, inhaltlich
+doppelte Anfrage, die kein realer Dateiname je matcht — bei jedem Titel mit
+einem Klammer-Credit (feat./remix-Klammern etc.), nicht nur im gemeldeten
+Einzelfall.
+
+**Fix:** Klammertiefen-bewusstes Parsing über eine neue Hilfsfunktion
+`splitTrailingParenGroup` (Tiefenzähler von hinten statt einer flachen
+Regex) ersetzt den alten Ansatz — findet die tatsächliche äußerste,
+balancierte Klammergruppe am Stringende auch dann, wenn ihr Inhalt selbst
+Klammern enthält. Ein unbalancierter Rest (z.B. eine offene Klammer ohne
+Schluss) wird unverändert gelassen statt verstümmelt. Tests:
+`build-search-query.test.ts` (3 neue Fälle, inkl. des exakten gemeldeten
+Beispiels und eines Fallback-auf-Album-Falls mit verschachtelten Klammern).
+
+### 21.2 <a name="iss27-10"></a> iss27-10 — Kein Feedback im Interactive-Search-Fenster, wenn ein Grab später doch in Quarantäne landet — Behoben, 27. Juli 2026
+
+**Symptom/Frage des Nutzers:** Beim Klick auf „Download“ in Interactive
+Search ist unklar, ob eine Datei trotz deaktiviertem Quality-/AcoustID-Check
+noch in der Quarantäne landen kann; falls ja, sollte das Fenster sofort eine
+Fehlermeldung zeigen. Erwartetes Verhalten laut Nutzer: Ein deaktivierter
+Check soll die Datei trotzdem durch die Pipeline durchwinken (markiert als
+„AcoustID nicht verifiziert“ / „Qualitätsprofil nicht erfüllt“), nicht
+quarantänisieren.
+
+**Recherche:** Der serverseitige Bypass war bereits korrekt:
+`core/imports/pipeline.py::_should_skip_quarantine_check` respektiert
+`skip_acoustid`/`quality_check=false` bereits exakt für die Quality- und
+AcoustID-Gates (`_skip_quality`, `_skip_acoustid`, ca. Zeile 827 bzw. 952) —
+ein deaktivierter Check quarantänisiert nicht, sondern importiert mit
+`_acoustid_result='skip'` bzw. einem `user_override`-Journal-Eintrag; keine
+Code-Änderung nötig. Andere Gates (Integrity/Silence/Duration-Abgleich) sind
+bewusst NICHT über diese zwei Checkboxen abschaltbar (Schutz vor kaputten/
+abgeschnittenen Dateien) und können weiterhin quarantänisieren — das ist
+gewolltes Verhalten, kein Bug. Die eigentliche Lücke war eine andere: nach
+einem Grab zeigt Interactive Search nur den Dispatch-Erfolg („Grabbed ✓“) —
+der reale Ausgang (Quarantäne, Import) läuft asynchron in der
+Post-Processing-Pipeline (Sekunden bis Minuten später) und war im Fenster
+selbst unsichtbar, egal welcher Check aktiv war.
+
+**Fix:** `InteractiveSearchModal` pollt nach einem erfolgreichen Dispatch für
+Grabs mit lib2-Track-/Album-Kontext die bereits bestehende
+Merged-Pipeline-History (`GET /api/library/v2/tracks|albums/<id>/history`,
+`core/library2/history_feed.py`, bereits für den History-Tab genutzt) alle 4s
+für bis zu 2 Minuten. Ein frisches Event mit `category='quarantined'` oder
+`'failed'` nach Grab-Start zeigt sofort Titel+Detail als Inline-Fehler im
+Fenster (Button wechselt zu „Retry“); ein `'imported'`-Event bestätigt
+„Grabbed ✓“. Kein Backend-Change nötig — reine Client-Logik
+(`classifyGrabOutcome`, eine pure Funktion, unabhängig unit-getestet).
+Zwischenzustand „Verifying…“ während des Pollings macht sichtbar, dass der
+Ausgang noch offen ist. Tests: `interactive-search.test.tsx` (6 neue Fälle
+für `classifyGrabOutcome`, 1 Integrationstest für den vollen
+Dispatch-→-Quarantäne-→-Inline-Fehler-Ablauf).
+
+### 21.3 <a name="iss27-11"></a> iss27-11 — Usenet-/Torrent-Indexer (z.B. „NZBGeek“) erscheint als Artist-Name — Behoben, 27. Juli 2026
+
+**Symptom:** Bei Usenet-Suchergebnissen wird gelegentlich der Name des
+Indexers (z.B. „NZBGeek“) als Artist angezeigt, obwohl das ein Indexer und
+kein Künstler ist.
+
+**Root Cause:** `core/download_plugins/usenet.py::_project_results` und das
+identische Pendant in `torrent.py` setzten
+`artist=parsed_artist or result.indexer_name or 'Usenet'/'Torrent'` — wenn
+`_parse_release_title` im Release-Titel kein „Artist - Title“-Trennzeichen
+findet (liefert dann `''` für Artist), fällt der Code auf den
+INDEXER-Namen zurück, der eigentlich nur in `_source_metadata['indexer']`
+gehört. Der Kommentar an der Stelle erklärte korrekt, WARUM überhaupt ein
+nicht-leerer Fallback nötig ist (verhindert, dass
+`TrackResult.__post_init__` den Dateinamen — der mit dem opaken
+Candidate-Token beginnt — als Artist fehlparst), aber die WAHL des
+Fallback-Werts war falsch: ein Indexer ist keine Person/Band.
+
+**Fix:** Fallback auf einen generischen Platzhalter `'Unknown Artist'`
+statt des Indexer-Namens, in beiden Plugins (`usenet.py`, `torrent.py`).
+Ein bestehender Test
+(`test_torrent_project_falls_back_to_indexer_name_when_title_lacks_dash`)
+kodifizierte das alte (falsche) Verhalten explizit als erwartet — korrigiert
+zu `..._placeholder_when_title_lacks_dash`, plus ein neuer Parity-Test fürs
+Usenet-Plugin. Tests: `tests/test_torrent_usenet_plugins.py` (51/51 grün).
+
+### 21.4 <a name="iss27-01-toggle"></a> Abschluss iss27-01 Punkt 4 — Toggle-Redesign & Multi-Select-Quellen-Chips — Behoben, 27. Juli 2026
+
+**Ausgangslage:** iss27-01 (§20.1) hatte den funktionalen Teil (alle
+konfigurierten Quellen parallel durchsuchen) bereits behoben, aber zwei rein
+visuelle Punkte offengelassen: (4) Toggle-Redesign der Checkboxen, und die
+vollständige Multi-Select-Chip-Quellenauswahl statt Dropdown.
+
+**Umsetzung:**
+1. **Quellenauswahl:** Der `<select>`-Dropdown ist durch eine Chip-Reihe
+   ersetzt (`role="group"`, ein Chip pro konfigurierter Quelle plus ein
+   „All sources“-Reset-Chip). Jeder Quellen-Chip ist unabhängig togglebar
+   (`excludedSources: Set<string>` statt eines Single-Value-States) — echtes
+   Multi-Select, nicht nur Einzelquelle-oder-alle. Ein Guard verhindert, dass
+   die letzte verbleibende aktive Quelle abgewählt wird (eine Suche über 0
+   Quellen wäre ein Fehlzustand, kein Filter). `run()` durchsucht jetzt genau
+   die aktive Teilmenge parallel (bei >1 aktiver Quelle), statt zwingend
+   „genau eine oder alle“.
+2. **Toggle-Redesign:** Die drei Checkboxen (Quality check, AcoustID check,
+   Only show results meeting cutoff) sind jetzt als Slide-Toggles gestylt —
+   rein visuell über CSS (`.toggleSwitch` in `library-v2-page.module.css`),
+   das zugrundeliegende `<input type="checkbox">` bleibt unverändert (gleiche
+   Rolle/Tastatur-Semantik, bestehende Tests unverändert grün).
+
+Tests: `interactive-search.test.tsx` (neuer Multi-Select-Chip-Test, der
+bestehende Quellenwahl-Test auf Chip-Interaktion statt `<select>` umgestellt),
+`npx vitest run src/routes/library-v2` (186/186 grün), `tsc --noEmit` und
+`oxlint --type-check src` sauber.
+
+### Verifikation (§21 gesamt)
+
+- Frontend: `npx vitest run src/routes/library-v2` — 186/186 grün
+  (29 Dateien, davon 2 mit neuen Tests: `build-search-query.test.ts`,
+  `interactive-search.test.tsx`); `tsc --noEmit -p tsconfig.json` und
+  `oxlint --type-check src` sauber (0 Fehler/Warnungen).
+- Backend: `tests/test_torrent_usenet_plugins.py` — 51/51 grün.
+- Geänderte Dateien: `webui/src/routes/library-v2/-ui/library-v2-page.tsx`,
+  `webui/src/routes/library-v2/-ui/interactive-search.tsx`,
+  `webui/src/routes/library-v2/-ui/library-v2-page.module.css`,
+  `webui/src/routes/library-v2/-ui/build-search-query.test.ts`,
+  `webui/src/routes/library-v2/-ui/interactive-search.test.tsx`,
+  `core/download_plugins/usenet.py`, `core/download_plugins/torrent.py`,
+  `tests/test_torrent_usenet_plugins.py`.
+
+### Einstufung
+
+iss27-01 ist damit vollständig (funktional + visuell) abgeschlossen. Drei
+neue, unabhängig gefundene Bugs (iss27-09, iss27-11) sind behoben, plus eine
+neue Feedback-Funktion für den Quarantäne-Fall (iss27-10) — dessen
+zugrundeliegender Bypass-Mechanismus sich bei der Recherche als bereits
+korrekt implementiert herausstellte. Nicht Teil dieser Session: Punkt 8
+(Column Settings Layout), iss27-07 (Re-Tag Preview), iss27-08
+(Maintenance-Umbenennung) — bewusst unangetastet, reine Design-Entscheidungen
+außerhalb des gemeldeten Scopes. Live-Verifikation im Browser gegen einen
+echten Soulseek/Usenet-Backend-Stack stand in dieser Session nicht zur
+Verfügung (kein laufender `dev.py`); empfohlen vor dem nächsten Nutzer-Test.
 
