@@ -10,6 +10,31 @@ import {
 
 export const LIBRARY_QUERY_KEY = ['library'] as const;
 
+interface SuccessResponse {
+  success?: boolean;
+  error?: string;
+}
+
+/**
+ * Add / remove straight from a card badge.
+ *
+ * Same two endpoints the vanilla card handler used; `artistId` is the
+ * source-matched id (see watchlistArtistId), which is what the watchlist is
+ * keyed on — not the library's own row id.
+ */
+export async function setArtistWatchlisted(
+  artistId: string,
+  artistName: string,
+  watch: boolean,
+): Promise<void> {
+  const payload = await readJson<SuccessResponse>(
+    watch
+      ? apiClient.post('watchlist/add', { json: { artist_id: artistId, artist_name: artistName } })
+      : apiClient.post('watchlist/remove', { json: { artist_id: artistId } }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Watchlist update failed');
+}
+
 /**
  * The artist grid. ONE endpoint backs the whole list page.
  *

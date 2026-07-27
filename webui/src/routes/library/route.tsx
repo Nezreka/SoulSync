@@ -6,6 +6,7 @@ import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
 import { libraryArtistsQueryOptions } from './-library.api';
 import { librarySearchSchema } from './-library.types';
+import { LibraryPage } from './-ui/library-page';
 
 /**
  * Whether the shell has handed /library over to React yet.
@@ -33,7 +34,15 @@ export const Route = createFileRoute('/library')({
     if (!isReactOwned()) return;
 
     const { profile } = context.shell;
-    await context.queryClient.ensureQueryData(libraryArtistsQueryOptions(profile.profileId, deps));
+    // Warming the cache for the first paint — NOT a gate. Letting this reject
+    // would hand the route to defaultErrorComponent and replace the whole page
+    // with "Something went wrong" on any backend hiccup, where the vanilla page
+    // toasted and stayed usable (filters and the alphabet still work, and the
+    // next click retries). The component's useQuery reads the same failure and
+    // renders the error state itself.
+    await context.queryClient
+      .ensureQueryData(libraryArtistsQueryOptions(profile.profileId, deps))
+      .catch(() => undefined);
   },
   component: LibraryRouteComponent,
 });
@@ -42,7 +51,5 @@ function LibraryRouteComponent() {
   if (!isReactOwned()) {
     return <LegacyRouteController pathname="/library" />;
   }
-  // The page component lands in P2. Until the manifest flips this branch is
-  // unreachable, so deferring to the legacy controller keeps it honest.
-  return <LegacyRouteController pathname="/library" />;
+  return <LibraryPage />;
 }

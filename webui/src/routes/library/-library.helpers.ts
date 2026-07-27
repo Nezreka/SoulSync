@@ -161,11 +161,22 @@ export function splitBadgeColumns(badges: ArtistBadge[]): {
  * Either id satisfies it — the order only expresses preference.
  */
 export function canWatchArtist(artist: LibraryArtist, musicSource: string | undefined): boolean {
-  return Boolean(
+  return watchlistArtistId(artist, musicSource) !== null;
+}
+
+/**
+ * The id the watchlist endpoints are keyed on — the same preference order, so
+ * a card that OFFERS the watch badge can always act on it.
+ */
+export function watchlistArtistId(
+  artist: LibraryArtist,
+  musicSource: string | undefined,
+): string | null {
+  const id =
     musicSource === 'iTunes'
       ? artist.itunes_artist_id || artist.spotify_artist_id
-      : artist.spotify_artist_id || artist.itunes_artist_id,
-  );
+      : artist.spotify_artist_id || artist.itunes_artist_id;
+  return id ? String(id) : null;
 }
 
 /** "12 tracks" / "1 track"; empty when the artist has none. */

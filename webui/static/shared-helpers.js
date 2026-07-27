@@ -2980,9 +2980,14 @@ function showLibraryDownloadsSection() {
     // that class and its copy comes FIRST in the DOM, so the old global query
     // grabbed the wrong container and insertBefore threw ("not a child of
     // this node") — killing the whole Library page init (#1038).
-    const artistGrid = document.getElementById('library-artists-grid');
-    if (!artistGrid || !artistGrid.parentElement) return;
-    const libraryContent = artistGrid.parentElement;
+    // The React library page renders a dedicated host with NO React children,
+    // so this section can own that subtree outright and React never reconciles
+    // it away. Preferred when present; the vanilla music page and the video
+    // library keep the original anchor-on-the-grid path below.
+    const reactHost = document.querySelector('[data-library-downloads-host]');
+    const artistGrid = reactHost ? null : document.getElementById('library-artists-grid');
+    if (!reactHost && (!artistGrid || !artistGrid.parentElement)) return;
+    const libraryContent = reactHost || artistGrid.parentElement;
 
     let downloadsSection = document.getElementById('library-downloads-section');
 
@@ -2992,6 +2997,13 @@ function showLibraryDownloadsSection() {
         downloadsSection.id = 'library-downloads-section';
         downloadsSection.className = 'artist-downloads-section';
         downloadsSection.style.display = 'none';   // revealed below only when bubbles exist
+        // insertBefore(node, null) === appendChild, which is what the React
+        // host wants; the vanilla path still lands ahead of the grid.
+        libraryContent.insertBefore(downloadsSection, artistGrid);
+    } else if (downloadsSection.parentElement !== libraryContent) {
+        // The page was re-rendered under it (React remount, or a nav back to
+        // the vanilla page). Re-home it rather than leaving it orphaned in a
+        // detached tree where the user can never see it.
         libraryContent.insertBefore(downloadsSection, artistGrid);
     }
 
