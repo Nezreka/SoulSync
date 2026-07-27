@@ -24,7 +24,18 @@ _CSS = (_ROOT / "webui" / "static" / "automations-redesign.css").read_text(encod
 _HTML = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 _JS = (_ROOT / "webui" / "static" / "stats-automations.js").read_text(encoding="utf-8")
 _VJS = (_ROOT / "webui" / "static" / "video" / "video-automations.js").read_text(encoding="utf-8")
-_SOURCES = _HTML + _JS + _VJS
+
+# The MUSIC automations list is a React page now (webui/src/routes/automations),
+# so its markup lives in JSX rather than in index.html or stats-automations.js.
+# The video page still renders from the shared vanilla builders, which is why
+# those two sources stay. Without the React source this check reports every
+# music-side class as an unused selector.
+_REACT = "".join(
+    p.read_text(encoding="utf-8")
+    for p in sorted((_ROOT / "webui" / "src" / "routes" / "automations").rglob("*.ts*"))
+    if ".test." not in p.name
+)
+_SOURCES = _HTML + _JS + _VJS + _REACT
 
 # Ancestors that guarantee a rule only applies on the automations surfaces.
 _SCOPES = (

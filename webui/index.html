@@ -4290,35 +4290,15 @@
             </div>
             <!-- Automations Page -->
             <div class="page" id="automations-page">
-                <!-- List View -->
-                <div class="automations-list-view" id="automations-list-view">
-                    <div class="page-shell automations-container">
-                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                            <div class="header-text">
-                                <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon" alt=""><span>Automations</span></h2>
-                                <p class="header-subtitle">Configure scheduled tasks and automated workflows</p>
-                            </div>
-                            <div class="header-spacer"></div>
-                            <div class="header-actions">
-                                <button class="auto-new-btn" onclick="showAutomationBuilder()">+ New Automation</button>
-                            </div>
-                        </div>
-                        <div class="automations-stats" id="automations-stats"></div>
-                        <div class="auto-filter-bar" id="auto-filter-bar" style="display:none;">
-                            <input type="text" class="auto-filter-search" id="auto-filter-search" placeholder="Filter automations…">
-                            <select class="auto-filter-select" id="auto-filter-trigger"><option value="">All Triggers</option></select>
-                            <select class="auto-filter-select" id="auto-filter-action"><option value="">All Actions</option></select>
-                            <span class="auto-filter-count" id="auto-filter-count"></span>
-                        </div>
-                        <div class="automations-list" id="automations-list"></div>
-                        <div class="automations-empty" id="automations-empty" style="display:none;">
-                            <div class="automations-empty-icon">&#9889;</div>
-                            <div class="automations-empty-title">No automations yet</div>
-                            <div class="automations-empty-text">Create your first automation to schedule tasks and trigger actions automatically.</div>
-                            <button class="auto-new-btn" onclick="showAutomationBuilder()">+ New Automation</button>
-                        </div>
-                    </div>
-                </div>
+                <!-- List View — INTENTIONALLY EMPTY.
+                     React renders the automations list (see
+                     webui/src/routes/automations/). This container has to stay:
+                     the shared builder toggles it directly, and
+                     hideAutomationBuilder does `_bEl('listView').style.display`
+                     with no null guard, so removing it would throw on every
+                     Back / Cancel / Save — on the VIDEO side too, which drives
+                     the same builder through its own context. -->
+                <div class="automations-list-view" id="automations-list-view"></div>
 
                 <!-- Builder View -->
                 <div class="automations-builder-view" id="automations-builder-view" style="display:none;">

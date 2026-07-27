@@ -3376,8 +3376,6 @@ async function loadAutomations() {
             renderAutomationsMasterToggle(statsBar, 'music');
         }
 
-        // Filter bar — show when 6+ automations
-        _initAutoFilterBar(automations);
         // Catch up on current automation progress
         try {
             const progRes = await fetch('/api/automations/progress');
@@ -3963,63 +3961,7 @@ function _promptNotifyConfig(groupName) {
 }
 
 // --- Filter Bar ---
-function _initAutoFilterBar(automations) {
-    const bar = document.getElementById('auto-filter-bar');
-    if (!bar) return;
-    if (automations.length < 7) { bar.style.display = 'none'; return; }
-    bar.style.display = '';
 
-    // Populate trigger dropdown
-    const trigSel = document.getElementById('auto-filter-trigger');
-    const actSel = document.getElementById('auto-filter-action');
-    const trigTypes = [...new Set(automations.map(a => a.trigger_type))].sort();
-    const actTypes = [...new Set(automations.map(a => a.action_type))].sort();
-    const prevTrig = trigSel.value;
-    const prevAct = actSel.value;
-    trigSel.innerHTML = '<option value="">All Triggers</option>' + trigTypes.map(t =>
-        `<option value="${_escAttr(t)}">${_esc(_autoFormatTrigger(t, {}))}</option>`).join('');
-    actSel.innerHTML = '<option value="">All Actions</option>' + actTypes.map(t =>
-        `<option value="${_escAttr(t)}">${_esc(_autoFormatAction(t))}</option>`).join('');
-    trigSel.value = prevTrig;
-    actSel.value = prevAct;
-
-    // Bind events (use a flag to avoid double-binding)
-    if (!bar.dataset.bound) {
-        bar.dataset.bound = '1';
-        document.getElementById('auto-filter-search').addEventListener('input', _filterAutomations);
-        trigSel.addEventListener('change', _filterAutomations);
-        actSel.addEventListener('change', _filterAutomations);
-    }
-    _filterAutomations();
-}
-
-function _filterAutomations() {
-    const q = (document.getElementById('auto-filter-search').value || '').toLowerCase().trim();
-    const trigFilter = document.getElementById('auto-filter-trigger').value;
-    const actFilter = document.getElementById('auto-filter-action').value;
-    const cards = document.querySelectorAll('#automations-list .automation-card');
-    let visible = 0;
-    cards.forEach(card => {
-        const name = (card.querySelector('.automation-name')?.textContent || '').toLowerCase();
-        const trig = card.querySelector('.flow-trigger')?.textContent || '';
-        const act = card.querySelector('.flow-action')?.textContent || '';
-        // Match search text against name, trigger label, action label
-        const matchQ = !q || name.includes(q) || trig.toLowerCase().includes(q) || act.toLowerCase().includes(q);
-        // Match trigger/action type filters using data attributes
-        const matchTrig = !trigFilter || card.dataset.triggerType === trigFilter;
-        const matchAct = !actFilter || card.dataset.actionType === actFilter;
-        const show = matchQ && matchTrig && matchAct;
-        card.style.display = show ? '' : 'none';
-        if (show) visible++;
-    });
-    const countEl = document.getElementById('auto-filter-count');
-    if (countEl) {
-        countEl.textContent = (q || trigFilter || actFilter) ? `${visible} of ${cards.length}` : '';
-    }
-}
-
-// --- Group Dropdown ---
-let _activeGroupDropdown = null;
 
 function _showGroupDropdown(event, autoId, currentGroup) {
     // Close any existing dropdown
