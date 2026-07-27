@@ -4,12 +4,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
 
 import {
+  fetchLibraryV2AlbumHistory,
+  fetchLibraryV2TrackHistory,
   libraryV2QualityProfilesQueryOptions,
   listSearchSources,
   rankSearchResultQuality,
   searchSources,
   startSourceDownload,
   type Lib2EntityRef,
+  type LibraryV2HistoryEntry,
   type SourceSearchResult,
 } from '../-library-v2.api';
 import styles from './library-v2-page.module.css';
@@ -237,7 +240,44 @@ function availabilityCell(r: SourceSearchResult): string {
   return queue ? `${slots} slots · ${queue} queued` : `${slots} slots`;
 }
 
-type GrabState = 'pending' | 'done' | 'error';
+type GrabState = 'pending' | 'verifying' | 'done' | 'error';
+
+/** A grab only dispatches a download — the real outcome (quarantined,
+ *  imported, still running) lands later via the async import pipeline. The
+ *  user's ask: if it still gets quarantined despite Quality/AcoustID check
+ *  being off, say so right in this window instead of silently leaving
+ *  "Grabbed ✓" up when the file never actually made it into the library. */
+export type GrabOutcome =
+  | { status: 'failed'; message: string }
+  | { status: 'imported' }
+  | { status: 'pending' };
+
+/** Pure classifier over the entity's merged pipeline history (already used
+ *  by the History tab) — no polling/timing concerns, so it's cheap to unit
+ *  test exhaustively. `sinceMs` filters to events from THIS grab, not an
+ *  earlier one for the same track/album (a 10s slack absorbs client/server
+ *  clock skew and request latency). */
+export function classifyGrabOutcome(
+  history: LibraryV2HistoryEntry[],
+  sinceMs: number,
+): GrabOutcome {
+  const fresh = history.filter((e) => {
+    const t = e.date ? Date.parse(e.date) : NaN;
+    return Number.isFinite(t) && t >= sinceMs - 10_000;
+  });
+  const failure = fresh.find((e) => e.category === 'quarantined' || e.category === 'failed');
+  if (failure) {
+    const message = failure.detail
+      ? `${failure.title ?? 'Failed'}: ${failure.detail}`
+      : (failure.title ?? 'Download failed');
+    return { status: 'failed', message };
+  }
+  if (fresh.some((e) => e.category === 'imported')) return { status: 'imported' };
+  return { status: 'pending' };
+}
+
+const GRAB_OUTCOME_POLL_INTERVAL_MS = 4_000;
+const GRAB_OUTCOME_MAX_POLLS = 30; // ~2 minutes — a best-effort window, not a guarantee
 
 export function sortSourceSearchResults(
   results: SourceSearchResult[],
@@ -331,7 +371,11 @@ export function InteractiveSearchModal({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState(initialQuery);
-  const [selectedSource, setSelectedSource] = useState('');
+  // iss27-01 pt.4: which configured sources to search — a source in this set
+  // is EXCLUDED, so the empty set (the default) means "search everything".
+  // Chips are independently toggleable (Lidarr-style multi-select), not a
+  // single-pick dropdown.
+  const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
   // Album/track actions use the ALBUM's own profile for the preview badge,
   // not the artist's (audit P1-17). The authoritative profile is resolved
   // server-side from the entity ids on grab either way.
@@ -357,6 +401,15 @@ export function InteractiveSearchModal({
   const [acoustidCheck, setAcoustidCheck] = useState(true);
   const [cutoffOnly, setCutoffOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'quality', dir: -1 });
+  // Stops in-flight outcome polls from touching state after the modal closes
+  // (the user is done watching, and the component is about to unmount).
+  const cancelledRef = useRef(false);
+  useEffect(
+    () => () => {
+      cancelledRef.current = true;
+    },
+    [],
+  );
 
   const sorted = useMemo(
     () => sortSourceSearchResults(results, sort.key, sort.dir),
@@ -390,31 +443,47 @@ export function InteractiveSearchModal({
   }
 
   const allSources = searchSourcesQuery.data?.sources ?? [];
+  const activeSources = allSources.filter((s) => !excludedSources.has(s.name));
 
-  /** iss27-01: with no explicit source picked and more than one source
-   *  configured, search every enabled source in parallel and merge the
-   *  results — a single source (or the orchestrator's single-source mode)
-   *  no longer silently stands in for "all sources". One source failing
-   *  (timeout, disconnected) doesn't blank the whole result set. */
-  async function run(q: string, source = selectedSource) {
+  /** Toggles one source chip. Never lets the last remaining active source be
+   *  excluded — a filter that could narrow the search down to nothing is
+   *  just a trap, not a filter. */
+  function toggleSource(name: string) {
+    setExcludedSources((prev) => {
+      if (prev.has(name)) {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      }
+      const stillActive = allSources.filter((s) => s.name !== name && !prev.has(s.name));
+      if (stillActive.length === 0) return prev;
+      return new Set(prev).add(name);
+    });
+  }
+
+  /** iss27-01: with every source active (the default) and more than one
+   *  source configured, search every enabled source in parallel and merge
+   *  the results — a single source (or the orchestrator's single-source
+   *  mode) no longer silently stands in for "all sources". One source
+   *  failing (timeout, disconnected) doesn't blank the whole result set.
+   *  Narrowing the chip row to a subset searches exactly that subset. */
+  async function run(q: string) {
     if (!q.trim()) return;
     setLoading(true);
     setError(null);
     setResults([]);
     try {
-      if (source || allSources.length <= 1) {
-        const all = await searchSources(q, source || undefined);
+      if (activeSources.length <= 1) {
+        const all = await searchSources(q, activeSources[0]?.name);
         setResults(all);
         return;
       }
-      const settled = await Promise.allSettled(
-        allSources.map((s) => searchSources(q, s.name)),
-      );
+      const settled = await Promise.allSettled(activeSources.map((s) => searchSources(q, s.name)));
       const merged: SourceSearchResult[] = [];
       const failed: string[] = [];
       settled.forEach((outcome, i) => {
         if (outcome.status === 'fulfilled') merged.push(...outcome.value);
-        else failed.push(allSources[i].display_name);
+        else failed.push(activeSources[i].display_name);
       });
       if (merged.length === 0 && failed.length > 0) {
         throw new Error(`Search failed for ${failed.join(', ')}`);
@@ -434,7 +503,7 @@ export function InteractiveSearchModal({
   useEffect(() => {
     if (autoRanRef.current || searchSourcesQuery.isLoading) return;
     autoRanRef.current = true;
-    void run(initialQuery, '');
+    void run(initialQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchSourcesQuery.isLoading]);
 
@@ -464,9 +533,19 @@ export function InteractiveSearchModal({
       delete next[key];
       return next;
     });
+    const sinceMs = Date.now();
     try {
       await startSourceDownload(r, { qualityCheck, skipAcoustid: !acoustidCheck }, entity);
-      setGrabbed((g) => ({ ...g, [key]: 'done' }));
+      // Dispatch succeeded — that only means the download STARTED. Only a
+      // grab naming a library entity can be watched through to its real
+      // outcome (quarantine, import) via that entity's pipeline history;
+      // anything else has nothing to poll and is "done" once dispatched.
+      if (entity?.trackId || entity?.albumId) {
+        setGrabbed((g) => ({ ...g, [key]: 'verifying' }));
+        void watchGrabOutcome(entity, sinceMs, key);
+      } else {
+        setGrabbed((g) => ({ ...g, [key]: 'done' }));
+      }
     } catch (caught) {
       setGrabbed((g) => ({ ...g, [key]: 'error' }));
       setGrabErrors((errors) => ({
@@ -474,6 +553,47 @@ export function InteractiveSearchModal({
         [key]:
           caught instanceof Error && caught.message.trim() ? caught.message : 'Download failed',
       }));
+    }
+  }
+
+  /** Polls the grabbed entity's merged pipeline history until a terminal
+   *  outcome shows up (or the window times out) — surfaces a quarantine/
+   *  failure right in this modal instead of leaving a stale "Grabbed ✓" up
+   *  when the file never actually made it into the library. */
+  async function watchGrabOutcome(entity: Lib2EntityRef, sinceMs: number, key: string) {
+    const fetchHistory = entity.trackId
+      ? () => fetchLibraryV2TrackHistory(entity.trackId!)
+      : entity.albumId
+        ? () => fetchLibraryV2AlbumHistory(entity.albumId!)
+        : null;
+    if (!fetchHistory) return;
+    for (let attempt = 0; attempt < GRAB_OUTCOME_MAX_POLLS; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, GRAB_OUTCOME_POLL_INTERVAL_MS));
+      if (cancelledRef.current) return;
+      let history: LibraryV2HistoryEntry[];
+      try {
+        history = await fetchHistory();
+      } catch {
+        continue; // transient — history is a best-effort signal, keep trying
+      }
+      if (cancelledRef.current) return;
+      const outcome = classifyGrabOutcome(history, sinceMs);
+      if (outcome.status === 'failed') {
+        setGrabbed((g) => ({ ...g, [key]: 'error' }));
+        setGrabErrors((errors) => ({ ...errors, [key]: outcome.message }));
+        return;
+      }
+      if (outcome.status === 'imported') {
+        setGrabbed((g) => ({ ...g, [key]: 'done' }));
+        return;
+      }
+    }
+    // Timed out with no terminal signal — likely still downloading (a large
+    // Usenet grab can outlast this window). Leave it as a plain "Grabbed ✓"
+    // rather than stalling the button forever; the track/album row's own
+    // live queue badge (docs §73) covers longer-running progress.
+    if (!cancelledRef.current) {
+      setGrabbed((g) => ({ ...g, [key]: 'done' }));
     }
   }
 
@@ -502,24 +622,6 @@ export function InteractiveSearchModal({
               if (e.key === 'Enter') void run(query);
             }}
           />
-          <select
-            className={`${styles.select} ${styles.searchSourceSelect}`}
-            aria-label="Download source"
-            value={selectedSource}
-            disabled={loading || searchSourcesQuery.isLoading}
-            onChange={(e) => setSelectedSource(e.target.value)}
-          >
-            <option value="">
-              {allSources.length > 1
-                ? `All sources (${allSources.map((s) => s.display_name).join(', ')})`
-                : (allSources[0]?.display_name ?? 'Configured source')}
-            </option>
-            {searchSourcesQuery.data?.sources.map((source) => (
-              <option key={source.name} value={source.name}>
-                {source.display_name}
-              </option>
-            ))}
-          </select>
           <button
             type="button"
             className={styles.btnPrimary}
@@ -530,18 +632,46 @@ export function InteractiveSearchModal({
           </button>
         </div>
 
+        {allSources.length > 1 ? (
+          <div className={styles.sourceChips} role="group" aria-label="Download sources">
+            <button
+              type="button"
+              className={styles.sourceChip}
+              aria-pressed={excludedSources.size === 0}
+              disabled={loading || searchSourcesQuery.isLoading}
+              onClick={() => setExcludedSources(new Set())}
+            >
+              All sources
+            </button>
+            {allSources.map((source) => (
+              <button
+                key={source.name}
+                type="button"
+                className={styles.sourceChip}
+                aria-pressed={!excludedSources.has(source.name)}
+                disabled={loading || searchSourcesQuery.isLoading}
+                onClick={() => toggleSource(source.name)}
+              >
+                {source.display_name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className={styles.searchOptions}>
-          <label className={styles.checkOption}>
+          <label className={styles.toggleOption}>
             <input
               type="checkbox"
+              className={styles.toggleSwitch}
               checked={qualityCheck}
               onChange={(e) => setQualityCheck(e.target.checked)}
             />
             Quality check
           </label>
-          <label className={styles.checkOption}>
+          <label className={styles.toggleOption}>
             <input
               type="checkbox"
+              className={styles.toggleSwitch}
               checked={acoustidCheck}
               onChange={(e) => setAcoustidCheck(e.target.checked)}
             />
@@ -549,9 +679,10 @@ export function InteractiveSearchModal({
           </label>
           <span className={styles.optionHint}>applied to grabs from this window</span>
           {canFilterByCutoff ? (
-            <label className={styles.checkOption}>
+            <label className={styles.toggleOption}>
               <input
                 type="checkbox"
+                className={styles.toggleSwitch}
                 checked={cutoffOnly}
                 onChange={(e) => setCutoffOnly(e.target.checked)}
               />
@@ -565,16 +696,11 @@ export function InteractiveSearchModal({
         <div className={styles.resultsWrap}>
           {loading ? (
             <div className={styles.inlineLoading}>
-              {selectedSource
-                ? `Searching ${
-                    allSources.find((source) => source.name === selectedSource)?.display_name ??
-                    selectedSource
-                  }…`
-                : allSources.length > 1
-                  ? `Searching all sources (${allSources.map((s) => s.display_name).join(', ')})…`
-                  : allSources[0]
-                    ? `Searching ${allSources[0].display_name}…`
-                    : 'Searching…'}
+              {activeSources.length === 1
+                ? `Searching ${activeSources[0].display_name}…`
+                : activeSources.length > 1
+                  ? `Searching ${activeSources.map((s) => s.display_name).join(', ')}…`
+                  : 'Searching…'}
             </div>
           ) : results.length === 0 ? (
             <div className={styles.inlineLoading}>
@@ -640,16 +766,20 @@ export function InteractiveSearchModal({
                           <button
                             type="button"
                             className={styles.toolButton}
-                            disabled={state === 'pending' || state === 'done'}
+                            disabled={
+                              state === 'pending' || state === 'done' || state === 'verifying'
+                            }
                             onClick={() => void grab(r)}
                           >
                             {state === 'done'
                               ? 'Grabbed ✓'
                               : state === 'pending'
                                 ? '…'
-                                : state === 'error'
-                                  ? 'Retry'
-                                  : 'Download'}
+                                : state === 'verifying'
+                                  ? 'Verifying…'
+                                  : state === 'error'
+                                    ? 'Retry'
+                                    : 'Download'}
                           </button>
                           {state === 'error' ? (
                             <span className={styles.grabError} role="alert">

@@ -39,7 +39,39 @@ describe('buildSearchQuery', () => {
 
   it('keeps a real track title even if it happens to start with "Track"', () => {
     expect(
-      buildSearchQuery('Public Enemy', 'Interactive Search: Track Suit and Tie (Fear of a Black Planet)'),
+      buildSearchQuery(
+        'Public Enemy',
+        'Interactive Search: Track Suit and Tie (Fear of a Black Planet)',
+      ),
     ).toBe('Public Enemy Track Suit and Tie');
+  });
+
+  it('drops only the outer album-context group when the album title itself has parens', () => {
+    // Regression: an album/track title with a "(feat. X)" credit made the
+    // naive `[^)]*` regex fail to find the trailing group boundary (it isn't
+    // nested-paren aware), so the ENTIRE tail — track title AND the
+    // album-context duplicate — leaked into the query verbatim. That produced
+    // a long, doubled, garbage query with zero real matches.
+    expect(
+      buildSearchQuery(
+        'Drenchill',
+        'Interactive Search: Freed from Desire (feat. Indiiana) - DNF Extended Remix (Freed from Desire (feat. Indiiana))',
+      ),
+    ).toBe('Drenchill Freed from Desire (feat. Indiiana) - DNF Extended Remix');
+  });
+
+  it('falls back to the album title (with its own parens intact) for a placeholder track', () => {
+    expect(
+      buildSearchQuery(
+        'Drenchill',
+        'Interactive Search: Track ? (Freed from Desire (feat. Indiiana))',
+      ),
+    ).toBe('Drenchill Freed from Desire (feat. Indiiana)');
+  });
+
+  it('leaves an unbalanced trailing paren alone instead of mangling the query', () => {
+    expect(buildSearchQuery('Artist', 'Interactive Search: Weird (Title')).toBe(
+      'Artist Weird (Title',
+    );
   });
 });

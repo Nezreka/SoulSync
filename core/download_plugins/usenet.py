@@ -406,8 +406,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 queue_length=0,
                 # Pre-fill artist + title so TrackResult.__post_init__
                 # doesn't auto-parse the filename — same URL-in-filename
-                # gotcha as the torrent plugin.
-                artist=parsed_artist or result.indexer_name or 'Usenet',
+                # gotcha as the torrent plugin. The indexer (e.g. "NZBGeek")
+                # is metadata about WHERE the result came from, never a
+                # substitute artist name — it only ever goes into
+                # _source_metadata below.
+                artist=parsed_artist or 'Unknown Artist',
                 title=parsed_title or result.title,
                 album=parsed_title or None,
                 track_number=None,

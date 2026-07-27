@@ -5,9 +5,75 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import type { SourceSearchResult } from '../-library-v2.api';
+import type { LibraryV2HistoryEntry, SourceSearchResult } from '../-library-v2.api';
 
-import { InteractiveSearchModal, sortSourceSearchResults } from './interactive-search';
+import {
+  classifyGrabOutcome,
+  InteractiveSearchModal,
+  sortSourceSearchResults,
+} from './interactive-search';
+
+describe('classifyGrabOutcome', () => {
+  const NOW = Date.parse('2026-01-01T00:00:00Z');
+
+  function entry(overrides: Partial<LibraryV2HistoryEntry>): LibraryV2HistoryEntry {
+    return {
+      date: new Date(NOW).toISOString(),
+      event_type: 'x',
+      category: 'info',
+      title: null,
+      detail: null,
+      source: null,
+      ...overrides,
+    };
+  }
+
+  it('reports pending when there is no fresh terminal event', () => {
+    expect(classifyGrabOutcome([], NOW)).toEqual({ status: 'pending' });
+    expect(classifyGrabOutcome([entry({ category: 'info' })], NOW)).toEqual({
+      status: 'pending',
+    });
+  });
+
+  it('ignores a stale event left over from an earlier grab of the same track', () => {
+    const stale = entry({ category: 'quarantined', date: new Date(NOW - 60_000).toISOString() });
+    expect(classifyGrabOutcome([stale], NOW)).toEqual({ status: 'pending' });
+  });
+
+  it('reports failed for a fresh quarantined event, combining title + detail', () => {
+    const fresh = entry({
+      category: 'quarantined',
+      title: 'Quarantined',
+      detail: 'AcoustID mismatch',
+    });
+    expect(classifyGrabOutcome([fresh], NOW)).toEqual({
+      status: 'failed',
+      message: 'Quarantined: AcoustID mismatch',
+    });
+  });
+
+  it('reports failed for a fresh failed-category event with no detail', () => {
+    const fresh = entry({ category: 'failed', title: 'Grab failed', detail: null });
+    expect(classifyGrabOutcome([fresh], NOW)).toEqual({
+      status: 'failed',
+      message: 'Grab failed',
+    });
+  });
+
+  it('reports imported for a fresh imported event', () => {
+    expect(classifyGrabOutcome([entry({ category: 'imported' })], NOW)).toEqual({
+      status: 'imported',
+    });
+  });
+
+  it('tolerates ~10s of clock skew around the grab start time', () => {
+    const justInside = entry({ category: 'imported', date: new Date(NOW - 9_000).toISOString() });
+    expect(classifyGrabOutcome([justInside], NOW)).toEqual({ status: 'imported' });
+
+    const tooOld = entry({ category: 'imported', date: new Date(NOW - 11_000).toISOString() });
+    expect(classifyGrabOutcome([tooOld], NOW)).toEqual({ status: 'pending' });
+  });
+});
 
 describe('library v2 interactive grab', () => {
   it('keeps unknown publish dates behind known releases in both age directions', () => {
@@ -136,8 +202,8 @@ describe('library v2 interactive grab', () => {
       ]),
     );
 
-    const source = await screen.findByLabelText('Download source');
-    fireEvent.change(source, { target: { value: 'usenet' } });
+    // Deselecting the Soulseek chip leaves Usenet as the only active source.
+    fireEvent.click(await screen.findByRole('button', { name: 'Soulseek' }));
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     await waitFor(() => expect(searches).toHaveLength(3));
@@ -186,6 +252,57 @@ describe('library v2 interactive grab', () => {
     // one source failing must not blank the whole result set (iss27-01).
     await screen.findByText('Found');
     expect(screen.queryByText(/search failed/i)).not.toBeInTheDocument();
+  });
+
+  it('iss27-01 pt.4: source chips toggle independently, never excluding the last active one', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [
+            { name: 'soulseek', display_name: 'Soulseek' },
+            { name: 'usenet', display_name: 'Usenet' },
+            { name: 'tidal', display_name: 'Tidal' },
+          ],
+        }),
+      ),
+      http.post('/api/search', () => HttpResponse.json({ results: [] })),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'Tidal' });
+    expect(screen.getByRole('button', { name: 'All sources' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // A subset can be narrowed by deselecting individual chips — this isn't
+    // a single-pick dropdown.
+    fireEvent.click(screen.getByRole('button', { name: 'Soulseek' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Usenet' }));
+    expect(screen.getByRole('button', { name: 'All sources' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getByRole('button', { name: 'Tidal' })).toHaveAttribute('aria-pressed', 'true');
+
+    // Only Tidal is left active — excluding it too would search nothing, so
+    // the click is a no-op.
+    fireEvent.click(screen.getByRole('button', { name: 'Tidal' }));
+    expect(screen.getByRole('button', { name: 'Tidal' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'All sources' }));
+    expect(screen.getByRole('button', { name: 'Soulseek' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Usenet' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('filters to only results meeting the quality profile cutoff (deep-dive D3)', async () => {
@@ -330,4 +447,69 @@ describe('library v2 interactive grab', () => {
     await waitFor(() => expect(downloadCalls).toBe(1));
     confirmSpy.mockRestore();
   });
+
+  it('surfaces a quarantine outcome that lands after the grab dispatch resolves', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'soulseek',
+          sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
+        }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              username: 'peer',
+              filename: 'Artist/Track.flac',
+              title: 'Track',
+              artist: 'Artist',
+              quality: 'flac',
+              size: 4096,
+            },
+          ],
+        }),
+      ),
+      http.post('/api/download', () => HttpResponse.json({ success: true })),
+      http.get('/api/library/v2/tracks/42/history', () =>
+        HttpResponse.json({
+          success: true,
+          history: [
+            {
+              date: new Date().toISOString(),
+              event_type: 'import_file_quarantined',
+              category: 'quarantined',
+              title: 'Quarantined',
+              detail: 'AcoustID mismatch',
+              source: 'acquisition',
+            },
+          ],
+        }),
+      ),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal
+          initialQuery="Artist Track"
+          entity={{ trackId: 42 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+
+    // Dispatch resolving is NOT the real outcome — a grab naming a library
+    // entity must wait for the pipeline's verdict instead of claiming
+    // success immediately.
+    expect(await screen.findByRole('button', { name: 'Verifying…' })).toBeDisabled();
+
+    expect(await screen.findByRole('alert', {}, { timeout: 8000 })).toHaveTextContent(
+      'AcoustID mismatch',
+    );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+  }, 10_000);
 });

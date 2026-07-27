@@ -213,8 +213,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 # Pre-fill artist + title so TrackResult.__post_init__
                 # doesn't auto-parse the filename — our filename starts
                 # with the indexer download URL, which would otherwise
-                # show up as "by download?apikey=..." in the UI.
-                artist=parsed_artist or result.indexer_name or 'Torrent',
+                # show up as "by download?apikey=..." in the UI. The
+                # indexer (e.g. "NZBGeek") is metadata about WHERE the
+                # result came from, never a substitute artist name — it
+                # only ever goes into _source_metadata below.
+                artist=parsed_artist or 'Unknown Artist',
                 title=parsed_title or result.title,
                 album=parsed_title or None,
                 track_number=None,

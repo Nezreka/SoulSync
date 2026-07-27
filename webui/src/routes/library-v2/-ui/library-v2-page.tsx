@@ -187,6 +187,32 @@ const SCOPED_SEARCH_RE = /^(Automatic Search|Search|Grab Release)\b/;
  *  guaranteed-empty search query, so it must never be sent to search. */
 const PLACEHOLDER_TRACK_LABEL_RE = /^Track\s+(\?|\d+)$/;
 
+/** Strips a trailing `(...)` group from `s`, matching parens by depth instead
+ *  of a flat `[^)]*` regex — an album/track title with its own parens (e.g.
+ *  "Freed from Desire (feat. Indiiana)") would otherwise hide the true end of
+ *  the wrapping "(album)" context group, so the regex found no match at all
+ *  and left the ENTIRE tail — track title and duplicated album context —
+ *  in the query. Returns the group's inner text (or null if the string
+ *  doesn't end in a balanced parenthesized group) plus the remaining prefix. */
+function splitTrailingParenGroup(s: string): { rest: string; group: string | null } {
+  const trimmed = s.replace(/\s+$/, '');
+  if (!trimmed.endsWith(')')) return { rest: s.trim(), group: null };
+  let depth = 0;
+  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+    if (trimmed[i] === ')') depth += 1;
+    else if (trimmed[i] === '(') {
+      depth -= 1;
+      if (depth === 0) {
+        return {
+          rest: trimmed.slice(0, i).trim(),
+          group: trimmed.slice(i + 1, -1).trim(),
+        };
+      }
+    }
+  }
+  return { rest: s.trim(), group: null }; // unbalanced — leave untouched
+}
+
 /** Build a source-search query from an artist name + an action label like
  *  "Interactive Search: Title (Album)". Falls back to the album context
  *  (iss27-01) when the title is really just the untitled-track placeholder. */
@@ -194,16 +220,10 @@ export function buildSearchQuery(artistName: string, action: string): string {
   const idx = action.indexOf(': ');
   if (idx === -1) return artistName; // artist-level search
   const tail = action.slice(idx + 2);
-  const albumMatch = tail.match(/\(([^)]*)\)\s*$/);
-  const album = albumMatch ? albumMatch[1].trim() : '';
-  let rest = tail
-    .replace(/\s*\([^)]*\)\s*$/, '') // drop trailing "(album)" context
-    .replace(/\s*-\s*missing\s*$/i, '')
-    .trim();
-  if (album && PLACEHOLDER_TRACK_LABEL_RE.test(rest)) {
-    rest = album;
-  }
-  return `${artistName} ${rest}`.trim();
+  const { rest: withoutAlbum, group: album } = splitTrailingParenGroup(tail);
+  const rest = withoutAlbum.replace(/\s*-\s*missing\s*$/i, '').trim();
+  const finalRest = album && PLACEHOLDER_TRACK_LABEL_RE.test(rest) ? album : rest;
+  return `${artistName} ${finalRest}`.trim();
 }
 
 const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
@@ -6391,10 +6411,7 @@ export function TrackMetadataGapsCell({
           'success',
         );
       } else {
-        window.showToast?.(
-          'Nothing to write — no configured provider has these tags yet.',
-          'info',
-        );
+        window.showToast?.('Nothing to write — no configured provider has these tags yet.', 'info');
       }
     },
     onError: (error) => {
