@@ -44,3 +44,77 @@ export function automationsProgressQueryOptions() {
     queryFn: () => readJson<AutomationsProgressResponse>(apiClient.get('automations/progress')),
   });
 }
+
+// ── mutations ───────────────────────────────────────────────────────────────
+//
+// All of these mirror the vanilla handlers verb-for-verb. The endpoints answer
+// `{error}` on failure with a 200, so an HTTP-level check alone is not enough —
+// every one asserts on the payload as the vanilla code did.
+
+interface MutationResponse {
+  success?: boolean;
+  error?: string;
+  /** bulk-toggle / group report how many rows changed. */
+  updated?: number;
+}
+
+function assertOk(payload: MutationResponse, fallback: string): MutationResponse {
+  if (payload.error) throw new Error(payload.error);
+  if (payload.success === false) throw new Error(fallback);
+  return payload;
+}
+
+export async function toggleAutomation(id: number): Promise<void> {
+  assertOk(
+    await readJson<MutationResponse>(apiClient.post(`automations/${id}/toggle`)),
+    'Could not toggle the automation',
+  );
+}
+
+export async function runAutomation(id: number): Promise<void> {
+  assertOk(
+    await readJson<MutationResponse>(apiClient.post(`automations/${id}/run`)),
+    'Could not start the automation',
+  );
+}
+
+export async function duplicateAutomation(id: number): Promise<void> {
+  assertOk(
+    await readJson<MutationResponse>(apiClient.post(`automations/${id}/duplicate`)),
+    'Could not duplicate the automation',
+  );
+}
+
+export async function deleteAutomation(id: number): Promise<void> {
+  assertOk(
+    await readJson<MutationResponse>(apiClient.delete(`automations/${id}`)),
+    'Could not delete the automation',
+  );
+}
+
+/** Enable/disable every automation in a group in one call. Returns how many changed. */
+export async function bulkToggleAutomations(ids: number[], enabled: boolean): Promise<number> {
+  const payload = assertOk(
+    await readJson<MutationResponse>(
+      apiClient.post('automations/bulk-toggle', { json: { automation_ids: ids, enabled } }),
+    ),
+    'Could not update those automations',
+  );
+  return payload.updated ?? 0;
+}
+
+/**
+ * The per-side master pause. Admin-only server-side (403 otherwise), and NOT
+ * profile-scoped — it silences the whole side for everyone.
+ */
+export async function setAutomationsMaster(
+  side: 'music' | 'video',
+  enabled: boolean,
+): Promise<void> {
+  assertOk(
+    await readJson<MutationResponse>(
+      apiClient.post('automations/master', { json: { side, enabled } }),
+    ),
+    'Could not update the master switch',
+  );
+}

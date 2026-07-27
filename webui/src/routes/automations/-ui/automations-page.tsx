@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useMemo } from 'react';
 
@@ -6,7 +6,17 @@ import { useProfile, useReactPageShell } from '@/platform/shell/route-controller
 
 import type { Automation } from '../-automations.types';
 
-import { automationsListQueryOptions, automationsMasterQueryOptions } from '../-automations.api';
+import {
+  AUTOMATIONS_QUERY_KEY,
+  automationsListQueryOptions,
+  automationsMasterQueryOptions,
+  bulkToggleAutomations,
+  deleteAutomation,
+  duplicateAutomation,
+  runAutomation,
+  setAutomationsMaster,
+  toggleAutomation,
+} from '../-automations.api';
 import { formatAction, formatTrigger } from '../-automations.format';
 import {
   buildAutomationsView,
@@ -25,8 +35,92 @@ export function AutomationsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
 
+  const queryClient = useQueryClient();
   const listQuery = useQuery(automationsListQueryOptions(profileId));
   const masterQuery = useQuery(automationsMasterQueryOptions());
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: AUTOMATIONS_QUERY_KEY });
+  const fail = (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error');
+
+  const toggle = useMutation({
+    mutationFn: (a: Automation) => toggleAutomation(a.id),
+    // Silent on success, as the vanilla toggle was — the switch itself is the
+    // feedback, and a toast per flick would be noise.
+    onSuccess: () => refresh(),
+    onError: fail,
+  });
+
+  const run = useMutation({
+    mutationFn: (a: Automation) => runAutomation(a.id),
+    onSuccess: () => {
+      window.showToast?.('Automation triggered', 'success');
+      // The run is async server-side; the vanilla page waited 1.5s before
+      // refetching so last_run/run_count have a chance to move. Refetching
+      // immediately would just redraw the same card.
+      setTimeout(() => void refresh(), 1500);
+    },
+    onError: fail,
+  });
+
+  const duplicate = useMutation({
+    mutationFn: (a: Automation) => duplicateAutomation(a.id),
+    onSuccess: async () => {
+      window.showToast?.('Automation duplicated', 'success');
+      await refresh();
+    },
+    onError: fail,
+  });
+
+  const remove = useMutation({
+    mutationFn: (a: Automation) => deleteAutomation(a.id),
+    onSuccess: async () => {
+      window.showToast?.('Automation deleted', 'success');
+      await refresh();
+    },
+    onError: fail,
+  });
+
+  const bulkToggle = useMutation({
+    mutationFn: ({ ids, enabled }: { ids: number[]; enabled: boolean }) =>
+      bulkToggleAutomations(ids, enabled),
+    onSuccess: async (updated, { enabled }) => {
+      window.showToast?.(`${enabled ? 'Enabled' : 'Disabled'} ${updated} automations`, 'success');
+      await refresh();
+    },
+    onError: fail,
+  });
+
+  const master = useMutation({
+    mutationFn: (enabled: boolean) => setAutomationsMaster('music', enabled),
+    onSuccess: async (_v, enabled) => {
+      window.showToast?.(
+        `Music automations ${enabled ? 'resumed' : 'paused'}`,
+        enabled ? 'success' : 'info',
+      );
+      await refresh();
+    },
+    onError: fail,
+  });
+
+  // Destructive, so it is confirm-gated exactly as the vanilla handler was.
+  const confirmDelete = async (a: Automation) => {
+    const ok = await window.showConfirmDialog?.({
+      title: 'Delete Automation',
+      message: `Delete automation "${a.name}"?`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (ok === false) return;
+    remove.mutate(a);
+  };
+
+  const cardHandlers = {
+    onToggle: (a: Automation) => toggle.mutate(a),
+    onRun: (a: Automation) => run.mutate(a),
+    onDuplicate: (a: Automation) => duplicate.mutate(a),
+    onDelete: (a: Automation) => void confirmDelete(a),
+    onEdit: (a: Automation) => window.showAutomationBuilder?.(a.id),
+  };
 
   // Both sides share ONE endpoint; only owned_by separates them.
   const automations = useMemo(
@@ -112,6 +206,8 @@ export function AutomationsPage() {
         <button
           type="button"
           className={`auto-master-toggle${masterOn ? ' on' : ''}`}
+          disabled={master.isPending}
+          onClick={() => master.mutate(!masterOn)}
           title={
             masterOn
               ? 'Automations are live. Click to pause every scheduled and event run on this side — individual switches keep their state, and manual Run still works.'
@@ -188,6 +284,7 @@ export function AutomationsPage() {
             label="System"
             automations={keep.system}
             isProtected
+            {...cardHandlers}
           />
         ) : null}
 
@@ -198,6 +295,18 @@ export function AutomationsPage() {
             label={`📁 ${group.name}`}
             automations={group.automations}
             groupName={group.name}
+            onBulkToggle={(name, allEnabled) =>
+              bulkToggle.mutate({
+                // Ids come from the unfiltered data. _bulkToggleGroup scraped
+                // the DOM, which was equivalent there because its filter only
+                // set display:none and left the cards in place. React does not
+                // render filtered-out cards at all, so a DOM query here would
+                // genuinely miss them and quietly toggle a subset of the group.
+                ids: view.groups.find((g) => g.name === name)?.automations.map((a) => a.id) ?? [],
+                enabled: !allEnabled,
+              })
+            }
+            {...cardHandlers}
           />
         ))}
 
@@ -206,6 +315,7 @@ export function AutomationsPage() {
             id="auto-section-custom"
             label="My Automations"
             automations={keep.ungrouped}
+            {...cardHandlers}
           />
         ) : null}
       </div>
