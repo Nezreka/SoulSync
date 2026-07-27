@@ -58,11 +58,13 @@ describe('shellRouteManifest', () => {
     // Order follows the manifest array, not the migration order.
     expect(getShellRouteByPageId('wishlist')?.kind).toBe('react');
     expect(getShellRouteByPageId('automations')?.kind).toBe('react');
+    expect(getShellRouteByPageId('library')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'watchlist',
       'wishlist',
       'automations',
       'import',
+      'library',
       'stats',
       'issues',
     ]);

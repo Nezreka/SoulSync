@@ -86,6 +86,22 @@ declare global {
       actionType: string,
     ) => void;
     clearEntireWishlist?: () => void;
+    /**
+     * Library page handoffs, all owned by vanilla and INVOKED rather than
+     * reimplemented:
+     *   - the two export / watch-all modals live in library.js
+     *   - the empty-state CTA drives the vanilla /search page's DOM
+     *   - showLibraryDownloadsSection is bound to `artistDownloadBubbles`,
+     *     module state in core.js, so it cannot move into a module
+     *   - currentMusicSourceName decides which provider id makes an artist
+     *     watchable
+     */
+    openArtistExportModal?: () => void;
+    openWatchAllUnwatchedModal?: () => void;
+    _handoffLibrarySearchToEnhancedSearch?: (query: string) => void;
+    showLibraryDownloadsSection?: () => void;
+    currentMusicSourceName?: string;
+    updateWatchlistCount?: () => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
