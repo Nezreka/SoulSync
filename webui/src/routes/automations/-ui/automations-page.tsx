@@ -10,6 +10,7 @@ import {
   AUTOMATIONS_QUERY_KEY,
   automationsListQueryOptions,
   automationsMasterQueryOptions,
+  automationsProgressQueryOptions,
   assignAutomationGroup,
   bulkToggleAutomations,
   deleteAutomation,
@@ -30,6 +31,7 @@ import {
 } from '../-automations.helpers';
 import { useAutomationProgress } from '../-automations.progress';
 import { Route } from '../route';
+import { AutomationHub } from './automation-hub';
 import { AutomationsSection, groupSectionId } from './automations-section';
 import { type DeleteGroupChoice, DeleteGroupDialog } from './delete-group-dialog';
 import { GroupDropdown } from './group-dropdown';
@@ -46,7 +48,13 @@ export function AutomationsPage() {
   const masterQuery = useQuery(automationsMasterQueryOptions());
   // Live run state, merged from the socket mirror. Not query-cached: it is a
   // stream of transient frames, not a resource with a canonical server copy.
-  const progress = useAutomationProgress();
+  //
+  // Seeded from /api/automations/progress so a page opened DURING a run shows
+  // that run immediately. Without the seed the card stays blank until the next
+  // socket frame — which for a long quiet phase can be a while. loadAutomations
+  // did the same catch-up fetch right after painting.
+  const progressSeed = useQuery(automationsProgressQueryOptions());
+  const progress = useAutomationProgress(progressSeed.data);
   // The builder stays in vanilla and is shared with the video page; this hands
   // the shell over for the edit and takes it back on close.
   const openBuilder = useVanillaBuilder(() => void refresh());
@@ -186,6 +194,9 @@ export function AutomationsPage() {
     onDuplicate: (a: Automation) => duplicate.mutate(a),
     onDelete: (a: Automation) => void confirmDelete(a),
     onEdit: (a: Automation) => openBuilder(a.id),
+    // Body-attached modal, so unlike the builder it needs no shell handoff.
+    onShowHistory: (a: Automation) =>
+      window.showAutomationHistory?.(a.id, a.name, a.action_type ?? ''),
     progressFor: (id: number) => progress[id],
     onAssignGroup: (a: Automation, event: React.MouseEvent) => {
       const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -367,22 +378,36 @@ export function AutomationsPage() {
       ) : null}
 
       <div className="automations-list">
-        {keep.system.length > 0 ? (
+        {/* Presence and count come from the UNFILTERED set: the vanilla filter
+            only hid cards, so a section never disappeared mid-search and its
+            count never moved. Only the cards inside narrow. */}
+        {view.system.length > 0 ? (
           <AutomationsSection
             id="auto-section-system"
             label="System"
             automations={keep.system}
+            totalCount={view.system.length}
+            allAutomations={view.system}
             isProtected
             {...cardHandlers}
           />
         ) : null}
 
-        {keep.groups.map((group) => (
+        {/* The Hub sits between System and the user groups, as loadAutomations
+            ordered it, and is static content so the filter does not touch it.
+            Hidden on an EMPTY list: loadAutomations returns before appending it,
+            so a fresh install sees the empty state alone rather than the empty
+            state plus a wall of reference material. */}
+        {isEmpty ? null : <AutomationHub />}
+
+        {view.groups.map((group) => (
           <AutomationsSection
             key={group.name}
             id={groupSectionId(group.name)}
             label={`📁 ${group.name}`}
-            automations={group.automations}
+            automations={keep.groups.find((g) => g.name === group.name)?.automations ?? []}
+            totalCount={group.automations.length}
+            allAutomations={group.automations}
             groupName={group.name}
             {...groupActions}
             onBulkToggle={(name, allEnabled) =>
@@ -400,11 +425,13 @@ export function AutomationsPage() {
           />
         ))}
 
-        {keep.ungrouped.length > 0 ? (
+        {view.ungrouped.length > 0 ? (
           <AutomationsSection
             id="auto-section-custom"
             label="My Automations"
             automations={keep.ungrouped}
+            totalCount={view.ungrouped.length}
+            allAutomations={view.ungrouped}
             {...cardHandlers}
           />
         ) : null}

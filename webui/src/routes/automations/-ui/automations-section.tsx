@@ -51,6 +51,16 @@ interface Props extends AutomationCardHandlers, GroupActions {
   id: string;
   label: string;
   automations: Automation[];
+  /**
+   * Size of the section BEFORE filtering, for the header count.
+   *
+   * The vanilla filter only set display:none on cards — sections and their
+   * counts were already rendered from the unfiltered data, so the count stayed
+   * put while you typed. Defaults to what is rendered.
+   */
+  totalCount?: number;
+  /** The unfiltered members, for decisions that must not depend on the filter. */
+  allAutomations?: Automation[];
   /** System/Hub sections: no group actions, and no drop target. */
   isProtected?: boolean;
   groupName?: string;
@@ -62,6 +72,8 @@ export function AutomationsSection({
   automations,
   isProtected = false,
   groupName,
+  totalCount,
+  allAutomations,
   onBulkToggle,
   onRename,
   onDeleteGroup,
@@ -91,8 +103,11 @@ export function AutomationsSection({
     });
   };
 
-  const enabledCount = automations.filter((a) => a.enabled === true || a.enabled === 1).length;
-  const allEnabled = enabledCount === automations.length;
+  // Judged over the whole group: with a filter active, "Disable all" must not
+  // flip to "Enable all" just because the only visible card happens to be off.
+  const forToggle = allAutomations ?? automations;
+  const enabledCount = forToggle.filter((a) => a.enabled === true || a.enabled === 1).length;
+  const allEnabled = forToggle.length > 0 && enabledCount === forToggle.length;
   const showGroupActions = Boolean(groupName) && !isProtected;
 
   return (
@@ -138,7 +153,7 @@ export function AutomationsSection({
             />
           </span>
         )}
-        <span className="section-count">{automations.length}</span>
+        <span className="section-count">{totalCount ?? automations.length}</span>
         {showGroupActions ? (
           <div className="section-actions" onClick={(e) => e.stopPropagation()}>
             <button
@@ -171,14 +186,20 @@ export function AutomationsSection({
       </div>
 
       <div className="automations-section-body">
-        {automations.map((a) => (
-          <AutomationCard
-            key={a.id}
-            automation={a}
-            progress={progressFor?.(a.id)}
-            {...cardHandlers}
-          />
-        ))}
+        {/* The cards live in their own container, NOT directly in the body:
+            .automations-grid is `repeat(2, 1fr)`, so omitting it silently
+            collapses the page to one card per row. Every call site — music and
+            video alike — passes useGrid, hence the grid class here. */}
+        <div className="automations-grid">
+          {automations.map((a) => (
+            <AutomationCard
+              key={a.id}
+              automation={a}
+              progress={progressFor?.(a.id)}
+              {...cardHandlers}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

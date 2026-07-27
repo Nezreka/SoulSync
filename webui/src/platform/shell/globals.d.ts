@@ -70,6 +70,21 @@ declare global {
      * can reclaim the shell — every exit path (Back, Cancel, Save) calls it.
      */
     hideAutomationBuilder?: () => void;
+    /**
+     * Builds the Automation Hub section (pipelines, recipes, guides, reference,
+     * tips) and returns the node. Shared verbatim with the VIDEO automations
+     * page, so React mounts what it returns rather than restating its content.
+     */
+    _buildAutomationHub?: () => HTMLElement;
+    /**
+     * The "Runs: N" run-history modal. Appends itself to document.body rather
+     * than into the page container, so it works unchanged from the React page.
+     */
+    showAutomationHistory?: (
+      automationId: number,
+      automationName: string,
+      actionType: string,
+    ) => void;
     clearEntireWishlist?: () => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;

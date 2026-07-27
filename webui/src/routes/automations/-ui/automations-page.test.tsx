@@ -316,3 +316,138 @@ describe('AutomationsPage group management', () => {
     expect(sent('automations/group', 'PUT')).toHaveLength(0);
   });
 });
+
+describe('AutomationsPage layout parity', () => {
+  it('puts cards inside .automations-grid, not loose in the section body', () => {
+    // .automations-grid is `repeat(2, 1fr)`. Rendering cards as direct children
+    // of .automations-section-body silently collapses the page to one card per
+    // row — which is exactly what shipped before this test existed.
+    renderPage([auto({ id: 1, name: 'Alpha' }), auto({ id: 2, name: 'Beta' })]);
+    return screen.findByText('Alpha').then(() => {
+      const grid = document.querySelector('.automations-section-body > .automations-grid');
+      expect(grid).not.toBeNull();
+      expect(grid!.querySelectorAll('.automation-card')).toHaveLength(2);
+      // and no card escaped the grid
+      expect(
+        document.querySelectorAll('.automations-section-body > .automation-card'),
+      ).toHaveLength(0);
+    });
+  });
+
+  it('renders the Automation Hub, mounted from the shared vanilla builder', async () => {
+    const built = document.createElement('div');
+    built.className = 'automations-section';
+    built.id = 'auto-section-hub';
+    built.textContent = 'Automation Hub';
+    window._buildAutomationHub = vi.fn(() => built);
+
+    renderPage([auto({ id: 1, name: 'Alpha' })]);
+    await screen.findByText('Alpha');
+
+    expect(window._buildAutomationHub).toHaveBeenCalled();
+    expect(document.querySelector('#auto-section-hub')).not.toBeNull();
+    delete window._buildAutomationHub;
+  });
+
+  it('hides the Hub when there are no automations', async () => {
+    // loadAutomations returns before appending the hub on an empty list, so a
+    // fresh install must not see the empty state AND a wall of reference docs.
+    window._buildAutomationHub = vi.fn(() => document.createElement('div'));
+    renderPage([]);
+    await screen.findByText('No automations yet');
+    expect(window._buildAutomationHub).not.toHaveBeenCalled();
+    delete window._buildAutomationHub;
+  });
+
+  it('survives the hub builder being unavailable', async () => {
+    delete window._buildAutomationHub;
+    renderPage([auto({ id: 1, name: 'Alpha' })]);
+    // The page must still render; a missing hub is not a crash.
+    await screen.findByText('Alpha');
+    expect(document.querySelector('.automation-card')).not.toBeNull();
+  });
+});
+
+describe('AutomationsPage handler coverage', () => {
+  it('opens the run-history modal from the Runs link', async () => {
+    window.showAutomationHistory = vi.fn();
+    renderPage([auto({ id: 31, name: 'Nightly', run_count: 4, action_type: 'scan_library' })]);
+    await screen.findByText('Nightly');
+
+    fireEvent.click(document.querySelector('.auto-runs-link')!);
+    expect(window.showAutomationHistory).toHaveBeenCalledWith(31, 'Nightly', 'scan_library');
+    delete window.showAutomationHistory;
+  });
+
+  it('supplies a handler for every affordance the card renders', async () => {
+    // onShowHistory was declared as a prop and simply never passed, so the
+    // Runs link rendered and did nothing. This asserts the card is never handed
+    // an incomplete handler set again — the failure mode is a dead control,
+    // which no type error and no rendering test would catch.
+    const { AutomationCard } = await import('./automation-card');
+    const declared = [
+      'onRun',
+      'onToggle',
+      'onEdit',
+      'onDuplicate',
+      'onAssignGroup',
+      'onDelete',
+      'onShowHistory',
+    ];
+    const source = AutomationCard.toString();
+    // Every handler the component invokes must be one the page provides.
+    const invoked = declared.filter((name) => source.includes(name));
+    const pageSource = (await import('node:fs')).readFileSync(
+      'src/routes/automations/-ui/automations-page.tsx',
+      'utf8',
+    );
+    const missing = invoked.filter((name) => !pageSource.includes(`${name}:`));
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('AutomationsPage filtering parity', () => {
+  const two = () => [
+    auto({ id: 41, name: 'Alpha', group_name: 'Chores' }),
+    auto({ id: 42, name: 'Beta', group_name: 'Chores' }),
+  ];
+
+  it('keeps the section and its count fixed while filtering', async () => {
+    // The vanilla filter only set display:none on cards, so a section never
+    // vanished mid-search and its header count never moved. Deriving either
+    // from the filtered list makes the count tick down as you type.
+    renderPage(two(), undefined, '/automations?q=Alpha');
+    await screen.findByText('Alpha');
+
+    expect(screen.queryByText('Beta')).toBeNull(); // card filtered out
+    expect(document.querySelector('.automations-section')).not.toBeNull(); // section stays
+    expect(document.querySelector('.section-count')?.textContent).toBe('2'); // count unmoved
+  });
+
+  it('keeps a section whose every card is filtered away', async () => {
+    renderPage(two(), undefined, '/automations?q=zzzznomatch');
+    await waitFor(() => expect(document.querySelector('.automations-section')).not.toBeNull());
+    expect(document.querySelectorAll('.automation-card')).toHaveLength(0);
+    expect(document.querySelector('.section-count')?.textContent).toBe('2');
+  });
+
+  it('judges Enable/Disable all over the whole group, not the visible subset', async () => {
+    // The discriminating case: the group is PARTLY enabled, and the filter
+    // leaves only the enabled one visible. Judged over the visible subset the
+    // button reads "Disable all" (1 of 1 enabled); judged over the group it
+    // reads "Enable all" (1 of 2). A group where every member is enabled
+    // cannot tell the two apart — which is what an earlier version of this
+    // test did, and it passed against the wrong implementation.
+    renderPage(
+      [
+        auto({ id: 43, name: 'Alpha', group_name: 'Chores', enabled: 1 }),
+        auto({ id: 44, name: 'Beta', group_name: 'Chores', enabled: 0 }),
+      ],
+      undefined,
+      '/automations?q=Alpha',
+    );
+    await screen.findByText('Alpha');
+    expect(screen.getByTitle('Enable all')).toBeInTheDocument();
+    expect(screen.queryByTitle('Disable all')).toBeNull();
+  });
+});
