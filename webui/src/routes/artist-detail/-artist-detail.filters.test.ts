@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyMusicBrainzDeclutter,
+  classifyReleaseContent,
   defaultFilterState,
   isMusicBrainzDiscography,
   isReleaseHidden,
@@ -56,20 +57,74 @@ describe('liveToggleLabel', () => {
   });
 });
 
+describe('classifyReleaseContent — the shared title heuristic (#877)', () => {
+  // Must stay identical to _classifyReleaseContent in library.js: the same
+  // function classifies the Download Discography modal, and a release judged
+  // differently in the two places is exactly the drift it exists to prevent.
+  it('detects live by word, parens or brackets — not as a substring', () => {
+    for (const title of ['Live at Leeds', 'Alive (Live)', 'Whatever [Live 1994]']) {
+      expect(classifyReleaseContent({ title }).isLive).toBe(true);
+    }
+    // \b guards this: "Alive" and "Deliverance" contain "live" but are not live.
+    for (const title of ['Alive', 'Deliverance', 'Olive']) {
+      expect(classifyReleaseContent({ title }).isLive).toBe(false);
+    }
+  });
+
+  it('detects compilations by album_type OR title phrase', () => {
+    expect(classifyReleaseContent({ album_type: 'compilation', title: 'X' }).isCompilation).toBe(
+      true,
+    );
+    for (const title of [
+      'Greatest Hits',
+      'The Best of Blur',
+      'Anthology',
+      'Essential',
+      'The Collection',
+    ]) {
+      expect(classifyReleaseContent({ title }).isCompilation).toBe(true);
+    }
+    expect(classifyReleaseContent({ title: 'Kid A' }).isCompilation).toBe(false);
+  });
+
+  it('detects featured across feat. / ft. / featuring', () => {
+    for (const title of ['Song (feat. Someone)', 'Song ft. Someone', 'Song featuring Someone']) {
+      expect(classifyReleaseContent({ title }).isFeatured).toBe(true);
+    }
+    expect(classifyReleaseContent({ title: 'Feature Film' }).isFeatured).toBe(false);
+  });
+
+  it('reads `name` when there is no `title` — the download modal uses name', () => {
+    expect(classifyReleaseContent({ name: 'Live at Wembley' }).isLive).toBe(true);
+  });
+
+  it('survives a release with neither title nor name', () => {
+    expect(classifyReleaseContent({})).toEqual({
+      isLive: false,
+      isCompilation: false,
+      isFeatured: false,
+    });
+  });
+});
+
 describe('releaseFlags', () => {
-  it('uses the backend flags off MusicBrainz', () => {
-    const flags = releaseFlags({ is_live: true, is_compilation: true }, false);
-    expect(flags).toEqual({ isLive: true, isCompilation: true, isFeatured: false });
+  it('uses the title heuristic off MusicBrainz', () => {
+    const flags = releaseFlags({ title: 'Live at Leeds' }, false);
+    expect(flags.isLive).toBe(true);
   });
 
   it('lets secondary_types OVERRIDE the live guess on MusicBrainz', () => {
-    // The whole point: a studio album titled "Live Through This" is flagged
-    // is_live by the title guess, and MB's secondary_types say otherwise.
-    const flags = releaseFlags(
-      { name: 'Live Through This', is_live: true, secondary_types: [] },
-      true,
-    );
+    // The whole point: the title heuristic flags "Live Through This" as live,
+    // and MB's secondary_types say it is a studio album.
+    const flags = releaseFlags({ title: 'Live Through This', secondary_types: [] }, true);
     expect(flags.isLive).toBe(false);
+  });
+
+  it('keeps the title-derived compilation/featured flags on MusicBrainz', () => {
+    // secondary_types only overrides LIVE; the other two still come from title.
+    const flags = releaseFlags({ title: 'Greatest Hits (feat. X)', secondary_types: [] }, true);
+    expect(flags.isCompilation).toBe(true);
+    expect(flags.isFeatured).toBe(true);
   });
 
   it('catches soundtrack/remix/demo, which a title guess never would', () => {
@@ -178,7 +233,7 @@ describe('sectionCounts', () => {
   });
 
   it('recomputes live-ness from secondary_types when the source is MusicBrainz', () => {
-    const releases = [{ name: 'Live Through This', is_live: true, secondary_types: [] }];
+    const releases = [{ title: 'Live Through This', secondary_types: [] }];
     expect(sectionCounts(releases, true, mb()).visible).toBe(1);
     // ...and the same release IS hidden when the title guess is trusted.
     expect(sectionCounts(releases, false, { ...mb(), mbDeclutter: false }).visible).toBe(0);

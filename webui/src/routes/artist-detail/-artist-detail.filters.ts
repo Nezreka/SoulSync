@@ -78,20 +78,43 @@ export interface ReleaseFlags {
 }
 
 /**
+ * Title-based classification, ported verbatim from `_classifyReleaseContent`.
+ *
+ * That function is deliberately SHARED between artist detail and the Download
+ * Discography modal (#877) so the two can never drift apart on what counts as
+ * live/compilation/featured. Keep these patterns identical to it — a release
+ * classified one way in the modal and another way on the page is the exact bug
+ * that shared classifier exists to prevent.
+ *
+ * Note there are no `is_live` / `is_compilation` fields on a release: the
+ * backend does not send them. Classification is entirely client-side, off the
+ * title, plus `album_type === 'compilation'`.
+ */
+const LIVE_PATTERN = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
+const COMPILATION_PATTERN = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
+const FEATURED_PATTERN = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
+
+export function classifyReleaseContent(release: DiscographyRelease): ReleaseFlags {
+  // `title` on the artist page, `name` in the download modal — both are checked
+  // because the same classifier serves both shapes.
+  const title = String(release.title ?? release.name ?? '');
+  return {
+    isLive: LIVE_PATTERN.test(title),
+    isCompilation: release.album_type === 'compilation' || COMPILATION_PATTERN.test(title),
+    isFeatured: FEATURED_PATTERN.test(title),
+  };
+}
+
+/**
  * The three content flags for one release.
  *
  * On MusicBrainz, `secondary_types` is authoritative and REPLACES the
- * title-based guess — that is what stops a studio album called "Live Through
- * This" being hidden, and it also catches soundtrack/remix/demo which a title
- * guess never would. Off MusicBrainz there are no secondary types, so the
- * flags the backend already set on the release stand.
+ * title-based live guess — that is what stops a studio album called "Live
+ * Through This" being hidden, and it also catches soundtrack/remix/demo which a
+ * title guess never would. Off MusicBrainz the title heuristic governs.
  */
 export function releaseFlags(release: DiscographyRelease, isMusicBrainz: boolean): ReleaseFlags {
-  const base: ReleaseFlags = {
-    isLive: release.is_live === true,
-    isCompilation: release.is_compilation === true,
-    isFeatured: release.is_featured === true,
-  };
+  const base = classifyReleaseContent(release);
   if (!isMusicBrainz) return base;
 
   const secondary = Array.isArray(release.secondary_types)
