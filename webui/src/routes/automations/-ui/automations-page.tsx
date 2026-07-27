@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -10,9 +10,11 @@ import {
   AUTOMATIONS_QUERY_KEY,
   automationsListQueryOptions,
   automationsMasterQueryOptions,
+  assignAutomationGroup,
   bulkToggleAutomations,
   deleteAutomation,
   duplicateAutomation,
+  regroupAutomations,
   runAutomation,
   setAutomationsMaster,
   toggleAutomation,
@@ -27,6 +29,8 @@ import {
 } from '../-automations.helpers';
 import { Route } from '../route';
 import { AutomationsSection, groupSectionId } from './automations-section';
+import { type DeleteGroupChoice, DeleteGroupDialog } from './delete-group-dialog';
+import { GroupDropdown } from './group-dropdown';
 
 export function AutomationsPage() {
   useReactPageShell('automations');
@@ -114,12 +118,85 @@ export function AutomationsPage() {
     remove.mutate(a);
   };
 
+  const assign = useMutation({
+    mutationFn: ({ id, group }: { id: number; group: string | null }) =>
+      assignAutomationGroup(id, group),
+    onSuccess: async (_v, { group }) => {
+      window.showToast?.(group ? `Moved to "${group}"` : 'Removed from group', 'success');
+      await refresh();
+    },
+    onError: fail,
+  });
+
+  const regroup = useMutation({
+    mutationFn: ({ ids, group }: { ids: number[]; group: string | null; toast: string }) =>
+      regroupAutomations(ids, group),
+    onSuccess: async (updated, { toast }) => {
+      window.showToast?.(toast.replace('{n}', String(updated)), 'success');
+      await refresh();
+    },
+    onError: fail,
+  });
+
+  // Deleting every automation in a group is N deletes; the API has no bulk
+  // delete. Sequential rather than parallel so a mid-way failure leaves a
+  // comprehensible state instead of a scatter of partial results.
+  const deleteGroupAll = useMutation({
+    mutationFn: async (ids: number[]) => {
+      for (const id of ids) await deleteAutomation(id);
+      return ids.length;
+    },
+    onSuccess: async (n) => {
+      window.showToast?.(`Deleted ${n} automation${n !== 1 ? 's' : ''}`, 'success');
+      await refresh();
+    },
+    onError: fail,
+  });
+
+  const idsInGroup = (name: string) =>
+    view.groups.find((g) => g.name === name)?.automations.map((a) => a.id) ?? [];
+
+  const onDeleteGroupChoice = (choice: DeleteGroupChoice) => {
+    if (!deletingGroup) return;
+    const { name } = deletingGroup;
+    const ids = idsInGroup(name);
+    setDeletingGroup(null);
+    if (choice === 'ungroup') {
+      regroup.mutate({
+        ids,
+        group: null,
+        toast: `Dissolved group "${name}" — {n} automations moved to My Automations`,
+      });
+    } else {
+      deleteGroupAll.mutate(ids);
+    }
+  };
+
   const cardHandlers = {
     onToggle: (a: Automation) => toggle.mutate(a),
     onRun: (a: Automation) => run.mutate(a),
     onDuplicate: (a: Automation) => duplicate.mutate(a),
     onDelete: (a: Automation) => void confirmDelete(a),
     onEdit: (a: Automation) => window.showAutomationBuilder?.(a.id),
+    onAssignGroup: (a: Automation, event: React.MouseEvent) => {
+      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      setGroupMenu({
+        id: a.id,
+        current: a.group_name ?? null,
+        anchor: { top: rect.top, bottom: rect.bottom, right: rect.right },
+      });
+    },
+  };
+
+  const groupActions = {
+    onRename: (name: string, next: string) =>
+      regroup.mutate({ ids: idsInGroup(name), group: next, toast: `Renamed to "${next}"` }),
+    onDeleteGroup: (name: string) => {
+      const count = idsInGroup(name).length;
+      // Nothing to decide about an empty group; just refresh it away.
+      if (count === 0) return void refresh();
+      setDeletingGroup({ name, count });
+    },
   };
 
   // Both sides share ONE endpoint; only owned_by separates them.
@@ -158,6 +235,13 @@ export function AutomationsPage() {
     }),
     [view, shown],
   );
+
+  const [groupMenu, setGroupMenu] = useState<{
+    id: number;
+    current: string | null;
+    anchor: { top: number; bottom: number; right: number };
+  } | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<{ name: string; count: number } | null>(null);
 
   const filtering = Boolean(search.q || search.trigger || search.action);
   const masterOn = masterQuery.data?.music !== false;
@@ -295,6 +379,7 @@ export function AutomationsPage() {
             label={`📁 ${group.name}`}
             automations={group.automations}
             groupName={group.name}
+            {...groupActions}
             onBulkToggle={(name, allEnabled) =>
               bulkToggle.mutate({
                 // Ids come from the unfiltered data. _bulkToggleGroup scraped
@@ -335,6 +420,28 @@ export function AutomationsPage() {
             + New Automation
           </button>
         </div>
+      ) : null}
+
+      {groupMenu ? (
+        <GroupDropdown
+          groups={view.groups.map((g) => g.name)}
+          currentGroup={groupMenu.current}
+          anchor={groupMenu.anchor}
+          onClose={() => setGroupMenu(null)}
+          onAssign={(name) => {
+            assign.mutate({ id: groupMenu.id, group: name });
+            setGroupMenu(null);
+          }}
+        />
+      ) : null}
+
+      {deletingGroup ? (
+        <DeleteGroupDialog
+          groupName={deletingGroup.name}
+          count={deletingGroup.count}
+          onChoose={onDeleteGroupChoice}
+          onCancel={() => setDeletingGroup(null)}
+        />
       ) : null}
     </div>
   );

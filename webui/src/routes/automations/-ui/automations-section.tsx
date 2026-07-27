@@ -40,7 +40,8 @@ export function groupSectionId(groupName: string): string {
 
 export interface GroupActions {
   onBulkToggle?: (groupName: string, allEnabled: boolean) => void;
-  onRename?: (groupName: string) => void;
+  /** Commit a rename. Called only with a changed, non-empty name. */
+  onRename?: (groupName: string, newName: string) => void;
   onDeleteGroup?: (groupName: string) => void;
 }
 
@@ -65,6 +66,20 @@ export function AutomationsSection({
   ...cardHandlers
 }: Props) {
   const [collapsed, setCollapsed] = useState(() => readCollapsed(id));
+  // null = not renaming. The vanilla version swapped the label for an input
+  // in place, so the section header keeps its layout while editing.
+  const [rename, setRename] = useState<string | null>(null);
+
+  // A no-op rename (empty or unchanged) just closes the editor: the vanilla
+  // handler bailed on both rather than issuing a pointless PUT.
+  const commitRename = () => {
+    setRename((draft) => {
+      if (draft === null) return null;
+      const next = draft.trim();
+      if (next && groupName && next !== groupName) onRename?.(groupName, next);
+      return null;
+    });
+  };
 
   const toggle = () => {
     setCollapsed((was) => {
@@ -95,7 +110,31 @@ export function AutomationsSection({
         }}
       >
         <span className="section-chevron">▼</span>
-        <span className="section-label">{label}</span>
+        {rename === null ? (
+          <span className="section-label">{label}</span>
+        ) : (
+          <span className="section-label">
+            <input
+              className="section-rename-input"
+              aria-label={`Rename group ${groupName ?? ''}`}
+              value={rename}
+              autoFocus
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setRename(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitRename();
+                }
+                if (e.key === 'Escape') setRename(null);
+              }}
+              // Blur SAVES, matching the vanilla input — clicking away is
+              // treated as accepting the edit, not discarding it.
+              onBlur={commitRename}
+            />
+          </span>
+        )}
         <span className="section-count">{automations.length}</span>
         {showGroupActions ? (
           <div className="section-actions" onClick={(e) => e.stopPropagation()}>
@@ -111,7 +150,7 @@ export function AutomationsSection({
               type="button"
               className="section-action-btn"
               title="Rename group"
-              onClick={() => onRename?.(groupName!)}
+              onClick={() => setRename(groupName!)}
             >
               ✏️
             </button>

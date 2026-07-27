@@ -86,18 +86,20 @@ function renderPage(rows: Automation[], master?: { music: boolean }, entry = '/a
 const sent = (fragment: string, method = 'POST') =>
   requests.filter((r) => r.url.includes(fragment) && r.method === method);
 
-describe('AutomationsPage interactions', () => {
-  beforeEach(() => {
-    window.SoulSyncWebShellBridge = createShellBridge();
-    window.showToast = vi.fn();
-    window.showConfirmDialog = vi.fn(async () => true);
-    window.showAutomationBuilder = vi.fn();
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete window.SoulSyncWebShellBridge;
-  });
+// Shared by every block below — a missing shell bridge makes the route
+// redirect instead of rendering, which surfaces as "cannot find text".
+beforeEach(() => {
+  window.SoulSyncWebShellBridge = createShellBridge();
+  window.showToast = vi.fn();
+  window.showConfirmDialog = vi.fn(async () => true);
+  window.showAutomationBuilder = vi.fn();
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete window.SoulSyncWebShellBridge;
+});
 
+describe('AutomationsPage interactions', () => {
   it('toggles an automation without a toast', async () => {
     renderPage([auto({ id: 5, name: 'Nightly' })]);
     await screen.findByText('Nightly');
@@ -181,5 +183,136 @@ describe('AutomationsPage interactions', () => {
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith('Error: engine unavailable', 'error'),
     );
+  });
+});
+
+describe('AutomationsPage group management', () => {
+  const chores = () => [
+    auto({ id: 21, name: 'Alpha', group_name: 'Chores' }),
+    auto({ id: 22, name: 'Beta', group_name: 'Chores' }),
+  ];
+
+  it('assigns an automation to an existing group', async () => {
+    renderPage([...chores(), auto({ id: 23, name: 'Loose' })]);
+    await screen.findByText('Loose');
+
+    // The group button on the ungrouped card opens the dropdown.
+    const looseCard = [...document.querySelectorAll('.automation-card')].find(
+      (c) => c.getAttribute('data-id') === '23',
+    )!;
+    fireEvent.click(looseCard.querySelector('.automation-group-btn')!);
+
+    const option = await screen.findByText('Chores', { selector: '.auto-group-option' });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(sent('/automations/23', 'PUT')).toHaveLength(1));
+    expect(sent('/automations/23', 'PUT')[0].body).toEqual({ group_name: 'Chores' });
+  });
+
+  it('creates a new group from the input, ignoring an empty submit', async () => {
+    renderPage([auto({ id: 24, name: 'Loose' })]);
+    await screen.findByText('Loose');
+    fireEvent.click(document.querySelector('.automation-group-btn')!);
+
+    const input = await screen.findByLabelText('New group name');
+    // Enter on blank must NOT fire. The vanilla handler passed '' straight to
+    // _assignGroup, where `|| null` silently UNGROUPED instead.
+    fireEvent.keyDown(input, { key: 'Enter' });
+    // Same reasoning: give an errant request a chance to be issued.
+    await waitFor(() => expect(screen.getByLabelText('New group name')).toBeInTheDocument());
+    expect(sent('/automations/24', 'PUT')).toHaveLength(0);
+
+    fireEvent.change(input, { target: { value: '  Errands  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(sent('/automations/24', 'PUT')).toHaveLength(1));
+    expect(sent('/automations/24', 'PUT')[0].body).toEqual({ group_name: 'Errands' });
+  });
+
+  it('renames a group over every automation in it', async () => {
+    renderPage(chores());
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByTitle('Rename group'));
+    const input = await screen.findByLabelText('Rename group Chores');
+    fireEvent.change(input, { target: { value: 'Errands' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(sent('automations/group', 'PUT')).toHaveLength(1));
+    expect(sent('automations/group', 'PUT')[0].body).toEqual({
+      automation_ids: [21, 22],
+      group_name: 'Errands',
+    });
+  });
+
+  it('does not PUT when a rename is unchanged or blank', async () => {
+    renderPage(chores());
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByTitle('Rename group'));
+    const input = await screen.findByLabelText('Rename group Chores');
+    fireEvent.keyDown(input, { key: 'Enter' }); // unchanged
+    fireEvent.click(screen.getByTitle('Rename group'));
+    const again = await screen.findByLabelText('Rename group Chores');
+    fireEvent.change(again, { target: { value: '   ' } });
+    fireEvent.keyDown(again, { key: 'Enter' }); // blank
+
+    await waitFor(() => expect(screen.queryByLabelText('Rename group Chores')).toBeNull());
+    expect(sent('automations/group', 'PUT')).toHaveLength(0);
+  });
+
+  it('escape abandons a rename without saving', async () => {
+    renderPage(chores());
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByTitle('Rename group'));
+    const input = await screen.findByLabelText('Rename group Chores');
+    fireEvent.change(input, { target: { value: 'Errands' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    // Wait for the editor to actually close before asserting. Checking
+    // synchronously here passes whatever Escape does, because the mutation
+    // would not have issued its request yet — the assertion has to outlive it.
+    await waitFor(() => expect(screen.queryByLabelText('Rename group Chores')).toBeNull());
+    expect(sent('automations/group', 'PUT')).toHaveLength(0);
+  });
+
+  it('offers keep-or-delete when removing a group, and cancel does nothing', async () => {
+    renderPage(chores());
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByTitle('Delete group'));
+    await screen.findByText(/Delete Group/);
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(sent('automations/group', 'PUT')).toHaveLength(0);
+    expect(sent('/automations/21', 'DELETE')).toHaveLength(0);
+  });
+
+  it('dissolving a group ungroups its automations rather than deleting them', async () => {
+    renderPage(chores());
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByTitle('Delete group'));
+    fireEvent.click(await screen.findByText(/Keep Automations/));
+
+    await waitFor(() => expect(sent('automations/group', 'PUT')).toHaveLength(1));
+    expect(sent('automations/group', 'PUT')[0].body).toEqual({
+      automation_ids: [21, 22],
+      group_name: null,
+    });
+    // The destructive path must NOT have run.
+    expect(sent('/automations/21', 'DELETE')).toHaveLength(0);
+  });
+
+  it('deleting everything removes each automation in the group', async () => {
+    renderPage(chores());
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByTitle('Delete group'));
+    fireEvent.click(await screen.findByText(/Delete Everything/));
+
+    await waitFor(() => expect(sent('/automations/21', 'DELETE')).toHaveLength(1));
+    await waitFor(() => expect(sent('/automations/22', 'DELETE')).toHaveLength(1));
+    expect(sent('automations/group', 'PUT')).toHaveLength(0);
   });
 });

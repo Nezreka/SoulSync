@@ -118,3 +118,35 @@ export async function setAutomationsMaster(
     'Could not update the master switch',
   );
 }
+
+/**
+ * Move one automation into a group (or out of it with null).
+ *
+ * Note the endpoint: PUT /api/automations/<id> with just {group_name}. The
+ * PLURAL /api/automations/group below is a different route used for bulk
+ * regrouping — mixing them up silently regroups the wrong set.
+ */
+export async function assignAutomationGroup(id: number, groupName: string | null): Promise<void> {
+  assertOk(
+    await readJson<MutationResponse>(
+      apiClient.put(`automations/${id}`, { json: { group_name: groupName || null } }),
+    ),
+    'Could not move the automation',
+  );
+}
+
+/**
+ * Bulk-set the group on many automations. Used for rename (same ids, new name)
+ * and for dissolving a group (same ids, null). Returns how many changed.
+ */
+export async function regroupAutomations(ids: number[], groupName: string | null): Promise<number> {
+  const payload = assertOk(
+    await readJson<MutationResponse>(
+      apiClient.put('automations/group', {
+        json: { automation_ids: ids, group_name: groupName },
+      }),
+    ),
+    'Could not update the group',
+  );
+  return payload.updated ?? 0;
+}
