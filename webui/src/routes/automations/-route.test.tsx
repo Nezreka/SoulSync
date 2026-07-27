@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -8,25 +8,13 @@ import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 /**
- * The /automations route exists but is DORMANT.
+ * /automations is now React-owned.
  *
- * TanStack matches a route from the generated tree, not from the manifest — so
- * the moment this route file landed, /automations started matching even though
- * the shell still owns the page. The guard inside route.tsx is what keeps the
- * vanilla page in charge; without it the legacy page and a React host would
- * both activate on the same URL.
- *
- * These tests pin that handover. When the manifest flips to 'react' in P5 they
- * are expected to be rewritten — deliberately, not by drift.
- *
- * Strength, measured rather than assumed: forcing isReactOwned() true fails
- * three of the five — the handover, the markup check and the API check. The
- * permission gate holds either way by design, and the manifest assertion reads
- * the manifest directly, so neither should move.
- *
- * (While the route rendered LegacyRouteController down BOTH branches — before
- * the page component was wired in — only the API case could detect a defeated
- * guard. Wiring the page is what gave the render assertions teeth.)
+ * This file previously pinned the DORMANT state — that the route existed but
+ * deferred to the vanilla page. Those assertions were written to fail the
+ * moment the manifest flipped, which is exactly what happened; they are
+ * replaced here rather than deleted, so the route keeps a guard on both the
+ * handover and the permission gate.
  */
 
 function renderRoute(entries = ['/automations']) {
@@ -34,7 +22,6 @@ function renderRoute(entries = ['/automations']) {
   const history = createMemoryHistory({ initialEntries: entries });
   const router = createAppRouter({ history, queryClient });
   return {
-    history,
     router,
     ...render(<AppRouterProvider router={router} queryClient={queryClient} />),
   };
@@ -42,18 +29,24 @@ function renderRoute(entries = ['/automations']) {
 
 let requested: string[] = [];
 
-describe('automations route (dormant)', () => {
+describe('automations route', () => {
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
-    // The app shell fetches on its own (profile context, status) no matter
-    // which route is active, so this records URLs rather than forbidding calls
-    // outright — the invariant is that no AUTOMATIONS endpoint is touched.
     requested = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        requested.push(input instanceof Request ? input.url : String(input));
-        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+        const url = input instanceof Request ? input.url : String(input);
+        requested.push(url);
+        const body = url.includes('/api/automations/master')
+          ? { music: true }
+          : url.includes('/api/automations/progress')
+            ? {}
+            : [{ id: 1, name: 'Nightly', enabled: 1, is_system: 1 }];
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }),
     );
   });
@@ -62,46 +55,29 @@ describe('automations route (dormant)', () => {
     delete window.SoulSyncWebShellBridge;
   });
 
-  it('is still owned by the shell', () => {
-    // If this fails the page was handed to React without its UI being built.
-    expect(getShellRouteByPageId('automations')?.kind).toBe('legacy');
+  it('is owned by React in the manifest', () => {
+    expect(getShellRouteByPageId('automations')?.kind).toBe('react');
   });
 
-  it('hands /automations to the vanilla page instead of rendering React', async () => {
+  it('renders the React page instead of handing off to the vanilla shell', async () => {
     renderRoute();
 
-    const bridge = window.SoulSyncWebShellBridge!;
-    await waitFor(() => {
-      expect(bridge.activateLegacyPath).toHaveBeenCalledWith('/automations');
-    });
+    await screen.findByText('Nightly');
+    expect(document.querySelector('.automations-container')).not.toBeNull();
+    // The legacy controller must NOT have been asked to activate the old page.
+    expect(window.SoulSyncWebShellBridge!.activateLegacyPath).not.toHaveBeenCalled();
   });
 
-  it('renders no React page markup of its own', async () => {
-    const { container } = renderRoute();
-
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge!.activateLegacyPath).toHaveBeenCalled();
-    });
-    // LegacyRouteController renders null — the vanilla DOM in index.html is
-    // what the user sees. Anything here would be a second, competing page.
-    expect(container.querySelector('.automations-container')).toBeNull();
-  });
-
-  it('does not touch the automations API while dormant', async () => {
+  it('loads the list and the master state before painting', async () => {
     renderRoute();
-
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge!.activateLegacyPath).toHaveBeenCalled();
-    });
-    // The loader returns early before ensureQueryData, so nothing should ask
-    // for the list, the master toggle or progress.
-    expect(requested.filter((u) => u.includes('/api/automations'))).toEqual([]);
+    await screen.findByText('Nightly');
+    expect(requested.some((u) => u.endsWith('/api/automations'))).toBe(true);
+    expect(requested.some((u) => u.includes('/api/automations/master'))).toBe(true);
   });
 
   it('still respects the page permission gate', async () => {
-    // A profile denied the page must be redirected even while dormant —
-    // otherwise the dormant period is a hole in the IDOR gate.
-    // createShellBridge already homes to 'discover'; only the gate changes.
+    // A profile denied the page must be redirected — the gate has to survive
+    // the handover to React, not just exist while the route was dormant.
     window.SoulSyncWebShellBridge = createShellBridge({
       isPageAllowed: vi.fn(() => false),
     });
@@ -110,5 +86,12 @@ describe('automations route (dormant)', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).not.toBe('/automations');
     });
+  });
+
+  it('carries the filter controls in the URL', async () => {
+    renderRoute(['/automations?q=night&trigger=schedule&action=scan_library']);
+    await waitFor(() => expect(document.querySelector('.automations-container')).not.toBeNull());
+    // validateSearch must accept all three without throwing the route down.
+    expect(document.querySelector('.automations-container')).not.toBeNull();
   });
 });
