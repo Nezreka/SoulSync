@@ -238,6 +238,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     fireEvent.focus(screen.getByRole('button', { name: '2 tag gaps' }));
 
     const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip.parentElement?.className).toContain('metadataTagsTooltipPositioner');
     expect(tooltip).toHaveTextContent('Present tags');
     expect(tooltip).toHaveTextContent('✓ Title');
     expect(tooltip).toHaveTextContent('Missing tags');

@@ -122,6 +122,7 @@ def test_column_order_defaults_and_customization():
         "features",
         "metadata",
         "verification",
+        "acoustid",
         "file_size",
         "file_path",
     ]

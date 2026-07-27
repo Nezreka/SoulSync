@@ -3433,3 +3433,132 @@ und aktualisiert die bare sowie alle zugehörigen Composite-Zeilen.
 
 Auf ausdrücklichen Wunsch wurde der etwa zehnminütige Backend-Komplettlauf
 nach den beiden isolierten Fixes nicht redundant wiederholt.
+
+## 26. Library-V2-Live-UI-Findings vom 28. Juli 2026
+
+Die folgenden Punkte stammen aus einem erneuten realen Nutzerlauf. Sie öffnen
+Teile von UI-03, UI-05, F-13 und F-16 wieder, die in status.md §37 anhand von
+Komponenten-/Buildtests als „Verified" geführt wurden. Die Tests belegten den
+damaligen Codevertrag, nicht dessen Bedienbarkeit in unterschiedlich breiten
+Browserfenstern oder in einer eingeklappten Single-/Ein-Track-Kachel.
+
+### <a name="iss28-01"></a> iss28-01 — AcoustID Check hat keine eigene Track-Spalte
+
+**Symptom:** Die konkrete AcoustID-Prüfung ist im Quality-Bereich bzw. in der
+allgemeinen Verification-Darstellung versteckt. Ein Nutzer kann den
+AcoustID-Lauf nicht als eigenständige Tabellendimension auswählen und auf
+einen Blick von Human-/Force-Verifikation unterscheiden.
+
+**Root Cause:** Der Payload liefert `track.file.acoustid_status` und
+`pipeline_result.acoustid_message` bereits separat. `track_table.columns`
+kennt jedoch nur `verification`; zusätzlich rendert die Quality-Zelle
+denselben `TrackVerificationBadge` nochmals.
+
+**Fix-Vertrag (Statusnomenklatur durch Nutzerfeedback präzisiert):** Eigene
+Preference-/Order-Spalte `acoustid`, standardmäßig sichtbar, mit dem
+nutzersichtbaren generischen Titel `Check`. Sie verdichtet den effektiven
+Prüfweg mit folgender Priorität: `human_verified` → **Human verified** (blau),
+AcoustID `pass` → **Verified**, AcoustID `skip` bzw. Force-/Retry-Bypass →
+**Skipped**, sonst → **Not scanned**. Ein vorhandener
+`pipeline_result.acoustid_message` bleibt im Tooltip als Grund sichtbar.
+`verification` bleibt eine getrennte, opt-in Provenienzspalte; die
+Quality-Zelle enthält keine Verification-Dopplung.
+
+### <a name="iss28-02"></a> iss28-02 — Pixelbreiten machen Trackspalten blockierend und erzeugen horizontalen Scroll
+
+**Symptom:** Eine Spalte lässt sich zunächst verschieben, später aber nicht
+mehr intuitiv zurückschieben. Teilweise muss eine andere Spalte verändert
+werden, um wieder Platz zu erhalten. Durch Dragging kann ein horizontaler
+Scrollbalken an Kachel bzw. Seite erscheinen.
+
+**Root Cause:** Jede Headerzelle speichert eine unabhängige CSS-Pixelbreite
+und setzt gleichzeitig `width`, `minWidth` und `maxWidth`. Die Summe dieser
+lokalen Minima ist nicht an die Containerbreite gekoppelt.
+`.trackTableWrap { overflow-x: auto }` macht die Überbreite anschließend
+sichtbar, statt die Breitenverteilung zu erhalten.
+
+**Fix-Vertrag:** Ein Drag verändert die relative Breite zweier benachbarter
+Datenspalten. Alle sichtbaren Spaltengewichte bleiben normalisiert, die
+Tabelle verwendet stets exakt die verfügbare Breite und reagiert auf
+Browser-Resize ohne gespeicherte Pixel-Falle. Kein horizontaler Scrollbalken
+an Seite, Albumkachel oder Tabelle; lange Inhalte werden umgebrochen oder
+gekürzt. Pointer-, Keyboard- und Reset-Bedienung bleiben erhalten.
+
+### <a name="iss28-03"></a> iss28-03 — Globale Startseitenaktion ist falsch benannt und formatiert
+
+**Symptom:** Der auf der Library-Startseite ergänzte Block „Automatic Search"
+wirkt visuell wie ein fremder, schlecht formatierter Zusatz.
+
+**Fix-Vertrag (korrigiert durch Nutzerfeedback):** Die kompakte
+nutzersichtbare Aktion heißt `Automatic Search`. Sie verwendet denselben
+neutralen Basis-Buttonstil wie der direkt benachbarte Re-Import-Button und
+ergänzt nur das Lupe-Symbol; kein abweichender Primary-/Sonderblock. Der
+bestehende Missing-/Upgrade-Ablauf bleibt erhalten. Laufstatus darf die
+Headerzeile nicht mit einem unkontrollierten breiten Inline-Block sprengen.
+
+### <a name="iss28-04"></a> iss28-04 — Album-/EP-/Single-Zeilen verbergen ihre Größe
+
+**Symptom:** Die aggregierte Größe ist auf Detail-/Artist-Ebene vorhanden,
+fehlt aber an den eingeklappten Album-, EP- und Single-Zeilen.
+
+**Root Cause:** `LibraryV2AlbumSummary.total_size_bytes` wird bereits
+geliefert; `AlbumBlock` rendert daraus kein Badge.
+
+**Fix-Vertrag (Farbkorrektur durch Nutzerfeedback):** Jede Release-Zeile zeigt
+im Standardzustand ein Größen-Badge mit Symbol und formatiertem Wert. `0 B`
+ist ein ehrlicher Wert und wird ebenfalls gezeigt. Die Anzeige ist neutral
+grau wie die Größenanzeige beim Artist; Größe ist kein grüner Erfolgsstatus.
+
+### <a name="iss28-05"></a> iss28-05 — Spalteneinstellungen werden in kleinen Release-Kacheln abgeschnitten
+
+**Symptom:** Bei eingeklappten Albums/Singles oder Releases mit nur einem
+Track ist der untere Teil des Einstellungsfensters nicht erreichbar.
+„Match Providers" ragt seitlich über die Kachel; zum Teil entsteht
+horizontaler Scroll.
+
+**Root Cause:** Das absolut positionierte Optionsmenü lebt innerhalb von
+`.trackTableWrap`, demselben Container mit Overflow-/Tabellen-Clipping. Sein
+zweispaltiges Mindestlayout (`260px + 300px`) ist breiter als schmale
+Kacheln, und seine erreichbare Höhe hängt faktisch vom Release-Inhalt ab.
+
+**Fix-Vertrag:** Viewport-gebundenes Dialogfenster außerhalb der
+Tabellen-Overflow-Grenze. Der Inhalt darf mehr Höhe und vertikalen Scroll
+verwenden, besitzt aber niemals horizontalen Scroll. Sections und
+Provider-Checkboxen brechen responsiv auf eine Spalte um; Footer/letzte
+Option bleiben auch bei einem einzigen Track erreichbar.
+
+### <a name="iss28-06"></a> iss28-06 — AcoustID-Auslagerung zerstört das interne Quality-Raster
+
+**Symptom:** Nach der Aufteilung von AcoustID und Verification wirken Format,
+Bitrate und Quality Profile in der Quality-Spalte zusammengedrückt und
+linksbündig. Zuvor hatte jeder Wert einen reservierten, zentrierten Bereich,
+wodurch die Anzeigen zeilenübergreifend ruhig ausgerichtet waren.
+
+**Root Cause:** Beim Umbau auf relative Tabellenbreiten wurden die vorhandenen
+internen Breiten `140px` (Format/Resolution), `80px` (Bitrate) und `110px`
+(Profile) zusammen mit der überflüssigen Verification-Unterzelle entfernt.
+Die AcoustID-Trennung erforderte nur das Entfernen der vierten Unterzelle,
+nicht die Auflösung des übrigen Quality-Rasters.
+
+**Fix-Vertrag:** Format/Resolution, Bitrate und Quality Profile erhalten ihre
+vorherigen reservierten und zentrierten Bereiche zurück. Die Quality-Spalte
+bekommt genügend relatives Standardgewicht. In schmalen Browserfenstern
+dürfen diese drei Bereiche kontrolliert auf weitere Tabellenzeilen umbrechen
+oder bis zur Zellbreite schrumpfen; sie dürfen weder einen horizontalen
+Scrollbalken erzeugen noch AcoustID/Verification wieder in Quality einbauen.
+
+### <a name="iss28-07"></a> iss28-07 — Actions-Spalte reserviert unnötig viel Leerraum
+
+**Symptom:** Rechts neben den drei Track-Aktionsicons bleibt auf breiten
+Browserfenstern auffällig viel ungenutzter Raum.
+
+**Root Cause:** Das neue `colgroup` reserviert pauschal 11 % für Actions;
+zusätzlich erbt der Header weiterhin `.colActions { width: 170px }` aus
+anderen Tabellen. Beides ist für drei feste Iconbuttons deutlich zu groß.
+
+**Fix-Vertrag:** Die Tracktabelle erhält einen eigenen kompakten
+Actions-Vertrag: 7 % statt 11 %, ohne geerbte 170-px-Breite, mit engerem
+zellspezifischem Padding und kompakteren Track-Action-Icons. Die frei
+werdenden vier Prozent gehen an die relativ berechneten Datenspalten
+(86 %). Alle drei Aktionen bleiben sichtbar und bedienbar; die Tabelle bleibt
+bei exakt 100 % und erzeugt keinen horizontalen Scroll.

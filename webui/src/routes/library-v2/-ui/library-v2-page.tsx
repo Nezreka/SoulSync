@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
@@ -173,6 +174,15 @@ function formatFileSize(bytes: number): string {
     unit = units[i];
   }
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
+}
+
+export function AlbumSizeBadge({ bytes }: { bytes: number }) {
+  return (
+    <span className={styles.albumSizeBadge} title="Size on disk">
+      <SvgIcon name="folder" />
+      {formatFileSize(bytes)}
+    </span>
+  );
 }
 
 /** Release dates from library-origin metadata sometimes carry a full
@@ -629,7 +639,7 @@ export function ArtistRefreshButton({ artistId }: { artistId: number }) {
               ? 'Retry Refresh & Scan'
               : 'Refresh & Scan'
         }
-        title="Refresh information and scan disk"
+        title="Re-read files on disk: existence, audio quality and embedded tags. Provider metadata is unchanged."
         busy={mutation.isPending}
         onClick={() => mutation.mutate()}
       />
@@ -647,6 +657,7 @@ function ModalShell({
   wide,
   detail,
   match,
+  settings,
   onClose,
   children,
 }: {
@@ -657,13 +668,15 @@ function ModalShell({
   detail?: boolean;
   /** Roomier matching surface for identity cards + release context. */
   match?: boolean;
+  /** Viewport-bound, vertically scrolling table-settings surface. */
+  settings?: boolean;
   onClose: () => void;
   children: ReactNode;
 }) {
-  return (
+  const modal = (
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
-        className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''} ${match ? styles.modalMatch : ''}`}
+        className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''} ${match ? styles.modalMatch : ''} ${settings ? styles.modalSettings : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -677,6 +690,7 @@ function ModalShell({
       </div>
     </div>
   );
+  return typeof document === 'undefined' ? modal : createPortal(modal, document.body);
 }
 
 // --- metadata match chips (legacy Enhanced-View parity) ---------------------
@@ -901,22 +915,22 @@ function TrackVerificationBadge({ file }: { file: LibraryV2TrackFile | null }) {
   switch (status) {
     case 'verified':
       className = styles.verificationVerified;
-      label = 'AcoustID ✓';
+      label = 'Verified';
       tooltip = 'AcoustID fingerprint matched the expected track';
       break;
     case 'human_verified':
       className = styles.verificationHuman;
-      label = 'AcoustID Human';
+      label = 'Human verified';
       tooltip = 'Human verified: you approved this file, skipping AcoustID';
       break;
     case 'force_imported':
       className = styles.verificationForced;
-      label = 'AcoustID Bypassed';
+      label = 'Bypassed';
       tooltip = 'Force-imported: AcoustID check bypassed (accepted version-mismatch fallback)';
       break;
     case 'unverified':
       className = styles.verificationUnverified;
-      label = 'AcoustID Unverified';
+      label = 'Unverified';
       tooltip = 'Imported but not hard-confirmed: AcoustID could not verify this file';
       break;
     default:
@@ -929,6 +943,63 @@ function TrackVerificationBadge({ file }: { file: LibraryV2TrackFile | null }) {
   return (
     <span className={`${styles.verificationBadge} ${className}`} title={tooltip}>
       {label}
+    </span>
+  );
+}
+
+/** iss28-01: compact effective Check summary. Human approval wins over the
+ * raw AcoustID skip because it explains why the technical check was bypassed. */
+export function TrackCheckBadge({ file }: { file: LibraryV2TrackFile | null }) {
+  if (!file) return <span className={styles.muted}>—</span>;
+  const detail = file.pipeline_result?.acoustid_message;
+  if (file.verification_status === 'human_verified') {
+    return (
+      <span
+        className={`${styles.verificationBadge} ${styles.verificationHuman}`}
+        title={
+          detail
+            ? `Human verified; AcoustID detail: ${detail}`
+            : 'Human verified: this file was explicitly approved'
+        }
+      >
+        Human verified
+      </span>
+    );
+  }
+  if (file.acoustid_status === 'pass') {
+    return (
+      <span
+        className={`${styles.verificationBadge} ${styles.verificationVerified}`}
+        title={detail ? `AcoustID check passed: ${detail}` : 'AcoustID fingerprint check passed'}
+      >
+        Verified
+      </span>
+    );
+  }
+  if (file.acoustid_status === 'skip' || file.verification_status === 'force_imported') {
+    return (
+      <span
+        className={`${styles.verificationBadge} ${styles.verificationForced}`}
+        title={
+          detail
+            ? `Check skipped: ${detail}`
+            : file.verification_status === 'force_imported'
+              ? 'Check skipped by force/retry import'
+              : 'AcoustID check was skipped'
+        }
+      >
+        Skipped
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`${styles.verificationBadge} ${styles.verificationUnverified}`}
+      title={
+        detail ? `Not scanned: ${detail}` : 'No completed AcoustID check is recorded for this file'
+      }
+    >
+      Not scanned
     </span>
   );
 }
@@ -5431,6 +5502,7 @@ function AlbumBlock({
           </button>
           <span className={styles.albumHeadBadges}>
             <span className={styles.albumTypeBadge}>{album.album_type}</span>
+            <AlbumSizeBadge bytes={album.total_size_bytes} />
             {releaseDate ? (
               <span className={styles.albumDateBadge} title="Release date">
                 {releaseDate}
@@ -5530,6 +5602,7 @@ const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
   features: true,
   metadata: true,
   verification: false,
+  acoustid: true,
   file_size: false,
   file_path: false,
   play: false,
@@ -5545,6 +5618,7 @@ const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string
   features: 'Features',
   metadata: 'Metadata',
   verification: 'Verification',
+  acoustid: 'Check',
   file_size: 'File size',
   file_path: 'File path',
   play: 'Play button',
@@ -5581,14 +5655,168 @@ function sortTracks(tracks: LibraryV2Track[], sort: TrackSort | null): LibraryV2
   });
 }
 
-const MIN_COLUMN_WIDTH = 48;
-const MAX_COLUMN_WIDTH = 640;
+const MIN_COLUMN_WIDTH = 3;
+const MAX_COLUMN_WIDTH = 80;
+const MAX_TRACK_NUMBER_WIDTH = 6;
+const CHECKBOX_COLUMN_WIDTH = 28;
+const MONITOR_COLUMN_WIDTH = 30;
+const ACTION_COLUMN_WIDTH = 80;
+const UTILITY_COLUMN_WIDTH = CHECKBOX_COLUMN_WIDTH + MONITOR_COLUMN_WIDTH + ACTION_COLUMN_WIDTH;
 
-/** UI-03: one clamp for restored and interactively resized widths. Persisted
- * values may come from an older client or a hand-edited DB row. */
+const DEFAULT_COLUMN_WEIGHTS: Record<string, number> = {
+  number: 3,
+  title: 24,
+  play: 5,
+  disc: 5,
+  artists: 14,
+  duration: 8,
+  bpm: 6,
+  match: 12,
+  // iss28-06: this one column contains three deliberately aligned sub-cells.
+  quality: 40,
+  features: 9,
+  metadata: 10,
+  verification: 9,
+  acoustid: 9,
+  file_size: 8,
+  file_path: 20,
+};
+
+/** iss28-02: clamp a relative weight, not a CSS-pixel width. The old
+ * preference values remain usable because normalization treats any positive
+ * number as a weight. */
 export function clampColumnWidth(width: number): number {
   if (!Number.isFinite(width)) return MIN_COLUMN_WIDTH;
-  return Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(width)));
+  return Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(width * 1000) / 1000));
+}
+
+function minimumColumnWidth(_key: string): number {
+  return MIN_COLUMN_WIDTH;
+}
+
+function maximumColumnWidth(key: string): number {
+  return key === 'number' ? MAX_TRACK_NUMBER_WIDTH : MAX_COLUMN_WIDTH;
+}
+
+export function normalizeColumnWidths(
+  keys: string[],
+  stored: Record<string, number | null> = {},
+): Record<string, number> {
+  const uniqueKeys = Array.from(new Set(keys));
+  if (uniqueKeys.length === 0) return {};
+  if (uniqueKeys.length === 1) return { [uniqueKeys[0]]: 100 };
+  const legacyPixels = uniqueKeys.some(
+    (key) =>
+      typeof stored[key] === 'number' &&
+      Number.isFinite(stored[key]) &&
+      (stored[key] as number) > MAX_COLUMN_WIDTH,
+  );
+  const raw = Object.fromEntries(
+    uniqueKeys.map((key) => {
+      const saved = stored[key];
+      return [
+        key,
+        typeof saved === 'number' && Number.isFinite(saved) && saved > 0
+          ? saved
+          : (DEFAULT_COLUMN_WEIGHTS[key] ?? 10) * (legacyPixels ? 10 : 1),
+      ];
+    }),
+  );
+  const result: Record<string, number> = {};
+  let remainingKeys = [...uniqueKeys];
+  let remainingWeight = 100;
+
+  // Bounded proportional allocation ("water filling"): a hostile/legacy
+  // value cannot collapse neighbours below their drag limit or consume more
+  // than the configured maximum, while the final allocation still totals
+  // exactly 100%.
+  while (remainingKeys.length > 0) {
+    if (remainingKeys.length === 1) {
+      result[remainingKeys[0]] = remainingWeight;
+      break;
+    }
+    const rawTotal = remainingKeys.reduce((sum, key) => sum + raw[key], 0);
+    let constrained: { key: string; weight: number } | null = null;
+    for (const key of remainingKeys) {
+      const candidate = (raw[key] / rawTotal) * remainingWeight;
+      const otherKeys = remainingKeys.filter((otherKey) => otherKey !== key);
+      const feasibleMinimum = Math.max(
+        minimumColumnWidth(key),
+        remainingWeight -
+          otherKeys.reduce((sum, otherKey) => sum + maximumColumnWidth(otherKey), 0),
+      );
+      const feasibleMaximum = Math.min(
+        maximumColumnWidth(key),
+        remainingWeight -
+          otherKeys.reduce((sum, otherKey) => sum + minimumColumnWidth(otherKey), 0),
+      );
+      if (candidate < feasibleMinimum) {
+        constrained = { key, weight: feasibleMinimum };
+        break;
+      }
+      if (candidate > feasibleMaximum) {
+        constrained = { key, weight: feasibleMaximum };
+        break;
+      }
+    }
+    if (!constrained) {
+      for (const key of remainingKeys) {
+        result[key] = (raw[key] / rawTotal) * remainingWeight;
+      }
+      break;
+    }
+    result[constrained.key] = constrained.weight;
+    remainingWeight -= constrained.weight;
+    remainingKeys = remainingKeys.filter((key) => key !== constrained.key);
+  }
+
+  const rounded = Object.fromEntries(
+    uniqueKeys.map((key) => [key, Math.round(result[key] * 1000) / 1000]),
+  );
+  const roundedTotal = Object.values(rounded).reduce((sum, weight) => sum + weight, 0);
+  const correction = Math.round((100 - roundedTotal) * 1000) / 1000;
+  const correctionKey =
+    uniqueKeys.find((key) =>
+      correction >= 0
+        ? rounded[key] + correction <= maximumColumnWidth(key)
+        : rounded[key] + correction >= minimumColumnWidth(key),
+    ) ?? uniqueKeys[uniqueKeys.length - 1];
+  rounded[correctionKey] = Math.round((rounded[correctionKey] + correction) * 1000) / 1000;
+  return rounded;
+}
+
+export function resizeColumnWidths(
+  widths: Record<string, number>,
+  keys: string[],
+  key: string,
+  deltaPercent: number,
+): Record<string, number> {
+  const index = keys.indexOf(key);
+  if (index < 0 || index >= keys.length - 1 || !Number.isFinite(deltaPercent)) return widths;
+  const neighbour = keys[index + 1];
+  const pairTotal = widths[key] + widths[neighbour];
+  const currentMinimum = Math.max(
+    minimumColumnWidth(key),
+    pairTotal - maximumColumnWidth(neighbour),
+  );
+  const currentMaximum = Math.min(
+    maximumColumnWidth(key),
+    pairTotal - minimumColumnWidth(neighbour),
+  );
+  const nextCurrent = Math.max(
+    currentMinimum,
+    Math.min(currentMaximum, widths[key] + deltaPercent),
+  );
+  return {
+    ...widths,
+    [key]: Math.round(nextCurrent * 1000) / 1000,
+    [neighbour]: Math.round((pairTotal - nextCurrent) * 1000) / 1000,
+  };
+}
+
+function dataColumnWidth(weight: number): string {
+  const fixedOffset = Math.round(((weight * UTILITY_COLUMN_WIDTH) / 100) * 1000) / 1000;
+  return `calc(${weight}% - ${fixedOffset}px)`;
 }
 
 /** Preference lists are leaf values in the JSON merge. When a new column is
@@ -5601,107 +5829,88 @@ export function mergeColumnOrder<K extends string>(stored: K[] | undefined, defa
 
 function ResizableHeaderCell({
   columnKey,
-  savedWidth,
-  onWidthCommit,
+  resizeLabel = columnKey,
+  resizeKey = columnKey,
+  handleSide = 'right',
+  onResizeStart,
+  onResize,
+  onResizeReset,
+  onKeyboardResize,
+  resizable = true,
   className,
   children,
 }: {
   columnKey: string;
-  savedWidth?: number;
-  onWidthCommit: (key: string, width: number | null) => void;
+  resizeLabel?: string;
+  resizeKey?: string;
+  handleSide?: 'left' | 'right';
+  onResizeStart: (key: string) => void;
+  onResize: (key: string, deltaPixels: number, phase: 'preview' | 'commit' | 'cancel') => void;
+  onResizeReset: () => void;
+  onKeyboardResize: (key: string, deltaPercent: number) => void;
+  resizable?: boolean;
   className?: string;
   children: ReactNode;
 }) {
-  const [liveWidth, setLiveWidth] = useState<number | null>(
-    savedWidth == null ? null : clampColumnWidth(savedWidth),
-  );
   const drag = useRef<{
     pointerId: number;
     startX: number;
-    startWidth: number;
   } | null>(null);
 
-  useEffect(() => {
-    if (drag.current) return;
-    setLiveWidth(savedWidth == null ? null : clampColumnWidth(savedWidth));
-  }, [savedWidth]);
-
-  function finishResize(event: ReactPointerEvent<HTMLSpanElement>, commit: boolean) {
+  function finishResize(event: ReactPointerEvent<HTMLSpanElement>, phase: 'commit' | 'cancel') {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
-    const width = clampColumnWidth(active.startWidth + event.clientX - active.startX);
     drag.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (commit) {
-      setLiveWidth(width);
-      onWidthCommit(columnKey, width);
-    } else {
-      setLiveWidth(savedWidth == null ? null : clampColumnWidth(savedWidth));
-    }
+    onResize(resizeKey, event.clientX - active.startX, phase);
   }
 
-  const widthStyle =
-    liveWidth == null
-      ? undefined
-      : {
-          width: `${liveWidth}px`,
-          minWidth: `${liveWidth}px`,
-          maxWidth: `${liveWidth}px`,
-        };
-
   return (
-    <th className={className} style={widthStyle}>
+    <th className={className}>
       <span className={styles.resizableHeaderContent}>{children}</span>
-      <span
-        role="separator"
-        aria-label={`Resize ${columnKey} column`}
-        aria-orientation="vertical"
-        className={styles.columnResizeHandle}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          drag.current = null;
-          setLiveWidth(null);
-          onWidthCommit(columnKey, null);
-        }}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          event.stopPropagation();
-          const measured =
-            event.currentTarget.parentElement?.getBoundingClientRect().width ?? MIN_COLUMN_WIDTH;
-          const startWidth = clampColumnWidth(liveWidth ?? measured);
-          drag.current = {
-            pointerId: event.pointerId,
-            startX: event.clientX,
-            startWidth,
-          };
-          setLiveWidth(startWidth);
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          const active = drag.current;
-          if (!active || active.pointerId !== event.pointerId) return;
-          setLiveWidth(clampColumnWidth(active.startWidth + event.clientX - active.startX));
-        }}
-        onPointerUp={(event) => finishResize(event, true)}
-        onPointerCancel={(event) => finishResize(event, false)}
-        onKeyDown={(event) => {
-          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-          event.preventDefault();
-          const current =
-            liveWidth ??
-            event.currentTarget.parentElement?.getBoundingClientRect().width ??
-            MIN_COLUMN_WIDTH;
-          const next = clampColumnWidth(current + (event.key === 'ArrowRight' ? 10 : -10));
-          setLiveWidth(next);
-          onWidthCommit(columnKey, next);
-        }}
-        tabIndex={0}
-        title="Drag to resize · double-click to reset"
-      />
+      {resizable ? (
+        <span
+          role="separator"
+          aria-label={`Resize ${resizeLabel} column`}
+          aria-orientation="vertical"
+          className={`${styles.columnResizeHandle} ${
+            handleSide === 'left' ? styles.columnResizeHandleLeft : ''
+          }`}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            drag.current = null;
+            onResizeReset();
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            drag.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+            };
+            onResizeStart(resizeKey);
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const active = drag.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            onResize(resizeKey, event.clientX - active.startX, 'preview');
+          }}
+          onPointerUp={(event) => finishResize(event, 'commit')}
+          onPointerCancel={(event) => finishResize(event, 'cancel')}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            onKeyboardResize(resizeKey, event.key === 'ArrowRight' ? 1 : -1);
+          }}
+          tabIndex={0}
+          title="Drag to resize adjacent columns · double-click to reset layout"
+        />
+      ) : null}
     </th>
   );
 }
@@ -5711,24 +5920,39 @@ function SortableHeader({
   sortKey,
   sort,
   onSort,
-  savedWidth,
-  onWidthCommit,
+  onResizeStart,
+  onResize,
+  onResizeReset,
+  onKeyboardResize,
+  resizable,
+  resizeKey,
+  handleSide,
   className,
 }: {
   label: string;
   sortKey: TrackSortKey;
   sort: TrackSort | null;
   onSort: (key: TrackSortKey) => void;
-  savedWidth?: number;
-  onWidthCommit: (key: string, width: number | null) => void;
+  onResizeStart: (key: string) => void;
+  onResize: (key: string, deltaPixels: number, phase: 'preview' | 'commit' | 'cancel') => void;
+  onResizeReset: () => void;
+  onKeyboardResize: (key: string, deltaPercent: number) => void;
+  resizable?: boolean;
+  resizeKey?: string;
+  handleSide?: 'left' | 'right';
   className?: string;
 }) {
   const active = sort?.key === sortKey;
   return (
     <ResizableHeaderCell
       columnKey={sortKey}
-      savedWidth={savedWidth}
-      onWidthCommit={onWidthCommit}
+      onResizeStart={onResizeStart}
+      onResize={onResize}
+      onResizeReset={onResizeReset}
+      onKeyboardResize={onKeyboardResize}
+      resizable={resizable}
+      resizeKey={resizeKey}
+      handleSide={handleSide}
       className={className}
     >
       <button type="button" className={styles.sortableHeader} onClick={() => onSort(sortKey)}>
@@ -5778,83 +6002,71 @@ function ColumnsOptionsMenu<K extends string>({
   extra?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [open]);
 
   const columnKeys = columnOrder ?? (Object.keys(columnLabels) as K[]);
 
   return (
-    <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
+    <span className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
       <IconActionButton icon="settings" title={title} onClick={() => setOpen((v) => !v)} />
       {open ? (
-        <div
-          className={`${styles.overflowMenu} ${styles.tableOptionsMenu} ${
-            extra ? '' : styles.tableOptionsMenuCompact
-          } ${styles.alignRight}`}
-        >
-          <div className={styles.tableOptionsLayout}>
-            <section className={styles.tableOptionsSection}>
-              <div className={styles.tableOptionsGroupLabel}>Visible columns</div>
-              <div className={styles.tableOptionsColumnGrid}>
-                {columnKeys.map((key, index) => (
-                  <div key={key} className={styles.tableOptionsRow}>
-                    {onReorder && columnOrder ? (
-                      <div className={styles.tableOptionsReorder}>
-                        <button
-                          type="button"
-                          title="Move up"
-                          disabled={index === 0}
-                          onClick={() => {
-                            const nextOrder = [...columnOrder];
-                            const temp = nextOrder[index];
-                            nextOrder[index] = nextOrder[index - 1];
-                            nextOrder[index - 1] = temp;
-                            onReorder(nextOrder);
-                          }}
-                          className={styles.reorderBtn}
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          title="Move down"
-                          disabled={index === columnKeys.length - 1}
-                          onClick={() => {
-                            const nextOrder = [...columnOrder];
-                            const temp = nextOrder[index];
-                            nextOrder[index] = nextOrder[index + 1];
-                            nextOrder[index + 1] = temp;
-                            onReorder(nextOrder);
-                          }}
-                          className={styles.reorderBtn}
-                        >
-                          ▼
-                        </button>
-                      </div>
-                    ) : null}
-                    <label className={styles.tableOptionsItem}>
-                      <input
-                        type="checkbox"
-                        checked={columns[key]}
-                        onChange={() => onToggle(key)}
-                      />
-                      {columnLabels[key]}
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </section>
-            {extra}
+        <ModalShell title={title} settings onClose={() => setOpen(false)}>
+          <div className={styles.tableOptionsDialogBody}>
+            <div className={styles.tableOptionsLayout}>
+              <section className={styles.tableOptionsSection}>
+                <div className={styles.tableOptionsGroupLabel}>Visible columns</div>
+                <div className={styles.tableOptionsColumnGrid}>
+                  {columnKeys.map((key, index) => (
+                    <div key={key} className={styles.tableOptionsRow}>
+                      {onReorder && columnOrder ? (
+                        <div className={styles.tableOptionsReorder}>
+                          <button
+                            type="button"
+                            title="Move up"
+                            disabled={index === 0}
+                            onClick={() => {
+                              const nextOrder = [...columnOrder];
+                              const temp = nextOrder[index];
+                              nextOrder[index] = nextOrder[index - 1];
+                              nextOrder[index - 1] = temp;
+                              onReorder(nextOrder);
+                            }}
+                            className={styles.reorderBtn}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            title="Move down"
+                            disabled={index === columnKeys.length - 1}
+                            onClick={() => {
+                              const nextOrder = [...columnOrder];
+                              const temp = nextOrder[index];
+                              nextOrder[index] = nextOrder[index + 1];
+                              nextOrder[index + 1] = temp;
+                              onReorder(nextOrder);
+                            }}
+                            className={styles.reorderBtn}
+                          >
+                            ▼
+                          </button>
+                        </div>
+                      ) : null}
+                      <label className={styles.tableOptionsItem}>
+                        <input
+                          type="checkbox"
+                          checked={columns[key]}
+                          onChange={() => onToggle(key)}
+                        />
+                        {columnLabels[key]}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              {extra}
+            </div>
           </div>
-        </div>
+        </ModalShell>
       ) : null}
     </span>
   );
@@ -5866,12 +6078,14 @@ function TrackTableOptionsMenu({
   showAllProviders,
   availableProviders,
   columnWidths,
+  onResetColumnWidths,
 }: {
   columns: LibraryV2TrackTableColumns;
   columnOrder: (keyof LibraryV2TrackTableColumns)[];
   showAllProviders: boolean;
   availableProviders?: Set<string> | null;
   columnWidths: Record<string, number | null>;
+  onResetColumnWidths: () => void;
 }) {
   const mutation = useUiPreferencesMutation();
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
@@ -5944,15 +6158,7 @@ function TrackTableOptionsMenu({
               type="button"
               className={styles.tableOptionsReset}
               disabled={!Object.values(columnWidths).some((width) => width != null)}
-              onClick={() =>
-                mutation.mutate({
-                  track_table: {
-                    column_widths: Object.fromEntries(
-                      Object.keys(columnWidths).map((key) => [key, null]),
-                    ),
-                  },
-                })
-              }
+              onClick={onResetColumnWidths}
             >
               Reset column widths
             </button>
@@ -6351,6 +6557,44 @@ export function AlbumTrackTable({
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
+  const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
+  const columnWidths = prefsQuery.data?.track_table.column_widths ?? {};
+  const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
+    'play',
+    'disc',
+    'artists',
+    'duration',
+    'bpm',
+    'match',
+    'quality',
+    'features',
+    'metadata',
+    'verification',
+    'acoustid',
+    'file_size',
+    'file_path',
+  ];
+  const orderedKeys = mergeColumnOrder(prefsQuery.data?.track_table.column_order, defaultOrder);
+  const visibleColumnKeys = ['number', 'title', ...orderedKeys.filter((key) => columns[key])];
+  const visibleColumnsSignature = visibleColumnKeys.join('|');
+  const persistedWidthsSignature = visibleColumnKeys
+    .map((key) => `${key}:${columnWidths[key] ?? ''}`)
+    .join('|');
+  const [columnWeights, setColumnWeights] = useState<Record<string, number>>(() =>
+    normalizeColumnWidths(visibleColumnKeys, columnWidths),
+  );
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const resizeSnapshot = useRef<{ key: string; widths: Record<string, number> } | null>(null);
+
+  useEffect(() => {
+    if (resizeSnapshot.current) return;
+    setColumnWeights(normalizeColumnWidths(visibleColumnKeys, columnWidths));
+    // Signatures deliberately represent the leaf preference values. Arrays
+    // and merged preference objects are recreated while queries settle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleColumnsSignature, persistedWidthsSignature]);
+
   const availableProviders = useMemo(() => {
     if (!matchQuery.data) return null;
     const set = new Set<string>();
@@ -6370,25 +6614,6 @@ export function AlbumTrackTable({
   const albumMatch = matchQuery.data?.album ?? [];
   const trackMatch = matchQuery.data?.tracks ?? {};
   const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
-  const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
-  const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
-  const columnWidths = prefsQuery.data?.track_table.column_widths ?? {};
-
-  const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
-    'play',
-    'disc',
-    'artists',
-    'duration',
-    'bpm',
-    'match',
-    'quality',
-    'features',
-    'metadata',
-    'verification',
-    'file_size',
-    'file_path',
-  ];
-  const orderedKeys = mergeColumnOrder(prefsQuery.data?.track_table.column_order, defaultOrder);
 
   const sortedTracks = sortTracks(album.tracks, sort);
   const selectableIds = album.tracks.filter((t) => t.id != null).map((t) => t.id as number);
@@ -6412,15 +6637,74 @@ export function AlbumTrackTable({
     });
   }
 
-  function commitColumnWidth(key: string, width: number | null) {
+  function persistColumnWidths(widths: Record<string, number>) {
     preferencesMutation.mutate({
       track_table: {
         column_widths: {
           ...columnWidths,
-          [key]: width,
+          ...widths,
         },
       },
     });
+  }
+
+  function startColumnResize(key: string) {
+    resizeSnapshot.current = { key, widths: columnWeights };
+  }
+
+  function resizeColumn(key: string, deltaPixels: number, phase: 'preview' | 'commit' | 'cancel') {
+    const snapshot = resizeSnapshot.current;
+    if (!snapshot || snapshot.key !== key) return;
+    if (phase === 'cancel') {
+      setColumnWeights(snapshot.widths);
+      resizeSnapshot.current = null;
+      return;
+    }
+    const tableWidth = tableWrapRef.current?.getBoundingClientRect().width ?? 1;
+    const dataWidth = Math.max(1, tableWidth - UTILITY_COLUMN_WIDTH);
+    const deltaPercent = (deltaPixels / dataWidth) * 100;
+    const next = resizeColumnWidths(snapshot.widths, visibleColumnKeys, key, deltaPercent);
+    setColumnWeights(next);
+    if (phase === 'commit') {
+      resizeSnapshot.current = null;
+      persistColumnWidths(next);
+    }
+  }
+
+  function resizeColumnByKeyboard(key: string, deltaPercent: number) {
+    const next = resizeColumnWidths(columnWeights, visibleColumnKeys, key, deltaPercent);
+    setColumnWeights(next);
+    persistColumnWidths(next);
+  }
+
+  function resetColumnLayout() {
+    const next = normalizeColumnWidths(visibleColumnKeys);
+    resizeSnapshot.current = null;
+    setColumnWeights(next);
+    preferencesMutation.mutate({
+      track_table: {
+        column_widths: Object.fromEntries(
+          Array.from(new Set([...Object.keys(columnWidths), ...visibleColumnKeys])).map((key) => [
+            key,
+            null,
+          ]),
+        ),
+      },
+    });
+  }
+
+  function headerResizeProps(key: string) {
+    const index = visibleColumnKeys.indexOf(key);
+    const last = index === visibleColumnKeys.length - 1;
+    return {
+      onResizeStart: startColumnResize,
+      onResize: resizeColumn,
+      onResizeReset: resetColumnLayout,
+      onKeyboardResize: resizeColumnByKeyboard,
+      resizable: visibleColumnKeys.length > 1,
+      resizeKey: last ? visibleColumnKeys[index - 1] : key,
+      handleSide: (last ? 'left' : 'right') as 'left' | 'right',
+    };
   }
 
   const renderHeaderCell = (key: keyof LibraryV2TrackTableColumns) => {
@@ -6431,8 +6715,7 @@ export function AlbumTrackTable({
           <ResizableHeaderCell
             key="disc"
             columnKey="disc"
-            savedWidth={columnWidths.disc ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('disc')}
             className={styles.colNum}
           >
             Disc
@@ -6440,12 +6723,7 @@ export function AlbumTrackTable({
         );
       case 'artists':
         return (
-          <ResizableHeaderCell
-            key="artists"
-            columnKey="artists"
-            savedWidth={columnWidths.artists ?? undefined}
-            onWidthCommit={commitColumnWidth}
-          >
+          <ResizableHeaderCell key="artists" columnKey="artists" {...headerResizeProps('artists')}>
             Artists
           </ResizableHeaderCell>
         );
@@ -6458,8 +6736,7 @@ export function AlbumTrackTable({
             sortKey="duration"
             sort={sort}
             onSort={toggleSort}
-            savedWidth={columnWidths.duration ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('duration')}
           />
         );
       case 'bpm':
@@ -6471,29 +6748,18 @@ export function AlbumTrackTable({
             sortKey="bpm"
             sort={sort}
             onSort={toggleSort}
-            savedWidth={columnWidths.bpm ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('bpm')}
           />
         );
       case 'match':
         return (
-          <ResizableHeaderCell
-            key="match"
-            columnKey="match"
-            savedWidth={columnWidths.match ?? undefined}
-            onWidthCommit={commitColumnWidth}
-          >
+          <ResizableHeaderCell key="match" columnKey="match" {...headerResizeProps('match')}>
             Match
           </ResizableHeaderCell>
         );
       case 'quality':
         return (
-          <ResizableHeaderCell
-            key="quality"
-            columnKey="quality"
-            savedWidth={columnWidths.quality ?? undefined}
-            onWidthCommit={commitColumnWidth}
-          >
+          <ResizableHeaderCell key="quality" columnKey="quality" {...headerResizeProps('quality')}>
             Quality
           </ResizableHeaderCell>
         );
@@ -6502,8 +6768,7 @@ export function AlbumTrackTable({
           <ResizableHeaderCell
             key="features"
             columnKey="features"
-            savedWidth={columnWidths.features ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('features')}
             className={styles.colFeatures}
           >
             Features
@@ -6514,8 +6779,7 @@ export function AlbumTrackTable({
           <ResizableHeaderCell
             key="metadata"
             columnKey="metadata"
-            savedWidth={columnWidths.metadata ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('metadata')}
           >
             Metadata
           </ResizableHeaderCell>
@@ -6525,10 +6789,20 @@ export function AlbumTrackTable({
           <ResizableHeaderCell
             key="verification"
             columnKey="verification"
-            savedWidth={columnWidths.verification ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('verification')}
           >
             Verification
+          </ResizableHeaderCell>
+        );
+      case 'acoustid':
+        return (
+          <ResizableHeaderCell
+            key="acoustid"
+            columnKey="acoustid"
+            resizeLabel="Check"
+            {...headerResizeProps('acoustid')}
+          >
+            Check
           </ResizableHeaderCell>
         );
       case 'file_size':
@@ -6539,8 +6813,7 @@ export function AlbumTrackTable({
             sortKey="file_size"
             sort={sort}
             onSort={toggleSort}
-            savedWidth={columnWidths.file_size ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('file_size')}
           />
         );
       case 'file_path':
@@ -6548,8 +6821,7 @@ export function AlbumTrackTable({
           <ResizableHeaderCell
             key="file_path"
             columnKey="file_path"
-            savedWidth={columnWidths.file_path ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('file_path')}
           >
             File
           </ResizableHeaderCell>
@@ -6559,8 +6831,7 @@ export function AlbumTrackTable({
           <ResizableHeaderCell
             key="play"
             columnKey="play"
-            savedWidth={columnWidths.play ?? undefined}
-            onWidthCommit={commitColumnWidth}
+            {...headerResizeProps('play')}
             className={styles.colPlay}
           >
             <span className={styles.srOnly}>Play</span>
@@ -6572,7 +6843,7 @@ export function AlbumTrackTable({
   };
 
   return (
-    <div className={styles.trackTableWrap}>
+    <div ref={tableWrapRef} className={styles.trackTableWrap}>
       <div className={styles.trackTableToolbar}>
         {albumMatch.length > 0 ? (
           <div className={styles.albumMatchRow}>
@@ -6594,6 +6865,7 @@ export function AlbumTrackTable({
           showAllProviders={showAllProviders}
           availableProviders={availableProviders}
           columnWidths={columnWidths}
+          onResetColumnWidths={resetColumnLayout}
         />
       </div>
       {selected.size > 0 ? (
@@ -6604,6 +6876,14 @@ export function AlbumTrackTable({
         />
       ) : null}
       <table className={styles.trackTable}>
+        <colgroup>
+          <col style={{ width: `${CHECKBOX_COLUMN_WIDTH}px` }} />
+          <col style={{ width: `${MONITOR_COLUMN_WIDTH}px` }} />
+          {visibleColumnKeys.map((key) => (
+            <col key={key} style={{ width: dataColumnWidth(columnWeights[key] ?? 0) }} />
+          ))}
+          <col style={{ width: `${ACTION_COLUMN_WIDTH}px` }} />
+        </colgroup>
         <thead>
           <tr>
             <th className={styles.colCheckbox}>
@@ -6622,16 +6902,14 @@ export function AlbumTrackTable({
               sortKey="number"
               sort={sort}
               onSort={toggleSort}
-              savedWidth={columnWidths.number ?? undefined}
-              onWidthCommit={commitColumnWidth}
+              {...headerResizeProps('number')}
             />
             <SortableHeader
               label="Title"
               sortKey="title"
               sort={sort}
               onSort={toggleSort}
-              savedWidth={columnWidths.title ?? undefined}
-              onWidthCommit={commitColumnWidth}
+              {...headerResizeProps('title')}
             />
             {orderedKeys.map(renderHeaderCell)}
             <th className={styles.colActions}>Actions</th>
@@ -6648,7 +6926,7 @@ export function AlbumTrackTable({
               profileName={profileNameById.get(track.quality_profile_id) ?? null}
               columns={columns}
               columnOrder={orderedKeys}
-              columnWidths={columnWidths}
+              columnWidths={columnWeights}
               showAllProviders={showAllProviders}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
@@ -6707,7 +6985,11 @@ function MetadataTagsTooltip({ gaps, hint }: { gaps: string[]; hint: string }) {
   const { present, missing } = metadataTagBreakdown(gaps);
   return (
     <Tooltip.Portal>
-      <Tooltip.Positioner sideOffset={8} collisionPadding={8}>
+      <Tooltip.Positioner
+        className={styles.metadataTagsTooltipPositioner}
+        sideOffset={8}
+        collisionPadding={8}
+      >
         <Tooltip.Popup role="tooltip" className={styles.metadataTagsTooltip}>
           {present.length > 0 ? (
             <div className={styles.metadataTagsTooltipGroup}>
@@ -6879,11 +7161,8 @@ function TrackRow({
   const widthStyle = (key: string) => {
     const raw = columnWidths[key];
     if (raw == null) return undefined;
-    const width = clampColumnWidth(raw);
     return {
-      width: `${width}px`,
-      minWidth: `${width}px`,
-      maxWidth: `${width}px`,
+      width: dataColumnWidth(raw),
     };
   };
 
@@ -6981,13 +7260,6 @@ function TrackRow({
                   </span>
                 ) : null}
               </div>
-
-              {/* 4. AcoustID Verification Status */}
-              <div className={styles.qualityColVerification}>
-                {track.file && track.file.verification_status ? (
-                  <TrackVerificationBadge file={track.file} />
-                ) : null}
-              </div>
             </span>
           </td>
         );
@@ -7034,6 +7306,16 @@ function TrackRow({
               >
                 —
               </span>
+            )}
+          </td>
+        );
+      case 'acoustid':
+        return (
+          <td key="acoustid" style={widthStyle('acoustid')}>
+            {missing ? (
+              <span className={styles.muted}>—</span>
+            ) : (
+              <TrackCheckBadge file={track.file} />
             )}
           </td>
         );
@@ -7085,7 +7367,7 @@ function TrackRow({
           />
         ) : null}
       </td>
-      <td>
+      <td className={styles.colMonitor}>
         <MonitorToggle
           entity="tracks"
           id={track.id}
@@ -8401,7 +8683,7 @@ export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportStat
   return `Library ready to browse · Caching artwork in the background · ${current}/${total} · ${percent}%`;
 }
 
-/** F-13 global Automatic Search. Upgrade candidates must be mirrored first,
+/** F-13 global Automatic Search action. Upgrade candidates must be mirrored first,
  * then the existing Wishlist processor sees one complete missing+upgrade
  * queue. Starting the processor first creates a race where the just-enqueued
  * upgrades can miss the active cycle. */
@@ -8434,18 +8716,22 @@ export function GlobalAutomaticSearchButton() {
   }
 
   return (
-    <span className={styles.importWrap}>
+    <span className={styles.automaticSearchWrap}>
       <button
         type="button"
-        className={styles.btnPrimary}
+        className={`${styles.btnGhost} ${styles.automaticSearchButton}`}
         disabled={busy}
         title="Search all monitored missing tracks and all files below their quality-profile cutoff"
         onClick={() => void runSearch()}
       >
         <SvgIcon name="automatic" />
-        {busy ? 'Searching…' : 'Automatic Search'}
+        Automatic Search
       </button>
-      {message ? <span className={styles.importMsg}>{message}</span> : null}
+      {message ? (
+        <span className={styles.automaticSearchMessage} role="status">
+          {message}
+        </span>
+      ) : null}
     </span>
   );
 }

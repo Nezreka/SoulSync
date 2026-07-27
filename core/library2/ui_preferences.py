@@ -46,6 +46,9 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             # approval / bypass) was only a sub-badge inside the quality cell.
             # Opt-in like file_path — it is a diagnostic, not everyday info.
             "verification": False,
+            # iss28-01: everyday Check summary backed by AcoustID plus the
+            # human/force verification provenance.
+            "acoustid": True,
             # UI-03: physical size of the selected primary file. Opt-in to
             # keep the default table compact on album-heavy pages.
             "file_size": False,
@@ -65,12 +68,13 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "features",
             "metadata",
             "verification",
+            "acoustid",
             "file_size",
             "file_path",
         ],
-        # UI-03: explicit, user-sized widths in CSS pixels. Missing keys mean
-        # "use the table's natural/default width", which also makes a
-        # double-click reset backwards-compatible with older preference rows.
+        # UI-03/iss28-02: relative weights, normalized by the client to the
+        # current table/browser width. Historical pixel values remain valid as
+        # unnormalised weights and are therefore migrated without a DB write.
         "column_widths": {},
         "show_all_match_providers": False,
         "visible_match_providers": {

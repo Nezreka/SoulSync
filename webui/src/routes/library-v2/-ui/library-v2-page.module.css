@@ -369,42 +369,52 @@
 }
 
 .qualityCellRow {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   align-items: center;
+  justify-content: center;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .qualityColFormat {
   width: 140px;
+  max-width: 100%;
+  flex: 0 0 140px;
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .qualityColBitrate {
   width: 80px;
+  max-width: 100%;
+  flex: 0 0 80px;
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .qualityColProfile {
   width: 110px;
+  max-width: 100%;
+  flex: 0 0 110px;
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.qualityColVerification {
-  width: 120px;
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  flex-shrink: 0;
+.qualityColProfile .qualityProfileBadge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .qualityPlaceholderDash {
@@ -611,6 +621,7 @@ button.featureTag:disabled {
 
 .albumTypeBadge,
 .albumDateBadge,
+.albumSizeBadge,
 .qualityProfileBadge {
   display: inline-flex;
   align-items: center;
@@ -631,6 +642,17 @@ button.featureTag:disabled {
 .albumDateBadge {
   background: rgba(59, 130, 246, 0.14);
   color: rgb(147, 197, 253);
+}
+
+.albumSizeBadge {
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid transparent;
+}
+
+.albumSizeBadge svg {
+  width: 11px;
+  height: 11px;
 }
 
 /* Quality-profile badge — same lilac styling for both the album header and
@@ -724,14 +746,19 @@ button.featureTag:disabled {
 }
 
 .trackTableWrap {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   background: rgba(0, 0, 0, 0.22);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding: 4px 8px 8px;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .trackTable {
   width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
   color: #dcdcdc;
@@ -746,6 +773,7 @@ button.featureTag:disabled {
   font-weight: 600;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   white-space: nowrap;
+  overflow: visible;
 }
 
 .resizableHeaderContent {
@@ -757,14 +785,19 @@ button.featureTag:disabled {
 
 .columnResizeHandle {
   position: absolute;
-  z-index: 2;
+  z-index: 4;
   top: 3px;
-  right: -3px;
+  right: 0;
   bottom: 3px;
-  width: 7px;
+  width: 10px;
   cursor: col-resize;
   touch-action: none;
   user-select: none;
+}
+
+.columnResizeHandleLeft {
+  right: auto;
+  left: 0;
 }
 
 .columnResizeHandle::after {
@@ -772,7 +805,7 @@ button.featureTag:disabled {
   position: absolute;
   top: 20%;
   bottom: 20%;
-  left: 3px;
+  right: 0;
   width: 1px;
   background: rgba(255, 255, 255, 0.12);
   transition:
@@ -784,6 +817,11 @@ button.featureTag:disabled {
 .columnResizeHandle:focus-visible::after {
   background: rgb(var(--accent-rgb));
   box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.22);
+}
+
+.columnResizeHandleLeft::after {
+  right: auto;
+  left: 0;
 }
 
 .srOnly {
@@ -801,6 +839,11 @@ button.featureTag:disabled {
 .trackTable td {
   padding: 6px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  min-width: 0;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .inlineLoading {
@@ -1124,11 +1167,41 @@ button.featureTag:disabled {
 }
 
 .trackActions {
-  display: flex;
-  gap: 4px;
-  justify-content: flex-end;
-  align-items: center;
+  text-align: right;
   white-space: nowrap;
+}
+
+.trackTable .colActions,
+.trackTable .trackActions {
+  width: auto;
+  padding-right: 2px;
+  padding-left: 2px;
+}
+
+.trackTable .colCheckbox {
+  width: auto;
+  padding-right: 4px;
+  padding-left: 4px;
+}
+
+.trackTable .colMonitor {
+  width: auto;
+  padding-right: 2px;
+  padding-left: 2px;
+  text-align: center;
+}
+
+.trackTable .colNum {
+  width: auto;
+}
+
+.trackTable .trackActions .iconAction {
+  width: 24px;
+  height: 24px;
+}
+
+.trackActions > * + * {
+  margin-left: 2px;
 }
 
 .cellArtist {
@@ -1229,17 +1302,31 @@ button.statusWarn:disabled {
   opacity: 0.6;
 }
 
+.metadataTagsTooltipPositioner {
+  z-index: 2147483647;
+  isolation: isolate;
+  pointer-events: none;
+}
+
 .metadataTagsTooltip {
-  z-index: 1000;
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+  contain: paint;
   width: min(330px, calc(100vw - 24px));
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 9px;
-  background: #17191f;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.48);
-  color: rgba(255, 255, 255, 0.82);
+  background-color: #050609 !important;
+  background-image: none !important;
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.82);
+  color: rgba(255, 255, 255, 0.9);
   font-size: 11px;
   line-height: 1.45;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
   transform-origin: var(--transform-origin);
 }
 
@@ -1708,6 +1795,40 @@ button.statusWarn:disabled {
   gap: 10px;
 }
 
+.automaticSearchWrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.automaticSearchButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.automaticSearchButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.automaticSearchMessage {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(340px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #191919;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
 .importMsg {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
@@ -1769,6 +1890,14 @@ button.statusWarn:disabled {
   display: flex;
   flex-direction: column;
   padding: 22px;
+}
+
+.modalSettings {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(88vh, 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .tabBody {
@@ -3770,6 +3899,13 @@ button.statusWarn:disabled {
   padding: 10px;
 }
 
+.tableOptionsDialogBody {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .tableOptionsMenuCompact {
   width: min(380px, calc(100vw - 48px));
 }
@@ -3780,19 +3916,21 @@ button.statusWarn:disabled {
 
 .tableOptionsLayout {
   display: grid;
-  grid-template-columns: minmax(260px, 1.2fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   align-items: start;
 }
 
 .tableOptionsExtraGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(145px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
 .tableOptionsSection {
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.025);
@@ -3802,7 +3940,7 @@ button.statusWarn:disabled {
 .tableOptionsColumnGrid,
 .tableOptionsProviderGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(125px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(155px, 100%), 1fr));
 }
 
 .tableOptionsGroupLabel {
@@ -3822,6 +3960,8 @@ button.statusWarn:disabled {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .tableOptionsReset {

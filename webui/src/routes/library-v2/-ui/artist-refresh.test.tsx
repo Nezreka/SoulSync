@@ -33,7 +33,12 @@ describe('library v2 artist refresh mutation', () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh & Scan' }));
+    const refresh = screen.getByRole('button', { name: 'Refresh & Scan' });
+    expect(refresh).toHaveAttribute(
+      'title',
+      'Re-read files on disk: existence, audio quality and embedded tags. Provider metadata is unchanged.',
+    );
+    fireEvent.click(refresh);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Music root is temporarily unavailable',

@@ -5,23 +5,26 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 27. Juli 2026, einschließlich Foundation-Rebase (§14), der an diesem
+Stand: 28. Juli 2026. Die sieben realen UI-Findings aus §39 öffneten Teile der
+am 27. Juli als abgeschlossen geführten UI-03/UI-05/F-13/F-16-Arbeit wieder
+und sind im aktuellen Arbeitsstand implementiert und regressionsgeprüft.
+Zuvor: einschließlich Foundation-Rebase (§14), der an diesem
 Tag umgesetzten Korrekturen §20–§24 (Pfad-Desync, Manual-Match-Timeout,
 Orphan-Approve-Materialisierung, F-10-Korrelation, Artwork-Kaltstart-
 Nachlieferung), §26 (nativer Subject-Row-Versatz in den Repair-Scannern,
 Abbau der vorbestehenden Testfehler), §27 (erster Lauf gegen einen Snapshot
 der Produktiv-DB, Album-Twin-Scan für jeden Artist, Frontend-Gate), §28
 (Reconcile-Unmapped-Artists-Diagnose: Namens-only-Matching, fehlender
-Cooldown — beide Pending, Korrektur folgt vor dem geplanten
-Post-Import-Autotrigger), §29 (Werkzeug-↔-V2-Konvergenz: Legacy-Findings,
+Cooldown — beide anschließend in §30 korrigiert und mit dem
+Post-Import-Autotrigger verdrahtet), §29 (Werkzeug-↔-V2-Konvergenz: Legacy-Findings,
 Cover-/Tag-Schreibpfad, Verification-Spalte — fünf Korrekturen, Genre-Lücke
 als Produktentscheidung offen) sowie §34–§36 (Live-Feedback iss27-12/13/14,
 Multi-Provider-Track-Reconcile, sofortige UI-Neuladung und Python-3.14-
 Async-Deadlock) und §37 (Abschluss der offenen F-13/F-15/UI-03/UI-05-
 Oberflächenpunkte plus zwei unabhängige Webclient-Fehler).
 Playlist UI bleibt geparkt. Der werkzeugweise Integrations-Deep-Dive über alle
-25 registrierten Repair-Jobs ist beauftragt und offen
-([issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17)).
+25 registrierten Repair-Jobs wurde in §30 abgeschlossen
+([issues.md §19](library-v2-issues.md#19-ergebnis-des-werkzeugweisen-deep-dive-26-juli-2026-nacht)).
 
 ## 1. Statusbegriffe
 
@@ -55,19 +58,19 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Removed / Deferred | §31, Entscheidung 27. Juli | `import-review`-Route und UI-Oberfläche per Nutzerentscheidung aus dieser PR entfernt |
-| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Verified | §29/§31/§33/§36/§37, [iss27-01](library-v2-issues.md#iss27-01) | Interactive Search und entity-gebundene Suche verified; globales Automatic Search wartet auf den Upgrade-Scan und startet danach die gemeinsame Missing-/Upgrade-Wishlist-Verarbeitung |
+| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Verified | §29/§31/§33/§36/§37/§39, [iss28-03](library-v2-issues.md#iss28-03) | Suchablauf verified; globale Startseitenaktion heißt `Automatic Search` und teilt den neutralen Basisstil des Re-Import-Nachbarbuttons, ergänzt um das Automatic-Icon |
 | [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1, §31 | Delete, File-Scope und Pfadsync abgedeckt; `Reorganize All` Ablauf bei Einstellungsänderung spezifiziert |
 | [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Verified | §28–§37, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05), [iss27-07](library-v2-issues.md#iss27-07) | Multi-Provider-IDs, Post-Import-Erkennung, Verification-Read, Tag-Gap-Write, Tags-Breakdown und stabile Album/EP/Single-Gruppierung geprüft |
-| [F-16](library-v2-features.md#feat-wanted) | Wanted Views, Entity Queue, Diskspace | Verified | §72–§74, `2e227c1b` | Entity Rollups und ein Queue-Poll pro Artist-Seite geprüft |
+| [F-16](library-v2-features.md#feat-wanted) | Wanted Views, Entity Queue, Diskspace | Verified | §72–§74, `2e227c1b`, §39 | Rollups plus neutrales Größen-Badge mit Symbol in jeder eingeklappten Album-/EP-/Single-Zeile, einschließlich `0 B` |
 
 ### UI-Status
 
 | ID | Bereich | Status | Hinweis |
 |---|---|---|---|
 | [UI-01](library-v2-features.md#ui-icons) | Icons/Nomenklatur | Verified | Automatic=Lupe, Interactive=User, Quality=Stern, Track=Pencil |
-| [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Verified | File Size und Verification opt-in; Größen-Sortierung; persistentes Pointer-/Keyboard-Resizing mit Grenzen und Reset; kompaktes Mehrspalten-Menü (§37) |
+| [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Implemented | §39: separate generische Check-Spalte (Verified/Human verified/Skipped/Not scanned); normalisierte benachbarte Relativbreiten; feste zentrierte Quality-Unterbereiche; viewport-gebundener Einstellungsdialog; gezielte Tests und Build grün, manueller Browser-Gate mangels installiertem Chromium ausstehend |
 | [UI-04](library-v2-features.md#ui-bulk) | Multi-Select/Bulk Bar | Implemented | Monitor, Profil, RG, Tags, Delete und Rich Bulk Edit |
-| [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Verified | Navigation Reset (§32), globales Automatic Search und verständlich gruppiertes „Library Health & Repair“ mit explizitem Artist-/Library-Scope (§37) |
+| [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Verified | Navigation/Maintenance sowie die als `Automatic Search` benannte und an den Re-Import-Nachbarbutton angeglichene globale Startseitenaktion geprüft (§39) |
 | F-12 UI | Acquisition Review | Removed | Per Nutzerentscheidung aus PR entfernt und gelöscht |
 
 
@@ -1290,10 +1293,10 @@ diese Tabelle enthält ausschließlich den Bearbeitungsstand.
 | [T-05](library-v2-issues.md#tool26-05) | `write_tags` kennt nur die Artwork-Cache-Datei | Implemented | `_album_cover_data` materialisiert über `build_artwork` (Guide §2.1-Reihenfolge, eigener Single-Flight-Lock) und nur, wenn überhaupt eine Cover-Quelle existiert |
 | [T-06](library-v2-issues.md#tool26-06) | Genre-Lücke katalogseitig unfüllbar | **Bewusst offen** → [§30](#30-werkzeugweiser-deep-dive-t-11-t-12-und-der-post-import-trigger-26-juli-2026-nacht) | Der naheliegende Vertrag („Album-Genres beim Provider holen") wurde gegen die echten Alben geprüft und **widerlegt** — keine Quelle liefert Genres. Der Nutzer hat die drei Entwurfsfragen am 26. Juli mit „offen lassen" beantwortet |
 | [T-07](library-v2-issues.md#tool26-07) | Ogg/Opus meldet dauerhaft ein fehlendes Cover | Implemented | `read_file_tags` erkennt `metadata_block_picture` wie `art_apply` — eine Wahrheit für Gap-Anzeige, Scan und Apply |
-| [T-08](library-v2-issues.md#tool26-08) | „Refresh & Scan" erneuert keine Provider-Metadaten | Partial | Der Datei-Pass leistet Tags + Quality-Probe + Missing-Lifecycle und seit T-09 auch die Verification; der Katalog-Refresh bleibt bewusst Sache von Enrich/Discography-Refresh (UI-Benennung offen) |
+| [T-08](library-v2-issues.md#tool26-08) | „Refresh & Scan" erneuert keine Provider-Metadaten | Implemented | Der Datei-Pass leistet Tags + Quality-Probe + Missing-Lifecycle und seit T-09 auch Verification; sein Tooltip grenzt den Datei-Scope jetzt ausdrücklich von Enrich/Discography Refresh ab |
 | [T-09](library-v2-issues.md#tool26-09) | Verification-Tag wird gelesen und weggeworfen | Implemented | `_persist_verification_observation` adoptiert `SOULSYNC_VERIFICATION`; unbekannte Werte ignoriert, fehlender Tag löscht nichts, `human_verified` wird nie überschrieben |
 | [T-10](library-v2-issues.md#tool26-10) | Keine Verification-Spalte | Implemented | Opt-in-Spalte `verification` in `track_table`; leere Zelle erklärt im Tooltip, wie sich der Wert beschaffen lässt |
-| [T-11](library-v2-issues.md#tool26-11) | `genre_cleanup`/`comma_artist_splitter` sind legacy-only | Pending | Teil des werkzeugweisen Deep-Dive, [issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17) |
+| [T-11](library-v2-issues.md#tool26-11) | `genre_cleanup`/`comma_artist_splitter` sind legacy-only | Implemented → [§30](#30-werkzeugweiser-deep-dive-t-11-t-12-und-der-post-import-trigger-26-juli-2026-nacht) | Beide Jobs besitzen native `lib2`-Überschreibungen; Regressionen und Datenbasis-Gate sind vorhanden |
 
 ### Verifikation
 
@@ -1347,10 +1350,9 @@ finding 19 library_reorganize    entity='234986381' -> artists=[28] albums=[1174
 
 Die vom Nutzer beschriebene Kette „Werkzeug erkennt richtig → Fix → Library V2
 zeigt es trotzdem nicht" ist an fünf Stellen geschlossen und an einer
-(T-06 Genre) bewusst offen und ehrlich beschriftet. Der werkzeugweise
-Deep-Dive über alle 25 registrierten Jobs ist beauftragt und steht als
-[issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17)
-bereit; T-11 ist sein erster Eintrag.
+(T-06 Genre) bewusst offen und ehrlich beschriftet. Der hier beauftragte
+Deep-Dive über alle 25 registrierten Jobs wurde anschließend in §30
+durchgeführt; T-11 und T-12 sind dort implementiert.
 
 ---
 
@@ -1883,3 +1885,54 @@ zielgenauen Fixes auf Benutzerwunsch nicht erneut gestartet. Die bekannten
 nicht-blockierenden Warnungen bleiben die `sqlite3`-Datetime-Deprecation und
 der bestehende Vite-Chunkgrößenhinweis. Die absichtlichen Nicht-Features und
 externen Release-Gates aus §37 bleiben unverändert offen.
+
+## 39. Reale UI-Regressionsbefunde vom 28. Juli 2026
+
+Die Root-Cause- und Abnahmeverträge stehen in
+[issues.md §26](library-v2-issues.md#26-library-v2-live-ui-findings-vom-28-juli-2026).
+Diese Tabelle hält den Implementierungsstand nach der Korrekturrunde fest.
+
+| ID | Finding | Status |
+|---|---|---|
+| [iss28-01](library-v2-issues.md#iss28-01) | Generische Check-Spalte mit Verified/Human verified/Skipped/Not scanned statt versteckter AcoustID-Anzeige | Implemented |
+| [iss28-02](library-v2-issues.md#iss28-02) | Relative benachbarte Spaltenbreiten; niemals horizontaler Scroll | Implemented |
+| [iss28-03](library-v2-issues.md#iss28-03) | Globale Startseitenaktion als `Automatic Search`, gleich gestaltet wie der Re-Import-Nachbarbutton plus Icon | Implemented |
+| [iss28-04](library-v2-issues.md#iss28-04) | Neutrales graues Größen-Badge mit Symbol in jeder Album-/EP-/Single-Zeile | Implemented |
+| [iss28-05](library-v2-issues.md#iss28-05) | Viewport-Dialog für Spalten/Quality/Match-Provider, vertikal statt horizontal scrollend | Implemented |
+| [iss28-06](library-v2-issues.md#iss28-06) | Zentrierte feste Quality-Unterbereiche trotz separater AcoustID-/Verification-Spalten | Implemented |
+| [iss28-07](library-v2-issues.md#iss28-07) | Kompakte Track-Actions-Spalte ohne geerbte 170-px-/11-%-Überbreite | Implemented |
+
+Umgesetzt wurden eine standardmäßig sichtbare `acoustid`-Preference samt
+generischer Check-Statuszelle, normalisierte relative Spaltengewichte mit
+Nachbarverteilung und Legacy-Pixelmigration, ein festes 100-%-`colgroup`,
+viewportgebundene Settings-Portals, das neutrale Release-Größenbadge sowie
+die wiederhergestellten zentrierten Quality-Bereiche 140/80/110 px. Die
+Actions-Spalte belegt nur noch 7 % statt 11 %, ihr 170-px-Erbe ist
+neutralisiert und die Datenspalten teilen sich 86 %. `#` und `Track Title`
+bleiben immer sichtbar.
+
+**Prüfung:** WebUI Library v2 **199 passed** in 32 Dateien; die gezielte
+Album-/Track-/Header-/Refresh-Runde **12 passed**; `npm run check` ohne Warnungen oder
+Fehler; Production Build grün. Preferences **12 passed**; der nach der
+Preference-Erweiterung gelaufene vollständige Backend-Scope
+`tests/library2` **1079 passed** (eine bekannte
+`sqlite3`-Datetime-Deprecation). Die laufende lokale App antwortete unter
+Port 8008 mit HTTP 200. Der Playwright-Live-Lauf konnte nicht starten, weil
+weder Playwright-Chromium noch ein System-Chromium installiert ist; dadurch
+entstand kein Produkt-Testfehler, aber der manuelle visuelle Browser-Gate
+bleibt offen.
+
+**Explizit verworfen:** `#` und `Track Title` werden nicht ein-/ausblendbar
+gemacht. Diese zwischenzeitlich ausgesprochene Idee wurde im selben
+Nutzerfeedback zurückgenommen und ist kein offenes Feature.
+
+## 40. Anschließende Bereinigung weiterer offener Statuspunkte
+
+- [T-11](library-v2-issues.md#tool26-11) war in §29 noch fälschlich Pending,
+  obwohl §30 die nativen `genre_cleanup`-/`comma_artist_splitter`-
+  Implementierungen samt Tests bereits belegt. Dokumentkopf und §29 zeigen
+  jetzt konsistent auf den abgeschlossenen Deep-Dive.
+- [T-08](library-v2-issues.md#tool26-08) ist geschlossen: `Refresh & Scan`
+  bleibt bewusst der Datei-Pass. Der Button erklärt nun im Tooltip konkret
+  „existence, audio quality and embedded tags" und grenzt Provider-Metadaten
+  ausdrücklich ab; der Artist-Refresh-Test pinnt diesen Vertrag.

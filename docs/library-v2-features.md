@@ -24,7 +24,9 @@ konkrete Reihenfolge später durch Audits und Nutzerfeedback angepasst wurde.
 - media-server-unabhängiges Artwork aus Files und Providern;
 - Artist-Monitoring über Watchlist, Release-/Track-Monitoring über Wanted und
   Wishlist;
-- Refresh & Scan liest reale Files/Tags und aktualisiert den Katalog.
+- Refresh & Scan liest reale Files/Tags und aktualisiert die beobachteten
+  Datei-, Qualitäts- und Missing-Werte im Katalog; Provider-Metadaten bleiben
+  Aufgabe von Enrich/Discography Refresh.
 
 ### Phase B — Interactive und Automatic Search
 
@@ -571,7 +573,11 @@ den konkret bestätigten Check.
 
 #### Globales Automatic Search (Library Header)
 
-Auf der Haupt-Library-Seite befindet sich oben rechts der Button **Automatic Search**. Dieser führt automatisch eine Suche durch für:
+Auf der Haupt-Library-Seite befindet sich oben rechts die kompakte Aktion
+**Automatic Search**. Sie verwendet exakt denselben neutralen Basis-Buttonstil
+wie der direkt benachbarte Re-Import-Button und ergänzt lediglich das
+Automatic-Search-Symbol; sie darf nicht als abweichender Primary-/Sonderblock
+formatiert werden. Die Aktion führt denselben automatischen Suchlauf aus für:
 1. Alle fehlenden Tracks (Missing), über Auslösung der Wishlist-Verarbeitung.
 2. Alle vorhandenen Tracks, deren Cutoff-Profil noch nicht erfüllt ist (Cutoff Unmet / Upgrades).
 Der Button `Re-Import Library` bleibt vorerst erhalten, soll jedoch in einer späteren Phase entfernt werden. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
@@ -696,7 +702,8 @@ Ein „Refresh & Scan" im Artist-Kontext ist strikt auf die Dateien dieses Küns
 - Auslesen der Audiodaten (Sample Rate, Bit Depth z.B. 24-Bit/44.1kHz, Bitrate, Format, Dateigröße).
 - Auslesen von Feature-Tags (ReplayGain, Lyrics, embedded Cover art).
 - **Auslesen von Verifikations-Tags:** Direkt aus den Audio-Tags gespeicherte Verifikations-Informationen (`HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT`) werden gelesen und in der Datenbank synchronisiert.
-- Erneute Bewertung gegen das effektive Quality Profile sowie Re-Fetch fehlender Metadaten von den Providern. *(Hinweis für die nächste Chat-Session: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
+- Erneute Bewertung gegen das effektive Quality Profile.
+- Der Button-Tooltip benennt diesen Datei-Scope ausdrücklich. Provider-Katalogmetadaten werden hier nicht neu geladen; dafür bleiben Enrich und Discography Refresh zuständig.
 
 #### Retag, Preview Re-Tag und Tag Matching
 
@@ -740,6 +747,10 @@ dokumentierten Felder statt nur ID/Artwork.
   Queue-Endpoint nicht brechen.
 - Artist und Album zeigen belegten Speicherplatz, aber nicht zwingend den
   absoluten Root-Pfad.
+- Jede Album-/EP-/Single-Zeile zeigt ihre aggregierte Dateigröße bereits im
+  eingeklappten Standardzustand als neutrales graues Größen-Badge mit Symbol
+  (dieselbe Farbsprache wie beim Artist, kein grüner Status); auch `0 B`
+  bleibt sichtbar und wird nicht als fehlender Wert verschluckt.
 - `missing_suspected` wird amber als „checking missing“ sichtbar; erst
   `missing_confirmed` gilt als Missing/Wanted-Auslöser.
 
@@ -770,11 +781,49 @@ dokumentierten Felder statt nur ID/Artwork.
 
 Ein richtiges Options-Modal persistiert Einstellungen pro Profil:
 
-- Spalten: #, Disc, Track Title, Artists, Verification Status, Match, Quality Profile/Tier, Features, Metadata, Duration, File Size on Disk, BPM, File Path, Format/Bitrate;
+- Spalten: #, Disc, Track Title, Artists, Verification Status, **Check**,
+  Match, Quality Profile/Tier, Features, Metadata, Duration, File
+  Size on Disk, BPM, File Path, Format/Bitrate;
 - **File Size Column:** Eigene Track-Spalte für Dateigröße auf Disk (`file_size_bytes`) inklusive Sortierbarkeit für alle Release-Typen (Alben, EPs, Singles).
-- **Verification Column:** Neue Spalte „Verification" / „Verified" (`verification_status`), welche z.B. „AcoustID Verified", „AcoustID Unverified", „Human Verified", „Retry Import" anzeigt.
-- **Manual Resizable Columns (Excel-like):** Die Spaltenbreite lässt sich per Drag-and-Drop manuell anpassen (wie in Excel). Inklusive Pointer-Capture, Min/Max-Breiten, Doppelklick-Reset und Wiederherstellung gespeicherter Breiten.
-- **Column Settings Dialog Redesign:** Das Einstellungs-Modal für Tabellenspalten wird vom langen vertikalen Stapel in ein kompaktes Mehrspalten-/Tab-Layout umgebaut, um vertikales Scrolling zu vermeiden.
+- **Verification Column:** „Verification" (`verification_status`) zeigt die
+  übergreifende Provenienz, etwa Human Verified oder Force Imported.
+- **Check Column:** Die intern weiterhin als `acoustid` persistierte,
+  standardmäßig sichtbare Spalte heißt nutzerseitig generisch `Check`. Sie
+  zeigt **Verified**, **Human verified** (blau), **Skipped** oder **Not
+  scanned**. Dabei hat die explizite menschliche Freigabe Vorrang vor einem
+  technischen Skip; `pipeline_result.acoustid_message` erklärt Skip bzw.
+  fehlenden Lauf im Tooltip. Der Check wird nicht mehr in Quality versteckt
+  oder dort doppelt gerendert.
+- **Geplante Check-Aktionen:** Ein Klick auf den Check-Status startet die
+  Prüfung ausschließlich für diesen Track; insbesondere `Not scanned` kann
+  dadurch ohne vollständigen Artist- oder Albumlauf nachgeholt werden.
+  Währenddessen zeigt die Zelle einen Busy-Zustand und lädt danach den
+  Trackstatus neu. Die Auswahlleiste erhält zusätzlich **Check tracks**: Die
+  Aktion prüft aus der aktuellen Trackauswahl nur checkbare, noch nicht
+  bestätigte Einträge (beispielsweise `Not scanned` oder `Skipped`),
+  überspringt fehlende Dateien sowie bereits `Verified` oder `Human verified`
+  und zeigt anschließend Ergebnis- und Fehlerzahlen an.
+- **Quality-Innenraster:** Die Auslagerung von AcoustID/Verification verändert
+  nicht die ruhige Quality-Darstellung: Format/Resolution, Bitrate und Quality
+  Profile behalten eigene zentrierte Bereiche (140/80/110 px, responsiv
+  begrenzt). Bei wenig Platz darf das Innenraster vertikal umbrechen, aber
+  niemals die Tabelle horizontal verbreitern.
+- **Manual Resizable Columns (Excel-like):** Die Spaltenbreite lässt sich per
+  Drag-and-Drop relativ zur aktuell verfügbaren Tabellen-/Browserbreite
+  anpassen. Eine Grenzverschiebung verteilt Platz zwischen benachbarten
+  Spalten; die Gesamtbreite bleibt immer 100 %. Gespeichert werden relative
+  Gewichte statt unabhängiger Pixel-Minima. Die Tabelle erzeugt niemals
+  horizontalen Seiten- oder Kachel-Scroll.
+- Die feste Track-Actions-Spalte bleibt auf ihre drei Iconbuttons begrenzt
+  (kompakter 7-%-Anteil mit schmalem Padding) und wächst nicht durch die
+  170-px-Regel anderer Tabellen oder einen unnötigen 11-%-Leerraum.
+- **Column Settings Dialog Redesign:** Das Einstellungsfenster liegt in einer
+  eigenen Viewport-Ebene, darf vertikal scrollen und bricht Spalten,
+  Quality/Größen sowie Match-Provider responsiv untereinander um. Es besitzt
+  keinen horizontalen Scroll und wird weder von einer eingeklappten
+  Albumkachel noch bei Singles/Ein-Track-Releases unten abgeschnitten.
+- `#` und `Track Title` bleiben immer sichtbar; sie werden ausdrücklich
+  nicht zu Ein-/Ausblendoptionen.
 *(Hinweis für die nächste Chat-Session: Vor der Umsetzung aller hier genannten Punkte selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
 
 

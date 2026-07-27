@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { GlobalAutomaticSearchButton } from './library-v2-page';
+import { GlobalAutomaticSearchButton, ImportButton } from './library-v2-page';
 
 describe('Library v2 global Automatic Search', () => {
   it('queues cutoff upgrades before starting the shared Wishlist processor', async () => {
@@ -36,15 +36,40 @@ describe('Library v2 global Automatic Search', () => {
           error: null,
         });
       }),
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json({
+          running: false,
+          stage: 'idle',
+          current: 0,
+          total: 0,
+          stats: null,
+          error: null,
+          finished_at: null,
+          artwork_cache: {
+            running: false,
+            current: 0,
+            total: 0,
+            stats: null,
+            error: null,
+            started_at: null,
+            finished_at: null,
+          },
+        }),
+      ),
     );
 
     render(
       <QueryClientProvider client={createTestQueryClient()}>
         <GlobalAutomaticSearchButton />
+        <ImportButton hasArtists />
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Automatic Search/ }));
+    const automaticSearch = screen.getByRole('button', { name: 'Automatic Search' });
+    const reimport = screen.getByRole('button', { name: 'Re-import library' });
+    expect(automaticSearch.className.split(' ')).toContain(reimport.className);
+    expect(automaticSearch.querySelector('svg')).toBeInTheDocument();
+    fireEvent.click(automaticSearch);
 
     expect(
       await screen.findByText(
