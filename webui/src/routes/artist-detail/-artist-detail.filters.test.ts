@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMusicBrainzDeclutter,
   classifyReleaseContent,
+  isSectionHidden,
+  sectionStatsLabels,
   defaultFilterState,
   isMusicBrainzDiscography,
   isReleaseHidden,
@@ -237,5 +239,37 @@ describe('sectionCounts', () => {
     expect(sectionCounts(releases, true, mb()).visible).toBe(1);
     // ...and the same release IS hidden when the title guess is trusted.
     expect(sectionCounts(releases, false, { ...mb(), mbDeclutter: false }).visible).toBe(0);
+  });
+});
+
+describe('section visibility and stats', () => {
+  const counts = (visible: number) => ({ visible, owned: 0, missing: 0 });
+
+  it('hides a section when its category toggle is off, even with visible cards', () => {
+    const s = defaultFilterState();
+    s.categories.eps = false;
+    expect(isSectionHidden('eps', counts(5), s)).toBe(true);
+    expect(isSectionHidden('albums', counts(5), s)).toBe(false);
+  });
+
+  it('hides a section when every card in it was filtered out', () => {
+    expect(isSectionHidden('albums', counts(0), defaultFilterState())).toBe(true);
+  });
+
+  it('labels with the FILTERED counts, not the bucket totals', () => {
+    expect(sectionStatsLabels({ visible: 3, owned: 2, missing: 1 })).toEqual({
+      owned: '2 owned',
+      missing: '1 missing',
+    });
+  });
+
+  it('shows 0 owned / 0 missing while ownership is still being checked', () => {
+    // NOT "Checking..." — populateReleaseSection writes that, then
+    // populateDiscographySections calls applyDiscographyFilters() in the same
+    // function with no early return, overwriting both labels before paint.
+    // Reproducing the label the user actually sees, not the one in the source.
+    const pending = sectionCounts([{ owned: null }, { owned: null }], false, defaultFilterState());
+    expect(pending).toEqual({ visible: 2, owned: 0, missing: 0 });
+    expect(sectionStatsLabels(pending)).toEqual({ owned: '0 owned', missing: '0 missing' });
   });
 });

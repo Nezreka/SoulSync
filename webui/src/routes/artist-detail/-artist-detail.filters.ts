@@ -175,6 +175,35 @@ export interface SectionCounts {
  * A release still being checked (`owned === null`) counts toward `visible` but
  * toward neither owned nor missing, so the two do not necessarily sum.
  */
+/**
+ * Whether a whole section is hidden.
+ *
+ * Two independent reasons, both from applyDiscographyFilters: its category
+ * toggle is off, or every card in it ended up filtered out.
+ */
+export function isSectionHidden(
+  bucket: DiscographyBucket,
+  counts: SectionCounts,
+  state: DiscographyFilterState,
+): boolean {
+  return !state.categories[bucket] || counts.visible === 0;
+}
+
+/**
+ * The "N owned" / "N missing" stats line.
+ *
+ * Always the FILTERED counts. `populateReleaseSection` first writes
+ * "Checking..." / "" when any ownership is still pending, but
+ * populateDiscographySections calls applyDiscographyFilters() immediately
+ * afterwards — in the same function, with no early return — which overwrites
+ * both labels before anything paints. So that "Checking..." state is
+ * unreachable in practice and is deliberately NOT reproduced here; during
+ * checking the user sees "0 owned" / "0 missing", exactly as they do today.
+ */
+export function sectionStatsLabels(counts: SectionCounts): { owned: string; missing: string } {
+  return { owned: `${counts.owned} owned`, missing: `${counts.missing} missing` };
+}
+
 export function sectionCounts(
   releases: DiscographyRelease[],
   isMusicBrainz: boolean,
