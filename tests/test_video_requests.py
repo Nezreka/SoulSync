@@ -81,7 +81,39 @@ def test_approve_movie_lands_on_the_wishlist(app_db):
     out = client.post("/api/video/requests/%d/approve" % rid,
                       json={"response": "enjoy"}).get_json()
     assert out["success"] is True
-    assert db.wishlist_counts().get("movie") == 1
+    # Diagnostic, not decoration: this assert went red once on CI (2026-07-27)
+    # and never reproduced — not in isolation, not for the whole file, not over
+    # all of tests/video, not in a full 10,966-test run in CI's own order. The
+    # tripwire cleared the usual suspect (_video_db was the fixture's object),
+    # so the two live theories are (a) the approve took the SHOW branch, which
+    # writes video_watchlist instead, or (b) the row landed and something
+    # removed it — core/video/download_monitor.py's remove_from_wishlist("movie")
+    # runs off a daemon thread against the live get_video_db(). Each leaves a
+    # different fingerprint below, so the next red run names the cause instead
+    # of costing another 45-minute re-roll.
+    counts = db.wishlist_counts()
+    if counts.get("movie") != 1:
+        import api.video as videoapi
+        conn = db.connect()
+        try:
+            wl = [dict(r) for r in conn.execute(
+                "SELECT kind, tmdb_id, title, status FROM video_wishlist")]
+            wa = [dict(r) for r in conn.execute(
+                "SELECT kind, tmdb_id, title FROM video_watchlist")]
+            rq = [dict(r) for r in conn.execute(
+                "SELECT id, kind, tmdb_id, status FROM video_requests")]
+        finally:
+            conn.close()
+        raise AssertionError(
+            "approve said %r but wishlist_counts()=%r\n"
+            "  request rows   : %r          <- kind here decides movie-vs-show branch\n"
+            "  wishlist rows  : %r          <- empty + approved => inserted then removed\n"
+            "  watchlist rows : %r          <- populated => the SHOW branch ran\n"
+            "  db path        : %s\n"
+            "  fixture db %s / api._video_db %s / same object: %s"
+            % (out, counts, rq, wl, wa, db.database_path,
+               hex(id(db)), hex(id(videoapi._video_db)), db is videoapi._video_db))
+    assert counts.get("movie") == 1
     req = db.get_video_request(rid)
     assert req["status"] == "approved" and req["admin_response"] == "enjoy"
     # terminal — a second approve 409s
