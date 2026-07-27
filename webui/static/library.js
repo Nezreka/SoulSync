@@ -219,6 +219,44 @@ function closeWatchAllUnwatchedModal() {
     window.dispatchEvent(new CustomEvent('ss:library-changed'));
 }
 
+// ===============================================
+// Artist Detail Page Functions
+// ===============================================
+
+// Artist detail page state
+const _ARTIST_DETAIL_BACK_LABELS = {
+    library: 'Back to Library',
+    search: 'Back to Search',
+    discover: 'Back to Discover',
+    watchlist: 'Back to Watchlist',
+    wishlist: 'Back to Wishlist',
+    stats: 'Back to Stats',
+    'playlist-explorer': 'Back to Explorer',
+    automations: 'Back to Automations',
+    dashboard: 'Back to Dashboard',
+    sync: 'Back to Sync',
+    'active-downloads': 'Back to Downloads',
+};
+
+// Stack of origins for the back-button label. Each entry: {type:'page', pageId}
+// or {type:'artist', name}. Pushed on forward navigation, popped on back.
+// Separate from browser history — only used for the label display.
+let _artistDetailLabelStack = [];
+let _artistDetailGoingBack = false;
+
+let artistDetailPageState = {
+    isInitialized: false,
+    currentArtistId: null,
+    currentArtistName: null,
+    currentArtistSource: null,
+    enhancedView: false,
+    enhancedData: null,
+    expandedAlbums: new Set(),
+    selectedTracks: new Set(),
+    editingCell: null,
+    enhancedTrackSort: {}
+};
+
 function clearArtistDetailPageState() {
     if (artistDetailPageState.completionController) {
         artistDetailPageState.completionController.abort();
