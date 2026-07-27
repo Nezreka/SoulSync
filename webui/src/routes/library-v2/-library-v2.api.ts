@@ -1070,6 +1070,18 @@ export async function writeLibraryV2Tags(trackIds: number[], embedCover = true):
   return payload.job_id;
 }
 
+/** iss27-02: the "N tag gaps" click — re-fetches the track's album metadata
+ *  from providers (best-effort) before writing tags, so a field the
+ *  catalogue never had a chance to get (not just one it already had). */
+export async function fillLibraryV2TagGaps(trackId: number): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+    apiClient.post(`library/v2/tracks/${trackId}/fill-tag-gaps`, { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Fill tag gaps failed');
+  if (!payload.job_id) throw new Error('Fill tag gaps did not return a job id');
+  return payload.job_id;
+}
+
 export interface LibraryV2DuplicateSide {
   track_id: number;
   album_title: string | null;
@@ -1430,7 +1442,17 @@ export async function fetchLibraryV2AlbumArtOptions(
     success: boolean;
     candidates: LibraryV2ArtCandidate[];
     error?: string;
-  }>(apiClient.get(`library/v2/albums/${albumId}/art-options`, { searchParams: params }));
+  }>(
+    apiClient.get(`library/v2/albums/${albumId}/art-options`, {
+      searchParams: params,
+      // iss27-03: the backend fans out to ~7 providers under its own bounded
+      // budget (core.metadata.artist_image._CANDIDATE_GATHER_TIMEOUT_S) —
+      // ky's 10s default was tighter than that budget plus network/JSON
+      // overhead, so a fully-successful backend answer could still arrive
+      // after the client had already given up and blanked the picker.
+      timeout: 20_000,
+    }),
+  );
   if (!payload.success) throw new Error(payload.error || 'Failed to load cover art options');
   return payload.candidates;
 }
@@ -1458,7 +1480,13 @@ export async function fetchLibraryV2ArtistArtOptions(
     success: boolean;
     candidates: LibraryV2ArtCandidate[];
     error?: string;
-  }>(apiClient.get(`library/v2/artists/${artistId}/art-options`, { searchParams: params }));
+  }>(
+    apiClient.get(`library/v2/artists/${artistId}/art-options`, {
+      searchParams: params,
+      // iss27-03: see the matching comment on fetchLibraryV2AlbumArtOptions.
+      timeout: 20_000,
+    }),
+  );
   if (!payload.success) throw new Error(payload.error || 'Failed to load photo options');
   return payload.candidates;
 }

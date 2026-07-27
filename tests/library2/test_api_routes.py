@@ -2527,6 +2527,107 @@ def test_retag_write_409s_when_conflicting_job_never_finishes(api, monkeypatch):
         api_module._job_registry.finish(blocking["job_id"])
 
 
+def test_fill_tag_gaps_404_for_unknown_track(api):
+    client, _db, _ids = api
+    response = client.post("/api/library/v2/tracks/999999/fill-tag-gaps")
+
+    assert response.status_code == 404
+
+
+def test_fill_tag_gaps_enriches_the_album_before_writing_tags(api, monkeypatch):
+    """iss27-02: a tag-gap click must try providers for whatever the
+    catalogue is missing before writing — not just push what it already
+    had (that was the older, narrower T-03 fix)."""
+    from core.library2 import native_enrich
+
+    calls = []
+
+    def _fake_enrich(conn, entity_type, entity_id, service, **kwargs):
+        calls.append((entity_type, entity_id, service))
+        if service == "deezer":
+            return {"success": True, "source": "deezer"}
+        return {"success": False}
+
+    monkeypatch.setattr(native_enrich, "enrich_native_entity_for_service", _fake_enrich)
+
+    client, _db, ids = api
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fill-tag-gaps")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    state = _wait_for_job(client, payload["job_id"])
+    assert state["error"] is None
+    assert state["result"]["enriched_from"] == "deezer"
+    # Stopped at the first successful provider — no need to keep walking.
+    assert calls == [("album", ids["views"], "deezer")]
+
+
+def test_fill_tag_gaps_falls_back_through_providers_until_one_succeeds(api, monkeypatch):
+    from core.library2 import native_enrich
+
+    attempted = []
+
+    def _fake_enrich(conn, entity_type, entity_id, service, **kwargs):
+        attempted.append(service)
+        if service == "spotify":
+            return {"success": True, "source": "spotify"}
+        return {"success": False}
+
+    monkeypatch.setattr(native_enrich, "enrich_native_entity_for_service", _fake_enrich)
+
+    client, _db, ids = api
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fill-tag-gaps")
+    state = _wait_for_job(client, response.get_json()["job_id"])
+
+    assert state["result"]["enriched_from"] == "spotify"
+    # Earlier providers in priority order were tried and failed first.
+    assert attempted[: attempted.index("spotify")]
+
+
+def test_fill_tag_gaps_still_writes_when_no_provider_has_anything_new(api, monkeypatch):
+    """Best-effort: exhausting every provider without a hit is not an error
+    — the file write still runs with whatever the catalogue already has."""
+    from core.library2 import native_enrich
+
+    monkeypatch.setattr(
+        native_enrich, "enrich_native_entity_for_service",
+        lambda conn, entity_type, entity_id, service, **kwargs: {"success": False},
+    )
+
+    client, _db, ids = api
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fill-tag-gaps")
+
+    assert response.status_code == 200
+    state = _wait_for_job(client, response.get_json()["job_id"])
+    assert state["error"] is None
+    assert state["result"]["enriched_from"] is None
+
+
+def test_fill_tag_gaps_tolerates_a_provider_that_raises(api, monkeypatch):
+    """One provider erroring must not abort the walk — the next provider in
+    priority order still gets a chance, matching the resilience the
+    Change-Photo picker fix relies on elsewhere (iss27-03)."""
+    from core.library2 import native_enrich
+
+    def _fake_enrich(conn, entity_type, entity_id, service, **kwargs):
+        if service == "deezer":
+            raise RuntimeError("boom")
+        if service == "itunes":
+            return {"success": True, "source": "itunes"}
+        return {"success": False}
+
+    monkeypatch.setattr(native_enrich, "enrich_native_entity_for_service", _fake_enrich)
+
+    client, _db, ids = api
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fill-tag-gaps")
+
+    assert response.status_code == 200
+    state = _wait_for_job(client, response.get_json()["job_id"])
+    assert state["error"] is None
+    assert state["result"]["enriched_from"] == "itunes"
+
+
 @pytest.mark.parametrize("limit", ["abc", "0", "-1", "1001"])
 def test_acquisition_history_rejects_invalid_limits(api, limit):
     client, _db, _ids = api

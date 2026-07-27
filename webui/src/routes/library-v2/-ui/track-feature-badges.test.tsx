@@ -224,15 +224,18 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     expect(onOpenTags).toHaveBeenCalledOnce();
   });
 
-  it('clicking "N tag gaps" writes this track\'s tags and never claims success optimistically', async () => {
-    let submittedIds: unknown = null;
+  it('clicking "N tag gaps" re-fetches from providers then writes this track\'s tags, never claiming success optimistically', async () => {
+    let requestedTrackId: string | undefined;
     server.use(
-      http.post('/api/library/v2/tags/write', async ({ request }) => {
-        submittedIds = ((await request.json()) as { track_ids: unknown }).track_ids;
+      http.post('/api/library/v2/tracks/:trackId/fill-tag-gaps', ({ params }) => {
+        requestedTrackId = params.trackId as string;
         return HttpResponse.json({ success: true, job_id: 'retag-job-1' });
       }),
       http.get('/api/library/v2/jobs/status', () =>
-        HttpResponse.json({ running: false, result: { written: 1, skipped: 0, failed: 0 } }),
+        HttpResponse.json({
+          running: false,
+          result: { written: 1, skipped: 0, failed: 0, enriched_from: 'deezer' },
+        }),
       ),
     );
     renderWithClient(
@@ -245,9 +248,12 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     const button = screen.getByRole('button', { name: '1 tag gaps' });
     fireEvent.click(button);
 
-    await waitFor(() => expect(submittedIds).toEqual([7]));
+    await waitFor(() => expect(requestedTrackId).toBe('7'));
     await waitFor(() =>
-      expect(window.showToast).toHaveBeenCalledWith('Tags written to file.', 'success'),
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Refetched from deezer and wrote tags to file.',
+        'success',
+      ),
     );
   });
 
@@ -257,11 +263,14 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     // "Tags written" is how the same two gaps kept coming back after a click
     // that looked successful.
     server.use(
-      http.post('/api/library/v2/tags/write', () =>
+      http.post('/api/library/v2/tracks/:trackId/fill-tag-gaps', () =>
         HttpResponse.json({ success: true, job_id: 'retag-job-3' }),
       ),
       http.get('/api/library/v2/jobs/status', () =>
-        HttpResponse.json({ running: false, result: { written: 0, skipped: 1, failed: 0 } }),
+        HttpResponse.json({
+          running: false,
+          result: { written: 0, skipped: 1, failed: 0, enriched_from: null },
+        }),
       ),
     );
     renderWithClient(
@@ -275,7 +284,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
 
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith(
-        'Nothing to write — the library has no value for these tags yet.',
+        'Nothing to write — no configured provider has these tags yet.',
         'info',
       ),
     );
@@ -283,7 +292,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
 
   it('surfaces a failed tag write as the button title without claiming "tags ✓"', async () => {
     server.use(
-      http.post('/api/library/v2/tags/write', () =>
+      http.post('/api/library/v2/tracks/:trackId/fill-tag-gaps', () =>
         HttpResponse.json({ success: true, job_id: 'retag-job-2' }),
       ),
       http.get('/api/library/v2/jobs/status', () =>

@@ -46,11 +46,8 @@ describe('library v2 interactive grab', () => {
     server.use(
       http.get('/api/search/sources', () =>
         HttpResponse.json({
-          mode: 'hybrid',
-          sources: [
-            { name: 'soulseek', display_name: 'Soulseek' },
-            { name: 'usenet', display_name: 'Usenet' },
-          ],
+          mode: 'soulseek',
+          sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
         }),
       ),
       http.post('/api/search', () =>
@@ -104,7 +101,7 @@ describe('library v2 interactive grab', () => {
     expect(submitted[1]).toEqual(submitted[0]);
   });
 
-  it('passes an explicitly selected configured source to the shared search endpoint', async () => {
+  it('iss27-01: searches every configured source in parallel by default', async () => {
     const searches: unknown[] = [];
     server.use(
       http.get('/api/search/sources', () =>
@@ -129,14 +126,66 @@ describe('library v2 interactive grab', () => {
       </QueryClientProvider>,
     );
 
+    // The initial auto-run waits for the source list, then fans out to
+    // every configured source instead of relying on a single fallback pick.
+    await waitFor(() => expect(searches).toHaveLength(2));
+    expect(searches).toEqual(
+      expect.arrayContaining([
+        { query: 'Artist Selected', source: 'soulseek' },
+        { query: 'Artist Selected', source: 'usenet' },
+      ]),
+    );
+
     const source = await screen.findByLabelText('Download source');
-    await waitFor(() => expect(source).toHaveTextContent('Usenet'));
     fireEvent.change(source, { target: { value: 'usenet' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
-    await waitFor(() => expect(searches).toHaveLength(2));
-    expect(searches[0]).toEqual({ query: 'Artist Selected' });
-    expect(searches[1]).toEqual({ query: 'Artist Selected', source: 'usenet' });
+    await waitFor(() => expect(searches).toHaveLength(3));
+    expect(searches[2]).toEqual({ query: 'Artist Selected', source: 'usenet' });
+  });
+
+  it('iss27-01: merges results from the sources that succeed when one source search fails', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [
+            { name: 'soulseek', display_name: 'Soulseek' },
+            { name: 'usenet', display_name: 'Usenet' },
+          ],
+        }),
+      ),
+      http.post('/api/search', async ({ request }) => {
+        const body = (await request.json()) as { source?: string };
+        if (body.source === 'usenet') {
+          return HttpResponse.json({ error: 'Usenet indexer timed out' }, { status: 500 });
+        }
+        return HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              username: 'peer',
+              filename: 'Found.flac',
+              title: 'Found',
+              quality: 'flac',
+              size: 10,
+            },
+          ],
+        });
+      }),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    // Soulseek's result still renders even though Usenet's search failed —
+    // one source failing must not blank the whole result set (iss27-01).
+    await screen.findByText('Found');
+    expect(screen.queryByText(/search failed/i)).not.toBeInTheDocument();
   });
 
   it('filters to only results meeting the quality profile cutoff (deep-dive D3)', async () => {

@@ -306,6 +306,61 @@ def test_current_photo_leads_the_grid_as_reference():
 
 
 
+def test_musicbrainz_relations_contribute_a_candidate_when_mbid_is_known(monkeypatch):
+    """iss27-03: MusicBrainz is excluded from the generic by-name search (see
+    the skip-set test above), but the picker already has the artist's own
+    MBID — its exact url-relations lookup must still be asked instead of
+    treating "musicbrainz" as entirely unqueryable."""
+    monkeypatch.setattr(ai, "_image_from_musicbrainz_relations",
+                        lambda mbid: "https://mb-rel/photo.jpg" if mbid == "mb-1" else None)
+    _wire_registry(monkeypatch, {}, ["spotify"])
+
+    cands = ai.gather_artist_image_candidates(
+        "Adele", {"musicbrainz_artist_id": "mb-1"})
+
+    assert {"source": "musicbrainz", "url": "https://mb-rel/photo.jpg"} in cands
+
+
+def test_musicbrainz_relations_skipped_without_an_mbid(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ai, "_image_from_musicbrainz_relations",
+                        lambda mbid: calls.append(mbid) or None)
+    _wire_registry(monkeypatch, {}, ["spotify"])
+
+    ai.gather_artist_image_candidates("Adele", {})
+
+    assert calls == []
+
+
+def test_one_slow_source_does_not_block_or_drop_the_others(monkeypatch):
+    """iss27-03: a provider stuck past the shared time budget (module-level
+    rate-limit backoff sleeping inside the worker thread, in production) must
+    not blank out sources that already answered — only the slow one is
+    missing from this round."""
+    import threading as _threading
+
+    released = _threading.Event()
+
+    class _SlowClient(_Client):
+        def search_artists(self, name, limit=1):
+            released.wait(timeout=5)  # blocks well past the gather's budget
+            return super().search_artists(name, limit=limit)
+
+    monkeypatch.setattr(ai, "_CANDIDATE_GATHER_TIMEOUT_S", 0.2)
+    clients = {
+        "deezer": _Client(search_hit=SimpleNamespace(image_url="https://dz/img.jpg")),
+        "itunes": _SlowClient(search_hit=SimpleNamespace(image_url="https://slow/img.jpg")),
+    }
+    _wire_registry(monkeypatch, clients, ["spotify", "deezer", "itunes"])
+
+    try:
+        cands = ai.gather_artist_image_candidates("Adele", {})
+    finally:
+        released.set()  # let the background thread finish so it doesn't leak
+
+    assert cands == [{"source": "deezer", "url": "https://dz/img.jpg"}]
+
+
 def test_text_artist_ids_work_end_to_end(tmp_path):
     """#1069: the exact Navidrome shape from the report — a TEXT primary key.
     Every db call the art endpoints make must take the string id verbatim."""

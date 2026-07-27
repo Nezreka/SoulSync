@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
 
@@ -389,14 +389,37 @@ export function InteractiveSearchModal({
     );
   }
 
+  const allSources = searchSourcesQuery.data?.sources ?? [];
+
+  /** iss27-01: with no explicit source picked and more than one source
+   *  configured, search every enabled source in parallel and merge the
+   *  results — a single source (or the orchestrator's single-source mode)
+   *  no longer silently stands in for "all sources". One source failing
+   *  (timeout, disconnected) doesn't blank the whole result set. */
   async function run(q: string, source = selectedSource) {
     if (!q.trim()) return;
     setLoading(true);
     setError(null);
     setResults([]);
     try {
-      const all = await searchSources(q, source || undefined);
-      setResults(all);
+      if (source || allSources.length <= 1) {
+        const all = await searchSources(q, source || undefined);
+        setResults(all);
+        return;
+      }
+      const settled = await Promise.allSettled(
+        allSources.map((s) => searchSources(q, s.name)),
+      );
+      const merged: SourceSearchResult[] = [];
+      const failed: string[] = [];
+      settled.forEach((outcome, i) => {
+        if (outcome.status === 'fulfilled') merged.push(...outcome.value);
+        else failed.push(allSources[i].display_name);
+      });
+      if (merged.length === 0 && failed.length > 0) {
+        throw new Error(`Search failed for ${failed.join(', ')}`);
+      }
+      setResults(merged);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Search failed');
     } finally {
@@ -404,11 +427,16 @@ export function InteractiveSearchModal({
     }
   }
 
-  // Auto-run once with the prefilled context query.
+  // Auto-run once with the prefilled context query — deferred until the
+  // source list has settled so the very first run already benefits from
+  // the all-sources fan-out above instead of racing it.
+  const autoRanRef = useRef(false);
   useEffect(() => {
+    if (autoRanRef.current || searchSourcesQuery.isLoading) return;
+    autoRanRef.current = true;
     void run(initialQuery, '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchSourcesQuery.isLoading]);
 
   async function grab(r: SourceSearchResult) {
     // §52.12.4: candidates outside the quality profile are shown (ProfileBadge)
@@ -482,9 +510,9 @@ export function InteractiveSearchModal({
             onChange={(e) => setSelectedSource(e.target.value)}
           >
             <option value="">
-              {searchSourcesQuery.data?.sources[0]
-                ? `Configured default — ${searchSourcesQuery.data.sources[0].display_name}`
-                : 'Configured default source'}
+              {allSources.length > 1
+                ? `All sources (${allSources.map((s) => s.display_name).join(', ')})`
+                : (allSources[0]?.display_name ?? 'Configured source')}
             </option>
             {searchSourcesQuery.data?.sources.map((source) => (
               <option key={source.name} value={source.name}>
@@ -539,13 +567,14 @@ export function InteractiveSearchModal({
             <div className={styles.inlineLoading}>
               {selectedSource
                 ? `Searching ${
-                    searchSourcesQuery.data?.sources.find(
-                      (source) => source.name === selectedSource,
-                    )?.display_name ?? selectedSource
+                    allSources.find((source) => source.name === selectedSource)?.display_name ??
+                    selectedSource
                   }…`
-                : searchSourcesQuery.data?.sources[0]
-                  ? `Searching configured default (${searchSourcesQuery.data.sources[0].display_name})…`
-                  : 'Searching configured default source…'}
+                : allSources.length > 1
+                  ? `Searching all sources (${allSources.map((s) => s.display_name).join(', ')})…`
+                  : allSources[0]
+                    ? `Searching ${allSources[0].display_name}…`
+                    : 'Searching…'}
             </div>
           ) : results.length === 0 ? (
             <div className={styles.inlineLoading}>

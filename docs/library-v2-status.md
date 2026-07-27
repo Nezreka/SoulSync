@@ -1480,16 +1480,16 @@ Aufnahme aller am 27. Juli 2026 definierten Nutzeranforderungen, UI-Optimierunge
 | 4 | Reorganize All Mechanismus | Dokumentation | Verified | [guide §5](library-v2-guide.md#5-technische-invarianten) | Ablauf bei Einstellungsänderung (Pfad-Templates, Move-Plan, Path-Sync & History) dokumentiert |
 | 5 | Preview Re-Tag UX | UI / UX | Pending | [iss27-07](library-v2-issues.md#iss27-07) | Übersichtliche Album-Unterteilung und visuelle Grenzen in Re-Tag Preview |
 | 6a | Tags Match Hover Breakdown | UI / Feature | Pending | [F-15](library-v2-features.md#feat-metadata) | Tooltip/Popover bei Tags Match für exakte Aufschlüsselung vorhandener vs. fehlender Tags |
-| 6b | Tag Gap Klick-Aktion Fix | Bugfix | Pending | [iss27-02](library-v2-issues.md#iss27-02) | Klick auf Tag Gap löst Provider-Re-Fetch und Schreiben der Tags in Datei aus |
-| 7 | Artist-scoped Refresh & Scan | Feature / Fix | Pending | [iss27-05](library-v2-issues.md#iss27-05) | Strikter Artist-Scope + physische Datei-Inspektion (Audio Stream Quality, Features, Verification Tags) |
+| 6b | Tag Gap Klick-Aktion Fix | Bugfix | **Implemented** (§32) | [iss27-02](library-v2-issues.md#iss27-02) | Klick auf Tag Gap löst Provider-Re-Fetch und Schreiben der Tags in Datei aus |
+| 7 | Artist-scoped Refresh & Scan | Feature / Fix | **Verified** (§32) | [iss27-05](library-v2-issues.md#iss27-05) | Strikter Artist-Scope + physische Datei-Inspektion (Audio Stream Quality, Features, Verification Tags) — war bereits per `0cd7167a6` behoben |
 | 8 | Column Settings Layout Redesign | UI / UX | Pending | [iss27-06](library-v2-issues.md#iss27-06) | Umbau des Column Settings Modals von langer vertikaler Liste zu Mehrspalten/Tab-Layout |
-| 9 | Navigation State Reset bei Artist-Wechsel | UI / UX | Pending | [iss27-04](library-v2-issues.md#iss27-04) | Beim Betreten eines neuen Artists immer auf „My Library" zurücksetzen (kein Auto-Fetch von All Releases) |
-| 10 | Change Photo Provider Reliability | Bugfix | Pending | [iss27-03](library-v2-issues.md#iss27-03) | Verlässliche Foto-Abfrage über alle 5-6 Metadata Provider ohne Stille Ausfälle |
+| 9 | Navigation State Reset bei Artist-Wechsel | UI / UX | **Implemented** (§32) | [iss27-04](library-v2-issues.md#iss27-04) | Beim Betreten eines neuen Artists immer auf „My Library" zurücksetzen (kein Auto-Fetch von All Releases) |
+| 10 | Change Photo Provider Reliability | Bugfix | **Implemented** (§32) | [iss27-03](library-v2-issues.md#iss27-03) | Verlässliche Foto-Abfrage über alle 5-6 Metadata Provider ohne Stille Ausfälle — Fanart.tv-Integration bewusst nicht enthalten (neues Feature, kein Fix) |
 | 11a | Verification Tag Reader | Backend / Feature | Pending | [F-15](library-v2-features.md#feat-metadata) | Lesen von `HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT` direkt aus Audio-Tags |
 | 11b | Verification Table Column | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Neue Tabellenspalte „Verification" / „Verified" (`verification_status`) |
 | 12 | Import Review Removal | Decision | Removed | [F-12](library-v2-features.md#feat-acq-review) | `/import-review` Route und UI-Seite vollständig aus diesem PR-Scope gelöscht |
-| 13a | Interactive Search UI Redesign & Source Filter | UI / UX | Pending | [iss27-01](library-v2-issues.md#iss27-01) | Moderne Checkboxen, Standard: alle Quellen durchsuchen, vereinfachter Quellenswitcher (Ref: Basic Search) |
-| 13b | Interactive Search Defekt-Fix | Bugfix | Pending | [iss27-01](library-v2-issues.md#iss27-01) | Behebung des Defekts von Interactive Search unter Verwendung von Basic Search als Referenz |
+| 13a | Interactive Search UI Redesign & Source Filter | UI / UX | Partially implemented (§32) | [iss27-01](library-v2-issues.md#iss27-01) | Standard durchsucht jetzt alle konfigurierten Quellen parallel; Toggle-Redesign der Checkboxen bleibt offen |
+| 13b | Interactive Search Defekt-Fix | Bugfix | **Implemented** (§32) | [iss27-01](library-v2-issues.md#iss27-01) | Garantiert-leere Anfrage für unbetitelte Tracks behoben (Fallback auf Albumtitel) |
 | 14 | Library Header Actions | UI / Feature | Pending | [F-13](library-v2-features.md#feat-search) | Button „Automatic Search" (Missing Wishlist + Cutoff Unmet Upgrade Search); `Re-Import Library` bleibt temporär |
 | 15 | Referenz auf Basic Search | Dokumentation | Verified | [iss27-01](library-v2-issues.md#iss27-01) | Querverweis in Doku aufgenommen, Basic Search für Search-Overhaul als Vorbild zu nutzen |
 
@@ -1520,3 +1520,65 @@ Punkte bleiben bewusst offen, beide auf ausdrückliche Nutzerentscheidung
 weiterhin Teil des §9-Gates: Failure-Injection pro Werkzeug (Restart im Apply,
 read-only Root, Windows-/Docker-Pfad-Mapping) sowie ein realer Lauf des
 Post-Import-Triggers gegen laufende Importe.
+
+## 32. Umsetzung der §31-Bugfixes iss27-01/02/03/04/05 (27. Juli 2026)
+
+Fortsetzung von §31: die fünf als „Bugfix"/„Feature / Fix" klassifizierten
+Punkte aus der Übersichtstabelle (6b, 7, 9, 10, 13b, teilweise 13a) wurden
+recherchiert und umgesetzt; die drei reinen UI/UX-Layout-Punkte (8, iss27-07,
+iss27-08) sowie die Fanart.tv-Provider-Integration blieben bewusst
+unangetastet — das sind Gestaltungs- bzw. neue-Feature-Entscheidungen, keine
+Bugfixes, und die einleitende Regel in §20/§31 verlangt für solche Punkte
+explizite Rückfragen an den Nutzer statt eigenmächtiger Designentscheidungen.
+
+Details je Punkt stehen jetzt direkt unter der jeweiligen
+`docs/library-v2-issues.md` §20-Unterüberschrift (iss27-01 bis iss27-05,
+jeweils mit „Umsetzung"-Absatz). Kurzfassung:
+
+- **iss27-04** (Navigation): `releases`-Suchparameter wird bei jeder
+  Navigation auf einen neuen Artist zurückgesetzt (4 Callsites in
+  `library-v2-page.tsx`).
+- **iss27-01** (Interactive Search): Root Cause war NICHT der in der Doku
+  vermutete Strukturunterschied zu Basic Search (beide treffen bereits
+  denselben Endpunkt) — echte Bugs waren eine garantiert-leere Anfrage für
+  unbetitelte Tracks und eine Einzel-Quellen-Suche ohne Fan-out. Beides
+  behoben; das Checkbox/Toggle-Redesign bleibt offen.
+- **iss27-02** (Tag Gaps): neuer Endpunkt
+  `POST /api/library/v2/tracks/<id>/fill-tag-gaps` komponiert
+  `enrich_native_entity_for_service` (Provider-Prioritätswalk) +
+  `retag.write_tags` statt nur Letzteres — füllt jetzt Felder, die die
+  Katalog-DB noch gar nicht hatte.
+- **iss27-03** (Change Photo): Root Cause war ein fehlendes Zeitbudget im
+  Provider-Fan-out (`pool.map()` blockierte auf den langsamsten Thread),
+  nicht fehlende Fehlerisolation (die war schon da). Bounded
+  `concurrent.futures.wait(timeout=10)`, MusicBrainz-Relations-Resolver
+  jetzt tatsächlich verdrahtet, Frontend-Timeout auf 20s erhöht,
+  manueller Refresh-Button gegen den 5-Minuten-Cache.
+- **iss27-05** (Refresh & Scan): bereits vor dieser Session durch
+  `0cd7167a6` behoben; nur verifiziert, keine Änderung nötig.
+
+### Verifikation
+
+- Frontend: `npx vitest run` — **278 von 278 Tests grün** (47 Dateien,
+  inkl. 2 neuer Testdateien `build-search-query.test.ts`,
+  `art-picker-modal.test.tsx`), `oxlint --type-check src` sauber (0 Fehler).
+- Backend: `tests/library2`, `tests/metadata`, `tests/test_artist_image_picker.py`
+  — alle grün (Exit-Code 0); `ruff check` über alle geänderten
+  Python-Dateien sauber.
+- Geänderte Dateien: `api/library_v2.py`, `core/metadata/artist_image.py`,
+  `webui/src/routes/library-v2/-library-v2.api.ts`,
+  `webui/src/routes/library-v2/-ui/{library-v2-page,interactive-search,art-picker-modal}.tsx`
+  plus zugehörige Tests.
+
+### Einstufung
+
+Alle fünf als Bugfix/Fix klassifizierten §31-Punkte sind abgeschlossen (vier
+umgesetzt, einer als bereits erledigt verifiziert). iss27-01s
+UI-Redesign-Anteil (Punkt 13a) ist nur teilweise erledigt — die
+funktionale Quellenauswahl (alle Quellen parallel) steht, das visuelle
+Toggle-Redesign nicht. Offen und bewusst nicht angefasst: Punkt 8
+(Column Settings Layout), iss27-07 (Preview-Re-Tag-Gliederung), iss27-08
+(Maintenance-Umbenennung/-Gruppierung) sowie Punkt 6a/11a/11b (Hover-Popover,
+Verification-Tag-Reader/-Spalte — 6a ist über das bestehende
+`title`-Tooltip bereits funktional abgedeckt, siehe §20.2-Notiz in
+`library-v2-issues.md`).

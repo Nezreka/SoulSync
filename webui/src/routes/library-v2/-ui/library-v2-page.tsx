@@ -25,6 +25,7 @@ import {
   fetchLibraryV2Duplicates,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2JobStatus,
+  fillLibraryV2TagGaps,
   fetchLibraryV2TrackHistory,
   fetchLibraryV2TrackLyrics,
   LIBRARY_V2_ALBUM_TYPES,
@@ -181,16 +182,27 @@ const INTERACTIVE_RE = /^Interactive Search\b/;
  *  carried alongside the action string decides artist/album/track scope. */
 const SCOPED_SEARCH_RE = /^(Automatic Search|Search|Grab Release)\b/;
 
+/** An untitled track's display label falls back to "Track <n>"/"Track ?"
+ *  (see the track-row `label` in `TrackRow`) — that placeholder makes a
+ *  guaranteed-empty search query, so it must never be sent to search. */
+const PLACEHOLDER_TRACK_LABEL_RE = /^Track\s+(\?|\d+)$/;
+
 /** Build a source-search query from an artist name + an action label like
- *  "Interactive Search: Title (Album)". */
-function buildSearchQuery(artistName: string, action: string): string {
+ *  "Interactive Search: Title (Album)". Falls back to the album context
+ *  (iss27-01) when the title is really just the untitled-track placeholder. */
+export function buildSearchQuery(artistName: string, action: string): string {
   const idx = action.indexOf(': ');
   if (idx === -1) return artistName; // artist-level search
-  const rest = action
-    .slice(idx + 2)
+  const tail = action.slice(idx + 2);
+  const albumMatch = tail.match(/\(([^)]*)\)\s*$/);
+  const album = albumMatch ? albumMatch[1].trim() : '';
+  let rest = tail
     .replace(/\s*\([^)]*\)\s*$/, '') // drop trailing "(album)" context
     .replace(/\s*-\s*missing\s*$/i, '')
     .trim();
+  if (album && PLACEHOLDER_TRACK_LABEL_RE.test(rest)) {
+    rest = album;
+  }
   return `${artistName} ${rest}`.trim();
 }
 
@@ -4193,7 +4205,12 @@ function WantedIndexView() {
                     className={styles.linkButton}
                     onClick={() =>
                       void navigate({
-                        search: (p) => ({ ...p, artist: row.artist.id, album: undefined }),
+                        search: (p) => ({
+                          ...p,
+                          artist: row.artist.id,
+                          album: undefined,
+                          releases: undefined,
+                        }),
                       })
                     }
                   >
@@ -4302,7 +4319,9 @@ function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
         <ArtistCard
           key={artist.id}
           artist={artist}
-          onOpen={(artistId) => void navigate({ search: (p) => ({ ...p, artist: artistId }) })}
+          onOpen={(artistId) =>
+            void navigate({ search: (p) => ({ ...p, artist: artistId, releases: undefined }) })
+          }
         />
       ))}
     </div>
@@ -4407,7 +4426,9 @@ function ArtistTable({
           <tr
             key={artist.id}
             className={styles.tableRow}
-            onClick={() => void navigate({ search: (p) => ({ ...p, artist: artist.id }) })}
+            onClick={() =>
+              void navigate({ search: (p) => ({ ...p, artist: artist.id, releases: undefined }) })
+            }
           >
             <td>
               <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
@@ -4474,6 +4495,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
         ...previous,
         album: undefined,
         artist: album?.primary_artist?.id ?? previous.artist,
+        releases: undefined,
       }),
     });
 
@@ -6344,25 +6366,39 @@ export function TrackMetadataGapsCell({
   const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: async () => {
-      const jobId = await writeLibraryV2Tags([track.id as number]);
+      // iss27-02: unlike the plain write-tags button, a tag-gap click first
+      // re-queries providers for whatever the catalogue is missing, so a
+      // field the catalogue never had (not just one it already had) gets a
+      // real chance to be filled before the file write.
+      const jobId = await fillLibraryV2TagGaps(track.id as number);
       const state = await awaitBulkJobState(queryClient, jobId);
       if (state.error) throw new Error(state.error);
-      return Number(state.result?.written ?? 0);
+      return {
+        written: Number(state.result?.written ?? 0),
+        enrichedFrom: (state.result?.enriched_from as string | null | undefined) ?? null,
+      };
     },
-    onSuccess: (written) => {
+    onSuccess: ({ written, enrichedFrom }) => {
       // The endpoint reports success even when it wrote to no file — a gap the
       // catalogue itself cannot fill (no genre stored on the album) leaves
       // nothing to write. Claiming "Tags written" there is what made the same
       // gaps look permanent after an apparently successful click (T-03).
-      if (written > 0) window.showToast?.('Tags written to file.', 'success');
-      else
+      if (written > 0) {
         window.showToast?.(
-          'Nothing to write — the library has no value for these tags yet.',
+          enrichedFrom
+            ? `Refetched from ${enrichedFrom} and wrote tags to file.`
+            : 'Tags written to file.',
+          'success',
+        );
+      } else {
+        window.showToast?.(
+          'Nothing to write — no configured provider has these tags yet.',
           'info',
         );
+      }
     },
     onError: (error) => {
-      window.showToast?.(mutationErrorMessage(error, 'Write tags failed'), 'error');
+      window.showToast?.(mutationErrorMessage(error, 'Fill tag gaps failed'), 'error');
     },
   });
 

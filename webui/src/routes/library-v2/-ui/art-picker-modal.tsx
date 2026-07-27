@@ -25,9 +25,13 @@ export function AlbumArtPickerModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  // iss27-03: a 5-minute server cache can pin a partial result from a
+  // transient provider hiccup — bumping this forces `?refresh=1`, a fresh
+  // cache slot (so it can't collide with the still-displayed stale one).
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const optionsQuery = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'art-options', albumId],
-    queryFn: () => fetchLibraryV2AlbumArtOptions(albumId),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'art-options', albumId, refreshNonce],
+    queryFn: () => fetchLibraryV2AlbumArtOptions(albumId, { refresh: refreshNonce > 0 }),
     staleTime: 0,
   });
   const [busyUrl, setBusyUrl] = useState<string | null>(null);
@@ -58,6 +62,15 @@ export function AlbumArtPickerModal({
       >
         <div className={styles.modalHeader}>
           <h3>Change Cover — {albumTitle}</h3>
+          <button
+            type="button"
+            className={styles.iconAction}
+            title="Refresh — re-query every provider instead of the cached result"
+            disabled={optionsQuery.isFetching}
+            onClick={() => setRefreshNonce((n) => n + 1)}
+          >
+            ⟳
+          </button>
           <button type="button" className={styles.iconAction} title="Close" onClick={onClose}>
             ✕
           </button>
@@ -114,9 +127,11 @@ export function ArtistImagePickerModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  // iss27-03: see the matching comment in AlbumArtPickerModal above.
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const optionsQuery = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-art-options', artistId],
-    queryFn: () => fetchLibraryV2ArtistArtOptions(artistId),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-art-options', artistId, refreshNonce],
+    queryFn: () => fetchLibraryV2ArtistArtOptions(artistId, { refresh: refreshNonce > 0 }),
     staleTime: 0,
   });
   const [busyUrl, setBusyUrl] = useState<string | null>(null);
@@ -147,6 +162,15 @@ export function ArtistImagePickerModal({
       >
         <div className={styles.modalHeader}>
           <h3>Change Photo — {artistName}</h3>
+          <button
+            type="button"
+            className={styles.iconAction}
+            title="Refresh — re-query every provider instead of the cached result"
+            disabled={optionsQuery.isFetching}
+            onClick={() => setRefreshNonce((n) => n + 1)}
+          >
+            ⟳
+          </button>
           <button type="button" className={styles.iconAction} title="Close" onClick={onClose}>
             ✕
           </button>

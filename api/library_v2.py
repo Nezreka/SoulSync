@@ -4342,6 +4342,82 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=_run, name="lib2-retag", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
+    @app.route("/api/library/v2/tracks/<int:eid>/fill-tag-gaps", methods=["POST"])
+    def lib2_fill_tag_gaps(eid):
+        """iss27-02: the Tags-Match "N tag gaps" click. Unlike plain
+        ``/tags/write`` (which only ever pushes whatever the catalogue
+        already has — a no-op for a field the catalogue never had, T-03),
+        this first re-queries providers for the track's album so a
+        genuinely-missing field (cover/genre/year/album title/album artist —
+        the common case for a never-enriched native artist) has a chance to
+        get filled, THEN writes the track's tags. Best-effort, source-
+        priority walk; a provider with nothing new is not an error.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT id, album_id FROM lib2_tracks WHERE id=?", (eid,),
+            ).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Track not found"}), 404
+            album_id = row["album_id"]
+        finally:
+            conn.close()
+
+        try:
+            job = _job_registry.start("retag", total=1)
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False,
+                "error": str(exc),
+                "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
+
+        def _run():
+            enriched_from = None
+            if album_id:
+                from core.library2.match_status import SERVICES
+                from core.library2.native_enrich import enrich_native_entity_for_service
+                from core.metadata.registry import METADATA_SOURCE_PRIORITY
+                valid_album_services = {s for s, _label, cols in SERVICES if "album" in cols}
+                providers = [s for s in METADATA_SOURCE_PRIORITY if s in valid_album_services]
+                for source in providers:
+                    enrich_conn = _conn()
+                    try:
+                        result = enrich_native_entity_for_service(
+                            enrich_conn, "album", album_id, source,
+                        )
+                        if result.get("success"):
+                            enrich_conn.commit()
+                            enriched_from = source
+                            break
+                        enrich_conn.rollback()
+                    except Exception as exc:  # noqa: BLE001
+                        enrich_conn.rollback()
+                        logger.debug(
+                            "fill-tag-gaps: %s enrich failed for album %s: %s",
+                            source, album_id, exc,
+                        )
+                    finally:
+                        enrich_conn.close()
+            try:
+                from core.library2 import retag
+                stats = retag.write_tags(get_database(), [eid], embed_cover=True)
+                stats["enriched_from"] = enriched_from
+                _job_registry.update(job_id, result=stats)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Library v2 fill-tag-gaps failed: %s", e, exc_info=True)
+                _job_registry.update(job_id, error=str(e))
+            finally:
+                _job_registry.finish(job_id)
+
+        threading.Thread(target=_run, name="lib2-fill-tag-gaps", daemon=True).start()
+        return jsonify({"success": True, "started": True, "job_id": job_id})
+
     # -- refresh & scan (re-read tags into DB + bust artwork cache) -----------
 
     @app.route("/api/library/v2/<entity>/<int:eid>/refresh", methods=["POST"])

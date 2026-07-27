@@ -2804,7 +2804,7 @@ Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-P
 > **Wichtiger Arbeitsauftrag für die nächste Chat-Session:** Der nächste Chat muss vor der Ausführung aller in Abschnitt 20 genannten Punkte selbstständig weiter im Code recherchieren und bei etwaigen Unklarheiten oder Detailentscheidungen gezielt Gegenfragen an den Nutzer stellen!
 
 
-### 20.1 <a name="iss27-01"></a> iss27-01 — Interactive Search ist defekt und Quellenauswahl unübersichtlich
+### 20.1 <a name="iss27-01"></a> iss27-01 — Interactive Search ist defekt und Quellenauswahl unübersichtlich — Teilweise behoben, 27. Juli 2026
 
 **Symptom:** Klick auf Interactive Search bei Alben oder Einzel-Tracks schlägt fehl, zeigt keine Kandidaten oder bricht ab. Auch Automatic Search ist dadurch betroffen. Die Checkboxen („Quality Check“, „Acoustic ID Check“, „Only Show Results with Cutoff“) wirken optisch unansehnlich und die Quellenauswahl ist schwer verständlich.
 
@@ -2816,7 +2816,23 @@ Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-P
 3. Automatic Search auf Track-Ebene strikt auf die jeweilige Track-Entity scopen.
 4. UI-Redesign der Checkboxen („Quality Check“, „AcoustID Check“, „Cutoff-Filter“) zu modernen Toggle-Controls.
 
-### 20.2 <a name="iss27-02"></a> iss27-02 — Tag Gaps Klick-Aktion löst Re-Fetch und Tag-Schreiben nicht aus
+**Umsetzung (27. Juli 2026):** Root-Cause-Recherche zeigte, dass Interactive
+Search und Basic Search bereits denselben Backend-Endpunkt
+(`/api/search` → `core/search/basic.py::run_basic_search`) treffen — der in
+der Doku vermutete Strukturunterschied existiert nicht (mehr). Zwei echte
+Bugs gefunden und behoben: (1) `buildSearchQuery` baute für unbetitelte
+Tracks eine garantiert leere Anfrage wie `"Artist Track ?"` — fällt jetzt auf
+den Albumtitel zurück (`webui/.../library-v2-page.tsx`, Test
+`build-search-query.test.ts`). (2) Ohne explizite Quellenauswahl wurde nur
+EINE Quelle befragt („configured default“) statt aller aktivierten Quellen —
+`InteractiveSearchModal` fragt jetzt bei mehreren konfigurierten Quellen alle
+parallel ab und mergt die Ergebnisse; ein einzelner ausgefallener Source
+leert nicht mehr die gesamte Liste (`interactive-search.tsx`, Tests in
+`interactive-search.test.tsx`). Punkt 4 (Toggle-Redesign der Checkboxen) und
+die vollständige Quellenauswahl-UI (Multi-Select-Chips statt Dropdown)
+bleiben offen — reine Visual-Politur, keine Funktionsblocker.
+
+### 20.2 <a name="iss27-02"></a> iss27-02 — Tag Gaps Klick-Aktion löst Re-Fetch und Tag-Schreiben nicht aus — Behoben, 27. Juli 2026
 
 **Symptom:** Im Tags Match Werkzeug führt das Klicken auf ein fehlendes Tag (Tag Gap) nicht dazu, dass die entsprechenden Metadaten/Artwork von den Providern neu heruntergeladen und in die physische Audio-Datei geschrieben werden.
 
@@ -2825,7 +2841,27 @@ Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-P
 2. Der Klick muss gezielt den Provider-Re-Fetch für dieses Feld starten und das Ergebnis über den Tag-Writer direkt in die physischen Audio-Tags schreiben.
 3. Beim Hovern über den Tags-Match-Status/Chip einen informativen Tooltip/Popover anzeigen, der analog zur Metadata-Vorschau exakt auflistet, welche Tags vorhanden sind und welche fehlen.
 
-### 20.3 <a name="iss27-03"></a> iss27-03 — Change Photo / Artist-Bild-Fetch unzuverlässig
+**Umsetzung (27. Juli 2026):** Root Cause war, dass `write_tags` nur
+Feldwerte schreibt, die die Katalog-DB bereits kennt — für einen Artist, der
+nie angereichert wurde (siehe
+[[library-v2-native-artist-enrich-deadend]]-artige Fälle), stand da schlicht
+nichts. Neuer Endpunkt `POST /api/library/v2/tracks/<id>/fill-tag-gaps`
+(`api/library_v2.py`) komponiert die vorhandenen Bausteine: läuft
+`enrich_native_entity_for_service` in Provider-Prioritätsreihenfolge
+(deezer→itunes→spotify→discogs→musicbrainz→jiosaavn→bandcamp) über das
+Album, bis einer greift, committet den Treffer und schreibt danach mit
+`retag.write_tags` die (jetzt evtl. gefüllten) Feldwerte in die Datei —
+Provider-Fehler pro Anbieter sind isoliert (ein Timeout/Fehler bricht die
+Kette nicht ab). Frontend-Klick auf „N tag gaps“ ruft jetzt diesen Endpunkt
+statt des reinen Write-Jobs (`fillLibraryV2TagGaps` in
+`-library-v2.api.ts`, `TrackMetadataGapsCell`). Tests:
+`tests/library2/test_api_routes.py::test_fill_tag_gaps_*` (Backend, 5 Fälle)
+und `track-feature-badges.test.tsx` (Frontend). Punkt 3 (Hover-Popover) war
+schon vor dieser Session über das native `title`-Attribut
+(`metadataGapsTooltip`) funktional abgedeckt — eine visuell reichhaltigere
+Popover-Variante bleibt offen (reine Politur).
+
+### 20.3 <a name="iss27-03"></a> iss27-03 — Change Photo / Artist-Bild-Fetch unzuverlässig — Teilweise behoben, 27. Juli 2026
 
 **Symptom:** Beim Öffnen des Foto-Pickers („Change Photo“) werden für manche Künstler nicht alle verfügbaren Provider-Bilder geladen oder einzelne Quellen fehlen vollständig in der Auswahl.
 
@@ -2833,7 +2869,31 @@ Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-P
 1. Provider-Fetch-Pipeline für Artist-Fotos prüfen: Alle 5 bis 6 konfigurierten Provider (Spotify, MusicBrainz, Deezer, Fanart.tv, iTunes etc.) müssen verlässlich abgefragt werden.
 2. Fehlerantworten oder Timeouts einzelner Provider isolieren, sodass funktionierende Quell-Kandidaten im Picker vollständig gerendert werden.
 
-### 20.4 <a name="iss27-04"></a> iss27-04 — Artist-Navigation behält Tab „All Releases" und löst ungewollte Diskografie-Fetches aus
+**Umsetzung (27. Juli 2026):** Jeder Provider war bereits einzeln
+try/except-isoliert — der eigentliche Root Cause war ein fehlendes
+Zeitbudget: `pool.map()` blockierte synchron auf den langsamsten Thread
+(iTunes-Rate-Limiter schläft bis zu 60s bei 403, Discogs-Backoff bis zu
+30s — beides INNERHALB des Worker-Threads), während der Frontend-Client nur
+10s (ky-Default) wartete — ein bereits vollständig erfolgreicher
+Backend-Lauf wurde so verworfen. Fix in
+`core/metadata/artist_image.py::gather_artist_image_candidates`: statt
+`pool.map()` jetzt `ThreadPoolExecutor` + `concurrent.futures.wait(...,
+timeout=10)` — ein einzelner langsamer Provider verpasst nur diese Runde,
+statt die Antwort für alle zu blockieren. Zusätzlich: MusicBrainz lieferte
+trotz vorhandener MBID nie einen Kandidaten (`_CANDIDATE_SKIP_SOURCES`
+schließt es aus dem generischen Namens-Suchpfad aus) — der bereits
+existierende, exakte `_image_from_musicbrainz_relations`-Resolver wird jetzt
+zusätzlich als eigene Kandidatenquelle abgefragt, wenn eine MBID bekannt
+ist. Frontend: `fetchLibraryV2ArtistArtOptions`/`fetchLibraryV2AlbumArtOptions`
+erhalten `timeout: 20_000` (passend zum neuen Backend-Budget), plus ein
+manueller „⟳ Refresh"-Button im Picker-Modal, der den 5-Minuten-Cache mit
+`?refresh=1` umgeht (`art-picker-modal.tsx`). **Nicht umgesetzt:** Fanart.tv
+ist in keinem der aktuell existierenden Sources verdrahtet (nur im separaten
+Video-Enrichment-Modul, `core/video/*`) — das wäre eine neue
+Provider-Integration, kein Bugfix, und bleibt bewusst offen. Tests:
+`tests/test_artist_image_picker.py` (3 neue Fälle), `art-picker-modal.test.tsx`.
+
+### 20.4 <a name="iss27-04"></a> iss27-04 — Artist-Navigation behält Tab „All Releases" und löst ungewollte Diskografie-Fetches aus — Behoben, 27. Juli 2026
 
 **Symptom:** Wenn der Nutzer in der Artist-Ansicht auf den Tab „All Releases" wechselt und anschließend zu einem anderen Künstler navigiert, bleibt die UI im Tab „All Releases" und löst sofort ein vollständiges Herunterladen der Diskografie des neuen Künstlers aus.
 
@@ -2843,7 +2903,18 @@ Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-P
 1. Bei jeder Navigation zu einem neuen Artist (ID-Wechsel) muss der `releases`-Suchparameter in der Navigation zwingend auf `'library'` zurückgesetzt (oder weggelassen) werden.
 2. Das Laden von „All Releases" darf erst durch einen expliziten Klick des Nutzers auf den Tab ausgelöst werden.
 
-### 20.5 <a name="iss27-05"></a> iss27-05 — Refresh & Scan liest Audio-File-Features und Verifikations-Tags nicht vollständig aus
+**Umsetzung (27. Juli 2026):** Root Cause exakt wie vermutet: `ArtistDetailView`
+wird nicht neu gemountet, wenn nur `search.artist` wechselt, und alle
+Navigations-Aufrufe spreadeten die vorherigen Suchparameter (`...p`) ohne
+`releases` zurückzusetzen. An allen vier Stellen, die `artist` auf eine neue
+ID setzen (`library-v2-page.tsx`: Wanted-Zeile, Artist-Karten-Grid,
+Artist-Tabellenzeile, sowie `AlbumDetailView`s „zurück zum Artist"), wird
+jetzt zusätzlich `releases: undefined` gesetzt (fällt via Zod-Default auf
+`'library'` zurück). Test: `releases-mode.test.ts` (bestehend, weiterhin
+grün) — die Navigations-Callsites selbst sind mechanisch und wurden per
+Typecheck + bestehender Testsuite abgesichert.
+
+### 20.5 <a name="iss27-05"></a> iss27-05 — Refresh & Scan liest Audio-File-Features und Verifikations-Tags nicht vollständig aus — Bereits behoben, verifiziert 27. Juli 2026
 
 **Symptom:** Ein „Refresh & Scan" im Artist-Kontext führt derzeit zum Teil keine echte Neu-Inspektion der physischen Dateien durch oder erfasst eingebettete Eigenschaften (Audio-Stream-Details wie 24-Bit/44.1kHz, ReplayGain, Lyrics, embedded Cover) sowie im Tag geschriebene Verifikations-Zustände (`HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT`) nicht verlässlich.
 
@@ -2851,6 +2922,20 @@ Diagnosen und Fix-Aufträge für die vom Nutzer am 27. Juli 2026 gemeldeten UI-P
 1. Refresh & Scan im Artist-Kontext strikt auf die Dateien dieses Künstlers scopen.
 2. Echte Datei-Neu-Inspektion ausführen: `probe_audio_quality` (Bitrate, Sample Rate, Bit Depth), Tag-Inspection für Features und Verifikations-Tags (`HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT`).
 3. Re-Verify gegen das effektive Quality Profile und Aktualisierung der V2-Datenbank-Zeilen.
+
+**Verifikation (27. Juli 2026):** Dieser Punkt war zum Zeitpunkt der
+Meldung bereits durch Commit `0cd7167a6` („fix(library-v2): close the
+tag/cover/verification convergence gaps (T-03, T-07, T-09, T-10)“, selber
+Tag, vor dieser Session bereits auf `HEAD`) behoben:
+`core/library2/scan.py::rescan_files` scoped strikt auf die Artist-Alben,
+probt `probe_audio_quality` real pro Datei und persistiert
+`verification_status` aus dem `SOULSYNC_VERIFICATION`-Tag korrekt. Die in
+diesem Issue genannten Tag-Namen `HUMAN_VERIFIED`/`ACOUSTICID_VERIFIED`/
+`RETRY_IMPORT` existieren im Code nicht — die reale, einzige
+Verifikations-Tag-Quelle ist `SOULSYNC_VERIFICATION` mit vier Zuständen
+(`core/matching/verification_status.py`); die genannten Namen stammen aus
+dem noch nicht gebauten F-15/UI-03-Spezifikationstext. Re-verifiziert per
+`tests/library2/test_scan_scope.py` (14/14 grün). Keine Code-Änderung nötig.
 
 ### 20.6 <a name="iss27-06"></a> iss27-06 — Column Settings Dialog hat exzessives vertikales Scrolling
 
