@@ -162,7 +162,11 @@ export function LibraryPage() {
   }, []);
 
   return (
-    <div className="library-container">
+    // The ids below are the guided tour's anchors (helper.js HELP_CONTENT).
+    // The vanilla page owned them until it was deleted; nothing else renders
+    // them now, so there is no duplicate-id hazard — and #library-page is what
+    // disambiguates these controls from the VIDEO library's .library-controls.
+    <div className="library-container" id="library-page">
       <div className="library-header">
         <div className="library-header-content">
           <h2 className="library-title">
@@ -171,9 +175,11 @@ export function LibraryPage() {
           </h2>
           <p className="library-subtitle">Browse your complete music collection</p>
         </div>
-        <div className="library-stats">
+        <div className="library-stats" id="library-stats">
           <span className="library-stat">
-            <span className="stat-number">{pagination.totalCount}</span>
+            <span className="stat-number" id="library-artist-count">
+              {pagination.totalCount}
+            </span>
             <span className="stat-label">Artists</span>
           </span>
         </div>
@@ -193,6 +199,7 @@ export function LibraryPage() {
           <input
             type="text"
             className="library-search-input"
+            id="library-search-input"
             placeholder="Filter your library…"
             aria-label="Filter your library"
             value={draft}
@@ -208,7 +215,7 @@ export function LibraryPage() {
           <div className="library-search-icon">🔍</div>
         </div>
 
-        <div className="watchlist-filter">
+        <div className="watchlist-filter" id="watchlist-filter">
           {(['all', 'watched', 'unwatched'] as const).map((f) => (
             <button
               key={f}
@@ -257,7 +264,7 @@ export function LibraryPage() {
           </select>
         </div>
 
-        <div className="alphabet-selector">
+        <div className="alphabet-selector" id="alphabet-selector">
           <div className="alphabet-selector-inner">
             {ALPHABET.map((letter) => (
               <button
@@ -287,7 +294,7 @@ export function LibraryPage() {
             put it: after the loading row, above the cards. */}
         <div ref={downloadsHost} data-library-downloads-host="" />
 
-        <div className="library-artists-grid">
+        <div className="library-artists-grid" id="library-artists-grid">
           {artists.map((artist, i) => (
             <LibraryArtistCard
               key={artist.id}
@@ -304,7 +311,7 @@ export function LibraryPage() {
         {isEmpty ? <LibraryEmpty query={search.q} failed={failed} /> : null}
 
         {pagination.totalPages > 1 ? (
-          <div className="library-pagination">
+          <div className="library-pagination" id="library-pagination">
             <button
               type="button"
               className="pagination-btn"

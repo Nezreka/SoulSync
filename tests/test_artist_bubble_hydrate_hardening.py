@@ -129,9 +129,11 @@ def test_downloads_sections_filter_malformed_bubbles():
     assert _HELPERS_JS.count("Array.isArray(artistDownloadBubbles[artistId].downloads)") >= 2
 
 
-def test_library_init_toast_names_the_real_error():
-    fn = _LIBRARY_JS.split("function initializeLibraryPage")[1].split("function initializeLibrarySearch")[0]
-    assert "error.message" in fn, "the toast should carry the underlying error"
+# initializeLibraryPage's opaque-toast fix retired with the function itself when
+# React took over /library. The equivalent guarantee — a failed artist load
+# surfaces a toast rather than a blank page — is pinned in
+# webui/src/routes/library/-ui/library-page.test.tsx ("toasts the vanilla fixed
+# string when the server reports failure").
 
 
 def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
@@ -142,9 +144,15 @@ def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
     fn = _HELPERS_JS.split("function showLibraryDownloadsSection")[1].split("function createArtistBubbleCard")[0]
     assert "getElementById('library-artists-grid')" in fn
     assert "artistGrid.parentElement" in fn
-    # the ambiguity is real: both sides carry the class (video first)
+    # The ambiguity is still real, it just spans two renderers now: index.html
+    # carries the VIDEO library's .library-content, and the React music library
+    # renders its own. A class query would still be able to hit the wrong one.
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-    assert index.count('class="library-content"') >= 2
+    react_page = (
+        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-page.tsx"
+    ).read_text(encoding="utf-8")
+    assert index.count('class="library-content"') >= 1, "video library lost its .library-content"
+    assert 'className="library-content"' in react_page, "music library lost its .library-content"
 
     # The React library page renders a dedicated host and is preferred when
     # present, so a querySelector is no longer disqualifying on its own — but it

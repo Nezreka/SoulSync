@@ -2982,8 +2982,9 @@ function showLibraryDownloadsSection() {
     // this node") — killing the whole Library page init (#1038).
     // The React library page renders a dedicated host with NO React children,
     // so this section can own that subtree outright and React never reconciles
-    // it away. Preferred when present; the vanilla music page and the video
-    // library keep the original anchor-on-the-grid path below.
+    // it away. That host is the normal path now that the vanilla music page is
+    // gone; the anchor-on-the-grid path below still resolves (React renders
+    // #library-artists-grid too) and stays as the backstop.
     const reactHost = document.querySelector('[data-library-downloads-host]');
     const artistGrid = reactHost ? null : document.getElementById('library-artists-grid');
     if (!reactHost && (!artistGrid || !artistGrid.parentElement)) return;
