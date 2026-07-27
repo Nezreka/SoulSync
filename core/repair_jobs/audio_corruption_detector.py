@@ -334,14 +334,14 @@ class AudioCorruptionDetectorJob(RepairJob):
                     context.db, context.config_manager,
                 ) if str(subject.get("path") or "").lower().endswith(".flac")
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate indexed FLAC scope: %s", exc)
         try:
             from core.repair_jobs.filesystem_subjects import filesystem_audio_files
 
             count += len(filesystem_audio_files(
                 context, extensions=_CORRUPT_CHECK_EXTS,
             ))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate filesystem FLAC scope: %s", exc)
         return count

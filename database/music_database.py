@@ -11392,13 +11392,26 @@ class MusicDatabase:
                         (spotify_track_id, f"{spotify_track_id}::%"))
                 else:
                     # Increment retry count and update failure reason
-                    cursor.execute("""
+                    composite = "::" in str(spotify_track_id)
+                    identity_clause = (
+                        "spotify_track_id = ?"
+                        if composite
+                        else "(spotify_track_id = ? OR spotify_track_id LIKE ?)"
+                    )
+                    params = [error_message, spotify_track_id]
+                    if not composite:
+                        params.append(f"{spotify_track_id}::%")
+                    params.append(profile_id)
+                    cursor.execute(
+                        f"""
                         UPDATE wishlist_tracks
-                        SET retry_count = retry_count + 1,
-                            last_attempted = CURRENT_TIMESTAMP,
-                            failure_reason = COALESCE(?, failure_reason)
-                        WHERE spotify_track_id = ? AND profile_id = ?
-                    """, (error_message, spotify_track_id, profile_id))
+                           SET retry_count = retry_count + 1,
+                               last_attempted = CURRENT_TIMESTAMP,
+                               failure_reason = COALESCE(?, failure_reason)
+                         WHERE {identity_clause} AND profile_id = ?
+                        """,
+                        params,
+                    )
                 
                 conn.commit()
                 return cursor.rowcount > 0

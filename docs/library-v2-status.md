@@ -1837,3 +1837,49 @@ dadurch nicht: T-06 (Genre-Lücke), Artwork-Negativcache,
 Track-Duplikat-Produktentscheidung, Live-Prowlarr/Download-Clients sowie
 Restart- und Windows-/Docker-Path-Mapping-Runtime-Gates bleiben bei ihrem
 zuvor dokumentierten Stand.
+
+## 38. Vertiefter Abschluss-Audit und Python-3.14-Runtime-Härtung — Verified, 27. Juli 2026
+
+Ein weiterer statischer und dynamischer Audit hat die bestehenden
+Library-v2-Verträge an mehreren Systemgrenzen abgesichert:
+
+- Track-Versionen verwenden nun dieselbe Qualifier-Erkennung für Klammer-
+  und Dash-Schreibweisen. Das verhindert falsche Quarantäne bei realen
+  Remix-/Edit-/Slowed-/Clean-/Explicit-Titeln, ohne normale Bindestrich-Titel
+  zu beschädigen.
+- Exakte Provider-ID-Lookups erkennen `allow_fallback` vor dem Aufruf über
+  die Signatur. Interne Provider-`TypeError`s können keine zweite,
+  unkontrollierte Fallbacksuche mehr auslösen.
+- Die parallele Artist-Bildsuche respektiert deterministisch die
+  konfigurierte Quellenpriorität, auch wenn eine Fallbackquelle schneller
+  dieselbe URL liefert.
+- Server-seitige Torrent-Downloads verwenden einen begrenzten gemeinsamen
+  Worker-Pool, ohne den Default-Executor des Besitzer-Loops anzulegen. Damit
+  beendet Python 3.14.6 den längeren Testprozess sauber.
+- Wishlist-Retry-Backoff versteht die kanonische
+  `track_id::album_id`-Identität und bewahrt die Abwärtskompatibilität alter
+  bare Track-IDs.
+- Native Findings enthalten durchgehend navigierbare Artist-IDs; der
+  qBittorrent-Adapter besitzt nur noch eine getestete Share-Limit-
+  Implementierung. Ruff-Funde zu Closure-Capture, nicht-striktem `zip()` und
+  stummen Exceptions wurden ebenfalls beseitigt.
+
+Verifikation:
+
+- Library-v2: **1.078 passed**;
+- Backend-Komplettlauf vor den letzten zwei isolierten Testhärtungen:
+  **12.285 passed, 3 skipped, 2 deselected, 2 failed** in rund zehn Minuten;
+- beide verbliebenen Fehler danach gezielt behoben und verifiziert:
+  Wishlist **51 passed**, Async-/Candidate-/Torrent-Scope **79 passed**;
+- weitere betroffene Scopes: Titelmatching **31 passed**,
+  Provider/Monitor **40 passed**, Adapter/Wishlist/Expiry **68 passed**,
+  Repair **19 passed**, native Findings **78 passed**;
+- WebUI: **301 passed** in 50 Dateien; `npm run check` und Production Build
+  grün;
+- Ruff grün; abschließende schnelle Syntax-/Diff-Prüfungen grün.
+
+Der redundante zehnminütige Backend-Komplettlauf wurde nach den zwei
+zielgenauen Fixes auf Benutzerwunsch nicht erneut gestartet. Die bekannten
+nicht-blockierenden Warnungen bleiben die `sqlite3`-Datetime-Deprecation und
+der bestehende Vite-Chunkgrößenhinweis. Die absichtlichen Nicht-Features und
+externen Release-Gates aus §37 bleiben unverändert offen.

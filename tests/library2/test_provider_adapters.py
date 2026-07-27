@@ -282,6 +282,34 @@ def test_matched_tracklists_fetch_every_exact_provider_without_name_search(monke
     assert results[0].track_payloads()[0]["isrc"] == "USAAA2600001"
 
 
+def test_exact_tracklist_internal_type_error_never_retries_with_fallback(monkeypatch):
+    calls = []
+
+    class Spotify:
+        def get_album_tracks(self, album_id, allow_fallback=True):
+            calls.append((album_id, allow_fallback))
+            if allow_fallback is False:
+                raise TypeError("provider parser failed internally")
+            return {
+                "items": [{
+                    "id": "wrong-fallback-track",
+                    "name": "Wrong fallback release",
+                    "track_number": 1,
+                }],
+            }
+
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: Spotify() if source == "spotify" else None,
+    )
+
+    assert fetch_matched_album_tracklists(
+        {"spotify": "exact-release"},
+        source_order=("spotify",),
+    ) == ()
+    assert calls == [("exact-release", False)]
+
+
 def test_track_metadata_records_provider_that_actually_answered(monkeypatch):
     class EmptySpotify:
         def get_track_details(self, _track_id, **_kwargs):

@@ -88,7 +88,12 @@ def test_select_expired_filters():
         _entry(eid=3, days_old=70, protected=True),          # mirrored → keep
         _entry(eid=4, days_old=10),                          # too new → keep
     ]
-    out = select_expired(entries, watchlist_retention="off", playlist_retention="2mo")
+    out = select_expired(
+        entries,
+        watchlist_retention="off",
+        playlist_retention="2mo",
+        now=NOW,
+    )
     assert [e["id"] for e in out] == [1]
 
 

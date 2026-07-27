@@ -136,8 +136,8 @@ def _prepare_scheduled_acquisition(
             spec = deps.download_orchestrator.registry.get_spec(candidate.username)
             if spec is not None:
                 source = spec.name
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Candidate source classification failed: %s", exc)
         from core.acquisition import manual_grab
         return manual_grab.try_prepare_scheduled_grab(
             lib2_context={

@@ -109,6 +109,7 @@ class LossyConverterJob(RepairJob):
                     f"lib2:{subject['track_id']}", subject["title"],
                     subject["artist_name"], subject["album_title"], file_path,
                     subject.get("album_image"), subject.get("artist_image"),
+                    subject.get("artist_id"),
                 ))
         except Exception as e:
             logger.warning("V2 subject enumeration failed: %s", e)
@@ -121,7 +122,7 @@ class LossyConverterJob(RepairJob):
             tracks.append((
                 None, os.path.splitext(os.path.basename(file_path))[0],
                 None, os.path.basename(os.path.dirname(file_path)), file_path,
-                None, None,
+                None, None, None,
             ))
 
         total = len(tracks)
@@ -149,7 +150,10 @@ class LossyConverterJob(RepairJob):
             if i % 200 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb = row
+            (
+                track_id, title, artist_name, album_title, file_path,
+                album_thumb, artist_thumb, artist_id,
+            ) = row
             result.scanned += 1
 
             if context.report_progress and i % 50 == 0:
@@ -215,6 +219,7 @@ class LossyConverterJob(RepairJob):
                         'file_size': file_size,
                         'album_thumb_url': album_thumb or None,
                         'artist_thumb_url': artist_thumb or None,
+                        'artist_id': artist_id,
                     }
                     if subject:
                         from core.library2.maintenance_subjects import subject_details
@@ -275,8 +280,8 @@ class LossyConverterJob(RepairJob):
                 ) if os.path.splitext(str(subject.get("path") or ""))[1].lower()
                 in LOSSLESS_CANDIDATE_EXTENSIONS
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate indexed conversion scope: %s", exc)
         try:
             from core.repair_jobs.filesystem_subjects import filesystem_audio_files
 
@@ -285,6 +290,6 @@ class LossyConverterJob(RepairJob):
                     context, extensions=LOSSLESS_CANDIDATE_EXTENSIONS,
                 ) if os.path.splitext(path)[1].lower() in LOSSLESS_CANDIDATE_EXTENSIONS
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate filesystem conversion scope: %s", exc)
         return count

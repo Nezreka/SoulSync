@@ -395,8 +395,8 @@ def write_embedded_tag(file_path: str, tag_key: str, value: str | None) -> Dict[
             try:
                 audio.add_tags()
                 tags = audio.tags
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Mutagen add_tags failed for %s: %s", file_path, exc)
 
     friendly_to_id3 = {v: k for k, v in _ID3_TEXT_FRAMES.items()}
     txxx_friendly_to_desc = {v: k for k, v in _KNOWN_TXXX_DESCS.items()}

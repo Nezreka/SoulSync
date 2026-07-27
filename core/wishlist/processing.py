@@ -1030,7 +1030,7 @@ def _tracks_in_scope(
     }
     return [
         track
-        for index, (track, row_ids) in enumerate(zip(rows, identities))
+        for index, (track, row_ids) in enumerate(zip(rows, identities, strict=True))
         if row_ids & exact or index in unique_indexes
     ]
 

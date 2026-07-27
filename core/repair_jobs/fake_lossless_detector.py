@@ -193,16 +193,16 @@ class FakeLosslessDetectorJob(RepairJob):
                 raw = str(subject.get("path") or "")
                 if os.path.splitext(raw)[1].lower() in LOSSLESS_EXTENSIONS:
                     count += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate indexed lossless scope: %s", exc)
         try:
             from core.repair_jobs.filesystem_subjects import filesystem_audio_files
 
             count += len(filesystem_audio_files(
                 context, extensions=LOSSLESS_EXTENSIONS,
             ))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate filesystem lossless scope: %s", exc)
         return count
 
 

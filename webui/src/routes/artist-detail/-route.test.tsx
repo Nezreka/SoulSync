@@ -61,9 +61,7 @@ describe('artist-detail route', () => {
   });
 
   it('does not stringify structured search params as an artist name', async () => {
-    renderArtistDetailRoute([
-      '/artist-detail/deezer/2481?name=%7B%22unexpected%22%3Atrue%7D',
-    ]);
+    renderArtistDetailRoute(['/artist-detail/deezer/2481?name=%7B%22unexpected%22%3Atrue%7D']);
 
     await waitFor(() => {
       expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(

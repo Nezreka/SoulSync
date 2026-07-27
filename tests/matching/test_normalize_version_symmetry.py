@@ -75,8 +75,12 @@ def test_hyphenated_word_not_treated_as_version_tail():
 
 # --- existing behaviour must still hold ---
 
-def test_whitelisted_dash_suffix_still_stripped():
-    assert normalize("In My Feelings - Instrumental") == "in my feelings"
+@pytest.mark.parametrize(
+    "suffix",
+    ["Instrumental", "Vocal", "Clean", "Explicit", "Original Mix"],
+)
+def test_whitelisted_dash_suffix_still_stripped(suffix):
+    assert normalize(f"In My Feelings - {suffix}") == "in my feelings"
 
 
 def test_genuinely_different_song_still_fails():

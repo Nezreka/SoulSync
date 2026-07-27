@@ -3335,3 +3335,101 @@ synchronen Aufrufer dauerhaft in `Future.result()` lassen.
 **Verifikation:** Async-Bridge 3/3 (Start, Parallelität, Task-Lebenszyklus),
 Candidate Store 15/15 und
 Torrent-/Usenet-Plugins 51/51 bestanden und beendeten den Prozess sauber.
+
+## 25. Abschluss-Audit: Identitätsgrenzen, Provider-Exaktheit und langlebige Async-Pfade — Verified, 27. Juli 2026
+
+Der abschließende Code-, Lint- und Regressionstest-Audit hat mehrere
+voneinander unabhängige Randfälle gefunden, die in kleinen Tests unauffällig
+blieben, in realen Bibliotheken oder langlebigen Python-3.14-Prozessen aber
+falsche Ergebnisse bzw. einen hängenden Prozess erzeugen konnten.
+
+### 25.1 Versionssymmetrie bei Tracktiteln
+
+**Symptom:** `Track (Producer Remix)` und `Track - Producer Remix` wurden
+nicht immer gleich normalisiert. Der Klammerpfad entfernte den gesamten
+Qualifier, während der Dash-Pfad nur wenige exakt ausgeschriebene Suffixe
+erkannte. Varianten wie `Don Diablo Edit`, `super slowed`,
+`Slowed + Reverb`, `Instrumental`, `Vocal`, `Clean`, `Explicit` oder
+`Original Mix` konnten deshalb trotz gleicher Aufnahme in der
+Audio-Verifikation auseinanderlaufen.
+
+**Fix:** `core.text.title_match` stellt eine gemeinsame
+`is_version_qualifier()`-Prüfung bereit. Die Audio-Verifikation verwendet
+dieselbe Markersemantik für Klammer- und Dash-Formen. Gewöhnliche
+Bindestrich-Titel und nicht versionsbezogene Dash-Zusätze bleiben erhalten.
+
+### 25.2 Exakte Provider-ID-Auflösung
+
+**Symptom:** Der Spotify-Adapter probierte zunächst
+`getter(id, allow_fallback=False)`, fing aber jedes `TypeError` ab und rief
+danach `getter(id)` erneut auf. Ein **innerhalb** des Providers ausgelöstes
+`TypeError` wurde dadurch fälschlich als alte Methodensignatur interpretiert;
+der zweite Aufruf konnte die verbotene Namens-Fallbacksuche aktivieren.
+
+**Fix:** Die Signatur wird vor dem Aufruf geprüft. Nur ein nachweislich
+unterstützter Parameter wird übergeben; nicht inspizierbare Spotify-Getter
+schlagen bewusst geschlossen fehl. Providerfehler führen nicht mehr zu einem
+zweiten, weniger exakten Aufruf.
+
+### 25.3 Deterministische Artist-Bildpriorität
+
+**Symptom:** Parallel geladene Bildquellen wurden über das ungeordnete
+`done`-Set von `concurrent.futures.wait()` ausgewertet. Lieferten zwei
+Quellen dieselbe URL, konnte die schnellere Fallbackquelle statt der
+konfigurierten bevorzugten Quelle als Gewinner gespeichert werden.
+
+**Fix:** Die Requests bleiben parallel, ihre Resultate werden nach Abschluss
+aber in der konfigurierten Quellenreihenfolge ausgewertet. Laufzeit-Timing
+ändert damit weder Priorität noch Attribution.
+
+### 25.4 Server-seitige Torrent-Fetches und Prozess-Shutdown
+
+**Symptom:** Der eigentliche HTTP-Fetch war erfolgreich, doch
+`asyncio.run()` konnte unter Python 3.14.6 beim Schließen des impliziten
+Default-Executors hängen. Das zeigte sich erst im längeren Testprozess nach
+der bereits in §24 korrigierten gemeinsamen Async-Loop-Problematik.
+
+**Fix:** Blockierende Torrent-Fetches laufen in einem kleinen,
+prozessweiten Executor. Der Besitzer-Loop pollt das
+`concurrent.futures.Future`, statt seinen Default-Executor oder einen
+Cross-Thread-Loop-Wakeup zu benötigen. Ein Regressionstest prüft zusätzlich,
+dass der Loop keinen Default-Executor anlegt.
+
+### 25.5 Wishlist-Retry-Identität
+
+**Symptom:** Die Fehlerzählung verstand nur historische bare Track-IDs. Bei
+der kanonischen Identität `track_id::album_id` konnte ein Fehlversuch
+ignoriert oder dem falschen Release zugeordnet werden.
+
+**Fix:** Ein exakter Composite-Key aktualisiert ausschließlich seine
+Wishlist-Zeile. Ein alter bare Key bleibt als kompatibler Wildcard erhalten
+und aktualisiert die bare sowie alle zugehörigen Composite-Zeilen.
+
+### 25.6 Weitere gefundene Härtungen
+
+- Vier native Repair-Jobs liefern `artist_id` nun auch top-level neben dem
+  Thumbnail, sodass Findings exakt zur Artist-Detailseite navigieren.
+- Die doppelt definierte qBittorrent-`set_share_limits`-Implementierung wurde
+  entfernt; ein Adaptertest schützt die WebUI-API-Felder und
+  Minutenumrechnung.
+- Ein Closure-Capture im Monitor-Sync, ein nicht-striktes `zip()` sowie
+  mehrere stumme Exception-Pfade wurden durch explizite Helfer,
+  `strict=True` und Debug-Logging gehärtet.
+- Zwei Testfehler wurden als Test-Infrastrukturfehler behoben: ein
+  wall-clock-abhängiger Expiry-Test und ein global-state-/timingabhängiger
+  Async-Task-Lebenszyklustest.
+
+### Verifikation
+
+- Library-v2-Vollsuite: **1.078 passed**;
+- langer Backendlauf vor den letzten zwei Testhärtungen:
+  **12.285 passed, 3 skipped, 2 deselected, 2 failed**; die beiden einzigen
+  Fehler waren exakt Wishlist-Retry und Async-Task-Lebenszyklus;
+- nach den Fixes: Wishlist **51 passed**, Async-/Candidate-/Torrent-Scope
+  **79 passed**, Titelmatching **31 passed** sowie alle weiteren betroffenen
+  gezielten Suites grün;
+- WebUI: **301 passed** in 50 Dateien, Check und Production Build grün;
+- Ruff und `git diff --check` grün.
+
+Auf ausdrücklichen Wunsch wurde der etwa zehnminütige Backend-Komplettlauf
+nach den beiden isolierten Fixes nicht redundant wiederholt.

@@ -75,14 +75,22 @@ def test_gathers_one_candidate_per_connected_source(monkeypatch):
 
 
 def test_duplicate_urls_dedupe_and_skip_sources_excluded(monkeypatch):
+    import time
+
     same = "https://cdn/same.jpg"
+
+    class SlowSpotify(_Client):
+        def search_artists(self, name, limit=1):
+            time.sleep(0.02)
+            return super().search_artists(name, limit)
+
     clients = {
         "deezer": _Client(search_hit=SimpleNamespace(image_url=same)),
         "musicbrainz": _Client(search_hit=SimpleNamespace(image_url="https://mb/x.jpg")),
     }
     _wire_registry(monkeypatch, clients, ["spotify", "deezer", "musicbrainz"])
     monkeypatch.setattr(ai.metadata_registry, "get_spotify_client",
-                        lambda **kw: _Client(search_hit=SimpleNamespace(image_url=same)))
+                        lambda **kw: SlowSpotify(search_hit=SimpleNamespace(image_url=same)))
 
     cands = ai.gather_artist_image_candidates("Adele", {})
     assert len(cands) == 1                            # deduped by url

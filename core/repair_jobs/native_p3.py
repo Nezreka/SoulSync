@@ -131,6 +131,7 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
                     "file_id": int(subject["file_id"]),
                     "title": subject.get("title"),
                     "artist": subject.get("artist_name"),
+                    "artist_id": subject.get("artist_id"),
                     "album": subject.get("album_title"),
                     "album_thumb_url": subject.get("album_image"),
                     "artist_thumb_url": subject.get("artist_image"),
@@ -221,6 +222,7 @@ class NativeAcoustIDScannerJob(AcoustIDScannerJob):
                     "album_title": subject.get("album_title") or "",
                     "album_thumb_url": subject.get("album_image"),
                     "artist_thumb_url": subject.get("artist_image"),
+                    "artist_id": subject.get("artist_id"),
                     "track_artist": subject.get("artist_name") or "",
                     "album_artist": subject.get("artist_name") or "",
                     "duration_ms": subject.get("duration") or 0,
@@ -396,6 +398,7 @@ class NativeMetadataGapFillerJob(MetadataGapFillerJob):
                 "track_id": f"lib2:{subject['track_id']}",
                 "title": subject.get("title"),
                 "artist": subject.get("artist_name"),
+                "artist_id": subject.get("artist_id"),
                 "album": subject.get("album_title"),
                 "track_ids": source_ids,
                 "resolved_source": resolved_source,
@@ -510,6 +513,7 @@ class NativeMissingCoverArtJob(MissingCoverArtJob):
                 "album_id": f"lib2:{subject['album_id']}",
                 "album_title": subject.get("title"),
                 "artist": subject.get("artist_name"),
+                "artist_id": subject.get("artist_id"),
                 "found_artwork_url": provider_result.url if provider_result else None,
                 "artwork_source": provider_result.source if provider_result else "embedded",
                 "artwork_source_id": (
@@ -614,6 +618,7 @@ class NativeLiveCommentaryCleanerJob(LiveCommentaryCleanerJob):
                 "album_matched": album_matched,
                 "album_thumb_url": subject.get("album_image"),
                 "artist_thumb_url": subject.get("artist_image"),
+                "artist_id": subject.get("artist_id"),
             }
             details.update(subject_details(subject))
             if context.create_finding:

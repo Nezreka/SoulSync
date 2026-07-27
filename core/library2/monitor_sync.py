@@ -258,6 +258,17 @@ def _provider_ids(value: Any) -> Dict[str, str]:
     }
 
 
+def _add_qualified_provider_id(
+    qualified_ids: Dict[str, set[str]],
+    source: Any,
+    provider_id: Any,
+) -> None:
+    source_key = str(source or "").strip().lower()
+    value = str(provider_id or "").strip()
+    if source_key and value and source_key != "library_v2":
+        qualified_ids.setdefault(source_key, set()).add(value)
+
+
 def _descriptor_lib2_track_ids(
     conn: Any, descriptors: Sequence[Mapping[str, Any]],
 ) -> List[int]:
@@ -299,19 +310,13 @@ def _descriptor_lib2_track_ids(
         qualified_ids: Dict[str, set[str]] = {}
         generic_ids: set[str] = set()
 
-        def add_qualified(source: Any, provider_id: Any) -> None:
-            source_key = str(source or "").strip().lower()
-            value = str(provider_id or "").strip()
-            if source_key and value and source_key != "library_v2":
-                qualified_ids.setdefault(source_key, set()).add(value)
-
         for values in (
             source_info.get("track_provider_ids"),
             track_data.get("provider_ids"),
             track_data.get("external_ids"),
         ):
             for source, provider_id in _provider_ids(values).items():
-                add_qualified(source, provider_id)
+                _add_qualified_provider_id(qualified_ids, source, provider_id)
 
         raw_id = (
             descriptor.get("spotify_track_id")
@@ -353,7 +358,7 @@ def _descriptor_lib2_track_ids(
                 or source_info.get("metadata_source")
             )
             if source:
-                add_qualified(source, raw_id)
+                _add_qualified_provider_id(qualified_ids, source, raw_id)
             else:
                 generic_ids.add(raw_id)
 

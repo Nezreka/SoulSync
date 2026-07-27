@@ -70,10 +70,13 @@ def test_first_run_async_call_waits_for_event_loop_startup():
 
 def test_submitted_task_is_retained_until_it_finishes():
     started = threading.Event()
+    release = threading.Event()
+    baseline = set(async_helpers._active_tasks)
 
     async def suspended_job():
         started.set()
-        await asyncio.sleep(0.2)
+        while not release.is_set():
+            await asyncio.sleep(0.01)
         return "finished"
 
     result = {}
@@ -84,12 +87,14 @@ def test_submitted_task_is_retained_until_it_finishes():
     assert started.wait(2)
 
     gc.collect()
-    assert async_helpers._active_tasks
+    retained = set(async_helpers._active_tasks) - baseline
+    assert retained
+    release.set()
 
     worker.join(2)
     assert not worker.is_alive()
     assert result == {"value": "finished"}
     deadline = time.monotonic() + 1
-    while async_helpers._active_tasks and time.monotonic() < deadline:
+    while retained.intersection(async_helpers._active_tasks) and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert not async_helpers._active_tasks
+    assert not retained.intersection(async_helpers._active_tasks)

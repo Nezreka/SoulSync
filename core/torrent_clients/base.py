@@ -16,6 +16,8 @@ All three converge on the same eight verbs below.
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 from dataclasses import dataclass
 from typing import List, Optional, Protocol, runtime_checkable
 
@@ -141,6 +143,12 @@ class TorrentClientAdapter(Protocol):
 
 # ── server-side .torrent fetch (Sonarr-style handoff) ─────────────────────────
 
+_TORRENT_FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="torrent-fetch",
+)
+
+
 def _strip_query(url: str) -> str:
     """Log-safe form of a download URL — Prowlarr links carry the API key in
     the query string."""
@@ -180,6 +188,25 @@ def fetch_torrent_payload(url: str, timeout: int = 30):
         return None, None
 
 
+async def _fetch_torrent_payload_async(url: str):
+    """Run the blocking indexer fetch without an event-loop default executor.
+
+    Python 3.14.6 can lose the cross-thread selector wakeup used while
+    ``asyncio.run()`` shuts its default executor down in a long-lived process.
+    Polling a bounded shared worker Future from the owner loop needs no foreign
+    thread to wake that loop and avoids creating an executor Runner.close()
+    must later join.
+    """
+    worker = _TORRENT_FETCH_EXECUTOR.submit(fetch_torrent_payload, url)
+    try:
+        while not worker.done():
+            await asyncio.sleep(0.01)
+        return worker.result()
+    except asyncio.CancelledError:
+        worker.cancel()
+        raise
+
+
 async def add_torrent_smart(
     adapter: "TorrentClientAdapter",
     url_or_magnet: str,
@@ -197,11 +224,7 @@ async def add_torrent_smart(
     if not str(url_or_magnet or '').lower().startswith(('http://', 'https://')):
         return await adapter.add_torrent(url_or_magnet, category=category, save_path=save_path)
 
-    import asyncio
-    loop = asyncio.get_event_loop()
-    file_bytes, magnet = await loop.run_in_executor(
-        None, fetch_torrent_payload, url_or_magnet
-    )
+    file_bytes, magnet = await _fetch_torrent_payload_async(url_or_magnet)
     if magnet:
         return await adapter.add_torrent(magnet, category=category, save_path=save_path)
     if file_bytes is not None:

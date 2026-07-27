@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from dataclasses import asdict, is_dataclass
+from inspect import Parameter, signature
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -686,8 +687,28 @@ def _fetch_direct_album_tracklist(
         if not callable(getter):
             return None
         try:
+            parameters = signature(getter).parameters.values()
+            accepts_no_fallback = any(
+                parameter.kind is Parameter.VAR_KEYWORD
+                or (
+                    parameter.name == "allow_fallback"
+                    and parameter.kind
+                    in {Parameter.POSITIONAL_OR_KEYWORD, Parameter.KEYWORD_ONLY}
+                )
+                for parameter in parameters
+            )
+        except (TypeError, ValueError):
+            if provider == "spotify":
+                logger.debug(
+                    "Cannot verify no-fallback support for exact Spotify "
+                    "tracklist lookup (%s)",
+                    provider_id,
+                )
+                return None
+            accepts_no_fallback = False
+        if accepts_no_fallback:
             payload = getter(provider_id, allow_fallback=False)
-        except TypeError:
+        else:
             payload = getter(provider_id)
         tracks = _normalize_tracklist(payload, provider)
         if tracks:

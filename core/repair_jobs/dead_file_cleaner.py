@@ -76,6 +76,7 @@ class DeadFileCleanerJob(RepairJob):
                 return result
             details = {
                 "track_id": subject["track_id"],
+                "artist_id": subject.get("artist_id"),
                 "title": subject.get("title"),
                 "artist": subject.get("artist_name"),
                 "album": subject.get("album_title"),

@@ -272,12 +272,12 @@ class ReplayGainFillerJob(RepairJob):
             from core.library2.maintenance_subjects import count_active_files
 
             count += count_active_files(context.db, context.config_manager)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate indexed ReplayGain scope: %s", exc)
         try:
             from core.repair_jobs.filesystem_subjects import filesystem_audio_files
 
             count += len(filesystem_audio_files(context))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not estimate filesystem ReplayGain scope: %s", exc)
         return count

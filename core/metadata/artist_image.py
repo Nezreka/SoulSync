@@ -343,19 +343,32 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
     from concurrent.futures import wait as _wait_futures
 
     pool = ThreadPoolExecutor(max_workers=max(len(sources), 1))
-    future_map = {pool.submit(_one, source): source for source in sources}
-    done, not_done = _wait_futures(future_map, timeout=_CANDIDATE_GATHER_TIMEOUT_S)
+    future_by_source = {
+        source: pool.submit(_one, source)
+        for source in sources
+    }
+    done, not_done = _wait_futures(
+        future_by_source.values(),
+        timeout=_CANDIDATE_GATHER_TIMEOUT_S,
+    )
     results = []
-    for future in done:
+    # Futures complete in timing order, but duplicate URLs must be resolved in
+    # configured provider order. Iterating ``done`` (a set) made a faster
+    # fallback source nondeterministically steal the preferred source's card.
+    for source, future in future_by_source.items():
+        if future not in done:
+            continue
         try:
             results.append(future.result())
         except Exception as exc:
-            logger.debug("artist image candidate failed for %s: %s", future_map[future], exc)
-    for future in not_done:
+            logger.debug("artist image candidate failed for %s: %s", source, exc)
+    for source, future in future_by_source.items():
+        if future not in not_done:
+            continue
         # Still running past the budget — leave it be (threads can't be
         # killed) rather than block the response on it; it just misses
         # this round's candidate list.
-        logger.debug("artist image candidate timed out for %s", future_map[future])
+        logger.debug("artist image candidate timed out for %s", source)
     pool.shutdown(wait=False)
 
     candidates, seen = [], set()

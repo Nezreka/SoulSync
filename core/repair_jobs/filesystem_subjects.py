@@ -6,6 +6,9 @@ import os
 from typing import Any, Iterable
 
 from core.repair_jobs.base import skip_deleted_quarantine
+from utils.logging_config import get_logger
+
+logger = get_logger("repair_jobs.filesystem_subjects")
 
 AUDIO_EXTENSIONS = {
     ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav",
@@ -70,9 +73,12 @@ def filesystem_audio_files(
                 )
                 indexed_exact.add(_path_key(resolved or raw))
                 indexed_suffixes.add(_suffix_key(raw))
-        except Exception:
+        except Exception as exc:
             # The filesystem scan is specifically the no-catalogue fallback.
-            pass
+            logger.debug(
+                "Indexed-file exclusion unavailable; using filesystem fallback: %s",
+                exc,
+            )
 
     found: list[str] = []
     seen: set[str] = set()
