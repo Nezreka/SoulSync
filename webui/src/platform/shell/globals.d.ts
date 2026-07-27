@@ -102,6 +102,9 @@ declare global {
     showLibraryDownloadsSection?: () => void;
     currentMusicSourceName?: string;
     updateWatchlistCount?: () => void;
+    /** shared-helpers.js — drops JioSaavn entries unless the experimental
+     *  source is enabled. Kept as the single source of truth for that flag. */
+    filterJiosaavnServiceEntries?: <T>(items: T[], idKey?: string) => T[];
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
