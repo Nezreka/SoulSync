@@ -27,7 +27,8 @@ describe('AutomationCard markup', () => {
     const el = card();
     expect(el.className).toBe('automation-card');
     expect(el.getAttribute('data-id')).toBe('7');
-    // _filterAutomations reads these two to apply the dropdowns.
+    // The vanilla filter read these two to apply its dropdowns; the React
+    // filter matches on them, and the CSS still selects on the card classes.
     expect(el.getAttribute('data-trigger-type')).toBe('schedule');
     expect(el.getAttribute('data-action-type')).toBe('process_wishlist');
     expect(document.querySelector('.automation-status')?.className).toContain('enabled');

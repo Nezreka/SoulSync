@@ -38,9 +38,9 @@ export type AutomationsSearch = z.infer<typeof automationsSearchSchema>;
 
 /**
  * The vanilla filter bar hides itself below this many automations — the exact
- * test is `automations.length < 7` in _initAutoFilterBar. Named so the React
- * port cannot quietly drift to "6+", which is what the surrounding comment
- * claims it does.
+ * test was `automations.length < 7` in the vanilla _initAutoFilterBar (since
+ * deleted with the rest of the legacy list). Named so this cannot quietly
+ * drift to "6+", which is what that code's own comment claimed it did.
  */
 export const AUTO_FILTER_BAR_MIN = 7;
 
