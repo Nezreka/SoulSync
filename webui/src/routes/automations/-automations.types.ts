@@ -14,9 +14,21 @@ function searchString(value: unknown): string | undefined {
   return undefined;
 }
 
+// All three filter-bar controls, not just the text box. They were transient DOM
+// state in the vanilla page — a reload dropped them — so putting them in the URL
+// only adds state that used to be thrown away.
 export const automationsSearchSchema = z.object({
-  /** Filter-bar text. Transient DOM state in the vanilla page, lost on reload. */
   q: z
+    .preprocess((v) => searchString(v) ?? '', z.string())
+    .default('')
+    .catch(''),
+  /** Raw trigger_type from the dropdown; '' means All Triggers. */
+  trigger: z
+    .preprocess((v) => searchString(v) ?? '', z.string())
+    .default('')
+    .catch(''),
+  /** Raw action_type from the dropdown; '' means All Actions. */
+  action: z
     .preprocess((v) => searchString(v) ?? '', z.string())
     .default('')
     .catch(''),

@@ -69,13 +69,52 @@ export function buildAutomationsView(automations: Automation[]): AutomationsView
   };
 }
 
-/** Filter-bar match: name, plus the action/trigger so "wishlist" finds handlers. */
-export function filterAutomations(automations: Automation[], query: string): Automation[] {
-  const needle = query.toLowerCase().trim();
-  if (!needle) return automations;
-  return automations.filter((a) =>
-    [a.name, a.action_type, a.trigger_type, a.group_name].some((field) =>
-      (field ?? '').toLowerCase().includes(needle),
-    ),
-  );
+/**
+ * The three filter-bar controls, applied together.
+ *
+ * The text box matches the RENDERED labels, not the raw types: _filterAutomations
+ * read `.flow-trigger` / `.flow-action` textContent, so a user typing "process
+ * wishlist" matches the label while the underlying `process_wishlist` is never
+ * what they are aiming at. `labelFor` supplies those strings, keeping this pure
+ * and DOM-free. Group names are deliberately NOT searched — the vanilla filter
+ * did not, and silently widening the match would change what people find.
+ *
+ * The dropdowns compare the raw type exactly, as they did through the card's
+ * data-trigger-type / data-action-type attributes.
+ */
+export function filterAutomations(
+  automations: Automation[],
+  filters: { q?: string; trigger?: string; action?: string },
+  labelFor: (a: Automation) => { trigger: string; action: string },
+): Automation[] {
+  const q = (filters.q ?? '').toLowerCase().trim();
+  const trigger = filters.trigger ?? '';
+  const action = filters.action ?? '';
+  if (!q && !trigger && !action) return automations;
+
+  return automations.filter((a) => {
+    const labels = labelFor(a);
+    const matchesQuery =
+      !q ||
+      (a.name ?? '').toLowerCase().includes(q) ||
+      labels.trigger.toLowerCase().includes(q) ||
+      labels.action.toLowerCase().includes(q);
+    return (
+      matchesQuery &&
+      (!trigger || (a.trigger_type ?? '') === trigger) &&
+      (!action || (a.action_type ?? '') === action)
+    );
+  });
+}
+
+/** Distinct trigger/action types, sorted — the two dropdowns' option lists. */
+export function filterOptions(automations: Automation[]): {
+  triggers: string[];
+  actions: string[];
+} {
+  const triggers = [...new Set(automations.map((a) => a.trigger_type ?? ''))].filter(Boolean);
+  const actions = [...new Set(automations.map((a) => a.action_type ?? ''))].filter(Boolean);
+  triggers.sort();
+  actions.sort();
+  return { triggers, actions };
 }

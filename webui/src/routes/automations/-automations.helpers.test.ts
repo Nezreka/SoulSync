@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAutomationsView,
   filterAutomations,
+  filterOptions,
   forMusicSide,
   readAutomationsList,
 } from './-automations.helpers';
@@ -97,24 +98,70 @@ describe('buildAutomationsView', () => {
 });
 
 describe('filterAutomations', () => {
+  // The vanilla filter read the RENDERED label text off the card, so the tests
+  // feed labels rather than raw types.
+  const labelFor = (a: Automation) => ({
+    trigger: a.trigger_type === 'schedule' ? 'Every 6 hours' : 'New Release Found',
+    action: a.action_type === 'process_wishlist' ? 'Process Wishlist' : 'Scan Library',
+  });
   const rows = [
-    auto({ id: 1, name: 'Nightly wishlist' }),
-    auto({ id: 2, name: 'Scan', action_type: 'process_wishlist' }),
-    auto({ id: 3, name: 'Other', trigger_type: 'schedule', group_name: 'Chores' }),
+    auto({ id: 1, name: 'Nightly', trigger_type: 'schedule', action_type: 'process_wishlist' }),
+    auto({
+      id: 2,
+      name: 'Scan',
+      trigger_type: 'watchlist_new_release',
+      action_type: 'scan_library',
+    }),
+    auto({
+      id: 3,
+      name: 'Other',
+      trigger_type: 'schedule',
+      action_type: 'scan_library',
+      group_name: 'Chores',
+    }),
   ];
+  const ids = (f: Parameters<typeof filterAutomations>[1]) =>
+    filterAutomations(rows, f, labelFor).map((a) => a.id);
 
-  it('returns everything for an empty or blank query', () => {
-    expect(filterAutomations(rows, '')).toHaveLength(3);
-    expect(filterAutomations(rows, '   ')).toHaveLength(3);
+  it('returns everything when nothing is set', () => {
+    expect(ids({})).toEqual([1, 2, 3]);
+    expect(ids({ q: '   ' })).toEqual([1, 2, 3]);
   });
 
-  it('matches name, action, trigger and group, case-insensitively', () => {
-    expect(filterAutomations(rows, 'WISHLIST').map((a) => a.id)).toEqual([1, 2]);
-    expect(filterAutomations(rows, 'schedule').map((a) => a.id)).toEqual([3]);
-    expect(filterAutomations(rows, 'chores').map((a) => a.id)).toEqual([3]);
+  it('matches the rendered label, not the raw type', () => {
+    // 'process wishlist' with a SPACE only exists in the label; the raw type is
+    // process_wishlist, so a raw-type match would miss this.
+    expect(ids({ q: 'process wishlist' })).toEqual([1]);
+    expect(ids({ q: 'new release' })).toEqual([2]);
   });
 
-  it('does not crash on rows missing the optional columns', () => {
-    expect(filterAutomations([auto({ id: 9, name: 'x' })], 'zzz')).toEqual([]);
+  it('matches the name case-insensitively', () => {
+    expect(ids({ q: 'NIGHTLY' })).toEqual([1]);
+  });
+
+  it('does NOT search group names, matching the vanilla filter', () => {
+    expect(ids({ q: 'chores' })).toEqual([]);
+  });
+
+  it('matches the dropdowns on the exact raw type', () => {
+    expect(ids({ trigger: 'schedule' })).toEqual([1, 3]);
+    expect(ids({ action: 'scan_library' })).toEqual([2, 3]);
+  });
+
+  it('ANDs the three controls together', () => {
+    expect(ids({ q: 'other', trigger: 'schedule', action: 'scan_library' })).toEqual([3]);
+    expect(ids({ q: 'other', trigger: 'watchlist_new_release' })).toEqual([]);
+  });
+});
+
+describe('filterOptions', () => {
+  it('lists distinct types, sorted, ignoring blanks', () => {
+    const out = filterOptions([
+      auto({ id: 1, trigger_type: 'schedule', action_type: 'scan_library' }),
+      auto({ id: 2, trigger_type: 'app_started', action_type: 'scan_library' }),
+      auto({ id: 3 }),
+    ]);
+    expect(out.triggers).toEqual(['app_started', 'schedule']);
+    expect(out.actions).toEqual(['scan_library']);
   });
 });

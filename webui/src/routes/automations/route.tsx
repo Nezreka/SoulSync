@@ -6,6 +6,7 @@ import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
 import { automationsListQueryOptions, automationsMasterQueryOptions } from './-automations.api';
 import { automationsSearchSchema } from './-automations.types';
+import { AutomationsPage } from './-ui/automations-page';
 
 /**
  * Whether the shell has handed /automations over to React yet.
@@ -50,7 +51,5 @@ function AutomationsRouteComponent() {
   if (!isReactOwned()) {
     return <LegacyRouteController pathname="/automations" />;
   }
-  // Replaced by the real page in P2; until the manifest flips, this branch is
-  // unreachable, so rendering the legacy controller keeps it honest.
-  return <LegacyRouteController pathname="/automations" />;
+  return <AutomationsPage />;
 }

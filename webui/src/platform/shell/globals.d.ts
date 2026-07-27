@@ -57,6 +57,12 @@ declare global {
     startWishlistCountdownTimer?: (currentCycle: string, initialSeconds: number) => void;
     openWishlistIgnoreModal?: () => void;
     cleanupWishlistOverview?: () => void;
+    /**
+     * The automation builder (create/edit) still lives in stats-automations.js
+     * — it is bound to module-scoped builder state, so the React page invokes
+     * it rather than reimplementing it. Ported in a later phase.
+     */
+    showAutomationBuilder?: (automationId?: number) => void;
     clearEntireWishlist?: () => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;

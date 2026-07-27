@@ -19,12 +19,14 @@ import { createShellBridge } from '@/test/shell-bridge';
  * These tests pin that handover. When the manifest flips to 'react' in P5 they
  * are expected to be rewritten — deliberately, not by drift.
  *
- * Honest caveat on their strength right now: defeating the guard (forcing
- * isReactOwned() true) is caught ONLY by the "does not touch the automations
- * API" case. The others still pass, because until P2 builds the real page the
- * component returns LegacyRouteController down BOTH branches, so there is
- * nothing to tell them apart. The loader is the only observable difference at
- * this phase. Once the page exists, the render assertions gain their teeth.
+ * Strength, measured rather than assumed: forcing isReactOwned() true fails
+ * three of the five — the handover, the markup check and the API check. The
+ * permission gate holds either way by design, and the manifest assertion reads
+ * the manifest directly, so neither should move.
+ *
+ * (While the route rendered LegacyRouteController down BOTH branches — before
+ * the page component was wired in — only the API case could detect a defeated
+ * guard. Wiring the page is what gave the render assertions teeth.)
  */
 
 function renderRoute(entries = ['/automations']) {
