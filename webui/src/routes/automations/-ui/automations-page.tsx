@@ -19,6 +19,7 @@ import {
   setAutomationsMaster,
   toggleAutomation,
 } from '../-automations.api';
+import { useVanillaBuilder } from '../-automations.builder';
 import { formatAction, formatTrigger } from '../-automations.format';
 import {
   buildAutomationsView,
@@ -46,6 +47,9 @@ export function AutomationsPage() {
   // Live run state, merged from the socket mirror. Not query-cached: it is a
   // stream of transient frames, not a resource with a canonical server copy.
   const progress = useAutomationProgress();
+  // The builder stays in vanilla and is shared with the video page; this hands
+  // the shell over for the edit and takes it back on close.
+  const openBuilder = useVanillaBuilder(() => void refresh());
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: AUTOMATIONS_QUERY_KEY });
   const fail = (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error');
@@ -181,7 +185,7 @@ export function AutomationsPage() {
     onRun: (a: Automation) => run.mutate(a),
     onDuplicate: (a: Automation) => duplicate.mutate(a),
     onDelete: (a: Automation) => void confirmDelete(a),
-    onEdit: (a: Automation) => window.showAutomationBuilder?.(a.id),
+    onEdit: (a: Automation) => openBuilder(a.id),
     progressFor: (id: number) => progress[id],
     onAssignGroup: (a: Automation, event: React.MouseEvent) => {
       const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -279,11 +283,7 @@ export function AutomationsPage() {
         </div>
         <div className="header-spacer" />
         <div className="header-actions">
-          <button
-            type="button"
-            className="auto-new-btn"
-            onClick={() => window.showAutomationBuilder?.()}
-          >
+          <button type="button" className="auto-new-btn" onClick={() => openBuilder()}>
             + New Automation
           </button>
         </div>
@@ -417,11 +417,7 @@ export function AutomationsPage() {
           <div className="automations-empty-text">
             Create your first automation to schedule tasks and trigger actions automatically.
           </div>
-          <button
-            type="button"
-            className="auto-new-btn"
-            onClick={() => window.showAutomationBuilder?.()}
-          >
+          <button type="button" className="auto-new-btn" onClick={() => openBuilder()}>
             + New Automation
           </button>
         </div>
