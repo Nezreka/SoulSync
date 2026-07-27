@@ -1962,16 +1962,20 @@ async function downloadArtistFromWishlist(section) {
 
 function backToCategories() {
     // Returns the OVERVIEW MODAL to its category cards. This used to call
-    // _nebulaBack(), which also poked #wishlist-nebula / #wishlist-category-tracks
-    // on the page — ids the modal duplicates, so with the page present it was
-    // toggling the wrong copy. The page is React-owned now and owns its own
-    // state, so this only touches the modal.
-    const tracks = document.querySelector('.wishlist-overview-modal #wishlist-category-tracks')
-        || document.getElementById('wishlist-category-tracks');
-    const categories = document.querySelector('.wishlist-overview-modal .wishlist-categories')
-        || document.querySelector('.wishlist-categories');
+    // _nebulaBack(), which also poked #wishlist-nebula and #wishlist-category-tracks
+    // on the page — ids the modal DUPLICATES, and the page's copy came first in
+    // document order, so the modal's own Back button was toggling the wrong one.
+    //
+    // The exact inverse of selectWishlistCategory: that shows the track list and
+    // the download button (it never hides the category grid, so there is nothing
+    // to restore). Scoped inside #wishlist-overview-modal so it cannot reach
+    // anything else that happens to share these ids.
+    const modal = document.getElementById('wishlist-overview-modal');
+    const scope = modal || document;
+    const tracks = scope.querySelector('#wishlist-category-tracks');
+    const downloadBtn = scope.querySelector('#wishlist-download-btn');
     if (tracks) tracks.style.display = 'none';
-    if (categories) categories.style.display = '';
+    if (downloadBtn) downloadBtn.style.display = 'none';
     window.selectedWishlistCategory = null;
 }
 
