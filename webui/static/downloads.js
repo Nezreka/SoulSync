@@ -1458,15 +1458,12 @@ async function cleanupWishlistOverview() {
             const statsResponse = await fetch('/api/wishlist/stats');
             const statsData = await statsResponse.json();
 
+            // The wishlist page is a React route now, so it cannot be refreshed
+            // by calling the old initializer — that would repaint markup nobody
+            // is looking at. Announce the change instead; the page listens.
+            notifyWishlistChanged();
             if (statsData.total === 0) {
-                // Wishlist is empty, refresh the page to show empty state
-                wishlistPageState.isInitialized = false;
-                await initializeWishlistPage();
                 await updateWishlistCount();
-            } else {
-                // Wishlist still has items, refresh the page to show updated counts
-                wishlistPageState.isInitialized = false;
-                await initializeWishlistPage();
             }
         } else {
             showToast(`Failed to cleanup wishlist: ${result.error || 'Unknown error'}`, 'error');
@@ -1515,7 +1512,7 @@ async function clearEntireWishlist() {
 
             console.log('Refreshing wishlist page...');
             wishlistPageState.isInitialized = false;
-            await initializeWishlistPage();
+            notifyWishlistChanged();
         } else {
             console.error('Clear failed:', result.error);
             showToast(`Failed to clear wishlist: ${result.error || 'Unknown error'}`, 'error');
@@ -1964,7 +1961,29 @@ async function downloadArtistFromWishlist(section) {
 }
 
 function backToCategories() {
-    _nebulaBack();
+    // Returns the OVERVIEW MODAL to its category cards. This used to call
+    // _nebulaBack(), which also poked #wishlist-nebula and #wishlist-category-tracks
+    // on the page — ids the modal DUPLICATES, and the page's copy came first in
+    // document order, so the modal's own Back button was toggling the wrong one.
+    //
+    // The exact inverse of selectWishlistCategory: that shows the track list and
+    // the download button (it never hides the category grid, so there is nothing
+    // to restore). Scoped inside #wishlist-overview-modal so it cannot reach
+    // anything else that happens to share these ids.
+    const modal = document.getElementById('wishlist-overview-modal');
+    const scope = modal || document;
+    const tracks = scope.querySelector('#wishlist-category-tracks');
+    const downloadBtn = scope.querySelector('#wishlist-download-btn');
+    if (tracks) tracks.style.display = 'none';
+    if (downloadBtn) downloadBtn.style.display = 'none';
+    window.selectedWishlistCategory = null;
+}
+
+// Tell the (React) wishlist page its data moved under it. Mirrors the
+// ss:watchlist-scan bridge: module-scoped vanilla state cannot be read from a
+// module, so the vanilla side announces and the page reacts.
+function notifyWishlistChanged() {
+    window.dispatchEvent(new CustomEvent('ss:wishlist-changed'));
 }
 
 function toggleAlbumTracks(albumId) {

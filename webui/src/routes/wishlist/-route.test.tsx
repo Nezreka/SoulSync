@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -323,6 +323,41 @@ describe('wishlist route', () => {
     await waitFor(() => expect(document.querySelector('.wl-orb-group')).toBeTruthy());
     expect(document.querySelector('.nebula-processing')).toBeNull();
     expect(document.querySelector('.orb-processing')).toBeNull();
+  });
+
+  it('refreshes when vanilla code announces a wishlist change', async () => {
+    // Cleanup / Clear All run in downloads.js and change the wishlist under the
+    // page. Without this the orbs keep showing removed tracks until you
+    // navigate away and back.
+    const calls: string[] = [];
+    const albums = [albumRow('Aphex Twin', 'SAW', 'Xtal')];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL) => {
+        const url = i instanceof Request ? i.url : String(i);
+        calls.push(url);
+        if (url.includes('/api/wishlist/stats'))
+          return res({ total: 1, albums: 1, singles: 0, next_run_in_seconds: 600 });
+        if (url.includes('/api/wishlist/cycle')) return res({ cycle: 'albums' });
+        if (url.includes('category=albums')) return res({ tracks: albums, artist_images: {} });
+        if (url.includes('category=singles')) return res({ tracks: [], artist_images: {} });
+        if (url.includes('/api/active-processes')) return res({ active_processes: [] });
+        if (url.includes('/api/watchlist/artists')) return res({ success: true, artists: [] });
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelector('.wl-orb-group')).toBeTruthy());
+    const before = calls.filter((u) => u.includes('category=albums')).length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('ss:wishlist-changed'));
+    });
+
+    await waitFor(() => {
+      expect(calls.filter((u) => u.includes('category=albums')).length).toBeGreaterThan(before);
+    });
   });
 
   it('redirects away when the profile may not see the wishlist', async () => {
