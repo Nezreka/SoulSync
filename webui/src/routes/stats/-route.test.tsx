@@ -182,3 +182,28 @@ describe('stats route', () => {
     await waitFor(() => expect(history.location.pathname).toBe('/discover'));
   });
 });
+
+describe('stats route survives a backend outage', () => {
+  beforeEach(() => {
+    window.SoulSyncWebShellBridge = createShellBridge();
+    window.showToast = vi.fn();
+  });
+
+  it('renders the page instead of "Something went wrong"', async () => {
+    // Only the cached-stats query was unguarded; the status probe already had
+    // its own catch. allSettled covers both.
+    server.use(
+      http.get('/api/stats/cached', () => HttpResponse.json({ error: 'down' }, { status: 500 })),
+      http.get('/api/listening/stats/status', () =>
+        HttpResponse.json({ error: 'down' }, { status: 500 }),
+      ),
+    );
+
+    renderStatsRoute(['/stats']);
+
+    await waitFor(() =>
+      expect(window.SoulSyncWebShellBridge!.showReactHost).toHaveBeenCalledWith('stats'),
+    );
+    expect(screen.queryByText('Something went wrong')).toBeNull();
+  });
+});

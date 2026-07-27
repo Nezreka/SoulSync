@@ -95,3 +95,41 @@ describe('automations route', () => {
     expect(document.querySelector('.automations-container')).not.toBeNull();
   });
 });
+
+describe('automations route survives a backend outage', () => {
+  /**
+   * The loader WARMS the cache; it must not gate the route. With Promise.all a
+   * single failing request rejected the loader and TanStack replaced the whole
+   * page with defaultErrorComponent.
+   */
+  beforeEach(() => {
+    window.SoulSyncWebShellBridge = createShellBridge();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete window.SoulSyncWebShellBridge;
+  });
+
+  it('renders the page instead of "Something went wrong"', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: 'backend down' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      ),
+    );
+
+    const { router } = renderRoute(['/automations']);
+
+    // Positive proof the PAGE mounted — useReactPageShell calls this on mount,
+    // so it cannot pass while the error component is showing instead.
+    await waitFor(() =>
+      expect(window.SoulSyncWebShellBridge!.showReactHost).toHaveBeenCalledWith('automations'),
+    );
+    expect(screen.queryByText('Something went wrong')).toBeNull();
+    expect(router.state.location.pathname).toBe('/automations');
+  });
+});

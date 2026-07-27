@@ -19,7 +19,12 @@ export const Route = createFileRoute('/stats')({
     range: search.range,
   }),
   loader: async ({ context, deps }) => {
-    await Promise.all([
+    // allSettled, not all: this loader WARMS the cache for the first paint, it
+    // does not gate the route. A rejection here would hand the page to
+    // defaultErrorComponent ("Something went wrong") on any backend hiccup,
+    // where the vanilla page stayed usable. The components read the same
+    // failures through useQuery and render their own error states.
+    await Promise.allSettled([
       context.queryClient.ensureQueryData(statsCachedQueryOptions(deps.range)),
       context.queryClient
         .fetchQuery({

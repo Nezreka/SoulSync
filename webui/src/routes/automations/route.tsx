@@ -39,7 +39,12 @@ export const Route = createFileRoute('/automations')({
     // renders the master toggle beside the counts. Progress is deliberately
     // NOT prefetched — it is a catch-up read for runs already in flight, and
     // blocking paint on it would delay the page for the common idle case.
-    await Promise.all([
+    // allSettled, not all: this loader WARMS the cache for the first paint, it
+    // does not gate the route. A rejection here would hand the page to
+    // defaultErrorComponent ("Something went wrong") on any backend hiccup,
+    // where the vanilla page stayed usable. The components read the same
+    // failures through useQuery and render their own error states.
+    await Promise.allSettled([
       queryClient.ensureQueryData(automationsListQueryOptions(profile.profileId)),
       queryClient.ensureQueryData(automationsMasterQueryOptions()),
     ]);

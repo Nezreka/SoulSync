@@ -41,7 +41,12 @@ export const Route = createFileRoute('/watchlist')({
       pending.push(queryClient.ensureQueryData(watchlistLabelsQueryOptions(profile.profileId)));
     }
 
-    await Promise.all(pending);
+    // allSettled, not all: this loader WARMS the cache for the first paint, it
+    // does not gate the route. A rejection here would hand the page to
+    // defaultErrorComponent ("Something went wrong") on any backend hiccup,
+    // where the vanilla page stayed usable. The components read the same
+    // failures through useQuery and render their own error states.
+    await Promise.allSettled(pending);
   },
   component: WatchlistPage,
 });
