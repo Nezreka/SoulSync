@@ -3,6 +3,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  AutomationBlocks,
   AutomationsListResponse,
   AutomationsMasterState,
   AutomationsProgressResponse,
@@ -149,4 +150,19 @@ export async function regroupAutomations(ids: number[], groupName: string | null
     'Could not update the group',
   );
   return payload.updated ?? 0;
+}
+
+/**
+ * Block definitions — the builder's palette, and the label source for any
+ * trigger/action type not in the static maps.
+ *
+ * Scoped to 'music' server-side, so the video-only types never appear here.
+ * Long-lived: these change only when the app ships new block types.
+ */
+export function automationBlocksQueryOptions() {
+  return queryOptions({
+    queryKey: [...AUTOMATIONS_QUERY_KEY, 'blocks'] as const,
+    queryFn: () => readJson<AutomationBlocks>(apiClient.get('automations/blocks')),
+    staleTime: Infinity,
+  });
 }

@@ -28,6 +28,10 @@ interface Props extends AutomationCardHandlers {
   automation: Automation;
   /** Live run state for this automation, if one is in flight or just ended. */
   progress?: AutomationRunState;
+  /** draggable + drag handlers, empty for system automations. */
+  dragProps?: Record<string, unknown>;
+  /** This card is the one being dragged. */
+  isDragging?: boolean;
 }
 
 /**
@@ -107,7 +111,14 @@ function NextRun({ nextRun }: { nextRun: string }) {
 }
 
 /** One automation row. Markup mirrors renderAutomationCard so the CSS applies unchanged. */
-export function AutomationCard({ automation: a, blockLabel, progress, ...on }: Props) {
+export function AutomationCard({
+  automation: a,
+  blockLabel,
+  progress,
+  dragProps,
+  isDragging,
+  ...on
+}: Props) {
   const enabled = a.enabled === true || a.enabled === 1;
   const isSystem = a.is_system === true || a.is_system === 1;
   const running = isRunning(progress);
@@ -149,7 +160,8 @@ export function AutomationCard({ automation: a, blockLabel, progress, ...on }: P
     <div
       className={`automation-card${enabled ? '' : ' disabled'}${isSystem ? ' system' : ''}${
         running ? ' running' : ''
-      }`}
+      }${isDragging ? ' dragging' : ''}`}
+      {...dragProps}
       data-id={a.id}
       data-trigger-type={a.trigger_type ?? ''}
       data-action-type={a.action_type ?? ''}

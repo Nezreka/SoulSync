@@ -113,3 +113,21 @@ export interface AutomationsView {
   stats: { active: number; system: number; custom: number; total: number };
   showFilterBar: boolean;
 }
+
+/** One entry in the builder palette. */
+export interface AutomationBlockDef {
+  type: string;
+  label?: string;
+}
+
+/**
+ * GET /api/automations/blocks. `_findBlockDef` searches these three categories
+ * in order, so the label lookup below must too.
+ */
+export interface AutomationBlocks {
+  triggers?: AutomationBlockDef[];
+  actions?: AutomationBlockDef[];
+  notifications?: AutomationBlockDef[];
+}
+
+export const BLOCK_CATEGORIES = ['triggers', 'actions', 'notifications'] as const;

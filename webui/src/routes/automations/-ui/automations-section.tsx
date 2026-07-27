@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { Automation } from '../-automations.types';
 
+import { DRAG_EXPAND_MS } from '../-automations.dnd';
 import { type AutomationCardHandlers, AutomationCard } from './automation-card';
 
 /**
@@ -48,6 +49,17 @@ export interface GroupActions {
 interface Props extends AutomationCardHandlers, GroupActions {
   /** Live run state lookup, threaded down to each card. */
   progressFor?: (id: number) => import('../-automations.progress').AutomationRunState | undefined;
+  blockLabel?: (type: string) => string | undefined;
+  /** Drop-zone handlers for this section body, empty when protected. */
+  zoneProps?: Record<string, unknown>;
+  /** This body is the current drop target. */
+  isDropTarget?: boolean;
+  /** A drag is in flight — protected sections dim to show they refuse drops. */
+  isDragActive?: boolean;
+  /** Per-card drag handlers, keyed by automation. */
+  cardDragProps?: (a: Automation) => Record<string, unknown>;
+  isCardDragging?: (id: number) => boolean;
+
   id: string;
   label: string;
   automations: Automation[];
@@ -74,6 +86,11 @@ export function AutomationsSection({
   groupName,
   totalCount,
   allAutomations,
+  zoneProps,
+  isDropTarget,
+  isDragActive,
+  cardDragProps,
+  isCardDragging,
   onBulkToggle,
   onRename,
   onDeleteGroup,
@@ -96,6 +113,18 @@ export function AutomationsSection({
     });
   };
 
+  // Hovering a COLLAPSED section during a drag opens it, so you can drop into
+  // a group you cannot see. Owned here rather than plumbed from the page: the
+  // collapsed state lives in this component, and the timer must die with it.
+  useEffect(() => {
+    if (!isDropTarget || !collapsed) return;
+    const timer = setTimeout(() => {
+      writeCollapsed(id, false);
+      setCollapsed(false);
+    }, DRAG_EXPAND_MS);
+    return () => clearTimeout(timer);
+  }, [isDropTarget, collapsed, id]);
+
   const toggle = () => {
     setCollapsed((was) => {
       writeCollapsed(id, !was);
@@ -114,7 +143,7 @@ export function AutomationsSection({
     <div
       className={`automations-section${isProtected ? ' section-protected' : ''}${
         collapsed ? ' collapsed' : ''
-      }`}
+      }${isProtected && isDragActive ? ' no-drop' : ''}`}
       id={id}
       data-group-name={groupName}
     >
@@ -185,7 +214,10 @@ export function AutomationsSection({
         <span className="section-line" />
       </div>
 
-      <div className="automations-section-body">
+      <div
+        className={`automations-section-body${isDropTarget ? ' drop-target' : ''}`}
+        {...zoneProps}
+      >
         {/* The cards live in their own container, NOT directly in the body:
             .automations-grid is `repeat(2, 1fr)`, so omitting it silently
             collapses the page to one card per row. Every call site — music and
@@ -196,6 +228,8 @@ export function AutomationsSection({
               key={a.id}
               automation={a}
               progress={progressFor?.(a.id)}
+              dragProps={cardDragProps?.(a)}
+              isDragging={isCardDragging?.(a.id)}
               {...cardHandlers}
             />
           ))}

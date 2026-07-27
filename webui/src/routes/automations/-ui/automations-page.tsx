@@ -9,6 +9,7 @@ import type { Automation } from '../-automations.types';
 import {
   AUTOMATIONS_QUERY_KEY,
   automationsListQueryOptions,
+  automationBlocksQueryOptions,
   automationsMasterQueryOptions,
   automationsProgressQueryOptions,
   assignAutomationGroup,
@@ -21,7 +22,8 @@ import {
   toggleAutomation,
 } from '../-automations.api';
 import { useVanillaBuilder } from '../-automations.builder';
-import { formatAction, formatTrigger } from '../-automations.format';
+import { useAutomationDnd } from '../-automations.dnd';
+import { blockLabelLookup, formatAction, formatTrigger } from '../-automations.format';
 import {
   buildAutomationsView,
   filterAutomations,
@@ -53,6 +55,11 @@ export function AutomationsPage() {
   // that run immediately. Without the seed the card stays blank until the next
   // socket frame — which for a long quiet phase can be a while. loadAutomations
   // did the same catch-up fetch right after painting.
+  // Labels for trigger/action types the static maps do not cover. Cached
+  // indefinitely — block definitions only change when the app ships new ones.
+  const blocksQuery = useQuery(automationBlocksQueryOptions());
+  const blockLabel = useMemo(() => blockLabelLookup(blocksQuery.data), [blocksQuery.data]);
+
   const progressSeed = useQuery(automationsProgressQueryOptions());
   const progress = useAutomationProgress(progressSeed.data);
   // The builder stays in vanilla and is shared with the video page; this hands
@@ -169,6 +176,12 @@ export function AutomationsPage() {
     onError: fail,
   });
 
+  // Dragging a card into another group's body reuses the same single-row PUT
+  // the 📁 dropdown issues, so both paths land on one endpoint.
+  const dnd = useAutomationDnd((dragged, toGroup) =>
+    assign.mutate({ id: dragged.id, group: toGroup }),
+  );
+
   const idsInGroup = (name: string) =>
     view.groups.find((g) => g.name === name)?.automations.map((a) => a.id) ?? [];
 
@@ -198,6 +211,7 @@ export function AutomationsPage() {
     onShowHistory: (a: Automation) =>
       window.showAutomationHistory?.(a.id, a.name, a.action_type ?? ''),
     progressFor: (id: number) => progress[id],
+    blockLabel,
     onAssignGroup: (a: Automation, event: React.MouseEvent) => {
       const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
       setGroupMenu({
@@ -229,10 +243,10 @@ export function AutomationsPage() {
   // that build the card must produce the strings the filter searches.
   const labelFor = useCallback(
     (a: Automation) => ({
-      trigger: formatTrigger(a.trigger_type, a.trigger_config),
-      action: formatAction(a.action_type),
+      trigger: formatTrigger(a.trigger_type, a.trigger_config, blockLabel),
+      action: formatAction(a.action_type, blockLabel),
     }),
-    [],
+    [blockLabel],
   );
 
   // Stats and the filter-bar threshold describe the WHOLE set: filtering down
@@ -353,7 +367,7 @@ export function AutomationsPage() {
             <option value="">All Triggers</option>
             {options.triggers.map((t) => (
               <option key={t} value={t}>
-                {formatTrigger(t, {})}
+                {formatTrigger(t, {}, blockLabel)}
               </option>
             ))}
           </select>
@@ -366,7 +380,7 @@ export function AutomationsPage() {
             <option value="">All Actions</option>
             {options.actions.map((t) => (
               <option key={t} value={t}>
-                {formatAction(t)}
+                {formatAction(t, blockLabel)}
               </option>
             ))}
           </select>
@@ -389,6 +403,12 @@ export function AutomationsPage() {
             totalCount={view.system.length}
             allAutomations={view.system}
             isProtected
+            zoneProps={dnd.zoneProps('system', null, { isProtected: true })}
+            isDragActive={dnd.dragging}
+            cardDragProps={(a) =>
+              dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1)
+            }
+            isCardDragging={dnd.isDraggingCard}
             {...cardHandlers}
           />
         ) : null}
@@ -409,6 +429,13 @@ export function AutomationsPage() {
             totalCount={group.automations.length}
             allAutomations={group.automations}
             groupName={group.name}
+            zoneProps={dnd.zoneProps(`group:${group.name}`, group.name)}
+            isDropTarget={dnd.overKey === `group:${group.name}`}
+            isDragActive={dnd.dragging}
+            cardDragProps={(a) =>
+              dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1)
+            }
+            isCardDragging={dnd.isDraggingCard}
             {...groupActions}
             onBulkToggle={(name, allEnabled) =>
               bulkToggle.mutate({
@@ -432,6 +459,13 @@ export function AutomationsPage() {
             automations={keep.ungrouped}
             totalCount={view.ungrouped.length}
             allAutomations={view.ungrouped}
+            zoneProps={dnd.zoneProps('ungrouped', null)}
+            isDropTarget={dnd.overKey === 'ungrouped'}
+            isDragActive={dnd.dragging}
+            cardDragProps={(a) =>
+              dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1)
+            }
+            isCardDragging={dnd.isDraggingCard}
             {...cardHandlers}
           />
         ) : null}

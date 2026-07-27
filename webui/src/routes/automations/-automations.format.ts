@@ -1,4 +1,4 @@
-import type { Automation } from './-automations.types';
+import { type Automation, type AutomationBlocks, BLOCK_CATEGORIES } from './-automations.types';
 
 /**
  * Parse a server timestamp as UTC.
@@ -223,5 +223,27 @@ export function automationMeta(
     // `?? undefined` because lastResultFacts returns null for "nothing worth
     // showing", while every other field here uses undefined for absent.
     result: a.last_error ? undefined : (lastResultFacts(a.last_result) ?? undefined),
+  };
+}
+
+/**
+ * Label for a type that the static maps do not cover — video triggers,
+ * monthly_time, webhook_received and anything shipped later.
+ *
+ * Mirrors _findBlockDef: searches triggers, then actions, then notifications,
+ * and returns the first match. Returns undefined so callers fall through to
+ * humanizeType, which is the vanilla precedence (map, then block def, then
+ * humanized).
+ */
+export function blockLabelLookup(
+  blocks: AutomationBlocks | undefined,
+): (type: string) => string | undefined {
+  return (type: string) => {
+    if (!blocks || !type) return undefined;
+    for (const category of BLOCK_CATEGORIES) {
+      const found = blocks[category]?.find((b) => b.type === type);
+      if (found?.label) return found.label;
+    }
+    return undefined;
   };
 }
