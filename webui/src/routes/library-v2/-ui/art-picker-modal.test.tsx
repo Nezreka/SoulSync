@@ -31,7 +31,9 @@ describe('ArtistImagePickerModal', () => {
     await screen.findByAltText('Cover option from deezer');
     expect(seenRefreshParams).toEqual([null]);
 
-    fireEvent.click(screen.getByTitle('Refresh — re-query every provider instead of the cached result'));
+    fireEvent.click(
+      screen.getByTitle('Refresh — re-query every provider instead of the cached result'),
+    );
 
     await waitFor(() => expect(seenRefreshParams).toEqual([null, '1']));
   });

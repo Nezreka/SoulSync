@@ -1938,11 +1938,10 @@ button.statusWarn:disabled {
   font-size: 11.5px;
 }
 
-/* iss27-01 pt.4: Quality/AcoustID/cutoff options as slide toggles instead of
-   plain checkboxes. Kept as a real <input type="checkbox"> underneath (same
-   accessible role, keyboard behavior and `checked` semantics) — only the
-   appearance changes, so nothing downstream that queries by role/label
-   needs to know the difference. */
+/* iss27-13: keep the real checkbox accessible, but draw the switch on a
+   sibling span. Pseudo-elements on replaced <input> controls are
+   browser-dependent and caused both the native checkbox and custom knob to
+   render in some Chromium builds. */
 .toggleOption {
   display: inline-flex;
   align-items: center;
@@ -1950,9 +1949,20 @@ button.statusWarn:disabled {
   cursor: pointer;
 }
 
+.toggleInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .toggleSwitch {
-  appearance: none;
-  -webkit-appearance: none;
   position: relative;
   width: 34px;
   height: 20px;
@@ -1979,21 +1989,21 @@ button.statusWarn:disabled {
   transition: transform 0.15s ease;
 }
 
-.toggleSwitch:checked {
+.toggleInput:checked + .toggleSwitch {
   background: rgba(var(--accent-rgb), 0.9);
   border-color: rgba(var(--accent-rgb), 0.9);
 }
 
-.toggleSwitch:checked::before {
+.toggleInput:checked + .toggleSwitch::before {
   transform: translateX(14px);
 }
 
-.toggleSwitch:focus-visible {
+.toggleInput:focus-visible + .toggleSwitch {
   outline: 2px solid rgba(var(--accent-rgb), 0.6);
   outline-offset: 2px;
 }
 
-.toggleSwitch:disabled {
+.toggleInput:disabled + .toggleSwitch {
   opacity: 0.5;
   cursor: default;
 }

@@ -11,6 +11,7 @@ from core.library2.provider_adapters import (
     fetch_album_tracklist,
     fetch_artwork_url,
     fetch_descriptive_metadata,
+    fetch_matched_album_tracklists,
     fetch_track_metadata,
 )
 
@@ -230,6 +231,55 @@ def test_direct_itunes_tracklist_keeps_itunes_track_identity(monkeypatch):
     assert result is not None and result.provider == "itunes"
     assert result.track_payloads()[0]["external_ids"] == {"itunes": "it-track"}
     assert "spotify_id" not in result.track_payloads()[0]
+
+
+def test_matched_tracklists_fetch_every_exact_provider_without_name_search(monkeypatch):
+    calls = []
+
+    class Client:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def get_album_tracks(self, album_id, allow_fallback=False):
+            calls.append((self.provider, album_id, allow_fallback))
+            return {
+                "items": [{
+                    "id": f"{self.provider}-track",
+                    "name": "Track",
+                    "track_number": 1,
+                    "external_ids": {"isrc": "USAAA2600001"},
+                }],
+            }
+
+    clients = {
+        "spotify": Client("spotify"),
+        "deezer": Client("deezer"),
+    }
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source", clients.get,
+    )
+
+    results = fetch_matched_album_tracklists(
+        {
+            "spotify": "sp-album",
+            "deezer": "dz-album",
+            "upc": "0123456789",
+        },
+        source_order=("spotify", "deezer"),
+    )
+
+    assert [(result.provider, result.provider_entity_id) for result in results] == [
+        ("spotify", "sp-album"),
+        ("deezer", "dz-album"),
+    ]
+    assert calls == [
+        ("spotify", "sp-album", False),
+        ("deezer", "dz-album", False),
+    ]
+    assert results[0].track_payloads()[0]["external_ids"] == {
+        "spotify": "spotify-track",
+    }
+    assert results[0].track_payloads()[0]["isrc"] == "USAAA2600001"
 
 
 def test_track_metadata_records_provider_that_actually_answered(monkeypatch):

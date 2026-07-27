@@ -3115,22 +3115,35 @@ außerhalb des gemeldeten Scopes. Live-Verifikation im Browser gegen einen
 echten Soulseek/Usenet-Backend-Stack stand in dieser Session nicht zur
 Verfügung (kein laufender `dev.py`); empfohlen vor dem nächsten Nutzer-Test.
 
-## 22. Live-Test-Feedback zu §21/§33: Usenet-Regression, kaputte Toggle-Optik, fehlendes Timeout-Verhalten — OFFEN, Recherche läuft, 27. Juli 2026
+## 22. Live-Test-Feedback zu §21/§33: Usenet-Regression, kaputte Toggle-Optik, fehlendes Timeout-Verhalten — Verified, 27. Juli 2026
 
 **Wichtig:** Genau die in §21 als "Live-Verifikation stand nicht zur
 Verfügung" markierte Lücke hat sich als real herausgestellt — der Nutzer hat
 §21/§33 direkt im Browser getestet und drei konkrete Probleme gemeldet.
-Alle drei Punkte sind zum Zeitpunkt dieses Eintrags **NICHT behoben** —
-Recherche wird in der nächsten Session fortgesetzt. Dieser Abschnitt hält
-den Zwischenstand der Recherche fest, damit nichts verlorengeht.
+Der historische Zwischenstand bleibt unten nachvollziehbar; die spätere
+Abschlussdiagnose hat alle drei Punkte behoben und regressionsgeprüft.
 
-### 22.1 <a name="iss27-12"></a> iss27-12 — Usenet liefert seit §21/§33 keine Ergebnisse mehr (Regression) — Offen, Root Cause noch nicht gefunden
+### 22.1 <a name="iss27-12"></a> iss27-12 — Usenet liefert seit §21/§33 keine Ergebnisse mehr (Regression) — Verified
 
 **Symptom:** Laut Nutzer lieferte die Usenet-Quelle in Interactive Search
 vor den §21/§33-Änderungen noch Ergebnisse; seit dem Umbau der
 Quellenauswahl auf Multi-Select-Chips (§21.4) liefert sie gar nichts mehr.
 
-**Bisherige Recherche (nicht abschließend):** Der naheliegendste Verdacht
+**Abschlussdiagnose:** Der Backend-/`source`-Verdacht war nicht die Ursache.
+Die neue UI speicherte **ausgeschlossene** Quellen. Im Defaultzustand waren
+„All sources" und alle Einzelchips als gedrückt dargestellt; ein Nutzerklick
+auf den gewünschten „Usenet"-Chip schloss Usenet jedoch aus. Die Regression
+war damit rein semantisch und durch den alten Test („Deselecting Soulseek
+leaves Usenet") sogar auf das falsche Verhalten festgeschrieben.
+
+**Fix:** `selectedSources` ist nun eine positive exakte Auswahl; leer bedeutet
+eindeutig „All sources", der erste Einzelklick wählt genau diese Quelle.
+Search-Requests senden außerdem die Track-/Album-ID, damit Candidate-Tokens
+bereits bei der Suche entity-gebunden sind. Regressionstest: Klick auf
+„Usenet" erzeugt ausschließlich `{source: "usenet", lib2_track_id,
+lib2_album_id}`.
+
+**Historische Recherche:** Der naheliegendste Verdacht
 war, dass `run()` in `interactive-search.tsx` jetzt — anders als vorher —
 IMMER einen expliziten `source`-Parameter an `searchSources()` übergibt,
 auch im reinen Single-Source-Modus (vorher wurde dort `undefined`
@@ -3150,22 +3163,25 @@ Requests: `activeSources.map((s) => searchSources(q, s.name))` ist bei
 leerem `excludedSources` bytgleich mit dem alten
 `allSources.map((s) => searchSources(q, s.name))`.
 
-**Nächste Schritte:** Muss mit dem echten Setup des Nutzers reproduziert
-werden (Single-Source „usenet“ vs. Hybrid mit Usenet im Chain? Welche
-Quellen sind aktuell konfiguriert? Browser-Devtools-Network-Tab: welcher
-`source`-Wert geht tatsächlich raus, welche Antwort kommt zurück —
-leeres `results: []`, ein Fehler, oder ein Timeout?). Ohne Reproduktion
-gegen einen echten Prowlarr/Usenet-Client lässt sich der Root Cause aus
-dem Code allein nicht sicher eingrenzen.
+Ein echter Prowlarr-/Usenet-Live-E2E bleibt Release-Gate, ist aber für die
+bestätigte Chip-Ursache nicht mehr der Blocker.
 
-### 22.2 <a name="iss27-13"></a> iss27-13 — Quality-/AcoustID-/Cutoff-Toggles rendern visuell kaputt — Offen, braucht Live-Browser-Diagnose
+### 22.2 <a name="iss27-13"></a> iss27-13 — Quality-/AcoustID-/Cutoff-Toggles rendern visuell kaputt — Verified
 
 **Symptom:** Laut Nutzer sehen die drei neuen Toggle-Switches (§21.4) "komplett
 kaputt" aus — sichtbar ist nur ein weißer Punkt, UND zusätzlich weiterhin
 eine native Checkbox-Box daneben/darunter, statt eines sauberen
 Slide-Toggles.
 
-**Einordnung:** Das ist ein reines CSS-Rendering-Problem, das durch
+**Abschlussdiagnose und Fix:** `.toggleSwitch::before` lag direkt auf einem
+ersetzten `<input type="checkbox">`; Pseudo-Elemente darauf sind
+browserabhängig, weshalb native Checkbox und eigener Knopf gleichzeitig
+erscheinen konnten. Der echte, zugängliche Checkbox-Input ist nun visuell
+geclippt, während Track/Knopf auf einem direkt folgenden `span` liegen.
+Chromium-Messung: Input 1×1 px + `clip-path: inset(50%)`, Track 36×22 px,
+Knopf 16×16 px; Screenshot zeigt genau einen sauberen Switch.
+
+**Historische Einordnung:** Das ist ein reines CSS-Rendering-Problem, das durch
 Unit-/Komponententests (jsdom rendert kein echtes Box-Modell/keine echten
 Pseudo-Elemente) nicht auffindbar ist — dafür ist ein echter Browser via
 `dev.py` nötig, der in dieser Session nicht zur Verfügung stand. Verdächtig:
@@ -3175,9 +3191,9 @@ könnte von einer globaleren/spezifischeren Regel überschrieben werden
 möglicherweise gleichzeitig sichtbar), oder eine fehlende
 Browser-Prefix-/Cascade-Reihenfolge lässt die native Checkbox-Box
 durchscheinen. Muss live im Browser inspiziert (Devtools Computed Styles)
-und korrigiert werden.
+und korrigiert werden. Diese Browserprüfung ist nun erfolgt.
 
-### 22.3 <a name="iss27-14"></a> iss27-14 — Kein progressives Rendering / unklares Timeout-Verhalten bei langsamer oder nicht-antwortender Quelle — Offen, Design-Entscheidung nötig
+### 22.3 <a name="iss27-14"></a> iss27-14 — Kein progressives Rendering / unklares Timeout-Verhalten bei langsamer oder nicht-antwortender Quelle — Verified
 
 **Symptom/Frage des Nutzers:** Was passiert, wenn eine Quelle nicht
 antwortet? Gibt es ein Timeout? Soulseek braucht/queued teils auch lange.
@@ -3195,24 +3211,18 @@ Quelle landet in `failed`, die anderen Ergebnisse werden trotzdem
 angezeigt — das ist die iss27-01-Fan-out-Garantie), aber die WARTEZEIT bis
 dahin blockiert die gesamte Anzeige.
 
-**Möglicher Fix-Ansatz (noch nicht umgesetzt, Nutzer-Rückfrage vor
-Umsetzung nötig):** Ergebnisse pro Quelle einzeln rendern, sobald sie
-eintreffen (`results` inkrementell befüllen statt erst nach
-`Promise.allSettled`), statt auf die langsamste Quelle zu warten. Das ist
-ein größerer UX-Umbau als eine kleine Bugfix-Änderung — bewusst nicht ad
-hoc umgesetzt, sondern hier nur recherchiert/dokumentiert, bis der Nutzer
-den Ansatz bestätigt.
+**Fix:** Ergebnisse werden pro Quelle inkrementell in die Tabelle gemerged.
+Solange weitere Quellen laufen, zeigt ein Status die laufende Suche; der
+90s-Timeout bleibt pro Quelle erhalten. Ein Run-Sequence-Guard verwirft späte
+Antworten einer überholten Suche. Der Regressionstest hält Soulseek künstlich
+offen und belegt, dass das fertige Usenet-Ergebnis vorher sichtbar wird.
 
 ### Einstufung (§22)
 
-Alle drei Punkte sind als Ergebnis des ersten echten Live-Tests von §21/§33
-gemeldet worden und bleiben bis zur nächsten Session offen. iss27-12 ist
-die dringendste (funktionale Regression), iss27-13 die am einfachsten zu
-beheben sobald ein Browser verfügbar ist (reines CSS), iss27-14 braucht
-vorab eine Nutzer-Entscheidung zum gewünschten UX (progressives Rendering
-vs. aktuelles Warten-auf-alle-Verhalten).
+Alle drei Live-Findings sind behoben. Abdeckung: 17 Interactive-Search-
+Komponententests, Frontend-Type/Lint/Build und echter Chromium-Render.
 
-## 23. Neu heruntergeladener Track eines bereits gut gemappten Albums hat nur eine Metadaten-Quelle — Offen, Recherche begonnen, 27. Juli 2026
+## 23. Neu heruntergeladener Track eines bereits gut gemappten Albums hat nur eine Metadaten-Quelle — Verified, 27. Juli 2026
 
 **Symptom/Szenario des Nutzers:** Ein Album ist bei fast allen
 Metadaten-Quellen gematcht, ebenso der Artist — das Album ist aber nicht
@@ -3227,8 +3237,33 @@ Werkzeug, das die Daten vom Album/Artist übernehmen bzw. die anderen
 Quellen nachmappen kann? Falls ja, sollte es nach dem Download für genau
 diesen einen Track automatisch ausgelöst werden.
 
-**Erste Recherche (nicht abschließend, nur zur Einordnung vor der
-nächsten Session):**
+**Abschlussdiagnose:** Die offene Kernfrage ist bestätigt:
+`fetch_album_tracklist()` probiert explizite Album-Provider-IDs in
+Prioritätsreihenfolge, gibt aber nach der **ersten** erfolgreichen Trackliste
+zurück. `_persist_tracklist_tracks()` konnte deshalb nur diese eine
+Provider-ID pro Track speichern. Album und Artist konnten unabhängig davon
+reichhaltig gemappt sein. Es gab keinen bestehenden albumweiten
+Multi-Provider-Track-Reconcile.
+
+Die zweite Hälfte des Symptoms war unabhängig davon: Autolink materialisiert
+die neue Datei bereits vor dem Import-History-Event in `lib2_track_files`.
+Album-/Artist-Queries wurden nach dem Import aber nicht invalidiert, weshalb
+die UI bis „Refresh & Scan" den alten `missing`-Stand zeigen konnte.
+
+**Umgesetzte Korrektur:**
+
+- `fetch_matched_album_tracklists()` lädt ausschließlich Tracklisten der
+  bereits explizit bestätigten Album-IDs; keine Namenssuche, kein Erraten
+  einer Edition.
+- `reconcile_album_track_provider_ids()` ordnet konservativ per vorhandener
+  Provider-ID, Titel+Disc/Position oder beidseitig eindeutigem Titel zu,
+  merged Provider-ID/ISRC/MBID und bewahrt Konflikte.
+- `track_reconcile_trigger` führt das albumweit fünf Sekunden entprellt nach
+  normalem Import und Post-Move-Recovery aus.
+- Imported-History und Queue aktiv→leer invalidieren die Library-v2-
+  React-Queries, sodass die autogelinkte Datei ohne manuellen Scan erscheint.
+
+**Historischer Recherche-Zwischenstand:**
 
 - Provider-IDs werden pro Entität in einer `external_ids`-JSON-Spalte
   gehalten (`lib2_artists`, `lib2_albums`, `lib2_tracks` —
@@ -3270,24 +3305,33 @@ nächsten Session):**
   für ein bereits gematchtes Album nachzieht, konnte in der verfügbaren
   Zeit nicht abschließend verifiziert werden.
 
-**Vorschlag für die nächste Session (noch nicht umgesetzt):** Falls sich
-bestätigt, dass Tracks beim Discography-Fetch nur eine einzelne Quelle
-bekommen: einen Track-Reconcile-Job analog zu
-`reconcile_unmapped_native_artists` bauen (pro Track alle konfigurierten
-Provider über `core/metadata/album_tracks.py` abklappern, per
-`dedup_title_key`/Tracknummer matchen, gefundene IDs per
-`_adopt_external_id` mergen), und diesen — genau wie beim
-Artist-Reconcile — per Post-Import-Hook automatisch für den einzelnen
-neu importierten Track auslösen (kein manuelles „Refresh & Scan" mehr
-nötig). Vor der Umsetzung: bestätigen, ob ein Teil davon nicht doch schon
-existiert, um keine Dopplung zu bauen.
-
 ### Einstufung
 
-Recherche begonnen, aber NICHT abgeschlossen — die Kernfrage (bekommen
-einzelne Tracks beim Discography-Fetch überhaupt Multi-Provider-IDs?) ist
-noch offen. Nächste Session: `core/library2/discography.py` und den
-initialen Album-Track-Anlage-Pfad nachvollziehen, dann entscheiden, ob ein
-neuer Track-Reconcile-Job nötig ist oder ob nur ein bestehendes Werkzeug
-verdrahtet werden muss.
+Verified. Gezielte Provider-/Reconcile-/Trigger-Tests, 49 Importtests,
+1.075 Library-v2-Tests und der §35-Frontend-Cachetest sind grün.
 
+## 24. Python 3.14.6: gemeinsamer Async-Loop wacht bei Torrent-/Usenet-Aufrufen nicht auf — Verified, 27. Juli 2026
+
+**Symptom:** Candidate-Store- und Torrent-/Usenet-Tests liefen bis zum ersten
+`utils.async_helpers.run_async()` und blockierten dann unbegrenzt. Eine
+isolierte Reproduktion mit `run_async(asyncio.sleep(0, result=42))` hing
+ebenfalls; Faulthandler zeigte den Loop dauerhaft in `selector.select()` und
+den Aufrufer in `Future.result()`.
+
+**Root Cause:** Der Selector-Loop wurde im aufrufenden Thread durch
+`asyncio.new_event_loop()` erzeugt, danach in einem separaten Thread per
+`run_forever()` betrieben. Unter Python 3.14.6 konnte
+`run_coroutine_threadsafe()` diesen fremderzeugten Loop in längeren Prozessen
+nicht zuverlässig wecken.
+
+**Fix:** Erzeugung und Betrieb erfolgen nun im selben Besitzer-Thread. Jobs
+gelangen über eine threadsichere Queue zu einem Loop-Pump, der sie als
+getrennte Tasks startet. Das umgeht den verlorenen Cross-Thread-Selector-
+Wakeup und erhält die notwendige Parallelität (kein serieller Head-of-Line-
+Block). Eine Active-Task-Menge hält zudem eine starke Referenz, solange ein
+Job auf I/O wartet; ein GC-Lauf kann ihn daher nicht verwerfen und den
+synchronen Aufrufer dauerhaft in `Future.result()` lassen.
+
+**Verifikation:** Async-Bridge 3/3 (Start, Parallelität, Task-Lebenszyklus),
+Candidate Store 15/15 und
+Torrent-/Usenet-Plugins 51/51 bestanden und beendeten den Prozess sauber.

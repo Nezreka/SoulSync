@@ -13,6 +13,7 @@ from core.library2.completeness import (
     precache_tracklists,
     resolve_tracklist,
 )
+from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
 
 
 def test_persist_tracklist_tracks_creates_monitorable_missing_rows(imported_conn):
@@ -124,7 +125,7 @@ def test_precache_materializes_cached_tracklists_before_provider_lookup(legacy_d
         ).fetchone()
         assert snapshot["provider"] == "legacy-cache"
         assert snapshot["is_complete"] == 1
-        assert snapshot["parser_version"] == "library2-tracklist/1"
+        assert snapshot["parser_version"] == TRACKLIST_PARSER_VERSION
         assert json.loads(snapshot["payload_json"])["reference"][
             "release_edition_id"] is not None
     finally:
@@ -184,7 +185,7 @@ def test_resolve_tracklist_snapshots_spotify_and_reuses_durable_cache(
     assert snapshot["provider"] == "spotify"
     assert snapshot["provider_entity_id"] == "sp-edition-1"
     assert snapshot["is_complete"] == 1
-    assert snapshot["parser_version"] == "library2-tracklist/1"
+    assert snapshot["parser_version"] == TRACKLIST_PARSER_VERSION
     assert payload["reference"]["release_edition_id"] == edition_id
     assert payload["tracks"][0]["spotify_id"] == "sp-t1"
 

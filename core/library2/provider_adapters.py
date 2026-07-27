@@ -16,7 +16,7 @@ from utils.logging_config import get_logger
 
 
 DISCOGRAPHY_PARSER_VERSION = "library2-discography/1"
-TRACKLIST_PARSER_VERSION = "library2-tracklist/1"
+TRACKLIST_PARSER_VERSION = "library2-tracklist/2"
 ARTWORK_PARSER_VERSION = "library2-artwork/1"
 logger = get_logger("library2.provider_adapters")
 
@@ -120,6 +120,8 @@ class TracklistTrack:
     duration_ms: Optional[int]
     provider: str
     provider_id: Optional[str]
+    isrc: Optional[str] = None
+    musicbrainz_id: Optional[str] = None
 
     @classmethod
     def from_item(cls, item: Mapping[str, Any], *, provider: str) -> Optional["TracklistTrack"]:
@@ -134,6 +136,19 @@ class TracklistTrack:
             seconds = _optional_nonnegative_int(item.get("duration"))
             duration = seconds * 1000 if seconds is not None else None
         provider_id = _optional_text(item.get("id"))
+        external_ids = item.get("external_ids")
+        if not isinstance(external_ids, Mapping):
+            external_ids = {}
+        isrc = _optional_text(item.get("isrc") or external_ids.get("isrc"))
+        musicbrainz_id = _optional_text(
+            item.get("musicbrainz_id")
+            or item.get("musicbrainz_recording_id")
+            or item.get("mbid")
+            or external_ids.get("musicbrainz")
+            or external_ids.get("mbid")
+        )
+        if provider == "musicbrainz" and provider_id:
+            musicbrainz_id = musicbrainz_id or provider_id
         return cls(
             title=title,
             track_number=number,
@@ -141,6 +156,8 @@ class TracklistTrack:
             duration_ms=duration,
             provider=provider,
             provider_id=provider_id,
+            isrc=isrc,
+            musicbrainz_id=musicbrainz_id,
         )
 
     def to_payload(self) -> Dict[str, Any]:
@@ -161,6 +178,10 @@ class TracklistTrack:
                 payload["spotify_id"] = self.provider_id
             elif self.provider == "musicbrainz":
                 payload["musicbrainz_id"] = self.provider_id
+        if self.isrc:
+            payload["isrc"] = self.isrc
+        if self.musicbrainz_id:
+            payload["musicbrainz_id"] = self.musicbrainz_id
         return payload
 
 
@@ -652,6 +673,60 @@ def _deezer_search_match(
     return True
 
 
+def _fetch_direct_album_tracklist(
+    provider: str,
+    provider_id: str,
+) -> Optional[TracklistProviderResult]:
+    """Fetch one exact, already-matched release without any name fallback."""
+    from core.metadata.registry import get_client_for_source
+
+    try:
+        client = get_client_for_source(provider)
+        getter = getattr(client, "get_album_tracks", None) if client else None
+        if not callable(getter):
+            return None
+        try:
+            payload = getter(provider_id, allow_fallback=False)
+        except TypeError:
+            payload = getter(provider_id)
+        tracks = _normalize_tracklist(payload, provider)
+        if tracks:
+            return TracklistProviderResult(provider, provider_id, tracks)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "%s tracklist lookup failed (%s): %s", provider, provider_id, exc,
+        )
+    return None
+
+
+def fetch_matched_album_tracklists(
+    source_album_ids: Mapping[str, str],
+    *,
+    source_order: Optional[Tuple[str, ...]] = None,
+) -> Tuple[TracklistProviderResult, ...]:
+    """Fetch tracklists for every explicitly matched release provider.
+
+    Unlike :func:`fetch_album_tracklist`, this never searches by title and
+    does not stop after the first successful provider. It is the conservative
+    identity-reconcile boundary: all requested IDs already belong to the same
+    local release, and each returned track ID keeps its provider namespace.
+    """
+    source_ids = _normalized_source_ids(source_album_ids)
+    configured = (
+        tuple(source_order) if source_order is not None else _configured_source_order()
+    )
+    order = _provider_query_order(configured, source_ids)
+    results = []
+    for provider in order:
+        provider_id = source_ids.get(provider)
+        if not provider_id or provider in {"upc", "barcode", "isrc"}:
+            continue
+        result = _fetch_direct_album_tracklist(provider, provider_id)
+        if result is not None:
+            results.append(result)
+    return tuple(results)
+
+
 def fetch_album_tracklist(
     album_title: str,
     artist_name: str,
@@ -667,34 +742,17 @@ def fetch_album_tracklist(
     numeric/string ID is ever re-labelled as Spotify.  A conservative Deezer
     name search remains the last fallback for older rows without release IDs.
     """
-    from core.metadata.registry import (
-        get_client_for_source,
-        get_deezer_client,
-    )
+    from core.metadata.registry import get_deezer_client
 
     source_ids = _normalized_source_ids(source_album_ids)
-    order = list(_configured_source_order())
-    order.extend(sorted(set(source_ids) - set(order)))
+    order = _provider_query_order(_configured_source_order(), source_ids)
     for provider in order:
         provider_id = source_ids.get(provider)
         if not provider_id or provider in {"upc", "barcode", "isrc"}:
             continue
-        try:
-            client = get_client_for_source(provider)
-            getter = getattr(client, "get_album_tracks", None) if client else None
-            if not callable(getter):
-                continue
-            try:
-                payload = getter(provider_id, allow_fallback=False)
-            except TypeError:
-                payload = getter(provider_id)
-            tracks = _normalize_tracklist(payload, provider)
-            if tracks:
-                return TracklistProviderResult(provider, provider_id, tracks)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "%s tracklist lookup failed (%s): %s", provider, provider_id, exc,
-            )
+        result = _fetch_direct_album_tracklist(provider, provider_id)
+        if result is not None:
+            return result
 
     if artist_name and album_title:
         try:
@@ -937,6 +995,7 @@ __all__ = [
     "TracklistTrack",
     "TrackMetadataProviderResult",
     "fetch_album_tracklist",
+    "fetch_matched_album_tracklists",
     "fetch_artwork_url",
     "fetch_artist_discography",
     "fetch_descriptive_metadata",

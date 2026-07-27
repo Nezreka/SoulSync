@@ -15,6 +15,19 @@ import tempfile
 import pytest
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _shutdown_library2_background_workers():
+    """Do not let queued provider work delay pytest process shutdown."""
+    yield
+    from core.library2 import artwork
+    from core.library2 import track_reconcile_trigger
+    from core.library2 import unmapped_trigger
+
+    track_reconcile_trigger.reset_for_tests()
+    unmapped_trigger.reset_for_tests()
+    artwork.shutdown_background_executor()
+
+
 class LegacyDBShim:
     """Mimics the ``MusicDatabase._get_connection`` contract the importer needs."""
 

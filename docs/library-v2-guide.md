@@ -176,6 +176,14 @@ Starke IDs schlagen Namensheuristiken. Namen dürfen nur dann als Fallback
 dienen, wenn keine widersprechende starke Identität existiert. Nicht-lateinische
 Schriften müssen Unicode-erhaltend normalisiert werden.
 
+Ein Release, dessen Album-ID bereits bei mehreren Providern explizit bestätigt
+ist, darf seine Track-IDs aus allen diesen **exakten** Provider-Tracklisten
+zusammenführen. Dieser Abgleich darf keine neue Release-Identität per
+Namenssuche erfinden: Track-ID, Titel plus Disc/Position oder ein auf beiden
+Seiten eindeutiger Titel sind zulässige Beweise; Konflikte bleiben erhalten
+und werden nicht überschrieben. Der kanonische Tracklist-Provider bestimmt
+weiter Titel/Reihenfolge, nicht die alleinige Identität aller Tracks.
+
 ### 2.6 Admin-Grenze
 
 Library V2 besitzt einen globalen, admin-gesteuerten Katalog- und
@@ -428,6 +436,10 @@ ein Kandidat Track oder Album-Bundle ist.
 7. Keine Platzhalter-MVPs für sicherheits- oder lifecycle-relevante Flows.
 8. Mutierende Dateioperationen immer mit Root-, Mapping-, Restart- und
    Failure-Injection-Fällen prüfen.
+9. Gemeinsame Sync→Async-Bridges müssen ihren Event-Loop in dessen
+   Besitzer-Thread erzeugen und sowohl ersten Start als auch parallele
+   Aufrufer testen; ein grüner reiner Importtest erkennt Selector-Wakeup-
+   Deadlocks nicht.
 
 ### 6.1 Lokale Verifikation
 

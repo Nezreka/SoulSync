@@ -571,7 +571,18 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
         logger.warning("Post-move standalone-library reconciliation failed: %s", exc)
     try:
         from core.library2.autolink import link_download_into_library_v2
-        link_download_into_library_v2(context)
+        linked_lib2_file_id = link_download_into_library_v2(context)
+        if linked_lib2_file_id is not None:
+            from config.settings import config_manager
+            from database.music_database import get_database
+            from core.library2.track_reconcile_trigger import (
+                schedule_file_track_reconcile,
+            )
+            schedule_file_track_reconcile(
+                get_database(),
+                linked_lib2_file_id,
+                config_manager,
+            )
     except Exception as exc:  # noqa: BLE001 - reconciliation must remain fail-open
         logger.warning("Post-move Library-v2 reconciliation failed: %s", exc)
     try:

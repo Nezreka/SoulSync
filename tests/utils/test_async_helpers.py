@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
+from utils import async_helpers
 from utils.async_helpers import run_async
 
 
@@ -64,3 +66,30 @@ def test_first_run_async_call_waits_for_event_loop_startup():
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_submitted_task_is_retained_until_it_finishes():
+    started = threading.Event()
+
+    async def suspended_job():
+        started.set()
+        await asyncio.sleep(0.2)
+        return "finished"
+
+    result = {}
+    worker = threading.Thread(
+        target=lambda: result.setdefault("value", run_async(suspended_job())),
+    )
+    worker.start()
+    assert started.wait(2)
+
+    gc.collect()
+    assert async_helpers._active_tasks
+
+    worker.join(2)
+    assert not worker.is_alive()
+    assert result == {"value": "finished"}
+    deadline = time.monotonic() + 1
+    while async_helpers._active_tasks and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not async_helpers._active_tasks

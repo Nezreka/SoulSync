@@ -1822,10 +1822,14 @@ function lib2EntityFields(entity?: Lib2EntityRef): Record<string, number> {
   };
 }
 
-export async function searchSources(query: string, source?: string): Promise<SourceSearchResult[]> {
+export async function searchSources(
+  query: string,
+  source?: string,
+  entity?: Lib2EntityRef,
+): Promise<SourceSearchResult[]> {
   const payload = await readJson<{ results?: SourceSearchResult[]; error?: string }>(
     apiClient.post('search', {
-      json: { query, ...(source ? { source } : {}) },
+      json: { query, ...(source ? { source } : {}), ...lib2EntityFields(entity) },
       timeout: 90_000, // source search (Soulseek etc.) can take up to ~75s
     }),
   );
@@ -1907,7 +1911,7 @@ export async function autoGrabBest(
   options: DownloadOptions = {},
   entity?: Lib2EntityRef,
 ): Promise<SourceSearchResult | null> {
-  const all = await searchSources(query);
+  const all = await searchSources(query, undefined, entity);
   if (all.length === 0) return null;
   // A track action must not grab a release-bundle result (audit P1-18):
   // the pipeline would import one arbitrary file of a whole album.

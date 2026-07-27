@@ -9,6 +9,12 @@ import pytest
 from core.library2 import autolink as A
 
 
+@pytest.fixture(autouse=True)
+def _disable_unrelated_artwork_warmup(monkeypatch):
+    """Keep DB-link tests from leaking provider futures into later modules."""
+    monkeypatch.setattr(A, "_warm_new_artwork", lambda *_args, **_kwargs: None)
+
+
 @pytest.fixture
 def lib2_enabled(monkeypatch, legacy_db):
     """Enable the feature flag and point get_database at the test DB."""

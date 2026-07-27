@@ -4775,6 +4775,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const releasesMode = search.releases;
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
+  useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
   const [discographyBusy, setDiscographyBusy] = useState(false);
   const [modalAction, setModalAction] = useState<{
@@ -6129,6 +6130,7 @@ export function AlbumTrackTable({
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('albums', albumId));
+  useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -6330,6 +6332,23 @@ export function AlbumTrackTable({
       </table>
     </div>
   );
+}
+
+/** Keep a page honest when a grab finishes after its search modal was closed.
+ * Queue polling is already active on artist/album detail pages; use its
+ * active→empty edge to refetch the committed autolink result exactly once. */
+function useRefreshLibraryWhenQueueDrains(activeCount: number) {
+  const queryClient = useQueryClient();
+  const hadActiveQueue = useRef(false);
+  useEffect(() => {
+    if (activeCount > 0) {
+      hadActiveQueue.current = true;
+      return;
+    }
+    if (!hadActiveQueue.current) return;
+    hadActiveQueue.current = false;
+    void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+  }, [activeCount, queryClient]);
 }
 
 /** Mirrors core/library2/status.py EXPECTED_TAGS (order = display order). */

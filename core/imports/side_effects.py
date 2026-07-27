@@ -404,11 +404,30 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
 
     # Library v2 auto-link (opt-in, best-effort): make the imported file appear
     # in the v2 library immediately instead of waiting for a full re-import.
+    linked_lib2_file_id = None
     try:
         from core.library2.autolink import link_download_into_library_v2
-        link_download_into_library_v2(context)
+        linked_lib2_file_id = link_download_into_library_v2(context)
     except Exception as e:
         logger.debug("library v2 autolink skipped: %s", e)
+
+    # The canonical tracklist deliberately comes from one provider, but a
+    # confirmed album can carry several provider release IDs. Reconcile those
+    # exact lists after the import so a newly landed track immediately gains
+    # every safe provider ID without making the file pipeline wait on network
+    # calls. Album-level debounce collapses a multi-file import into one run.
+    if linked_lib2_file_id is not None:
+        try:
+            from core.library2.track_reconcile_trigger import (
+                schedule_file_track_reconcile,
+            )
+            schedule_file_track_reconcile(
+                get_database(),
+                linked_lib2_file_id,
+                _get_config_manager(),
+            )
+        except Exception as e:
+            logger.debug("library v2 track-identity reconcile not scheduled: %s", e)
 
     # ...and heal the artists that link just created. Featured credits and
     # wishlist/discography rows are born without a provider id, so their chips

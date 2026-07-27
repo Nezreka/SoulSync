@@ -167,7 +167,7 @@ describe('library v2 interactive grab', () => {
     expect(submitted[1]).toEqual(submitted[0]);
   });
 
-  it('iss27-01: searches every configured source in parallel by default', async () => {
+  it('iss27-12: searches every source by default and clicking Usenet selects Usenet', async () => {
     const searches: unknown[] = [];
     server.use(
       http.get('/api/search/sources', () =>
@@ -188,7 +188,11 @@ describe('library v2 interactive grab', () => {
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
-        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+        <InteractiveSearchModal
+          initialQuery="Artist Selected"
+          entity={{ trackId: 321, albumId: 12 }}
+          onClose={vi.fn()}
+        />
       </QueryClientProvider>,
     );
 
@@ -197,17 +201,35 @@ describe('library v2 interactive grab', () => {
     await waitFor(() => expect(searches).toHaveLength(2));
     expect(searches).toEqual(
       expect.arrayContaining([
-        { query: 'Artist Selected', source: 'soulseek' },
-        { query: 'Artist Selected', source: 'usenet' },
+        {
+          query: 'Artist Selected',
+          source: 'soulseek',
+          lib2_track_id: 321,
+          lib2_album_id: 12,
+        },
+        {
+          query: 'Artist Selected',
+          source: 'usenet',
+          lib2_track_id: 321,
+          lib2_album_id: 12,
+        },
       ]),
     );
 
-    // Deselecting the Soulseek chip leaves Usenet as the only active source.
-    fireEvent.click(await screen.findByRole('button', { name: 'Soulseek' }));
+    // Regression: the selected-looking Usenet chip must INCLUDE Usenet. The
+    // old exclusion-set implementation did the opposite and made live
+    // Usenet results appear to have disappeared.
+    fireEvent.click(await screen.findByRole('button', { name: 'Usenet' }));
+    expect(screen.getByRole('button', { name: 'Usenet' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     await waitFor(() => expect(searches).toHaveLength(3));
-    expect(searches[2]).toEqual({ query: 'Artist Selected', source: 'usenet' });
+    expect(searches[2]).toEqual({
+      query: 'Artist Selected',
+      source: 'usenet',
+      lib2_track_id: 321,
+      lib2_album_id: 12,
+    });
   });
 
   it('iss27-01: merges results from the sources that succeed when one source search fails', async () => {
@@ -254,7 +276,7 @@ describe('library v2 interactive grab', () => {
     expect(screen.queryByText(/search failed/i)).not.toBeInTheDocument();
   });
 
-  it('iss27-01 pt.4: source chips toggle independently, never excluding the last active one', async () => {
+  it('iss27-12: source chips expose an intuitive exact subset and normalize all', async () => {
     server.use(
       http.get('/api/search/sources', () =>
         HttpResponse.json({
@@ -281,28 +303,118 @@ describe('library v2 interactive grab', () => {
       'aria-pressed',
       'true',
     );
+    expect(screen.getByRole('button', { name: 'Soulseek' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
 
-    // A subset can be narrowed by deselecting individual chips — this isn't
-    // a single-pick dropdown.
+    // From "All", the first individual click selects exactly that source;
+    // further clicks build a true multi-select subset.
     fireEvent.click(screen.getByRole('button', { name: 'Soulseek' }));
+    expect(screen.getByRole('button', { name: 'Soulseek' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Usenet' })).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(screen.getByRole('button', { name: 'Usenet' }));
     expect(screen.getByRole('button', { name: 'All sources' })).toHaveAttribute(
       'aria-pressed',
       'false',
     );
-    expect(screen.getByRole('button', { name: 'Tidal' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Tidal' })).toHaveAttribute('aria-pressed', 'false');
 
-    // Only Tidal is left active — excluding it too would search nothing, so
-    // the click is a no-op.
+    // Selecting the final source is equivalent to "All sources" and is
+    // normalized back to that one canonical state.
     fireEvent.click(screen.getByRole('button', { name: 'Tidal' }));
-    expect(screen.getByRole('button', { name: 'Tidal' })).toHaveAttribute('aria-pressed', 'true');
-
-    fireEvent.click(screen.getByRole('button', { name: 'All sources' }));
-    expect(screen.getByRole('button', { name: 'Soulseek' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'All sources' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-    expect(screen.getByRole('button', { name: 'Usenet' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Usenet' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('iss27-14: renders a fast source before a slow source finishes', async () => {
+    let releaseSlow!: () => void;
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [
+            { name: 'soulseek', display_name: 'Soulseek' },
+            { name: 'usenet', display_name: 'Usenet' },
+          ],
+        }),
+      ),
+      http.post('/api/search', async ({ request }) => {
+        const body = (await request.json()) as { source?: string };
+        if (body.source === 'soulseek') {
+          await slowGate;
+          return HttpResponse.json({
+            results: [
+              {
+                result_type: 'track',
+                username: 'peer',
+                filename: 'Slow.flac',
+                title: 'Slow Soulseek result',
+                size: 10,
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              username: 'usenet',
+              filename: 'Fast.flac',
+              title: 'Fast Usenet result',
+              size: 10,
+            },
+          ],
+        });
+      }),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Fast Usenet result')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/remaining sources are still searching/i);
+    expect(screen.queryByText('Slow Soulseek result')).not.toBeInTheDocument();
+
+    releaseSlow();
+    expect(await screen.findByText('Slow Soulseek result')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+  });
+
+  it('iss27-13: renders switch chrome as a sibling of the accessible checkbox', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'soulseek',
+          sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
+        }),
+      ),
+      http.post('/api/search', () => HttpResponse.json({ results: [] })),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const quality = await screen.findByRole('checkbox', { name: 'Quality check' });
+    expect(quality).toBeChecked();
+    expect(quality.nextElementSibling).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('filters to only results meeting the quality profile cutoff (deep-dive D3)', async () => {
@@ -511,5 +623,66 @@ describe('library v2 interactive grab', () => {
       'AcoustID mismatch',
     );
     expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+  }, 10_000);
+
+  it('§35: invalidates stale library rows as soon as autolink reports imported', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'soulseek',
+          sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
+        }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              username: 'peer',
+              filename: 'Artist/Track.flac',
+              title: 'Track',
+              artist: 'Artist',
+              quality: 'flac',
+              size: 4096,
+            },
+          ],
+        }),
+      ),
+      http.post('/api/download', () => HttpResponse.json({ success: true })),
+      http.get('/api/library/v2/tracks/42/history', () =>
+        HttpResponse.json({
+          success: true,
+          history: [
+            {
+              date: new Date().toISOString(),
+              event_type: 'import_file_completed',
+              category: 'imported',
+              title: 'Imported',
+              detail: null,
+              source: 'acquisition',
+            },
+          ],
+        }),
+      ),
+    );
+
+    const queryClient = createTestQueryClient();
+    const staleAlbumKey = ['library-v2', 'album', 12, false] as const;
+    queryClient.setQueryData(staleAlbumKey, { tracks_present: 1 });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal
+          initialQuery="Artist Track"
+          entity={{ trackId: 42, albumId: 12 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+    expect(
+      await screen.findByRole('button', { name: 'Grabbed ✓' }, { timeout: 8000 }),
+    ).toBeDisabled();
+    expect(queryClient.getQueryState(staleAlbumKey)?.isInvalidated).toBe(true);
   }, 10_000);
 });

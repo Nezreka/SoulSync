@@ -5,7 +5,7 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 26. Juli 2026, einschließlich Foundation-Rebase (§14), der an diesem
+Stand: 27. Juli 2026, einschließlich Foundation-Rebase (§14), der an diesem
 Tag umgesetzten Korrekturen §20–§24 (Pfad-Desync, Manual-Match-Timeout,
 Orphan-Approve-Materialisierung, F-10-Korrelation, Artwork-Kaltstart-
 Nachlieferung), §26 (nativer Subject-Row-Versatz in den Repair-Scannern,
@@ -13,9 +13,11 @@ Abbau der vorbestehenden Testfehler), §27 (erster Lauf gegen einen Snapshot
 der Produktiv-DB, Album-Twin-Scan für jeden Artist, Frontend-Gate), §28
 (Reconcile-Unmapped-Artists-Diagnose: Namens-only-Matching, fehlender
 Cooldown — beide Pending, Korrektur folgt vor dem geplanten
-Post-Import-Autotrigger) und §29 (Werkzeug-↔-V2-Konvergenz: Legacy-Findings,
+Post-Import-Autotrigger), §29 (Werkzeug-↔-V2-Konvergenz: Legacy-Findings,
 Cover-/Tag-Schreibpfad, Verification-Spalte — fünf Korrekturen, Genre-Lücke
-als Produktentscheidung offen).
+als Produktentscheidung offen) sowie §34–§36 (Live-Feedback iss27-12/13/14,
+Multi-Provider-Track-Reconcile, sofortige UI-Neuladung und Python-3.14-
+Async-Deadlock).
 Playlist UI bleibt geparkt. Der werkzeugweise Integrations-Deep-Dive über alle
 25 registrierten Repair-Jobs ist beauftragt und offen
 ([issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17)).
@@ -52,9 +54,9 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Removed / Deferred | §31, Entscheidung 27. Juli | `import-review`-Route und UI-Oberfläche per Nutzerentscheidung aus dieser PR entfernt |
-| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Partial | §29/§53/§55, §31/§33, [iss27-01](library-v2-issues.md#iss27-01) | Scoped/Transient Search vorhanden; Interactive Search inkl. Quellenauswahl-Redesign vollständig behoben (§33); globaler Automatic-Search-Header-Button offen |
+| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Partial | §29/§53/§55, §31/§33/§36, [iss27-01](library-v2-issues.md#iss27-01) | Interactive Search inkl. intuitiver Quellenauswahl, entity-gebundener Suche und progressiver Ergebnisse verified; globaler Automatic-Search-Header-Button offen |
 | [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1, §31 | Delete, File-Scope und Pfadsync abgedeckt; `Reorganize All` Ablauf bei Einstellungsänderung spezifiziert |
-| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Partial | §28–§37, §31, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05) | Artist-scoped Refresh & Scan File Inspection, Preview Re-Tag Album-Subdivision, Tags Match Hover & Tag Gap Click Fix offen |
+| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Partial | §28–§37, §31/§36, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05) | Multi-Provider-Track-IDs und Post-Import-Erkennung verified; Preview Re-Tag Album-Subdivision, Tags Match Hover & Tag Gap Click Fix offen |
 | [F-16](library-v2-features.md#feat-wanted) | Wanted Views, Entity Queue, Diskspace | Verified | §72–§74, `2e227c1b` | Entity Rollups und ein Queue-Poll pro Artist-Seite geprüft |
 
 ### UI-Status
@@ -1650,44 +1652,38 @@ Probleme aufgedeckt** (Usenet-Regression, kaputte Toggle-Optik,
 Timeout-Frage) — die Aussage "keine bekannten offenen Funktionsblocker"
 oben ist damit überholt, siehe §34.
 
-## 34. Live-Test-Feedback zu §33: Usenet-Regression, kaputte Toggle-Optik, Timeout-Frage — OFFEN, 27. Juli 2026 (Fortsetzung morgen)
+## 34. Live-Test-Feedback zu §33: Usenet-Regression, kaputte Toggle-Optik, Timeout-Frage — Verified, 27. Juli 2026
 
 Direkt nach dem §33-Push hat der Nutzer live im Browser getestet (statt
 wie in §33 dokumentiert nur per Unit-/Integrationstests) und drei konkrete
-Probleme gemeldet. **Alle drei sind zum jetzigen Zeitpunkt noch offen** —
-Nutzer hat die Fortsetzung auf morgen verschoben. Details unter
-`docs/library-v2-issues.md` §22 (iss27-12/13/14); Kurzfassung:
+Probleme gemeldet. **Alle drei sind inzwischen behoben und
+regressionsgeprüft.** Details unter `docs/library-v2-issues.md` §22
+(iss27-12/13/14); Kurzfassung:
 
-- **iss27-12 (Usenet-Regression):** Liefert seit den §33-Änderungen keine
-  Ergebnisse mehr, lief davor. Verdacht "expliziter statt impliziter
-  `source`-Parameter im Single-Source-Modus" wurde durch Code-Recherche in
-  `core/download_orchestrator.py` widerlegt (beide Pfade lösen denselben
-  Client mit denselben Default-Argumenten auf) — Root Cause noch NICHT
-  gefunden, braucht Reproduktion mit dem echten Nutzer-Setup
-  (Single-Source vs. Hybrid? Network-Tab-Inspektion).
-- **iss27-13 (Toggle-Optik kaputt):** Die neuen Slide-Toggles zeigen laut
-  Nutzer nur einen weißen Punkt plus weiterhin eine sichtbare native
-  Checkbox — ein reines CSS-Problem, das nur mit einem echten Browser
-  (nicht per jsdom-Unit-Test) diagnostizierbar ist. Kein laufender `dev.py`
-  in dieser Session verfügbar gewesen.
-- **iss27-14 (Timeout-Verhalten):** Jede Quelle hat ein 90s-Client-Timeout,
-  aber `Promise.allSettled` im Multi-Source-Fan-out wartet auf ALLE
-  Quellen, bevor irgendein Ergebnis angezeigt wird — eine langsame Quelle
-  (z.B. gequeutes Soulseek) verzögert damit auch bereits fertige
-  Ergebnisse anderer, schnellerer Quellen. Möglicher Fix (progressives
-  Rendering pro Quelle) ist ein größerer UX-Umbau und braucht vorab eine
-  Nutzer-Entscheidung, bevor er umgesetzt wird.
+- **iss27-12 (Usenet-Regression):** Root Cause war die invertierte Chip-
+  Semantik: im Defaultzustand wirkten „All sources" und jeder Einzelchip
+  gedrückt, ein Klick auf „Usenet" fügte Usenet aber zum unsichtbaren
+  `excludedSources`-Set hinzu. Die UI verwendet nun eine positive exakte
+  Auswahl; ein Klick auf Usenet sucht Usenet. Search-Requests tragen
+  zusätzlich die Library-v2-Entity-IDs zur Candidate-Bindung.
+- **iss27-13 (Toggle-Optik):** Pseudo-Elemente direkt auf dem ersetzten
+  Checkbox-Input waren browserabhängig. Der zugängliche Input ist jetzt
+  visuell versteckt, Track und Knopf liegen auf einem Sibling-`span`.
+  Echtes Chromium bestätigt 1×1 px geclippten Input, genau einen
+  36×22-px-Track und einen 16-px-Knopf.
+- **iss27-14 (Timeout-Verhalten):** Multi-Source-Suchen rendern jede
+  erfolgreiche Quelle sofort; eine langsame Quelle hält schnelle Ergebnisse
+  nicht mehr bis zu ihrem 90s-Timeout zurück. Ein Run-Sequence-Guard verhindert,
+  dass eine alte Anfrage neuere Ergebnisse überschreibt.
 
 ### Einstufung
 
-Dies bestätigt eine in §33 selbst benannte Lücke: die dort dokumentierte
-Test-Abdeckung (Unit-/Integrationstests, Typecheck, Lint) hat den echten
-Soulseek/Usenet/Prowlarr-Stack nicht ersetzen können. Nächste Session:
-Root-Cause-Reproduktion für iss27-12 mit echtem Setup zuerst (funktionale
-Regression, höchste Priorität), dann iss27-13 (Browser-Diagnose, sobald
-`dev.py` läuft), dann iss27-14 (nach Rückfrage zum gewünschten UX-Verhalten).
+Die drei Regressionen sind mit 17 Interactive-Search-Komponententests,
+Frontend-Type/Lint/Build und echtem Chromium abgedeckt. Ein echter
+Prowlarr-/Usenet-End-to-End-Lauf bleibt trotzdem Teil des Release-Gates, weil
+das lokale Testprofil keine Prowlarr-/Usenet-Zugangsdaten enthält.
 
-## 35. Neu heruntergeladener Track eines gut gemappten Albums hat nur eine Metadaten-Quelle — Offen, Recherche begonnen, 27. Juli 2026
+## 35. Neu heruntergeladener Track eines gut gemappten Albums hat nur eine Metadaten-Quelle — Verified, 27. Juli 2026
 
 Neues, unabhängiges Szenario vom Nutzer (nicht Interactive-Search-UI,
 sondern Metadaten-Vollständigkeit nach einem Download): Album + Artist
@@ -1696,36 +1692,65 @@ per Automatic/Interactive Search nachgeladen — danach hat aber genau
 dieser Track nur EINE Metadaten-Quelle hinterlegt, nicht die vom Album/
 Artist bekannten vielen. Zusätzlich muss aktuell manuell „Refresh & Scan"
 ausgelöst werden, damit die neue Datei überhaupt erkannt wird. Details
-und erste Code-Recherche unter `docs/library-v2-issues.md` §23.
+und Abschlussdiagnose unter `docs/library-v2-issues.md` §23.
 
-**Bisherige Erkenntnisse (nicht abschließend):**
-- `core/library2/autolink.py::_find_or_create_track` versucht beim
-  Datei-Import aktiv, eine bestehende Track-Zeile wiederzuverwenden
-  (Provider-ID- oder Titel-Abgleich) und merged nur die eine neu bekannte
-  Provider-ID zusätzlich rein — grundsätzlich der richtige Mechanismus,
-  sofern die bestehende Zeile schon eine reichhaltige `external_ids`-Map
-  hätte.
-- Offene Kernfrage: Bekommen einzelne Tracks beim initialen
-  Discography-Fetch überhaupt eine Multi-Provider-`external_ids`-Map, oder
-  nur eine flache Tracklist aus einer Quelle, während die
-  Multi-Provider-Anreicherung nur auf Album-/Artist-Ebene läuft? Das wäre
-  der eigentliche Root Cause, nicht der Re-Use-Mechanismus selbst.
-- Ein Analogon existiert bereits für ARTISTS:
-  `core/library2/native_enrich.py::reconcile_unmapped_native_artists`,
-  automatisch nach jedem Import angestoßen über
-  `core/library2/unmapped_trigger.py` (§28, Commit `f7303866c`,
-  27. Juli 2026 — selber Tag) — aber (soweit bisher gesehen) NICHT für
-  Alben/Tracks. Der Baustein zum Abfragen einer vollen Tracklist pro
-  Provider (`core/metadata/album_tracks.py`) existiert bereits und wird
-  anderswo genutzt (u.a. iss27-02 Tag-Gap-Fill) — ob es bereits einen
-  höherwertigen Track-Reconcile-Job darauf gibt, konnte in der
-  verfügbaren Zeit nicht abschließend verifiziert werden.
+**Bestätigte Root Cause und Korrektur:**
+
+- `provider_adapters.fetch_album_tracklist()` beendet die Suche bewusst nach
+  der ersten erfolgreichen Trackliste. `_persist_tracklist_tracks()` konnte
+  daher pro Track nur die IDs dieses einen Providers erhalten, obwohl das
+  Album mehrere bestätigte Release-IDs besaß. Ein höherwertiger Track-
+  Reconcile existierte nicht.
+- `fetch_matched_album_tracklists()` fragt nun alle **explizit bestätigten**
+  Album-Provider-IDs ohne Namensfallback ab. Der neue
+  `track_identity_reconcile` merged Track-IDs/ISRC/MBID nur bei vorhandener
+  ID, Titel+Disc/Position oder beidseitig eindeutigem Titel; Konflikte werden
+  gezählt und niemals überschrieben.
+- Der Post-Import-Trigger arbeitet albumweise und entprellt (Default 5s), so
+  dass ein 30-Track-Import nicht 30 Provider-Runden startet. Normaler Import
+  und Post-Move-Recovery verdrahten denselben Hook.
+- Die Datei war in der DB bereits direkt nach Autolink sichtbar. Das
+  zusätzliche „Refresh & Scan"-Symptom war ein React-Query-Cacheproblem:
+  Imported-History sowie Queue aktiv→leer invalidieren nun die Library-v2-
+  Abfragen automatisch.
 
 ### Einstufung
 
-Recherche begonnen, nicht abgeschlossen. Nächste Session:
-`core/library2/discography.py` (initialer Album-Track-Anlage-Pfad)
-nachvollziehen, um die Kernfrage zu klären, dann entscheiden, ob ein neuer
-Track-Reconcile-Job (analog zum Artist-Reconcile, ebenfalls per
-Post-Import-Hook automatisch ausgelöst) gebaut werden muss oder ob nur
-ein bestehendes Werkzeug verdrahtet werden muss.
+Verified durch Provider-/Reconcile-/Trigger-Regressionen, 49 Importtests,
+die vollständige Library-v2-Suite (1.075 Tests) sowie den §35-Frontendtest.
+
+## 36. Abschlussprüfung und unabhängiger Python-3.14-Async-Deadlock — Verified, 27. Juli 2026
+
+Bei der breiteren Search-/Candidate-Prüfung hing sowohl ein Torrent-Cleanup
+als auch `run_async(asyncio.sleep(0))`. Root Cause in
+`utils/async_helpers.py`: der gemeinsame Selector-Loop wurde in einem Thread
+erzeugt und in einem anderen betrieben; unter Python 3.14.6 konnte
+`run_coroutine_threadsafe()` den Loop dann in längeren Prozessen nicht
+zuverlässig aufwecken.
+
+Der Loop wird nun im Besitzer-Thread erzeugt. Eine threadsichere Jobqueue
+übergibt Coroutines an einen Loop-Pump, der alle wartenden Jobs als getrennte
+Tasks startet; die frühere Parallelität bleibt damit erhalten, ohne vom
+fehlerhaften Cross-Thread-Selector-Wakeup abzuhängen. Laufende Tasks werden
+bis zum Abschluss stark referenziert, damit ein GC-Zyklus keinen wartenden
+Aufrufer strandet.
+
+Zusätzlich wurden order-abhängige Library-v2-Tests repariert: Autolink- und
+Discography-Tests starten keine fachfremden Artwork-Provider-Futures mehr,
+Parser-Assertions verwenden die zentrale Version, und Session-Teardown
+beendet verbliebene Background-Pools.
+
+Verifikation:
+
+- `tests/library2`: **1.075 passed**, Prozess beendet sauber;
+- Frontend: **292 passed** in 47 Dateien; Formatter/Type/Lint grün
+  (zwei bekannte Warnungen außerhalb Library v2), Production Build grün;
+- Async Bridge **3 passed**, Candidate Store **15 passed**,
+  Torrent/Usenet **51 passed**, Scoped/Manual Search **11 passed**;
+- Import Side Effects/Pipeline **49 passed**;
+- echtes Chromium: Toggle-Input 1×1/geclippt, Track 36×22, Knopf 16×16;
+- `compileall` und `git diff --check` grün.
+
+Nicht als erledigt ausgegeben: echter Prowlarr/SABnzbd-/NZBGet-Live-E2E,
+Restart-/Docker-/Windows-Mapping-Gates sowie die bewusst offenen
+Designpunkte aus F-13/F-15/UI-03/UI-05.

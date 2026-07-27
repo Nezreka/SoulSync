@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
@@ -6,6 +6,7 @@ import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library
 import {
   fetchLibraryV2AlbumHistory,
   fetchLibraryV2TrackHistory,
+  LIBRARY_V2_QUERY_KEY,
   libraryV2QualityProfilesQueryOptions,
   listSearchSources,
   rankSearchResultQuality,
@@ -370,12 +371,13 @@ export function InteractiveSearchModal({
   entity?: Lib2EntityRef;
   onClose: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState(initialQuery);
-  // iss27-01 pt.4: which configured sources to search — a source in this set
-  // is EXCLUDED, so the empty set (the default) means "search everything".
-  // Chips are independently toggleable (Lidarr-style multi-select), not a
-  // single-pick dropdown.
-  const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
+  // An empty set means the explicit "All sources" choice. Once a user clicks
+  // a source chip, the set becomes the exact subset to search. This makes a
+  // click on "Usenet" select Usenet instead of silently excluding it
+  // (iss27-12).
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
   // Album/track actions use the ALBUM's own profile for the preview badge,
   // not the artist's (audit P1-17). The authoritative profile is resolved
   // server-side from the entity ids on grab either way.
@@ -404,6 +406,7 @@ export function InteractiveSearchModal({
   // Stops in-flight outcome polls from touching state after the modal closes
   // (the user is done watching, and the component is about to unmount).
   const cancelledRef = useRef(false);
+  const runSequenceRef = useRef(0);
   useEffect(
     () => () => {
       cancelledRef.current = true;
@@ -443,21 +446,21 @@ export function InteractiveSearchModal({
   }
 
   const allSources = searchSourcesQuery.data?.sources ?? [];
-  const activeSources = allSources.filter((s) => !excludedSources.has(s.name));
+  const activeSources =
+    selectedSources.size === 0 ? allSources : allSources.filter((s) => selectedSources.has(s.name));
 
-  /** Toggles one source chip. Never lets the last remaining active source be
-   *  excluded — a filter that could narrow the search down to nothing is
-   *  just a trap, not a filter. */
+  /** Select an exact source subset. Selecting every source normalizes back to
+   *  "All sources"; removing the last explicit source does the same. */
   function toggleSource(name: string) {
-    setExcludedSources((prev) => {
-      if (prev.has(name)) {
-        const next = new Set(prev);
+    setSelectedSources((previous) => {
+      if (previous.size === 0) return new Set([name]);
+      const next = new Set(previous);
+      if (next.has(name)) {
         next.delete(name);
-        return next;
+      } else {
+        next.add(name);
       }
-      const stillActive = allSources.filter((s) => s.name !== name && !prev.has(s.name));
-      if (stillActive.length === 0) return prev;
-      return new Set(prev).add(name);
+      return next.size === 0 || next.size === allSources.length ? new Set() : next;
     });
   }
 
@@ -469,30 +472,45 @@ export function InteractiveSearchModal({
    *  Narrowing the chip row to a subset searches exactly that subset. */
   async function run(q: string) {
     if (!q.trim()) return;
+    const runSequence = ++runSequenceRef.current;
+    const sources = [...activeSources];
     setLoading(true);
     setError(null);
     setResults([]);
     try {
-      if (activeSources.length <= 1) {
-        const all = await searchSources(q, activeSources[0]?.name);
-        setResults(all);
+      if (sources.length <= 1) {
+        const all = await searchSources(q, sources[0]?.name, entity);
+        if (runSequence === runSequenceRef.current) setResults(all);
         return;
       }
-      const settled = await Promise.allSettled(activeSources.map((s) => searchSources(q, s.name)));
+
+      // Render each source as soon as it answers. A slow/disconnected source
+      // must not hide fast Usenet/Soulseek results for its full 90s timeout
+      // (iss27-14).
       const merged: SourceSearchResult[] = [];
       const failed: string[] = [];
-      settled.forEach((outcome, i) => {
-        if (outcome.status === 'fulfilled') merged.push(...outcome.value);
-        else failed.push(activeSources[i].display_name);
-      });
+      await Promise.all(
+        sources.map(async (source) => {
+          try {
+            const sourceResults = await searchSources(q, source.name, entity);
+            merged.push(...sourceResults);
+            if (runSequence === runSequenceRef.current && sourceResults.length > 0) {
+              setResults((current) => [...current, ...sourceResults]);
+            }
+          } catch {
+            failed.push(source.display_name);
+          }
+        }),
+      );
       if (merged.length === 0 && failed.length > 0) {
         throw new Error(`Search failed for ${failed.join(', ')}`);
       }
-      setResults(merged);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed');
+      if (runSequence === runSequenceRef.current) {
+        setError(e instanceof Error ? e.message : 'Search failed');
+      }
     } finally {
-      setLoading(false);
+      if (runSequence === runSequenceRef.current) setLoading(false);
     }
   }
 
@@ -585,6 +603,11 @@ export function InteractiveSearchModal({
       }
       if (outcome.status === 'imported') {
         setGrabbed((g) => ({ ...g, [key]: 'done' }));
+        // Autolink has committed the new file before the imported history
+        // event is written. Refresh active album/artist queries immediately;
+        // otherwise the table can keep showing "Missing" until a manual
+        // Refresh & Scan even though the DB row already exists (§35).
+        void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
         return;
       }
     }
@@ -637,9 +660,9 @@ export function InteractiveSearchModal({
             <button
               type="button"
               className={styles.sourceChip}
-              aria-pressed={excludedSources.size === 0}
+              aria-pressed={selectedSources.size === 0}
               disabled={loading || searchSourcesQuery.isLoading}
-              onClick={() => setExcludedSources(new Set())}
+              onClick={() => setSelectedSources(new Set())}
             >
               All sources
             </button>
@@ -648,7 +671,7 @@ export function InteractiveSearchModal({
                 key={source.name}
                 type="button"
                 className={styles.sourceChip}
-                aria-pressed={!excludedSources.has(source.name)}
+                aria-pressed={selectedSources.has(source.name)}
                 disabled={loading || searchSourcesQuery.isLoading}
                 onClick={() => toggleSource(source.name)}
               >
@@ -662,19 +685,21 @@ export function InteractiveSearchModal({
           <label className={styles.toggleOption}>
             <input
               type="checkbox"
-              className={styles.toggleSwitch}
+              className={styles.toggleInput}
               checked={qualityCheck}
               onChange={(e) => setQualityCheck(e.target.checked)}
             />
+            <span className={styles.toggleSwitch} aria-hidden="true" />
             Quality check
           </label>
           <label className={styles.toggleOption}>
             <input
               type="checkbox"
-              className={styles.toggleSwitch}
+              className={styles.toggleInput}
               checked={acoustidCheck}
               onChange={(e) => setAcoustidCheck(e.target.checked)}
             />
+            <span className={styles.toggleSwitch} aria-hidden="true" />
             AcoustID check
           </label>
           <span className={styles.optionHint}>applied to grabs from this window</span>
@@ -682,10 +707,11 @@ export function InteractiveSearchModal({
             <label className={styles.toggleOption}>
               <input
                 type="checkbox"
-                className={styles.toggleSwitch}
+                className={styles.toggleInput}
                 checked={cutoffOnly}
                 onChange={(e) => setCutoffOnly(e.target.checked)}
               />
+              <span className={styles.toggleSwitch} aria-hidden="true" />
               Only show results meeting cutoff
             </label>
           ) : null}
@@ -694,7 +720,7 @@ export function InteractiveSearchModal({
         {error ? <div className={styles.searchError}>{error}</div> : null}
 
         <div className={styles.resultsWrap}>
-          {loading ? (
+          {loading && results.length === 0 ? (
             <div className={styles.inlineLoading}>
               {activeSources.length === 1
                 ? `Searching ${activeSources[0].display_name}…`
@@ -713,86 +739,93 @@ export function InteractiveSearchModal({
               turn off the filter to see them all.
             </div>
           ) : (
-            <table className={styles.trackTable}>
-              <thead>
-                <tr>
-                  <SortTh label="Source" k="source" className={styles.isSource} />
-                  <SortTh label="Title" k="title" />
-                  <th className={styles.isArtist}>Artist</th>
-                  <SortTh label="Quality" k="quality" className={styles.isQuality} />
-                  <SortTh label="Size" k="size" className={styles.colNum} />
-                  <SortTh label="Age" k="age" className={styles.colNum} />
-                  <SortTh label="Availability" k="availability" className={styles.isAvail} />
-                  <th className={styles.isGrab}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => {
-                  const key = resultKey(r);
-                  const state = grabbed[key];
-                  const isAlbum = r.result_type === 'album';
-                  return (
-                    <tr key={`${key}-${i}`}>
-                      <td>
-                        <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
-                          {sourceLabel(r)}
-                        </span>
-                        {sourceDetail(r) ? (
-                          <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
-                        ) : null}
-                      </td>
-                      <td title={r.filename}>
-                        <span className={styles.isTitle}>{resultTitle(r)}</span>
-                        {isAlbum ? (
-                          <span className={styles.albumResultBadge}>
-                            album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
+            <>
+              {loading ? (
+                <div className={styles.inlineLoading} role="status">
+                  Showing available results while the remaining sources are still searching…
+                </div>
+              ) : null}
+              <table className={styles.trackTable}>
+                <thead>
+                  <tr>
+                    <SortTh label="Source" k="source" className={styles.isSource} />
+                    <SortTh label="Title" k="title" />
+                    <th className={styles.isArtist}>Artist</th>
+                    <SortTh label="Quality" k="quality" className={styles.isQuality} />
+                    <SortTh label="Size" k="size" className={styles.colNum} />
+                    <SortTh label="Age" k="age" className={styles.colNum} />
+                    <SortTh label="Availability" k="availability" className={styles.isAvail} />
+                    <th className={styles.isGrab}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r, i) => {
+                    const key = resultKey(r);
+                    const state = grabbed[key];
+                    const isAlbum = r.result_type === 'album';
+                    return (
+                      <tr key={`${key}-${i}`}>
+                        <td>
+                          <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
+                            {sourceLabel(r)}
                           </span>
-                        ) : null}
-                      </td>
-                      <td>{r.artist ?? '—'}</td>
-                      <td className={styles.qualityText}>
-                        <span className={styles.qualityCellRow}>
-                          {resultQuality(r)}
-                          <ProfileBadge result={r} profile={effectiveProfile} />
-                        </span>
-                      </td>
-                      <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
-                      <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>
-                        {ageText(effMeta(r).publish_date)}
-                      </td>
-                      <td className={styles.isAvailCell}>{availabilityCell(r)}</td>
-                      <td>
-                        <span className={styles.grabAction}>
-                          <button
-                            type="button"
-                            className={styles.toolButton}
-                            disabled={
-                              state === 'pending' || state === 'done' || state === 'verifying'
-                            }
-                            onClick={() => void grab(r)}
-                          >
-                            {state === 'done'
-                              ? 'Grabbed ✓'
-                              : state === 'pending'
-                                ? '…'
-                                : state === 'verifying'
-                                  ? 'Verifying…'
-                                  : state === 'error'
-                                    ? 'Retry'
-                                    : 'Download'}
-                          </button>
-                          {state === 'error' ? (
-                            <span className={styles.grabError} role="alert">
-                              {grabErrors[key] ?? 'Download failed'}
+                          {sourceDetail(r) ? (
+                            <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
+                          ) : null}
+                        </td>
+                        <td title={r.filename}>
+                          <span className={styles.isTitle}>{resultTitle(r)}</span>
+                          {isAlbum ? (
+                            <span className={styles.albumResultBadge}>
+                              album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
                             </span>
                           ) : null}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td>{r.artist ?? '—'}</td>
+                        <td className={styles.qualityText}>
+                          <span className={styles.qualityCellRow}>
+                            {resultQuality(r)}
+                            <ProfileBadge result={r} profile={effectiveProfile} />
+                          </span>
+                        </td>
+                        <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
+                        <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>
+                          {ageText(effMeta(r).publish_date)}
+                        </td>
+                        <td className={styles.isAvailCell}>{availabilityCell(r)}</td>
+                        <td>
+                          <span className={styles.grabAction}>
+                            <button
+                              type="button"
+                              className={styles.toolButton}
+                              disabled={
+                                state === 'pending' || state === 'done' || state === 'verifying'
+                              }
+                              onClick={() => void grab(r)}
+                            >
+                              {state === 'done'
+                                ? 'Grabbed ✓'
+                                : state === 'pending'
+                                  ? '…'
+                                  : state === 'verifying'
+                                    ? 'Verifying…'
+                                    : state === 'error'
+                                      ? 'Retry'
+                                      : 'Download'}
+                            </button>
+                            {state === 'error' ? (
+                              <span className={styles.grabError} role="alert">
+                                {grabErrors[key] ?? 'Download failed'}
+                              </span>
+                            ) : null}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
           )}
         </div>
 

@@ -11,6 +11,15 @@ from core.library2 import discography as D
 from core.library2.importer import import_legacy_library
 
 
+@pytest.fixture(autouse=True)
+def _disable_unrelated_artwork_warmup(monkeypatch):
+    """Discography assertions are offline; artwork scheduling has its own suite."""
+    monkeypatch.setattr(
+        "core.library2.artwork.schedule_missing_artwork",
+        lambda *_args, **_kwargs: 0,
+    )
+
+
 def _cards(*entries):
     """Build get_artist_detail_discography-style release cards."""
     out = {"albums": [], "eps": [], "singles": [], "success": True, "source": "spotify"}
