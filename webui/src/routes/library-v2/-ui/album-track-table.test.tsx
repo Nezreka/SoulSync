@@ -95,24 +95,27 @@ describe('library v2 album track table', () => {
   });
 
   it('sanitizes restored widths and appends newly introduced columns once', () => {
-    expect(clampColumnWidth(-100)).toBe(3);
-    expect(clampColumnWidth(9999)).toBe(80);
+    expect(clampColumnWidth(-100)).toBe(1);
+    expect(clampColumnWidth(9999)).toBe(9999);
     expect(mergeColumnOrder(['duration', 'obsolete'], ['duration', 'file_size'])).toEqual([
       'duration',
       'file_size',
     ]);
 
+    const defaultLayout = normalizeColumnWidths(['number', 'title']);
+    expect(defaultLayout).toEqual({ number: 3, title: 97 });
+
     const normalized = normalizeColumnWidths(['number', 'title', 'file_size'], { file_size: 120 });
     expect(Object.values(normalized).reduce((sum, value) => sum + value, 0)).toBeCloseTo(100);
     expect(normalized.title).toBeGreaterThan(normalized.file_size);
-    expect(normalized.number).toBeLessThanOrEqual(6);
+    expect(normalized.number).toBe(3);
 
     const restoredLegacyNumber = normalizeColumnWidths(['number', 'title', 'file_size'], {
       number: 320,
       title: 200,
       file_size: 120,
     });
-    expect(restoredLegacyNumber.number).toBeLessThanOrEqual(6);
+    expect(restoredLegacyNumber.number).toBe(3);
     expect(Object.values(restoredLegacyNumber).reduce((sum, value) => sum + value, 0)).toBe(100);
 
     const bounded = normalizeColumnWidths(['number', 'title', 'file_size'], {
@@ -121,8 +124,8 @@ describe('library v2 album track table', () => {
       file_size: 9999,
     });
     expect(Object.values(bounded).reduce((sum, value) => sum + value, 0)).toBe(100);
-    expect(Math.min(...Object.values(bounded))).toBeGreaterThanOrEqual(3);
-    expect(Math.max(...Object.values(bounded))).toBeLessThanOrEqual(80);
+    expect(Math.min(...Object.values(bounded))).toBeGreaterThanOrEqual(1);
+    expect(bounded.file_size).toBeGreaterThan(80);
 
     const resized = resizeColumnWidths(normalized, ['number', 'title', 'file_size'], 'title', 5);
     expect(resized.title).toBeCloseTo(normalized.title + 5);
@@ -135,8 +138,11 @@ describe('library v2 album track table', () => {
       'number',
       -50,
     );
-    expect(narrowedNumber.number).toBe(3);
+    expect(narrowedNumber.number).toBe(1);
     expect(narrowedNumber.title).toBeGreaterThan(restoredLegacyNumber.title);
+
+    const expandedNumber = resizeColumnWidths(defaultLayout, ['number', 'title'], 'number', 500);
+    expect(expandedNumber).toEqual({ number: 99, title: 1 });
   });
 
   it('expands an uncached album after its first request completes', async () => {
@@ -487,6 +493,17 @@ describe('library v2 album track table', () => {
       ),
     );
 
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 400,
+      height: 400,
+      left: 0,
+      right: 1000,
+      top: 0,
+      width: 1000,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
     render(
       <QueryClientProvider client={createTestQueryClient()}>
         <AlbumTrackTable albumId={42} onAction={vi.fn()} />
@@ -500,9 +517,17 @@ describe('library v2 album track table', () => {
     expect(tableColumns[0].style.width).toBe('28px');
     expect(tableColumns[1].style.width).toBe('30px');
     expect(tableColumns.at(-1)?.style.width).toBe('80px');
-    expect(
-      tableColumns.slice(2, -1).every((column) => column.style.width.startsWith('calc(')),
-    ).toBe(true);
+    expect(tableColumns.slice(2, -1).every((column) => column.style.width.endsWith('px'))).toBe(
+      true,
+    );
+
+    const numberColumn = tableColumns[2];
+    const initialNumberWidth = Number.parseFloat(numberColumn.style.width);
+    const numberHandle = screen.getByRole('separator', { name: 'Resize number column' });
+    fireEvent.pointerDown(numberHandle, { button: 0, pointerId: 6, clientX: 100 });
+    fireEvent.pointerMove(numberHandle, { pointerId: 6, clientX: 75 });
+    expect(Number.parseFloat(numberColumn.style.width)).toBeLessThan(initialNumberWidth);
+    fireEvent.pointerUp(numberHandle, { pointerId: 6, clientX: 75 });
 
     const visibleTitles = () =>
       within(table)
@@ -516,17 +541,6 @@ describe('library v2 album track table', () => {
     fireEvent.click(screen.getByRole('button', { name: 'File size' }));
     expect(visibleTitles()).toEqual(['Large', 'Small']);
 
-    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      bottom: 400,
-      height: 400,
-      left: 0,
-      right: 1000,
-      top: 0,
-      width: 1000,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
     const handle = screen.getByRole('separator', { name: 'Resize file_size column' });
     fireEvent.pointerDown(handle, { button: 0, pointerId: 7, clientX: 100 });
     fireEvent.pointerMove(handle, { pointerId: 7, clientX: 150 });

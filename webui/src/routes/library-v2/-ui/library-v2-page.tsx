@@ -5,6 +5,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -5655,9 +5656,8 @@ function sortTracks(tracks: LibraryV2Track[], sort: TrackSort | null): LibraryV2
   });
 }
 
-const MIN_COLUMN_WIDTH = 3;
-const MAX_COLUMN_WIDTH = 80;
-const MAX_TRACK_NUMBER_WIDTH = 6;
+const MIN_COLUMN_WIDTH = 1;
+const LEGACY_PIXEL_WIDTH_THRESHOLD = 100;
 const CHECKBOX_COLUMN_WIDTH = 28;
 const MONITOR_COLUMN_WIDTH = 30;
 const ACTION_COLUMN_WIDTH = 80;
@@ -5687,15 +5687,7 @@ const DEFAULT_COLUMN_WEIGHTS: Record<string, number> = {
  * number as a weight. */
 export function clampColumnWidth(width: number): number {
   if (!Number.isFinite(width)) return MIN_COLUMN_WIDTH;
-  return Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(width * 1000) / 1000));
-}
-
-function minimumColumnWidth(_key: string): number {
-  return MIN_COLUMN_WIDTH;
-}
-
-function maximumColumnWidth(key: string): number {
-  return key === 'number' ? MAX_TRACK_NUMBER_WIDTH : MAX_COLUMN_WIDTH;
+  return Math.max(MIN_COLUMN_WIDTH, Math.round(width * 1000) / 1000);
 }
 
 export function normalizeColumnWidths(
@@ -5709,8 +5701,19 @@ export function normalizeColumnWidths(
     (key) =>
       typeof stored[key] === 'number' &&
       Number.isFinite(stored[key]) &&
-      (stored[key] as number) > MAX_COLUMN_WIDTH,
+      (stored[key] as number) > LEGACY_PIXEL_WIDTH_THRESHOLD,
   );
+  const storedValuesAreComplete =
+    uniqueKeys.every(
+      (key) =>
+        typeof stored[key] === 'number' &&
+        Number.isFinite(stored[key]) &&
+        (stored[key] as number) > 0,
+    ) && !legacyPixels;
+  const defaultNumberWidth =
+    uniqueKeys.includes('number') && !storedValuesAreComplete
+      ? Math.min(DEFAULT_COLUMN_WEIGHTS.number, 100 - MIN_COLUMN_WIDTH * (uniqueKeys.length - 1))
+      : null;
   const raw = Object.fromEntries(
     uniqueKeys.map((key) => {
       const saved = stored[key];
@@ -5723,13 +5726,13 @@ export function normalizeColumnWidths(
     }),
   );
   const result: Record<string, number> = {};
-  let remainingKeys = [...uniqueKeys];
-  let remainingWeight = 100;
+  let remainingKeys = uniqueKeys.filter((key) => key !== 'number' || defaultNumberWidth == null);
+  let remainingWeight = 100 - (defaultNumberWidth ?? 0);
+  if (defaultNumberWidth != null) result.number = defaultNumberWidth;
 
-  // Bounded proportional allocation ("water filling"): a hostile/legacy
-  // value cannot collapse neighbours below their drag limit or consume more
-  // than the configured maximum, while the final allocation still totals
-  // exactly 100%.
+  // Lower-bounded proportional allocation ("water filling"). There is no
+  // artificial maximum: a user may give any column all space that remains
+  // after its neighbours reach their minimum.
   while (remainingKeys.length > 0) {
     if (remainingKeys.length === 1) {
       result[remainingKeys[0]] = remainingWeight;
@@ -5739,23 +5742,8 @@ export function normalizeColumnWidths(
     let constrained: { key: string; weight: number } | null = null;
     for (const key of remainingKeys) {
       const candidate = (raw[key] / rawTotal) * remainingWeight;
-      const otherKeys = remainingKeys.filter((otherKey) => otherKey !== key);
-      const feasibleMinimum = Math.max(
-        minimumColumnWidth(key),
-        remainingWeight -
-          otherKeys.reduce((sum, otherKey) => sum + maximumColumnWidth(otherKey), 0),
-      );
-      const feasibleMaximum = Math.min(
-        maximumColumnWidth(key),
-        remainingWeight -
-          otherKeys.reduce((sum, otherKey) => sum + minimumColumnWidth(otherKey), 0),
-      );
-      if (candidate < feasibleMinimum) {
-        constrained = { key, weight: feasibleMinimum };
-        break;
-      }
-      if (candidate > feasibleMaximum) {
-        constrained = { key, weight: feasibleMaximum };
+      if (candidate < MIN_COLUMN_WIDTH) {
+        constrained = { key, weight: MIN_COLUMN_WIDTH };
         break;
       }
     }
@@ -5777,9 +5765,7 @@ export function normalizeColumnWidths(
   const correction = Math.round((100 - roundedTotal) * 1000) / 1000;
   const correctionKey =
     uniqueKeys.find((key) =>
-      correction >= 0
-        ? rounded[key] + correction <= maximumColumnWidth(key)
-        : rounded[key] + correction >= minimumColumnWidth(key),
+      correction >= 0 ? true : rounded[key] + correction >= MIN_COLUMN_WIDTH,
     ) ?? uniqueKeys[uniqueKeys.length - 1];
   rounded[correctionKey] = Math.round((rounded[correctionKey] + correction) * 1000) / 1000;
   return rounded;
@@ -5795,18 +5781,8 @@ export function resizeColumnWidths(
   if (index < 0 || index >= keys.length - 1 || !Number.isFinite(deltaPercent)) return widths;
   const neighbour = keys[index + 1];
   const pairTotal = widths[key] + widths[neighbour];
-  const currentMinimum = Math.max(
-    minimumColumnWidth(key),
-    pairTotal - maximumColumnWidth(neighbour),
-  );
-  const currentMaximum = Math.min(
-    maximumColumnWidth(key),
-    pairTotal - minimumColumnWidth(neighbour),
-  );
-  const nextCurrent = Math.max(
-    currentMinimum,
-    Math.min(currentMaximum, widths[key] + deltaPercent),
-  );
+  const minimum = Math.min(MIN_COLUMN_WIDTH, pairTotal / 2);
+  const nextCurrent = Math.max(minimum, Math.min(pairTotal - minimum, widths[key] + deltaPercent));
   return {
     ...widths,
     [key]: Math.round(nextCurrent * 1000) / 1000,
@@ -5814,9 +5790,23 @@ export function resizeColumnWidths(
   };
 }
 
-function dataColumnWidth(weight: number): string {
-  const fixedOffset = Math.round(((weight * UTILITY_COLUMN_WIDTH) / 100) * 1000) / 1000;
-  return `calc(${weight}% - ${fixedOffset}px)`;
+function dataColumnWidth(weight: number, tableWidth: number | null): string {
+  if (tableWidth == null || tableWidth <= UTILITY_COLUMN_WIDTH) return `${weight}%`;
+  const dataWidth = tableWidth - UTILITY_COLUMN_WIDTH;
+  const pixels = Math.round((weight / 100) * dataWidth * 1000) / 1000;
+  return `${pixels}px`;
+}
+
+function measureTrackTableWidth(element: HTMLDivElement | null): number | null {
+  if (!element) return null;
+  const rectWidth = element.getBoundingClientRect().width;
+  const borderBoxWidth = element.clientWidth || rectWidth;
+  if (!Number.isFinite(borderBoxWidth) || borderBoxWidth <= 0) return null;
+  const style = window.getComputedStyle(element);
+  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+  const contentWidth = borderBoxWidth - paddingLeft - paddingRight;
+  return contentWidth > 0 ? contentWidth : null;
 }
 
 /** Preference lists are leaf values in the JSON merge. When a new column is
@@ -6584,8 +6574,27 @@ export function AlbumTrackTable({
   const [columnWeights, setColumnWeights] = useState<Record<string, number>>(() =>
     normalizeColumnWidths(visibleColumnKeys, columnWidths),
   );
-  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const [tableWrapElement, setTableWrapElement] = useState<HTMLDivElement | null>(null);
+  const [tableWidth, setTableWidth] = useState<number | null>(null);
   const resizeSnapshot = useRef<{ key: string; widths: Record<string, number> } | null>(null);
+
+  useLayoutEffect(() => {
+    const element = tableWrapElement;
+    if (!element) return;
+    const measure = () => {
+      const next = measureTrackTableWidth(element);
+      setTableWidth((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+    observer?.observe(element);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [tableWrapElement]);
 
   useEffect(() => {
     if (resizeSnapshot.current) return;
@@ -6660,8 +6669,8 @@ export function AlbumTrackTable({
       resizeSnapshot.current = null;
       return;
     }
-    const tableWidth = tableWrapRef.current?.getBoundingClientRect().width ?? 1;
-    const dataWidth = Math.max(1, tableWidth - UTILITY_COLUMN_WIDTH);
+    const liveTableWidth = measureTrackTableWidth(tableWrapElement) ?? tableWidth ?? 1;
+    const dataWidth = Math.max(1, liveTableWidth - UTILITY_COLUMN_WIDTH);
     const deltaPercent = (deltaPixels / dataWidth) * 100;
     const next = resizeColumnWidths(snapshot.widths, visibleColumnKeys, key, deltaPercent);
     setColumnWeights(next);
@@ -6843,7 +6852,7 @@ export function AlbumTrackTable({
   };
 
   return (
-    <div ref={tableWrapRef} className={styles.trackTableWrap}>
+    <div ref={setTableWrapElement} className={styles.trackTableWrap}>
       <div className={styles.trackTableToolbar}>
         {albumMatch.length > 0 ? (
           <div className={styles.albumMatchRow}>
@@ -6880,7 +6889,10 @@ export function AlbumTrackTable({
           <col style={{ width: `${CHECKBOX_COLUMN_WIDTH}px` }} />
           <col style={{ width: `${MONITOR_COLUMN_WIDTH}px` }} />
           {visibleColumnKeys.map((key) => (
-            <col key={key} style={{ width: dataColumnWidth(columnWeights[key] ?? 0) }} />
+            <col
+              key={key}
+              style={{ width: dataColumnWidth(columnWeights[key] ?? 0, tableWidth) }}
+            />
           ))}
           <col style={{ width: `${ACTION_COLUMN_WIDTH}px` }} />
         </colgroup>
@@ -6927,6 +6939,7 @@ export function AlbumTrackTable({
               columns={columns}
               columnOrder={orderedKeys}
               columnWidths={columnWeights}
+              tableWidth={tableWidth}
               showAllProviders={showAllProviders}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
@@ -7132,6 +7145,7 @@ function TrackRow({
   columns,
   columnOrder,
   columnWidths,
+  tableWidth,
   showAllProviders,
   selected,
   onToggleSelect,
@@ -7146,6 +7160,7 @@ function TrackRow({
   columns: LibraryV2TrackTableColumns;
   columnOrder: (keyof LibraryV2TrackTableColumns)[];
   columnWidths: Record<string, number | null>;
+  tableWidth: number | null;
   showAllProviders: boolean;
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
@@ -7162,7 +7177,7 @@ function TrackRow({
     const raw = columnWidths[key];
     if (raw == null) return undefined;
     return {
-      width: dataColumnWidth(raw),
+      width: dataColumnWidth(raw, tableWidth),
     };
   };
 
