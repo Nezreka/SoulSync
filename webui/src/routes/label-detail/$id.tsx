@@ -11,7 +11,11 @@ import { useShellBridge } from '@/platform/shell/route-controllers';
 // (same guard as the artist-detail route).
 const labelDetailSearchSchema = z.object({
   name: z
-    .preprocess((v) => (v == null ? '' : String(v)), z.string())
+    .preprocess(
+      (v) =>
+        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : '',
+      z.string(),
+    )
     .optional()
     .default(''),
 });

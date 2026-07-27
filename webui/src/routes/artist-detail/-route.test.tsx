@@ -60,6 +60,23 @@ describe('artist-detail route', () => {
     });
   });
 
+  it('does not stringify structured search params as an artist name', async () => {
+    renderArtistDetailRoute([
+      '/artist-detail/deezer/2481?name=%7B%22unexpected%22%3Atrue%7D',
+    ]);
+
+    await waitFor(() => {
+      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
+        '2481',
+        '',
+        'deezer',
+        {
+          skipRouteChange: true,
+        },
+      );
+    });
+  });
+
   it('passes the ?name= search param through to the legacy shell', async () => {
     // Bandcamp (and any other source with no numeric-ID lookup API) can only
     // resolve an artist by name — the URL is the only channel that survives

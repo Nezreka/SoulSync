@@ -38,13 +38,24 @@ type JsonErrorPayload = {
   message?: unknown;
 };
 
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
 function getHttpErrorMessage(data: unknown, fallback: string): string {
-  if (typeof data === 'string' && data.trim()) return data;
+  const direct = nonEmptyString(data);
+  if (direct) return direct;
   if (!data || typeof data !== 'object') return fallback;
 
   const payload = data as JsonErrorPayload;
-  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error;
-  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message;
+  const error = nonEmptyString(payload.error);
+  if (error) return error;
+  if (payload.error && typeof payload.error === 'object') {
+    const nested = nonEmptyString((payload.error as { message?: unknown }).message);
+    if (nested) return nested;
+  }
+  const message = nonEmptyString(payload.message);
+  if (message) return message;
 
   return fallback;
 }

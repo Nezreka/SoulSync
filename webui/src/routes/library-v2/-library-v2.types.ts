@@ -505,6 +505,8 @@ export interface LibraryV2TrackTableColumns {
   metadata: boolean;
   /** T-10: AcoustID/human verification provenance as its own column. */
   verification: boolean;
+  /** UI-03: size of the primary physical file on disk. */
+  file_size: boolean;
   file_path: boolean;
   /** H1: row play button, reuses the Legacy player via the shell bridge. */
   play: boolean;
@@ -525,6 +527,8 @@ export interface LibraryV2UiPreferences {
   track_table: {
     columns: LibraryV2TrackTableColumns;
     column_order: (keyof LibraryV2TrackTableColumns)[];
+    /** UI-03: user-resized widths in CSS pixels; absent keys use defaults. */
+    column_widths: Record<string, number | null>;
     show_all_match_providers: boolean;
     visible_match_providers: Record<string, boolean>;
     quality_show_format: boolean;

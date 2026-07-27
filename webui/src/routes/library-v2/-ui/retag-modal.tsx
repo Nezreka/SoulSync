@@ -25,6 +25,15 @@ function diffSummary(t: LibraryV2TagPreviewTrack): string {
     .join('  ·  ');
 }
 
+function releaseTypeLabel(albumType: string | null | undefined): string {
+  const normalized = albumType?.trim().toLowerCase();
+  if (normalized === 'ep') return 'EP';
+  if (normalized === 'single') return 'Single';
+  if (normalized === 'compilation') return 'Compilation';
+  if (normalized === 'live') return 'Live';
+  return 'Album';
+}
+
 /** Lidarr-style "Preview Retag": show, per track, exactly which tag fields
  *  would change (file value → library value), let the user deselect tracks,
  *  then write. Unchanged tracks are listed but not selectable. */
@@ -54,20 +63,29 @@ export function RetagModal({
   const changed = useMemo(() => tracks.filter((t) => t.has_changes), [tracks]);
 
   const grouped = useMemo(() => {
-    const groups: { albumTitle: string; tracks: LibraryV2TagPreviewTrack[] }[] = [];
-    for (const t of tracks) {
-      const titleStr = t.album_title ?? 'Unknown Album';
-      const last = groups[groups.length - 1];
-      if (last && last.albumTitle === titleStr) {
-        last.tracks.push(t);
-      } else {
-        groups.push({
-          albumTitle: titleStr,
-          tracks: [t],
-        });
+    const byAlbum = new Map<
+      number,
+      {
+        albumId: number;
+        albumTitle: string;
+        albumType: string | null;
+        tracks: LibraryV2TagPreviewTrack[];
       }
+    >();
+    for (const t of tracks) {
+      let group = byAlbum.get(t.album_id);
+      if (!group) {
+        group = {
+          albumId: t.album_id,
+          albumTitle: t.album_title ?? 'Unknown Album',
+          albumType: t.album_type,
+          tracks: [],
+        };
+        byAlbum.set(t.album_id, group);
+      }
+      group.tracks.push(t);
     }
-    return groups;
+    return [...byAlbum.values()];
   }, [tracks]);
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -164,40 +182,51 @@ export function RetagModal({
                   <th>Changes (file → library)</th>
                 </tr>
               </thead>
-              {grouped.map((group) => (
-                <tbody key={group.albumTitle}>
-                  <tr className={styles.albumGroupHeaderRow}>
-                    <td colSpan={4} className={styles.albumGroupHeader}>
-                      {group.albumTitle}
-                    </td>
-                  </tr>
-                  {group.tracks.map((t) => (
-                    <tr key={t.track_id} className={t.has_changes ? '' : styles.staticRow}>
-                      <td>
-                        {t.has_changes ? (
-                          <input
-                            type="checkbox"
-                            checked={selected.has(t.track_id)}
-                            disabled={phase === 'writing'}
-                            onChange={() => toggle(t.track_id)}
-                          />
-                        ) : null}
-                      </td>
-                      <td className={styles.colNum}>{t.track_number ?? '—'}</td>
-                      <td title={t.file_path ?? undefined}>{t.title ?? '—'}</td>
-                      <td className={styles.diffCell}>
-                        {t.error ? (
-                          <span className={styles.statusWarn}>{t.error}</span>
-                        ) : t.has_changes ? (
-                          diffSummary(t)
-                        ) : (
-                          <span className={styles.statusOk}>tags match</span>
-                        )}
+              {grouped.map((group) => {
+                const changedInGroup = group.tracks.filter((track) => track.has_changes).length;
+                return (
+                  <tbody key={group.albumId} className={styles.retagAlbumGroup}>
+                    <tr className={styles.albumGroupHeaderRow}>
+                      <td colSpan={4} className={styles.albumGroupHeader}>
+                        <span className={styles.retagAlbumHeading}>
+                          <span>{group.albumTitle}</span>
+                          <span className={styles.retagReleaseType}>
+                            {releaseTypeLabel(group.albumType)}
+                          </span>
+                          <span className={styles.retagAlbumCount}>
+                            {changedInGroup} of {group.tracks.length} changing
+                          </span>
+                        </span>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              ))}
+                    {group.tracks.map((t) => (
+                      <tr key={t.track_id} className={t.has_changes ? '' : styles.staticRow}>
+                        <td>
+                          {t.has_changes ? (
+                            <input
+                              type="checkbox"
+                              checked={selected.has(t.track_id)}
+                              disabled={phase === 'writing'}
+                              onChange={() => toggle(t.track_id)}
+                            />
+                          ) : null}
+                        </td>
+                        <td className={styles.colNum}>{t.track_number ?? '—'}</td>
+                        <td title={t.file_path ?? undefined}>{t.title ?? '—'}</td>
+                        <td className={styles.diffCell}>
+                          {t.error ? (
+                            <span className={styles.statusWarn}>{t.error}</span>
+                          ) : t.has_changes ? (
+                            diffSummary(t)
+                          ) : (
+                            <span className={styles.statusOk}>tags match</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                );
+              })}
             </table>
           )}
         </div>

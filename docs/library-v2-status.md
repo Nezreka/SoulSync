@@ -17,7 +17,8 @@ Post-Import-Autotrigger), §29 (Werkzeug-↔-V2-Konvergenz: Legacy-Findings,
 Cover-/Tag-Schreibpfad, Verification-Spalte — fünf Korrekturen, Genre-Lücke
 als Produktentscheidung offen) sowie §34–§36 (Live-Feedback iss27-12/13/14,
 Multi-Provider-Track-Reconcile, sofortige UI-Neuladung und Python-3.14-
-Async-Deadlock).
+Async-Deadlock) und §37 (Abschluss der offenen F-13/F-15/UI-03/UI-05-
+Oberflächenpunkte plus zwei unabhängige Webclient-Fehler).
 Playlist UI bleibt geparkt. Der werkzeugweise Integrations-Deep-Dive über alle
 25 registrierten Repair-Jobs ist beauftragt und offen
 ([issues.md §18](library-v2-issues.md#18-auftrag-werkzeugweiser-integrations-deep-dive-offen-nach-17)).
@@ -54,9 +55,9 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
 | [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Removed / Deferred | §31, Entscheidung 27. Juli | `import-review`-Route und UI-Oberfläche per Nutzerentscheidung aus dieser PR entfernt |
-| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Partial | §29/§53/§55, §31/§33/§36, [iss27-01](library-v2-issues.md#iss27-01) | Interactive Search inkl. intuitiver Quellenauswahl, entity-gebundener Suche und progressiver Ergebnisse verified; globaler Automatic-Search-Header-Button offen |
+| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Verified | §29/§31/§33/§36/§37, [iss27-01](library-v2-issues.md#iss27-01) | Interactive Search und entity-gebundene Suche verified; globales Automatic Search wartet auf den Upgrade-Scan und startet danach die gemeinsame Missing-/Upgrade-Wishlist-Verarbeitung |
 | [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1, §31 | Delete, File-Scope und Pfadsync abgedeckt; `Reorganize All` Ablauf bei Einstellungsänderung spezifiziert |
-| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Partial | §28–§37, §31/§36, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05) | Multi-Provider-Track-IDs und Post-Import-Erkennung verified; Preview Re-Tag Album-Subdivision, Tags Match Hover & Tag Gap Click Fix offen |
+| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Verified | §28–§37, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05), [iss27-07](library-v2-issues.md#iss27-07) | Multi-Provider-IDs, Post-Import-Erkennung, Verification-Read, Tag-Gap-Write, Tags-Breakdown und stabile Album/EP/Single-Gruppierung geprüft |
 | [F-16](library-v2-features.md#feat-wanted) | Wanted Views, Entity Queue, Diskspace | Verified | §72–§74, `2e227c1b` | Entity Rollups und ein Queue-Poll pro Artist-Seite geprüft |
 
 ### UI-Status
@@ -64,9 +65,9 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | ID | Bereich | Status | Hinweis |
 |---|---|---|---|
 | [UI-01](library-v2-features.md#ui-icons) | Icons/Nomenklatur | Verified | Automatic=Lupe, Interactive=User, Quality=Stern, Track=Pencil |
-| [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Pending | Track File Size Column (Singles/EPs), Verification Column, Excel-like Column Resizing & Modal Layout Redesign offen |
+| [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Verified | File Size und Verification opt-in; Größen-Sortierung; persistentes Pointer-/Keyboard-Resizing mit Grenzen und Reset; kompaktes Mehrspalten-Menü (§37) |
 | [UI-04](library-v2-features.md#ui-bulk) | Multi-Select/Bulk Bar | Implemented | Monitor, Profil, RG, Tags, Delete und Rich Bulk Edit |
-| [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Pending | Artist Navigation State Reset ("My Library"), Library Header Actions ("Automatic Search"), Maintenance UX Overhaul offen |
+| [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Verified | Navigation Reset (§32), globales Automatic Search und verständlich gruppiertes „Library Health & Repair“ mit explizitem Artist-/Library-Scope (§37) |
 | F-12 UI | Acquisition Review | Removed | Per Nutzerentscheidung aus PR entfernt und gelöscht |
 
 
@@ -1476,23 +1477,23 @@ Aufnahme aller am 27. Juli 2026 definierten Nutzeranforderungen, UI-Optimierunge
 
 | # | Anforderung / Modul | Typ | Status | Referenz / Issue | Kurzbeschreibung |
 |---:|---|---|---|---|---|
-| 1 | Track File Size Column | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Eigene sortierbare Spalte für Track-Dateigröße auf Disk; auch für Singles und EPs |
-| 2 | Resizable Table Columns | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Manuelle Spaltenbreitenanpassung per Drag-and-Drop (Excel-like) |
-| 3 | Files & Tools -> Maintenance UX | UI / UX | Pending | [iss27-08](library-v2-issues.md#iss27-08) | Umbenennung, Entschachtelung & klare Gruppierung von Maintenance-Jobs |
+| 1 | Track File Size Column | UI / Feature | **Verified** (§37) | [UI-03](library-v2-features.md#ui-columns) | Eigene sortierbare Spalte für die primäre physische Track-Datei; unabhängig vom Release-Typ |
+| 2 | Resizable Table Columns | UI / Feature | **Verified** (§37) | [UI-03](library-v2-features.md#ui-columns) | Persistentes Drag-/Keyboard-Resizing mit Pointer Capture, Grenzen und Doppelklick-Reset |
+| 3 | Files & Tools -> Maintenance UX | UI / UX | **Verified** (§37) | [iss27-08](library-v2-issues.md#iss27-08) | „Library Health & Repair“ gruppiert Werkzeuge verständlich und zeigt Artist-/Library-Scope explizit |
 | 4 | Reorganize All Mechanismus | Dokumentation | Verified | [guide §5](library-v2-guide.md#5-technische-invarianten) | Ablauf bei Einstellungsänderung (Pfad-Templates, Move-Plan, Path-Sync & History) dokumentiert |
-| 5 | Preview Re-Tag UX | UI / UX | Pending | [iss27-07](library-v2-issues.md#iss27-07) | Übersichtliche Album-Unterteilung und visuelle Grenzen in Re-Tag Preview |
-| 6a | Tags Match Hover Breakdown | UI / Feature | Pending | [F-15](library-v2-features.md#feat-metadata) | Tooltip/Popover bei Tags Match für exakte Aufschlüsselung vorhandener vs. fehlender Tags |
+| 5 | Preview Re-Tag UX | UI / UX | **Verified** (§37) | [iss27-07](library-v2-issues.md#iss27-07) | Stabile Gruppierung per Album-ID, visuelle Release-Grenzen, Typ und Änderungszähler |
+| 6a | Tags Match Hover Breakdown | UI / Feature | **Verified** (§37) | [F-15](library-v2-features.md#feat-metadata) | Portal-Tooltip bei Hover und Keyboard-Fokus mit vorhandenen/fehlenden Tags und Aktionshinweis |
 | 6b | Tag Gap Klick-Aktion Fix | Bugfix | **Implemented** (§32) | [iss27-02](library-v2-issues.md#iss27-02) | Klick auf Tag Gap löst Provider-Re-Fetch und Schreiben der Tags in Datei aus |
 | 7 | Artist-scoped Refresh & Scan | Feature / Fix | **Verified** (§32) | [iss27-05](library-v2-issues.md#iss27-05) | Strikter Artist-Scope + physische Datei-Inspektion (Audio Stream Quality, Features, Verification Tags) — war bereits per `0cd7167a6` behoben |
-| 8 | Column Settings Layout Redesign | UI / UX | Pending | [iss27-06](library-v2-issues.md#iss27-06) | Umbau des Column Settings Modals von langer vertikaler Liste zu Mehrspalten/Tab-Layout |
+| 8 | Column Settings Layout Redesign | UI / UX | **Verified** (§37) | [iss27-06](library-v2-issues.md#iss27-06) | Kompaktes responsives Mehrspalten-Layout für Spalten, Quality/Größen und Match-Provider |
 | 9 | Navigation State Reset bei Artist-Wechsel | UI / UX | **Implemented** (§32) | [iss27-04](library-v2-issues.md#iss27-04) | Beim Betreten eines neuen Artists immer auf „My Library" zurücksetzen (kein Auto-Fetch von All Releases) |
 | 10 | Change Photo Provider Reliability | Bugfix | **Implemented** (§32) | [iss27-03](library-v2-issues.md#iss27-03) | Verlässliche Foto-Abfrage über alle 5-6 Metadata Provider ohne Stille Ausfälle — Fanart.tv-Integration bewusst nicht enthalten (neues Feature, kein Fix) |
-| 11a | Verification Tag Reader | Backend / Feature | Pending | [F-15](library-v2-features.md#feat-metadata) | Lesen von `HUMAN_VERIFIED`, `ACOUSTICID_VERIFIED`, `RETRY_IMPORT` direkt aus Audio-Tags |
-| 11b | Verification Table Column | UI / Feature | Pending | [UI-03](library-v2-features.md#ui-columns) | Neue Tabellenspalte „Verification" / „Verified" (`verification_status`) |
+| 11a | Verification Tag Reader | Backend / Feature | **Verified** (§29/§32) | [F-15](library-v2-features.md#feat-metadata) | Der reale kanonische Tag `SOULSYNC_VERIFICATION` wird eingelesen; die drei ursprünglich genannten Tag-Namen existieren im Produkt nicht |
+| 11b | Verification Table Column | UI / Feature | **Verified** (§29/§37) | [UI-03](library-v2-features.md#ui-columns) | Opt-in-Spalte zeigt die vier kanonischen `verification_status`-Zustände und erklärt fehlende Provenienz |
 | 12 | Import Review Removal | Decision | Removed | [F-12](library-v2-features.md#feat-acq-review) | `/import-review` Route und UI-Seite vollständig aus diesem PR-Scope gelöscht |
 | 13a | Interactive Search UI Redesign & Source Filter | UI / UX | **Implemented** (§33) | [iss27-01](library-v2-issues.md#iss27-01) | Standard durchsucht alle konfigurierten Quellen parallel; Toggle-Redesign + Multi-Select-Quellen-Chips jetzt ebenfalls umgesetzt (§33) |
 | 13b | Interactive Search Defekt-Fix | Bugfix | **Implemented** (§32) | [iss27-01](library-v2-issues.md#iss27-01) | Garantiert-leere Anfrage für unbetitelte Tracks behoben (Fallback auf Albumtitel) |
-| 14 | Library Header Actions | UI / Feature | Pending | [F-13](library-v2-features.md#feat-search) | Button „Automatic Search" (Missing Wishlist + Cutoff Unmet Upgrade Search); `Re-Import Library` bleibt temporär |
+| 14 | Library Header Actions | UI / Feature | **Verified** (§37) | [F-13](library-v2-features.md#feat-search) | „Automatic Search“ kombiniert Missing Wishlist und Cutoff-Unmet-Upgrades ohne Start-Race; Re-Import bleibt erhalten |
 | 15 | Referenz auf Basic Search | Dokumentation | Verified | [iss27-01](library-v2-issues.md#iss27-01) | Querverweis in Doku aufgenommen, Basic Search für Search-Overhaul als Vorbild zu nutzen |
 
 ### Verifikation
@@ -1754,3 +1755,85 @@ Verifikation:
 Nicht als erledigt ausgegeben: echter Prowlarr/SABnzbd-/NZBGet-Live-E2E,
 Restart-/Docker-/Windows-Mapping-Gates sowie die bewusst offenen
 Designpunkte aus F-13/F-15/UI-03/UI-05.
+
+## 37. Abschluss der F-13/F-15/UI-03/UI-05-Designpunkte und Webclient-Härtung — Verified, 27. Juli 2026
+
+Die vier am Ende von §36 noch offenen Designbereiche wurden gegen Guide,
+Features, Issues und den realen Codefluss geprüft und umgesetzt.
+
+### F-13 und UI-05: globales Automatic Search und Repair-UX
+
+- Der Library-Header bietet jetzt `Automatic Search`. Der Client wartet
+  zunächst auf den bestehenden `quality_upgrade_scan`-Job und startet erst
+  danach die vorhandene Wishlist-Verarbeitung. Damit sind Cutoff-Upgrades vor
+  Beginn des gemeinsamen Missing-/Upgrade-Laufs gespiegelt; die umgekehrte
+  Reihenfolge hätte ein Race mit dem bereits laufenden Wishlist-Zyklus
+  erzeugt.
+- Beide vorhandenen Wishlist-Antwortformen werden verstanden: das ältere
+  Top-Level-`message` und das öffentliche API-Envelope `data.message`.
+- „Maintenance“ heißt nun „Library Health & Repair“. Catalog-/Monitoring-,
+  Artist-Datei-/Tag- und globale Scan-Werkzeuge sind visuell getrennt,
+  verständlich benannt und tragen einen expliziten Scope.
+- Der bereits in §32 verifizierte Navigation-State-Reset bleibt unverändert
+  Teil von UI-05.
+
+### UI-03: Track-Dateigröße, persistente Breiten und kompakte Optionen
+
+- `track.file.size` erscheint als opt-in `File size`-Spalte, formatiert und
+  numerisch sortierbar. Da Album-, EP- und Single-Details dieselbe
+  `AlbumTrackTable` verwenden, gilt die Spalte für alle Release-Typen.
+- Alle fachlichen Track-Spalten inklusive `#` und `Title` besitzen
+  Pointer-Capture-Resizing, einen Clamp von 48 bis 640 CSS-Pixeln,
+  Tastatursteuerung, Doppelklick-Reset und DB-persistierte Breiten.
+- Alte gespeicherte `column_order`-Listen werden mit neuen Defaults gemerged.
+  Dadurch bleiben neu eingeführte Spalten auffindbar, statt bei bestehenden
+  Installationen dauerhaft aus dem Optionsmenü zu verschwinden. Derselbe Fix
+  schließt die entsprechende Lücke der Artist-`size`-Spalte.
+- Das Optionsmenü ist ein responsives Mehrspalten-Layout für sichtbare
+  Spalten, Quality/Größen und Match-Provider. Ein gemeinsamer Reset entfernt
+  gesetzte Breiten.
+- Die bereits vorhandene Verification-Spalte und der kanonische
+  `SOULSYNC_VERIFICATION`-Reader wurden erneut durch die Vollsuite abgedeckt.
+
+### F-15: Preview Re-Tag und Tags-Breakdown
+
+- Die Preview gruppierte vorher nur **benachbarte Zeilen gleichen
+  Albumtitels**. Interleavte Rows oder zwei verschiedene Releases mit
+  identischem Titel wurden daher falsch geteilt bzw. zusammengeführt. Die
+  API liefert nun zusätzlich `album_type`; die UI gruppiert stabil per
+  `album_id` und zeigt Album/EP/Single, visuelle Grenzen sowie
+  „N of M changing“.
+- `tags ✓` und `N tag gaps` verwenden statt eines nativen mehrzeiligen
+  `title`-Strings ein portalfähiges Tooltip. Hover und Keyboard-Fokus zeigen
+  explizit vorhandene und fehlende Tags sowie die jeweilige Klickwirkung.
+
+### Zwei zusätzlich gefundene Webclient-Fehler
+
+1. Der zentrale HTTP-Fehlerparser verstand `error: "Text"`, nicht aber das
+   von 141 öffentlichen API-Callsites verwendete Standardformat
+   `error: {code, message}`. Fehler wie „Wishlist processing is already
+   running“ wurden deshalb durch einen generischen HTTP-Status ersetzt.
+   `readJson` extrahiert nun auch `error.message`.
+2. Artist-/Label-Namen in Search-Parametern müssen Zahlen wie `311` weiterhin
+   zu Strings normalisieren. Beliebige Objekte wurden dabei jedoch zu
+   `[object Object]`. Die Coercion akzeptiert jetzt nur String, Number und
+   Boolean; strukturierte Werte fallen sicher auf den leeren Namen zurück.
+
+### Verifikation
+
+- `tests/library2`: **1.078 passed**, 1 bekannte `sqlite3`-
+  Deprecation-Warnung;
+- WebUI: **301 passed** in 50 Dateien;
+- neue/erweiterte Regressionen für File-Size-Sortierung und -Resizing,
+  Preference-Migration/-Persistenz, Retag-Release-Gruppierung, Tags-Tooltip,
+  Automatic-Search-Reihenfolge, Maintenance-Scope, verschachtelte
+  API-Fehler sowie strukturierte Route-Parameter;
+- `npm run check`: **0 Warnungen, 0 Fehler**;
+- Vite Production Build, Docker-Frontend-Stage, vollständiger Docker-Image-
+  Build, Ruff, `compileall` und `git diff --check`: grün.
+
+Die absichtlichen Nicht-Features und externen Release-Gates ändern sich
+dadurch nicht: T-06 (Genre-Lücke), Artwork-Negativcache,
+Track-Duplikat-Produktentscheidung, Live-Prowlarr/Download-Clients sowie
+Restart- und Windows-/Docker-Path-Mapping-Runtime-Gates bleiben bei ihrem
+zuvor dokumentierten Stand.

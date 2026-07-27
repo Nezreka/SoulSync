@@ -55,6 +55,21 @@ def test_db_data_shape(imported_conn):
     assert data["spotify_track_id"] == "sp1"
 
 
+def test_preview_carries_release_identity_for_stable_ui_grouping(imported_conn):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn, path=None)
+    conn.execute(
+        "UPDATE lib2_albums SET album_type='ep' WHERE id=?",
+        (album_id,),
+    )
+    conn.commit()
+
+    out = retag.tag_preview(retag.track_contexts(conn, [track_id]))
+
+    assert out[0]["album_id"] == album_id
+    assert out[0]["album_type"] == "ep"
+
+
 def test_preview_reports_missing_file(imported_conn):
     conn = imported_conn
     _, _, track_id = _seed_album_with_files(conn, path=None)

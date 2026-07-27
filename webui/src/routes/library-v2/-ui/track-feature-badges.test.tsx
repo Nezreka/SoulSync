@@ -224,6 +224,27 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     expect(onOpenTags).toHaveBeenCalledOnce();
   });
 
+  it('shows an exact present-versus-missing tag breakdown on hover or keyboard focus', async () => {
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({
+          metadata_scan_status: 'scanned',
+          metadata_gaps: ['genre', 'cover'],
+        })}
+        onOpenTags={vi.fn()}
+      />,
+    );
+
+    fireEvent.focus(screen.getByRole('button', { name: '2 tag gaps' }));
+
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent('Present tags');
+    expect(tooltip).toHaveTextContent('✓ Title');
+    expect(tooltip).toHaveTextContent('Missing tags');
+    expect(tooltip).toHaveTextContent('✗ Genre · ✗ Cover Art');
+    expect(tooltip).toHaveTextContent('Click to fetch the missing metadata');
+  });
+
   it('clicking "N tag gaps" re-fetches from providers then writes this track\'s tags, never claiming success optimistically', async () => {
     let requestedTrackId: string | undefined;
     server.use(
@@ -290,7 +311,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     );
   });
 
-  it('surfaces a failed tag write as the button title without claiming "tags ✓"', async () => {
+  it('surfaces a failed tag write in the breakdown without claiming "tags ✓"', async () => {
     server.use(
       http.post('/api/library/v2/tracks/:trackId/fill-tag-gaps', () =>
         HttpResponse.json({ success: true, job_id: 'retag-job-2' }),
@@ -309,11 +330,10 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     fireEvent.click(screen.getByRole('button', { name: '1 tag gaps' }));
 
     await waitFor(() =>
-      expect(screen.getByRole('button')).toHaveAttribute('title', 'File not found on disk'),
-    );
-    await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith('File not found on disk', 'error'),
     );
+    fireEvent.focus(screen.getByRole('button', { name: '1 tag gaps' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('File not found on disk');
     expect(screen.queryByRole('button', { name: 'tags ✓' })).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,14 @@
+import { Tooltip } from '@base-ui/react/tooltip';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
@@ -52,6 +60,7 @@ import {
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   moveLibraryV2TrackFile,
+  processWishlist,
   removeLibraryV2FileRecords,
   searchLibraryV2MatchService,
   refreshLibraryV2,
@@ -657,6 +666,7 @@ function ModalShell({
         className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''} ${match ? styles.modalMatch : ''}`}
         role="dialog"
         aria-modal="true"
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
       >
         <div className={styles.modalHeader}>
@@ -2716,35 +2726,34 @@ function EditArtistModal({
   );
 }
 
-/** Maintenance jobs (the existing repair workers), runnable from the artist
- *  page like Lidarr's Tasks. Jobs with `scoped: true` honor an artist scope
- *  when triggered from here; the rest scan the whole library. */
+/** Existing repair workers exposed with explicit user-facing scope. */
 const MAINTENANCE_JOBS: Array<{
   id: string;
   label: string;
   desc: string;
-  scoped?: boolean;
+  scope: 'artist' | 'library';
 }> = [
   {
     id: 'metadata_gap_filler',
-    label: 'Metadata Gap Fill',
-    desc: 'Fill missing metadata identifiers (ISRC, MusicBrainz) from providers.',
-    scoped: true,
+    label: 'Find Missing Metadata',
+    desc: 'Find missing identifiers and metadata fields for this artist’s tracks.',
+    scope: 'artist',
   },
   {
     id: 'album_tag_consistency',
-    label: 'Album Tag Consistency',
-    desc: 'Align album-level tags (album artist, year, art) across each album.',
-    scoped: true,
+    label: 'Check Album Tags',
+    desc: 'Find inconsistent album artist, year and artwork tags for this artist.',
+    scope: 'artist',
   },
   {
     id: 'quality_upgrade_scan',
-    label: 'Automatic Upgrade Scan (monitored)',
-    desc: 'Queue monitored tracks below their quality profile cutoff (also schedulable under Stats → Repair).',
+    label: 'Find Quality Upgrades',
+    desc: 'Queue monitored tracks across the library that are below their profile cutoff.',
+    scope: 'library',
   },
 ];
 
-function MaintenanceModal({
+export function MaintenanceModal({
   artistId,
   artistName,
   onClose,
@@ -2812,71 +2821,110 @@ function MaintenanceModal({
   };
 
   return (
-    <ModalShell title="Maintenance" onClose={onClose}>
+    <ModalShell title="Library Health & Repair" wide onClose={onClose}>
       <p className={styles.qpSubtitle}>
-        Jobs marked <span className={styles.qpCurrent}>this artist</span> run scoped to{' '}
-        <strong>{artistName}</strong>; the rest scan the whole library. Progress under Stats →
-        Repair jobs.
+        Review and repair catalog links, monitoring and file metadata. Every tool states whether it
+        is limited to <strong>{artistName}</strong> or scans the entire library. Progress remains
+        visible under Stats → Repair jobs.
       </p>
-      <div className={styles.qpList}>
-        <button
-          type="button"
-          className={styles.qpOption}
-          disabled={reconcile === 'running'}
-          onClick={runReconcile}
-        >
-          <span className={styles.qpName}>
-            Reconcile Unmapped Artists
-            {reconcile === 'running' ? <span className={styles.statusOk}>running…</span> : null}
-            {reconcile === 'done' ? <span className={styles.statusOk}>done</span> : null}
-            {reconcile === 'error' ? <span className={styles.statusWarn}>failed</span> : null}
-          </span>
-          <span className={styles.qpDesc}>
-            Resolve featured/wishlist/discography artists that never matched a provider (id + cover
-            art), and split true collaboration names into their real artists.
-            {reconcileResult ? ` — ${reconcileResult}` : ''}
-          </span>
-        </button>
-        <button
-          type="button"
-          className={styles.qpOption}
-          disabled={wishlist === 'running'}
-          onClick={runWishlistReconcile}
-        >
-          <span className={styles.qpName}>
-            Reconcile Wishlist
-            {wishlist === 'running' ? <span className={styles.statusOk}>running…</span> : null}
-            {wishlist === 'done' ? <span className={styles.statusOk}>done</span> : null}
-            {wishlist === 'error' ? <span className={styles.statusWarn}>failed</span> : null}
-          </span>
-          <span className={styles.qpDesc}>
-            Re-add monitored, still-missing tracks whose Wishlist entry was downloaded, cleared, or
-            aged away, and prune entries that are no longer wanted. Respects deliberate cancels.
-            {wishlistResult ? ` — ${wishlistResult}` : ''}
-          </span>
-        </button>
-        {MAINTENANCE_JOBS.map((job) => (
-          <button
-            key={job.id}
-            type="button"
-            className={styles.qpOption}
-            disabled={state[job.id] === 'queued'}
-            onClick={() => {
-              void runRepairJob(job.id, job.scoped ? { id: artistId, name: artistName } : undefined)
-                .then(() => setState((s) => ({ ...s, [job.id]: 'queued' })))
-                .catch(() => setState((s) => ({ ...s, [job.id]: 'error' })));
-            }}
-          >
-            <span className={styles.qpName}>
-              {job.label}
-              {job.scoped ? <span className={styles.qpCurrent}>this artist</span> : null}
-              {state[job.id] === 'queued' ? <span className={styles.statusOk}>queued</span> : null}
-              {state[job.id] === 'error' ? (
-                <span className={styles.statusWarn}>failed to queue</span>
-              ) : null}
-            </span>
-            <span className={styles.qpDesc}>{job.desc}</span>
-          </button>
+      <div className={styles.maintenanceGrid}>
+        <section className={styles.maintenanceSection}>
+          <div className={styles.maintenanceSectionHeader}>
+            <div>
+              <strong>Catalog & monitoring</strong>
+              <span>Repair cross-system identities and acquisition intent.</span>
+            </div>
+            <span className={styles.maintenanceScopeBadge}>Entire library</span>
+          </div>
+          <div className={styles.qpList}>
+            <button
+              type="button"
+              className={styles.qpOption}
+              disabled={reconcile === 'running'}
+              onClick={runReconcile}
+            >
+              <span className={styles.qpName}>
+                Match Unmapped Artists
+                {reconcile === 'running' ? <span className={styles.statusOk}>running…</span> : null}
+                {reconcile === 'done' ? <span className={styles.statusOk}>done</span> : null}
+                {reconcile === 'error' ? <span className={styles.statusWarn}>failed</span> : null}
+              </span>
+              <span className={styles.qpDesc}>
+                Resolve provider identities and split genuine collaboration names into their real
+                artists.
+                {reconcileResult ? ` — ${reconcileResult}` : ''}
+              </span>
+            </button>
+            <button
+              type="button"
+              className={styles.qpOption}
+              disabled={wishlist === 'running'}
+              onClick={runWishlistReconcile}
+            >
+              <span className={styles.qpName}>
+                Synchronize Wanted & Wishlist
+                {wishlist === 'running' ? <span className={styles.statusOk}>running…</span> : null}
+                {wishlist === 'done' ? <span className={styles.statusOk}>done</span> : null}
+                {wishlist === 'error' ? <span className={styles.statusWarn}>failed</span> : null}
+              </span>
+              <span className={styles.qpDesc}>
+                Re-add wanted missing tracks, prune tracks no longer wanted and preserve deliberate
+                cancels.
+                {wishlistResult ? ` — ${wishlistResult}` : ''}
+              </span>
+            </button>
+          </div>
+        </section>
+
+        {(['artist', 'library'] as const).map((scope) => (
+          <section key={scope} className={styles.maintenanceSection}>
+            <div className={styles.maintenanceSectionHeader}>
+              <div>
+                <strong>{scope === 'artist' ? 'Artist files & tags' : 'Library-wide scans'}</strong>
+                <span>
+                  {scope === 'artist'
+                    ? `Only files linked to ${artistName}.`
+                    : 'Potentially checks every monitored catalog entry.'}
+                </span>
+              </div>
+              <span
+                className={`${styles.maintenanceScopeBadge} ${
+                  scope === 'artist' ? styles.maintenanceScopeArtist : ''
+                }`}
+              >
+                {scope === 'artist' ? 'This artist' : 'Entire library'}
+              </span>
+            </div>
+            <div className={styles.qpList}>
+              {MAINTENANCE_JOBS.filter((job) => job.scope === scope).map((job) => (
+                <button
+                  key={job.id}
+                  type="button"
+                  className={styles.qpOption}
+                  disabled={state[job.id] === 'queued'}
+                  onClick={() => {
+                    void runRepairJob(
+                      job.id,
+                      job.scope === 'artist' ? { id: artistId, name: artistName } : undefined,
+                    )
+                      .then(() => setState((s) => ({ ...s, [job.id]: 'queued' })))
+                      .catch(() => setState((s) => ({ ...s, [job.id]: 'error' })));
+                  }}
+                >
+                  <span className={styles.qpName}>
+                    {job.label}
+                    {state[job.id] === 'queued' ? (
+                      <span className={styles.statusOk}>queued</span>
+                    ) : null}
+                    {state[job.id] === 'error' ? (
+                      <span className={styles.statusWarn}>failed to queue</span>
+                    ) : null}
+                  </span>
+                  <span className={styles.qpDesc}>{job.desc}</span>
+                </button>
+              ))}
+            </div>
+          </section>
         ))}
       </div>
     </ModalShell>
@@ -3590,6 +3638,10 @@ function ArtistIndexView() {
     added: false,
     size: false,
   };
+  const artistColumnOrder = mergeColumnOrder<keyof LibraryV2ArtistTableColumns>(
+    prefsQuery.data?.artist_table.column_order,
+    ['quality_profile', 'genres', 'added', 'size'],
+  );
 
   // rev25-06/rev25-11: the size roll-up is requested explicitly by whichever
   // view can actually render it, not derived from the preference server-side
@@ -3619,7 +3671,7 @@ function ArtistIndexView() {
           </p>
         </div>
         <div className={styles.headerActions}>
-          <UpgradeScanButton />
+          <GlobalAutomaticSearchButton />
           <ImportButton hasArtists={artists.length > 0} />
         </div>
       </header>
@@ -3683,12 +3735,7 @@ function ArtistIndexView() {
           </button>
         </div>
         {isTableView ? (
-          <ArtistTableOptionsMenu
-            columns={artistTableColumns}
-            columnOrder={
-              prefsQuery.data?.artist_table.column_order ?? ['quality_profile', 'genres', 'added']
-            }
-          />
+          <ArtistTableOptionsMenu columns={artistTableColumns} columnOrder={artistColumnOrder} />
         ) : null}
       </div>
 
@@ -3704,9 +3751,7 @@ function ArtistIndexView() {
         <ArtistTable
           artists={artists}
           columns={artistTableColumns}
-          columnOrder={
-            prefsQuery.data?.artist_table.column_order ?? ['quality_profile', 'genres', 'added']
-          }
+          columnOrder={artistColumnOrder}
           profileNameById={profileNameById}
         />
       ) : (
@@ -4647,7 +4692,7 @@ export function shouldAutoFetchDiscography(params: {
   return discographyCount === 0;
 }
 
-/** B4: artist-toolbar decluttering — Preview Retag/Reorganize All/Maintenance/
+/** B4: artist-toolbar decluttering — Preview Retag/Reorganize All/repair tools/
  *  Manual Import/Enrich are secondary "files & tools" actions, tucked behind
  *  one dropdown instead of five separate buttons next to the Lidarr-core
  *  primary bar (Refresh & Scan/Automatic Search/Interactive Search/Update
@@ -4688,7 +4733,7 @@ function ArtistToolsMenu({
       <ActionButton
         icon="organize"
         label="Files/Tools"
-        title="Preview Retag, Reorganize All, Maintenance, Manual Import, Enrich"
+        title="Preview Retag, Reorganize All, Library Health & Repair, Manual Import, Enrich"
         onClick={() => setOpen((v) => !v)}
       />
       {open ? (
@@ -4721,7 +4766,7 @@ function ArtistToolsMenu({
               setOpen(false);
             }}
           >
-            Maintenance
+            Library Health & Repair
           </button>
           <button
             type="button"
@@ -5485,6 +5530,7 @@ const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
   features: true,
   metadata: true,
   verification: false,
+  file_size: false,
   file_path: false,
   play: false,
 };
@@ -5499,11 +5545,12 @@ const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string
   features: 'Features',
   metadata: 'Metadata',
   verification: 'Verification',
+  file_size: 'File size',
   file_path: 'File path',
   play: 'Play button',
 };
 
-type TrackSortKey = 'number' | 'title' | 'duration' | 'bpm';
+type TrackSortKey = 'number' | 'title' | 'duration' | 'bpm' | 'file_size';
 type TrackSort = { key: TrackSortKey; dir: 'asc' | 'desc' };
 
 /** Clientside-only (B6) — every field is already in the fetched payload, so
@@ -5521,6 +5568,8 @@ function sortTracks(tracks: LibraryV2Track[], sort: TrackSort | null): LibraryV2
         return t.duration ?? -1;
       case 'bpm':
         return t.bpm ?? -1;
+      case 'file_size':
+        return t.file?.size ?? -1;
     }
   };
   return [...tracks].sort((a, b) => {
@@ -5532,29 +5581,165 @@ function sortTracks(tracks: LibraryV2Track[], sort: TrackSort | null): LibraryV2
   });
 }
 
+const MIN_COLUMN_WIDTH = 48;
+const MAX_COLUMN_WIDTH = 640;
+
+/** UI-03: one clamp for restored and interactively resized widths. Persisted
+ * values may come from an older client or a hand-edited DB row. */
+export function clampColumnWidth(width: number): number {
+  if (!Number.isFinite(width)) return MIN_COLUMN_WIDTH;
+  return Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(width)));
+}
+
+/** Preference lists are leaf values in the JSON merge. When a new column is
+ * introduced, an older stored list therefore does not contain it. Append all
+ * missing defaults exactly once so new columns remain discoverable. */
+export function mergeColumnOrder<K extends string>(stored: K[] | undefined, defaults: K[]): K[] {
+  const allowed = new Set(defaults);
+  return Array.from(new Set([...(stored ?? []).filter((key) => allowed.has(key)), ...defaults]));
+}
+
+function ResizableHeaderCell({
+  columnKey,
+  savedWidth,
+  onWidthCommit,
+  className,
+  children,
+}: {
+  columnKey: string;
+  savedWidth?: number;
+  onWidthCommit: (key: string, width: number | null) => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [liveWidth, setLiveWidth] = useState<number | null>(
+    savedWidth == null ? null : clampColumnWidth(savedWidth),
+  );
+  const drag = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (drag.current) return;
+    setLiveWidth(savedWidth == null ? null : clampColumnWidth(savedWidth));
+  }, [savedWidth]);
+
+  function finishResize(event: ReactPointerEvent<HTMLSpanElement>, commit: boolean) {
+    const active = drag.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    const width = clampColumnWidth(active.startWidth + event.clientX - active.startX);
+    drag.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (commit) {
+      setLiveWidth(width);
+      onWidthCommit(columnKey, width);
+    } else {
+      setLiveWidth(savedWidth == null ? null : clampColumnWidth(savedWidth));
+    }
+  }
+
+  const widthStyle =
+    liveWidth == null
+      ? undefined
+      : {
+          width: `${liveWidth}px`,
+          minWidth: `${liveWidth}px`,
+          maxWidth: `${liveWidth}px`,
+        };
+
+  return (
+    <th className={className} style={widthStyle}>
+      <span className={styles.resizableHeaderContent}>{children}</span>
+      <span
+        role="separator"
+        aria-label={`Resize ${columnKey} column`}
+        aria-orientation="vertical"
+        className={styles.columnResizeHandle}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          drag.current = null;
+          setLiveWidth(null);
+          onWidthCommit(columnKey, null);
+        }}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const measured =
+            event.currentTarget.parentElement?.getBoundingClientRect().width ?? MIN_COLUMN_WIDTH;
+          const startWidth = clampColumnWidth(liveWidth ?? measured);
+          drag.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth,
+          };
+          setLiveWidth(startWidth);
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const active = drag.current;
+          if (!active || active.pointerId !== event.pointerId) return;
+          setLiveWidth(clampColumnWidth(active.startWidth + event.clientX - active.startX));
+        }}
+        onPointerUp={(event) => finishResize(event, true)}
+        onPointerCancel={(event) => finishResize(event, false)}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const current =
+            liveWidth ??
+            event.currentTarget.parentElement?.getBoundingClientRect().width ??
+            MIN_COLUMN_WIDTH;
+          const next = clampColumnWidth(current + (event.key === 'ArrowRight' ? 10 : -10));
+          setLiveWidth(next);
+          onWidthCommit(columnKey, next);
+        }}
+        tabIndex={0}
+        title="Drag to resize · double-click to reset"
+      />
+    </th>
+  );
+}
+
 function SortableHeader({
   label,
   sortKey,
   sort,
   onSort,
+  savedWidth,
+  onWidthCommit,
   className,
 }: {
   label: string;
   sortKey: TrackSortKey;
   sort: TrackSort | null;
   onSort: (key: TrackSortKey) => void;
+  savedWidth?: number;
+  onWidthCommit: (key: string, width: number | null) => void;
   className?: string;
 }) {
   const active = sort?.key === sortKey;
   return (
-    <th className={className}>
+    <ResizableHeaderCell
+      columnKey={sortKey}
+      savedWidth={savedWidth}
+      onWidthCommit={onWidthCommit}
+      className={className}
+    >
       <button type="button" className={styles.sortableHeader} onClick={() => onSort(sortKey)}>
         {label}
         {active ? (
-          <span className={styles.sortIndicator}>{sort?.dir === 'asc' ? '▲' : '▼'}</span>
+          <span aria-hidden="true" className={styles.sortIndicator}>
+            {sort?.dir === 'asc' ? '▲' : '▼'}
+          </span>
         ) : null}
       </button>
-    </th>
+    </ResizableHeaderCell>
   );
 }
 
@@ -5610,56 +5795,65 @@ function ColumnsOptionsMenu<K extends string>({
     <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
       <IconActionButton icon="settings" title={title} onClick={() => setOpen((v) => !v)} />
       {open ? (
-        <div className={`${styles.overflowMenu} ${styles.tableOptionsMenu} ${styles.alignRight}`}>
-          <div className={styles.tableOptionsGroupLabel}>Columns</div>
-          {columnKeys.map((key, index) => (
-            <div key={key} className={styles.tableOptionsRow}>
-              {onReorder && columnOrder ? (
-                <div className={styles.tableOptionsReorder}>
-                  <button
-                    type="button"
-                    title="Move up"
-                    disabled={index === 0}
-                    onClick={() => {
-                      const nextOrder = [...columnOrder];
-                      const temp = nextOrder[index];
-                      nextOrder[index] = nextOrder[index - 1];
-                      nextOrder[index - 1] = temp;
-                      onReorder(nextOrder);
-                    }}
-                    className={styles.reorderBtn}
-                  >
-                    ▲
-                  </button>
-                  <button
-                    type="button"
-                    title="Move down"
-                    disabled={index === columnKeys.length - 1}
-                    onClick={() => {
-                      const nextOrder = [...columnOrder];
-                      const temp = nextOrder[index];
-                      nextOrder[index] = nextOrder[index + 1];
-                      nextOrder[index + 1] = temp;
-                      onReorder(nextOrder);
-                    }}
-                    className={styles.reorderBtn}
-                  >
-                    ▼
-                  </button>
-                </div>
-              ) : null}
-              <label className={styles.tableOptionsItem}>
-                <input type="checkbox" checked={columns[key]} onChange={() => onToggle(key)} />
-                {columnLabels[key]}
-              </label>
-            </div>
-          ))}
-          {extra ? (
-            <>
-              <div className={styles.tableOptionsDivider} />
-              {extra}
-            </>
-          ) : null}
+        <div
+          className={`${styles.overflowMenu} ${styles.tableOptionsMenu} ${
+            extra ? '' : styles.tableOptionsMenuCompact
+          } ${styles.alignRight}`}
+        >
+          <div className={styles.tableOptionsLayout}>
+            <section className={styles.tableOptionsSection}>
+              <div className={styles.tableOptionsGroupLabel}>Visible columns</div>
+              <div className={styles.tableOptionsColumnGrid}>
+                {columnKeys.map((key, index) => (
+                  <div key={key} className={styles.tableOptionsRow}>
+                    {onReorder && columnOrder ? (
+                      <div className={styles.tableOptionsReorder}>
+                        <button
+                          type="button"
+                          title="Move up"
+                          disabled={index === 0}
+                          onClick={() => {
+                            const nextOrder = [...columnOrder];
+                            const temp = nextOrder[index];
+                            nextOrder[index] = nextOrder[index - 1];
+                            nextOrder[index - 1] = temp;
+                            onReorder(nextOrder);
+                          }}
+                          className={styles.reorderBtn}
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          title="Move down"
+                          disabled={index === columnKeys.length - 1}
+                          onClick={() => {
+                            const nextOrder = [...columnOrder];
+                            const temp = nextOrder[index];
+                            nextOrder[index] = nextOrder[index + 1];
+                            nextOrder[index + 1] = temp;
+                            onReorder(nextOrder);
+                          }}
+                          className={styles.reorderBtn}
+                        >
+                          ▼
+                        </button>
+                      </div>
+                    ) : null}
+                    <label className={styles.tableOptionsItem}>
+                      <input
+                        type="checkbox"
+                        checked={columns[key]}
+                        onChange={() => onToggle(key)}
+                      />
+                      {columnLabels[key]}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </section>
+            {extra}
+          </div>
         </div>
       ) : null}
     </span>
@@ -5671,11 +5865,13 @@ function TrackTableOptionsMenu({
   columnOrder,
   showAllProviders,
   availableProviders,
+  columnWidths,
 }: {
   columns: LibraryV2TrackTableColumns;
   columnOrder: (keyof LibraryV2TrackTableColumns)[];
   showAllProviders: boolean;
   availableProviders?: Set<string> | null;
+  columnWidths: Record<string, number | null>;
 }) {
   const mutation = useUiPreferencesMutation();
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
@@ -5709,81 +5905,101 @@ function TrackTableOptionsMenu({
       columnOrder={columnOrder}
       onReorder={(newOrder) => mutation.mutate({ track_table: { column_order: newOrder } })}
       extra={
-        <>
-          <div className={styles.tableOptionsDivider} />
-          <div className={styles.tableOptionsGroupLabel}>Quality Details</div>
-          <label className={styles.tableOptionsItem}>
-            <input
-              type="checkbox"
-              checked={qualityShowFormat}
-              onChange={() =>
-                mutation.mutate({ track_table: { quality_show_format: !qualityShowFormat } })
-              }
-            />
-            Show Format (e.g. FLAC, MP3)
-          </label>
-          <label className={styles.tableOptionsItem}>
-            <input
-              type="checkbox"
-              checked={qualityShowResolution}
-              onChange={() =>
+        <div className={styles.tableOptionsExtraGrid}>
+          <section className={styles.tableOptionsSection}>
+            <div className={styles.tableOptionsGroupLabel}>Quality & sizing</div>
+            <label className={styles.tableOptionsItem}>
+              <input
+                type="checkbox"
+                checked={qualityShowFormat}
+                onChange={() =>
+                  mutation.mutate({ track_table: { quality_show_format: !qualityShowFormat } })
+                }
+              />
+              Show format
+            </label>
+            <label className={styles.tableOptionsItem}>
+              <input
+                type="checkbox"
+                checked={qualityShowResolution}
+                onChange={() =>
+                  mutation.mutate({
+                    track_table: { quality_show_resolution: !qualityShowResolution },
+                  })
+                }
+              />
+              Show resolution
+            </label>
+            <label className={styles.tableOptionsItem}>
+              <input
+                type="checkbox"
+                checked={qualityShowBitrate}
+                onChange={() =>
+                  mutation.mutate({ track_table: { quality_show_bitrate: !qualityShowBitrate } })
+                }
+              />
+              Show bitrate
+            </label>
+            <button
+              type="button"
+              className={styles.tableOptionsReset}
+              disabled={!Object.values(columnWidths).some((width) => width != null)}
+              onClick={() =>
                 mutation.mutate({
-                  track_table: { quality_show_resolution: !qualityShowResolution },
+                  track_table: {
+                    column_widths: Object.fromEntries(
+                      Object.keys(columnWidths).map((key) => [key, null]),
+                    ),
+                  },
                 })
               }
-            />
-            Show Resolution (e.g. 24bit/96kHz)
-          </label>
-          <label className={styles.tableOptionsItem}>
-            <input
-              type="checkbox"
-              checked={qualityShowBitrate}
-              onChange={() =>
-                mutation.mutate({ track_table: { quality_show_bitrate: !qualityShowBitrate } })
-              }
-            />
-            Show Bitrate (e.g. 320 kbps)
-          </label>
+            >
+              Reset column widths
+            </button>
+          </section>
 
-          <div className={styles.tableOptionsDivider} />
-          <label className={styles.tableOptionsItem}>
-            <input
-              type="checkbox"
-              checked={showAllProviders}
-              onChange={() =>
-                mutation.mutate({ track_table: { show_all_match_providers: !showAllProviders } })
-              }
-            />
-            Show all match providers
-          </label>
-
-          <div className={styles.tableOptionsDivider} />
-          <div className={styles.tableOptionsGroupLabel}>Match Providers</div>
-          {MATCH_PROVIDERS.filter(
-            (provider) => !availableProviders || availableProviders.has(provider.key),
-          ).map((provider) => {
-            const isVisible = visibleProviders[provider.key] ?? true;
-            return (
-              <label key={provider.key} className={styles.tableOptionsItem}>
-                <input
-                  type="checkbox"
-                  checked={isVisible}
-                  onChange={() =>
-                    mutation.mutate({
-                      track_table: {
-                        visible_match_providers: {
-                          ...visibleProviders,
-                          [provider.key]: !isVisible,
-                        },
-                      },
-                    })
-                  }
-                />
-                {provider.label}
-              </label>
-            );
-          })}
-        </>
+          <section className={styles.tableOptionsSection}>
+            <div className={styles.tableOptionsGroupLabel}>Match providers</div>
+            <label className={styles.tableOptionsItem}>
+              <input
+                type="checkbox"
+                checked={showAllProviders}
+                onChange={() =>
+                  mutation.mutate({
+                    track_table: { show_all_match_providers: !showAllProviders },
+                  })
+                }
+              />
+              Show every provider
+            </label>
+            <div className={styles.tableOptionsProviderGrid}>
+              {MATCH_PROVIDERS.filter(
+                (provider) => !availableProviders || availableProviders.has(provider.key),
+              ).map((provider) => {
+                const isVisible = visibleProviders[provider.key] ?? true;
+                return (
+                  <label key={provider.key} className={styles.tableOptionsItem}>
+                    <input
+                      type="checkbox"
+                      checked={isVisible}
+                      onChange={() =>
+                        mutation.mutate({
+                          track_table: {
+                            visible_match_providers: {
+                              ...visibleProviders,
+                              [provider.key]: !isVisible,
+                            },
+                          },
+                        })
+                      }
+                    />
+                    {provider.label}
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+        </div>
       }
     />
   );
@@ -6130,6 +6346,7 @@ export function AlbumTrackTable({
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('albums', albumId));
+  const preferencesMutation = useUiPreferencesMutation();
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
@@ -6155,6 +6372,7 @@ export function AlbumTrackTable({
   const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
   const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
+  const columnWidths = prefsQuery.data?.track_table.column_widths ?? {};
 
   const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
     'play',
@@ -6167,12 +6385,10 @@ export function AlbumTrackTable({
     'features',
     'metadata',
     'verification',
+    'file_size',
     'file_path',
   ];
-  const columnOrder = prefsQuery.data?.track_table.column_order ?? defaultOrder;
-  const orderedKeys = Array.from(
-    new Set([...columnOrder.filter((key) => key in DEFAULT_TRACK_TABLE_COLUMNS), ...defaultOrder]),
-  ) as (keyof LibraryV2TrackTableColumns)[];
+  const orderedKeys = mergeColumnOrder(prefsQuery.data?.track_table.column_order, defaultOrder);
 
   const sortedTracks = sortTracks(album.tracks, sort);
   const selectableIds = album.tracks.filter((t) => t.id != null).map((t) => t.id as number);
@@ -6196,17 +6412,43 @@ export function AlbumTrackTable({
     });
   }
 
+  function commitColumnWidth(key: string, width: number | null) {
+    preferencesMutation.mutate({
+      track_table: {
+        column_widths: {
+          ...columnWidths,
+          [key]: width,
+        },
+      },
+    });
+  }
+
   const renderHeaderCell = (key: keyof LibraryV2TrackTableColumns) => {
     if (!columns[key]) return null;
     switch (key) {
       case 'disc':
         return (
-          <th key="disc" className={styles.colNum}>
+          <ResizableHeaderCell
+            key="disc"
+            columnKey="disc"
+            savedWidth={columnWidths.disc ?? undefined}
+            onWidthCommit={commitColumnWidth}
+            className={styles.colNum}
+          >
             Disc
-          </th>
+          </ResizableHeaderCell>
         );
       case 'artists':
-        return <th key="artists">Artists</th>;
+        return (
+          <ResizableHeaderCell
+            key="artists"
+            columnKey="artists"
+            savedWidth={columnWidths.artists ?? undefined}
+            onWidthCommit={commitColumnWidth}
+          >
+            Artists
+          </ResizableHeaderCell>
+        );
       case 'duration':
         return (
           <SortableHeader
@@ -6216,6 +6458,8 @@ export function AlbumTrackTable({
             sortKey="duration"
             sort={sort}
             onSort={toggleSort}
+            savedWidth={columnWidths.duration ?? undefined}
+            onWidthCommit={commitColumnWidth}
           />
         );
       case 'bpm':
@@ -6227,26 +6471,101 @@ export function AlbumTrackTable({
             sortKey="bpm"
             sort={sort}
             onSort={toggleSort}
+            savedWidth={columnWidths.bpm ?? undefined}
+            onWidthCommit={commitColumnWidth}
           />
         );
       case 'match':
-        return <th key="match">Match</th>;
+        return (
+          <ResizableHeaderCell
+            key="match"
+            columnKey="match"
+            savedWidth={columnWidths.match ?? undefined}
+            onWidthCommit={commitColumnWidth}
+          >
+            Match
+          </ResizableHeaderCell>
+        );
       case 'quality':
-        return <th key="quality">Quality</th>;
+        return (
+          <ResizableHeaderCell
+            key="quality"
+            columnKey="quality"
+            savedWidth={columnWidths.quality ?? undefined}
+            onWidthCommit={commitColumnWidth}
+          >
+            Quality
+          </ResizableHeaderCell>
+        );
       case 'features':
         return (
-          <th key="features" className={styles.colFeatures}>
+          <ResizableHeaderCell
+            key="features"
+            columnKey="features"
+            savedWidth={columnWidths.features ?? undefined}
+            onWidthCommit={commitColumnWidth}
+            className={styles.colFeatures}
+          >
             Features
-          </th>
+          </ResizableHeaderCell>
         );
       case 'metadata':
-        return <th key="metadata">Metadata</th>;
+        return (
+          <ResizableHeaderCell
+            key="metadata"
+            columnKey="metadata"
+            savedWidth={columnWidths.metadata ?? undefined}
+            onWidthCommit={commitColumnWidth}
+          >
+            Metadata
+          </ResizableHeaderCell>
+        );
       case 'verification':
-        return <th key="verification">Verification</th>;
+        return (
+          <ResizableHeaderCell
+            key="verification"
+            columnKey="verification"
+            savedWidth={columnWidths.verification ?? undefined}
+            onWidthCommit={commitColumnWidth}
+          >
+            Verification
+          </ResizableHeaderCell>
+        );
+      case 'file_size':
+        return (
+          <SortableHeader
+            key="file_size"
+            label="File size"
+            sortKey="file_size"
+            sort={sort}
+            onSort={toggleSort}
+            savedWidth={columnWidths.file_size ?? undefined}
+            onWidthCommit={commitColumnWidth}
+          />
+        );
       case 'file_path':
-        return <th key="file_path">File</th>;
+        return (
+          <ResizableHeaderCell
+            key="file_path"
+            columnKey="file_path"
+            savedWidth={columnWidths.file_path ?? undefined}
+            onWidthCommit={commitColumnWidth}
+          >
+            File
+          </ResizableHeaderCell>
+        );
       case 'play':
-        return <th key="play" className={styles.colPlay}></th>;
+        return (
+          <ResizableHeaderCell
+            key="play"
+            columnKey="play"
+            savedWidth={columnWidths.play ?? undefined}
+            onWidthCommit={commitColumnWidth}
+            className={styles.colPlay}
+          >
+            <span className={styles.srOnly}>Play</span>
+          </ResizableHeaderCell>
+        );
       default:
         return null;
     }
@@ -6274,6 +6593,7 @@ export function AlbumTrackTable({
           columnOrder={orderedKeys}
           showAllProviders={showAllProviders}
           availableProviders={availableProviders}
+          columnWidths={columnWidths}
         />
       </div>
       {selected.size > 0 ? (
@@ -6302,8 +6622,17 @@ export function AlbumTrackTable({
               sortKey="number"
               sort={sort}
               onSort={toggleSort}
+              savedWidth={columnWidths.number ?? undefined}
+              onWidthCommit={commitColumnWidth}
             />
-            <SortableHeader label="Title" sortKey="title" sort={sort} onSort={toggleSort} />
+            <SortableHeader
+              label="Title"
+              sortKey="title"
+              sort={sort}
+              onSort={toggleSort}
+              savedWidth={columnWidths.title ?? undefined}
+              onWidthCommit={commitColumnWidth}
+            />
             {orderedKeys.map(renderHeaderCell)}
             <th className={styles.colActions}>Actions</th>
           </tr>
@@ -6319,6 +6648,7 @@ export function AlbumTrackTable({
               profileName={profileNameById.get(track.quality_profile_id) ?? null}
               columns={columns}
               columnOrder={orderedKeys}
+              columnWidths={columnWidths}
               showAllProviders={showAllProviders}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
@@ -6365,26 +6695,41 @@ const METADATA_TAG_LABELS: Record<string, string> = {
 };
 const METADATA_TAG_ORDER = Object.keys(METADATA_TAG_LABELS);
 
-function metadataGapsTooltip(gaps: string[]): string {
+function metadataTagBreakdown(gaps: string[]) {
   const present = METADATA_TAG_ORDER.filter((tag) => !gaps.includes(tag)).map(
-    (tag) => `✓ ${METADATA_TAG_LABELS[tag]}`,
+    (tag) => METADATA_TAG_LABELS[tag],
   );
-  const missing = gaps.map((tag) => `✗ ${METADATA_TAG_LABELS[tag] ?? tag}`);
+  const missing = gaps.map((tag) => METADATA_TAG_LABELS[tag] ?? tag);
+  return { present, missing };
+}
 
-  const lines: string[] = [];
-
-  if (present.length > 0) {
-    lines.push('Present Tags:');
-    lines.push(...present);
-  }
-
-  if (missing.length > 0) {
-    if (lines.length > 0) lines.push('');
-    lines.push('Missing Tags:');
-    lines.push(...missing);
-  }
-
-  return lines.join('\n');
+function MetadataTagsTooltip({ gaps, hint }: { gaps: string[]; hint: string }) {
+  const { present, missing } = metadataTagBreakdown(gaps);
+  return (
+    <Tooltip.Portal>
+      <Tooltip.Positioner sideOffset={8} collisionPadding={8}>
+        <Tooltip.Popup role="tooltip" className={styles.metadataTagsTooltip}>
+          {present.length > 0 ? (
+            <div className={styles.metadataTagsTooltipGroup}>
+              <strong>Present tags</strong>
+              <span className={styles.metadataTagsPresent}>
+                {present.map((label) => `✓ ${label}`).join(' · ')}
+              </span>
+            </div>
+          ) : null}
+          {missing.length > 0 ? (
+            <div className={styles.metadataTagsTooltipGroup}>
+              <strong>Missing tags</strong>
+              <span className={styles.metadataTagsMissing}>
+                {missing.map((label) => `✗ ${label}`).join(' · ')}
+              </span>
+            </div>
+          ) : null}
+          <span className={styles.metadataTagsTooltipHint}>{hint}</span>
+        </Tooltip.Popup>
+      </Tooltip.Positioner>
+    </Tooltip.Portal>
+  );
 }
 
 /** LV2-TAG-STATUS-01/02: the tag-gap cell must not claim "tags ✓" before the
@@ -6458,36 +6803,41 @@ export function TrackMetadataGapsCell({
   }
   if (track.metadata_gaps.length === 0) {
     return (
-      <button
-        type="button"
-        className={styles.statusOk}
-        title={metadataGapsTooltip(track.metadata_gaps)}
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenTags();
-        }}
-      >
-        tags ✓
-      </button>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          type="button"
+          delay={150}
+          className={styles.statusOk}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenTags();
+          }}
+        >
+          tags ✓
+        </Tooltip.Trigger>
+        <MetadataTagsTooltip gaps={track.metadata_gaps} hint="Click to inspect the file tags." />
+      </Tooltip.Root>
     );
   }
+  const hint = mutation.isError
+    ? mutationErrorMessage(mutation.error, 'Write tags failed')
+    : 'Click to fetch the missing metadata and write these tags to the file.';
   return (
-    <button
-      type="button"
-      className={styles.statusWarn}
-      disabled={mutation.isPending || !track.id}
-      title={
-        mutation.isError
-          ? mutationErrorMessage(mutation.error, 'Write tags failed')
-          : `${metadataGapsTooltip(track.metadata_gaps)}\n\nClick to write these tags to the file`
-      }
-      onClick={(e) => {
-        e.stopPropagation();
-        mutation.mutate();
-      }}
-    >
-      {mutation.isPending ? '…' : `${track.metadata_gaps.length} tag gaps`}
-    </button>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        type="button"
+        delay={150}
+        className={styles.statusWarn}
+        disabled={mutation.isPending || !track.id}
+        onClick={(e) => {
+          e.stopPropagation();
+          mutation.mutate();
+        }}
+      >
+        {mutation.isPending ? '…' : `${track.metadata_gaps.length} tag gaps`}
+      </Tooltip.Trigger>
+      <MetadataTagsTooltip gaps={track.metadata_gaps} hint={hint} />
+    </Tooltip.Root>
   );
 }
 
@@ -6499,6 +6849,7 @@ function TrackRow({
   profileName,
   columns,
   columnOrder,
+  columnWidths,
   showAllProviders,
   selected,
   onToggleSelect,
@@ -6512,6 +6863,7 @@ function TrackRow({
   profileName: string | null;
   columns: LibraryV2TrackTableColumns;
   columnOrder: (keyof LibraryV2TrackTableColumns)[];
+  columnWidths: Record<string, number | null>;
   showAllProviders: boolean;
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
@@ -6524,33 +6876,47 @@ function TrackRow({
   const label = track.title ?? `Track ${track.track_number ?? '?'}`;
   const entity: Lib2EntityRef = { ...entityBase, ...(track.id ? { trackId: track.id } : {}) };
   const [detailTab, setDetailTab] = useState<TrackDetailTab | null>(null);
+  const widthStyle = (key: string) => {
+    const raw = columnWidths[key];
+    if (raw == null) return undefined;
+    const width = clampColumnWidth(raw);
+    return {
+      width: `${width}px`,
+      minWidth: `${width}px`,
+      maxWidth: `${width}px`,
+    };
+  };
 
   const renderBodyCell = (key: keyof LibraryV2TrackTableColumns) => {
     if (!columns[key]) return null;
     switch (key) {
       case 'disc':
         return (
-          <td key="disc" className={styles.colNum}>
+          <td key="disc" className={styles.colNum} style={widthStyle('disc')}>
             {track.disc_number ?? '—'}
           </td>
         );
       case 'artists':
-        return <td key="artists">{track.artists.map((a) => a.name).join(', ')}</td>;
+        return (
+          <td key="artists" style={widthStyle('artists')}>
+            {track.artists.map((a) => a.name).join(', ')}
+          </td>
+        );
       case 'duration':
         return (
-          <td key="duration" className={styles.colDuration}>
+          <td key="duration" className={styles.colDuration} style={widthStyle('duration')}>
             {formatDuration(track.duration)}
           </td>
         );
       case 'bpm':
         return (
-          <td key="bpm" className={styles.colBpm}>
+          <td key="bpm" className={styles.colBpm} style={widthStyle('bpm')}>
             {track.bpm ?? '—'}
           </td>
         );
       case 'match':
         return (
-          <td key="match">
+          <td key="match" style={widthStyle('match')}>
             {matchServices.length > 0 ? (
               <MatchChips
                 entityType="track"
@@ -6571,7 +6937,7 @@ function TrackRow({
         const showFormatCol = showFormat || showResolution;
 
         return (
-          <td key="quality" className={styles.qualityText}>
+          <td key="quality" className={styles.qualityText} style={widthStyle('quality')}>
             <span className={styles.qualityCellRow}>
               {/* 1. Format & Resolution */}
               {showFormatCol ? (
@@ -6628,7 +6994,7 @@ function TrackRow({
       }
       case 'features':
         return (
-          <td key="features">
+          <td key="features" style={widthStyle('features')}>
             {!missing && track.file ? (
               <span className={styles.featuresDisplay}>
                 <TrackReplayGainBadge track={track} />
@@ -6641,7 +7007,7 @@ function TrackRow({
         );
       case 'metadata':
         return (
-          <td key="metadata">
+          <td key="metadata" style={widthStyle('metadata')}>
             {track.id && !missing ? (
               <TrackMetadataGapsCell track={track} onOpenTags={() => setDetailTab('tags')} />
             ) : (
@@ -6651,7 +7017,7 @@ function TrackRow({
         );
       case 'verification':
         return (
-          <td key="verification">
+          <td key="verification" style={widthStyle('verification')}>
             {!missing && track.file?.verification_status ? (
               <TrackVerificationBadge file={track.file} />
             ) : (
@@ -6673,13 +7039,28 @@ function TrackRow({
         );
       case 'file_path':
         return (
-          <td key="file_path" className={styles.filePathCell} title={track.file?.path ?? undefined}>
+          <td
+            key="file_path"
+            className={styles.filePathCell}
+            style={widthStyle('file_path')}
+            title={track.file?.path ?? undefined}
+          >
             {track.file?.path ?? <span className={styles.muted}>—</span>}
+          </td>
+        );
+      case 'file_size':
+        return (
+          <td key="file_size" className={styles.fileSizeCell} style={widthStyle('file_size')}>
+            {track.file?.size == null ? (
+              <span className={styles.muted}>—</span>
+            ) : (
+              formatFileSize(track.file.size)
+            )}
           </td>
         );
       case 'play':
         return (
-          <td key="play" className={styles.colPlay}>
+          <td key="play" className={styles.colPlay} style={widthStyle('play')}>
             <TrackPlayButton
               track={track}
               albumTitle={albumTitle}
@@ -6715,8 +7096,10 @@ function TrackRow({
           title={track.title ?? undefined}
         />
       </td>
-      <td className={styles.colNum}>{track.track_number ?? '—'}</td>
-      <td>
+      <td className={styles.colNum} style={widthStyle('number')}>
+        {track.track_number ?? '—'}
+      </td>
+      <td style={widthStyle('title')}>
         {/* Legacy parity: present/missing shown inline right after the title. */}
         <span className={styles.trackTitleCell}>
           <span className={missing ? styles.muted : undefined}>{label}</span>
@@ -8018,25 +8401,33 @@ export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportStat
   return `Library ready to browse · Caching artwork in the background · ${current}/${total} · ${percent}%`;
 }
 
-/** Deep-dive B7: the manual global upgrade scan used to live in every
- *  artist's toolbar (misleadingly, since it always scanned the whole
- *  catalog). Scoped Automatic Search (C1) covers per-artist/-album/-track
- *  upgrades now, so the global variant only makes sense here, at the
- *  library-overview level, next to Import. */
-function UpgradeScanButton() {
+/** F-13 global Automatic Search. Upgrade candidates must be mirrored first,
+ * then the existing Wishlist processor sees one complete missing+upgrade
+ * queue. Starting the processor first creates a race where the just-enqueued
+ * upgrades can miss the active cycle. */
+export function GlobalAutomaticSearchButton() {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function runScan() {
+  async function runSearch() {
     setBusy(true);
-    setMessage('Scanning…');
+    setMessage('Finding missing tracks and quality upgrades…');
+    let upgradesQueued = false;
     try {
       const jobId = await startLibraryV2UpgradeScan();
       const error = await awaitBulkJob(queryClient, jobId);
-      setMessage(error ? `Failed: ${error}` : 'Upgrade scan finished — candidates queued.');
+      if (error) throw new Error(error);
+      upgradesQueued = true;
+      setMessage('Upgrades queued · starting Wishlist processing…');
+      const started = await processWishlist();
+      setMessage(`${started} Missing tracks and quality upgrades are queued.`);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Upgrade scan failed');
+      const detail = e instanceof Error ? e.message : 'Automatic Search failed';
+      setMessage(
+        upgradesQueued ? `Upgrades queued, but Wishlist processing failed: ${detail}` : detail,
+      );
     } finally {
       setBusy(false);
     }
@@ -8046,12 +8437,13 @@ function UpgradeScanButton() {
     <span className={styles.importWrap}>
       <button
         type="button"
-        className={styles.btnGhost}
+        className={styles.btnPrimary}
         disabled={busy}
-        title="Scan the entire Library v2 catalog and queue monitored tracks below their quality-profile cutoff"
-        onClick={() => void runScan()}
+        title="Search all monitored missing tracks and all files below their quality-profile cutoff"
+        onClick={() => void runSearch()}
       >
-        {busy ? 'Scanning…' : 'Search Upgrades'}
+        <SvgIcon name="automatic" />
+        {busy ? 'Searching…' : 'Automatic Search'}
       </button>
       {message ? <span className={styles.importMsg}>{message}</span> : null}
     </span>

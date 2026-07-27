@@ -45,6 +45,13 @@ def test_play_column_defaults_off():
     assert get_ui_preferences(conn)["track_table"]["columns"]["play"] is False
 
 
+def test_file_size_and_resizable_column_defaults():
+    conn = _conn()
+    track_table = get_ui_preferences(conn)["track_table"]
+    assert track_table["columns"]["file_size"] is False
+    assert track_table["column_widths"] == {}
+
+
 def test_artist_table_columns_default_off_and_merge_independently():
     conn = _conn()
     prefs = get_ui_preferences(conn)
@@ -115,6 +122,7 @@ def test_column_order_defaults_and_customization():
         "features",
         "metadata",
         "verification",
+        "file_size",
         "file_path",
     ]
     # Patch overrides it completely since lists are leaf values.
@@ -124,6 +132,18 @@ def test_column_order_defaults_and_customization():
     assert prefs["track_table"]["column_order"] == custom_order
     # Columns sibling mapping remains untouched.
     assert prefs["track_table"]["columns"]["bpm"] is True
+
+
+def test_column_widths_merge_and_persist_without_clobbering_other_table_preferences():
+    conn = _conn()
+    update_ui_preferences(
+        conn,
+        {"track_table": {"column_widths": {"title": 320, "file_size": 96}}},
+    )
+    update_ui_preferences(conn, {"track_table": {"column_widths": {"title": 280}}})
+    track_table = get_ui_preferences(conn)["track_table"]
+    assert track_table["column_widths"] == {"title": 280, "file_size": 96}
+    assert track_table["columns"]["duration"] is True
 
 
 def test_quality_and_match_provider_preferences():

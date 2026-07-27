@@ -43,7 +43,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
     return conn.execute(
         f"""SELECT t.id, t.title, t.track_number, t.disc_number,
                    t.spotify_id, t.musicbrainz_id, t.album_id,
-                   al.title AS album_title, al.year, al.release_date, al.genres,
+                   al.title AS album_title, al.album_type, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
                    al.image_url AS album_image_url,
                    ar.name AS album_artist_name,
@@ -177,6 +177,7 @@ def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "track_number": row["track_number"],
             "album_id": row["album_id"],
             "album_title": row["album_title"],
+            "album_type": row["album_type"],
             "file_path": row["file_path"],
         }
         if not row["file_path"]:

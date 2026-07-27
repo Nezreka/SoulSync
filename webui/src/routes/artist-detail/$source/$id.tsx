@@ -15,7 +15,11 @@ import { useShellBridge } from '@/platform/shell/route-controllers';
 // the artist did nothing). Coerce whatever arrives back to a string.
 const artistDetailSearchSchema = z.object({
   name: z
-    .preprocess((v) => (v == null ? '' : String(v)), z.string())
+    .preprocess(
+      (v) =>
+        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : '',
+      z.string(),
+    )
     .optional()
     .default(''),
 });

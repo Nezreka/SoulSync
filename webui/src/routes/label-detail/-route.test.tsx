@@ -64,4 +64,16 @@ describe('label-detail route', () => {
       );
     });
   });
+
+  it('does not display a structured search param as [object Object]', async () => {
+    renderLabelDetailRoute(['/label-detail/mbid-x?name=%7B%22unexpected%22%3Atrue%7D']);
+
+    await waitFor(() => {
+      expect(window.SoulSyncWebShellBridge?.navigateToLabelDetail).toHaveBeenCalledWith(
+        'mbid-x',
+        '',
+        { skipRouteChange: true },
+      );
+    });
+  });
 });

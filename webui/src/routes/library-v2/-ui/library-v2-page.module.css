@@ -727,6 +727,7 @@ button.featureTag:disabled {
   background: rgba(0, 0, 0, 0.22);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding: 4px 8px 8px;
+  overflow-x: auto;
 }
 
 .trackTable {
@@ -738,12 +739,63 @@ button.featureTag:disabled {
 }
 
 .trackTable th {
+  position: relative;
   text-align: left;
   padding: 7px 12px;
   color: rgba(255, 255, 255, 0.4);
   font-weight: 600;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   white-space: nowrap;
+}
+
+.resizableHeaderContent {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.columnResizeHandle {
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  right: -3px;
+  bottom: 3px;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.columnResizeHandle::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 3px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.columnResizeHandle:hover::after,
+.columnResizeHandle:focus-visible::after {
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.22);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .trackTable td {
@@ -1175,6 +1227,52 @@ button.statusOk:disabled,
 button.statusWarn:disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+.metadataTagsTooltip {
+  z-index: 1000;
+  width: min(330px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9px;
+  background: #17191f;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.48);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 11px;
+  line-height: 1.45;
+  transform-origin: var(--transform-origin);
+}
+
+.metadataTagsTooltipGroup {
+  display: grid;
+  gap: 3px;
+}
+
+.metadataTagsTooltipGroup + .metadataTagsTooltipGroup {
+  margin-top: 8px;
+}
+
+.metadataTagsTooltipGroup strong {
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadataTagsPresent {
+  color: rgb(52, 211, 153);
+}
+
+.metadataTagsMissing {
+  color: rgb(251, 191, 36);
+}
+
+.metadataTagsTooltipHint {
+  display: block;
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.58);
 }
 
 .statusDup {
@@ -3272,6 +3370,77 @@ button.statusWarn:disabled {
   color: rgba(255, 255, 255, 0.55);
 }
 
+.maintenanceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.maintenanceSection {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+}
+
+.maintenanceSection:first-child {
+  grid-column: 1 / -1;
+}
+
+.maintenanceSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.maintenanceSectionHeader > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.maintenanceSectionHeader strong {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.maintenanceSectionHeader > div > span {
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 11px;
+}
+
+.maintenanceScopeBadge {
+  flex: 0 0 auto;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.maintenanceScopeArtist {
+  border-color: rgba(var(--accent-rgb), 0.36);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: rgb(var(--accent-rgb));
+}
+
+@media (max-width: 720px) {
+  .maintenanceGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenanceSection:first-child {
+    grid-column: auto;
+  }
+}
+
 .qpPolicy {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
@@ -3349,6 +3518,36 @@ button.statusWarn:disabled {
   padding: 8px 12px !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   text-align: left;
+}
+
+.retagAlbumGroup + .retagAlbumGroup .albumGroupHeader {
+  border-top: 10px solid rgba(8, 8, 10, 0.92);
+}
+
+.retagAlbumHeading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.retagReleaseType {
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.1);
+  color: rgb(var(--accent-rgb));
+  padding: 2px 7px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.retagAlbumCount {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 10.5px;
+  font-weight: 500;
 }
 
 .enrichWrap {
@@ -3558,9 +3757,52 @@ button.statusWarn:disabled {
   font-size: 11.5px;
 }
 
+.fileSizeCell {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .tableOptionsMenu {
-  min-width: 210px;
-  padding: 8px 0;
+  width: min(820px, calc(100vw - 48px));
+  max-height: min(70vh, 620px);
+  overflow: auto;
+  padding: 10px;
+}
+
+.tableOptionsMenuCompact {
+  width: min(380px, calc(100vw - 48px));
+}
+
+.tableOptionsMenuCompact .tableOptionsLayout {
+  grid-template-columns: 1fr;
+}
+
+.tableOptionsLayout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.2fr) minmax(300px, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.tableOptionsExtraGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(145px, 1fr));
+  gap: 10px;
+}
+
+.tableOptionsSection {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 7px 0;
+}
+
+.tableOptionsColumnGrid,
+.tableOptionsProviderGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(125px, 1fr));
 }
 
 .tableOptionsGroupLabel {
@@ -3580,6 +3822,28 @@ button.statusWarn:disabled {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
+}
+
+.tableOptionsReset {
+  margin: 7px 14px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tableOptionsReset:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  color: #fff;
+}
+
+.tableOptionsReset:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .tableOptionsItem:hover {
@@ -3604,6 +3868,17 @@ button.statusWarn:disabled {
 
 .tableOptionsRow .tableOptionsItem:hover {
   background: transparent;
+}
+
+@media (max-width: 780px) {
+  .tableOptionsMenu {
+    width: min(560px, calc(100vw - 24px));
+  }
+
+  .tableOptionsLayout,
+  .tableOptionsExtraGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .tableOptionsReorder {

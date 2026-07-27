@@ -768,11 +768,15 @@ export async function updateLibraryV2MetadataOverrides(
  *  monitored missing/upgradable track is mirrored to the wishlist, so
  *  processing it searches and downloads them through the normal pipeline. */
 export async function processWishlist(): Promise<string> {
-  const payload = await readJson<{ success: boolean; message?: string; error?: string }>(
-    apiClient.post('wishlist/process', { json: {} }),
-  );
-  if (!payload.success) throw new Error(payload.error || 'Wishlist processing failed to start');
-  return payload.message ?? 'Wishlist processing started';
+  const payload = await readJson<{
+    success: boolean;
+    message?: string;
+    data?: { message?: string } | null;
+    error?: string | { message?: string } | null;
+  }>(apiClient.post('wishlist/process', { json: {} }));
+  const error = typeof payload.error === 'string' ? payload.error : payload.error?.message;
+  if (!payload.success) throw new Error(error || 'Wishlist processing failed to start');
+  return payload.message ?? payload.data?.message ?? 'Wishlist processing started';
 }
 
 export async function deleteLibraryV2Entity(
@@ -1034,6 +1038,7 @@ export interface LibraryV2TagPreviewTrack {
   track_number: number | null;
   album_id: number;
   album_title: string | null;
+  album_type: string | null;
   file_path: string | null;
   diff: LibraryV2TagDiffField[];
   has_changes: boolean;
@@ -1668,6 +1673,7 @@ type UiPreferencesPatch = {
   track_table?: {
     columns?: Partial<LibraryV2TrackTableColumns>;
     column_order?: (keyof LibraryV2TrackTableColumns)[];
+    column_widths?: Record<string, number | null>;
     show_all_match_providers?: boolean;
     visible_match_providers?: Record<string, boolean>;
     quality_show_format?: boolean;

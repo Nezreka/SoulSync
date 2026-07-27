@@ -46,6 +46,9 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             # approval / bypass) was only a sub-badge inside the quality cell.
             # Opt-in like file_path — it is a diagnostic, not everyday info.
             "verification": False,
+            # UI-03: physical size of the selected primary file. Opt-in to
+            # keep the default table compact on album-heavy pages.
+            "file_size": False,
             "file_path": False,
             # H1: row play button (reuses the Legacy player via the shell
             # bridge) — opt-in like file_path, not everyone wants it visible.
@@ -62,8 +65,13 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "features",
             "metadata",
             "verification",
+            "file_size",
             "file_path",
         ],
+        # UI-03: explicit, user-sized widths in CSS pixels. Missing keys mean
+        # "use the table's natural/default width", which also makes a
+        # double-click reset backwards-compatible with older preference rows.
+        "column_widths": {},
         "show_all_match_providers": False,
         "visible_match_providers": {
             "spotify": True,
