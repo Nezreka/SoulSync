@@ -16,7 +16,13 @@ import { describe, expect, it } from 'vitest';
  * and the function is never called, so nothing in these scripts executes.
  */
 describe('vanilla shell scripts parse', () => {
-  for (const file of ['static/init.js', 'static/core.js', 'static/api-monitor.js']) {
+  for (const file of [
+    'static/init.js',
+    'static/core.js',
+    'static/api-monitor.js',
+    'static/downloads.js',
+    'static/sync-services.js',
+  ]) {
     it(file, () => {
       const source = readFileSync(resolve(process.cwd(), file), 'utf8');
       expect(() => new Function(source)).not.toThrow();
