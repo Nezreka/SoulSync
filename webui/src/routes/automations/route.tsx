@@ -1,0 +1,56 @@
+import { createFileRoute, redirect } from '@tanstack/react-router';
+
+import { getProfileHomePath } from '@/platform/shell/bridge';
+import { LegacyRouteController } from '@/platform/shell/route-controllers';
+import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
+
+import { automationsListQueryOptions, automationsMasterQueryOptions } from './-automations.api';
+import { automationsSearchSchema } from './-automations.types';
+
+/**
+ * Whether the shell has handed /automations over to React yet.
+ *
+ * The route file exists (and is tested) before the React page reaches parity.
+ * Without this check TanStack would match /automations regardless of the
+ * manifest and the vanilla page and the React host would both activate.
+ * Delete this indirection once the vanilla automations page is gone.
+ */
+function isReactOwned(): boolean {
+  return getShellRouteByPageId('automations')?.kind === 'react';
+}
+
+export const Route = createFileRoute('/automations')({
+  validateSearch: automationsSearchSchema,
+  beforeLoad: ({ context }) => {
+    const { bridge } = context.shell;
+
+    if (!bridge.isPageAllowed('automations')) {
+      throw redirect({ href: getProfileHomePath(bridge), replace: true });
+    }
+  },
+  loader: async ({ context }) => {
+    if (!isReactOwned()) return;
+
+    const { profile } = context.shell;
+    const { queryClient } = context;
+
+    // Both feed the first paint: the sections need the list, and the stats bar
+    // renders the master toggle beside the counts. Progress is deliberately
+    // NOT prefetched — it is a catch-up read for runs already in flight, and
+    // blocking paint on it would delay the page for the common idle case.
+    await Promise.all([
+      queryClient.ensureQueryData(automationsListQueryOptions(profile.profileId)),
+      queryClient.ensureQueryData(automationsMasterQueryOptions()),
+    ]);
+  },
+  component: AutomationsRouteComponent,
+});
+
+function AutomationsRouteComponent() {
+  if (!isReactOwned()) {
+    return <LegacyRouteController pathname="/automations" />;
+  }
+  // Replaced by the real page in P2; until the manifest flips, this branch is
+  // unreachable, so rendering the legacy controller keeps it honest.
+  return <LegacyRouteController pathname="/automations" />;
+}
