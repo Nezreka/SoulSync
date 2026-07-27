@@ -9,6 +9,7 @@ import {
   isFinished,
   isRunning,
   PROGRESS_HIDE_MS,
+  useSecondTick,
 } from '../-automations.progress';
 
 export interface AutomationCardHandlers {
@@ -99,11 +100,9 @@ function ProgressPanel({ state }: { state: AutomationRunState }) {
  * outside that selector, so React owns it alone.
  */
 function NextRun({ nextRun }: { nextRun: string }) {
-  const [, force] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => force((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+  // One shared interval for every countdown on the page, mirroring the single
+  // module-level timer the vanilla page used — not one timer per card.
+  useSecondTick();
   return <span className="auto-next-run">Next: {timeUntil(nextRun)}</span>;
 }
 

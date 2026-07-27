@@ -4,10 +4,12 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  _tickDiagnostics,
   AUTOMATION_PROGRESS_EVENT,
   isFinished,
   isRunning,
   useAutomationProgress,
+  useSecondTick,
 } from './-automations.progress';
 
 function emit(detail: unknown) {
@@ -50,6 +52,29 @@ describe('useAutomationProgress', () => {
     expect(Object.keys(result.current)).toEqual(['1']);
   });
 
+  it('seeds from the catch-up response so a page opened mid-run shows it', () => {
+    // Without this, a card stays blank until the next socket frame — which in a
+    // long quiet phase can be a while. loadAutomations did the same catch-up.
+    const { result } = renderHook(() =>
+      useAutomationProgress({ '5': { status: 'running', progress: 25 } }),
+    );
+    expect(result.current[5]?.progress).toBe(25);
+  });
+
+  it('ignores the {error} shape of that response', () => {
+    const { result } = renderHook(() => useAutomationProgress({ error: 'nope' }));
+    expect(result.current).toEqual({});
+  });
+
+  it('lets a live frame win over the catch-up seed', () => {
+    // A socket frame that landed while the catch-up was in flight is newer.
+    const { result } = renderHook(() =>
+      useAutomationProgress({ '5': { status: 'running', progress: 10 } }),
+    );
+    emit({ '5': { status: 'finished', progress: 100 } });
+    expect(result.current[5]?.status).toBe('finished');
+  });
+
   it('stops listening once unmounted', () => {
     const { result, unmount } = renderHook(() => useAutomationProgress());
     unmount();
@@ -87,9 +112,60 @@ describe('the vanilla side of the progress seam', () => {
     expect(read('core.js')).toContain('updateAutomationProgressFromData(data)');
   });
 
+  it('loadAutomations refuses to repaint the legacy list behind React', () => {
+    // Reachable via the shared builder: saveAutomation calls onSaved ->
+    // loadAutomations after the React page has reclaimed the shell. Without
+    // this guard the hidden container gets a full duplicate render, and every
+    // #auto-section-* id and .automation-card[data-id] exists twice.
+    const src = read('stats-automations.js');
+    const fn = src.slice(src.indexOf('async function loadAutomations()'));
+    expect(fn.slice(0, 1200)).toContain("getElementById('webui-react-root')");
+  });
+
   it('the vanilla renderer refuses to write into React-owned cards', () => {
     // Without this guard the document-wide querySelector finds React's cards
     // and injects panels React clobbers on its next render.
     expect(read('stats-automations.js')).toContain("card.closest('#webui-react-root')");
+  });
+});
+
+describe('useSecondTick', () => {
+  it('runs ONE interval no matter how many countdowns subscribe', () => {
+    // The vanilla page ticked every countdown from a single module-level
+    // interval. A timer per card means N timers and N re-renders a second for
+    // the same output.
+    const a = renderHook(() => useSecondTick());
+    const b = renderHook(() => useSecondTick());
+    const c = renderHook(() => useSecondTick());
+    expect(_tickDiagnostics()).toEqual({ running: true, listeners: 3 });
+    a.unmount();
+    b.unmount();
+    c.unmount();
+  });
+
+  it('stops the interval once the last subscriber leaves', () => {
+    // A page with no scheduled automations must not leave a timer running.
+    const a = renderHook(() => useSecondTick());
+    const b = renderHook(() => useSecondTick());
+    a.unmount();
+    expect(_tickDiagnostics().running).toBe(true);
+    b.unmount();
+    expect(_tickDiagnostics()).toEqual({ running: false, listeners: 0 });
+  });
+
+  it('re-renders subscribers on each tick', () => {
+    vi.useFakeTimers();
+    let renders = 0;
+    const h = renderHook(() => {
+      renders += 1;
+      useSecondTick();
+    });
+    const before = renders;
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(renders).toBeGreaterThan(before);
+    h.unmount();
+    vi.useRealTimers();
   });
 });
