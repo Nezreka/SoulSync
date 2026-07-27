@@ -70,7 +70,9 @@ export function settleOwnershipForSourceArtist(discography: Discography): Discog
     const releases = discography[bucket];
     if (!releases) continue;
     settled[bucket] = releases.map((release) =>
-      release.owned === null || release.owned === undefined ? { ...release, owned: false } : release,
+      release.owned === null || release.owned === undefined
+        ? { ...release, owned: false }
+        : release,
     );
   }
   return settled;

@@ -133,15 +133,15 @@ describe('needsCompletionStream', () => {
   const library = { artist: { server_source: 'plex' } };
 
   it('runs when a library discography still has unknown ownership', () => {
-    expect(
-      needsCompletionStream({ ...library, discography: { albums: [{ owned: null }] } }),
-    ).toBe(true);
+    expect(needsCompletionStream({ ...library, discography: { albums: [{ owned: null }] } })).toBe(
+      true,
+    );
   });
 
   it('does not run once everything is resolved', () => {
-    expect(
-      needsCompletionStream({ ...library, discography: { albums: [{ owned: true }] } }),
-    ).toBe(false);
+    expect(needsCompletionStream({ ...library, discography: { albums: [{ owned: true }] } })).toBe(
+      false,
+    );
   });
 
   it('finds unknowns in eps and singles too, not just albums', () => {
