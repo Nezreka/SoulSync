@@ -54,7 +54,12 @@ export interface Automation {
   next_run?: string | null;
   run_count?: number;
   last_error?: string | null;
-  last_result?: string | null;
+  /**
+   * JSON-parsed by _hydrate_automation, so normally a dict of run facts. It is
+   * NOT in _JSON_DEFAULT_DICT, so a malformed value hydrates to null rather
+   * than {} — hence unknown rather than a record type.
+   */
+  last_result?: unknown;
   /** Seeded, undeletable automations. Rendered in the protected System section. */
   is_system?: boolean | number;
   /** User-defined grouping; drives the 📁 sections. */
