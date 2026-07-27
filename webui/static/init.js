@@ -3260,7 +3260,6 @@ async function loadPageData(pageId) {
         stopLogPolling();
         // Stop watchlist/wishlist page timers when navigating away
         if (wishlistCountdownInterval) { clearInterval(wishlistCountdownInterval); wishlistCountdownInterval = null; }
-        if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
         if (pageId !== 'sync') {
             cleanupBeatportContent();
         }
