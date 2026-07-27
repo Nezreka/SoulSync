@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -8,16 +8,15 @@ import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 /**
- * /library exists as a route but is DORMANT.
+ * /library is LIVE — the manifest hands it to React.
  *
- * TanStack matches from the generated route tree, not the manifest, so this
- * route began matching the moment the file landed. The isReactOwned() guard is
- * what keeps the vanilla page in charge; without it both would activate.
+ * These were the dormant-route tests; they were written to fail the moment the
+ * manifest flipped, and this is that rewrite. The point of the suite is
+ * unchanged: the route must not hand the page back to vanilla, validateSearch
+ * must survive whatever is in the URL, and the permission gate still applies.
  *
- * Honest note on strength: until P2 adds the page component, the route returns
- * LegacyRouteController down BOTH branches, so only the "does not fetch" case
- * can detect a defeated guard. The render assertions gain teeth once the page
- * exists — the same progression the automations route went through.
+ * Unlike library-page.test.tsx this file does NOT mock the manifest — the flip
+ * itself is what it is checking.
  */
 
 function renderRoute(entries = ['/library']) {
@@ -29,60 +28,81 @@ function renderRoute(entries = ['/library']) {
 
 let requested: string[] = [];
 
-describe('library route (dormant)', () => {
+describe('library route (live)', () => {
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
+    window.showLibraryDownloadsSection = vi.fn();
     requested = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        requested.push(input instanceof Request ? input.url : String(input));
-        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+        const url = input instanceof Request ? input.url : String(input);
+        requested.push(url);
+        const body = url.includes('/api/library/artists')
+          ? {
+              success: true,
+              artists: [{ id: 1, name: 'Aphex Twin' }],
+              pagination: {
+                page: 1,
+                limit: 75,
+                total_count: 1,
+                total_pages: 1,
+                has_prev: false,
+                has_next: false,
+              },
+            }
+          : {};
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }),
     );
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     delete window.SoulSyncWebShellBridge;
+    delete window.showLibraryDownloadsSection;
   });
 
-  it('is still owned by the shell', () => {
-    // Fails the moment the manifest flips — which is the point. Rewrite it
-    // then, deliberately, rather than letting it rot.
-    expect(getShellRouteByPageId('library')?.kind).toBe('legacy');
+  it('is owned by React', () => {
+    expect(getShellRouteByPageId('library')?.kind).toBe('react');
   });
 
-  it('hands /library to the vanilla page', async () => {
+  it('renders the React page instead of handing /library to vanilla', async () => {
+    renderRoute();
+    await screen.findByText('Aphex Twin');
+    // The vanilla page must not activate underneath — two live library pages
+    // would fight over #library-artists-grid and the downloads section.
+    expect(window.SoulSyncWebShellBridge!.activateLegacyPath).not.toHaveBeenCalledWith('/library');
+  });
+
+  it('loads the artists through the route loader', async () => {
     renderRoute();
     await waitFor(() =>
-      expect(window.SoulSyncWebShellBridge!.activateLegacyPath).toHaveBeenCalledWith('/library'),
+      expect(requested.filter((u) => u.includes('/api/library/artists'))).not.toEqual([]),
     );
-  });
-
-  it('does not touch the library API while dormant', async () => {
-    renderRoute();
-    await waitFor(() =>
-      expect(window.SoulSyncWebShellBridge!.activateLegacyPath).toHaveBeenCalled(),
-    );
-    // The shell fetches on its own regardless of route, so this checks the
-    // library endpoint specifically rather than forbidding all traffic.
-    expect(requested.filter((u) => u.includes('/api/library'))).toEqual([]);
   });
 
   it('accepts every filter in the URL without throwing the route down', async () => {
-    // validateSearch runs even while dormant. An all-digits q arrives as a
-    // NUMBER from TanStack's JSON parse, which a bare z.string() would reject.
+    // An all-digits q arrives as a NUMBER from TanStack's JSON parse, which a
+    // bare z.string() would reject and take the route down with.
     renderRoute(['/library?q=123&letter=A&page=3&watchlist=unwatched&source=spotify']);
     await waitFor(() =>
-      expect(window.SoulSyncWebShellBridge!.activateLegacyPath).toHaveBeenCalled(),
+      expect(requested.filter((u) => u.includes('/api/library/artists'))).not.toEqual([]),
     );
+    const url = new URL(requested.find((u) => u.includes('/api/library/artists'))!, 'http://x');
+    expect(url.searchParams.get('search')).toBe('123');
+    expect(url.searchParams.get('letter')).toBe('a');
   });
 
   it('falls back rather than crashing on a nonsense page number', async () => {
     renderRoute(['/library?page=notanumber']);
     await waitFor(() =>
-      expect(window.SoulSyncWebShellBridge!.activateLegacyPath).toHaveBeenCalled(),
+      expect(requested.filter((u) => u.includes('/api/library/artists'))).not.toEqual([]),
     );
+    const url = new URL(requested.find((u) => u.includes('/api/library/artists'))!, 'http://x');
+    expect(url.searchParams.get('page')).toBe('1');
   });
 
   it('still respects the page permission gate', async () => {

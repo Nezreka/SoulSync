@@ -41,9 +41,16 @@ export const librarySearchSchema = z.object({
     .preprocess((v) => searchString(v) ?? '', z.string())
     .default('')
     .catch(''),
-  /** Alphabet selector; 'all' means no letter filter. */
+  /**
+   * Alphabet selector; 'all' means no letter filter.
+   *
+   * Lowercased because the buttons carry lowercase values and the active-letter
+   * highlight compares against them — a hand-typed `?letter=A` would otherwise
+   * filter correctly (the backend compares with UPPER on both sides) while
+   * highlighting nothing.
+   */
   letter: z
-    .preprocess((v) => searchString(v) ?? 'all', z.string())
+    .preprocess((v) => (searchString(v) ?? 'all').toLowerCase(), z.string())
     .default('all')
     .catch('all'),
   /** 1-based. Anything unparseable or < 1 falls back to page 1. */

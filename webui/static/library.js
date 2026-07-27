@@ -160,6 +160,13 @@ function initializeLibraryPagination() {
 }
 
 async function loadLibraryArtists() {
+    // React owns /library. This is the ONLY thing that fills
+    // #library-artists-grid, so guarding it here makes the whole vanilla list
+    // — the filter handlers, the pagination buttons, displayLibraryArtists —
+    // unreachable rather than merely unused, and stops a stray call from
+    // repainting the hidden vanilla page behind the React one.
+    if (document.getElementById('webui-react-root')?.classList.contains('active')) return;
+
     try {
         // Show loading state
         showLibraryLoading(true);
@@ -615,7 +622,11 @@ function closeWatchAllUnwatchedModal() {
     if (!overlay) return;
     const needsRefresh = overlay.dataset.needsRefresh === 'true';
     overlay.remove();
-    if (needsRefresh) loadLibraryArtists();
+    if (!needsRefresh) return;
+    // The modal is vanilla but the list it just changed is React, and
+    // loadLibraryArtists() no-ops there — announce it instead.
+    loadLibraryArtists();
+    window.dispatchEvent(new CustomEvent('ss:library-changed'));
 }
 
 async function toggleLibraryCardWatchlist(btn, artist) {

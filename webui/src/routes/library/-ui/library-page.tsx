@@ -8,6 +8,7 @@ import type { LibraryArtist, LibraryArtistsResponse } from '../-library.types';
 
 import { libraryArtistsQueryOptions, setArtistWatchlisted } from '../-library.api';
 import { readArtistsResponse, watchlistArtistId } from '../-library.helpers';
+import { useLibraryChanged } from '../-library.live';
 import { Route } from '../route';
 import { LibraryArtistCard } from './library-artist-card';
 
@@ -45,6 +46,7 @@ export function LibraryPage() {
   useReactPageShell('library');
 
   const { profileId } = useProfile();
+  useLibraryChanged();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
 

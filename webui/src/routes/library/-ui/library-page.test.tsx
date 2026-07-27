@@ -9,22 +9,13 @@ import { createShellBridge } from '@/test/shell-bridge';
 import type { LibraryArtist } from '../-library.types';
 
 /**
- * Driven through the REAL router with /library reported as React-owned.
+ * Driven through the REAL router and the real manifest, which now hands
+ * /library to React.
  *
  * The page cannot render standalone (useProfile reads the root route context),
  * and going through the router also exercises validateSearch, the loader and
  * the URL-driven filter state rather than stubs of them.
  */
-vi.mock('@/platform/shell/route-manifest', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/platform/shell/route-manifest')>();
-  return {
-    ...actual,
-    getShellRouteByPageId: (pageId: string) =>
-      pageId === 'library'
-        ? { ...actual.getShellRouteByPageId('library'), kind: 'react' }
-        : actual.getShellRouteByPageId(pageId as never),
-  };
-});
 
 function artist(over: Partial<LibraryArtist> & { id: number }): LibraryArtist {
   return { name: `Artist ${over.id}`, ...over };
@@ -361,6 +352,40 @@ describe('LibraryPage watchlist from a card', () => {
       expect(window.showToast).toHaveBeenCalledWith('Error: already watching', 'error'),
     );
     expect(document.querySelector('.watch-icon-label')?.textContent).toBe('Watch');
+  });
+});
+
+describe('LibraryPage vanilla refresh seam', () => {
+  it('refetches when vanilla announces the list changed', async () => {
+    // "Watch All Unwatched" is a vanilla modal; it used to refresh by calling
+    // loadLibraryArtists(), which no-ops now that React owns the page.
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    const before = libraryCalls().length;
+
+    window.dispatchEvent(new CustomEvent('ss:library-changed'));
+
+    await waitFor(() => expect(libraryCalls().length).toBeGreaterThan(before));
+  });
+
+  it('stops listening once the page unmounts', async () => {
+    // Asserted on the registration itself: after unmount the query has no
+    // observers, so a leaked listener would invalidate silently and a
+    // fetch-count check would pass either way.
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const { unmount } = renderPage();
+    await screen.findByText('Aphex Twin');
+
+    const handler = add.mock.calls.find(([type]) => type === 'ss:library-changed')?.[1];
+    expect(handler).toBeDefined();
+
+    unmount();
+    expect(
+      remove.mock.calls.some(([type, fn]) => type === 'ss:library-changed' && fn === handler),
+    ).toBe(true);
+    add.mockRestore();
+    remove.mockRestore();
   });
 });
 
