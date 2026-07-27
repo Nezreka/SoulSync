@@ -539,7 +539,14 @@ function initializeWebSocket() {
     socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); });
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
-    socket.on('automation:progress', (data) => { qaSignal('auto'); updateAutomationProgressFromData(data); });
+    socket.on('automation:progress', (data) => {
+        qaSignal('auto');
+        updateAutomationProgressFromData(data);
+        // Mirror to the React automations page. Same seam as ss:watchlist-scan:
+        // the progress state is module-scoped in stats-automations.js and cannot
+        // be read from a module, so the vanilla side announces and React reacts.
+        window.dispatchEvent(new CustomEvent('ss:automation-progress', { detail: data }));
+    });
     socket.on('overlay:progress', (data) => { if (typeof updateOverlayTask === 'function') updateOverlayTask(data); });
     socket.on('collections:sync', (data) => { if (typeof updateCollectionSyncTask === 'function') updateCollectionSyncTask(data); });
     socket.on('collections:artwork', (data) => { if (typeof updateCollectionArtTask === 'function') updateCollectionArtTask(data); });

@@ -46,6 +46,8 @@ export interface GroupActions {
 }
 
 interface Props extends AutomationCardHandlers, GroupActions {
+  /** Live run state lookup, threaded down to each card. */
+  progressFor?: (id: number) => import('../-automations.progress').AutomationRunState | undefined;
   id: string;
   label: string;
   automations: Automation[];
@@ -63,6 +65,7 @@ export function AutomationsSection({
   onBulkToggle,
   onRename,
   onDeleteGroup,
+  progressFor,
   ...cardHandlers
 }: Props) {
   const [collapsed, setCollapsed] = useState(() => readCollapsed(id));
@@ -169,7 +172,12 @@ export function AutomationsSection({
 
       <div className="automations-section-body">
         {automations.map((a) => (
-          <AutomationCard key={a.id} automation={a} {...cardHandlers} />
+          <AutomationCard
+            key={a.id}
+            automation={a}
+            progress={progressFor?.(a.id)}
+            {...cardHandlers}
+          />
         ))}
       </div>
     </div>

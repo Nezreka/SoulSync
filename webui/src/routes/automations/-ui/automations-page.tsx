@@ -27,6 +27,7 @@ import {
   forMusicSide,
   readAutomationsList,
 } from '../-automations.helpers';
+import { useAutomationProgress } from '../-automations.progress';
 import { Route } from '../route';
 import { AutomationsSection, groupSectionId } from './automations-section';
 import { type DeleteGroupChoice, DeleteGroupDialog } from './delete-group-dialog';
@@ -42,6 +43,9 @@ export function AutomationsPage() {
   const queryClient = useQueryClient();
   const listQuery = useQuery(automationsListQueryOptions(profileId));
   const masterQuery = useQuery(automationsMasterQueryOptions());
+  // Live run state, merged from the socket mirror. Not query-cached: it is a
+  // stream of transient frames, not a resource with a canonical server copy.
+  const progress = useAutomationProgress();
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: AUTOMATIONS_QUERY_KEY });
   const fail = (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error');
@@ -178,6 +182,7 @@ export function AutomationsPage() {
     onDuplicate: (a: Automation) => duplicate.mutate(a),
     onDelete: (a: Automation) => void confirmDelete(a),
     onEdit: (a: Automation) => window.showAutomationBuilder?.(a.id),
+    progressFor: (id: number) => progress[id],
     onAssignGroup: (a: Automation, event: React.MouseEvent) => {
       const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
       setGroupMenu({

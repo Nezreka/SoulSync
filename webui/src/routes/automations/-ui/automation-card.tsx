@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { Automation } from '../-automations.types';
 
 import { automationMeta, formatAction, formatTrigger, timeUntil } from '../-automations.format';
 import { automationIcon, formatNotify } from '../-automations.icons';
+import {
+  type AutomationRunState,
+  isFinished,
+  isRunning,
+  PROGRESS_HIDE_MS,
+} from '../-automations.progress';
 
 export interface AutomationCardHandlers {
   onRun?: (a: Automation) => void;
@@ -19,6 +25,65 @@ export interface AutomationCardHandlers {
 
 interface Props extends AutomationCardHandlers {
   automation: Automation;
+  /** Live run state for this automation, if one is in flight or just ended. */
+  progress?: AutomationRunState;
+}
+
+/**
+ * The run panel: bar, phase, and the streaming log.
+ *
+ * A finished panel lingers for 30s then collapses, matching the vanilla hide
+ * timer — long enough to read the result, short enough not to accumulate.
+ */
+function ProgressPanel({ state }: { state: AutomationRunState }) {
+  const [hidden, setHidden] = useState(false);
+  const logRef = useRef<HTMLDivElement>(null);
+  const done = isFinished(state);
+
+  useEffect(() => {
+    if (!done) {
+      // A re-run inside the hide window must bring the panel back.
+      setHidden(false);
+      return;
+    }
+    const id = setTimeout(() => setHidden(true), PROGRESS_HIDE_MS);
+    return () => clearTimeout(id);
+  }, [done, state.status]);
+
+  const lines = state.log ?? [];
+  useEffect(() => {
+    // Follow the tail as lines arrive, as the vanilla renderer did.
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [lines.length]);
+
+  const classes = [
+    'automation-output',
+    hidden ? '' : 'visible',
+    done ? 'finished' : '',
+    state.status === 'error' ? 'error' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div className={classes}>
+      <div className="auto-progress-bar-wrap">
+        {/* A finished run reads 100% regardless of the last reported number. */}
+        <div
+          className="auto-progress-bar"
+          style={{ width: `${done ? 100 : (state.progress ?? 0)}%` }}
+        />
+      </div>
+      <div className="auto-progress-phase">{state.phase ?? ''}</div>
+      <div className="auto-progress-log" ref={logRef}>
+        {lines.map((line, i) => (
+          <div key={i} className={`auto-log-line ${line.type || 'info'}`}>
+            {line.text}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -43,9 +108,10 @@ function NextRun({ nextRun }: { nextRun: string }) {
 }
 
 /** One automation row. Markup mirrors renderAutomationCard so the CSS applies unchanged. */
-export function AutomationCard({ automation: a, blockLabel, ...on }: Props) {
+export function AutomationCard({ automation: a, blockLabel, progress, ...on }: Props) {
   const enabled = a.enabled === true || a.enabled === 1;
   const isSystem = a.is_system === true || a.is_system === 1;
+  const running = isRunning(progress);
   const meta = automationMeta(a);
   const thenItems = a.then_actions ?? [];
   const delay = (a.action_config as { delay?: number } | null)?.delay ?? 0;
@@ -82,12 +148,17 @@ export function AutomationCard({ automation: a, blockLabel, ...on }: Props) {
 
   return (
     <div
-      className={`automation-card${enabled ? '' : ' disabled'}${isSystem ? ' system' : ''}`}
+      className={`automation-card${enabled ? '' : ' disabled'}${isSystem ? ' system' : ''}${
+        running ? ' running' : ''
+      }`}
       data-id={a.id}
       data-trigger-type={a.trigger_type ?? ''}
       data-action-type={a.action_type ?? ''}
     >
-      <div className={`automation-status ${enabled ? 'enabled' : 'disabled'}`} />
+      {/* While running the dot shows the run, not the enabled state. */}
+      <div
+        className={`automation-status ${running ? 'running' : enabled ? 'enabled' : 'disabled'}`}
+      />
       <div className="automation-info">
         <div className="automation-name" title={a.name}>
           {a.name}
@@ -193,6 +264,8 @@ export function AutomationCard({ automation: a, blockLabel, ...on }: Props) {
           </>
         )}
       </div>
+
+      {progress ? <ProgressPanel state={progress} /> : null}
     </div>
   );
 }

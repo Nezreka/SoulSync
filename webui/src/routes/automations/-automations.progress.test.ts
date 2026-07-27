@@ -1,0 +1,95 @@
+import { act, renderHook } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+import {
+  AUTOMATION_PROGRESS_EVENT,
+  isFinished,
+  isRunning,
+  useAutomationProgress,
+} from './-automations.progress';
+
+function emit(detail: unknown) {
+  act(() => {
+    window.dispatchEvent(new CustomEvent(AUTOMATION_PROGRESS_EVENT, { detail }));
+  });
+}
+
+describe('useAutomationProgress', () => {
+  it('records a frame keyed by automation id', () => {
+    const { result } = renderHook(() => useAutomationProgress());
+    emit({ '7': { status: 'running', progress: 40, phase: 'Scanning' } });
+    expect(result.current[7]).toEqual({ status: 'running', progress: 40, phase: 'Scanning' });
+  });
+
+  it('MERGES frames instead of replacing the map', () => {
+    // The server reports only the automations it has news about. Replacing
+    // would make a still-running automation's panel vanish the moment an
+    // unrelated one reported.
+    const { result } = renderHook(() => useAutomationProgress());
+    emit({ '1': { status: 'running', progress: 10 } });
+    emit({ '2': { status: 'running', progress: 90 } });
+    expect(result.current[1]?.progress).toBe(10);
+    expect(result.current[2]?.progress).toBe(90);
+  });
+
+  it('lets a later frame supersede the same id', () => {
+    const { result } = renderHook(() => useAutomationProgress());
+    emit({ '1': { status: 'running', progress: 10 } });
+    emit({ '1': { status: 'finished', progress: 100 } });
+    expect(result.current[1]).toEqual({ status: 'finished', progress: 100 });
+  });
+
+  it('ignores junk without corrupting the map', () => {
+    const { result } = renderHook(() => useAutomationProgress());
+    emit({ '1': { status: 'running' } });
+    emit(null);
+    emit('nonsense');
+    emit({ notanumber: { status: 'running' } }); // would become NaN as a key
+    expect(Object.keys(result.current)).toEqual(['1']);
+  });
+
+  it('stops listening once unmounted', () => {
+    const { result, unmount } = renderHook(() => useAutomationProgress());
+    unmount();
+    emit({ '9': { status: 'running' } });
+    expect(result.current[9]).toBeUndefined();
+  });
+});
+
+describe('run state predicates', () => {
+  it('separates running from finished and errored', () => {
+    expect(isRunning({ status: 'running' })).toBe(true);
+    expect(isRunning({ status: 'finished' })).toBe(false);
+    expect(isRunning(undefined)).toBe(false);
+    expect(isFinished({ status: 'finished' })).toBe(true);
+    expect(isFinished({ status: 'error' })).toBe(true);
+    expect(isFinished({ status: 'running' })).toBe(false);
+  });
+});
+
+/**
+ * The seam itself. React only ever sees progress if core.js mirrors the socket
+ * frame onto the window, and it only owns its cards if the vanilla renderer
+ * skips them — both live in plain scripts no bundler or typechecker guards.
+ */
+describe('the vanilla side of the progress seam', () => {
+  const read = (file: string) => readFileSync(resolve(process.cwd(), 'static', file), 'utf8');
+
+  it('core.js mirrors automation:progress onto the window', () => {
+    const src = read('core.js');
+    expect(src).toContain("socket.on('automation:progress'");
+    expect(src).toContain(AUTOMATION_PROGRESS_EVENT);
+  });
+
+  it('still calls the vanilla renderer, for the legacy and video pages', () => {
+    expect(read('core.js')).toContain('updateAutomationProgressFromData(data)');
+  });
+
+  it('the vanilla renderer refuses to write into React-owned cards', () => {
+    // Without this guard the document-wide querySelector finds React's cards
+    // and injects panels React clobbers on its next render.
+    expect(read('stats-automations.js')).toContain("card.closest('#webui-react-root')");
+  });
+});

@@ -4372,7 +4372,13 @@ function updateAutomationProgressFromData(data) {
     for (const [aidStr, state] of Object.entries(data)) {
         const aid = parseInt(aidStr);
         const card = document.querySelector(`.automation-card[data-id="${aid}"]`);
-        if (!card) continue;
+        // Skip cards React owns. This query is document-wide, so once /automations
+        // is a React route it would otherwise inject .automation-output panels
+        // into React's DOM — which React then clobbers on its next render, and
+        // the two fight over the same node. React renders its own progress from
+        // the ss:automation-progress event instead. Vanilla music + video cards
+        // live outside the React root and are unaffected.
+        if (!card || card.closest('#webui-react-root')) continue;
 
         let panel = card.querySelector('.automation-output');
         if (!panel) {
