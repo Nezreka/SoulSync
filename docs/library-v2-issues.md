@@ -4035,3 +4035,300 @@ kommende Runden gelten:
    übrigen `entity_type='file'`-Findings geprüft (`orphan_file_detector`,
    `track_number_repair` ×2) — dort überall `entity_id=None`, also sauber.
    Dieselbe Systematik lohnt bei jedem neuen Fund dieser Klasse.
+
+## 28. Legacy-Artist-/Discovery-Ansicht nach Library V2 überführen (Auftrag vom 28. Juli 2026, Abend)
+
+Dieser Abschnitt ist ein **Auftrag für die nächste Sitzung**, kein
+Bearbeitungsstand. Er ist die letzte Vorbedingung vor PR und Abschaltung der
+alten Library: solange ein Nutzer über die Suche noch in der Legacy-Oberfläche
+landet, kann die alte Library nicht gelöscht werden.
+
+Findings-Präfix: `ldp-` (*Legacy Discovery Parity*).
+
+### 28.1 Auftrag im Wortlaut (sinngemäß protokolliert)
+
+Der Nutzer hat den Auftrag in eigenen Worten so formuliert (hier gestrafft,
+aber inhaltlich unverändert übernommen, weil die Formulierungen den
+Abnahmemaßstab bilden):
+
+- „Wenn man über die Suche einen Artist sucht und auf einen Artist klickt, der
+  noch nicht in der Library ist, wird man auf die **Legacy Library** verwiesen.
+  Das muss auf jeden Fall noch gelöst werden, wenn wir die alte Library
+  löschen." Die Ansicht soll erscheinen, aber eben **nicht** in der alten
+  Library. Idee: „dass wir das auch auf die Library V2 umstellen. Aber sagen
+  wir, man hat einen Artist, von dem hat man noch nichts, dann muss man das
+  halt ebenfalls so fetchen."
+- Ziel der Umstellung insgesamt: „für dass die Umstellung für die anderen
+  einfach ist, dass sie im Prinzip nicht merken, dass es die neue Library ist"
+  — und dann die alte Library **komplett löschen**.
+- Zur Legacy-Artist-Ansicht: „Erstens laden die Bilder viel, viel schneller.
+  Keine Ahnung, wie das geht." Bei einem Artist, der noch nicht in der Library
+  ist, steht kurz „Loading Artist Discography" — „das ist ja okay, weil das
+  müssen wir ja dann auch machen".
+- „Den oberen Teil da mit den Informationen und wie viele Plays, wie viele
+  Listeners etc. finde ich sehr gut. Ich würde eigentlich am liebsten die
+  gesamte Darstellungsweise kopieren. Also dass du den **Code kopierst**, nicht
+  einfach nachbaust, sondern wirklich den Code kopierst und bei uns so
+  implementierst." — mit Anpassung, damit es in Library V2 hineinpasst.
+- Gleichzeitig: „Die Ansicht, die wir jetzt von Library V2 haben, gefällt mir
+  eigentlich schon sehr gut." `My Library` bleibt wie es ist. `All Releases`
+  ist inhaltlich gut, aber: „Wenn ich auf All Releases gehe bei Library V2,
+  dann dauert es viel länger, bis die Albumbilder nachgeladen werden."
+- Deshalb ein **Umschalter nur bei All Releases**: „wenn man All Releases
+  anklickt, sollten nebendran noch mal zwei Optionen kommen. Table View, also
+  so wie wir jetzt haben, oder so wie Legacy" — also die Kachel-/Card-Optik der
+  alten Library.
+- Artist-Kopfbereich: „Es kann eigentlich nicht schaden, dass wir neben dem
+  Artist ebenfalls diese Informationen darstellen wie Top Tracks, Listeners,
+  Plays. Ich weiß, ich habe mal gesagt, dass ich das nicht haben möchte, aber
+  das schadet ja nicht." **Harte Auflage:** „Ich will einfach, dass es
+  **vertikal nicht noch mehr Platz einnimmt**, als es jetzt einnimmt. Das
+  heißt, es muss kompakt sein" — oder über einen Umschalter am Artist-Kopf, mit
+  dem man die Darstellung der Artist-Informationen wechseln kann.
+- Herkunftsabhängige Vorbelegung: „Wenn man von Search kommt, sollte dann zum
+  Beispiel immer diese Legacy-Darstellungsweise angezeigt werden und muss halt
+  umgeschaltet werden."
+- Top Tracks: „bei Top Tracks sollte einfach stehen **Bookmark**, nicht
+  Download. Momentan steht bei Legacy ja *Add to Wishlist*."
+- Discovery-Filter: „Sortierfunktionen bei der Discovery-Ansicht — Album, EPs,
+  Singles, Live, Compilations, Features etc. finde ich sehr gut. Das sollten
+  wir auch implementieren. Eigentlich sollte die All-Releases-Ansicht wie zur
+  Discovery-Ansicht umgeschaltet werden können, und wo man ebenfalls umschalten
+  kann zwischen Table View und Legacy View, auch mit diesen wunderschönen
+  Sortierknöpfen."
+- Ausdrücklich **nicht** übernehmen: „so wie die Metadaten-Sources dargestellt
+  werden bei der Legacy, finde ich nicht so okay. Ist auch nützlich, aber nicht
+  so meins."
+- Untersuchungsauftrag: „Untersucht, wieso bei der Legacy — selbst bei Alben,
+  die noch nicht in der Mediathek sind — die Albumcovers und Single-Covers viel,
+  viel schneller laden. Untersucht das, und dass wir das auch machen."
+  Arbeitsweise generell: „Schaue immer, wie es bei der alten gemacht ist, und
+  dann implementiere es bei uns, je nachdem noch ein bisschen anpassen."
+- Abschlussbedingung: „Erst wenn das implementiert ist, können wir die PR
+  machen. Weil dann können wir die alte Library wirklich komplett löschen, weil
+  dann haben wir alles implementiert, was die alte Library auch konnte."
+
+### 28.2 Ist-Zustand im Code (verifiziert, 28. Juli 2026)
+
+**Routing Suche → Artist.** `webui/static/search.js` unterscheidet zwei Fälle:
+
+| Trefferart | Zeile | Ziel |
+| --- | --- | --- |
+| `db_artists` („In Your Library") | search.js:482-484 | `/library-v2?artist=<library_v2_id>` — korrekt, das war der Fix aus §10/§11 |
+| `spotify_artists` (Provider-Treffer, nicht in der Library) | search.js:500 | `buildArtistDetailPath(id, source, name)` → `/artist-detail/<source>/<id>` |
+
+Die Route `/artist-detail/$source/$id`
+(`webui/src/routes/artist-detail/$source/$id.tsx:35-53`) ist ein reiner
+Legacy-Handoff: sie ruft `bridge.navigateToArtistDetail(...)`, das in
+`webui/static/library.js:812` die alte Artist-Detail-Seite aufbaut. Genau das
+ist das vom Nutzer beobachtete Symptom — es ist kein Fallback-Unfall, sondern
+der einzige existierende Pfad für Provider-Artists.
+
+**Library V2 kennt keinen Provider-Artist.** Sämtliche Routen in
+`api/library_v2.py` sind auf `<int:artist_id>` typisiert, d. h. auf eine
+vorhandene `lib2_artists`-Zeile. Es gibt heute keine Möglichkeit, in V2 einen
+Artist ohne Katalogzeile zu betrachten. Das ist die eigentliche strukturelle
+Lücke hinter ldp-01/ldp-02 — nicht das Frontend.
+
+**Legacy-Bausteine, die kopiert werden sollen (Fundstellen):**
+
+| Baustein | Fundstelle |
+| --- | --- |
+| Hero-Markup (Bild, Badges, Genres, Bio, Listeners/Plays, Completion-Bars, Top-Tracks-Sidebar) | `webui/index.html:4565-4655` |
+| Hero-Befüllung inkl. Last.fm-Listeners/Playcount | `library.js:1389` (`updateArtistHeroSection`), Stats bei 1475-1495 |
+| Top Tracks (2 Pässe: Provider-Popularität, sonst Last.fm) | `library.js:1625-1745`; Endpunkte `/api/artist/<id>/top-tracks`, `/api/artist/0/lastfm-top-tracks?name=` |
+| Discography-Filterleiste (Show / Include / Status / Sources) | Markup `webui/index.html:4676ff`; Logik `library.js:2632` (`initializeDiscographyFilters`), `2662` (`reset…`), `2687` (`apply…`) |
+| Inhaltsklassifikation Live/Compilation/Featured | `library.js:_classifyReleaseContent` (ca. 2920-2940) — **reine Funktion, 1:1 portierbar** |
+| Release-Karte (Kachel) | `library.js:2141` (`createReleaseCard`), Sektionsaufbau `1848` (`populateDiscographySections`) |
+| Lazy-Loading der Kachelbilder | `data-bg-src` + `observeLazyBackgrounds` in `webui/static/core.js:225-239` (IntersectionObserver, `rootMargin: 200px`) |
+| CSS | `webui/static/style.css`: `.artist-hero-section` ab 29418, `.discography-filters` ab 29074, `.release-card` ab 29186, `.album-card-image` ab 26953, `.discog-card` ab 50582 |
+| Provider-Discography-Endpunkt (funktioniert bereits für Nicht-Library-Artists) | `GET /api/artist-detail/<id>?source=<src>&name=<name>` — siehe `library.js:1000-1012` |
+
+**Library-V2-Gegenstücke:**
+
+| Baustein | Fundstelle |
+| --- | --- |
+| Artist-Kopf | `library-v2-page.tsx` in `ArtistDetailView` (ab 4923), Header endet bei ~5196 |
+| `My Library` / `All Releases`-Umschalter | `library-v2-page.tsx:5198-5222` |
+| Release-Darstellung | `AlbumGroup` (nur Tabellenform), Aufrufe ab 5225 |
+| Artwork-Komponente | `library-v2-page.tsx:400-470` (`Artwork`, `watchPendingArtwork`) |
+
+### 28.3 Untersuchungsergebnis: warum Legacy-Cover schneller laden
+
+Das ist der explizit beauftragte Untersuchungspunkt. Die Ursache ist eindeutig
+und liegt **nicht** an Lazy-Loading, Bildgrößen oder Renderkosten, sondern an
+zwei völlig verschiedenen Auslieferungswegen.
+
+**Legacy:** `release.image_url` ist die **Provider-CDN-URL** genau so, wie sie
+aus der Discography-Antwort kommt (Spotify-/Deezer-CDN). `createReleaseCard`
+(`library.js:2167-2174`) hängt sie als `data-bg-src` an die Kachel, der
+IntersectionObserver setzt sie beim Sichtbarwerden. Der Browser lädt also `N`
+Bilder **direkt vom CDN**, hochparallel über HTTP/2, häufig aus einem bereits
+warmen CDN-/Browser-Cache, und der SoulSync-Server ist an keinem einzigen
+dieser Requests beteiligt.
+
+**Library V2:** `_apply_artwork_urls` (`api/library_v2.py:281-284`)
+**überschreibt jede** `image_url` mit `_artwork_url()`
+(`api/library_v2.py:265-278`), also mit
+`/api/library/v2/artwork/<kind>/<id>?v=<version>`. Das gilt in
+`lib2_get_artist` (`api/library_v2.py:1394-1396`) für den Artist **und für
+jedes Album, jede EP, jede Single** — einschließlich der reinen
+Discography-Einträge, die in `All Releases` sichtbar werden.
+
+Was bei kaltem Artwork-Cache pro Cover passiert
+(`api/library_v2.py:2067-2135`):
+
+1. Fast-Path prüft `thumb_file` / `artwork_file` auf der Platte → nicht da.
+2. Der Endpunkt antwortet mit **404 + `X-Artwork-Pending: 1`** und stellt einen
+   Hintergrund-Build in die Queue (`schedule_artwork_build`).
+3. Der Client (`library-v2-page.tsx:437-451`) rendert den Platzhalter und
+   abonniert über `watchPendingArtwork`, bis der Server „ready" meldet.
+4. Der Build selbst ist teuer: Provider-Walk, HTTP-Download, **zwei
+   JPEG-Encodes** (Vollbild + Thumb).
+5. Diese Builds laufen durch einen begrenzten Pool —
+   `_precache_max_workers` in `core/library2/artwork.py:899-915`, **Default 6**.
+
+Damit ergibt sich die beobachtete Differenz direkt aus der Architektur: eine
+`All Releases`-Seite mit ~100 Releases erzeugt in Legacy ~100 parallele
+CDN-GETs, in V2 dagegen ~100 serverseitige Builds durch 6 Worker, also
+grob 17 aufeinanderfolgende Wellen aus Download + doppeltem Encode. Das ist
+kein Tuning-Problem; auch ein größerer Pool verschiebt es nur.
+
+**Der entscheidende Hebel:** Die Provider-URL ist **bereits im Katalog
+vorhanden** — `lib2_albums.image_url` bzw. `lib2_artists.image_url` werden in
+`core/library2/queries.py` (u. a. 445/501, 260/290, 1208) sauber selektiert und
+über die Override-Auflösung gereicht. Sie wird erst im API-Layer verworfen. Es
+muss also nichts neu beschafft werden, es muss nur aufhören, weggeworfen zu
+werden.
+
+**Verschärfend:** Der `?v=`-Cache-Buster aus `_artwork_url` sorgt dafür, dass
+ein kaltes Cover nicht einmal aus dem HTTP-Cache bedient werden kann, während
+die CDN-URL in Legacy praktisch immer cachebar ist.
+
+**Fix-Vertrag ldp-07 (empfohlene Variante A):** Die Serialisierung liefert
+zusätzlich zum lokalen `image_url` ein `remote_image_url` mit der
+Provider-URL aus dem Katalog. Die `Artwork`-Komponente zeigt sofort
+`remote_image_url` an (schneller First Paint, exakt wie Legacy) und wechselt
+auf das lokale Endpoint-Bild, sobald dieses als „ready" gemeldet wird bzw. beim
+nächsten Render bereits gecacht ist. Damit bleibt die lokale Kopie die
+langfristige Wahrheit (NAS/Offline/eigene Coverauswahl bleiben unberührt), aber
+kein Nutzer wartet mehr auf einen Kaltstart-Build.
+
+Zwei Zusatzentscheidungen, die dabei zu treffen sind:
+
+- **Verworfene Variante B** — nur den Precache aggressiver fahren: hilft
+  genau im beobachteten Fall (erster Besuch einer Discography) nicht.
+- **Offene Produktentscheidung:** Sollen reine Discography-Einträge
+  („All Releases", nicht besessen, nicht monitored) überhaupt lokal
+  gecacht werden? Dagegen spricht, dass jedes Durchblättern den Artwork-Cache
+  mit Releases füllt, die der Nutzer nie haben will. Vorschlag: lokaler Cache
+  nur für besessene/monitored Entitäten, für den Rest ausschließlich die
+  Remote-URL. **Vor Umsetzung mit dem Nutzer klären.**
+
+### 28.4 Zielbild und Einzelfindings
+
+#### <a name="ldp-01"></a> ldp-01 — Suchtreffer für nicht vorhandene Artists landet in der Legacy-Library
+
+**Symptom:** Klick auf einen Provider-Artist in der Suche öffnet die alte
+Artist-Detail-Seite (`search.js:500` → `/artist-detail/<source>/<id>` →
+Legacy-Shell).
+
+**Fix-Vertrag:** Auch Provider-Treffer routen nach Library V2. Die Route muss
+Provider-Identität transportieren können (Quelle + Provider-ID + Name), nicht
+nur eine numerische Katalog-ID. `/artist-detail/$source/$id` darf nach der
+Umstellung entweder auf V2 weiterleiten oder entfallen.
+
+#### <a name="ldp-02"></a> ldp-02 — Library V2 kann keinen Artist ohne Katalogzeile darstellen
+
+**Symptom/Ursache:** Alle V2-Endpunkte sind auf `<int:artist_id>` typisiert;
+für einen Artist ohne `lib2_artists`-Zeile existiert kein Datenpfad.
+
+**Fix-Vertrag:** Ein „Discovery-Modus" der V2-Artist-Ansicht, der einen Artist
+allein aus Provider-Daten rendert (Ladezustand „Loading Artist Discography" ist
+ausdrücklich in Ordnung). Der bestehende, bereits quellenfähige Endpunkt
+`/api/artist-detail/<id>?source=&name=` ist der naheliegende Lieferant —
+wiederverwenden statt neu bauen. Zu klären: ob dieser Modus lesend bleibt und
+erst bei Monitor/Bookmark eine Katalogzeile materialisiert (bevorzugt, weil es
+die Katalog-Hygiene aus §62/§63 nicht gefährdet), oder ob beim Öffnen sofort
+angelegt wird. **Mit dem Nutzer klären.**
+
+#### <a name="ldp-03"></a> ldp-03 — `All Releases` braucht einen Ansichtsumschalter Table ↔ Legacy-Karten
+
+**Fix-Vertrag:** Direkt neben dem bestehenden `My Library` / `All Releases`
+-Umschalter (`library-v2-page.tsx:5198-5222`) erscheint **nur bei aktivem
+`All Releases`** eine zweite Umschaltgruppe: `Table View` (heutige
+`AlbumGroup`-Tabelle, Default) und `Legacy View` (Kachelgitter). Das
+Kachelgitter wird aus `createReleaseCard` (`library.js:2141`) samt
+`.release-card`/`.album-card-image`-CSS übernommen, nicht freihändig
+nachgebaut. `My Library` bleibt unverändert.
+
+#### <a name="ldp-04"></a> ldp-04 — Discography-Filterleiste fehlt in V2
+
+**Fix-Vertrag:** Portierung der Legacy-Filterleiste (`Show`: Albums/EPs/
+Singles; `Include`: Live/Compilations/Featured; `Status`: All/Owned/Missing) in
+die `All Releases`-Ansicht, wirksam in **beiden** Ansichtsmodi. Die
+Klassifikation kommt aus `_classifyReleaseContent`, das als reine Funktion 1:1
+übernommen wird — damit driften V2 und der Download-Discography-Dialog nicht
+auseinander (das war der Sinn von #877).
+
+#### <a name="ldp-05"></a> ldp-05 — Artist-Kopf ohne Listeners/Plays/Top Tracks
+
+**Fix-Vertrag:** Der V2-Artist-Kopf erhält Listeners, Plays und Top Tracks aus
+den bestehenden Endpunkten. **Harte Auflage: die Kopfzeile darf vertikal nicht
+höher werden als heute.** Zulässige Lösungen: horizontale Verdichtung in die
+vorhandene Kopfzeile und/oder ein Umschalter der Kopfdarstellung
+(kompakt ↔ Legacy-reich). Herkunftsabhängige Vorbelegung: aus der Suche
+kommend wird die Legacy-reiche Darstellung vorbelegt, umschaltbar bleibt sie
+trotzdem. Die Auswahl wird wie die übrigen Ansichtseinstellungen persistiert.
+
+#### <a name="ldp-06"></a> ldp-06 — Top-Tracks-Aktion heißt falsch
+
+**Fix-Vertrag:** Die Aktion an einem Top Track heißt **Bookmark** und benutzt
+die V2-Monitoring-Semantik (`MonitorToggle`/Wanted). Weder `Download` noch das
+Legacy-`Add to Wishlist` (`library.js:2904`) wird übernommen.
+
+#### <a name="ldp-07"></a> ldp-07 — Artwork-Geschwindigkeit
+
+Siehe §28.3. Abnahme: Beim ersten Öffnen von `All Releases` eines Artists mit
+kaltem Artwork-Cache sind die Cover **spürbar so schnell** sichtbar wie in der
+Legacy-Ansicht, nicht erst nach mehreren Hintergrund-Build-Wellen.
+
+#### <a name="ldp-08"></a> ldp-08 — Metadaten-Quellen-Darstellung NICHT übernehmen
+
+**Vertrag:** Die Legacy-Darstellung der Metadaten-Quellen wird ausdrücklich
+nicht kopiert. Die bestehenden V2-`ArtistMatchChips` bleiben.
+
+#### <a name="ldp-09"></a> ldp-09 — Abschlussbedingung
+
+**Vertrag:** ldp-01 bis ldp-07 sind Vorbedingung dafür, den PR zu stellen und
+die alte Library zu entfernen. Erst wenn ein Nutzer über die Suche einen
+beliebigen Artist — in der Library oder nicht — öffnen kann, ohne je die
+Legacy-Oberfläche zu sehen, ist die Funktionsparität hergestellt.
+
+### 28.5 Arbeitsweise: „kopieren statt nachbauen"
+
+Der Nutzer hat explizit verlangt, den Legacy-Code zu **kopieren**, nicht nach
+Augenmaß neu zu bauen. Da Legacy Vanilla-JS mit globalem DOM ist und V2
+React/TypeScript, heißt „kopieren" konkret:
+
+- **Wörtlich übernehmen:** CSS-Regeln und Klassennamen aus `style.css`,
+  Markup-Struktur aus `index.html:4565-4655` und `4676ff`, die reine Funktion
+  `_classifyReleaseContent`, die Filterlogik aus `applyDiscographyFilters`, das
+  Lazy-Loading-Muster aus `core.js:225-239`, die Top-Tracks-Endpunktnutzung
+  samt Zwei-Pass-Fallback aus `library.js:1625-1745`.
+- **Anzupassen:** DOM-Mutation → React-State; `getElementId`-Zugriffe →
+  Props/Queries; Legacy-Aktionsnamen → V2-Semantik (ldp-06).
+- **Nicht zu übernehmen:** die Metadaten-Quellen-Darstellung (ldp-08) und alles,
+  was die Kopfzeile vertikal wachsen lässt (ldp-05).
+
+### 28.6 Vor Umsetzungsbeginn zu klären
+
+Diese Punkte ändern den Zuschnitt spürbar und werden zu Beginn der nächsten
+Sitzung gefragt, nicht stillschweigend entschieden:
+
+1. **ldp-02:** Discovery-Modus rein lesend (Katalogzeile erst bei
+   Bookmark/Monitor) oder Materialisierung schon beim Öffnen?
+2. **ldp-07:** Sollen Cover reiner Discography-Einträge überhaupt lokal
+   gecacht werden, oder nur für besessene/monitored Entitäten?
+3. **ldp-05:** Umschalter der Kopfdarstellung oder eine einzige verdichtete
+   Kopfzeile für beide Fälle?

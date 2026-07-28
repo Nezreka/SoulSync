@@ -2133,3 +2133,46 @@ falsche Werte in *jede* Datei und benannte sie bei `dry_run: False` auch um.
 Neu ist die Regel, dass eine nicht eindeutig bestimmbare Edition **kein**
 Finding erzeugt — eine plausibel aussehende falsche Nummer ist schlimmer als
 gar keine Meldung.
+
+## 42. Legacy-Artist-/Discovery-Parität (ldp-01…ldp-09) — OFFEN, beauftragt am 28. Juli 2026
+
+Vollständiger Auftrag, Ist-Analyse und Fix-Verträge in
+[issues.md §28](library-v2-issues.md#28-legacy-artist-discovery-ansicht-nach-library-v2-überführen-auftrag-vom-28-juli-2026-abend).
+
+**Status: nichts implementiert.** Dieser Abschnitt ist die letzte bekannte
+Vorbedingung vor PR-Entwurf und Löschung der alten Library. Solange ldp-01
+offen ist, landet ein Nutzer beim Klick auf einen Suchtreffer, der noch nicht
+in der Library ist, in der Legacy-Oberfläche — die alte Library kann deshalb
+nicht entfernt werden.
+
+Beauftragter Umfang in Kürze:
+
+- **ldp-01/ldp-02** — Suche → Provider-Artist muss nach Library V2 routen; V2
+  braucht dafür einen Discovery-Modus für Artists ohne Katalogzeile (heute sind
+  alle V2-Routen auf `<int:artist_id>` typisiert).
+- **ldp-03/ldp-04** — `All Releases` wird zur Discovery-Ansicht mit Umschalter
+  `Table View` ↔ `Legacy View` plus portierter Filterleiste
+  (Albums/EPs/Singles, Live/Compilations/Featured, Status). `My Library` bleibt
+  unverändert.
+- **ldp-05/ldp-06** — Artist-Kopf erhält Listeners/Plays/Top Tracks, **ohne
+  vertikal zu wachsen**; Top-Track-Aktion heißt `Bookmark` und nutzt die
+  V2-Monitoring-Semantik.
+- **ldp-07** — Artwork-Geschwindigkeitsparität. Ursache ist analysiert:
+  `_apply_artwork_urls` (`api/library_v2.py:281`) ersetzt jede Provider-CDN-URL
+  durch `/api/library/v2/artwork/<kind>/<id>`; bei kaltem Cache antwortet der
+  Endpunkt mit `404 + X-Artwork-Pending` und baut im Hintergrund
+  (Provider-Walk + Download + zwei JPEG-Encodes) durch einen Pool mit Default 6
+  Workern. Legacy reicht dagegen die CDN-URL direkt an den Browser. Die
+  Provider-URL liegt bereits im Katalog (`lib2_albums.image_url`) und wird
+  ausschließlich im API-Layer verworfen.
+- **ldp-08** — Legacy-Darstellung der Metadaten-Quellen wird ausdrücklich
+  **nicht** übernommen.
+
+Arbeitsweise laut Auftrag: Legacy-Code **kopieren/wiederverwenden**, nicht nach
+Augenmaß nachbauen (issues.md §28.5 listet die wörtlich zu übernehmenden
+Bausteine mit Fundstellen).
+
+Drei Punkte sind vor Umsetzungsbeginn mit dem Nutzer zu klären
+(issues.md §28.6): Lesemodus vs. Sofort-Materialisierung im Discovery-Modus,
+lokaler Artwork-Cache für reine Discography-Einträge ja/nein, und Umschalter
+vs. einheitlich verdichteter Artist-Kopf.
