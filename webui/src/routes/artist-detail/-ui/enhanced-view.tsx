@@ -32,6 +32,12 @@ interface Props {
  * an album typed "live" is grouped and then never shown.
  */
 export function EnhancedView({ data, status, isAdmin }: Props) {
+  /**
+   * Selection is page-level and shared across albums, as the vanilla's single
+   * artistDetailPageState.selectedTracks was: the bulk bar acts on everything
+   * ticked, and expanding a second album is a normal way to build that set.
+   */
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   if (status.error) {
     return (
       <div className="enhanced-loading" style={{ color: '#ff6b6b' }}>
@@ -60,6 +66,8 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
             albums={albums}
             artist={data.artist}
             isAdmin={isAdmin}
+            selected={selected}
+            onSelectedChange={setSelected}
           />
         );
       })}
@@ -96,12 +104,16 @@ function EnhancedSection({
   albums,
   artist,
   isAdmin,
+  selected,
+  onSelectedChange,
 }: {
   type: string;
   label: string;
   albums: EnhancedAlbum[];
   artist: Record<string, unknown> | undefined;
   isAdmin: boolean;
+  selected: Set<string>;
+  onSelectedChange: (next: Set<string>) => void;
 }) {
   return (
     <div className="enhanced-section">
@@ -118,6 +130,8 @@ function EnhancedSection({
             type={type}
             artist={artist}
             isAdmin={isAdmin}
+            selected={selected}
+            onSelectedChange={onSelectedChange}
             key={String(album.id)}
           />
         ))}
@@ -143,17 +157,18 @@ function EnhancedAlbumWrapper({
   type,
   artist,
   isAdmin,
+  selected,
+  onSelectedChange,
 }: {
   album: EnhancedAlbum;
   type: string;
   artist: Record<string, unknown> | undefined;
   isAdmin: boolean;
+  selected: Set<string>;
+  onSelectedChange: (next: Set<string>) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
-  // Selection is per album, and clears when the panel closes — the vanilla's
-  // shared Set leaked ticks between albums.
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   /**
    * A saved edit is applied here rather than refetching the whole artist. The
@@ -177,12 +192,7 @@ function EnhancedAlbumWrapper({
       <div
         className={`enhanced-album-row${expanded ? ' expanded' : ''}`}
         id={`enhanced-album-row-${album.id}`}
-        onClick={() =>
-          setExpanded((open) => {
-            if (open) setSelected(new Set());
-            return !open;
-          })
-        }
+        onClick={() => setExpanded((open) => !open)}
       >
         <span className="enhanced-album-expand-icon">▶</span>
 
@@ -243,7 +253,7 @@ function EnhancedAlbumWrapper({
                 isAdmin={isAdmin}
                 artist={artist}
                 selected={selected}
-                onSelectedChange={setSelected}
+                onSelectedChange={onSelectedChange}
                 onTrackEdited={(trackId, field, value) =>
                   setAlbum((current) => ({
                     ...current,

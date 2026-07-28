@@ -4,9 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyMusicBrainzDeclutter, defaultFilterState } from '../-artist-detail.filters';
 import { DiscographyFilters } from './discography-filters';
 
-function renderBar(filters = defaultFilterState(), isSourceArtist = false, gapFill = false) {
+function renderBar(
+  filters = defaultFilterState(),
+  isSourceArtist = false,
+  gapFill = false,
+  { showViewToggle = false, enhanced = false } = {},
+) {
   const onChange = vi.fn();
   const onToggleGapFill = vi.fn();
+  const onToggleEnhanced = vi.fn();
   render(
     <DiscographyFilters
       filters={filters}
@@ -14,9 +20,12 @@ function renderBar(filters = defaultFilterState(), isSourceArtist = false, gapFi
       isSourceArtist={isSourceArtist}
       gapFillEnabled={gapFill}
       onToggleGapFill={onToggleGapFill}
+      showViewToggle={showViewToggle}
+      enhanced={enhanced}
+      onToggleEnhanced={onToggleEnhanced}
     />,
   );
-  return { onChange, onToggleGapFill };
+  return { onChange, onToggleGapFill, onToggleEnhanced };
 }
 
 const btn = (filter: string, value: string) =>
@@ -178,5 +187,53 @@ describe('the gap-fill chip', () => {
     expect(onToggleGapFill).toHaveBeenCalled();
     // It is a view option, not a discography filter — filter state is untouched.
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('the View toggle', () => {
+  it('is absent unless the page says the artist can be enhanced', () => {
+    renderBar();
+    expect(document.querySelector('.enhanced-view-toggle-btn')).toBeNull();
+  });
+
+  it('marks Standard active by default', () => {
+    renderBar(defaultFilterState(), false, false, { showViewToggle: true });
+    const [standard, enhanced] = [...document.querySelectorAll('.enhanced-view-toggle-btn')];
+    expect(standard.className).toContain('active');
+    expect(enhanced.className).not.toContain('active');
+  });
+
+  it('marks Enhanced active when it is on', () => {
+    renderBar(defaultFilterState(), false, false, { showViewToggle: true, enhanced: true });
+    const [standard, enhanced] = [...document.querySelectorAll('.enhanced-view-toggle-btn')];
+    expect(standard.className).not.toContain('active');
+    expect(enhanced.className).toContain('active');
+  });
+
+  it('reports which view was picked', () => {
+    const { onToggleEnhanced } = renderBar(defaultFilterState(), false, false, {
+      showViewToggle: true,
+    });
+    fireEvent.click(document.querySelector('[data-view="enhanced"]') as HTMLElement);
+    expect(onToggleEnhanced).toHaveBeenCalledWith(true);
+
+    fireEvent.click(document.querySelector('[data-view="standard"]') as HTMLElement);
+    expect(onToggleEnhanced).toHaveBeenCalledWith(false);
+  });
+
+  it('HIDES the discography filters while Enhanced is on, keeping View', () => {
+    // Enhanced replaces the discography, so filters that only describe it are
+    // meaningless there.
+    renderBar(defaultFilterState(), false, false, { showViewToggle: true, enhanced: true });
+    const groups = [...document.querySelectorAll('.filter-group')] as HTMLElement[];
+    const visible = groups.filter((g) => g.style.display !== 'none');
+    expect(visible).toHaveLength(1);
+    expect(visible[0].querySelector('.filter-label')?.textContent).toBe('View');
+  });
+
+  it('shows them all again in Standard', () => {
+    renderBar(defaultFilterState(), false, false, { showViewToggle: true });
+    const groups = [...document.querySelectorAll('.filter-group')] as HTMLElement[];
+    expect(groups.every((g) => g.style.display !== 'none')).toBe(true);
   });
 });

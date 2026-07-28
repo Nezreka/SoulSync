@@ -9,6 +9,10 @@ interface Props {
   isSourceArtist: boolean;
   gapFillEnabled: boolean;
   onToggleGapFill: () => void;
+  /** The Enhanced toggle is admin-and-library-only; absent for everyone else. */
+  showViewToggle: boolean;
+  enhanced: boolean;
+  onToggleEnhanced: (enabled: boolean) => void;
 }
 
 const CATEGORIES: { value: DiscographyBucket; label: string }[] = [
@@ -37,6 +41,9 @@ export function DiscographyFilters({
   isSourceArtist,
   gapFillEnabled,
   onToggleGapFill,
+  showViewToggle,
+  enhanced,
+  onToggleEnhanced,
 }: Props) {
   const toggleCategory = (value: DiscographyBucket) =>
     onChange({
@@ -54,7 +61,9 @@ export function DiscographyFilters({
 
   return (
     <div className="discography-filters" id="discography-filters">
-      <div className="filter-group">
+      {/* Enhanced replaces the discography entirely, so the filters that only
+          describe the discography are hidden rather than left inert. */}
+      <div className="filter-group" style={enhanced ? { display: 'none' } : undefined}>
         <span className="filter-label">Show</span>
         {CATEGORIES.map(({ value, label }) => (
           <button
@@ -70,9 +79,9 @@ export function DiscographyFilters({
         ))}
       </div>
 
-      <div className="filter-divider" />
+      <div className="filter-divider" style={enhanced ? { display: 'none' } : undefined} />
 
-      <div className="filter-group">
+      <div className="filter-group" style={enhanced ? { display: 'none' } : undefined}>
         <span className="filter-label">Include</span>
         <button
           type="button"
@@ -110,8 +119,8 @@ export function DiscographyFilters({
           release is "missing" and the filter is meaningless. */}
       {isSourceArtist ? null : (
         <>
-          <div className="filter-divider" />
-          <div className="filter-group">
+          <div className="filter-divider" style={enhanced ? { display: 'none' } : undefined} />
+          <div className="filter-group" style={enhanced ? { display: 'none' } : undefined}>
             <span className="filter-label">Status</span>
             {OWNERSHIP.map(({ value, label }) => (
               <button
@@ -132,8 +141,8 @@ export function DiscographyFilters({
       {/* Rendered for source artists too: unlike Status, this group keeps a
           button so the vanilla's `:has(.filter-label:only-child)` rule never
           hides it, and other sources are exactly what a source artist has. */}
-      <div className="filter-divider" />
-      <div className="filter-group">
+      <div className="filter-divider" style={enhanced ? { display: 'none' } : undefined} />
+      <div className="filter-group" style={enhanced ? { display: 'none' } : undefined}>
         <span className="filter-label">Sources</span>
         <button
           type="button"
@@ -145,6 +154,31 @@ export function DiscographyFilters({
           + Other sources
         </button>
       </div>
+
+      {showViewToggle ? (
+        <>
+          <div className="filter-divider" />
+          <div className="filter-group">
+            <span className="filter-label">View</span>
+            <button
+              type="button"
+              className={`enhanced-view-toggle-btn${enhanced ? '' : ' active'}`}
+              data-view="standard"
+              onClick={() => onToggleEnhanced(false)}
+            >
+              Standard
+            </button>
+            <button
+              type="button"
+              className={`enhanced-view-toggle-btn${enhanced ? ' active' : ''}`}
+              data-view="enhanced"
+              onClick={() => onToggleEnhanced(true)}
+            >
+              Enhanced
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

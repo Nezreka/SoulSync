@@ -24,6 +24,7 @@ vi.mock('@/platform/shell/route-manifest', async (importOriginal) => {
 let requested: string[] = [];
 let streamFrames: string[] = [];
 let gapFillBody: unknown = { success: true, gaps: {} };
+let enhancedBody: unknown = { success: true, artist: { id: 42, name: 'Aphex Twin' }, albums: [] };
 
 function stubDetail(body: unknown, status = 200) {
   requested = [];
@@ -32,6 +33,12 @@ function stubDetail(body: unknown, status = 200) {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
       requested.push(url);
+      if (url.includes('/enhanced')) {
+        return new Response(JSON.stringify(enhancedBody), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.includes('/discography/gap-fill')) {
         return new Response(JSON.stringify(gapFillBody), {
           status: 200,
@@ -88,6 +95,11 @@ beforeEach(() => {
   window.observeLazyBackgrounds = vi.fn();
   streamFrames = [];
   gapFillBody = { success: true, gaps: {} };
+  enhancedBody = {
+    success: true,
+    artist: { id: 42, name: 'Aphex Twin' },
+    albums: [{ id: 1, title: 'SAW', record_type: 'album', tracks: [{ id: 9, title: 'Xtal' }] }],
+  };
   localStorage.clear();
   stubDetail(LIBRARY);
 });
@@ -325,5 +337,123 @@ describe('gap-fill (#1067)', () => {
 
     fireEvent.click(document.getElementById('gapfill-toggle-btn') as HTMLElement);
     await waitFor(() => expect(screen.queryByText('Only On Deezer')).toBeNull());
+  });
+});
+
+describe('the Enhanced view', () => {
+  const toggle = (view: string) =>
+    fireEvent.click(document.querySelector(`[data-view="${view}"]`) as HTMLElement);
+
+  it('offers the toggle to an admin on a library artist', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(document.querySelector('[data-view="enhanced"]')).not.toBeNull();
+  });
+
+  it('does NOT offer it on a source artist', async () => {
+    // No DB record to edit; the vanilla showed an empty pane with the
+    // discography hidden behind it.
+    stubDetail({ success: true, artist: { id: 'sp1', name: 'X' }, discography: {} });
+    renderPage();
+    await screen.findByText('X');
+    expect(document.querySelector('[data-view="enhanced"]')).toBeNull();
+  });
+
+  it('fetches nothing until the user actually switches', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(requested.some((u) => u.includes('/enhanced'))).toBe(false);
+  });
+
+  it('swaps the discography for the Enhanced container', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(document.querySelector('.discography-sections')).not.toBeNull();
+
+    toggle('enhanced');
+    await waitFor(() => expect(document.getElementById('enhanced-view-container')).not.toBeNull());
+    expect(document.querySelector('.discography-sections')).toBeNull();
+    await screen.findByText('SAW');
+  });
+
+  it('hides Similar Artists, which lives outside React', async () => {
+    const section = document.createElement('div');
+    section.id = 'ad-similar-artists-section';
+    document.body.appendChild(section);
+
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    toggle('enhanced');
+    await waitFor(() => expect(section.style.display).toBe('none'));
+
+    toggle('standard');
+    await waitFor(() => expect(section.style.display).toBe(''));
+    section.remove();
+  });
+
+  it('persists the choice per profile', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    toggle('enhanced');
+    await waitFor(() =>
+      expect(localStorage.getItem('soulsync-library-view-mode:2')).toBe('enhanced'),
+    );
+  });
+
+  it('does NOT refetch when toggling back and forth', async () => {
+    // The payload carries every track of every album.
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    toggle('enhanced');
+    await screen.findByText('SAW');
+
+    toggle('standard');
+    toggle('enhanced');
+    await screen.findByText('SAW');
+    expect(requested.filter((u) => u.includes('/enhanced'))).toHaveLength(1);
+  });
+
+  it('opens straight into Enhanced when the profile saved that choice', async () => {
+    localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
+    renderPage();
+    await waitFor(() => expect(document.getElementById('enhanced-view-container')).not.toBeNull());
+  });
+
+  it('refetches for a DIFFERENT artist', async () => {
+    // One attempt per artist — but a new artist is a new payload.
+    localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
+    const first = renderPage('/artist-detail/library/42');
+    await screen.findByText('SAW');
+    first.unmount();
+
+    renderPage('/artist-detail/library/99');
+    await waitFor(() => expect(requested.filter((u) => u.includes('/enhanced'))).toHaveLength(2));
+  });
+
+  it('restores Similar Artists when the page UNMOUNTS', async () => {
+    const section = document.createElement('div');
+    section.id = 'ad-similar-artists-section';
+    document.body.appendChild(section);
+    localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
+
+    const view = renderPage();
+    await waitFor(() => expect(section.style.display).toBe('none'));
+    view.unmount();
+    // Otherwise the next page inherits a hidden section it never hid.
+    expect(section.style.display).toBe('');
+    section.remove();
+  });
+
+  it('reports a failed load instead of an empty view', async () => {
+    enhancedBody = { success: false, error: 'no library data' };
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    toggle('enhanced');
+    // The message is split across text nodes, so match on the element.
+    await waitFor(() =>
+      expect(document.querySelector('.enhanced-loading')?.textContent).toBe(
+        'Failed to load: no library data',
+      ),
+    );
   });
 });

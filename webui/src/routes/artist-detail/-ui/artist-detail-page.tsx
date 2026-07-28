@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
-import { useReactPageShell } from '@/platform/shell/route-controllers';
+import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { Discography, DiscographyBucket, DiscographyRelease } from '../-artist-detail.types';
 
@@ -14,6 +14,11 @@ import {
   settleOwnershipForSourceArtist,
   watchlistIdentity,
 } from '../-artist-detail.api';
+import {
+  readEnhancedViewMode,
+  showsEnhancedToggle,
+  writeEnhancedViewMode,
+} from '../-artist-detail.enhanced';
 import {
   applyMusicBrainzDeclutter,
   defaultFilterState,
@@ -30,10 +35,12 @@ import {
   stillCheckingMessage,
 } from '../-artist-detail.open-release';
 import { useCompletionStream } from '../-artist-detail.use-completion';
+import { useEnhancedData } from '../-artist-detail.use-enhanced';
 import { useGapFill } from '../-artist-detail.use-gap-fill';
 import { ArtistHero } from './artist-hero';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
+import { EnhancedView } from './enhanced-view';
 
 const BUCKETS: DiscographyBucket[] = ['albums', 'eps', 'singles'];
 
@@ -100,6 +107,37 @@ export function ArtistDetailPage() {
   );
 
   const isMusicBrainz = isMusicBrainzDiscography(displayed.source);
+
+  /**
+   * Enhanced Management view. Offered to an admin on a library artist only, and
+   * the choice is persisted per profile — a source artist has no DB record to
+   * edit, and forcing the view on one showed an empty pane with the discography
+   * hidden behind it.
+   */
+  const profile = useProfile();
+  const canEnhance = showsEnhancedToggle(Boolean(profile?.isAdmin), sourceOnly);
+  const [enhanced, setEnhanced] = useState(() => readEnhancedViewMode(profile?.profileId));
+  const showEnhanced = canEnhance && enhanced;
+  const enhancedState = useEnhancedData(payload?.artist?.id, showEnhanced);
+
+  const toggleEnhanced = (next: boolean) => {
+    setEnhanced(next);
+    writeEnhancedViewMode(profile?.profileId, next);
+  };
+
+  /**
+   * Similar Artists belongs to the Standard view and is rendered OUTSIDE React,
+   * by loadSimilarArtists into the shell's own section — so hiding it has to be
+   * a DOM effect rather than a branch.
+   */
+  useEffect(() => {
+    const section = document.getElementById('ad-similar-artists-section');
+    if (!section) return;
+    section.style.display = showEnhanced ? 'none' : '';
+    return () => {
+      section.style.display = '';
+    };
+  }, [showEnhanced]);
 
   /**
    * Filters reset on every artist change (resetDiscographyFilters ran BEFORE
@@ -245,18 +283,33 @@ export function ArtistDetailPage() {
             isSourceArtist={sourceOnly}
             gapFillEnabled={gapFill.enabled}
             onToggleGapFill={gapFill.toggle}
+            showViewToggle={canEnhance}
+            enhanced={showEnhanced}
+            onToggleEnhanced={toggleEnhanced}
           />
-          {BUCKETS.map((bucket) => (
-            <DiscographySection
-              key={bucket}
-              bucket={bucket}
-              releases={displayed[bucket] ?? []}
-              filters={filters}
-              isMusicBrainz={isMusicBrainz}
-              isSourceArtist={sourceOnly}
-              onOpen={openRelease}
-            />
-          ))}
+          {showEnhanced ? (
+            <div id="enhanced-view-container">
+              <EnhancedView
+                data={enhancedState.data}
+                status={enhancedState.status}
+                isAdmin={Boolean(profile?.isAdmin)}
+              />
+            </div>
+          ) : (
+            <div className="discography-sections">
+              {BUCKETS.map((bucket) => (
+                <DiscographySection
+                  key={bucket}
+                  bucket={bucket}
+                  releases={displayed[bucket] ?? []}
+                  filters={filters}
+                  isMusicBrainz={isMusicBrainz}
+                  isSourceArtist={sourceOnly}
+                  onOpen={openRelease}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </>
