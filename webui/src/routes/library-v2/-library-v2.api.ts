@@ -827,21 +827,45 @@ export interface ArtistTopTrack {
 export async function fetchArtistTopTracks(input: {
   providerId: string | null;
   name: string;
-}): Promise<{ source: 'provider' | 'lastfm'; tracks: ArtistTopTrack[] }> {
+}): Promise<{
+  kind: 'provider' | 'lastfm';
+  /** The provider that ACTUALLY answered, plus the id it resolved to. The
+   *  endpoint routes by the configured primary source, so asking with a
+   *  Spotify artist id can come back with Deezer track objects — writing
+   *  those ids into a Spotify slot is exactly what guide §2.5 forbids. */
+  source: string;
+  resolvedArtistId: string | null;
+  tracks: ArtistTopTrack[];
+}> {
   if (input.providerId) {
-    const payload = await readJson<{ success: boolean; tracks?: ArtistTopTrack[] }>(
+    const payload = await readJson<{
+      success: boolean;
+      source?: string;
+      resolved_artist_id?: string;
+      tracks?: ArtistTopTrack[];
+    }>(
       apiClient.get(`artist/${encodeURIComponent(input.providerId)}/top-tracks`, {
         searchParams: { limit: 10 },
       }),
     ).catch(() => null);
     if (payload?.success && payload.tracks?.length) {
-      return { source: 'provider', tracks: payload.tracks };
+      return {
+        kind: 'provider',
+        source: payload.source ?? '',
+        resolvedArtistId: payload.resolved_artist_id ?? input.providerId,
+        tracks: payload.tracks,
+      };
     }
   }
   const fallback = await readJson<{ success: boolean; tracks?: ArtistTopTrack[] }>(
     apiClient.get('artist/0/lastfm-top-tracks', { searchParams: { name: input.name, limit: 10 } }),
   ).catch(() => null);
-  return { source: 'lastfm', tracks: (fallback?.tracks ?? []).slice(0, 10) };
+  return {
+    kind: 'lastfm',
+    source: 'lastfm',
+    resolvedArtistId: null,
+    tracks: (fallback?.tracks ?? []).slice(0, 10),
+  };
 }
 
 export async function bulkMonitorLibraryV2Releases(

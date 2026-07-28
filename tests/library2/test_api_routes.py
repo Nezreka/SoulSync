@@ -3268,7 +3268,8 @@ def test_album_resolve_fills_a_partially_materialized_tracklist(api, monkeypatch
     but none of the record it came from."""
     client, db, ids = api
     conn = _conn(db)
-    conn.execute("UPDATE lib2_albums SET expected_track_count=12 WHERE id=?", (ids["views"],))
+    conn.execute("UPDATE lib2_albums SET expected_track_count=12, tracklist_status='ready' "
+                 "WHERE id=?", (ids["views"],))
     conn.commit()
     conn.close()
     resolved = []
@@ -3287,7 +3288,8 @@ def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
     """A complete release must not pay for a provider round trip on every open."""
     client, db, ids = api
     conn = _conn(db)
-    conn.execute("UPDATE lib2_albums SET expected_track_count=1 WHERE id=?", (ids["views"],))
+    conn.execute("UPDATE lib2_albums SET expected_track_count=1, tracklist_status='ready' "
+                 "WHERE id=?", (ids["views"],))
     conn.commit()
     conn.close()
     resolved = []
@@ -3355,3 +3357,26 @@ def test_discovery_track_resolves_new_rows_against_every_provider(api, monkeypat
     assert scheduled[0] == [("album", first["album_id"]), ("track", first["track_id"])]
     assert len(scheduled) == 1, "an already-known release must not be re-enriched"
     assert first["album_id"] != ids["views"]
+
+
+def test_album_resolve_runs_for_a_release_whose_tracklist_was_never_fetched(api, monkeypatch):
+    """A bookmark materializes exactly one recording, leaving `have=1` and
+    `expected=0` — indistinguishable from a genuine one-track single by
+    counting alone. `tracklist_status` is the honest signal: never fetched
+    means never complete."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("UPDATE lib2_albums SET expected_track_count=0, tracklist_status='idle' "
+                 "WHERE id=?", (ids["single"],))
+    conn.commit()
+    conn.close()
+    resolved = []
+    from core.library2 import completeness
+
+    monkeypatch.setattr(
+        completeness, "resolve_tracklist",
+        lambda _cfg, _conn, album_id: resolved.append(album_id))
+
+    client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
+
+    assert resolved == [ids["single"]]

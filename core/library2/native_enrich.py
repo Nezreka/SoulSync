@@ -678,7 +678,9 @@ def enrich_native_entity_for_service(
     }
 
 
-def enrich_native_entity_all_services(conn, entity_type: str, entity_id: int) -> Dict[str, str]:
+def enrich_native_entity_all_services(
+    conn, entity_type: str, entity_id: int, *, commit: bool = False,
+) -> Dict[str, str]:
     """Resolve an entity against EVERY provider that supports it.
 
     A newly created catalogue row starts with at most the one provider id
@@ -700,7 +702,19 @@ def enrich_native_entity_all_services(conn, entity_type: str, entity_id: int) ->
             result = enrich_native_entity_for_service(conn, entity_type, entity_id, service)
         except Exception as exc:  # noqa: BLE001
             logger.debug("enrich %s %s via %s failed: %s", entity_type, entity_id, service, exc)
+            if commit and conn is not None:
+                conn.rollback()
             continue
+        finally:
+            # Commit (or release) between providers, never across them. Each
+            # service does a blocking provider call and then writes on this
+            # connection; leaving the write transaction open across the NEXT
+            # service's network call held SQLite's single writer lock for the
+            # whole walk, and every other request — including the monitor POST
+            # this walk was started by — died on "database is locked" after
+            # the 30s busy timeout.
+            if commit and conn is not None:
+                conn.commit()
         if result.get("success") and result.get("external_id"):
             resolved[str(result.get("source") or service)] = str(result["external_id"])
     return resolved
@@ -720,8 +734,8 @@ def schedule_native_entity_enrich(database: Any, targets: List[tuple]) -> Any:
         try:
             conn = database._get_connection()
             for entity_type, entity_id in targets:
-                if enrich_native_entity_all_services(conn, str(entity_type), int(entity_id)):
-                    conn.commit()
+                enrich_native_entity_all_services(
+                    conn, str(entity_type), int(entity_id), commit=True)
         except Exception as exc:  # noqa: BLE001
             logger.debug("native entity enrich failed (%s): %s", targets, exc)
         finally:

@@ -1041,3 +1041,57 @@ def test_enrich_all_services_skips_providers_that_do_not_support_the_entity(monk
     # Bandcamp has no artist-level column in the SERVICES matrix.
     assert "bandcamp" not in calls
     assert "spotify" in calls
+
+
+def test_enrich_all_services_releases_the_write_lock_between_providers(monkeypatch):
+    """Each service does a blocking provider call and then writes on this
+    connection. Holding the write transaction open across the NEXT service's
+    network call kept SQLite's single writer lock for the whole walk, and
+    every other request — including the monitor POST that started the walk —
+    died on "database is locked" after the 30s busy timeout."""
+    from core.library2 import native_enrich
+
+    events = []
+
+    class FakeConn:
+        def commit(self):
+            events.append("commit")
+
+        def rollback(self):
+            events.append("rollback")
+
+    def fake_one(_conn, _entity_type, _entity_id, service):
+        events.append(f"call:{service}")
+        if service == "musicbrainz":
+            raise RuntimeError("provider down")
+        return {"success": False}
+
+    monkeypatch.setattr(native_enrich, "enrich_native_entity_for_service", fake_one)
+
+    native_enrich.enrich_native_entity_all_services(FakeConn(), "album", 7, commit=True)
+
+    # Never two provider calls in a row without releasing the transaction.
+    calls = [i for i, e in enumerate(events) if e.startswith("call:")]
+    for first, second in zip(calls, calls[1:]):
+        assert any(e in ("commit", "rollback") for e in events[first + 1:second])
+    # A failing provider releases too, instead of leaving the walk holding it.
+    failed = events.index("call:musicbrainz")
+    assert "rollback" in events[failed + 1:failed + 3]
+
+
+def test_enrich_all_services_does_not_touch_the_connection_without_commit(monkeypatch):
+    """The synchronous caller keeps owning its own transaction boundary."""
+    from core.library2 import native_enrich
+
+    class Boom:
+        def commit(self):
+            raise AssertionError("must not commit the caller's transaction")
+
+        def rollback(self):
+            raise AssertionError("must not roll back the caller's transaction")
+
+    monkeypatch.setattr(
+        native_enrich, "enrich_native_entity_for_service",
+        lambda *_a, **_k: {"success": False})
+
+    assert native_enrich.enrich_native_entity_all_services(Boom(), "album", 7) == {}

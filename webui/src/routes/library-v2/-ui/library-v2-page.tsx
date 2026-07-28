@@ -5350,17 +5350,28 @@ function TopTracksSidebar({
   // ids. Bookmarking one of those invented an album named after the track
   // that matched nothing, so its tracklist could never resolve. Those rows
   // stay display-only here too.
-  const bookmarkable = topTracks.data?.source === 'provider';
+  const bookmarkable = topTracks.data?.kind === 'provider';
+  // Identify against the provider that actually answered, not against the id
+  // namespace the artist row happens to carry.
+  const trackSource = topTracks.data?.source || source;
+  const trackArtistId = topTracks.data?.resolvedArtistId ?? providerId;
   const titles = tracks.map((t) => t.name);
   // The tick is a fact about the library, not about this component's
   // lifetime: without this the bookmark looked applied until the next reload.
   const status = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'top-track-status', source, providerId, artistName, titles],
+    queryKey: [
+      ...LIBRARY_V2_QUERY_KEY,
+      'top-track-status',
+      trackSource,
+      trackArtistId,
+      artistName,
+      titles,
+    ],
     queryFn: () =>
       fetchLibraryV2DiscoveryTrackStatus({
-        source,
+        source: trackSource,
         artistName,
-        artistProviderId: providerId,
+        artistProviderId: trackArtistId,
         titles,
       }),
     enabled: bookmarkable && titles.length > 0,
@@ -5377,9 +5388,9 @@ function TopTracksSidebar({
     setBookmarked((s) => ({ ...s, [track.name]: { status: 'busy' } }));
     try {
       const trackId = await materializeLibraryV2DiscoveryTrack({
-        source,
+        source: trackSource,
         artistName,
-        artistProviderId: providerId,
+        artistProviderId: trackArtistId,
         trackTitle: track.name,
         trackProviderId: track.id ?? null,
         albumTitle: track.album?.name ?? null,
@@ -5399,7 +5410,7 @@ function TopTracksSidebar({
   return (
     <div className="artist-hero-right">
       <div className="hero-sidebar-title">
-        {topTracks.data?.source === 'lastfm' ? 'Popular on Last.fm' : 'Top Tracks'}
+        {topTracks.data?.kind === 'lastfm' ? 'Popular on Last.fm' : 'Top Tracks'}
       </div>
       <div className="hero-top-tracks">
         {tracks.map((track, index) => {

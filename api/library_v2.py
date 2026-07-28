@@ -1711,10 +1711,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # ever adds.
                 counts = conn.execute(
                     "SELECT (SELECT COUNT(*) FROM lib2_tracks WHERE album_id=a.id) AS have, "
-                    "       COALESCE(a.expected_track_count, 0) AS expected "
+                    "       COALESCE(a.expected_track_count, 0) AS expected, "
+                    "       COALESCE(a.tracklist_status, 'idle') AS status "
                     "  FROM lib2_albums a WHERE a.id=?", (album_id,)
                 ).fetchone()
-                if counts is not None and counts["have"] < max(counts["expected"], 1):
+                # `tracklist_status` is the honest signal: a release whose
+                # tracklist was never fetched is 'idle', and one track row does
+                # not make it complete. Counting alone cannot tell a genuine
+                # one-track single from a release where a bookmark materialized
+                # exactly one recording — both have have=1 and expected=0.
+                if counts is not None and (
+                        counts["status"] != "ready"
+                        or counts["have"] < counts["expected"]):
                     try:
                         from core.library2.completeness import resolve_tracklist
                         resolve_tracklist(config_manager, conn, album_id)
