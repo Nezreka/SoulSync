@@ -42,11 +42,19 @@ export const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 export function visibleEnrichmentServices(
   services: readonly EnrichmentService[] = ENRICHMENT_SERVICES,
 ): EnrichmentService[] {
+  return filterJiosaavnEntries(services, 'key');
+}
+
+/**
+ * The generic form, for the several other service lists on this page that key
+ * JioSaavn under a different property name ('svc', 'id', ...).
+ */
+export function filterJiosaavnEntries<T>(entries: readonly T[], key: string): T[] {
   const filter = window.filterJiosaavnServiceEntries;
   if (typeof filter === 'function') {
-    return filter([...services], 'key') as EnrichmentService[];
+    return filter([...entries] as never, key) as T[];
   }
-  return services.filter((s) => s.key !== 'jiosaavn');
+  return entries.filter((entry) => (entry as Record<string, unknown>)[key] !== 'jiosaavn');
 }
 
 export interface EnrichmentRing {
