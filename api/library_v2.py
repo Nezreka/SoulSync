@@ -5062,6 +5062,114 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=_run, name="lib2-import", daemon=True).start()
         return jsonify({"success": True, "started": True})
 
+    # Tables that survive a reset. Everything else named lib2_* is catalogue
+    # state the migration rebuilds, and is discovered from the schema rather
+    # than listed here so a table added later cannot be silently missed.
+    _RESET_KEEP_TABLES = {
+        # A single-row control record: re-armed below, never deleted.
+        "lib2_bootstrap_state",
+        # Column layouts and provider visibility — the user's, not the library's.
+        "lib2_ui_preferences",
+        # An audit of decisions the user made about FILES, which outlives any
+        # rebuild of the rows those files hang off (same contract as the
+        # importer's own reset).
+        "lib2_manual_skips",
+        # Append-only by design, enforced by a trigger. Their rows point at
+        # entity ids, and lib2 ids are AUTOINCREMENT, so a rebuilt catalogue
+        # never reuses an id an old history row refers to — the audit stays
+        # truthful instead of being reattributed to a different entity.
+        "lib2_entity_history",
+        "lib2_external_id_history",
+    }
+
+    @app.route("/api/library/v2/reset", methods=["POST"])
+    def lib2_reset():
+        """Empty the catalogue and re-arm the automatic migration.
+
+        This exists to make an upgrade testable: it puts an installation back
+        into the state a user is in right after updating — lib2 empty, nothing
+        migrated yet — so the next server start has to migrate it again, for
+        real. Without it the only route back is editing the database by hand.
+
+        It deliberately does NOT import. The point is to watch the automatic
+        bootstrap do the work on the next start.
+
+        Nothing outside lib2 is touched: the legacy library, the watchlist and
+        the wishlist are the migration's *source*, so wiping them would remove
+        what is being tested rather than reset it.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+
+        with _import_lock:
+            if _import_state["running"]:
+                return jsonify({
+                    "success": False,
+                    "error": "An import is running; wait for it to finish",
+                }), 409
+        # Fence against a migration in flight: it holds the bootstrap claim and
+        # would keep writing rows into the database we are emptying.
+        owner_token = lib2_bootstrap.try_claim(get_database())
+        if not owner_token:
+            return jsonify({
+                "success": False,
+                "error": "A library migration is running in the background",
+            }), 409
+
+        cleared: Dict[str, int] = {}
+        conn = _conn()
+        try:
+            # A blanket sweep cannot honour delete order, and these rows are all
+            # going away together anyway.
+            conn.execute("PRAGMA foreign_keys=OFF")
+            tables = [
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name LIKE 'lib2\\_%' ESCAPE '\\' ORDER BY name"
+                ).fetchall()
+            ]
+            cursor = conn.cursor()
+            cursor.execute("BEGIN")
+            for table in tables:
+                if table in _RESET_KEEP_TABLES:
+                    continue
+                cursor.execute(f'DELETE FROM "{table}"')
+                if cursor.rowcount > 0:
+                    cleared[table] = cursor.rowcount
+            # Re-arm: 'pending' with no watermark and no checkpoint is exactly
+            # the state a never-migrated installation is in.
+            cursor.execute(
+                "UPDATE lib2_bootstrap_state SET status='pending', attempts=0, "
+                "stage=NULL, current_count=0, total_count=0, last_error=NULL, "
+                "started_at=NULL, finished_at=NULL, heartbeat_at=NULL, "
+                "owner_token=NULL, source_watermark=NULL, resume_stage=NULL, "
+                "resume_rowid=NULL, resume_run_id=NULL, resume_watermark=NULL "
+                "WHERE id=1"
+            )
+            conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            conn.rollback()
+            lib2_bootstrap.mark_failed(get_database(), owner_token, str(exc))
+            logger.error("Library v2 reset failed: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": str(exc)}), 500
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.close()
+
+        _reset_artwork_cache_state()
+        _import_state.update(running=False, stage=None, current=0, total=0,
+                             stats=None, error=None, finished_at=None)
+        logger.warning("Library v2 catalogue reset: %s", cleared or "already empty")
+        return jsonify({
+            "success": True,
+            "cleared": cleared,
+            "message": (
+                "Library v2 is empty and the automatic migration is re-armed. "
+                "Restart the server to watch it run."
+            ),
+        })
+
     @app.route("/api/library/v2/import/status")
     def lib2_import_status():
         guard = _guard()

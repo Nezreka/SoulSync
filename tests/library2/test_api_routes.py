@@ -3524,3 +3524,127 @@ def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):
     finally:
         conn.close()
     assert status == "failed"
+
+
+# --- catalogue reset (migration testing) ---------------------------------
+
+
+def _table_count(db, table: str) -> int:
+    conn = _conn(db)
+    try:
+        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_reset_empties_the_catalogue_and_rearms_the_migration(api):
+    """Wipe lib2 and let the automatic migration rebuild it on the next start.
+
+    This is what makes an upgrade actually testable: without it the only way
+    back to "not migrated yet" is editing the database by hand.
+    """
+    client, db, _ids = api
+    assert _table_count(db, "lib2_artists") > 0
+
+    from core.library2 import bootstrap as lib2_bootstrap
+    owner = lib2_bootstrap.try_claim(db)
+    lib2_bootstrap.mark_done(db, owner, watermark="whatever")
+    assert lib2_bootstrap.get_state(db)["status"] == "done"
+
+    response = client.post("/api/library/v2/reset")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["cleared"]["lib2_artists"] > 0
+    for table in ("lib2_artists", "lib2_albums", "lib2_tracks", "lib2_track_files"):
+        assert _table_count(db, table) == 0
+
+    state = lib2_bootstrap.get_state(db)
+    assert state["status"] == "pending"
+    assert state["source_watermark"] is None
+    assert state["resume_stage"] is None
+
+
+def test_reset_keeps_the_tables_that_are_not_the_catalogue(api):
+    client, db, _ids = api
+    conn = _conn(db)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO lib2_ui_preferences(id, preferences_json) "
+            "VALUES(1, '{\"artistColumns\": []}')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    client.post("/api/library/v2/reset")
+
+    # Column layouts are the user's, not the catalogue's; the bootstrap row is
+    # a control record that is re-armed rather than deleted.
+    assert _table_count(db, "lib2_ui_preferences") == 1
+    assert _table_count(db, "lib2_bootstrap_state") == 1
+
+
+def test_reset_is_admin_only(api):
+    client, db, _ids = api
+    db.active_profile = 2
+
+    response = client.post("/api/library/v2/reset")
+
+    assert response.status_code == 403
+    assert _table_count(db, "lib2_artists") > 0
+
+
+def test_reset_refuses_while_a_migration_holds_the_claim(api):
+    client, db, _ids = api
+    from core.library2 import bootstrap as lib2_bootstrap
+    owner = lib2_bootstrap.try_claim(db)
+    lib2_bootstrap.heartbeat(db, owner, stage="tracks", current=1, total=9)
+
+    response = client.post("/api/library/v2/reset")
+
+    assert response.status_code == 409
+    assert _table_count(db, "lib2_artists") > 0
+
+
+def test_reset_only_ever_touches_lib2_tables(api):
+    """The migration's SOURCE must survive its own reset.
+
+    The legacy library, the watchlist and the wishlist are what lib2 is built
+    FROM. Clearing them would not reset the test, it would remove what is being
+    tested — so the sweep is scoped to lib2_* and nothing else, by construction.
+    """
+    client, _db, _ids = api
+
+    body = client.post("/api/library/v2/reset").get_json()
+
+    assert body["cleared"]
+    assert all(table.startswith("lib2_") for table in body["cleared"])
+
+
+def test_reset_leaves_the_append_only_history_intact(api):
+    client, db, ids = api
+    conn = _conn(db)
+    try:
+        conn.execute(
+            "INSERT INTO lib2_entity_history"
+            "(event_type, subject_type, subject_id, to_entity_type, "
+            " to_entity_id, change_source) "
+            "VALUES('entity_moved', 'artist', ?, 'artist', ?, 'database_write')",
+            (ids["artist"], ids["artist"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert client.post("/api/library/v2/reset").status_code == 200
+
+    conn = _conn(db)
+    try:
+        survived = conn.execute(
+            "SELECT COUNT(*) FROM lib2_entity_history WHERE event_type='entity_moved'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert survived == 1
