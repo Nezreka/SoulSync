@@ -67,7 +67,12 @@ describe('Library V2 discovery mode', () => {
         }),
       ),
       http.get('/api/artist/:id/top-tracks', () =>
-        HttpResponse.json({ success: false, tracks: [] }),
+        HttpResponse.json({
+          success: true,
+          tracks: [
+            { id: 'sp-t1', name: 'Roygbiv', album: { id: 'sp-a1', name: 'Music Has the Right' } },
+          ],
+        }),
       ),
       http.get('/api/artist/0/lastfm-top-tracks', () =>
         HttpResponse.json({ success: true, tracks: [{ name: 'Roygbiv', playcount: 4_200_000 }] }),
@@ -110,11 +115,20 @@ describe('Library V2 discovery mode', () => {
     expect(screen.getByText('Music Has the Right to Children')).toBeInTheDocument();
   });
 
-  it('falls back to the Last.fm top tracks when the source has no ranking', async () => {
+  it('falls back to display-only Last.fm rows when the source has no ranking', async () => {
+    server.use(
+      http.get('/api/artist/:id/top-tracks', () =>
+        HttpResponse.json({ success: false, tracks: [] }),
+      ),
+    );
     renderDiscovery(DISCOVERY_URL);
 
     expect(await screen.findByText('Popular on Last.fm')).toBeInTheDocument();
     expect(screen.getByText('Roygbiv')).toBeInTheDocument();
+    // A Last.fm row is a name and a playcount — no album, no ids. Bookmarking
+    // one invented an album that matched nothing, so legacy never offered the
+    // action on these rows either.
+    expect(document.querySelector('.hero-top-track-download')).toBeNull();
   });
 
   it('shows an already-wanted top track as bookmarked on a fresh load', async () => {

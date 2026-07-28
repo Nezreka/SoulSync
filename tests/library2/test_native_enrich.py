@@ -1000,3 +1000,44 @@ def test_manual_reconcile_ignores_the_cooldown(imported_conn):
     )
 
     assert "Recently Tried" in calls
+
+
+def test_enrich_all_services_walks_every_supported_provider(monkeypatch):
+    """One provider id is enough to exist and not enough to work. Each service
+    is independent: one being down or having no match must not cost the rest."""
+    from core.library2 import native_enrich
+
+    calls = []
+
+    def fake_one(_conn, entity_type, entity_id, service):
+        calls.append((entity_type, entity_id, service))
+        if service == "musicbrainz":
+            raise RuntimeError("provider down")
+        if service == "spotify":
+            return {"success": True, "source": "spotify", "external_id": "sp-1"}
+        return {"success": False}
+
+    monkeypatch.setattr(native_enrich, "enrich_native_entity_for_service", fake_one)
+
+    resolved = native_enrich.enrich_native_entity_all_services(None, "album", 7)
+
+    assert resolved == {"spotify": "sp-1"}
+    services = [c[2] for c in calls]
+    # A failing provider does not end the walk.
+    assert "musicbrainz" in services and len(services) > 2
+    assert all(c[:2] == ("album", 7) for c in calls)
+
+
+def test_enrich_all_services_skips_providers_that_do_not_support_the_entity(monkeypatch):
+    from core.library2 import native_enrich
+
+    calls = []
+    monkeypatch.setattr(
+        native_enrich, "enrich_native_entity_for_service",
+        lambda _c, _t, _i, service: calls.append(service) or {"success": False})
+
+    native_enrich.enrich_native_entity_all_services(None, "artist", 1)
+
+    # Bandcamp has no artist-level column in the SERVICES matrix.
+    assert "bandcamp" not in calls
+    assert "spotify" in calls

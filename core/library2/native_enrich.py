@@ -678,6 +678,64 @@ def enrich_native_entity_for_service(
     }
 
 
+def enrich_native_entity_all_services(conn, entity_type: str, entity_id: int) -> Dict[str, str]:
+    """Resolve an entity against EVERY provider that supports it.
+
+    A newly created catalogue row starts with at most the one provider id
+    whoever created it happened to know. One id is enough to exist and not
+    enough to work: tracklist resolution, artwork and matching all walk the
+    stored ids in priority order, so an album that only Spotify knows falls
+    back to a name search the moment Spotify has nothing. Each service is
+    independent and best-effort — one provider being down or having no match
+    must not cost the others. Returns ``{service: external_id}`` for what
+    resolved.
+    """
+    from core.library2.match_status import SERVICES
+
+    resolved: Dict[str, str] = {}
+    for service, _label, supported in SERVICES:
+        if entity_type not in supported:
+            continue
+        try:
+            result = enrich_native_entity_for_service(conn, entity_type, entity_id, service)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("enrich %s %s via %s failed: %s", entity_type, entity_id, service, exc)
+            continue
+        if result.get("success") and result.get("external_id"):
+            resolved[str(result.get("source") or service)] = str(result["external_id"])
+    return resolved
+
+
+def schedule_native_entity_enrich(database: Any, targets: List[tuple]) -> Any:
+    """Run :func:`enrich_native_entity_all_services` off the caller's thread.
+
+    Same contract as :func:`schedule_native_artist_artwork`: the caller
+    commits first, the worker opens its own connection, and nothing here can
+    fail the request. ``targets`` is a list of ``(entity_type, entity_id)``.
+    """
+    import threading
+
+    def _run() -> None:
+        conn = None
+        try:
+            conn = database._get_connection()
+            for entity_type, entity_id in targets:
+                if enrich_native_entity_all_services(conn, str(entity_type), int(entity_id)):
+                    conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("native entity enrich failed (%s): %s", targets, exc)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("native entity enrich close failed: %s", exc)
+
+    thread = threading.Thread(target=_run, name="lib2-native-entity-enrich", daemon=True)
+    thread.start()
+    return thread
+
+
 def _get_or_create_component_artist(
     conn, name: str, identity: Dict[str, Any], *, monitored: int = 0
 ) -> int:
@@ -1050,6 +1108,8 @@ def default_artist_resolver(name: str) -> Optional[Dict[str, Any]]:
 
 
 __all__ = [
+    "enrich_native_entity_all_services",
+    "schedule_native_entity_enrich",
     "enrich_native_entity_for_service",
     "resolve_and_enrich_native_artist",
     "reconcile_unmapped_native_artists",

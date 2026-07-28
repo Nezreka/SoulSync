@@ -4681,6 +4681,7 @@ function ArtistTable({
 
 function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
+  const previousArtist = Route.useSearch().artist;
   const queryClient = useQueryClient();
   // `resolve` materializes the provider tracklist for a release that has no
   // track rows yet. The inline expand always did this; opening the same
@@ -4714,15 +4715,30 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     runScoped(scope.entity, scope.id);
   }
 
-  const goBack = () =>
-    navigate({
+  // Back must return to the view you left. Clearing `releases` here dropped
+  // the user out of All Releases / Discover View into My Library on every
+  // back click, so getting back to the release they came from took three
+  // more clicks. The view settings are only reset when back leads to a
+  // DIFFERENT artist than the URL was showing — then they describe someone
+  // else's page and carrying them over would be the surprise instead.
+  const goBack = () => {
+    const artistId = album?.primary_artist?.id;
+    const switchesArtist = Boolean(artistId && previousArtist && artistId !== previousArtist);
+    return navigate({
       search: (previous) => ({
         ...previous,
         album: undefined,
-        artist: album?.primary_artist?.id ?? previous.artist,
-        releases: undefined,
+        artist: artistId ?? previous.artist,
+        ...(switchesArtist
+          ? {
+              releases: 'library' as const,
+              releaseView: 'table' as const,
+              header: 'compact' as const,
+            }
+          : {}),
       }),
     });
+  };
 
   return (
     <div className={styles.page}>
@@ -5329,6 +5345,12 @@ function TopTracksSidebar({
     staleTime: 5 * 60_000,
   });
   const tracks = topTracks.data?.tracks ?? [];
+  // Legacy offered its row action only on the provider pass, and for a real
+  // reason: a Last.fm row is a name and a playcount, with no album and no
+  // ids. Bookmarking one of those invented an album named after the track
+  // that matched nothing, so its tracklist could never resolve. Those rows
+  // stay display-only here too.
+  const bookmarkable = topTracks.data?.source === 'provider';
   const titles = tracks.map((t) => t.name);
   // The tick is a fact about the library, not about this component's
   // lifetime: without this the bookmark looked applied until the next reload.
@@ -5341,7 +5363,7 @@ function TopTracksSidebar({
         artistProviderId: providerId,
         titles,
       }),
-    enabled: titles.length > 0,
+    enabled: bookmarkable && titles.length > 0,
   });
   if (topTracks.isLoading || tracks.length === 0) return null;
 
@@ -5391,24 +5413,26 @@ function TopTracksSidebar({
               {track.playcount ? (
                 <span className="hero-top-track-plays">{formatCompactNumber(track.playcount)}</span>
               ) : null}
-              <button
-                type="button"
-                className="hero-top-track-download"
-                disabled={state?.status === 'busy' || state?.status === 'done'}
-                title={
-                  state?.status === 'error'
-                    ? state.message
-                    : state?.status === 'done'
-                      ? 'Bookmarked — this track is now wanted'
-                      : 'Bookmark — mark this track as wanted'
-                }
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void bookmark(track);
-                }}
-              >
-                {state?.status === 'done' ? '✓' : <SvgIcon name="monitor" filled />}
-              </button>
+              {bookmarkable ? (
+                <button
+                  type="button"
+                  className="hero-top-track-download"
+                  disabled={state?.status === 'busy' || state?.status === 'done'}
+                  title={
+                    state?.status === 'error'
+                      ? state.message
+                      : state?.status === 'done'
+                        ? 'Bookmarked — this track is now wanted'
+                        : 'Bookmark — mark this track as wanted'
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void bookmark(track);
+                  }}
+                >
+                  {state?.status === 'done' ? '✓' : <SvgIcon name="monitor" filled />}
+                </button>
+              ) : null}
             </div>
           );
         })}

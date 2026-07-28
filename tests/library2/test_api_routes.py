@@ -3300,3 +3300,58 @@ def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
     client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
 
     assert resolved == []
+
+
+def test_discovery_track_never_monitors_the_whole_album(api, monkeypatch):
+    """`find_or_create_*` defaults new rows to monitored — right for the
+    post-download autolink it was written for, badly wrong here: bookmarking
+    ONE top track handed the user a fully monitored album they never asked
+    for. Only the named track becomes wanted, and that happens through the
+    normal monitor endpoint afterwards, so it arrives with its rule and
+    wishlist mirror rather than a bare flag."""
+    client, db, _ids = api
+    from core.library2 import native_enrich
+
+    monkeypatch.setattr(native_enrich, "schedule_native_entity_enrich",
+                        lambda *_a, **_k: None)
+
+    body = client.post("/api/library/v2/discovery/track", json={
+        "source": "spotify", "artist_name": "Drake", "artist_provider_id": "sp-drake",
+        "track_title": "Fresh Song", "track_provider_id": "sp-fresh",
+        "album_title": "Fresh Album", "album_provider_id": "sp-fresh-album",
+    }).get_json()
+
+    conn = _conn(db)
+    try:
+        album = conn.execute("SELECT monitored FROM lib2_albums WHERE id=?",
+                             (body["album_id"],)).fetchone()
+        track = conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                             (body["track_id"],)).fetchone()
+    finally:
+        conn.close()
+    assert album["monitored"] == 0
+    assert track["monitored"] == 0
+
+
+def test_discovery_track_resolves_new_rows_against_every_provider(api, monkeypatch):
+    """A row created from one provider's payload knows one provider, and
+    everything downstream (tracklist resolution, artwork, matching) walks the
+    stored ids — so a release that only Spotify knows is effectively
+    unmatched. Only genuinely NEW rows are enriched; re-bookmarking must not
+    re-walk every provider."""
+    client, _db, ids = api
+    scheduled = []
+    from core.library2 import native_enrich
+
+    monkeypatch.setattr(native_enrich, "schedule_native_entity_enrich",
+                        lambda _db, targets: scheduled.append(list(targets)))
+
+    payload = {"source": "spotify", "artist_name": "Drake",
+               "artist_provider_id": "sp-drake", "track_title": "Brand New",
+               "album_title": "Brand New Album"}
+    first = client.post("/api/library/v2/discovery/track", json=payload).get_json()
+    client.post("/api/library/v2/discovery/track", json=payload)
+
+    assert scheduled[0] == [("album", first["album_id"]), ("track", first["track_id"])]
+    assert len(scheduled) == 1, "an already-known release must not be re-enriched"
+    assert first["album_id"] != ids["views"]

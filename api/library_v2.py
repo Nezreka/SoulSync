@@ -1438,6 +1438,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "SELECT id FROM lib2_artists WHERE legacy_artist_id = ? LIMIT 1",
                     (provider_id,)).fetchone()
                 artist_id = row["id"] if row else None
+            known = artist_id is not None
             if artist_id is None and name:
                 artist_id = find_or_create_artist(
                     conn, name,
@@ -1448,6 +1449,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn.commit()
         finally:
             conn.close()
+        if create and artist_id is not None and not known:
+            # Adopted from one provider's search result — resolve the rest so
+            # the artist arrives matched, not matched-to-one.
+            from core.library2.native_enrich import schedule_native_entity_enrich
+            schedule_native_entity_enrich(get_database(), [("artist", artist_id)])
         if create and artist_id is None:
             return jsonify({"success": False,
                             "error": "Could not materialize this artist"}), 400
@@ -1532,6 +1538,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.autolink import (
             find_or_create_album, find_or_create_artist, find_or_create_track,
         )
+        db = get_database()
         conn = _conn()
         try:
             artist_id = find_or_create_artist(
@@ -1541,18 +1548,41 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if artist_id is None:
                 return jsonify({"success": False,
                                 "error": "Could not resolve this artist"}), 400
+            known_albums = {
+                int(r["id"]) for r in conn.execute(
+                    "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist_id,))}
+            # monitored=0 on BOTH rows. `find_or_create_*` defaults new rows to
+            # monitored — right for the post-download autolink it was written
+            # for, wrong here: bookmarking one track must never hand the user a
+            # fully monitored album they did not ask for. The single track's
+            # intent is applied afterwards by the caller through the normal
+            # monitor endpoint, so it arrives with its rule and wishlist mirror
+            # instead of a bare flag (guide §2.2).
             album_id = find_or_create_album(
                 conn, artist_id, str(body.get("album_title") or "").strip() or track_title,
                 album_type=str(body.get("album_type") or "album"),
                 spotify_album_id=str(body.get("album_provider_id") or "").strip() or None,
-                source=source)
+                source=source, monitored=0)
+            known_tracks = {
+                int(r["id"]) for r in conn.execute(
+                    "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))}
             track_id = find_or_create_track(
                 conn, album_id, artist_id, track_title, track_number=None,
                 spotify_track_id=str(body.get("track_provider_id") or "").strip() or None,
-                source=source)
+                source=source, monitored=0)
+            created = [("album", album_id)] if album_id not in known_albums else []
+            if track_id not in known_tracks:
+                created.append(("track", track_id))
             conn.commit()
         finally:
             conn.close()
+        if created:
+            # A row created from one provider's payload knows one provider.
+            # Everything downstream — tracklist resolution, artwork, matching —
+            # walks the stored ids, so resolve the rest in the background
+            # rather than leaving the release effectively unmatched.
+            from core.library2.native_enrich import schedule_native_entity_enrich
+            schedule_native_entity_enrich(db, created)
         return jsonify({"success": True, "artist_id": artist_id,
                         "album_id": album_id, "track_id": track_id})
 

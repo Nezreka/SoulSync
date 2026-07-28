@@ -254,6 +254,60 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(albumRequests.some((q) => q.includes('resolve=1'))).toBe(true));
   });
 
+  it('back from a release returns to the view it was opened from', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            id: 1,
+            title: 'Dummy',
+            album_type: 'album',
+            release_date: null,
+            year: null,
+            image_url: null,
+            monitored: false,
+            quality_profile: null,
+            origin: 'discography',
+            genres: [],
+            explicit: null,
+            label: null,
+            style: null,
+            mood: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [],
+            track_count: 0,
+            tracks_present: 0,
+            tracks_missing: 0,
+            total_size_bytes: 0,
+            user_overrides: {},
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    const { router } = renderArtist(
+      '/library-v2?artist=1&album=1&releases=all&releaseView=cards&header=rich',
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Portishead/ }));
+
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+    // Not back to My Library — that cost three extra clicks to return to the
+    // release you were just looking at.
+    expect(router.state.location.search).toMatchObject({
+      artist: 1,
+      releases: 'all',
+      releaseView: 'cards',
+      header: 'rich',
+    });
+  });
+
   it('shows the legacy enrichment rings and keeps the V2 match chips', async () => {
     renderArtist('/library-v2?artist=1&header=rich');
 
@@ -267,8 +321,14 @@ describe('Library V2 artist detail — All Releases views', () => {
 
   it('uses the same bookmark glyph as every other monitor control', async () => {
     server.use(
-      http.get('/api/artist/0/lastfm-top-tracks', () =>
-        HttpResponse.json({ success: true, tracks: [{ name: 'Glory Box', playcount: 10 }] }),
+      http.get('/api/artist/:id/top-tracks', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [{ id: 'sp-t1', name: 'Glory Box', album: { id: 'sp-a1', name: 'Dummy' } }],
+        }),
+      ),
+      http.get('/api/library/v2/discovery/track-status', () =>
+        HttpResponse.json({ success: true, statuses: {} }),
       ),
     );
     renderArtist('/library-v2?artist=1&header=rich');
