@@ -98,3 +98,28 @@ export function needsCompletionStream(payload: ArtistDetailResponse): boolean {
     (release) => release.owned === null,
   );
 }
+
+export interface WatchlistIdentity {
+  id: string;
+  name: string;
+}
+
+/**
+ * Which identity the watchlist button acts on.
+ *
+ * A library artist that has been enriched gets the CANONICAL Spotify identity,
+ * because the watchlist is keyed on Spotify ids — otherwise the same artist
+ * watched from here and from the Watchlist page would be two different rows.
+ * Source artists (Deezer/iTunes/Discogs) have no Spotify id and fall back to
+ * whatever id they arrived with.
+ *
+ * Returns null when neither half resolves; the vanilla required BOTH before
+ * initialising the button.
+ */
+export function watchlistIdentity(payload: ArtistDetailResponse): WatchlistIdentity | null {
+  const spotify = payload.spotify_artist;
+  const id = spotify?.spotify_artist_id || payload.artist?.id;
+  const name = spotify?.spotify_artist_name || payload.artist?.name;
+  if (!id || !name) return null;
+  return { id: String(id), name: String(name) };
+}

@@ -90,10 +90,22 @@ export interface ProviderError {
   status_code?: number;
 }
 
+/**
+ * Present only when the artist has a spotify_artist_id (web_server.py:9765).
+ * It is the CANONICAL Spotify identity, and the watchlist is keyed on it —
+ * an artist enriched from Deezer still gets watched under their Spotify id.
+ */
+export interface SpotifyArtistIdentity {
+  spotify_artist_id?: string | null;
+  spotify_artist_name?: string | null;
+  artist_image?: string | null;
+}
+
 export interface ArtistDetailResponse {
   success?: boolean;
   error?: string;
   artist?: ArtistInfo;
+  spotify_artist?: SpotifyArtistIdentity;
   discography?: Discography;
   enrichment_coverage?: Record<string, unknown>;
   provider_error?: ProviderError;
