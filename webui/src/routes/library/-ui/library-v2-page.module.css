@@ -4301,11 +4301,26 @@ textarea.searchInput {
   flex: 0 0 auto;
 }
 
-.heroImage {
+/* Scoped through the box on purpose: this must not depend on stylesheet order.
+
+   `downloads.js` appends an unscoped `.artist-image { width: 120px; height:
+   120px; margin: 0 auto 12px; border-radius: 8px; background: … }` to the end
+   of <head> at load time — styling for the Search page's artist cards, which
+   happen to share the class name. In the dev server the module CSS is injected
+   later still and wins the specificity tie, so this looks fine; in a
+   production build the module CSS is a <link> the legacy script then appends
+   past, and the search-card rules take over the hero portrait. That is a
+   120px image, centred by auto margins, with the wrong corner radius.
+
+   One class more than the rule it has to beat ends the ordering dependency.
+   Every property that block sets on the portrait is answered here. */
+.heroImageBox .heroImage {
   width: 100%;
   max-width: 100%;
   height: auto;
   aspect-ratio: 1;
+  margin: 0;
+  border-radius: 14px;
 }
 
 /* The hero stacks into a centred column here, where a percentage of the full

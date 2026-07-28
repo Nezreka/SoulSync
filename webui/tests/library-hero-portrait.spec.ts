@@ -65,3 +65,50 @@ test('the artist hero portrait keeps its size when the photo does not', async ({
   const after = (await portrait.boundingBox())!.width;
   expect(Math.round(after)).toBe(Math.round(before));
 });
+
+/** The portrait must also survive the legacy shell's own CSS.
+ *
+ *  `downloads.js` appends an unscoped `.artist-image { width: 120px … }` to the
+ *  end of <head> at load time — the Search page's artist cards, sharing the
+ *  class name. Whether that beats the hero's own rule comes down to stylesheet
+ *  order, which differs between the dev server (module CSS injected last, so
+ *  the bug is invisible) and a production build (module CSS is a <link> the
+ *  script then appends past, so the hero portrait becomes a 120px thumbnail).
+ *  Injecting the same rule here reproduces the production order deterministically.
+ */
+test('the artist hero portrait is not restyled by the legacy search-card CSS', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  if (!baseURL) test.skip();
+  await selectAdmin(request, baseURL!);
+
+  const artistsResponse = await request.get(
+    new URL('/api/library/v2/artists?page=1&sort=name&monitored=all', baseURL!).toString(),
+  );
+  const artists = (await artistsResponse.json()) as ArtistListResponse;
+  expect(artists.artists.length).toBeGreaterThan(0);
+
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto(
+    new URL(`/library?artist=${artists.artists[0].id}&header=rich`, baseURL!).toString(),
+    { waitUntil: 'domcontentloaded' },
+  );
+
+  const portrait = page.locator('.artist-hero-section .artist-image').first();
+  await expect(portrait).toBeVisible();
+  const before = (await portrait.boundingBox())!.width;
+
+  await page.evaluate(() => {
+    document.head.insertAdjacentHTML(
+      'beforeend',
+      '<style>.artist-image { width: 120px; height: 120px; margin: 0 auto 12px auto;' +
+        ' border-radius: 8px; }</style>',
+    );
+  });
+
+  const after = (await portrait.boundingBox())!.width;
+  expect(Math.round(after)).toBe(Math.round(before));
+  await expect(portrait).toHaveCSS('border-radius', '14px');
+});
