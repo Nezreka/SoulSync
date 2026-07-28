@@ -3594,15 +3594,26 @@ kennen oder Dateien zu teilen:
   Cache-Konsistenz, Restart-Adoption (ADR-07), der in §36 neu geschriebene
   Async-Loop-Pump.
 
-**Wichtiger Vorbehalt:** Alle folgenden Funde sind Ergebnisse einer reinen
-Codeanalyse durch LLM-Agenten — sie wurden **nicht** durch Tests, Reproduktion
-oder einen Live-Lauf verifiziert. Guide §6 Punkt 3 gilt uneingeschränkt: vor
-jedem Fix ein isoliertes Reproduktionsszenario oder einen Regressionstest
-herstellen. Ein Teil der Funde widerspricht zuvor als „abgeschlossen"
-dokumentierten Ständen (siehe insbesondere dd28-27, das denselben
-Identitäts-Bug-Typ wie das angeblich geschlossene T-12 an einer weiteren
-Stelle findet) — auch das ist ein Hinweis, frühere „Verified"-Einträge nicht
-blind zu vertrauen, sondern jeden Fund gegen den aktuellen Code neu zu prüfen.
+**Ursprünglicher Vorbehalt (28. Juli, vormittags):** Alle folgenden Funde
+waren Ergebnisse einer reinen Codeanalyse durch LLM-Agenten — sie wurden
+**nicht** durch Tests, Reproduktion oder einen Live-Lauf verifiziert. Guide §6
+Punkt 3 gilt uneingeschränkt: vor jedem Fix ein isoliertes
+Reproduktionsszenario oder einen Regressionstest herstellen. Ein Teil der
+Funde widerspricht zuvor als „abgeschlossen" dokumentierten Ständen (siehe
+insbesondere dd28-27, das denselben Identitäts-Bug-Typ wie das angeblich
+geschlossene T-12 an einer weiteren Stelle findet) — auch das ist ein Hinweis,
+frühere „Verified"-Einträge nicht blind zu vertrauen, sondern jeden Fund gegen
+den aktuellen Code neu zu prüfen.
+
+> **Nachtrag (28. Juli 2026, nachts) — abgearbeitet.** Alle 50 Funde wurden
+> gegen den aktuellen Code nachgeprüft und behoben; **kein einziger erwies
+> sich als Fehlalarm.** Zwei Funde wurden bewusst enger umgesetzt als
+> vorgeschlagen (dd28-51, dd28-44), weil die wörtliche Umsetzung
+> Hauptanwendungsfälle gebrochen hätte. Vier bestehende Tests pinnten die
+> alte, falsche Semantik und wurden mit Begründung umgeschrieben.
+> Bearbeitungsstand, Commits, Testdateien und beide Vorbehalte im Detail:
+> [status.md §41](library-v2-status.md#41-multi-agent-deep-dive-vor-dem-pr-entwurf--status).
+> Die Reihenfolge unten in §27.6 wurde eingehalten.
 
 ### 27.1 Kritisch
 
@@ -4002,4 +4013,25 @@ bestätigt — als negative Evidenz für den Statusabgleich festgehalten:
    ist.
 
 Bearbeitungsstand ausschließlich in
-[status.md](library-v2-status.md#41-multi-agent-deep-dive-vor-dem-pr-entwurf-status).
+[status.md](library-v2-status.md#41-multi-agent-deep-dive-vor-dem-pr-entwurf--status).
+
+### 27.7 Was die Abarbeitung zusätzlich gezeigt hat
+
+Drei Beobachtungen, die über die einzelnen Funde hinausgehen und für
+kommende Runden gelten:
+
+1. **Ein Agentenvorschlag ist eine Diagnose, keine Lösung.** dd28-51 wollte
+   `discography_synced_at` als Cutoff *ersetzen*; das hätte jedes Release aus
+   einem längeren Sync-Loch verworfen — der bereits vorhandene
+   Regressionstest hat genau das sofort aufgedeckt. Der Stamp wurde deshalb
+   als zusätzlicher Zulassungspfad umgesetzt.
+2. **Grüne Tests waren an vier Stellen Teil des Problems** (Guide §6 Punkt 6):
+   sie pinnten den lautlosen Quellenfehlschlag (dd28-06), das Wiederabspielen
+   überholter Outbox-Zeilen (dd28-13, zweimal) und die Annahme, dass eine
+   denormalisierte `quality_profile_id` ohne `quality_profile_explicit` die
+   Kaskade gewinnt (dd28-11). Wer nur „alles grün" prüft, hätte diese vier
+   Funde für Fehlalarme gehalten.
+3. **Identitäts-Bugs treten in Familien auf.** Nach dd28-27 wurden alle
+   übrigen `entity_type='file'`-Findings geprüft (`orphan_file_detector`,
+   `track_number_repair` ×2) — dort überall `entity_id=None`, also sauber.
+   Dieselbe Systematik lohnt bei jedem neuen Fund dieser Klasse.

@@ -1949,10 +1949,50 @@ Monitoring/Wanted/Wishlist, Frontend-Async/Download-Client-Adoption) und
 insgesamt 50 Funde (2 kritisch, 18 hoch, 26 mittel, 4 niedrig) plus mehrere
 gezielt geprüfte, für korrekt befundene Bereiche gemeldet.
 
-**Status: keiner der Funde ist bislang reproduziert, verifiziert oder
-gefixt.** Dies ist eine reine Codeanalyse-Runde; die nächste Session beginnt
-mit Reproduktion (Guide §6 Punkt 3), nicht mit direkten Fixes. Die
-empfohlene Abarbeitungsreihenfolge steht in issues.md §27.6.
+**Status: alle 50 Funde sind gegen den aktuellen Code nachgeprüft und
+behoben** (28. Juli 2026, fünf Commits entlang der Domänengrenzen). Jeder
+Fund wurde vor dem Fix am realen Code verifiziert — keiner erwies sich als
+Fehlalarm. Details je Domäne in §41.1–§41.6.
+
+Verifikation nach Guide §6: Regressionstests liegen in
+`tests/library2/test_artwork_contention.py`,
+`tests/test_prowlarr_search_hardening.py`,
+`tests/library2/test_multi_file_convergence.py`,
+`tests/library2/test_monitoring_projection_findings.py`,
+`tests/acquisition/test_client_boundary_findings.py`,
+`tests/repair_jobs/test_section27_repair_findings.py`,
+plus Ergänzungen in `tests/imports/test_quarantine_management.py`,
+`tests/library2/test_mirror_outbox.py`, `tests/test_atomic_audio_save.py`
+und `webui/src/routes/library-v2/-ui/build-search-query.test.ts`.
+Die zentralen Fixes (dd28-04, dd28-11) wurden zusätzlich durch temporäres
+Zurückdrehen der Änderung gegengeprüft: die Tests schlagen ohne den Fix
+nachweislich fehl.
+
+Vier bestehende Tests pinnten alte, falsche Semantik und wurden mit
+Begründung umgeschrieben statt „grün gehalten“ (Guide §6 Punkt 6):
+
+- `interactive-search.test.tsx` akzeptierte einen lautlosen Quellenfehlschlag
+  (dd28-06) — verlangt jetzt den Hinweis.
+- `test_monitor_sync.py` pinnte das Wiederabspielen einer überholten
+  Outbox-Operation (dd28-13) — verlangt jetzt das Überspringen.
+- `test_mirror_outbox.py::test_artist_watchlist_ops` verließ sich auf dasselbe
+  Replay-Verhalten und drainiert jetzt zwischen Add und Remove.
+- `test_lib2_upgrade_scan.py` setzte nur die denormalisierte
+  `quality_profile_id` ohne `quality_profile_explicit` und erwartete, dass die
+  Kaskade sie trotzdem übernimmt (dd28-11) — genau der Zustand, den Guide §2.3
+  als nicht autoritativ bezeichnet.
+
+Zwei Funde wurden bewusst enger gefasst als der Agent vorschlug:
+
+- **dd28-51:** Der Vorschlag, `discography_synced_at` als Cutoff zu *ersetzen*,
+  hätte jedes seit dem letzten Lauf erschienene Release aus einem längeren
+  Sync-Loch verworfen (der vorhandene Regressionstest belegt das). Der Stamp
+  ist deshalb ein *zusätzlicher* Zulassungspfad, nie eine Verschärfung.
+- **dd28-44:** Die `submission_unknown`-Ausnahme in
+  `fail_stale_local_submissions` bleibt absichtlich bestehen — der Client kann
+  den Job angenommen haben. Die eigentliche Ursache (History flutet die
+  Adoptionskandidaten) ist mit dd28-15 behoben; die 24-h-`evidence_ttl_expired`
+  bleibt als Auffanglinie.
 
 Die zwei vom Nutzer selbst live beobachteten Symptome sind identifiziert:
 Artist-Foto-Wechsel-API-Fehler ist dd28-01 (Timeout-Mismatch zwischen
@@ -1963,10 +2003,133 @@ Kombination von dd28-02 (hartes 15-s-Prowlarr-Timeout, lautlos als
 auf dem Prowlarr-Pfad, im Gegensatz zu Tidals bereits vorhandener
 Retry-Leiter).
 
-Ein Fund relativiert einen zuvor als geschlossen geführten Stand: dd28-27
-findet in `fake_lossless_detector` dieselbe Identitäts-Bugklasse wie das
+Ein Fund relativierte einen zuvor als geschlossen geführten Stand: dd28-27
+fand in `fake_lossless_detector` dieselbe Identitäts-Bugklasse wie das
 laut [§19.2](library-v2-issues.md#tool26-12) geschlossene T-12 (nackte
 numerische ID statt `lib2:`-Präfix, dort aber unter `entity_type='file'`
-statt `'album'`/`'track'`) — aktuell nur report-only, also ohne
-Fix-Handler-Impact, aber vor der nächsten „T-12 ist erledigt"-Aussage zu
-verifizieren.
+statt `'album'`/`'track'`). Bestätigt und behoben: das Finding trug die
+Track-ID unter `entity_type='file'`, und `_resolve_links` löste sie gegen
+`lib2_track_files` auf. Eine Nachprüfung aller übrigen
+`entity_type='file'`-Findings (`orphan_file_detector`,
+`track_number_repair` an zwei Stellen) ergab überall `entity_id=None` — T-12
+selbst bleibt also geschlossen, `fake_lossless_detector` war die einzige
+weitere Fundstelle.
+
+### 41.1 Domäne C — Artwork (dd28-01/03/04/22/23/24/25/26)
+
+`600f1b7c8`. Der vom Nutzer gemeldete „manchmal API-Fehler beim
+Foto-Wechsel" hatte vier zusammenwirkende Ursachen, deshalb der gemeinsame
+Block (issues.md §27.6 Punkt 2):
+
+- **dd28-01:** Die Apply-POSTs hatten kein eigenes Timeout; kys 10-s-Default
+  brach ab, während der Server fertig lief. Jetzt 45 s, passend zum realen
+  Aufwand (bis zu 5 revalidierte Redirect-Hops à (3.05, 15) s, zwei
+  `optimize=True`-Encodes, DB-Write, Build-Lock).
+- **dd28-03:** `ensure_metadata_overrides_schema` führte bei *jedem* Aufruf
+  DDL aus (inkl. `DROP TRIGGER`+`CREATE TRIGGER` pro Entity-Tabelle) und nahm
+  dafür den SQLite-Schreiblock. Ein `sqlite_master`-Lesecheck kürzt den
+  Normalfall ab; eine belegte DB antwortet 503-JSON statt HTML-500.
+- **dd28-04:** `apply_manual_artwork` öffnete die Schreibtransaktion **vor**
+  dem Warten auf `_build_lock`. Reihenfolge umgedreht; zusätzlich hat der
+  Provider-Walk in `build_artwork` jetzt ein Budget
+  (`PROVIDER_WALK_BUDGET_S`), damit die Lock-Haltedauer überhaupt eine obere
+  Schranke hat.
+- **dd28-22** ist damit miterledigt: Override und Cache-Datei liegen jetzt in
+  derselben Lock-Sektion und können nicht mehr auseinanderlaufen.
+- **dd28-23/24/25/26:** Invalidate im `catch`-Zweig plus ehrliche
+  Timeout-Meldung, per-Writer-Temp-Dateien, gehärtete Album-Art-Route
+  (ein bereits committeter Pick kann keinen 500 mehr erzeugen),
+  `forget_artwork_versions` beim Entity-Delete.
+
+### 41.2 Domäne B — Interactive Search (dd28-02/05/06/07/34/35/36/37/52)
+
+`600f1b7c8`. Der zweite Nutzerbefund („Usenet wird gar nicht gecheckt",
+lange/verklammerte Titel):
+
+- **dd28-02/05:** Prowlarr bekam ein eigenes Suchbudget
+  (`DEFAULT_SEARCH_TIMEOUT`, respektiert `download_source.source_search_timeout`)
+  und wirft `ProwlarrSearchError` statt „0 Treffer" zurückzugeben. Beide
+  Plugins reichen ihren `timeout` jetzt durch.
+- **dd28-07/52:** Neue `core/download_plugins/query_variants.py` mit einer
+  progressiven Query-Leiter und *balance-bewusstem* Klammer-Stripping. Tidals
+  eigener Fallback nutzt dieselben Helfer, womit der iss27-09-Regexfehler bei
+  echt verschachtelten Klammern verschwindet.
+- **dd28-34:** Kategorie 3060 (Audio/Foreign) wird mitgesucht — nicht-lateinische
+  Releases waren über Prowlarr strukturell unauffindbar. 3020/3030 bleiben
+  bewusst draußen: anderes Medium, keine Schrift-/Regionfrage.
+- **dd28-37:** `prowlarr.indexer_ids` wird pro Protokoll gefiltert. Eine
+  Allowlist, die eine Quelle gar nicht bedienen kann, fällt auf „alle
+  aktivierten Indexer" zurück statt auf „keine".
+- **dd28-06/35/36:** Pro-Quelle-Fehlschläge werden gemeldet (Warnbanner neben
+  den Ergebnissen, nicht statt ihrer); Album-Suche behält die eigene
+  Klammergruppe des Albumtitels (`entity` unterscheidet Track- von
+  Album-Scope); ein vollständig verklammerter Titel kollabiert nicht mehr auf
+  eine leere Query.
+
+### 41.3 Domäne D — Import/Autolink (dd28-08/09/10/38/39/40/49/50)
+
+`1f2c4aa76`. Katalogintegrität; laut issues.md §27.6 Punkt 3 vor jedem
+weiteren Livetest zu beheben:
+
+- **dd28-08:** Neue `retire_replaced_files` in `core/library2/track_files.py`.
+  Die Pipeline meldet die von ihr gelöschten Pfade (`_replaced_file_paths`);
+  zusätzlich werden verschwundene Dateien defensiv stillgelegt — aber nur bei
+  gesundem Storage-Root (Guide §5).
+- **dd28-09:** Der Album-Lookup spannt jetzt die Alias-Gruppe auf. Damit
+  entfällt sowohl das Doppel-Album als auch die Download-Schleife, die es
+  auslöste.
+- **dd28-10:** Neue `attach_track_to_edition`; Autolink hängt neue Tracks
+  sofort an eine Edition, statt sie dem Backfill zu überlassen.
+- **dd28-38:** Neue `writable_file_rows`; Tags/ReplayGain/Lyrics erreichen
+  alle Dateien eines Tracks. ReplayGain analysiert dabei jede Datei einzeln —
+  eine FLAC und ihr MP3-Transkodat haben nicht dieselbe Lautheit.
+- **dd28-39/40/49/50:** Explizites Fehl-Flag statt „assuming success";
+  behaltenes verlustfreies Original wird als zweite Datei verlinkt;
+  Quarantäne-Pfad über `docker_resolve_path`; kollisionsfreie Entry-Namen.
+
+### 41.4 Domäne E — Monitoring/Wanted (dd28-11/12/13/41/42/43/51)
+
+`702f7ec8c`. Vor dem Release-Gate zu beheben, weil sie bestehende
+Testannahmen über Quality Profiles widerlegen (issues.md §27.6 Punkt 4) —
+was sich bestätigt hat, siehe die Testkorrekturen oben.
+
+- **dd28-11/42:** Upgrade-Scan folgt `wt.effective_profile_id`; die
+  Profil-Zuweisung reprojiziert auch ohne `monitor_existing`.
+- **dd28-12:** Neue Vorwärtskante `sync_wishlist_addition` —
+  bewusst oberhalb der DB-Schicht, damit die Mirror-Outbox sich nicht selbst
+  füttert.
+- **dd28-13:** Outbox-Zeilen, die eine neuere Operation derselben Entität
+  bereits überholt hat, werden als `superseded` markiert statt abgespielt.
+- **dd28-41:** Ein monitored Track ohne Erwerbsbedarf wird aus der Wishlist
+  zurückgezogen — aber nur, wenn dort wirklich eine Zeile liegt.
+- **dd28-43/51:** `monitor_new_items='new'` verlangt ein vollständiges Datum;
+  der Sync-Stamp ist ein zusätzlicher Zulassungspfad (siehe Vorbehalt oben).
+
+### 41.5 Domäne F — Client-Adoption und Frontend-Async (dd28-14…17, 44…47)
+
+`a064252ad`. Am schwersten zu reproduzieren (issues.md §27.6 Punkt 5),
+deshalb mit gezieltem Mocking statt echtem SAB/NZBGet-Stack getestet:
+
+- **dd28-14:** Cancel bestätigt nur noch, was der Client bestätigt hat, holt
+  die Job-ID notfalls aus dem persistierten Grab und bleibt sonst
+  `cancel_pending`.
+- **dd28-15/44:** Terminale (History-)Jobs sind keine Adoptionskandidaten
+  mehr. Das behebt zugleich den nie greifenden
+  `unique_category_job`-Fallback.
+- **dd28-17/47:** `run_async` kennt ein optionales Timeout (Default weiter
+  unbegrenzt, weil legitime Langläufer denselben Weg nehmen); der Monitor
+  nutzt es überall, wo er `_cycle_lock` hält. Der Loop-Pump wird referenziert
+  und überwacht.
+- **dd28-16/45/46:** Ein gemeinsamer `useScopedSearchBanner`-Hook mit
+  Run-Sequence-Guard und In-Flight-Sperre; geordnete
+  UI-Preferences-Antworten; Tag-Edit invalidiert auch die Album-Query.
+
+### 41.6 Domäne A — Repair-Werkzeuge (dd28-18…20, 27…33)
+
+`4f2e14872`. Vor der nächsten Produktiv-DB-Verifikation zu beheben
+(issues.md §27.6 Punkt 6). Der schwerwiegendste Fund ist dd28-18: bei
+Multi-Edition-Releasegruppen schrieb der Tracknummer-Fix deterministisch
+falsche Werte in *jede* Datei und benannte sie bei `dry_run: False` auch um.
+Neu ist die Regel, dass eine nicht eindeutig bestimmbare Edition **kein**
+Finding erzeugt — eine plausibel aussehende falsche Nummer ist schlimmer als
+gar keine Meldung.
