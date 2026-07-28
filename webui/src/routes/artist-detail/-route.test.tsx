@@ -39,7 +39,7 @@ describe('artist-detail route', () => {
    *  as `"311"` and only reads back as the string `311`. */
   async function expectRedirect(entry: string, expected: Record<string, string>) {
     const { history, router } = renderArtistDetailRoute([entry]);
-    await waitFor(() => expect(history.location.pathname).toBe('/library-v2'));
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
     expect(router.state.location.search).toMatchObject(expected);
     // The legacy shell must never be involved again.
     expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).not.toHaveBeenCalled();
@@ -71,7 +71,7 @@ describe('artist-detail route', () => {
       '/artist-detail/deezer/2481?name=%7B%22unexpected%22%3Atrue%7D',
     ]);
 
-    await waitFor(() => expect(history.location.pathname).toBe('/library-v2'));
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
     expect(router.state.location.search).not.toHaveProperty('discoverName');
   });
 

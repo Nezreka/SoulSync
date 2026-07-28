@@ -32,7 +32,7 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
   validateSearch: artistDetailSearchSchema,
   beforeLoad: ({ params, search }) => {
     throw redirect({
-      to: '/library-v2',
+      to: '/library',
       search: {
         discover: `${params.source.toLowerCase()}:${params.id}`,
         discoverName: search.name || undefined,

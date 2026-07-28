@@ -21,7 +21,7 @@ function renderDiscovery(entry: string) {
 }
 
 const DISCOVERY_URL =
-  '/library-v2?discover=%22spotify%3Asp-1%22&discoverName=%22Boards%20of%20Canada%22';
+  '/library?discover=%22spotify%3Asp-1%22&discoverName=%22Boards%20of%20Canada%22';
 
 describe('Library V2 discovery mode', () => {
   let resolveResponse: number | null;

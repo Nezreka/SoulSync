@@ -131,7 +131,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('offers the Table ↔ Discover switch only on All Releases (ldp-03)', async () => {
-    const { router } = renderArtist('/library-v2?artist=1');
+    const { router } = renderArtist('/library?artist=1');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(screen.queryByRole('button', { name: 'Discover View' })).not.toBeInTheDocument();
 
@@ -154,7 +154,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('applies the discography filters in the table view too (ldp-04)', async () => {
-    renderArtist('/library-v2?artist=1&releases=all');
+    renderArtist('/library?artist=1&releases=all');
     await screen.findByText('Roseland NYC Live');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Live' }));
@@ -164,7 +164,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('switches the header between compact and the rich legacy hero (ldp-05)', async () => {
-    const { router } = renderArtist('/library-v2?artist=1');
+    const { router } = renderArtist('/library?artist=1');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(document.querySelector('.artist-hero-section')).toBeNull();
 
@@ -216,7 +216,7 @@ describe('Library V2 artist detail — All Releases views', () => {
       ),
     );
     // Arrive carrying a previous artist's discovery view settings.
-    const { router } = renderArtist('/library-v2?releases=all&releaseView=cards&header=rich');
+    const { router } = renderArtist('/library?releases=all&releaseView=cards&header=rich');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open Portishead' }));
 
@@ -238,7 +238,7 @@ describe('Library V2 artist detail — All Releases views', () => {
         return HttpResponse.json({ success: true });
       }),
     );
-    const { router } = renderArtist('/library-v2?artist=1&releases=all&releaseView=cards');
+    const { router } = renderArtist('/library?artist=1&releases=all&releaseView=cards');
     await screen.findByText('Dummy');
 
     const card = document.querySelectorAll('.release-card.album-card')[0];
@@ -257,7 +257,7 @@ describe('Library V2 artist detail — All Releases views', () => {
         return HttpResponse.json({ success: false, error: 'stop here' }, { status: 404 });
       }),
     );
-    renderArtist('/library-v2?album=1');
+    renderArtist('/library?album=1');
 
     // Without `resolve=1` a discography-only release rendered an empty track
     // list — the inline expand always resolved, the page never did.
@@ -302,7 +302,7 @@ describe('Library V2 artist detail — All Releases views', () => {
       ),
     );
     const { router } = renderArtist(
-      '/library-v2?artist=1&album=1&releases=all&releaseView=cards&header=rich',
+      '/library?artist=1&album=1&releases=all&releaseView=cards&header=rich',
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /Portishead/ }));
@@ -319,7 +319,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('shows the legacy enrichment rings and keeps the V2 match chips', async () => {
-    renderArtist('/library-v2?artist=1&header=rich');
+    renderArtist('/library?artist=1&header=rich');
 
     expect(await screen.findByText('Enrichment Coverage')).toBeInTheDocument();
     // Per-provider share of the artist's TRACKS, not the artist row itself.
@@ -341,7 +341,7 @@ describe('Library V2 artist detail — All Releases views', () => {
         HttpResponse.json({ success: true, statuses: {} }),
       ),
     );
-    renderArtist('/library-v2?artist=1&header=rich');
+    renderArtist('/library?artist=1&header=rich');
 
     const bookmark = await screen.findByTitle('Bookmark — mark this track as wanted');
     const monitor = document.querySelector('.artist-hero-actions svg path');

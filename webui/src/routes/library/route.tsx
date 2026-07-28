@@ -12,11 +12,11 @@ import {
 import { libraryV2SearchSchema } from './-library-v2.types';
 import { LibraryV2Page } from './-ui/library-v2-page';
 
-export const Route = createFileRoute('/library-v2')({
+export const Route = createFileRoute('/library')({
   validateSearch: libraryV2SearchSchema,
   beforeLoad: ({ context }) => {
     const { bridge } = context.shell;
-    if (!bridge.isPageAllowed('library-v2')) {
+    if (!bridge.isPageAllowed('library')) {
       throw redirect({ href: getProfileHomePath(bridge), replace: true });
     }
   },

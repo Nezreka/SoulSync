@@ -3673,7 +3673,7 @@ export function UnifiedFileRemovalDialog({
 // --- page root ---------------------------------------------------------------
 
 export function LibraryV2Page() {
-  useReactPageShell('library-v2');
+  useReactPageShell('library');
   const search = Route.useSearch();
   const enabledQuery = useQuery(libraryV2EnabledQueryOptions());
 

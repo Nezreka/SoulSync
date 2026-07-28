@@ -480,7 +480,7 @@ function initializeSearchModeToggle() {
                 meta: 'In Your Library',
                 badge: { text: 'Library', class: 'enh-badge-library' },
                 href: artist.library_v2_id
-                    ? `/library-v2?artist=${encodeURIComponent(artist.library_v2_id)}`
+                    ? `/library?artist=${encodeURIComponent(artist.library_v2_id)}`
                     : buildArtistDetailPath(artist.id),
             })
         );

@@ -132,7 +132,7 @@ describe('stats route', () => {
 
     // ldp-01: the canonical `/artist-detail/...` URL stays the link target, but
     // it now redirects into Library V2 instead of the legacy artist page.
-    await waitFor(() => expect(history.location.pathname).toBe('/library-v2'));
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
     expect(new URLSearchParams(history.location.search).get('discover')).toBe('library:7');
   });
 

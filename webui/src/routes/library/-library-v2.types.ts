@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// Single route `/library-v2` with the current view driven by search params:
+// Single route `/library` with the current view driven by search params:
 //   - artist set -> artist detail (albums expand inline)
 //   - album set  -> directly addressable album detail
 //   - neither    -> artist overview

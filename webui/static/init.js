@@ -504,6 +504,9 @@ function setCurrentProfile(profile) {
 const LEGACY_PROFILE_PAGE_ALIASES = {
     downloads: 'search',
     artists: 'search',
+    // Library v2 became the Library; anything still naming the old route id
+    // resolves to the same permission rather than to an unknown page.
+    'library-v2': 'library',
 };
 
 function normalizeProfilePageId(pageId) {
@@ -526,13 +529,6 @@ function isPageAllowed(pageId) {
     if (currentProfile.id === 1) return true;
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
-    // Library v2 replaces the legacy Library surface and therefore inherits
-    // that page permission.  It must not become a permission bypass merely
-    // because its route id differs from the persisted `library` page id.
-    if (normalizedPageId === 'library-v2') {
-        const ap = normalizeProfilePageList(currentProfile.allowed_pages);
-        return !ap || ap.includes('library') || ap.includes('library-v2');
-    }
     if (normalizedPageId === 'settings') return currentProfile.is_admin;
     if (normalizedPageId === 'artist-detail') {
         const ap = normalizeProfilePageList(currentProfile.allowed_pages);
@@ -2867,24 +2863,6 @@ async function _continueAppInit() {
 
     initApp();
 }
-
-// Reveal the native Library v2 entry after the server confirms availability
-// and the active profile owns the persisted `library` page permission.
-function revealLibraryV2NavIfEnabled() {
-    const navEl = document.getElementById('library-v2-nav');
-    if (!navEl) return;
-    fetch('/api/library/v2/enabled')
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-            if (data && data.enabled && isPageAllowed('library-v2')) {
-                navEl.style.display = '';
-            } else {
-                navEl.style.display = 'none';
-            }
-        })
-        .catch(() => { /* leave hidden */ });
-}
-document.addEventListener('DOMContentLoaded', revealLibraryV2NavIfEnabled);
 
 function initApp() {
     // Unlocked / authenticated — reveal the app (the lock screens hide it via

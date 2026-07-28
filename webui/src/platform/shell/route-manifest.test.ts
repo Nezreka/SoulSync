@@ -54,10 +54,10 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
     expect(getShellRouteByPageId('import')?.kind).toBe('react');
     expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
-    expect(getShellRouteByPageId('library-v2')?.kind).toBe('react');
+    expect(getShellRouteByPageId('library')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'import',
-      'library-v2',
+      'library',
       'stats',
       'issues',
     ]);

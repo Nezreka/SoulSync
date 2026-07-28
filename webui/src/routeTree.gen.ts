@@ -9,9 +9,10 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LibraryV2RouteImport } from './routes/library-v2'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
-import { Route as LibraryV2RouteRouteImport } from './routes/library-v2/route'
+import { Route as LibraryRouteRouteImport } from './routes/library/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -22,6 +23,11 @@ import { Route as ImportAutoRouteImport } from './routes/import/auto'
 import { Route as ImportAlbumRouteImport } from './routes/import/album'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
 
+const LibraryV2Route = LibraryV2RouteImport.update({
+  id: '/library-v2',
+  path: '/library-v2',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -32,9 +38,9 @@ const StatsRouteRoute = StatsRouteRouteImport.update({
   path: '/stats',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LibraryV2RouteRoute = LibraryV2RouteRouteImport.update({
-  id: '/library-v2',
-  path: '/library-v2',
+const LibraryRouteRoute = LibraryRouteRouteImport.update({
+  id: '/library',
+  path: '/library',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IssuesRouteRoute = IssuesRouteRouteImport.update({
@@ -87,9 +93,10 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
-  '/library-v2': typeof LibraryV2RouteRoute
+  '/library': typeof LibraryRouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
@@ -100,9 +107,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
-  '/library-v2': typeof LibraryV2RouteRoute
+  '/library': typeof LibraryRouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
@@ -115,9 +123,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
-  '/library-v2': typeof LibraryV2RouteRoute
+  '/library': typeof LibraryRouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
@@ -131,9 +140,10 @@ export interface FileRouteTypes {
     | '/'
     | '/import'
     | '/issues'
-    | '/library-v2'
+    | '/library'
     | '/stats'
     | '/$'
+    | '/library-v2'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
@@ -144,9 +154,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/issues'
-    | '/library-v2'
+    | '/library'
     | '/stats'
     | '/$'
+    | '/library-v2'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
@@ -158,9 +169,10 @@ export interface FileRouteTypes {
     | '/'
     | '/import'
     | '/issues'
-    | '/library-v2'
+    | '/library'
     | '/stats'
     | '/$'
+    | '/library-v2'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
@@ -173,15 +185,23 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
-  LibraryV2RouteRoute: typeof LibraryV2RouteRoute
+  LibraryRouteRoute: typeof LibraryRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
   SplatRoute: typeof SplatRoute
+  LibraryV2Route: typeof LibraryV2Route
   LabelDetailIdRoute: typeof LabelDetailIdRoute
   ArtistDetailSourceIdRoute: typeof ArtistDetailSourceIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/library-v2': {
+      id: '/library-v2'
+      path: '/library-v2'
+      fullPath: '/library-v2'
+      preLoaderRoute: typeof LibraryV2RouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$': {
       id: '/$'
       path: '/$'
@@ -196,11 +216,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StatsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/library-v2': {
-      id: '/library-v2'
-      path: '/library-v2'
-      fullPath: '/library-v2'
-      preLoaderRoute: typeof LibraryV2RouteRouteImport
+    '/library': {
+      id: '/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof LibraryRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/issues': {
@@ -291,9 +311,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
-  LibraryV2RouteRoute: LibraryV2RouteRoute,
+  LibraryRouteRoute: LibraryRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
   SplatRoute: SplatRoute,
+  LibraryV2Route: LibraryV2Route,
   LabelDetailIdRoute: LabelDetailIdRoute,
   ArtistDetailSourceIdRoute: ArtistDetailSourceIdRoute,
 }
