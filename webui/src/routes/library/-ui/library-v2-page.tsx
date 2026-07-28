@@ -5519,7 +5519,11 @@ function EnrichmentCoverage({ coverage }: { coverage: Record<string, number> }) 
  *  The image is deliberately NOT the plain 160px `.artist-image`: legacy
  *  overrode that with `#artist-hero-section #artist-detail-image { width:100% }`
  *  so the portrait fills its `max-width: min(38%, 460px)` column. An id
- *  selector cannot be reused here, so `styles.heroImage` reproduces it. */
+ *  selector cannot be reused here, so `styles.heroImage` reproduces it.
+ *
+ *  `styles.heroImageBox` gives that column a width of its own. Without one it
+ *  took the photo's intrinsic width, so the header's proportions changed from
+ *  artist to artist depending on what the provider shipped. */
 function LegacyArtistHero({
   name,
   imageUrl,
@@ -5568,7 +5572,7 @@ function LegacyArtistHero({
     <div className="artist-hero-section">
       <div className="artist-hero-content">
         <div
-          className="artist-image-container"
+          className={`artist-image-container ${styles.heroImageBox}`}
           title={onPickImage ? 'Change artist photo' : undefined}
           onClick={onPickImage}
         >

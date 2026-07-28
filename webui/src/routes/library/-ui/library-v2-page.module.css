@@ -4281,15 +4281,39 @@ textarea.searchInput {
    cannot be reused here, so this reproduces exactly that override. The
    aspect ratio is pinned because this class also lands on the `<div>`
    placeholder, which has no intrinsic height to keep. */
+/* The portrait column is sized by the layout, never by the photo.
+
+   `.artist-image-container` is a `flex-shrink: 0` item with no width of its
+   own, so its used width is its content's max-content width — and a
+   percentage width on the `<img>` contributes nothing to intrinsic sizing.
+   The rendered portrait was therefore the source file's own pixel width,
+   clamped between `.heroImage`'s min-width and the container's
+   `max-width: min(38%, 460px)`: measured on one unchanged page, a 1000px
+   photo rendered 451px, a 256px photo 260px and a 64px photo 160px. Artists
+   whose provider ships smaller art (or whose photo came from an embedded
+   album cover) got a visibly smaller header than the rest.
+
+   Making that cap the width itself decouples the column from the file. The
+   `<img>` fills it and `object-fit: cover` (from `.artist-image`) crops,
+   so a small or non-square source is scaled instead of resizing the page. */
+.heroImageBox {
+  width: min(38%, 460px);
+  flex: 0 0 auto;
+}
+
 .heroImage {
   width: 100%;
   max-width: 100%;
   height: auto;
   aspect-ratio: 1;
-  /* A flex child with only `width: 100%` and no intrinsic width collapses to
-     nothing — which is exactly what the placeholder `<div>` is when an artist
-     has no photo. 160px is legacy's own fallback size. */
-  min-width: 160px;
+}
+
+/* The hero stacks into a centred column here, where a percentage of the full
+   width would be a portrait the size of a thumbnail. */
+@media (max-width: 768px) {
+  .heroImageBox {
+    width: min(60%, 220px);
+  }
 }
 
 /* The legacy overlay sized its glyph with width/height attributes on the SVG
