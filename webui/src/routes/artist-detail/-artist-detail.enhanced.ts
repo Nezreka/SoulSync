@@ -179,3 +179,66 @@ export function enhancedStats(data: EnhancedData): EnhancedStats {
       })),
   };
 }
+
+/** m:ss, or a dash for a track with no known duration. */
+export function formatDurationMs(ms: unknown): string {
+  const value = Number(ms);
+  if (!value) return '-';
+  const totalSeconds = Math.floor(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+/** "3 releases · 40 tracks" — singular for exactly one release. */
+export function sectionCountLabel(albumCount: number, trackCount: number): string {
+  return `${albumCount} release${albumCount !== 1 ? 's' : ''} \u00B7 ${trackCount} tracks`;
+}
+
+export function sectionTrackTotal(albums: EnhancedAlbum[]): number {
+  return albums.reduce((sum, album) => sum + (album.tracks ? album.tracks.length : 0), 0);
+}
+
+export interface AlbumRowMeta {
+  trackCount: number;
+  /** "1992 · 12 tracks · 48:20 · Warp" — absent parts are simply skipped. */
+  metaLine: string;
+  /** The album's commonest format, or '' when no track has a path. */
+  primaryFormat: string;
+  formatClass: string;
+}
+
+/**
+ * The collapsed album row's derived fields.
+ *
+ * The meta line drops each part it has nothing for rather than printing a
+ * placeholder — including the duration, which is skipped when formatDurationMs
+ * returns its '-' sentinel rather than showing a bare dash between separators.
+ */
+export function albumRowMeta(album: EnhancedAlbum): AlbumRowMeta {
+  const tracks = album.tracks ?? [];
+  const trackCount = tracks.length;
+
+  let durationMs = 0;
+  const formats: Record<string, number> = {};
+  for (const track of tracks) {
+    durationMs += track.duration || 0;
+    const format = extractFormat(track.file_path);
+    if (format !== '-') formats[format] = (formats[format] || 0) + 1;
+  }
+  const duration = formatDurationMs(durationMs);
+  const primaryFormat = Object.keys(formats).sort((a, b) => formats[b] - formats[a])[0] || '';
+
+  const parts: string[] = [];
+  if (album.year) parts.push(String(album.year));
+  parts.push(`${trackCount} track${trackCount !== 1 ? 's' : ''}`);
+  if (duration !== '-') parts.push(duration);
+  if (album.label) parts.push(String(album.label));
+
+  return {
+    trackCount,
+    metaLine: parts.join(' \u00B7 '),
+    primaryFormat,
+    formatClass: primaryFormat === 'FLAC' ? 'flac' : primaryFormat === 'MP3' ? 'mp3' : 'other',
+  };
+}

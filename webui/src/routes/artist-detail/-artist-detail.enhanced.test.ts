@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  albumRowMeta,
   enhancedStats,
   extractFormat,
   groupAlbumsByType,
   libraryViewModeKey,
   readEnhancedViewMode,
+  formatDurationMs,
+  sectionCountLabel,
+  sectionTrackTotal,
   showsEnhancedToggle,
   writeEnhancedViewMode,
 } from './-artist-detail.enhanced';
@@ -182,5 +186,76 @@ describe('enhancedStats', () => {
     const stats = enhancedStats({});
     expect(stats.items.map((s) => s.value)).toEqual([0, 0, 0, 0, '0m']);
     expect(stats.badges).toEqual([]);
+  });
+});
+
+describe('formatDurationMs', () => {
+  it('is m:ss with a zero-padded second', () => {
+    expect(formatDurationMs(65_000)).toBe('1:05');
+    expect(formatDurationMs(3_600_000)).toBe('60:00');
+  });
+
+  it('is a dash — NOT 0:00 — with no duration', () => {
+    expect(formatDurationMs(0)).toBe('-');
+    expect(formatDurationMs(undefined)).toBe('-');
+    expect(formatDurationMs(null)).toBe('-');
+  });
+});
+
+describe('sectionCountLabel', () => {
+  it('singularises exactly one release', () => {
+    expect(sectionCountLabel(1, 12)).toBe('1 release \u00B7 12 tracks');
+    expect(sectionCountLabel(3, 40)).toBe('3 releases \u00B7 40 tracks');
+  });
+
+  it('never singularises tracks, matching the vanilla', () => {
+    expect(sectionCountLabel(1, 1)).toBe('1 release \u00B7 1 tracks');
+  });
+});
+
+describe('sectionTrackTotal', () => {
+  it('sums tracks, tolerating an album with none', () => {
+    expect(sectionTrackTotal([{ tracks: [{}, {}] }, {}, { tracks: [] }])).toBe(2);
+  });
+});
+
+describe('albumRowMeta', () => {
+  it('builds the full meta line in order', () => {
+    const meta = albumRowMeta({
+      year: 1992,
+      label: 'Warp',
+      tracks: [
+        { duration: 200_000, file_path: 'a.flac' },
+        { duration: 100_000, file_path: 'b.flac' },
+      ],
+    });
+    expect(meta.metaLine).toBe('1992 \u00B7 2 tracks \u00B7 5:00 \u00B7 Warp');
+  });
+
+  it('SKIPS the duration rather than printing the dash sentinel', () => {
+    // A bare "-" between separators reads as a broken row.
+    const meta = albumRowMeta({ year: 1992, tracks: [{ file_path: 'a.flac' }] });
+    expect(meta.metaLine).toBe('1992 \u00B7 1 track');
+  });
+
+  it('drops the year and label when the album has none', () => {
+    expect(albumRowMeta({ tracks: [] }).metaLine).toBe('0 tracks');
+  });
+
+  it('singularises a single track', () => {
+    expect(albumRowMeta({ tracks: [{}] }).metaLine).toBe('1 track');
+  });
+
+  it('picks the album\u2019s commonest format for the badge', () => {
+    const meta = albumRowMeta({
+      tracks: [{ file_path: 'a.flac' }, { file_path: 'b.mp3' }, { file_path: 'c.mp3' }],
+    });
+    expect(meta.primaryFormat).toBe('MP3');
+    expect(meta.formatClass).toBe('mp3');
+  });
+
+  it('has no format badge when no track has a path', () => {
+    const meta = albumRowMeta({ tracks: [{ duration: 1 }] });
+    expect(meta.primaryFormat).toBe('');
   });
 });
