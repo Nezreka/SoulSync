@@ -12,6 +12,18 @@ import {
 } from '../-library-v2.api';
 import styles from './library-v2-page.module.css';
 
+/** dd28-23: a timed-out apply is not a rejected apply. ky raises TimeoutError
+ *  once its own budget runs out, but the request keeps running server-side and
+ *  usually completes, so telling the user it "failed" is actively wrong. Name
+ *  that case explicitly and point at the refresh the modal has already
+ *  triggered. */
+function applyErrorMessage(caught: unknown, subject: 'cover' | 'photo'): string {
+  if (caught instanceof Error && caught.name === 'TimeoutError') {
+    return `The server is taking unusually long to apply this ${subject}. It may still complete — reopen this dialog in a moment to check before retrying.`;
+  }
+  return caught instanceof Error ? caught.message : `Failed to apply ${subject}`;
+}
+
 /** Legacy "Change cover" parity (docs §49): candidate covers from Cover Art
  *  Archive + Deezer/iTunes/Spotify/AudioDB, click one to apply. The choice is
  *  pinned server-side so a later refresh won't revert it. */
@@ -45,7 +57,12 @@ export function AlbumArtPickerModal({
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to apply cover');
+      // dd28-23: a client-side abort does not cancel the server-side apply —
+      // it commits the override and rewrites the cache file regardless. Always
+      // re-read after a failure so the UI shows what the server actually has,
+      // instead of leaving a stale thumbnail next to a "failed" message.
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      setError(applyErrorMessage(caught, 'cover'));
       setBusyUrl(null);
     }
   }
@@ -145,7 +162,9 @@ export function ArtistImagePickerModal({
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to apply photo');
+      // dd28-23: see the matching comment in AlbumArtPickerModal above.
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      setError(applyErrorMessage(caught, 'photo'));
       setBusyUrl(null);
     }
   }

@@ -3562,3 +3562,444 @@ zellspezifischem Padding und kompakteren Track-Action-Icons. Die frei
 werdenden vier Prozent gehen an die relativ berechneten Datenspalten
 (86 %). Alle drei Aktionen bleiben sichtbar und bedienbar; die Tabelle bleibt
 bei exakt 100 % und erzeugt keinen horizontalen Scroll.
+
+---
+
+## 27. Finaler Multi-Agent Deep-Dive vor dem PR-Entwurf (28. Juli 2026)
+
+Ausdrücklicher Nutzerauftrag: ein letzter, sehr breiter Bug-Run über die
+gesamte `library-overhaul`-Branch, bevor aus dem Draft ein PR wird — mit
+explizitem Fokus darauf, dass die kürzlich auf `lib2_*` umgehängten Werkzeuge
+(Cover Art Filler, ReplayGain Filler, Metadata Gap Filler, etc.) korrekt
+miteinander und mit der übrigen Pipeline zusammenspielen, und dass keine
+bestehende Funktionalität verloren geht. Sechs parallele, read-only Agenten
+haben je eine unabhängige Domäne durchleuchtet, ohne sich gegenseitig zu
+kennen oder Dateien zu teilen:
+
+- **A — Repair-Werkzeuge ↔ Library V2** (`core/repair_jobs/*`, `core/repair_worker.py`):
+  Nachlese zu §18/§19, mit Fokus auf die dort explizit ausgesparten
+  Fehlerinjektionsszenarien (Crash mid-apply, Multi-File, read-only Root,
+  Alias-Gruppen, Multi-Edition, Cross-Job-Races).
+- **B — Interactive Search / Multi-Source-Query-Building**: konkreter
+  Nutzerbefund — sehr lange Titel und Titel mit Klammern/Sonderzeichen
+  scheitern bei manchen Quellen, insbesondere Usenet.
+- **C — Artist-/Album-Artwork-Pipeline**: konkreter Nutzerbefund — Foto-Wechsel
+  eines Artists funktioniert meistens, aber gelegentlich mit unklarem
+  API-Fehler.
+- **D — Import-Pipeline & Tag-/Metadata-Schreiben**: Nachlese zur bereits
+  behobenen §23/§35-Bugklasse ("nur eine Metadaten-Quelle nach Nachimport").
+- **E — Monitoring/Wanted/Watchlist-Wishlist-Reconcile**: Invarianten aus
+  Guide §2.2/§2.3/§5 (ADR-02, Quality-Kaskade, Outbox/Reconciler).
+- **F — Frontend-Async-State & Download-Client-Adoption**: React-Query-
+  Cache-Konsistenz, Restart-Adoption (ADR-07), der in §36 neu geschriebene
+  Async-Loop-Pump.
+
+**Wichtiger Vorbehalt:** Alle folgenden Funde sind Ergebnisse einer reinen
+Codeanalyse durch LLM-Agenten — sie wurden **nicht** durch Tests, Reproduktion
+oder einen Live-Lauf verifiziert. Guide §6 Punkt 3 gilt uneingeschränkt: vor
+jedem Fix ein isoliertes Reproduktionsszenario oder einen Regressionstest
+herstellen. Ein Teil der Funde widerspricht zuvor als „abgeschlossen"
+dokumentierten Ständen (siehe insbesondere dd28-27, das denselben
+Identitäts-Bug-Typ wie das angeblich geschlossene T-12 an einer weiteren
+Stelle findet) — auch das ist ein Hinweis, frühere „Verified"-Einträge nicht
+blind zu vertrauen, sondern jeden Fund gegen den aktuellen Code neu zu prüfen.
+
+### 27.1 Kritisch
+
+**dd28-01 (Domäne C) — Artwork-POST hat kein zum Backend passendes Timeout**
+*Fundort:* `webui/src/routes/library-v2/-library-v2.api.ts:1501` (Artist),
+`:1467` (Album); Backend `core/library2/artwork.py:947` (`apply_manual_artwork`).
+*Szenario:* Der `apiClient` setzt nur `retry: 0`; kys Default-`timeout` bleibt
+bei 10 000 ms. Das Backend hat dafür keine passende Grenze:
+`_download_remote_artwork` erlaubt `(3.05, 15)` s pro Hop über bis zu 5
+Redirects plus ein ungebremstes `socket.getaddrinfo`, danach zwei
+`optimize=True`-JPEG-Encodes für Bilder bis 40 MP, einen DB-Write und den
+Erwerb von `_build_lock`. Sobald das zusammen über 10 s dauert, bricht der
+Client ab und zeigt einen rohen ky-Fehler — **während der Server die Änderung
+trotzdem fertigstellt.** Die GET-`art-options`-Aufrufe wurden für exakt dieses
+Problem bereits auf `timeout: 20_000` angehoben (iss27-03); der POST-Pfad hat
+diese Behandlung nie bekommen.
+*Warum kritisch:* Trifft den vom Nutzer geschilderten Fehler wortgleich —
+„meistens funktioniert es, aber manchmal API-Fehler" ist exakt das erwartete
+Verhalten dieses Timeout-Mismatches (Provider-CDN beim zweiten Versuch warm,
+Encode schneller o.ä.).
+
+**dd28-02 (Domäne B) — Prowlarr/Usenet-Suche hat ein hartes 15-s-Timeout und
+scheitert lautlos als „0 Treffer"**
+*Fundort:* `core/prowlarr_client.py:103` (`DEFAULT_TIMEOUT = 15`), abgefangen
+in `core/prowlarr_client.py:252-254` → `None` → `core/download_plugins/usenet.py:373-375`
+gibt `([], [])` zurück.
+*Szenario:* Jeder Prowlarr-Aufruf über 15 s (normal, wenn mehrere
+Usenet-Indexer gefächert abgefragt werden; lange/ungewöhnliche Queries sind
+die langsamsten) liefert HTTP 200 mit `{"results": []}` — nicht
+unterscheidbar von einer echten Nulltreffer-Suche. Soulseek bekommt 60 s+15 s
+Puffer, das Frontend erlaubt 90 s, und die vorhandene Nutzer-Einstellung
+`download_source.source_search_timeout` (`config/settings.py:1034`) ist bei
+HiFi/Qobuz/Deezer/Stream verdrahtet, **aber nicht bei Prowlarr.**
+*Warum kritisch:* Exakt der vom Nutzer geschilderte Befund „Usenet wird gar
+nicht gecheckt". `usenet.py:358-372` und `torrent.py:157-171` nehmen zwar
+einen `timeout`-Parameter gemäß `base.py`-Vertrag entgegen, reichen ihn aber
+nie an `self._prowlarr.search(...)` weiter (siehe dd28-05) — die Grenze ist
+also auch nicht durch Konfiguration umgehbar.
+
+### 27.2 Hoch
+
+**dd28-03 (C) — `set_field_override` führt bei jedem Aufruf unbedingte
+Schema-DDL aus → SQLite-Lock eskaliert zu einem 500er**
+`core/library2/metadata_overrides.py:130-151`. `ensure_metadata_overrides_schema`
+führt `CREATE TABLE IF NOT EXISTS`, jeden `CREATE INDEX` sowie ein
+`DROP TRIGGER`+`CREATE TRIGGER`-Paar **pro Entity-Tabelle bei jedem einzelnen
+Aufruf** aus und nimmt dafür den SQLite-Schreiblock. Ein `database is locked`
+nach Ablauf des 30-s-Busy-Timeouts (Import/Scan/Post-Processing läuft
+parallel) wird von der Route (`api/library_v2.py:2340-2352`, fängt nur
+`MetadataOverrideError`) nicht behandelt und landet als generischer HTML-500
+beim Client. Zweitbester Treffer für „manchmal API-Fehler, Retry hilft".
+
+**dd28-04 (C) — Offene Schreibtransaktion wird über einen netzwerkblockierenden
+Lock gehalten**
+`core/library2/artwork.py:978`, `:987`. `set_field_override` öffnet die
+Schreibtransaktion; committet wird erst nach `apply_manual_artwork`
+(`api/library_v2.py:2343`). Dazwischen kann `with _build_lock(...)` für die
+gesamte Dauer eines parallel laufenden `build_artwork` blockieren — der hält
+den Lock über einen sequenziellen, budgetlosen Provider-Walk
+(`_provider_art_url` → `fetch_artwork_url`, `provider_adapters.py:890-911`)
+plus Download plus zwei Encodes. Das Öffnen der Artist-Detailseite stößt
+genau so einen Build für einen kalten Artist an, und der Picker wird von
+derselben Seite geöffnet — die Kollision ist der Normalfall, nicht die
+Ausnahme. Ergebnis: der DB-Schreiblock der gesamten App hängt an einem
+Netzwerkaufruf und verlängert dd28-01s 10-s-Fenster zusätzlich.
+
+**dd28-05 (B) — `timeout`-Parameter wird von beiden Prowlarr-Plugins
+entgegengenommen und verworfen**
+`core/download_plugins/usenet.py:358-372`, `torrent.py:157-171`. Nehmen
+`timeout: Optional[int]` gemäß `base.py:74-79`-Vertrag entgegen und reichen
+ihn nie an `self._prowlarr.search(...)` weiter — macht dd28-02
+konfigurationsseitig unlösbar.
+
+**dd28-06 (B) — Ein Usenet-Fehlschlag ist unsichtbar, sobald irgendeine andere
+Quelle Treffer liefert**
+`webui/src/routes/library-v2/-ui/interactive-search.tsx:492-507`.
+Pro-Quelle-Fehler landen in `failed`, ein Fehler wird aber nur geworfen, wenn
+`merged.length === 0 && failed.length > 0`. Liefert Soulseek irgendetwas,
+erzeugt ein Usenet-500/-Timeout weder Banner noch Chip-Status noch sonst
+etwas — bereits durch einen eigenen Test abgesichert
+(`interactive-search.test.tsx:232-273`), aber als bewusstes Verhalten, nicht
+als Bug erkannt. In Kombination mit dd28-02 kann Usenet jedes Mal scheitern,
+ohne dass es je auffällt.
+
+**dd28-07 (B) — Keine Query-Normalisierung für lange/verklammerte Titel auf
+dem Prowlarr-Pfad (Usenet/Torrent)**
+`core/download_plugins/usenet.py:366-372`. Sendet `buildSearchQuery`s Output
+unverändert. Bei `"Drenchill Freed from Desire (feat. Indiiana) - DNF
+Extended Remix"` oder jedem >100-Zeichen-Titel wird jedes Token zum
+UND-verknüpften Suchbegriff, ein korrektes NZB mit Titel
+`Drenchill-Freed_From_Desire-WEB-2019-FLAC` bekommt null Treffer. Zum
+Vergleich: `core/tidal_download_client.py:579-622` versucht bereits bis zu 5
+progressiv gekürzte Varianten genau aus diesem Grund. Es gibt **keinerlei**
+Längenbehandlung (weder Client noch Server) und keinen
+Klammer-Stripping-Fallback für Usenet/Torrent. Trifft exakt den vom Nutzer
+gemeldeten Fall „lange Titel + Klammern funktionieren nicht bei manchen
+Quellen".
+
+**dd28-08 (D) — Quality-Upgrade/Redownload lässt eine veraltete *primäre*
+`lib2_track_files`-Zeile auf eine gelöschte Datei zeigen**
+`core/imports/pipeline.py:1616-1625` (Enhance), `:2041-2058`
+(Redownload-Hook). Ein Enhance-Grab schreibt nach `<gleicher Stamm>.<neue
+Endung>` (`core/imports/paths.py:537-544`) und löscht danach die
+Originaldatei. Autolink schlüsselt über `(track_id, path)`
+(`core/library2/autolink.py:604-607`) und **fügt eine neue Zeile ein**, ohne
+die alte anzufassen. Der Insert-Trigger promotet die neue Zeile nur, wenn der
+Track noch keine aktive Primärdatei hat (`core/library2/track_files.py:241-255`)
+— die veraltete Zeile bleibt `is_primary=1`/`active`, obwohl die MP3 gelöscht
+ist. Jeder lib2-Lesepfad (Retag, ReplayGain, Lyrics, Wishlist-Mirror,
+Quality-Eval, Queue-Status) arbeitet danach mit einer nicht existenten Datei;
+der Track zeigt zwei Dateien. Der Redownload-Hook hat dieselbe Form: löscht
+`old_file_path`, aktualisiert aber nur die **Legacy**-`tracks.file_path`, nie
+`lib2_track_files`. Nichts konvergiert das, bis der Nutzer manuell
+„Refresh & Scan" auslöst — der wahrscheinlich häufigste einzelne
+lib2-Schreibpfad überhaupt (Upgrades).
+
+**dd28-09 (D) — Alias-verlinkter Artist bekommt beim Import ein doppeltes
+Album**
+`core/library2/autolink.py:202-224` (`_find_or_create_album`),
+`core/library2/materialize.py:81-84` (derselbe Defekt im Pre-Download-Pfad).
+Der Album-Lookup ist auf `lib2_album_artists WHERE aa.artist_id = <aufgelöster
+Artist>` beschränkt und ruft nie `resolve_alias_group` auf, während
+`_find_or_create_artist` (`autolink.py:124-192`) anstandslos die
+*Alias*-Zeile auflöst. Ein Download, der auf die Rōmaji-Schreibweise
+gebucht ist, während das Album unter der Kanji-Kanonik liegt, erzeugt eine
+**zweite `lib2_albums`-Zeile** unter dem Alias — Artist-Seite zeigt das Album
+doppelt, die Datei landet auf dem Duplikat, das Original bleibt dateilos und
+monitored, wodurch die Wanted-Projektion es dauerhaft weiter zum Download
+vorschlägt. Untergräbt genau den Zweck des Alias-Features (§40) und kann
+Downloads in eine Schleife bringen.
+
+**dd28-10 (D) — Neue Tracks bekommen keine Edition-Zeile; der Backfill pinnt
+sie danach auf die Default-Edition**
+`core/library2/autolink.py:303-323`, `core/library2/editions.py:387-403`.
+Autolink erzeugt `lib2_tracks`, ruft aber nie `ensure_release_track` —
+frisch importierte Tracks sind für jeden edition-scoped Konsumenten
+unsichtbar (`core/acquisition/bundle_matching.py:193-199`,
+`core/acquisition/catalog.py:60-73`). `backfill_editions` läuft nur beim
+Schema-Ensure (Prozessstart) oder nach einem Legacy-Import und pinnt jeden
+noch nicht zugeordneten Track dann unabhängig von der tatsächlich
+heruntergeladenen Edition auf `default_edition_id(album_id)` — idempotent pro
+`(edition, track)`, die Fehlzuordnung ist also dauerhaft.
+
+**dd28-11 (E) — Upgrade-Scan liest eine veraltete denormalisierte
+Profil-ID statt live aufzulösen**
+`core/library2/wishlist_mirror.py:314` (`JOIN quality_profiles qp ON qp.id =
+t.quality_profile_id`). Wechselt der Nutzer das app-weite Default-Profil
+(z.B. von „Balanced"/`acceptable` auf „Upgrade until top"/`until_cutoff`,
+`database/music_database.py:10090`), flippt das nur `is_default` — nichts
+schreibt `lib2_tracks.quality_profile_id` neu, die beim Insert per
+Schema-Trigger gesetzt wurde. `lib2_upgrade_scan`
+(`core/repair_jobs/lib2_upgrade_scan.py:86`) und der manuelle Scan
+(`api/library_v2.py:4038`) filtern also weiter nach der alten Policy und
+liefern null Kandidaten, während `wanted_views.list_cutoff_unmet` (nutzt
+live `w.effective_profile_id`) dieselben Tracks als Cutoff-Unmet listet —
+zwei Systemteile widersprechen sich. Exakt die in Guide §2.3 explizit
+verbotene Situation „ein später editiertes Profil bleibt durch alte
+denormalisierte Wishlist-Flags wirkungslos".
+
+**dd28-12 (E) — Legacy-Wishlist-Zugänge werden vom stündlichen Reconciler
+lautlos gelöscht**
+`core/library2/monitor_sync.py:806`,
+`core/repair_jobs/monitoring_list_reconcile.py:29`
+(`default_interval_hours=1`, `auto_fix=True`). Der Mirror ist asymmetrisch:
+Wishlist-*Entfernen* hat eine Rückkante nach lib2 (`sync_wishlist_removal`),
+Wishlist-*Hinzufügen* nicht — `api/wishlist.py:88`,
+`core/wishlist/service.py:166` schreiben nur die Legacy-Tabelle. Ein Track,
+der vom Nutzer, der API oder dem Failed-Download-Dialog hinzugefügt wird und
+sich zwar auf eine lib2-Zeile abbilden lässt, aber keine lib2-Regel besitzt,
+die ihn „wanted" macht, landet im `prune` und wird binnen einer Stunde per
+`wishlist_remove` wieder entfernt. Fehlgeschlagene Downloads hören damit
+lautlos auf, erneut versucht zu werden.
+
+**dd28-13 (E) — Outbox spielt eine bereits überholte Operation nach einem
+transienten Fehler erneut ab**
+`core/library2/mirror_outbox.py:202-231`. `drain` iteriert Zeilen in
+ID-Reihenfolge, stoppt aber nicht beim ersten Fehler. Scheitert Zeile 100
+(`wishlist_add` für Track T) transient (DB gesperrt) und Zeile 101
+(`wishlist_remove` für T) gelingt, bleibt Zeile 100 `pending` und wird beim
+nächsten Drain erneut abgespielt — ein gerade vom Nutzer entfernter
+Wishlist-Eintrag wird wiederbelebt. `retry_failed` (`:254`) verschärft das,
+weil es jede alte `failed`-Zeile ohne Ordnungsprüfung auf `pending`,
+`attempts=0` zurücksetzt.
+
+**dd28-14 (F) — Usenet-Cancel markiert den Grab als CANCELLED, ohne den
+Client je zu kontaktieren**
+`core/download_plugins/usenet.py:788-800`. `cancel_confirmed` startet `True`;
+die Client-Stufe steckt in `if adapter and job_id:`. Ist `job_id` `None`
+(die In-Memory-`active_downloads`-Zeile ist weg — nach einem Neustart, nach
+`clear_all_completed_downloads` oder nach einem früheren `remove=True`) oder
+der Adapter unkonfiguriert, wird das SAB/NZBGet-Remove lautlos übersprungen
+und `_update_grab(status=STATUS_CANCELLED)` läuft trotzdem. Der Rückgabewert
+von `adapter.remove()` wird zusätzlich ignoriert (der zentrale Monitor macht
+es an der Stelle korrekt: `removed = bool(run_async(...))`,
+`client_monitor.py:579`). DB sagt „cancelled", der Client lädt weiter — und
+weil „cancelled" terminal ist, adoptiert `_restore_open_grabs` diesen Job nie
+wieder. Exakt der umgekehrte Fall des zweistufigen Cancel-Vertrags aus ADR-07,
+lautlos und ohne manuelle Client-Bereinigung nicht mehr reparierbar.
+
+**dd28-15 (F) — Restart-Adoption kann einen neuen Grab an einen alten,
+bereits abgeschlossenen Client-Job binden**
+`core/acquisition/client_monitor.py:169-206`. `unknown_jobs` (Zeile 227)
+umfasst jeden Snapshot-Job der Acquisition-Kategorie ohne offenen Grab.
+`SabnzbdAdapter._get_all_sync` (`core/usenet_clients/sabnzbd.py:224-236`)
+schließt die **SAB-History** ein (`limit=50`) — abgeschlossene/fehlgeschlagene
+Jobs früherer Grabs sind also Adoptionskandidaten, und der
+`exact_title`-Zweig (Zeile 188) filtert weder nach Status noch nach Alter.
+Ein Re-Grab desselben Releases (Quarantäne-Retry, fehlgeschlagener Import),
+dessen Submission `submission_unknown` zurückgab, adoptiert damit den alten
+History-Job; `reconcile_usenet_snapshot` sieht `state == "completed"` mit
+`save_path` und ruft `record_download_completed(output_path=<alter Pfad>)` —
+eine Phantom-Completion auf ein bereits konsumiertes/entferntes Verzeichnis,
+ohne jeden Fehler.
+
+**dd28-16 (F) — Scoped „Automatic Search" hat weder Run-Sequence-Guard noch
+In-Flight-Sperre**
+`webui/src/routes/library-v2/-ui/library-v2-page.tsx:4980-4987` (Artist),
+`:4615-4625` (Album), Buttons `:5005-5009`, `:7409-7419`. `void
+runScopedSearch(...).then(setGrabBanner)` schreibt in ein einziges geteiltes
+`grabBanner`. Track-A-Suche gefolgt von Track-B-Suche: Track As langsameres
+Endergebnis landet zuletzt und überschreibt Bs Banner — der Nutzer liest das
+falsche Ergebnis (ein „ok" über einem echten Fehlschlag). Exakt die Klasse,
+die für Interactive Search bereits gefixt wurde
+(`interactive-search.tsx:409/475/483/509`, `runSequenceRef`), aber nie hier
+oder bei `updateDiscography` (`:4929-4946`, schreibt dasselbe Banner)
+angewendet. Zusätzlich sind die Buttons nicht disabled, solange eine Anfrage
+läuft — ein Doppelklick doppelt-POSTet; der Server ist zwar idempotent
+(`_job_registry.start` → 409), aber der Client rendert den 409 als
+„Search failed: …" — ein falscher Fehler über einer tatsächlich laufenden
+Suche.
+
+**dd28-17 (F) — `run_async` hat kein Timeout und blockiert den
+Monitor-Zykluslock vollständig**
+`utils/async_helpers.py:98-111`, `core/acquisition/client_monitor.py:559-586`,
+`:641-645`. `future.result()` wartet unbegrenzt. Der Monitor-Thread ruft es
+auf, während er `_cycle_lock` (Zeile 546) hält — für
+`collect_usenet_snapshot`, jedes `adapter.remove`, und via
+`persistent_reconciler_runner` → `_acquisition_client_observations()` auch
+für slskd. Ein einziger hängender Client-Aufruf stoppt dauerhaft die
+Usenet-Reconciliation, die Import-Pipeline und das Fertigwerden von Cancels;
+`status()` meldet weiterhin `running: True, last_error: None` — ein
+lautloser Totalstillstand der Persistenzschicht.
+
+**dd28-18 (A) — Multi-Edition-Release-Gruppen korrumpieren
+Tracknummer-/Total-Writes**
+`core/repair_jobs/native_p3.py:87-93`, `core/repair_jobs/track_number_repair.py:881`.
+`canonical_by_album[album_id]` wird aus **allen** `lib2_tracks`-Zeilen der
+Release-*Gruppe* gebaut, ohne Edition-Filter — `lib2_albums` ist aber die
+Gruppe, die konkrete Nummerierung pro Edition liegt in `lib2_release_tracks`.
+Bei Standard- + Deluxe-Pressung ist `api_tracks` die Vereinigung beider
+Tracklisten; `disc_total` zählt dann z.B. 28 statt 12, und
+`_fix_track_number_tag` schreibt `N/28` in jede Datei. Doppelte Titel über
+Editionen hinweg lassen `_match_title_to_api_track` zusätzlich eine beliebige
+Editions-Tracknummer wählen. Mit `dry_run: False` werden dabei auch Dateien
+umbenannt — unreviewed, deterministisch falsch, auf eine ganze Albumklasse
+angewendet.
+
+**dd28-19 (A) — Nicht erreichbarer Storage wird als erfolgreiches Löschen
+gemeldet**
+`core/repair_worker.py:1990-1999`, `core/library2/maintenance_sync.py:532-556`.
+`_remove_native_repair_file` gibt bei nicht auflösbarem Pfad `{'success':
+True, 'deleted_file': False}` zurück. Die drei Aufrufer
+(`_fix_short_preview_track`, `_fix_corrupt_audio`, `_fix_unwanted_content`,
+plus AcoustID-Delete) melden daraufhin unbedingt
+`library_v2_file_deleted: True`, `sync_repair_change` setzt `file_state=
+'deleted'` und kippt Monitoring/Wishlist. Auf einem ungemounteten NAS oder
+bei einem Path-Mapping-Miss löscht das Bestätigen eines dieser Findings
+lautlos eine Datei, die real noch existiert, und stößt einen Redownload an.
+`dead_file_cleaner` schützt sich exakt dagegen
+(`missing_path_root_is_healthy`) — die löschenden Fixes tun es nicht.
+
+**dd28-20 (A) — AcoustID-„Retag" entleert einen Track ohne Wanted-Recompute**
+`core/repair_worker.py:3132-3145`, Effekte in
+`core/repair_jobs/__init__.py:70`. Das native Retag hängt
+`lib2_track_files.track_id` auf einen neu erzeugten Track um; der
+ursprüngliche (erwartete) Track bleibt ohne jede Datei. `acoustid_scanner`s
+deklarierte Effekte sind `{'observe','tags','metadata'}` — kein `'wanted'` —
+und `'retagged'` ist weder in `_DELETE_ACTIONS` noch setzt es
+`repair_intent`, also ruft `maintenance_sync.py:588` nie
+`recompute_wanted`. Der entleerte Track wird nie als fehlend/wanted
+projiziert — das Album liest sich lautlos als vollständig, während ein Track
+keine Datei mehr hat.
+
+### 27.3 Mittel
+
+| ID | Domäne | Fundort | Kurzbeschreibung |
+|---|---|---|---|
+| dd28-22 | C | `art-picker-modal.tsx:147-150` | Re-Pick nach einem Timeout kann die gepinnte Override-URL vom gecachten Bild entkoppeln (Doppelklick-Schutz wird im `catch` zu früh wieder aufgehoben; kein UI-Pfad setzt `force=1`). |
+| dd28-23 | C | `art-picker-modal.tsx:140-151` | Ein am Client getimeouteter, serverseitig aber erfolgreicher Apply zeigt „failed", obwohl das Foto bereits gewechselt wurde — kein Query-Invalidate im `catch`-Zweig. |
+| dd28-24 | C | `core/library2/artwork.py:367,383`, aufgerufen aus `api/library_v2.py:2101,2133` | Zwei parallele Thumbnail-Requests für denselben Artist schreiben unlocked in denselben `_t.tmp`-Pfad; `is_cached_jpeg` prüft nur die ersten drei Magic-Bytes, ein interleaved Write besteht die Prüfung dauerhaft. |
+| dd28-25 | C | `api/library_v2.py:2246-2250` | Album-Art-Route ist weniger gehärtet als die Artist-Route: `retag`/`_job_registry.start` laufen nach dem bereits committeten Pick ungeschützt; jede Exception dort liefert einen 500 für eine Operation, die bereits erfolgreich war. |
+| dd28-26 | C | `api/library_v2.py:3479-3490` vs. `core/library2/artwork.py:174-196` | `_delete_artwork_files` ruft nie `forget_artwork_versions` — eine wiederverwendete Entity-ID kann mit `?v=`-Token auf gelöschte Kunst zeigen (7 Tage `immutable`-Header). |
+| dd28-27 | A | `core/repair_jobs/fake_lossless_detector.py:150-151` → `core/library2/maintenance_sync.py:188-197` | Finding trägt eine Track-ID unter `entity_type='file'`; `_resolve_links` liest sie als File-ID (ID-Räume überlappen) — dieselbe Bugklasse wie das angeblich geschlossene T-12, heute nur report-only, wird destruktiv, sobald `fake_lossless` einen Fix-Handler bekommt. |
+| dd28-28 | A | `core/repair_worker.py:3660-3664` (Erfolg bei 3677) | `path_mismatch`-Fix verschluckt einen fehlgeschlagenen DB-Update mit `except Exception: logger.debug`, meldet aber trotzdem Erfolg — die Datei ist verschoben, `lib2_track_files.path` zeigt noch auf die alte Stelle, `path_drift_reconcile` kann das nicht mehr selbst heilen. |
+| dd28-29 | A | `core/repair_jobs/native_p3.py:165-196` | In-Scan-Auto-Fix-Rename hat kein Rollback: schlägt der separate DB-Write nach dem physischen Rename fehl, bleibt die Datei umbenannt, der Katalog zeigt den alten Pfad, `report_change` wird übersprungen. |
+| dd28-30 | A | `core/repair_worker.py:864-874`, `:907-932` | `reported_changes` ist In-Memory; bei einem Prozesstod während eines großen Auto-Fix-Laufs (z.B. Tracknummer `dry_run: False`) sind Dateimutationen/DB-Writes bereits committet, aber Rescan/Tag-Cache/Artwork-Invalidierung/History für den ganzen Lauf gehen verloren. `fix_finding` (Einzel-Fix-Pfad) macht das korrekt. |
+| dd28-31 | A | `core/metadata/common.py:283` (`{path}.sstmp`), erreichbar über `repair_worker.py:3999-4002` vs. `:899` | Bulk-Fix-Thread und laufender Scan-Auto-Fix können gleichzeitig auf dieselbe Datei schreiben; beide teilen sich einen festen Temp-Dateinamen — der Verlierer fällt in den generischen `except`-Zweig zurück und landet beim nicht-atomaren In-Place-Save, den der atomare Save eigentlich ablösen sollte. |
+| dd28-32 | A | `core/repair_worker.py:1807-1824` → `maintenance_sync.py:539-556` | „Tote Referenz entfernen" setzt `monitored=0` mit User-Provenienz für den ganzen Track, auch wenn eine zweite, intakte Datei (z.B. MP3 neben fehlender FLAC) weiterhin vorhanden ist. |
+| dd28-33 | A | `core/repair_jobs/native_p3.py:481-491`, `core/repair_worker.py:2697-2698` | Cover-Fix schreibt pro Release-Gruppe nur in einen Ordner (`rep_path` = erste Datei); Mehrordner-Alben (CD1/CD2, getrennte Editionsordner) bleiben in den übrigen Ordnern dauerhaft ohne Sidecar, ohne dass das Finding erneut auftaucht. |
+| dd28-34 | B | `core/prowlarr_client.py:52-57` | `DEFAULT_MUSIC_CATEGORIES` lässt 3060 (Audio/Foreign) aus — nicht-lateinische Releases (J-Pop/K-Pop) sind über Usenet grundsätzlich nicht auffindbar, während Soulseek (kein Kategoriefilter) sie findet. |
+| dd28-35 | B | `library-v2-page.tsx:5563` + `build-search-query.ts:239-247` | Album-Level Interactive Search entfernt unbedingt eine trailing Klammergruppe — bei `"OK Computer (OKNOTOK 1997 2017)"` oder `"Definitely Maybe (Remastered)"` verschwindet die editionsrelevante Klammer aus der Query; Gegenteil des Track-Bugs, ungetestet. |
+| dd28-36 | B | `build-search-query.ts` (`splitTrailingParenGroup`) + `interactive-search.tsx:474` | Ein komplett verklammerter Titel (`"( )"`, `"(Untitled)"`) kollabiert die Query auf den Artist-Namen oder — bei zusätzlich leerem Artist — auf gar nichts; `run()` bricht dann vor `setLoading(true)` ab, UI zeigt sofort „No results" ohne je eine Anfrage zu senden. |
+| dd28-37 | B | `core/download_plugins/torrent.py:817-831`, genutzt von `usenet.py:367`/`torrent.py:166` | Ein einziges `prowlarr.indexer_ids`-Allowlist-Setting wird von Usenet und Torrent geteilt; mit Torrent-Indexer-IDs befüllt sucht Usenet dauerhaft nur Torrent-Indexer → 0 Treffer ohne jede Fehlermeldung. |
+| dd28-38 | D | `core/library2/retag.py:50-59`, `replaygain.py:39,182`, `lyrics.py:70` | Tags/ReplayGain/Lyrics werden ausschließlich in die *primäre* Datei geschrieben (`primary_order(...) LIMIT 1`); eine sekundäre Datei (FLAC+MP3, oder ein Upgrade-Duplikat wie in dd28-08) bleibt unverändert, obwohl „Write Tags" Erfolg meldet. |
+| dd28-39 | D | `core/imports/pipeline.py:1254-1256` vs. `:2001-2017` | `if not artist_context: return` setzt keine Rejection-Flags; der äußere Wrapper loggt „cannot verify, assuming success" und markiert den Task als Completed, obwohl die Datei unimportiert im Downloadordner liegt. |
+| dd28-40 | D | `core/imports/pipeline.py:1660-1668` | `create_lossy_copy` überschreibt `_final_processed_path`; bei `delete_original=False` existieren beide Dateien auf Disk, aber lib2 kennt nur die MP3 — die FLAC liest sich als Orphan, Quality-/Cutoff-Bewertung nutzt dauerhaft die verlustbehaftete Kopie. |
+| dd28-41 | E | `core/library2/mirror_outbox.py:66-68` | Wird ein Track wanted, aber `_should_queue=False`, passiert nichts — bleibt der Track wanted, ohne dass die Wishlist ihn je entfernt (z.B. Datei extern hinzugefügt oder Profilcutoff gesenkt), erzeugt das dauerhaft überflüssige Download-Versuche. |
+| dd28-42 | E | `api/library_v2.py:2618,2662` | Profil-Reassignment ohne `monitor_existing` (Default-UI-Pfad) ändert `quality_profile_id`, ruft aber nie `recompute_wanted` — `lib2_wanted_tracks.effective_profile_id` bleibt bis zum nächsten stündlichen Voll-Recompute (oder für immer, falls der Job deaktiviert ist) auf dem alten Profil stehen. |
+| dd28-43 | E | `core/library2/discography.py:138-159,177-178` | `_release_date_key` fällt bei fehlendem Tagesdatum auf `(Jahr,1,1)` zurück und behandelt ein reines Jahresdatum damit wie ein echtes Datum — `monitor_new_items='new'` monitort dadurch entgegen Guide §5 auch undatierte/nur-jahresgenaue Backkatalog-Releases automatisch; die bereits vorhandene strikte `_full_release_date_key` wird hier nicht verwendet. |
+| dd28-44 | F | `client_monitor.py:196-205`, `:383-403` | Weil SAB-History `remaining_jobs` flutet, greift der `unique_category_job`-Fallback praktisch nie; nicht-titel-matchende Grabs werden `ambiguous` und nie adoptiert. `submission_unknown` ist von `fail_stale_local_submissions` explizit ausgenommen — der Track bleibt bis zum 24-h-`evidence_ttl_expired` hängen. |
+| dd28-45 | F | `library-v2-page.tsx:5963-5971,6648-6657,6683-6687,6596-6605` | `useUiPreferencesMutation` setzt Query-Daten ungeordnet aus jeder Serverantwort; eine langsamere ältere Antwort auf einen früheren Resize kann eine neuere überschreiben — Spaltenbreite „springt zurück". |
+| dd28-46 | F | `library-v2-page.tsx:8092-8095` | Tag-Edit invalidiert nur `['library-v2','track-file-tags',trackId]`; die Tag-Gap-Zelle der Trackzeile liest aber aus der Album-Query (`track.metadata_gaps`) und zeigt nach einem erfolgreichen manuellen Tag-Write weiter „N tag gaps". |
+| dd28-47 | F | `utils/async_helpers.py:65,26-48` | Der Loop-Pump-Task (`loop.create_task(_pump_jobs())`) wird nirgends referenziert und hat keinen Done-Callback; stirbt er an einer Exception, bleibt der Thread scheinbar am Leben und jeder folgende `run_async`-Aufruf blockiert für immer, ohne sichtbaren Fehler außer einer GC-Zeit-Warnung. |
+
+### 27.4 Niedrig
+
+| ID | Domäne | Fundort | Kurzbeschreibung |
+|---|---|---|---|
+| dd28-49 | D | `core/imports/guards.py:47-49` vs. `pipeline.py:1776-1779,1880-1883` | Quarantäne-Verzeichnis wird nicht über `docker_resolve_path` aufgelöst wie Retry/Cleanup — bei Docker + Windows-Laufwerkspfad landen Einträge dort, wo Approve/Delete/List sie nicht findet. |
+| dd28-50 | D | `core/imports/guards.py:51-58`, `file_ops.py:155-166` | Quarantäne-Dateiname (`<Zeitstempel>_<Stamm>.<Endung>.quarantined`) kollidiert bei zwei Kandidaten derselben Sekunde (normales Multi-Candidate-Retry-Muster); `safe_move_file` überschreibt, ein Kandidat und sein Sidecar gehen verloren. |
+| dd28-51 | E | `core/library2/discography.py:178` | Cutoff nutzt das neueste *existierende* Release-Datum statt `discography_synced_at`; ein zwischen Läufen nachgetragenes Backkatalog-Release kann die Latte anheben und ein gleich/früher datiertes, echtes neues Release maskieren. Kein Zeitzonenfehler — beide Seiten sind naive Datumsangaben. |
+| dd28-52 | B | `core/tidal_download_client.py:590-591` | Der iss27-09-Regex-Bug (`[^\)\]]*`, bricht bei echt verschachtelten Klammern) lebt in Tidals eigenem Query-Fallback weiter fort — betrifft nur Tidal-Fallback-Suchen mit doppelt verschachtelten Klammern wie `"Song (Live (2015))"`. |
+| — | F | `library-v2-page.tsx:5288` (`awaitBulkJobState`) | Nicht gezählt, vom Agenten explizit als Nebenbefund markiert: pollt ohne Unmount-Cancellation weiter, wenn der Nutzer während eines Artist-Refresh wegnavigiert — leichtes Leck, kein Datenrisiko. |
+
+### 27.5 Geprüft und für korrekt befunden
+
+Diese Kategorien wurden gezielt geprüft und **nicht** als fehlerhaft
+bestätigt — als negative Evidenz für den Statusabgleich festgehalten:
+
+- **Domäne C:** kein separater Upload-Pfad neben der Provider-URL-Übernahme
+  (die vermutete vierte Fehlerklasse entfällt für Artists); der zentrale
+  HTTP-Fehlerparser (`webui/src/app/api-client.ts:45-61`) versteht sowohl
+  flache als auch verschachtelte `error.message` — die §37-Fehlerklasse
+  betrifft den Art-Picker nicht.
+- **Domäne B:** `splitTrailingParenGroup` selbst ist korrekt (nested
+  Klammern, unbalancierte Klammern, kombinierte Album-/Feat.-Gruppen wurden
+  einzeln durchgespielt); Sonderzeichen-Escaping ist über die gesamte Kette
+  sauber (kein manuelles String-Interpolieren in URLs, `requests` urlencodet
+  korrekt inkl. UTF-8/CJK); dieselbe Query-Zeichenkette wird tatsächlich an
+  jede Quelle gesendet — es gibt schlicht keine Pro-Quellen-Normalisierung,
+  die kaputt sein könnte.
+- **Domäne D:** `fetch_matched_album_tracklists` sammelt bereits korrekt
+  *alle* Provider (§23/§35-Fix hält); der Post-Import-Debounce in
+  `track_reconcile_trigger.py` ist korrekt album-scoped, keine
+  Kollisionsgefahr zwischen zwei Alben.
+- **Domäne E:** Monitoring übersteht einen erfolgreichen Download (§2.2 hält,
+  `wishlist/resolution.py:43` umgeht bewusst die harte Cascade-Route); die
+  Artist-Kaskade fegt explizite Track-Intents nicht mit (`wanted._decide`
+  gewichtet `user_explicit`/`wishlist_import` korrekt höher); ein Crash
+  zwischen Outbox-Execute und Mark-Processed ist unkritisch (Operationen sind
+  idempotent, PK verhindert Duplikate); das Bearbeiten der Ziel-/Cutoff-Werte
+  eines *bestehenden* Profils wirkt überall live außer im bereits als
+  dd28-11 gemeldeten Sonderfall.
+- **Domäne F:** `MonitorToggle`, `MonitoringModal.futureReleasesMutation`,
+  Interactive Searchs eigener Grab-Button und Run-Sequence-Guard,
+  `UnifiedFileRemovalDialog` sowie der *zentrale* Client-Monitor-Cancel
+  (3-Miss-Bestätigung) sind alle korrekt gegen Doppel-Submit/Rollback
+  abgesichert; die Restart-Adoption bindet niemals zwei Grabs an einen Job
+  *innerhalb desselben Zyklus*; das neue Task-per-Job-Modell im Loop-Pump
+  verwirft und vertauscht keine Jobs gegenüber dem alten
+  `run_coroutine_threadsafe`-Pfad.
+- **Domäne A:** Multi-File-Findings sind korrekt pro Datei dedupliziert
+  (nicht pro Entity); read-only Roots werden bei realem `EROFS` sauber
+  erkannt und gemeldet statt teilweise zu schreiben; `rescan_files`
+  überschreibt keine Katalog-Metadaten, die ein Fix gerade geschrieben hat;
+  in keinem geprüften Fix wird eine Alias-/Duplikat-Artist-Zeile
+  fälschlich statt der kanonischen bearbeitet.
+
+### 27.6 Empfohlene Abarbeitungsreihenfolge für die nächste Session
+
+1. **Reproduzieren, nicht blind fixen** (Guide §6.3): dd28-01/dd28-02 zuerst
+   live nachstellen — das sind exakt die zwei vom Nutzer selbst beobachteten
+   Symptome (Artist-Foto-Fehler, Usenet-Suche).
+2. **dd28-01 … dd28-07** (Timeout-/Lock-Mismatches Artwork + Search) bilden
+   einen zusammenhängenden Block: Backend-Timeouts, Frontend-Timeouts und
+   Lock-Reihenfolge sollten gemeinsam pro Domäne gefixt werden, nicht
+   einzeln, sonst verschiebt sich das Problem nur.
+3. **dd28-08 … dd28-10** (Import/Autolink: stale primary file, Alias-Album-
+   Duplikat, fehlende Edition-Zeile) sind Katalog-Integritätsbugs mit
+   Datenverlust-/Dopplungs-Charakter — vor jedem weiteren Livetest gegen
+   eine reale DB zuerst mit einer **Kopie** reproduzieren (read-only plus
+   Backup-Kopie für einen Re-Import-Testlauf, nie direkt gegen die
+   Produktiv-DB; siehe Guide §6.1).
+4. **dd28-11 … dd28-13** (Wanted/Outbox) vor jedem Release-Gate-Test, weil
+   sie bestehende automatisierte Test-Annahmen über Quality-Profile
+   möglicherweise widerlegen.
+5. **dd28-14 … dd28-17** (Download-Client-Adoption/Cancel/Async-Blocking)
+   sind am schwersten isoliert zu reproduzieren (brauchen echten
+   SAB/NZBGet/Prowlarr-Stack oder gezieltes Mocking) — dafür Zeit einplanen,
+   nicht zwischen Tür und Angel.
+6. **dd28-18 … dd28-20** (Repair-Werkzeuge) vor der nächsten
+   Produktiv-DB-Verifikation (wie in §27, Vorgänger-Runden) gegen eine
+   DB-Kopie mit echten Multi-Edition-Alben durchspielen.
+7. Rest (§27.3/§27.4) nach Kapazität; dd28-27 (fake_lossless-Identität)
+   zuerst, weil es den bereits als geschlossen geführten T-12 relativiert und
+   die Statusdoku entsprechend korrigiert werden sollte, sobald es verifiziert
+   ist.
+
+Bearbeitungsstand ausschließlich in
+[status.md](library-v2-status.md#41-multi-agent-deep-dive-vor-dem-pr-entwurf-status).

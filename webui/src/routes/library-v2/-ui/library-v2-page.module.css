@@ -2350,6 +2350,14 @@ button.statusWarn:disabled {
   margin-bottom: 8px;
 }
 
+/* dd28-06: a source failed but others answered — a warning beside real
+   results, deliberately not styled as the red "the search failed" state. */
+.searchWarning {
+  color: rgb(251, 191, 36);
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+
 .resultsWrap {
   flex: 1;
   overflow: auto;

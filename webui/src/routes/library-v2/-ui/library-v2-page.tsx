@@ -233,15 +233,37 @@ function splitTrailingParenGroup(s: string): { rest: string; group: string | nul
   return { rest: s.trim(), group: null }; // unbalanced — leave untouched
 }
 
-/** Build a source-search query from an artist name + an action label like
- *  "Interactive Search: Title (Album)". Falls back to the album context
- *  (iss27-01) when the title is really just the untitled-track placeholder. */
-export function buildSearchQuery(artistName: string, action: string): string {
+/** Build a source-search query from an artist name + an action label.
+ *
+ *  Track-scoped labels carry an appended album context — "Title (Album)" — and
+ *  that context has to come back off, or the query repeats the album name.
+ *  Album-scoped labels are just "Album", where a trailing parenthesized group
+ *  is *part of the title* ("OK Computer (OKNOTOK 1997 2017)", "Definitely
+ *  Maybe (Remastered)"). dd28-35: stripping unconditionally threw away exactly
+ *  the edition words that pick the right release. ``entity`` disambiguates —
+ *  only a track-scoped search has a trackId, so only it gets the strip.
+ *
+ *  Falls back to the album context (iss27-01) when the title is really just
+ *  the untitled-track placeholder.
+ *
+ *  dd28-36: a title that is *entirely* one parenthesized group ("(Untitled)")
+ *  would otherwise reduce to the bare artist name — or, with no artist, to an
+ *  empty query the search silently refuses to send. Keep the original tail
+ *  whenever removing the group would leave nothing behind. */
+export function buildSearchQuery(
+  artistName: string,
+  action: string,
+  entity?: Lib2EntityRef,
+): string {
   const idx = action.indexOf(': ');
   if (idx === -1) return artistName; // artist-level search
   const tail = action.slice(idx + 2);
-  const { rest: withoutAlbum, group: album } = splitTrailingParenGroup(tail);
-  const rest = withoutAlbum.replace(/\s*-\s*missing\s*$/i, '').trim();
+  const trackScoped = entity?.trackId !== undefined;
+  const { rest: withoutAlbum, group: album } = trackScoped
+    ? splitTrailingParenGroup(tail)
+    : { rest: tail.trim(), group: null };
+  const stripped = withoutAlbum.replace(/\s*-\s*missing\s*$/i, '').trim();
+  const rest = stripped || tail.replace(/\s*-\s*missing\s*$/i, '').trim();
   const finalRest = album && PLACEHOLDER_TRACK_LABEL_RE.test(rest) ? album : rest;
   return `${artistName} ${finalRest}`.trim();
 }
@@ -4725,7 +4747,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
           <AlbumTrackTable albumId={album.id} onAction={handleAction} />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
-              initialQuery={buildSearchQuery(album.primary_artist?.name ?? '', modalAction.action)}
+              initialQuery={buildSearchQuery(
+                album.primary_artist?.name ?? '',
+                modalAction.action,
+                modalAction.entity,
+              )}
               qualityProfile={album.quality_profile}
               entity={modalAction.entity}
               onClose={() => setModalAction(null)}
@@ -5203,7 +5229,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
-              initialQuery={buildSearchQuery(artist.name, modalAction.action)}
+              initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}
               qualityProfile={artist.quality_profile}
               entity={modalAction.entity}
               onClose={() => setModalAction(null)}

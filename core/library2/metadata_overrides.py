@@ -127,8 +127,38 @@ class MetadataOverride:
     updated_at: str
 
 
+def _schema_objects_present(cursor: Any) -> bool:
+    """Read-only check that every object this module owns already exists.
+
+    dd28-03: the DDL below is unconditional — ``CREATE TABLE IF NOT EXISTS``
+    still takes SQLite's write lock, and the ``DROP TRIGGER``/``CREATE
+    TRIGGER`` pair *always* rewrites schema.  Running that on every single
+    ``set_field_override`` call meant an ordinary "change artist photo" click
+    competed for the write lock with any concurrent import/scan and could fail
+    the 30s busy timeout outright.  A pure ``sqlite_master`` read costs nothing
+    and lets the steady state skip the write lock completely.
+    """
+    names = {
+        row[0]
+        for row in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index','trigger')"
+        ).fetchall()
+    }
+    if "lib2_metadata_overrides" not in names:
+        return False
+    if "idx_lib2_metadata_overrides_entity" not in names:
+        return False
+    for table in _ENTITY_TABLES.values():
+        # Only entity tables that exist need (and can have) a cleanup trigger.
+        if table in names and f"trg_{table}_metadata_overrides_delete" not in names:
+            return False
+    return True
+
+
 def ensure_metadata_overrides_schema(cursor: Any) -> None:
     """Create the override store and entity-delete cleanup triggers."""
+    if _schema_objects_present(cursor):
+        return
     cursor.execute(LIB2_METADATA_OVERRIDES_DDL)
     for index_sql in _INDEXES:
         cursor.execute(index_sql)

@@ -8,6 +8,7 @@ shape. Provider-specific response keys must not leak beyond this module.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from dataclasses import asdict, is_dataclass
 from inspect import Parameter, signature
@@ -874,18 +875,34 @@ def fetch_artwork_url(
     album_title: Optional[str] = None,
     source_ids: Optional[Mapping[str, str]] = None,
     source_order: Optional[Tuple[str, ...]] = None,
+    deadline: Optional[float] = None,
 ) -> Optional[ArtworkProviderResult]:
     """Resolve artwork through existing engines and return one typed result.
 
     Library v2 supplies normalized catalog facts; provider-specific response
     dictionaries stay inside ``core.metadata``. No image bytes or signed
     provider payloads are persisted by this adapter.
+
+    ``deadline`` is an optional ``time.monotonic()`` stamp after which no
+    *further* provider is queried (dd28-04).  The walk is sequential over every
+    configured source, so without a budget one slow provider could hold a
+    caller — and, through it, the per-entity artwork build lock — for minutes.
+    The check sits between attempts, so the bound is the deadline plus at most
+    one in-flight provider call.
     """
     kind = str(kind or "").strip().lower()
     if kind not in {"artist", "album"}:
         raise ValueError("artwork kind must be artist or album")
     normalized_ids = _normalized_source_ids(source_ids)
     artist_name = str(artist_name or "").strip()
+
+    def _out_of_budget() -> bool:
+        if deadline is None:
+            return False
+        if time.monotonic() < deadline:
+            return False
+        logger.debug("artwork provider walk hit its budget (%s)", kind)
+        return True
 
     if kind == "artist":
         from core.metadata.artist_image import get_artist_image_url
@@ -895,6 +912,8 @@ def fetch_artwork_url(
             provider_id = normalized_ids.get(source)
             if not provider_id:
                 continue
+            if _out_of_budget():
+                return None
             url = get_artist_image_url(
                 provider_id,
                 source_override=source,
@@ -925,6 +944,8 @@ def fetch_artwork_url(
         provider_id = normalized_ids.get(source)
         if not provider_id or source in {"upc", "barcode", "isrc"}:
             continue
+        if _out_of_budget():
+            return None
         if source == "musicbrainz":
             return ArtworkProviderResult(
                 kind="album",
@@ -980,6 +1001,8 @@ def fetch_artwork_url(
         available_art_sources,
         select_preferred_art,
     )
+    if _out_of_budget():
+        return None
     order = tuple(source_order) if source_order is not None else tuple(
         available_art_sources()
     )

@@ -587,8 +587,17 @@ class TidalDownloadClient(DownloadSourcePlugin):
                 variants.append(candidate)
                 seen.add(candidate.lower())
 
-        _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*$', '', original))
-        _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]', ' ', original))
+        # dd28-52: the previous `[^\)\]]*` regexes stop at the first closing
+        # bracket, so a genuinely nested group like "Song (Live (2015))" left a
+        # stray ")" behind instead of being removed. The shared strippers match
+        # by depth; the Prowlarr ladder uses the same ones.
+        from core.download_plugins.query_variants import (
+            strip_bracket_groups,
+            strip_trailing_bracket_group,
+        )
+
+        _add(strip_trailing_bracket_group(original))
+        _add(strip_bracket_groups(original))
 
         tokens = original.split()
 

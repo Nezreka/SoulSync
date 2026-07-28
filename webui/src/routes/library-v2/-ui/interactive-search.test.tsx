@@ -274,6 +274,11 @@ describe('library v2 interactive grab', () => {
     // one source failing must not blank the whole result set (iss27-01).
     await screen.findByText('Found');
     expect(screen.queryByText(/search failed/i)).not.toBeInTheDocument();
+    // dd28-06: ...but the failure must still be SAID. Previously a Usenet
+    // timeout or 500 produced no banner, no chip state and no log the user
+    // could see, so "Usenet never finds anything" looked like a property of
+    // Usenet instead of a broken call.
+    await screen.findByText(/Usenet could not be searched/i);
   });
 
   it('iss27-12: source chips expose an intuitive exact subset and normalize all', async () => {

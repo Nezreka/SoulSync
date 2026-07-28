@@ -70,7 +70,7 @@ def test_invalid_provider_bytes_are_not_cached(
         imported_conn, legacy_db, monkeypatch):
     album_id = imported_conn.execute("SELECT id FROM lib2_albums LIMIT 1").fetchone()[0]
     monkeypatch.setattr(artwork, "_embedded_art_for_album", lambda *_args: b"not-image")
-    monkeypatch.setattr(artwork, "_provider_art_url", lambda *_args: None)
+    monkeypatch.setattr(artwork, "_provider_art_url", lambda *_args, **_kwargs: None)
     database = _art_db(legacy_db)
 
     path = artwork.build_artwork(

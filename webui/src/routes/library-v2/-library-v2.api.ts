@@ -1466,7 +1466,16 @@ export async function fetchLibraryV2AlbumArtOptions(
  *  refresh won't clobber it; returns the local artwork URL to re-render. */
 export async function applyLibraryV2AlbumArt(albumId: number, url: string): Promise<string> {
   const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
-    apiClient.post(`library/v2/albums/${albumId}/art`, { json: { url } }),
+    apiClient.post(`library/v2/albums/${albumId}/art`, {
+      json: { url },
+      // dd28-01: the apply path is strictly slower than the art-options GET it
+      // follows — a bounded remote download (up to 5 revalidated redirect hops
+      // at (3.05, 15)s each), two optimize=True JPEG encodes, a DB write and
+      // the per-entity artwork build lock. ky's 10s default aborted the client
+      // while the server went on to finish the change, surfacing a raw ky
+      // error over an apply that had actually succeeded.
+      timeout: 45_000,
+    }),
   );
   if (!payload.success || !payload.image_url) {
     throw new Error(payload.error || 'Failed to apply cover art');
@@ -1500,7 +1509,11 @@ export async function fetchLibraryV2ArtistArtOptions(
  *  later refresh won't clobber it; returns the local artwork URL to re-render. */
 export async function applyLibraryV2ArtistArt(artistId: number, url: string): Promise<string> {
   const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
-    apiClient.post(`library/v2/artists/${artistId}/art`, { json: { url } }),
+    apiClient.post(`library/v2/artists/${artistId}/art`, {
+      json: { url },
+      // dd28-01: see the matching comment on applyLibraryV2AlbumArt.
+      timeout: 45_000,
+    }),
   );
   if (!payload.success || !payload.image_url) {
     throw new Error(payload.error || 'Failed to apply photo');

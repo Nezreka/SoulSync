@@ -79,7 +79,7 @@ def test_artist_prefers_provider_photo_over_embedded_album_art(
     provider_bytes = _image_bytes((11, 22, 33))
     embedded_bytes = _image_bytes((200, 100, 50))
     monkeypatch.setattr(
-        artwork, "_provider_art_url", lambda *_args: "https://example.com/artist.jpg"
+        artwork, "_provider_art_url", lambda *_args, **_kwargs: "https://example.com/artist.jpg"
     )
     monkeypatch.setattr(
         artwork, "_download_remote_artwork", lambda _url: provider_bytes
@@ -99,7 +99,7 @@ def test_artist_falls_back_to_embedded_art_when_provider_has_no_photo(
     imported_conn, legacy_db, monkeypatch, artist_id,
 ):
     embedded_bytes = _image_bytes((44, 55, 66))
-    monkeypatch.setattr(artwork, "_provider_art_url", lambda *_args: None)
+    monkeypatch.setattr(artwork, "_provider_art_url", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(artwork, "_embedded_art_for_album", lambda *_args: embedded_bytes)
 
     path = artwork.build_artwork(

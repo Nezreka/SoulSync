@@ -17,6 +17,7 @@ Registered from ``web_server.py`` via ``register_library_v2_routes(app, ...)``.
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -2224,6 +2225,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except MetadataOverrideError as exc:
             conn.rollback()
             return jsonify({"success": False, "error": str(exc)}), exc.status
+        except sqlite3.OperationalError as exc:
+            # dd28-03: a busy-timeout expiry here used to escape as a generic
+            # HTML 500, which the client renders as an unexplained "API error"
+            # for an operation that is simply worth retrying.
+            conn.rollback()
+            logger.warning("Library v2 album art apply hit a locked database: %s", exc)
+            return jsonify({
+                "success": False,
+                "error": "The database is busy right now — try again in a moment.",
+            }), 503
         finally:
             conn.close()
         if not ok:
@@ -2235,37 +2246,59 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # A1: a picked cover only lands in the DB/cache above — without this,
         # existing files keep their old embedded art forever (build_tag_diff
         # never compares cover art, so a normal retag would just skip them).
-        from core.library2 import retag
-        scope_conn = _conn()
+        #
+        # dd28-25: everything below runs AFTER the pick is already committed, so
+        # it must not be able to turn a succeeded operation into a 500.  The
+        # artist route has no such tail; this one scopes tracks and starts a job,
+        # either of which can raise (DB busy, registry state).  Report the
+        # embed-retag failure alongside the successful pick instead.
+        embed_error: Optional[str] = None
         try:
-            track_ids = retag.album_track_ids(scope_conn, album_id)
-        finally:
-            scope_conn.close()
-        if track_ids:
+            from core.library2 import retag
+            scope_conn = _conn()
             try:
-                job = _job_registry.start("retag", total=len(track_ids))
-            except JobAlreadyRunning:
-                job = None
-            if job is not None:
-                job_id = job["job_id"]
+                track_ids = retag.album_track_ids(scope_conn, album_id)
+            finally:
+                scope_conn.close()
+            if track_ids:
+                try:
+                    job = _job_registry.start("retag", total=len(track_ids))
+                except JobAlreadyRunning:
+                    job = None
+                    embed_error = "another retag job is already running"
+                if job is not None:
+                    job_id = job["job_id"]
 
-                def _run():
-                    db = get_database()
-                    try:
-                        def _progress(_stage, current, total):
-                            _job_registry.update(job_id, current=current, total=total)
-                        stats = retag.write_tags(db, track_ids, embed_cover=True,
-                                                 force_cover=True, progress=_progress)
-                        _job_registry.update(job_id, result=stats)
-                    except Exception as e:  # noqa: BLE001
-                        logger.error("Library v2 cover-embed retag failed: %s", e, exc_info=True)
-                        _job_registry.update(job_id, error=str(e))
-                    finally:
-                        _job_registry.finish(job_id)
+                    def _run():
+                        db = get_database()
+                        try:
+                            def _progress(_stage, current, total):
+                                _job_registry.update(job_id, current=current, total=total)
+                            stats = retag.write_tags(db, track_ids, embed_cover=True,
+                                                     force_cover=True, progress=_progress)
+                            _job_registry.update(job_id, result=stats)
+                        except Exception as e:  # noqa: BLE001
+                            logger.error("Library v2 cover-embed retag failed: %s", e, exc_info=True)
+                            _job_registry.update(job_id, error=str(e))
+                        finally:
+                            _job_registry.finish(job_id)
 
-                threading.Thread(target=_run, name="lib2-cover-embed", daemon=True).start()
+                    threading.Thread(target=_run, name="lib2-cover-embed", daemon=True).start()
+        except Exception as e:  # noqa: BLE001
+            logger.error("Library v2 cover-embed scheduling failed: %s", e, exc_info=True)
+            embed_error = str(e)
 
-        return jsonify({"success": True, "album_id": album_id, "image_url": _artwork_url("album", album_id)})
+        payload = {
+            "success": True,
+            "album_id": album_id,
+            "image_url": _artwork_url("album", album_id),
+        }
+        if embed_error:
+            payload["embed_warning"] = (
+                f"Cover applied, but embedding it into the track files could not "
+                f"be started: {embed_error}"
+            )
+        return jsonify(payload)
 
     _artist_art_options_cache: Dict[int, tuple] = {}
     _artist_art_options_cache_lock = threading.Lock()
@@ -2353,6 +2386,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except MetadataOverrideError as exc:
             conn.rollback()
             return jsonify({"success": False, "error": str(exc)}), exc.status
+        except sqlite3.OperationalError as exc:
+            # dd28-03: see the matching handler on the album art route.
+            conn.rollback()
+            logger.warning("Library v2 artist art apply hit a locked database: %s", exc)
+            return jsonify({
+                "success": False,
+                "error": "The database is busy right now — try again in a moment.",
+            }), 503
         finally:
             conn.close()
         if not ok:
@@ -3479,13 +3520,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def _delete_artwork_files(db, kind: str, eid: int) -> None:
         """Remove the cached artwork (full + thumb) of a deleted entity."""
         try:
-            from core.library2.artwork import artwork_file, thumb_file
+            from core.library2.artwork import (
+                artwork_file, forget_artwork_versions, thumb_file,
+            )
             for f in (artwork_file(db, kind, eid), thumb_file(db, kind, eid)):
                 if f.exists():
                     try:
                         f.unlink()
                     except OSError:
                         pass
+            # dd28-26: the in-process version cache still holds this entity's
+            # last mtime.  SQLite reuses AUTOINCREMENT-free rowids, so a later
+            # entity can land on the same id and inherit a ``?v=`` token that
+            # points at deleted art — behind a 7-day ``immutable`` header.
+            forget_artwork_versions(db, kind, eid)
         except Exception as e:  # noqa: BLE001
             logger.debug("artwork cleanup failed (%s %s): %s", kind, eid, e)
 

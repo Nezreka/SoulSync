@@ -22,6 +22,8 @@ import json
 import os
 import socket
 import threading
+import time
+import uuid
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
@@ -47,24 +49,31 @@ _build_locks_guard = threading.Lock()
 
 
 @contextmanager
-def _build_lock(database, kind: str, entity_id: int) -> Iterator[None]:
+def _build_lock(
+    database, kind: str, entity_id: int, *, timeout: Optional[float] = None
+) -> Iterator[bool]:
     """Reference-counted per-entity lock; entries disappear when idle.
 
     A full first import may touch hundreds of thousands of entities, so a
     permanent lock registry would trade the provider stampede for a memory
     leak.  Counting owners + waiters lets us safely prune without allowing a
     third caller to create a second lock while another waiter still exists.
+
+    Yields whether the lock was actually taken.  Without ``timeout`` that is
+    always ``True``; with one, a caller that would otherwise queue behind a
+    long provider walk can decide to proceed unserialized (dd28-04).
     """
     key = (str(database.database_path), kind, int(entity_id))
     with _build_locks_guard:
         current = _build_locks.get(key)
         lock, references = current if current is not None else (threading.Lock(), 0)
         _build_locks[key] = (lock, references + 1)
-    lock.acquire()
+    acquired = lock.acquire(timeout=timeout) if timeout is not None else lock.acquire()
     try:
-        yield
+        yield acquired
     finally:
-        lock.release()
+        if acquired:
+            lock.release()
         with _build_locks_guard:
             current = _build_locks.get(key)
             if current is not None and current[0] is lock:
@@ -362,17 +371,43 @@ def _normalize_jpeg(data: bytes) -> Optional[bytes]:
     return variants[0] if variants else None
 
 
-def _write_thumbnail_bytes(dst: Path, data: bytes) -> None:
+def _unique_tmp_path(dst: Path, suffix: str = ".tmp") -> Path:
+    """Per-writer staging path for an atomic ``os.replace`` into ``dst``.
+
+    dd28-24: a fixed ``<name>.tmp`` is only safe when writers to the same
+    destination are serialized, and the thumbnail writers are not — two HTTP
+    requests for the same artist's thumbnail race each other outside any lock.
+    Interleaved writes into one shared staging file produce a spliced JPEG that
+    still starts with ``FF D8 FF``, so :func:`is_cached_jpeg` accepts it
+    permanently.  A per-writer name makes each ``os.replace`` publish exactly
+    the bytes its own writer produced.
+    """
+    unique = f"{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}"
+    return dst.with_name(f"{dst.name}.{unique}{suffix}")
+
+
+def _discard_tmp_path(tmp: Path) -> None:
+    """Remove a staging file that never made it through ``os.replace``."""
     try:
-        tmp = dst.with_suffix(".tmp")
+        tmp.unlink()
+    except OSError:
+        pass
+
+
+def _write_thumbnail_bytes(dst: Path, data: bytes) -> None:
+    tmp = _unique_tmp_path(dst)
+    try:
         tmp.write_bytes(data)
         os.replace(tmp, dst)
     except OSError as exc:
         logger.debug("thumbnail generation failed for %s: %s", dst, exc)
+    finally:
+        _discard_tmp_path(tmp)
 
 
 def _write_thumbnail(src: Path, dst: Path, height: int = 256) -> None:
     """Write a small JPEG thumbnail (Lidarr-style) for fast list rendering."""
+    tmp = _unique_tmp_path(dst)
     try:
         from PIL import Image
         with Image.open(src) as im:
@@ -380,11 +415,12 @@ def _write_thumbnail(src: Path, dst: Path, height: int = 256) -> None:
             w, h = im.size
             if h > height:
                 im = im.resize((max(1, int(w * height / h)), height), Image.LANCZOS)
-            tmp = dst.with_suffix(".tmp")
             im.save(tmp, "JPEG", quality=82, optimize=True)
             os.replace(tmp, dst)
     except Exception as e:  # noqa: BLE001
         logger.debug("thumbnail generation failed for %s: %s", src, e)
+    finally:
+        _discard_tmp_path(tmp)
 
 
 def _resolve_abs(file_path: str, config_manager) -> Optional[str]:
@@ -423,10 +459,14 @@ def _embedded_art_for_album(conn, config_manager, album_id: int) -> Optional[byt
     return None
 
 
-def _provider_art_url(conn, kind: str, entity_id: int) -> Optional[str]:
+def _provider_art_url(
+    conn, kind: str, entity_id: int, *, deadline: Optional[float] = None
+) -> Optional[str]:
     """Best-effort provider image URL from stored external IDs / names (no media
     server). Artists use the artist-image resolver; albums use the cover-art
-    lookup across whatever providers are available (CAA/Deezer/iTunes/Spotify…)."""
+    lookup across whatever providers are available (CAA/Deezer/iTunes/Spotify…).
+
+    ``deadline`` bounds the sequential provider walk (dd28-04)."""
     try:
         if kind == "artist":
             row = conn.execute(
@@ -453,6 +493,7 @@ def _provider_art_url(conn, kind: str, entity_id: int) -> Optional[str]:
                 "artist",
                 artist_name=effective["name"],
                 source_ids=source_ids,
+                deadline=deadline,
             )
             return result.url if result else None
         elif kind == "album":
@@ -498,6 +539,7 @@ def _provider_art_url(conn, kind: str, entity_id: int) -> Optional[str]:
                 artist_name=artist_effective["name"],
                 album_title=album_effective["title"],
                 source_ids=source_ids,
+                deadline=deadline,
             )
             return result.url if result else None
     except Exception as e:  # noqa: BLE001
@@ -568,8 +610,15 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
         )
 
 
+# dd28-04: a build holds the per-entity lock for its whole provider walk, and
+# anything waiting on that lock — including a user's "apply this photo" click —
+# waits with it.  Cap the walk so the lock has a knowable worst-case hold time.
+PROVIDER_WALK_BUDGET_S = 25.0
+
+
 def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id: int,
                             *, force: bool = False) -> Optional[str]:
+    deadline = time.monotonic() + PROVIDER_WALK_BUDGET_S
     out = artwork_file(database, kind, entity_id)
     if out.exists() and not force:
         if is_cached_jpeg(out):
@@ -604,7 +653,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
         # cover. Prefer the provider's artist image; embedded album art is the
         # resilient fallback for providers/artists without one.
         provider_attempted = True
-        url = _provider_art_url(conn, kind, entity_id)
+        url = _provider_art_url(conn, kind, entity_id, deadline=deadline)
         if url:
             try:
                 data = _download_remote_artwork(url)
@@ -625,7 +674,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
                 data = _embedded_art_for_album(conn, config_manager, album["id"])
 
     if not data and not provider_attempted:
-        url = _provider_art_url(conn, kind, entity_id)
+        url = _provider_art_url(conn, kind, entity_id, deadline=deadline)
         if url:
             try:
                 data = _download_remote_artwork(url)
@@ -638,8 +687,8 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
     if not variants:
         return None
     data, thumbnail = variants
+    tmp = _unique_tmp_path(out, ".writing")
     try:
-        tmp = out.with_suffix(".writing")
         tmp.write_bytes(data)
         os.replace(tmp, out)
         _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
@@ -648,6 +697,8 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
     except OSError as e:
         logger.debug("artwork write failed (%s %s): %s", kind, entity_id, e)
         return None
+    finally:
+        _discard_tmp_path(tmp)
 
 
 _background_executor: Optional[ThreadPoolExecutor] = None
@@ -975,21 +1026,29 @@ def apply_manual_artwork(
     data, thumbnail = variants
 
     from core.library2.metadata_overrides import set_field_override
-    set_field_override(
-        conn, entity_type=entity_type, entity_id=entity_id,
-        field_name="image_url", value=url, profile_id=profile_id,
-        reason="manual cover pick",
-    )
 
-    # Serialize the final cache replacement with background/on-demand builds.
-    # The override is already persisted on this connection, so whichever build
-    # follows will also resolve to the user's pinned URL.
+    # dd28-04: take the per-entity build lock BEFORE opening the write
+    # transaction, not after.  ``set_field_override`` starts SQLite's write
+    # transaction, which the caller only commits once this returns — acquiring
+    # the lock afterwards meant the entire application's DB write lock could
+    # sit behind a concurrent ``build_artwork``'s provider walk and download.
+    # Opening the artist detail page starts exactly such a build for a cold
+    # artist, and the picker is opened from that same page, so the collision
+    # was the normal case.  Waiting here costs nothing but this request.
     with _build_lock(database, kind, entity_id):
+        set_field_override(
+            conn, entity_type=entity_type, entity_id=entity_id,
+            field_name="image_url", value=url, profile_id=profile_id,
+            reason="manual cover pick",
+        )
         out = artwork_file(database, kind, entity_id)
         try:
-            tmp = out.with_suffix(".writing")
-            tmp.write_bytes(data)
-            os.replace(tmp, out)
+            tmp = _unique_tmp_path(out, ".writing")
+            try:
+                tmp.write_bytes(data)
+                os.replace(tmp, out)
+            finally:
+                _discard_tmp_path(tmp)
             _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
         except OSError as e:
             logger.debug("manual artwork write failed (%s %s): %s", kind, entity_id, e)

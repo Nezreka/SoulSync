@@ -243,6 +243,14 @@ function availabilityCell(r: SourceSearchResult): string {
 
 type GrabState = 'pending' | 'verifying' | 'done' | 'error';
 
+/** dd28-06: one source that failed while others succeeded. Kept separately
+ *  from `error` because it must not replace the results that DID arrive. */
+interface SourceFailure {
+  name: string;
+  displayName: string;
+  message: string;
+}
+
 /** A grab only dispatches a download — the real outcome (quarantined,
  *  imported, still running) lands later via the async import pipeline. The
  *  user's ask: if it still gets quarantined despite Quality/AcoustID check
@@ -397,6 +405,8 @@ export function InteractiveSearchModal({
   const [results, setResults] = useState<SourceSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // dd28-06: per-source failures that did NOT blank the whole result set.
+  const [sourceFailures, setSourceFailures] = useState<SourceFailure[]>([]);
   const [grabbed, setGrabbed] = useState<Record<string, GrabState>>({});
   const [grabErrors, setGrabErrors] = useState<Record<string, string>>({});
   const [qualityCheck, setQualityCheck] = useState(true);
@@ -471,12 +481,21 @@ export function InteractiveSearchModal({
    *  failing (timeout, disconnected) doesn't blank the whole result set.
    *  Narrowing the chip row to a subset searches exactly that subset. */
   async function run(q: string) {
-    if (!q.trim()) return;
     const runSequence = ++runSequenceRef.current;
+    // dd28-36: bailing out silently made an empty query look like a completed
+    // search with no hits. Say what actually happened so the user can type one.
+    if (!q.trim()) {
+      setResults([]);
+      setSourceFailures([]);
+      setLoading(false);
+      setError('Enter something to search for — this entity has no usable title.');
+      return;
+    }
     const sources = [...activeSources];
     setLoading(true);
     setError(null);
     setResults([]);
+    setSourceFailures([]);
     try {
       if (sources.length <= 1) {
         const all = await searchSources(q, sources[0]?.name, entity);
@@ -488,7 +507,7 @@ export function InteractiveSearchModal({
       // must not hide fast Usenet/Soulseek results for its full 90s timeout
       // (iss27-14).
       const merged: SourceSearchResult[] = [];
-      const failed: string[] = [];
+      const failed: SourceFailure[] = [];
       await Promise.all(
         sources.map(async (source) => {
           try {
@@ -497,13 +516,29 @@ export function InteractiveSearchModal({
             if (runSequence === runSequenceRef.current && sourceResults.length > 0) {
               setResults((current) => [...current, ...sourceResults]);
             }
-          } catch {
-            failed.push(source.display_name);
+          } catch (caught) {
+            failed.push({
+              name: source.name,
+              displayName: source.display_name,
+              message:
+                caught instanceof Error && caught.name === 'TimeoutError'
+                  ? 'timed out'
+                  : caught instanceof Error
+                    ? caught.message
+                    : 'failed',
+            });
           }
         }),
       );
+      // dd28-06: a per-source failure used to be reported only when EVERY
+      // source came back empty. With Soulseek answering, a Usenet timeout or
+      // 500 was invisible — so "Usenet never finds anything" looked like a
+      // property of Usenet rather than a broken call. Surface the failures
+      // regardless; they are a warning next to the results, not an error
+      // replacing them.
+      if (runSequence === runSequenceRef.current) setSourceFailures(failed);
       if (merged.length === 0 && failed.length > 0) {
-        throw new Error(`Search failed for ${failed.join(', ')}`);
+        throw new Error(`Search failed for ${failed.map((f) => f.displayName).join(', ')}`);
       }
     } catch (e) {
       if (runSequence === runSequenceRef.current) {
@@ -718,6 +753,13 @@ export function InteractiveSearchModal({
         </div>
 
         {error ? <div className={styles.searchError}>{error}</div> : null}
+        {!error && sourceFailures.length > 0 ? (
+          <div className={styles.searchWarning} role="status">
+            {sourceFailures.length === 1
+              ? `${sourceFailures[0].displayName} could not be searched (${sourceFailures[0].message}) — these results are from the other sources only.`
+              : `${sourceFailures.map((f) => `${f.displayName} (${f.message})`).join(', ')} could not be searched — these results are from the other sources only.`}
+          </div>
+        ) : null}
 
         <div className={styles.resultsWrap}>
           {loading && results.length === 0 ? (

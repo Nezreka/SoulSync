@@ -1936,3 +1936,37 @@ Nutzerfeedback zurückgenommen und ist kein offenes Feature.
   bleibt bewusst der Datei-Pass. Der Button erklärt nun im Tooltip konkret
   „existence, audio quality and embedded tags" und grenzt Provider-Metadaten
   ausdrücklich ab; der Artist-Refresh-Test pinnt diesen Vertrag.
+
+---
+
+## 41. Multi-Agent Deep-Dive vor dem PR-Entwurf — Status
+
+Vollständige Diagnosen unter
+[issues.md §27](library-v2-issues.md#27-finaler-multi-agent-deep-dive-vor-dem-pr-entwurf-28-juli-2026).
+Sechs parallele Read-only-Agenten haben je eine Domäne durchleuchtet
+(Repair-Werkzeuge, Interactive Search, Artwork, Import/Tagging,
+Monitoring/Wanted/Wishlist, Frontend-Async/Download-Client-Adoption) und
+insgesamt 50 Funde (2 kritisch, 18 hoch, 26 mittel, 4 niedrig) plus mehrere
+gezielt geprüfte, für korrekt befundene Bereiche gemeldet.
+
+**Status: keiner der Funde ist bislang reproduziert, verifiziert oder
+gefixt.** Dies ist eine reine Codeanalyse-Runde; die nächste Session beginnt
+mit Reproduktion (Guide §6 Punkt 3), nicht mit direkten Fixes. Die
+empfohlene Abarbeitungsreihenfolge steht in issues.md §27.6.
+
+Die zwei vom Nutzer selbst live beobachteten Symptome sind identifiziert:
+Artist-Foto-Wechsel-API-Fehler ist dd28-01 (Timeout-Mismatch zwischen
+10-s-Frontend-Default und einem potenziell langsameren Backend-Pfad ohne
+eigenes Limit), lange/verklammerte Titel scheitern bei Usenet aus einer
+Kombination von dd28-02 (hartes 15-s-Prowlarr-Timeout, lautlos als
+0-Treffer gemeldet) und dd28-07 (keine Query-Längen-/Klammer-Normalisierung
+auf dem Prowlarr-Pfad, im Gegensatz zu Tidals bereits vorhandener
+Retry-Leiter).
+
+Ein Fund relativiert einen zuvor als geschlossen geführten Stand: dd28-27
+findet in `fake_lossless_detector` dieselbe Identitäts-Bugklasse wie das
+laut [§19.2](library-v2-issues.md#tool26-12) geschlossene T-12 (nackte
+numerische ID statt `lib2:`-Präfix, dort aber unter `entity_type='file'`
+statt `'album'`/`'track'`) — aktuell nur report-only, also ohne
+Fix-Handler-Impact, aber vor der nächsten „T-12 ist erledigt"-Aussage zu
+verifizieren.

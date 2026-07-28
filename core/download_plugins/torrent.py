@@ -75,9 +75,11 @@ from core.download_plugins.torrent_stall import (
     get_stall_timeout,
 )
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
+from core.download_plugins.query_variants import indexer_query_variants
 from core.prowlarr_client import (
     DEFAULT_MUSIC_CATEGORIES,
     ProwlarrClient,
+    ProwlarrSearchError,
     ProwlarrSearchResult,
 )
 from core.torrent_clients import get_active_adapter as get_active_torrent_adapter
@@ -162,16 +164,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         if not self._prowlarr.is_configured():
             return ([], [])
-        try:
-            indexer_ids = _parse_indexer_id_filter()
-            results = await self._prowlarr.search(
-                query,
-                categories=DEFAULT_MUSIC_CATEGORIES,
-                indexer_ids=indexer_ids,
-            )
-        except Exception as e:
-            logger.error("Torrent plugin search failed: %s", e)
-            return ([], [])
+        results = await prowlarr_search_with_variants(
+            self._prowlarr, query, "torrent", timeout=timeout,
+        )
         return self._project_results(results)
 
     def _project_results(
@@ -621,9 +616,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         query = f"{artist_name} {album_name}".strip()
         _emit('searching', query=query)
         try:
-            search_results = run_async(self._prowlarr.search(
-                query, categories=DEFAULT_MUSIC_CATEGORIES,
-                indexer_ids=_parse_indexer_id_filter(),
+            search_results = run_async(prowlarr_search_with_variants(
+                self._prowlarr, query, 'torrent',
             ))
         except Exception as e:
             result['error'] = f'Prowlarr search failed: {e}'
@@ -811,6 +805,65 @@ def _guess_quality_from_title(title: str) -> str:
     if 'ogg' in lower:
         return 'ogg'
     return 'mp3'
+
+
+async def prowlarr_search_with_variants(
+    prowlarr: ProwlarrClient,
+    query: str,
+    protocol: str,
+    *,
+    timeout: Optional[int] = None,
+    categories=DEFAULT_MUSIC_CATEGORIES,
+) -> List[ProwlarrSearchResult]:
+    """One Prowlarr search per plugin, with the dd28-02/05/07/37 handling.
+
+    * the caller's ``timeout`` actually reaches Prowlarr (dd28-05) and falls
+      back to the user setting rather than a hard 15s constant (dd28-02);
+    * a failed search raises instead of masquerading as zero hits (dd28-02),
+      so the per-source UI can report it — the hybrid chain already swallows
+      per-source exceptions, so its behaviour is unchanged;
+    * a query that yields nothing is retried with progressively relaxed
+      variants before giving up (dd28-07);
+    * the shared indexer allowlist is narrowed to this protocol (dd28-37).
+    """
+    variants = indexer_query_variants(query)
+    if not variants:
+        return []
+    indexer_ids = prowlarr.indexer_ids_for_protocol(
+        _parse_indexer_id_filter(), protocol,
+    )
+    protocol = str(protocol or "").strip().lower()
+    first_error: Optional[Exception] = None
+    for attempt, variant in enumerate(variants):
+        try:
+            results = await prowlarr.search(
+                variant,
+                categories=categories,
+                indexer_ids=indexer_ids,
+                timeout=timeout,
+            )
+        except ProwlarrSearchError as e:
+            # A transport failure is not evidence that the relaxed variants
+            # would fail too, but it IS the thing the user needs told if
+            # nothing works out. Keep trying, remember the first cause.
+            logger.warning("Prowlarr %s search failed for %r: %s", protocol, variant, e)
+            first_error = first_error or e
+            continue
+        except Exception as e:  # noqa: BLE001
+            logger.error("Prowlarr %s search errored for %r: %s", protocol, variant, e)
+            first_error = first_error or e
+            continue
+        usable = [r for r in results if str(r.protocol or "").lower() == protocol]
+        if usable:
+            if attempt:
+                logger.info(
+                    "Prowlarr %s search matched on relaxed query %r (original %r)",
+                    protocol, variant, variants[0],
+                )
+            return results
+    if first_error is not None:
+        raise ProwlarrSearchError(str(first_error)) from first_error
+    return []
 
 
 def _parse_indexer_id_filter() -> List[int]:
