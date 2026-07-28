@@ -11,7 +11,7 @@ function renderSection(
   filters = defaultFilterState(),
   opts: Partial<{ mb: boolean; bucket: 'albums' | 'eps' | 'singles' }> = {},
 ) {
-  render(
+  return render(
     <DiscographySection
       bucket={opts.bucket ?? 'albums'}
       releases={releases}
@@ -25,6 +25,7 @@ function renderSection(
 
 afterEach(() => {
   document.body.innerHTML = '';
+  delete window.observeLazyBackgrounds;
 });
 
 describe('DiscographySection', () => {
@@ -116,5 +117,52 @@ describe('DiscographySection', () => {
     spy.mockRestore();
     expect(warned).toBe(false);
     expect(document.querySelectorAll('.release-card')).toHaveLength(2);
+  });
+});
+
+describe('lazy artwork loading', () => {
+  it('hands the grid to core.js so data-bg-src is actually swapped in', () => {
+    // The cards only render the ATTRIBUTE. populateReleaseSection called
+    // observeLazyBackgrounds(grid) after filling it; without the equivalent
+    // here every tile stays blank and nothing errors.
+    const observe = vi.fn();
+    window.observeLazyBackgrounds = observe;
+    renderSection([{ id: 1, title: 'A', image_url: 'a.jpg' }]);
+    expect(observe).toHaveBeenCalledWith(document.getElementById('albums-grid'));
+  });
+
+  it('re-observes when filtering mounts cards that were never seen', () => {
+    // A card revealed by turning a filter back on has never been observed, so
+    // observing only on MOUNT would leave it blank.
+    const observe = vi.fn();
+    window.observeLazyBackgrounds = observe;
+    const releases = [
+      { id: 1, owned: true },
+      { id: 2, owned: false },
+    ];
+    const { rerender } = renderSection(releases, {
+      ...defaultFilterState(),
+      ownership: 'owned' as const,
+    });
+    const first = observe.mock.calls.length;
+
+    rerender(
+      <DiscographySection
+        bucket="albums"
+        releases={releases}
+        filters={defaultFilterState()}
+        isMusicBrainz={false}
+        isSourceArtist={false}
+        onOpen={vi.fn()}
+      />,
+    );
+
+    expect(observe.mock.calls.length).toBeGreaterThan(first);
+    expect(document.querySelectorAll('.release-card')).toHaveLength(2);
+  });
+
+  it('survives core.js being unavailable', () => {
+    // The helper is a vanilla global; a missing one must not throw.
+    expect(() => renderSection([{ id: 1, title: 'A' }])).not.toThrow();
   });
 });

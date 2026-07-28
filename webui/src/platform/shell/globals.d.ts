@@ -105,6 +105,10 @@ declare global {
     /** shared-helpers.js — drops JioSaavn entries unless the experimental
      *  source is enabled. Kept as the single source of truth for that flag. */
     filterJiosaavnServiceEntries?: <T>(items: T[], idKey?: string) => T[];
+    /** core.js — points the shared IntersectionObserver at every [data-bg-src]
+     *  inside a container. Cards render the attribute; without this call the
+     *  artwork is never fetched and every tile stays blank. */
+    observeLazyBackgrounds?: (container: Element | null) => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;

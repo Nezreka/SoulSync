@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 import type { DiscographyBucket, DiscographyRelease } from '../-artist-detail.types';
 
 import {
@@ -50,6 +52,16 @@ export function DiscographySection({
     (release) => !isReleaseHidden(release, releaseFlags(release, isMusicBrainz), filters),
   );
 
+  // The cards render data-bg-src and rely on core.js's shared
+  // IntersectionObserver to swap it in — exactly as populateReleaseSection did
+  // by calling observeLazyBackgrounds(grid) after filling it. Without this the
+  // attribute is inert and NO artwork ever loads. Re-run whenever the visible
+  // set changes, since filtering mounts cards that were never observed.
+  const gridRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    window.observeLazyBackgrounds?.(gridRef.current);
+  });
+
   return (
     <div className="discography-section" id={`${bucket}-section`}>
       <div className="section-header">
@@ -59,7 +71,7 @@ export function DiscographySection({
           <span id={`${bucket}-missing-count`}>{labels.missing}</span>
         </div>
       </div>
-      <div className="releases-grid" id={`${bucket}-grid`}>
+      <div className="releases-grid" id={`${bucket}-grid`} ref={gridRef}>
         {visible.map((release, index) => (
           <ReleaseCard
             // The index is ALWAYS part of the key, not merely a fallback for a
