@@ -6,6 +6,7 @@ import {
   backLabelStack,
   popBackOrigin,
   pushArtistOrigin,
+  pushPageOrigin,
   resetGoingBackForTests,
 } from './-artist-detail.back-label';
 
@@ -123,5 +124,52 @@ describe('the stack across hops', () => {
     stack.push({ type: 'page', pageId: 'search' });
     expect(backLabelStack()).toBe(stack);
     expect(backButtonLabel()).toBe('← Back to Search');
+  });
+});
+
+describe('pushPageOrigin — arrivals that never touch navigateToArtistDetail', () => {
+  it('names the React page you came from', () => {
+    // The Library card is a plain <a href>, so nothing pushed for it and the
+    // button read a bare "Back" — the whole reason this function exists.
+    const stack = install();
+    pushPageOrigin('/library');
+    expect(stack).toEqual([{ type: 'page', pageId: 'library' }]);
+    expect(backButtonLabel()).toBe('← Back to Library');
+  });
+
+  it('reads a nested path back to its page', () => {
+    install();
+    pushPageOrigin('/watchlist/artist/42');
+    expect(backButtonLabel()).toBe('← Back to Watchlist');
+  });
+
+  it('leaves a stack that already has an origin alone', () => {
+    // navigateToArtistDetail got there first; overwriting would relabel an
+    // arrival that was already recorded correctly.
+    const stack = install([{ type: 'page', pageId: 'search' }]);
+    pushPageOrigin('/library');
+    expect(stack).toEqual([{ type: 'page', pageId: 'search' }]);
+  });
+
+  it('never overwrites an artist chain', () => {
+    const stack = install();
+    pushArtistOrigin('Aphex Twin');
+    pushPageOrigin('/library');
+    expect(stack).toEqual([{ type: 'artist', name: 'Aphex Twin' }]);
+  });
+
+  it('ignores an artist-detail path, which is a hop not an origin', () => {
+    // Otherwise every similar-artist hop would push "Back to Artist Detail".
+    const stack = install();
+    pushPageOrigin('/artist-detail/library/42');
+    expect(stack).toEqual([]);
+  });
+
+  it('stays silent on a cold load and on an unmappable path', () => {
+    const stack = install();
+    pushPageOrigin(undefined);
+    pushPageOrigin('/not-a-page');
+    expect(stack).toEqual([]);
+    expect(backButtonLabel()).toBe('← Back');
   });
 });
