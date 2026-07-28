@@ -33,6 +33,11 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_worker")
 
+# dd28-30: how many in-scan mutations may sit unsynced before the Library-v2
+# bridge is drained. Small enough that a process death costs at most this many
+# rescans/history entries, large enough not to open a connection per file.
+_CHANGE_SYNC_BATCH = 25
+
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
@@ -862,16 +867,66 @@ class RepairWorker:
 
         # Build context
         reported_changes: List[dict] = []
+        seen_changes: set = set()
+        sync_errors = [0]
+
+        def _flush_reported_changes():
+            """Push buffered in-scan mutations into the Library-v2 bridge.
+
+            dd28-30: this used to run ONCE, after the whole scan. A large
+            auto-fix run (e.g. track numbers with dry_run False) had already
+            committed its file mutations and DB writes, so a process death
+            before the end lost the rescan, tag-cache/artwork invalidation and
+            history for the entire run — with no record that anything was
+            pending. ``fix_finding`` (the single-fix path) always got this
+            right. Flushing in batches bounds the loss to the current batch.
+            """
+            if not reported_changes:
+                return
+            batch = list(reported_changes)
+            reported_changes.clear()
+            try:
+                from core.library2.maintenance_sync import sync_repair_change
+
+                for change in batch:
+                    dedup_key = (
+                        change.get('finding_type'), change.get('action'),
+                        change.get('entity_type'), str(change.get('entity_id')),
+                        str(change.get('file_path')),
+                    )
+                    if dedup_key in seen_changes:
+                        continue
+                    seen_changes.add(dedup_key)
+                    sync_repair_change(
+                        self.db,
+                        self._config_manager,
+                        job_id=job_id,
+                        finding_type=change.get('finding_type'),
+                        action=change.get('action') or 'auto_fixed',
+                        entity_type=change.get('entity_type'),
+                        entity_id=change.get('entity_id'),
+                        file_path=change.get('file_path'),
+                        details=change.get('details'),
+                        result=change.get('result'),
+                    )
+            except Exception as e:
+                logger.error(
+                    "Library-v2 post-job sync failed for %s: %s", job_id, e,
+                    exc_info=True,
+                )
+                sync_errors[0] += 1
 
         def _report_change(**change):
             """Collect successful in-scan mutations for the post-job bridge.
 
-            Jobs report only after their own file/DB write succeeded. Keeping
-            this list in the worker avoids Library-v2 writes inside a job's
-            transaction and gives finding fixes + live scans one contract.
+            Jobs report only after their own file/DB write succeeded, so the
+            buffer can be drained mid-scan without writing into a job's own
+            open transaction.
             """
             if isinstance(change, dict):
                 reported_changes.append(dict(change))
+                if len(reported_changes) >= _CHANGE_SYNC_BATCH:
+                    _flush_reported_changes()
 
         context = JobContext(
             db=self.db,
@@ -904,38 +959,8 @@ class RepairWorker:
         # Optional Library-v2 interoperability pass. The callee repeats the
         # strict feature gate; failures are counted because the underlying
         # mutation succeeded but its Library-v2 view did not converge.
-        if reported_changes:
-            try:
-                from core.library2.maintenance_sync import sync_repair_change
-
-                seen_changes = set()
-                for change in reported_changes:
-                    dedup_key = (
-                        change.get('finding_type'), change.get('action'),
-                        change.get('entity_type'), str(change.get('entity_id')),
-                        str(change.get('file_path')),
-                    )
-                    if dedup_key in seen_changes:
-                        continue
-                    seen_changes.add(dedup_key)
-                    sync_repair_change(
-                        self.db,
-                        self._config_manager,
-                        job_id=job_id,
-                        finding_type=change.get('finding_type'),
-                        action=change.get('action') or 'auto_fixed',
-                        entity_type=change.get('entity_type'),
-                        entity_id=change.get('entity_id'),
-                        file_path=change.get('file_path'),
-                        details=change.get('details'),
-                        result=change.get('result'),
-                    )
-            except Exception as e:
-                logger.error(
-                    "Library-v2 post-job sync failed for %s: %s", job_id, e,
-                    exc_info=True,
-                )
-                result.errors += 1
+        _flush_reported_changes()
+        result.errors += sync_errors[0]
 
         duration = time.time() - start_time
 
@@ -1796,6 +1821,34 @@ class RepairWorker:
         return {'success': True, 'action': 'already_queued',
                 'message': 'Upgrade already queued (or no longer a candidate)'}
 
+    def _other_usable_lib2_files(self, track_id, excluded_path) -> list:
+        """Live file rows of a track other than the one being removed (dd28-32)."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            rows = conn.execute(
+                """SELECT id, path FROM lib2_track_files
+                    WHERE track_id=? AND path IS NOT NULL AND path <> ''
+                      AND COALESCE(file_state,'active')
+                          NOT IN ('missing_confirmed','deleted')""",
+                (int(track_id),),
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001 - never block the fix on this
+            logger.debug("multi-file check failed for track %s: %s", track_id, exc)
+            return []
+        finally:
+            if conn:
+                conn.close()
+        target = os.path.normcase(os.path.normpath(str(excluded_path or ''))) \
+            if excluded_path else ''
+        others = []
+        for row in rows:
+            stored = os.path.normcase(os.path.normpath(str(row['path'])))
+            if target and stored == target:
+                continue
+            others.append(row['id'])
+        return others
+
     def _fix_dead_file(self, entity_type, entity_id, file_path, details):
         """Fix a dead file reference. Action depends on details['_fix_action']:
            'redownload' (default) — add to wishlist + remove DB entry
@@ -1811,7 +1864,16 @@ class RepairWorker:
             if not row:
                 return {'success': False, 'error': 'Track not found in Library v2'}
             title = row.get('title') or details.get('title') or 'Unknown'
-            return {
+            # dd28-32: 'remove' means "drop this dead FILE reference", but the
+            # repair_intent below unmonitors the whole TRACK with user
+            # provenance. With a second intact file (an MP3 next to a missing
+            # FLAC) that silently un-wanted a track the user still owns and
+            # still wants upgraded. ADR-03: a file-semantic finding is about a
+            # file — only the LAST file leaving makes it a track decision.
+            other_files = self._other_usable_lib2_files(
+                native_track_id, file_path or details.get('file_path'),
+            )
+            payload = {
                 'success': True,
                 'action': 'removed' if fix_action == 'remove' else 'redownload',
                 'message': (
@@ -1820,8 +1882,17 @@ class RepairWorker:
                     else f'Queued "{title}" for re-download'
                 ),
                 'library_v2_file_deleted': True,
-                'repair_intent': 'remove' if fix_action == 'remove' else 'redownload',
             }
+            if fix_action != 'remove':
+                payload['repair_intent'] = 'redownload'
+            elif not other_files:
+                payload['repair_intent'] = 'remove'
+            else:
+                payload['message'] = (
+                    f'Removed missing file reference for "{title}" — the track '
+                    f'keeps its other file and stays monitored'
+                )
+            return payload
 
         # Simple removal — just delete the dead track record
         if fix_action == 'remove':
@@ -1985,12 +2056,32 @@ class RepairWorker:
         target = file_path or details.get('original_path') or details.get('file_path')
         if not target:
             return {'success': True, 'deleted_file': False}
-        from core.library2.paths import resolve_lib2_path
+        from core.library2.paths import (
+            missing_path_root_is_healthy, resolve_lib2_path,
+        )
 
         resolved = target if os.path.isfile(target) else resolve_lib2_path(
             target, config_manager=self._config_manager,
         )
         if not resolved or not os.path.exists(resolved):
+            # dd28-19: reporting success here made every caller announce
+            # ``library_v2_file_deleted: True``; ``sync_repair_change`` then set
+            # file_state='deleted' and flipped monitoring/wishlist. On an
+            # unmounted NAS or a path-mapping miss, confirming one of these
+            # findings therefore "deleted" a file that still exists on disk and
+            # queued a redownload of it. ``dead_file_cleaner`` guards against
+            # exactly this with a root-health check; the DELETING fixes did not.
+            if not missing_path_root_is_healthy(
+                resolved or target, self._config_manager,
+            ):
+                return {
+                    'success': False,
+                    'error': (
+                        'Storage for this file is not reachable right now — '
+                        'refusing to record it as deleted. Check the mount or '
+                        'path mapping and try again.'
+                    ),
+                }
             return {'success': True, 'deleted_file': False}
         try:
             os.remove(resolved)
@@ -2694,8 +2785,31 @@ class RepairWorker:
         # apply_art_to_album_files, silently skipping the cover.jpg write while
         # embedding (which uses the resolved paths) still worked — Sokhi's
         # "embeds art but never writes cover.jpgs".
-        folder = os.path.dirname(resolved[0])
-        art_result = apply_art_to_album_files(resolved, metadata, album_info, folder=folder)
+        # dd28-33: an album is not always one folder — CD1/CD2 and separate
+        # edition folders are ordinary. Writing only into the FIRST file's
+        # directory left every other folder permanently without a sidecar, and
+        # because the finding is per release group it never came back to say
+        # so. Group the resolved files by directory and write one sidecar per
+        # folder; embedding is per file either way.
+        by_folder: dict = {}
+        for path in resolved:
+            by_folder.setdefault(os.path.dirname(path), []).append(path)
+        art_result = {}
+        for folder, folder_files in sorted(by_folder.items()):
+            folder_result = apply_art_to_album_files(
+                folder_files, metadata, album_info, folder=folder,
+            )
+            if not art_result:
+                art_result = dict(folder_result)
+                continue
+            for key in ('embedded', 'skipped', 'failed'):
+                art_result[key] = art_result.get(key, 0) + folder_result.get(key, 0)
+            art_result['cover_written'] = (
+                art_result.get('cover_written') or folder_result.get('cover_written')
+            )
+            art_result['read_only_fs'] = (
+                art_result.get('read_only_fs') or folder_result.get('read_only_fs')
+            )
 
         embedded = art_result.get('embedded', 0)
         if art_result.get('read_only_fs'):
@@ -3149,6 +3263,14 @@ class RepairWorker:
                 return {'success': False, 'error': f'Library-v2 re-home failed: {exc}'}
             finally:
                 conn.close()
+            # dd28-20: re-homing the file leaves the ORIGINAL (expected) track
+            # with no file at all. `acoustid_scanner`'s declared effects are
+            # {observe,tags,metadata} — no 'wanted' — and 'retagged' is neither
+            # a delete action nor sets repair_intent, so nothing ever called
+            # recompute_wanted. The emptied track was never projected as
+            # missing: the album read as complete while one of its tracks had
+            # no file. Say so in the result so the sync bridge reprojects.
+            emptied_track = native_track_id
             if file_path:
                 from core.library2.paths import resolve_lib2_path
                 resolved = resolve_lib2_path(file_path, config_manager=self._config_manager)
@@ -3170,6 +3292,11 @@ class RepairWorker:
                 'action': 'retagged',
                 'message': f'Re-homed file as "{actual_title}" by {actual_artist}',
                 'library_v2_rehomed_track_id': actual_track_id,
+                # dd28-20: forces the wanted reprojection the effect set does
+                # not imply, so the now-fileless original track is projected as
+                # missing instead of the album silently reading as complete.
+                'library_v2_recompute_wanted': True,
+                'library_v2_emptied_track_id': emptied_track,
             }
 
         if fix_action == 'delete':
@@ -3612,6 +3739,7 @@ class RepairWorker:
 
             # Update DB file path
             conn = None
+            db_update_error = None
             try:
                 conn = self.db._get_connection()
                 cursor = conn.cursor()
@@ -3658,10 +3786,27 @@ class RepairWorker:
                     )
                 conn.commit()
             except Exception as e:
-                logger.debug("DB path update failed for %s: %s", src, e)
+                # dd28-19/dd28-28: the file is already at `dst`. Swallowing this
+                # and still reporting success left lib2_track_files pointing at
+                # the OLD location with nothing left to reconcile it —
+                # path_drift_reconcile matches on the stored path, which no
+                # longer exists anywhere. Report the failure so the finding
+                # stays open and the user knows the catalog is out of sync.
+                logger.error("DB path update failed for %s: %s", src, e)
+                db_update_error = str(e)
             finally:
                 if conn:
                     conn.close()
+            if db_update_error:
+                return {
+                    'success': False,
+                    'action': 'moved_file',
+                    'error': (
+                        f'File was moved to {rel_to}, but the catalog could not '
+                        f'be updated ({db_update_error}). Re-run this fix or a '
+                        f'path reconcile to finish it.'
+                    ),
+                }
 
             # Clean up empty source directories
             parent = os.path.dirname(src)

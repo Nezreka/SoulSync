@@ -148,7 +148,15 @@ class FakeLosslessDetectorJob(RepairJob):
                             finding_type='fake_lossless',
                             severity='warning',
                             entity_type='file',
-                            entity_id=f"lib2:{subject['track_id']}" if subject else None,
+                            # dd28-27: this used to pass the TRACK id under
+                            # entity_type='file'. ``_resolve_links`` reads that
+                            # id against lib2_track_files, and the two id spaces
+                            # overlap, so it silently resolved to a completely
+                            # unrelated file — the same identity bug class as
+                            # T-12, one table over. Report-only today, but it
+                            # becomes destructive the moment fake_lossless gets
+                            # a fix handler, so it is named by its own id here.
+                            entity_id=f"lib2:{subject['file_id']}" if subject else None,
                             file_path=fpath,
                             title=f'Possible fake lossless: {os.path.basename(fpath)}',
                             description=(

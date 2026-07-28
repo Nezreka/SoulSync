@@ -45,6 +45,72 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_jobs.native_p3")
 
 
+def _edition_tracklists(
+    conn: Any, album_id: int,
+) -> tuple[Dict[int, list[Dict[str, Any]]], Dict[int, list[int]]]:
+    """Per-edition tracklists for one release group, plus a track→editions map.
+
+    dd28-18: ``lib2_albums`` is the release *group*; the concrete numbering of a
+    given pressing lives in ``lib2_release_tracks``. Returns ``({}, {})`` when
+    the album has no edition rows yet, so callers fall back to the group view
+    (which is correct for a single-edition album).
+    """
+    rows = conn.execute(
+        """SELECT rt.release_edition_id AS edition_id,
+                  rt.track_id AS lib2_track_id,
+                  COALESCE(rt.title_override, t.title) AS name,
+                  rt.track_number,
+                  COALESCE(rt.disc_number, 1) AS disc_number
+             FROM lib2_release_tracks rt
+             JOIN lib2_release_editions e ON e.id = rt.release_edition_id
+             LEFT JOIN lib2_tracks t ON t.id = rt.track_id
+            WHERE e.release_group_id = ? AND rt.track_id IS NOT NULL
+            ORDER BY rt.release_edition_id, COALESCE(rt.disc_number, 1),
+                     rt.track_number, rt.id""",
+        (int(album_id),),
+    ).fetchall()
+    by_edition: Dict[int, list[Dict[str, Any]]] = {}
+    of_track: Dict[int, list[int]] = {}
+    for row in rows:
+        entry = dict(row)
+        edition_id = int(entry.pop("edition_id"))
+        if entry.get("track_number") is None:
+            continue
+        by_edition.setdefault(edition_id, []).append(entry)
+        of_track.setdefault(int(entry["lib2_track_id"]), []).append(edition_id)
+    return by_edition, of_track
+
+
+def _api_tracks_for_subject(
+    subject: Dict[str, Any],
+    group_tracks: list[Dict[str, Any]],
+    editions: Dict[int, list[Dict[str, Any]]],
+    edition_of_track: Dict[int, list[int]],
+) -> list[Dict[str, Any]]:
+    """The tracklist a single file must be judged against (dd28-18).
+
+    With one edition (or none recorded) the release group's own list is the
+    right answer and behaviour is unchanged. With several, the file is judged
+    against the edition it actually belongs to — and if that cannot be
+    determined unambiguously, against nothing at all: writing a plausible-
+    looking wrong track number is worse than reporting no finding.
+    """
+    if len(editions) <= 1:
+        return group_tracks
+    try:
+        track_id = int(subject["track_id"])
+    except (KeyError, TypeError, ValueError):
+        return []
+    owning = edition_of_track.get(track_id) or []
+    if len(owning) != 1:
+        logger.debug(
+            "Skipping track %s: it maps to %d editions of a multi-edition release",
+            track_id, len(owning),
+        )
+        return []
+    return editions.get(owning[0]) or []
+
+
 @register_job
 class NativeTrackNumberRepairJob(TrackNumberRepairJob):
     """Compare file tags/names with the native canonical album track rows."""
@@ -72,6 +138,10 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
         # track row for the album so missing files still contribute to totals
         # and multi-disc numbering heuristics.
         canonical_by_album: Dict[int, list[Dict[str, Any]]] = {}
+        # dd28-18: lib2_albums is the release GROUP; the concrete numbering
+        # lives per edition in lib2_release_tracks. Keep both views.
+        edition_tracks_by_album: Dict[int, Dict[int, list[Dict[str, Any]]]] = {}
+        edition_of_track: Dict[int, list[int]] = {}
         conn = context.db._get_connection()
         try:
             from core.library2.completeness import resolve_tracklist
@@ -91,21 +161,40 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
                      ORDER BY COALESCE(disc_number, 1), track_number, id""",
                     (album_id,),
                 ).fetchall()]
+                edition_tracks, track_edition = _edition_tracklists(conn, album_id)
+                if edition_tracks:
+                    edition_tracks_by_album[album_id] = edition_tracks
+                    edition_of_track.update(track_edition)
         finally:
             conn.close()
 
         for album_id, album_subjects in by_album.items():
-            api_tracks = [
+            group_tracks = [
                 row for row in canonical_by_album.get(album_id, [])
                 if row.get("track_number") is not None
             ]
-            if not api_tracks:
+            editions = edition_tracks_by_album.get(album_id) or {}
+            if not group_tracks:
                 result.skipped += len(album_subjects)
                 continue
             for subject in album_subjects:
                 if context.check_stop() or context.wait_if_paused():
                     return result
                 result.scanned += 1
+                # dd28-18: with a standard + deluxe pressing in one release
+                # group, the union of both tracklists made disc_total count e.g.
+                # 28 instead of 12, so ``N/28`` was written into every file —
+                # and duplicate titles across editions let the title matcher
+                # pick an arbitrary edition's track number. With dry_run False
+                # that also renamed files: deterministic, unreviewed corruption
+                # over a whole class of albums. Judge each file against ITS
+                # edition, and refuse to guess when the edition is ambiguous.
+                api_tracks = _api_tracks_for_subject(
+                    subject, group_tracks, editions, edition_of_track,
+                )
+                if not api_tracks:
+                    result.skipped += 1
+                    continue
                 raw_path = str(subject.get("path") or "")
                 resolved = raw_path if os.path.isfile(raw_path) else resolve_lib2_path(
                     raw_path, config_manager=context.config_manager,
@@ -171,6 +260,12 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
                             os.path.splitext(str(new_filename))[0],
                         )
                     if new_path:
+                        # dd28-29: the rename already happened on disk. If the
+                        # separate DB write fails there is no rollback, so the
+                        # catalog keeps pointing at a path that no longer exists
+                        # and ``report_change`` is skipped too — nothing left to
+                        # reconcile it. Put the file back instead, so disk and
+                        # catalog stay in the one consistent state we still have.
                         conn = context.db._get_connection()
                         try:
                             conn.execute(
@@ -179,6 +274,19 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
                                 (new_path, int(subject["file_id"])),
                             )
                             conn.commit()
+                        except Exception:
+                            try:
+                                os.replace(new_path, resolved)
+                                logger.warning(
+                                    "Rolled back rename of %s: catalog update failed",
+                                    new_path,
+                                )
+                            except OSError as undo_exc:
+                                logger.error(
+                                    "Rename of %s could not be rolled back after a "
+                                    "failed catalog update: %s", new_path, undo_exc,
+                                )
+                            raise
                         finally:
                             conn.close()
                     result.auto_fixed += 1

@@ -585,7 +585,12 @@ def sync_repair_change(
             logger.warning("Library-v2 artwork invalidation failed: %s", exc)
 
     mirrored = 0
-    if deleting or new_file_id is not None or "wanted" in effects:
+    # dd28-20: a job whose declared effects do not include 'wanted' can still
+    # empty a track — the AcoustID retag re-homes the file onto a new identity
+    # and leaves the expected track fileless. A handler that knows it did that
+    # says so explicitly rather than relying on the job-level effect set.
+    forced_recompute = bool(result.get("library_v2_recompute_wanted"))
+    if deleting or new_file_id is not None or "wanted" in effects or forced_recompute:
         conn = database._get_connection()
         try:
             from core.library2 import ADMIN_PROFILE_ID

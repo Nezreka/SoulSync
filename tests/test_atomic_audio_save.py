@@ -45,8 +45,14 @@ def test_atomic_replace_on_success(tmp_path):
     save_audio_file(Audio(), _symbols(180.0))
 
     assert f.read_bytes() == b"ORIGINAL-AUDIO+TAGS"     # replaced with the tagged copy
-    assert saved_to == [str(f) + ".sstmp"]              # wrote the temp, NOT in place
-    assert not (tmp_path / "song.flac.sstmp").exists()  # temp cleaned up
+    # dd28-31: the staging name is per-writer now (pid/thread/uuid), because a
+    # bulk fix and a scan's auto-fix can target the same file concurrently and
+    # a shared name made the loser fall back to a non-atomic in-place save.
+    assert len(saved_to) == 1
+    assert saved_to[0] != str(f)                       # wrote a temp, NOT in place
+    assert saved_to[0].startswith(str(f) + ".")
+    assert saved_to[0].endswith(".sstmp")
+    assert not list(tmp_path.glob("song.flac.*sstmp"))  # temp cleaned up
 
 
 def test_original_survives_save_failure(tmp_path):
@@ -67,7 +73,7 @@ def test_original_survives_save_failure(tmp_path):
     save_audio_file(Audio(), _symbols(180.0))
 
     assert f.read_bytes() == b"ORIGINAL"               # never destroyed
-    assert not (tmp_path / "song.flac.sstmp").exists()  # temp removed
+    assert not list(tmp_path.glob("song.flac.*sstmp"))  # temp removed
     assert inplace == [True]                            # fell back to in-place
 
 
@@ -92,7 +98,7 @@ def test_corrupt_temp_aborts_without_inplace(tmp_path):
 
     assert ok is False                                  # signalled failure
     assert f.read_bytes() == b"ORIGINAL"                # original untouched
-    assert not (tmp_path / "song.flac.sstmp").exists()  # temp removed
+    assert not list(tmp_path.glob("song.flac.*sstmp"))  # temp removed
     assert inplace == []                                # NO in-place retry
 
 
@@ -138,7 +144,7 @@ def test_real_flac_atomic_save_preserves_audio(tmp_path):
     reread = FLAC(str(f))
     assert reread.info.length == pytest.approx(orig_len, abs=0.05)  # audio intact
     assert reread["title"] == ["Atomic Test"]                      # tag written
-    assert not (tmp_path / "real.flac.sstmp").exists()
+    assert not list(tmp_path.glob("real.flac.*sstmp"))
 
 
 # ── #1000: audio-frame integrity verification (no ffmpeg needed) ──
@@ -217,7 +223,7 @@ def test_flac_frame_corruption_aborts(tmp_path, monkeypatch):
 
     assert ok is False                         # aborted
     assert f.read_bytes() == original          # original byte-for-byte intact
-    assert not (tmp_path / "real.flac.sstmp").exists()
+    assert not list(tmp_path.glob("real.flac.*sstmp"))
 
 
 def test_flac_clean_tag_write_replaces(tmp_path):
@@ -232,4 +238,4 @@ def test_flac_clean_tag_write_replaces(tmp_path):
                                                 File=__import__("mutagen").File))
     assert ok is True
     assert FLAC(str(f))["title"] == ["Clean Write"]
-    assert not (tmp_path / "real.flac.sstmp").exists()
+    assert not list(tmp_path.glob("real.flac.*sstmp"))

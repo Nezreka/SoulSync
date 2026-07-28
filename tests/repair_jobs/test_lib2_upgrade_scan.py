@@ -51,9 +51,14 @@ def _seed_track(conn, *, policy: str, monitored: int = 1) -> int:
         "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
         (album, artist),
     )
+    # dd28-11: the scan resolves the EFFECTIVE profile (the shared cascade),
+    # not the denormalized column — and the cascade only honours a level whose
+    # ``quality_profile_explicit`` flag is set, exactly as
+    # ``assign_quality_profile`` writes it. Seeding the bare column alone
+    # describes an inherited value, which must NOT win.
     track = conn.execute(
-        "INSERT INTO lib2_tracks(album_id, title, monitored, quality_profile_id) "
-        "VALUES(?,?,?,?)",
+        "INSERT INTO lib2_tracks(album_id, title, monitored, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?,?,?,?,1)",
         (album, f"Track {profile}", monitored, profile),
     ).lastrowid
     conn.execute(
