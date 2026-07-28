@@ -65308,14 +65308,14 @@ body.max-performance #page-particles-canvas {
 */
 
 /* Library-only: status filter (owned/missing only makes sense when you own things) */
-body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) .filter-group:has(.filter-label:only-child),
-body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) .discography-filter-btn[data-filter="ownership"] {
+body[data-artist-source="source"] .artist-detail-page .filter-group:has(.filter-label:only-child),
+body[data-artist-source="source"] .artist-detail-page .discography-filter-btn[data-filter="ownership"] {
     display: none !important;
 }
 
 /* Library-only: Enhanced view toggle + container (per-track editing requires owned tracks) */
-body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) .enhanced-view-toggle-btn,
-body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) #enhanced-view-container {
+body[data-artist-source="source"] .artist-detail-page .enhanced-view-toggle-btn,
+body[data-artist-source="source"] .artist-detail-page #enhanced-view-container {
     display: none !important;
 }
 
@@ -65325,33 +65325,33 @@ body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) 
    .collection-overview and #artist-hero-sidebar both render usefully for
    source artists (collection shows 0/N missing, Top Tracks pulls from
    Last.fm by name) so they stay visible. */
-body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) .artist-enrichment-coverage,
-body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) #library-artist-radio-btn,
-body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) #library-artist-enhance-btn {
+body[data-artist-source="source"] .artist-detail-page .artist-enrichment-coverage,
+body[data-artist-source="source"] .artist-detail-page #library-artist-radio-btn,
+body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-btn {
     display: none !important;
 }
 
 
-/* The artist-detail page is React-rendered now and lives inside
-   #webui-react-root, NOT inside #artist-detail-page. Every rule below is
-   therefore written against BOTH: the legacy container, and the
-   .artist-detail-page wrapper the React page puts around itself. Dropping the
-   second half silently un-styles the whole page — the release cards lose their
-   big-photo treatment and the source-artist hides (Artist Radio, Enhance
-   Quality, enrichment coverage) stop applying, which is how a source artist
-   ended up offering library-only actions.
+/* The artist-detail page is React-rendered and lives inside
+   #webui-react-root, under the .artist-detail-page wrapper the page puts
+   around itself. These rules used to name the legacy container as well; that
+   element is gone, so the id half was matching nothing. The class half is
+   load-bearing — dropping it un-styles the whole page: release cards lose
+   their big-photo treatment and the source-artist hides (Artist Radio,
+   Enhance Quality, enrichment coverage) stop applying, which is how a source
+   artist once ended up offering library-only actions.
    ========================================================================= */
 
 /* =========================================================================
    Standalone /artist-detail page hero — blurred-background treatment
    ========================================================================= */
 
-:is(#artist-detail-page, .artist-detail-page) .artist-hero-section {
+.artist-detail-page .artist-hero-section {
     position: relative;
     overflow: hidden;
 }
 
-:is(#artist-detail-page, .artist-detail-page) .artist-detail-hero-bg {
+.artist-detail-page .artist-detail-hero-bg {
     /* Blurred artist-cover backdrop retired — Boulder didn't want the artist
        image bleeding behind the header. The element stays in the DOM (JS still
        sets its background-image) but is hidden; flip display back on to restore. */
@@ -65367,7 +65367,7 @@ body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) 
     pointer-events: none;
 }
 
-:is(#artist-detail-page, .artist-detail-page) .artist-detail-hero-overlay {
+.artist-detail-page .artist-detail-hero-overlay {
     position: absolute;
     inset: 0;
     background: linear-gradient(180deg,
@@ -65378,7 +65378,7 @@ body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) 
     pointer-events: none;
 }
 
-:is(#artist-detail-page, .artist-detail-page) .artist-hero-content {
+.artist-detail-page .artist-hero-content {
     position: relative;
     z-index: 2;
 }
@@ -65395,7 +65395,7 @@ body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) 
    fixed 300px height, flex column). These overrides switch off the parts
    that fight with the .album-card layout. */
 
-:is(#artist-detail-page, .artist-detail-page) .release-card.album-card {
+.artist-detail-page .release-card.album-card {
     background: rgba(18, 18, 18, 1);
     backdrop-filter: none;
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -65411,7 +65411,7 @@ body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) 
                 border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-:is(#artist-detail-page, .artist-detail-page) .release-card.album-card:hover {
+.artist-detail-page .release-card.album-card:hover {
     background: rgba(18, 18, 18, 1);
     transform: translateY(-5px) scale(1.02);
     border-color: rgba(var(--accent-rgb), 0.25);
@@ -65419,18 +65419,18 @@ body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) 
                 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 
-:is(#artist-detail-page, .artist-detail-page) .release-card.album-card.missing {
+.artist-detail-page .release-card.album-card.missing {
     opacity: 1;  /* let the completion-overlay convey state, not the whole card */
 }
 
 /* The fit-content override on the discography page also conflicts with
    aspect-ratio:1 — clear it for album-card variants. */
-:is(#artist-detail-page, .artist-detail-page) .discography-sections .release-card.album-card {
+.artist-detail-page .discography-sections .release-card.album-card {
     height: auto;
 }
 
 /* MusicBrainz icon position (was tied to the old card's padding) */
-:is(#artist-detail-page, .artist-detail-page) .release-card.album-card .mb-card-icon {
+.artist-detail-page .release-card.album-card .mb-card-icon {
     position: absolute;
     top: 8px;
     left: 8px;
@@ -65443,7 +65443,7 @@ body[data-artist-source="source"] :is(#artist-detail-page, .artist-detail-page) 
     transition: opacity 0.2s ease;
 }
 
-:is(#artist-detail-page, .artist-detail-page) .release-card.album-card .mb-card-icon:hover {
+.artist-detail-page .release-card.album-card .mb-card-icon:hover {
     opacity: 1;
 }
 
