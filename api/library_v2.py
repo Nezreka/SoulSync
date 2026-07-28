@@ -3111,39 +3111,74 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     @app.route("/api/library/v2/artists/<int:artist_id>/discography/refresh", methods=["POST"])
     def lib2_discography_refresh(artist_id):
         """Fetch the artist's full provider discography and persist it as
-        browsable (unmonitored) ``origin='discography'`` releases."""
+        browsable (unmonitored) ``origin='discography'`` releases.
+
+        Background job; poll ``/api/library/v2/jobs/status``. This walks a
+        provider catalogue: a prolific artist is ~70 releases plus their
+        tracklists, measured at 55s against a real library, and that is with
+        the provider healthy. Holding a request open for that long put the
+        answer past any sane client timeout and pinned a worker thread while
+        the work was all network wait, so the browser reported a timeout on a
+        refresh the server went on to finish.
+
+        The job kind is per artist, so two artists can refresh at once while a
+        double-click on one gets the running job's id back instead of starting
+        a second walk over the same catalogue.
+        """
         guard = _guard()
         if guard:
             return guard
-        db = get_database()
         try:
-            from core.library2.discography import refresh_artist_discography
-            stats, mirrored = refresh_artist_discography(
-                db,
-                artist_id,
-                config_manager,
-                wishlist_profile_id=_profile(),
-            )
-        except ValueError:
-            return jsonify({"success": False, "error": "Artist not found"}), 404
-        except Exception as e:  # noqa: BLE001
-            logger.error("Discography refresh failed (artist %s): %s", artist_id, e)
-            return jsonify({"success": False, "error": str(e)}), 500
-        # monitor_new_items enforcement: releases discovered on a re-expansion
-        # of a monitored 'all'/'new' artist come back pre-monitored — give them
-        # real track rows and mirror those into the wishlist (shared helper,
-        # also used by the periodic monitored-discography refresh job).
-        auto_ids = stats.pop("auto_monitor_album_ids", []) or []
-        # §17.2: already-owned albums whose track numbers collided got
-        # re-resolved (title-healed) in the same call, see
-        # discography.repair_track_number_collisions.
-        repaired_ids = stats.pop("repaired_track_number_collisions", []) or []
+            job = _job_registry.start(f"discography-refresh:{artist_id}")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False, "error": str(exc), "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
+        # Resolve the active profile in the request context, never in the thread.
+        active_profile = _profile()
 
-        # §62.6 Stufe 3: reconcile the artist's MB release groups OFF the hot
-        # path — MB is rate-limited (1 req/s), and the reconcile only folds
-        # provider-release duplicates the sync itself cannot see. Best-effort:
-        # a failure here must never fail the refresh that already happened.
-        def _mb_reconcile():
+        def _run():
+            db = get_database()
+            try:
+                from core.library2.discography import refresh_artist_discography
+                stats, mirrored = refresh_artist_discography(
+                    db,
+                    artist_id,
+                    config_manager,
+                    wishlist_profile_id=active_profile,
+                )
+            except ValueError:
+                _job_registry.update(job_id, error="Artist not found")
+                _job_registry.finish(job_id)
+                return
+            except Exception as e:  # noqa: BLE001
+                logger.error("Discography refresh failed (artist %s): %s", artist_id, e)
+                _job_registry.update(job_id, error=str(e))
+                _job_registry.finish(job_id)
+                return
+            # monitor_new_items enforcement: releases discovered on a re-expansion
+            # of a monitored 'all'/'new' artist come back pre-monitored — give them
+            # real track rows and mirror those into the wishlist (shared helper,
+            # also used by the periodic monitored-discography refresh job).
+            auto_ids = stats.pop("auto_monitor_album_ids", []) or []
+            # §17.2: already-owned albums whose track numbers collided got
+            # re-resolved (title-healed) in the same call, see
+            # discography.repair_track_number_collisions.
+            repaired_ids = stats.pop("repaired_track_number_collisions", []) or []
+            _job_registry.update(job_id, result={
+                **stats,
+                "auto_monitored_releases": len(auto_ids),
+                "auto_monitor_mirrored": mirrored,
+                "repaired_track_number_collisions": len(repaired_ids),
+            })
+            _job_registry.finish(job_id)
+
+            # §62.6 Stufe 3: reconcile the artist's MB release groups after the
+            # job reports done — MB is rate-limited (1 req/s), and the reconcile
+            # only folds provider-release duplicates the sync itself cannot see.
+            # Best-effort: a failure here must never fail the refresh that
+            # already happened.
             try:
                 from core.library2 import mb_reconcile
                 mb_reconcile.reconcile_artist_release_groups(db, artist_id)
@@ -3151,13 +3186,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 logger.debug("MB release-group reconcile failed (artist %s): %s",
                              artist_id, reconcile_error)
 
-        threading.Thread(target=_mb_reconcile, name="lib2-mb-reconcile",
+        threading.Thread(target=_run, name="lib2-discography-refresh",
                          daemon=True).start()
-
-        return jsonify({"success": True, **stats,
-                        "auto_monitored_releases": len(auto_ids),
-                        "auto_monitor_mirrored": mirrored,
-                        "repaired_track_number_collisions": len(repaired_ids)})
+        return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/maintenance/repair-duplicates", methods=["POST"])
     def lib2_repair_duplicates():

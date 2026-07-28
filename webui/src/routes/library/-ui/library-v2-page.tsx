@@ -76,7 +76,7 @@ import {
   removeLibraryV2FileRecords,
   searchLibraryV2MatchService,
   refreshLibraryV2,
-  refreshLibraryV2Discography,
+  startLibraryV2DiscographyRefresh,
   reconcileUnmappedArtists,
   reconcileWishlist,
   rescanLibraryV2AcquisitionImport,
@@ -112,6 +112,7 @@ import {
   type LibraryV2ArtistTableColumns,
   type LibraryV2FileTags,
   type LibraryV2ImportState,
+  type LibraryV2DiscographyStats,
   type LibraryV2JobState,
   type LibraryV2ManualSkip,
   type LibraryV2MatchService,
@@ -6041,11 +6042,16 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     await runBannerTask(async ({ sequence }) => {
       publishBanner(sequence, { tone: 'busy', text: 'Fetching full discography…' });
       try {
-        const stats = await refreshLibraryV2Discography(artistId);
-        await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+        // A provider catalogue walk runs as a background job: polling it means
+        // a slow provider shows as "still running" instead of a timeout on
+        // work the server is going to finish anyway.
+        const jobId = await startLibraryV2DiscographyRefresh(artistId);
+        const state = await awaitBulkJobState(queryClient, jobId);
+        if (state.error) throw new Error(state.error);
+        const stats = (state.result ?? {}) as Partial<LibraryV2DiscographyStats>;
         publishBanner(sequence, {
           tone: 'ok',
-          text: `Discography updated from ${stats.source ?? 'provider'}: ${stats.added} new, ${stats.enriched} matched.`,
+          text: `Discography updated from ${stats.source ?? 'provider'}: ${stats.added ?? 0} new, ${stats.enriched ?? 0} matched.`,
         });
       } catch (e) {
         publishBanner(sequence, {

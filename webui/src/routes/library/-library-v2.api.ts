@@ -8,7 +8,6 @@ import type {
   LibraryV2ArtistDetail,
   LibraryV2ArtistSettings,
   LibraryV2ArtistSummary,
-  LibraryV2DiscographyStats,
   LibraryV2FileTags,
   LibraryV2ImportState,
   LibraryV2JobState,
@@ -613,17 +612,24 @@ export async function blacklistLibraryV2Source(input: {
   if (!payload.success) throw new Error(payload.error || 'Failed to blacklist source');
 }
 
-export async function refreshLibraryV2Discography(
-  artistId: number,
-): Promise<LibraryV2DiscographyStats> {
-  const payload = await readJson<{ success: boolean; error?: string } & LibraryV2DiscographyStats>(
+/** Start the provider discography walk. Returns the background job to poll.
+ *
+ *  This used to be a plain request that answered with the stats. A prolific
+ *  artist is a ~70-release catalogue plus tracklists — measured at 55s on a
+ *  real library — so the answer regularly arrived after any client timeout we
+ *  could justify, and the browser reported a failure for work the server
+ *  completed. A 409 means the same artist is already being walked; its job id
+ *  comes back so the caller attaches to that instead of starting a second one.
+ */
+export async function startLibraryV2DiscographyRefresh(artistId: number): Promise<string> {
+  const payload = await readJson<{ success: boolean; error?: string; job_id?: string }>(
     apiClient.post(`library/v2/artists/${artistId}/discography/refresh`, {
       json: {},
-      timeout: 60_000, // provider discography lookup can take a few seconds
+      throwHttpErrors: false,
     }),
   );
-  if (!payload.success) throw new Error(payload.error || 'Discography refresh failed');
-  return payload;
+  if (!payload.job_id) throw new Error(payload.error || 'Discography refresh failed');
+  return payload.job_id;
 }
 
 // --- ldp-01/ldp-02/ldp-05: provider-artist discovery ------------------------

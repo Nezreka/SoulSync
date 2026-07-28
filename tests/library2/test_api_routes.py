@@ -3648,3 +3648,120 @@ def test_reset_leaves_the_append_only_history_intact(api):
     finally:
         conn.close()
     assert survived == 1
+
+
+# --- discography refresh runs as a background job ------------------------
+
+
+def _await_job(client, job_id, timeout=10.0):
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        state = client.get(
+            "/api/library/v2/jobs/status", query_string={"job_id": job_id},
+        ).get_json()
+        if not state.get("running"):
+            return state
+        _t.sleep(0.02)
+    raise AssertionError("job never finished")
+
+
+def test_discography_refresh_answers_immediately_with_a_job(api, monkeypatch):
+    """A provider catalogue walk must not be answered on the request thread.
+
+    Measured against a real library, one prolific artist is ~55 seconds of
+    provider I/O — past any client timeout worth setting, so the browser
+    reported a failure for work the server went on to finish.
+    """
+    import threading
+
+    client, _db, ids = api
+    release = threading.Event()
+
+    def _slow_refresh(*_a, **_k):
+        assert release.wait(timeout=5.0), "refresh was called but never released"
+        return ({"added": 3, "enriched": 1, "removed": 0, "total": 4,
+                 "source": "spotify", "auto_monitor_album_ids": [7, 8]}, 2)
+
+    monkeypatch.setattr(
+        "core.library2.discography.refresh_artist_discography", _slow_refresh)
+
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/discography/refresh")
+
+    # Answered while the walk is still blocked.
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["job_id"]
+
+    release.set()
+    state = _await_job(client, body["job_id"])
+    assert state["error"] is None
+    assert state["result"]["added"] == 3
+    assert state["result"]["source"] == "spotify"
+    assert state["result"]["auto_monitored_releases"] == 2
+    assert state["result"]["auto_monitor_mirrored"] == 2
+
+
+def test_discography_refresh_reports_failure_through_the_job(api, monkeypatch):
+    client, _db, ids = api
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("provider unreachable")
+
+    monkeypatch.setattr(
+        "core.library2.discography.refresh_artist_discography", _boom)
+
+    body = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/discography/refresh").get_json()
+    state = _await_job(client, body["job_id"])
+
+    assert "provider unreachable" in state["error"]
+
+
+def test_discography_refresh_reports_a_missing_artist_through_the_job(api, monkeypatch):
+    client, _db, ids = api
+
+    def _missing(*_a, **_k):
+        raise ValueError("no such artist")
+
+    monkeypatch.setattr(
+        "core.library2.discography.refresh_artist_discography", _missing)
+
+    body = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/discography/refresh").get_json()
+    state = _await_job(client, body["job_id"])
+
+    assert state["error"] == "Artist not found"
+
+
+def test_second_refresh_of_the_same_artist_joins_the_running_job(api, monkeypatch):
+    """A double-click must not start a second walk over the same catalogue —
+    while a different artist may still be refreshed at the same time."""
+    import threading
+
+    client, _db, ids = api
+    release = threading.Event()
+    calls = []
+
+    def _slow_refresh(_db_arg, artist_id, *_a, **_k):
+        calls.append(artist_id)
+        assert release.wait(timeout=5.0)
+        return ({"added": 0, "enriched": 0, "removed": 0, "total": 0,
+                 "auto_monitor_album_ids": []}, 0)
+
+    monkeypatch.setattr(
+        "core.library2.discography.refresh_artist_discography", _slow_refresh)
+
+    first = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/discography/refresh").get_json()
+    second = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/discography/refresh")
+
+    assert second.status_code == 409
+    assert second.get_json()["job_id"] == first["job_id"]
+
+    release.set()
+    _await_job(client, first["job_id"])
+    assert calls == [ids["artist"]]
