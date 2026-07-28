@@ -457,3 +457,115 @@ describe('the Enhanced view', () => {
     );
   });
 });
+
+describe('the vanilla page-state bridge', () => {
+  /** The shape library.js declares, defaults and all. */
+  type VanillaState = {
+    currentArtistId: unknown;
+    currentArtistName: string | null;
+    currentArtistSource: string | null;
+    enhancedData: unknown;
+    selectedTracks: Set<string>;
+  };
+
+  const install = (): VanillaState => {
+    const state: VanillaState = {
+      currentArtistId: null,
+      currentArtistName: null,
+      currentArtistSource: null,
+      enhancedData: null,
+      selectedTracks: new Set<string>(),
+    };
+    (window as unknown as { artistDetailPageState: VanillaState }).artistDetailPageState = state;
+    return state;
+  };
+
+  afterEach(() => {
+    delete (window as unknown as { artistDetailPageState?: VanillaState }).artistDetailPageState;
+  });
+
+  it('populates the artist BEFORE any hero action can be clicked', async () => {
+    // Artist Radio, the art picker and the discography modal read these two
+    // fields instead of taking arguments; unset, they bail out with
+    // "No artist selected" and the buttons do nothing at all.
+    const state = install();
+    renderPage();
+
+    await screen.findByText('Aphex Twin');
+    expect(state.currentArtistId).toBe(42);
+    expect(state.currentArtistName).toBe('Aphex Twin');
+    expect(state.currentArtistSource).toBe('spotify');
+  });
+
+  it('uses the id the PAYLOAD returned, not the one in the url', async () => {
+    // The library-upgrade case: clicking a Deezer result for an artist already
+    // in the library gets back the library primary key, and the library-only
+    // endpoints behind those buttons need that id.
+    const state = install();
+    stubDetail({
+      success: true,
+      artist: { id: 77, name: 'Aphex Twin', server_source: 'plex' },
+      discography: { albums: [], source: 'spotify' },
+    });
+    renderPage('/artist-detail/deezer/2481');
+
+    await screen.findByText('Aphex Twin');
+    expect(state.currentArtistId).toBe(77);
+  });
+
+  it('clears the artist on unmount, so the next page cannot act on it', async () => {
+    const state = install();
+    const view = renderPage();
+    await screen.findByText('Aphex Twin');
+
+    view.unmount();
+    expect(state.currentArtistId).toBeNull();
+    expect(state.currentArtistName).toBeNull();
+  });
+
+  it('hands the Enhanced payload over once the view is open', async () => {
+    // Every still-vanilla album and track action reads enhancedData for the
+    // artist name and to patch its own copy of the album list.
+    const state = install();
+    localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
+    renderPage();
+
+    await screen.findByText('SAW');
+    expect((state.enhancedData as { albums: unknown[] })?.albums).toHaveLength(1);
+  });
+
+  it('takes the Enhanced payload back on unmount', async () => {
+    // Otherwise the next artist's page finds the previous artist's albums, and
+    // a delete would patch the wrong list.
+    const state = install();
+    localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
+    const view = renderPage();
+    await screen.findByText('SAW');
+    expect(state.enhancedData).not.toBeNull();
+
+    view.unmount();
+    expect(state.enhancedData).toBeNull();
+  });
+
+  it('mirrors the track selection into the SAME Set object', async () => {
+    // deleteLibraryTrack deletes from this Set; replacing it would leave those
+    // writes landing somewhere nobody reads.
+    const state = install();
+    const originalSet = state.selectedTracks;
+    localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
+    renderPage();
+
+    await screen.findByText('SAW');
+    fireEvent.click(document.getElementById('enhanced-album-row-1') as HTMLElement);
+    fireEvent.click(document.querySelector('tbody .enhanced-track-checkbox') as HTMLElement);
+
+    await waitFor(() => expect([...state.selectedTracks]).toEqual(['9']));
+    expect(state.selectedTracks).toBe(originalSet);
+  });
+
+  it('renders fine when library.js is not loaded at all', async () => {
+    // The React page must not depend on the vanilla bundle existing.
+    renderPage();
+    await screen.findByText('Aphex Twin');
+  });
+});

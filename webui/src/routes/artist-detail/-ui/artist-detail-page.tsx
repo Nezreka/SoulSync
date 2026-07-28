@@ -37,6 +37,7 @@ import {
 import { useCompletionStream } from '../-artist-detail.use-completion';
 import { useEnhancedData } from '../-artist-detail.use-enhanced';
 import { useGapFill } from '../-artist-detail.use-gap-fill';
+import { clearVanillaArtist, syncVanillaArtist } from '../-artist-detail.vanilla-state';
 import { ArtistHero } from './artist-hero';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
@@ -161,6 +162,28 @@ export function ArtistDetailPage() {
       delete document.body.dataset.artistSource;
     };
   }, [payload, sourceOnly]);
+
+  /**
+   * Hand the artist down to the vanilla page state.
+   *
+   * Artist Radio, the artist art picker and the Download Discography modal all
+   * read currentArtistId/currentArtistName rather than taking arguments — with
+   * these unset they bail out with "No artist selected" and do nothing.
+   *
+   * The id is the one the PAYLOAD returned, not the one in the URL: when the
+   * backend resolves a source-artist click to an existing library record it
+   * hands back the library primary key, and the library-only endpoints behind
+   * these buttons need that.
+   */
+  useEffect(() => {
+    if (!payload) return;
+    syncVanillaArtist({
+      id: payload.artist?.id ?? null,
+      name: payload.artist?.name ?? null,
+      source: payload.discography?.source ?? payload.artist?.source ?? null,
+    });
+    return clearVanillaArtist;
+  }, [payload]);
 
   /** Non-fatal: the page still renders, but the vanilla warned about it. */
   useEffect(() => {

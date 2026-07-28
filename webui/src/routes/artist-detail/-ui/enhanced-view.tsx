@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { EnhancedAlbum, EnhancedData } from '../-artist-detail.enhanced';
 
@@ -11,6 +11,7 @@ import {
   sectionTrackTotal,
 } from '../-artist-detail.enhanced';
 import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
+import { syncVanillaEnhancedData, syncVanillaSelection } from '../-artist-detail.vanilla-state';
 import { AlbumMetaRow } from './album-meta-row';
 import { EnhancedBulkBar } from './enhanced-bulk-bar';
 import { EnhancedTrackTable } from './enhanced-track-table';
@@ -39,6 +40,23 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
    * ticked, and expanding a second album is a normal way to build that set.
    */
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  /**
+   * The album and track actions that are still vanilla read this payload for
+   * the artist name and to patch their own copy of the album list, and read
+   * the selection to drop ids they just deleted. Cleared on unmount so a later
+   * page cannot act on a stale artist.
+   */
+  useEffect(() => {
+    syncVanillaEnhancedData(data);
+    return () => syncVanillaEnhancedData(null);
+  }, [data]);
+
+  useEffect(() => {
+    syncVanillaSelection(selected);
+    return () => syncVanillaSelection(new Set());
+  }, [selected]);
+
   if (status.error) {
     return (
       <div className="enhanced-loading" style={{ color: '#ff6b6b' }}>

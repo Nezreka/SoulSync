@@ -257,6 +257,14 @@ let artistDetailPageState = {
     enhancedTrackSort: {}
 };
 
+// Exported for the React artist-detail page. `let` at the top level of a
+// classic script is a global LEXICAL binding and never lands on window, so a
+// module cannot see it — yet a dozen functions here (playArtistRadio,
+// openArtistArtPicker, openDiscographyModal, deleteLibraryAlbum, runEnrichment,
+// …) read this object when the React page invokes them. Same object, not a
+// copy, so both sides stay in step.
+if (typeof window !== 'undefined') window.artistDetailPageState = artistDetailPageState;
+
 function clearArtistDetailPageState() {
     if (artistDetailPageState.completionController) {
         artistDetailPageState.completionController.abort();
