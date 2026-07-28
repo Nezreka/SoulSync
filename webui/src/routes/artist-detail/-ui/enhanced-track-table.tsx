@@ -9,6 +9,7 @@ import {
   bitrateClass,
   getAlbumTrackRows,
   queueTrackPayload,
+  sortedTrackRows,
   sortIndicator,
   type TrackSort,
   trackColumns,
@@ -33,13 +34,11 @@ interface Props {
 /**
  * The per-album track table (renderTrackTable / _buildTrackRow, library.js:4776).
  *
- * A note on the column sort, reproduced rather than fixed: the vanilla stored a
+ * The column sort WORKS here, which it never did in the vanilla: that stored a
  * per-album sort, called sortEnhancedTracks on album.tracks, and then rendered
- * from _getEnhancedAlbumTrackRows — which ALWAYS re-sorts by disc, then track,
- * then title. So clicking a header moves the arrow and leaves the rows where
- * they were. Making the columns actually sort would be a behaviour change, not
- * a port, so the arrow behaviour is kept and the row order still comes from
- * getAlbumTrackRows.
+ * from _getEnhancedAlbumTrackRows — which always re-sorts by disc, then track,
+ * then title. The custom sort was applied and immediately thrown away, so a
+ * header click moved the arrow and nothing else. A deliberate fix, not a port.
  */
 export function EnhancedTrackTable({
   album,
@@ -50,7 +49,7 @@ export function EnhancedTrackTable({
   onTrackEdited,
 }: Props) {
   const [sort, setSort] = useState<TrackSort | undefined>(undefined);
-  const rows = getAlbumTrackRows(album);
+  const rows = sortedTrackRows(getAlbumTrackRows(album), sort);
 
   if (rows.length === 0) {
     return <div className="enhanced-no-tracks">No tracks in database</div>;

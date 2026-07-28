@@ -656,14 +656,10 @@ export function sortIndicator(column: TrackColumn, sort: TrackSort | undefined):
 const NUMERIC_SORT_FIELDS = ['track_number', 'disc_number', 'bpm', 'bitrate', 'duration'];
 
 /**
- * Sort the album's OWNED tracks, as sortEnhancedTracks did.
+ * Sort tracks by a column, as sortEnhancedTracks did.
  *
- * NOTE: this does not change the rendered order. The vanilla sorted
- * album.tracks and then fed the table from _getEnhancedAlbumTrackRows, which
- * re-sorts by disc, then track, then title — so a column click updates the
- * arrow and nothing else. Reproduced verbatim rather than "fixed", because
- * making the columns actually sort is a behaviour change, not a port. See the
- * note in enhanced-track-table.tsx.
+ * A null always sinks, whichever direction the sort runs — the vanilla's rule,
+ * and the reason an unset BPM never floats to the top of an ascending sort.
  */
 export function sortTracks(
   tracks: EnhancedTrack[],
@@ -792,4 +788,30 @@ export function inlineEditDisplay(value: string | number | null): string {
 /** Track edits hit the track endpoint, album edits the album one. */
 export function inlineEditUrl(type: 'track' | 'album', id: unknown): string {
   return type === 'track' ? `/api/library/track/${id}` : `/api/library/album/${id}`;
+}
+
+/**
+ * The rows a sorted table renders.
+ *
+ * Missing rows always sink, in BOTH directions, and keep their own disc/track
+ * order among themselves. They are not data for these columns — a row you do
+ * not own has no bitrate, no format and no file — so interleaving them with
+ * real tracks would sort on absence. Sinking them matches how sortTracks
+ * already treats a null.
+ *
+ * With no active sort this is exactly getAlbumTrackRows: disc, then track,
+ * then title. An untouched table looks the way it always has.
+ */
+export function sortedTrackRows(
+  rows: EnhancedTrack[],
+  sort: TrackSort | undefined,
+): EnhancedTrack[] {
+  if (!sort) return rows;
+
+  const owned: EnhancedTrack[] = [];
+  const missing: EnhancedTrack[] = [];
+  for (const row of rows) {
+    ((row as { _missingExpected?: boolean })._missingExpected ? missing : owned).push(row);
+  }
+  return [...sortTracks(owned, sort.field, sort.ascending), ...missing];
 }

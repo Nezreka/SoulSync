@@ -535,7 +535,9 @@ describe('the vanilla page-state bridge', () => {
     renderPage();
 
     await screen.findByText('SAW');
-    expect((state.enhancedData as { albums: unknown[] })?.albums).toHaveLength(1);
+    await waitFor(() =>
+      expect((state.enhancedData as { albums: unknown[] })?.albums).toHaveLength(1),
+    );
   });
 
   it('takes the Enhanced payload back on unmount', async () => {
@@ -545,7 +547,10 @@ describe('the vanilla page-state bridge', () => {
     localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
     const view = renderPage();
     await screen.findByText('SAW');
-    expect(state.enhancedData).not.toBeNull();
+    // waitFor, not a bare assertion: findByText resolves on the committed
+    // render, and the sync runs in a passive effect — which can land a tick
+    // later. Asserting synchronously made this flake about once in twenty runs.
+    await waitFor(() => expect(state.enhancedData).not.toBeNull());
 
     view.unmount();
     expect(state.enhancedData).toBeNull();

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   albumEnrichServices,
+  sortedTrackRows,
   inlineEditDisplay,
   inlineEditInput,
   inlineEditUrl,
@@ -603,5 +604,43 @@ describe('inlineEditUrl', () => {
   it('routes each entity to its own endpoint', () => {
     expect(inlineEditUrl('track', 5)).toBe('/api/library/track/5');
     expect(inlineEditUrl('album', 9)).toBe('/api/library/album/9');
+  });
+});
+
+describe('sortedTrackRows', () => {
+  const owned = (id: number, title: string, bpm?: number) => ({ id, title, bpm });
+  const missing = (id: string, title: string) => ({ id, title, _missingExpected: true });
+
+  it('is the input, untouched, with no active sort', () => {
+    const rows = [owned(1, 'B'), owned(2, 'A')];
+    expect(sortedTrackRows(rows, undefined)).toBe(rows);
+  });
+
+  it('sorts the owned rows', () => {
+    const sorted = sortedTrackRows([owned(1, 'B'), owned(2, 'A')], {
+      field: 'title',
+      ascending: true,
+    });
+    expect(sorted.map((r) => r.title)).toEqual(['A', 'B']);
+  });
+
+  it('sinks missing rows in BOTH directions', () => {
+    const rows = [missing('m1', 'AAA'), owned(1, 'B'), owned(2, 'C')];
+    for (const ascending of [true, false]) {
+      const sorted = sortedTrackRows(rows, { field: 'title', ascending });
+      expect(sorted.at(-1)?.title).toBe('AAA');
+    }
+  });
+
+  it('keeps missing rows in their own order among themselves', () => {
+    const rows = [missing('m1', 'first'), missing('m2', 'second')];
+    const sorted = sortedTrackRows(rows, { field: 'title', ascending: false });
+    expect(sorted.map((r) => r.title)).toEqual(['first', 'second']);
+  });
+
+  it('does not mutate the input', () => {
+    const rows = [owned(1, 'B'), owned(2, 'A')];
+    sortedTrackRows(rows, { field: 'title', ascending: true });
+    expect(rows.map((r) => r.title)).toEqual(['B', 'A']);
   });
 });

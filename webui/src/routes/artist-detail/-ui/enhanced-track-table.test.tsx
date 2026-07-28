@@ -56,6 +56,9 @@ const ARTIST = { id: 42, name: 'Aphex Twin', thumb_url: 'artist.jpg' };
 
 const rows = () => [...document.querySelectorAll('tbody tr')] as HTMLElement[];
 
+const titles = () =>
+  rows().map((r) => r.querySelector('.col-title')?.textContent?.replace('Missing', '') ?? '');
+
 const ACTIONS = [
   'showTagPreview',
   'analyzeTrackReplayGain',
@@ -149,14 +152,84 @@ describe('the sort arrow', () => {
     expect(document.querySelector('[data-sort-field="bpm"]')?.textContent).toBe('BPM ▲');
   });
 
-  it('does NOT reorder the rows — verbatim vanilla', () => {
-    // sortEnhancedTracks sorted album.tracks and the table then rendered from
-    // _getEnhancedAlbumTrackRows, which re-sorts by disc/track/title. So the
-    // arrow moves and the rows do not.
+  it('actually reorders the rows — the vanilla never did', () => {
     renderTable();
-    const before = rows().map((r) => r.getAttribute('data-track-id'));
+    // Default order is track number: Xtal (1), Tha (2), then the missing row.
+    expect(titles()).toEqual(['Xtal', 'Tha', 'Ageispolis']);
+
     fireEvent.click(document.querySelector('[data-sort-field="title"]') as HTMLElement);
-    expect(rows().map((r) => r.getAttribute('data-track-id'))).toEqual(before);
+    expect(titles()).toEqual(['Tha', 'Xtal', 'Ageispolis']);
+  });
+});
+
+describe('sorting by column', () => {
+  it('sorts by title, and flips on a second click', () => {
+    renderTable();
+    const th = document.querySelector('[data-sort-field="title"]') as HTMLElement;
+
+    fireEvent.click(th);
+    expect(titles()).toEqual(['Tha', 'Xtal', 'Ageispolis']);
+    fireEvent.click(th);
+    expect(titles()).toEqual(['Xtal', 'Tha', 'Ageispolis']);
+  });
+
+  it('sorts numerically, not as strings', () => {
+    // '1000' vs '192' as text would put 1000 first ascending; as numbers it is
+    // second.
+    renderTable();
+    fireEvent.click(document.querySelector('[data-sort-field="bitrate"]') as HTMLElement);
+    expect(titles()).toEqual(['Tha', 'Xtal', 'Ageispolis']);
+  });
+
+  it('sorts by duration', () => {
+    renderTable();
+    fireEvent.click(document.querySelector('[data-sort-field="duration"]') as HTMLElement);
+    // Xtal is 5:00, Tha is 9:30.
+    expect(titles()).toEqual(['Xtal', 'Tha', 'Ageispolis']);
+  });
+
+  it('sorts by the derived FORMAT, not by the raw path', () => {
+    renderTable();
+    fireEvent.click(document.querySelector('[data-sort-field="format"]') as HTMLElement);
+    // FLAC before MP3 — from extractFormat, not from '01 Xtal.flac'.
+    expect(titles()).toEqual(['Xtal', 'Tha', 'Ageispolis']);
+  });
+
+  it('SINKS a track with no value for that column, in both directions', () => {
+    // Only Xtal has a BPM; an unset one must not float to the top ascending.
+    renderTable();
+    const th = document.querySelector('[data-sort-field="bpm"]') as HTMLElement;
+
+    fireEvent.click(th);
+    expect(titles()[0]).toBe('Xtal');
+    fireEvent.click(th);
+    expect(titles()[0]).toBe('Xtal');
+  });
+
+  it('always sinks MISSING rows, whichever way the sort runs', () => {
+    // A row you do not own has no bitrate, no format and no file — sorting it
+    // among real tracks would be sorting on absence.
+    renderTable();
+    const th = document.querySelector('[data-sort-field="title"]') as HTMLElement;
+
+    fireEvent.click(th);
+    expect(titles().at(-1)).toBe('Ageispolis');
+    fireEvent.click(th);
+    expect(titles().at(-1)).toBe('Ageispolis');
+  });
+
+  it('leaves the default order alone until a header is clicked', () => {
+    renderTable();
+    expect(titles()).toEqual(['Xtal', 'Tha', 'Ageispolis']);
+  });
+
+  it('re-sorts when the column changes', () => {
+    renderTable();
+    fireEvent.click(document.querySelector('[data-sort-field="title"]') as HTMLElement);
+    expect(titles()).toEqual(['Tha', 'Xtal', 'Ageispolis']);
+
+    fireEvent.click(document.querySelector('[data-sort-field="track_number"]') as HTMLElement);
+    expect(titles()).toEqual(['Xtal', 'Tha', 'Ageispolis']);
   });
 });
 
