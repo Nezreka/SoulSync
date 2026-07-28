@@ -20,6 +20,8 @@ import {
   totalReleaseCount,
 } from '../-artist-detail.hero-stats';
 import { bucketCounts } from '../-artist-detail.use-completion';
+import { EnrichmentCoverage } from './enrichment-coverage';
+import { TopTracksSidebar } from './top-tracks-sidebar';
 
 interface Props {
   artist: ArtistInfo;
@@ -29,6 +31,8 @@ interface Props {
   streamCounts?: StreamCounts | null;
   /** True once the stream reported `complete`. */
   streamCompleted?: boolean;
+  /** Per-service coverage payload; the panel hides itself when absent. */
+  enrichment?: Record<string, unknown>;
 }
 
 /**
@@ -120,6 +124,7 @@ export function ArtistHero({
   isSourceArtist,
   streamCounts,
   streamCompleted = false,
+  enrichment,
 }: Props) {
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
@@ -148,6 +153,20 @@ export function ArtistHero({
         >
           <ArtistPhoto artist={artist} discography={discography} />
           <div className="artist-image-edit-overlay">
+            <svg
+              viewBox="0 0 24 24"
+              width="26"
+              height="26"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="m21 15-5-5L5 21" />
+            </svg>
             <span>Change photo</span>
           </div>
         </div>
@@ -190,6 +209,22 @@ export function ArtistHero({
               <span className="radio-icon">📻</span>
               <span className="radio-text">Artist Radio</span>
             </button>
+            {/*
+              Both of these are driven from outside React: the page calls
+              initializeLibraryWatchlistButton, which installs its own onclick
+              and toggles `watching`, and checkArtistEnhanceEligibility unhides
+              the enhance button and rewrites `.enhance-text` with the count.
+              They are rendered with no React state so a re-render cannot undo
+              what those globals wrote.
+            */}
+            <button
+              type="button"
+              className="library-artist-watchlist-btn"
+              id="library-artist-watchlist-btn"
+            >
+              <span className="watchlist-icon">👁️</span>
+              <span className="watchlist-text">Add to Watchlist</span>
+            </button>
             {/* Only shown when there is something to download. */}
             <div
               className="discog-download-wrap"
@@ -207,6 +242,15 @@ export function ArtistHero({
                 <span className="discog-btn-shimmer" />
               </button>
             </div>
+            <button
+              type="button"
+              className="library-artist-enhance-btn hidden"
+              id="library-artist-enhance-btn"
+              onClick={() => window.openEnhanceQualityModal?.()}
+            >
+              <span className="enhance-icon">⚡</span>
+              <span className="enhance-text">Enhance Quality</span>
+            </button>
           </div>
 
           <div className="artist-genres-container" id="artist-genres">
@@ -283,7 +327,11 @@ export function ArtistHero({
               })}
             </div>
           )}
+
+          <EnrichmentCoverage enrichment={enrichment} />
         </div>
+
+        <TopTracksSidebar artistId={artist.id} artistName={artist.name ?? ''} />
       </div>
     </div>
   );

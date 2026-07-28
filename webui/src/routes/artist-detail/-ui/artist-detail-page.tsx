@@ -215,6 +215,7 @@ export function ArtistDetailPage() {
         isSourceArtist={sourceOnly}
         streamCounts={stream.counts}
         streamCompleted={stream.completed}
+        enrichment={payload.enrichment_coverage}
       />
 
       <div className="artist-detail-content">

@@ -11,7 +11,11 @@ function renderHero(
   artist: ArtistInfo,
   discography: Discography = {},
   isSourceArtist = false,
-  stream: { counts?: StreamCounts | null; completed?: boolean } = {},
+  stream: {
+    counts?: StreamCounts | null;
+    completed?: boolean;
+    enrichment?: Record<string, unknown>;
+  } = {},
 ) {
   return render(
     <ArtistHero
@@ -20,6 +24,7 @@ function renderHero(
       isSourceArtist={isSourceArtist}
       streamCounts={stream.counts}
       streamCompleted={stream.completed}
+      enrichment={stream.enrichment}
     />,
   );
 }
@@ -310,5 +315,56 @@ describe('artist format tags', () => {
     const order = [...info.children].map((n) => n.className);
     expect(order.indexOf('artist-formats')).toBe(order.indexOf('artist-genres-container') + 1);
     expect(order.indexOf('artist-hero-bio')).toBe(order.indexOf('artist-formats') + 1);
+  });
+});
+
+describe('hero elements the vanilla globals reach for by id', () => {
+  it('renders the watchlist button initializeLibraryWatchlistButton wires', () => {
+    // The global installs its own onclick and toggles `watching`; without the
+    // element it silently returns and the button never appears.
+    renderHero({ name: 'A' });
+    const btn = document.getElementById('library-artist-watchlist-btn');
+    expect(btn).not.toBeNull();
+    expect(btn?.querySelector('.watchlist-text')?.textContent).toBe('Add to Watchlist');
+  });
+
+  it('renders the enhance button hidden, for checkArtistEnhanceEligibility to reveal', () => {
+    // It unhides the button and rewrites .enhance-text with a count.
+    renderHero({ name: 'A' });
+    const btn = document.getElementById('library-artist-enhance-btn');
+    expect(btn?.className).toContain('hidden');
+    expect(btn?.querySelector('.enhance-text')).not.toBeNull();
+  });
+
+  it('opens the enhance modal on click', () => {
+    window.openEnhanceQualityModal = vi.fn();
+    renderHero({ name: 'A' });
+    fireEvent.click(document.getElementById('library-artist-enhance-btn') as HTMLElement);
+    expect(window.openEnhanceQualityModal).toHaveBeenCalled();
+    delete window.openEnhanceQualityModal;
+  });
+
+  it('places the actions in the vanilla order', () => {
+    renderHero({ name: 'A' }, { albums: [{ id: 1 }] });
+    const actions = document.querySelector('.artist-hero-actions') as HTMLElement;
+    expect([...actions.children].map((n) => n.id)).toEqual([
+      'library-artist-radio-btn',
+      'library-artist-watchlist-btn',
+      'discog-download-wrap',
+      'library-artist-enhance-btn',
+    ]);
+  });
+
+  it('renders the enrichment rings LAST inside the artist info column', () => {
+    renderHero({ name: 'A' }, {}, false, {
+      enrichment: { total_tracks: 5, spotify: 100 },
+    });
+    const info = document.querySelector('.artist-info') as HTMLElement;
+    expect(info.lastElementChild?.id).toBe('artist-enrichment-coverage');
+  });
+
+  it('leaves the coverage block out when the artist has no enrichment data', () => {
+    renderHero({ name: 'A' });
+    expect(document.getElementById('artist-enrichment-coverage')).toBeNull();
   });
 });
