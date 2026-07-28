@@ -129,6 +129,39 @@ declare global {
     /** stats-automations.js — the Enhance Quality modal, opened from the hero. */
     openEnhanceQualityModal?: () => void;
     /**
+     * The Enhanced view's album actions. All of these still live in library.js
+     * (showReportIssueModal in stats-automations.js) and are invoked through
+     * window until the modals slice ports them; two of them take the button
+     * element itself, because they render progress onto it.
+     */
+    openAlbumArtPicker?: (album: unknown) => void;
+    openManualMatchModal?: (
+      entityType: string,
+      entityId: unknown,
+      service: string,
+      title: string,
+      artistId: unknown,
+    ) => void;
+    runEnrichment?: (
+      entityType: string,
+      entityId: unknown,
+      service: string,
+      title: string,
+      artistName: string,
+      artistId: unknown,
+    ) => void;
+    writeAlbumTags?: (albumId: unknown) => void;
+    analyzeAlbumReplayGain?: (albumId: unknown, button: HTMLElement) => void;
+    showReorganizeModal?: (albumId: unknown) => void;
+    redownloadLibraryAlbum?: (album: unknown, artistName: string, button: HTMLElement) => void;
+    deleteLibraryAlbum?: (albumId: unknown) => void;
+    showReportIssueModal?: (
+      entityType: string,
+      entityId: unknown,
+      title: string,
+      artistName: string,
+    ) => void;
+    /**
      * shared-helpers.js — the download-missing modal. Called directly rather
      * than through the shell bridge because the bridge wrapper fixes the last
      * two arguments, and the top-tracks bulk download needs contextType

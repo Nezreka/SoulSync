@@ -26,27 +26,27 @@ afterEach(() => {
 
 describe('EnhancedView states', () => {
   it('shows a loading line while the request is in flight', () => {
-    render(<EnhancedView data={null} status={{ loading: true, error: '' }} />);
+    render(<EnhancedView isAdmin={false} data={null} status={{ loading: true, error: '' }} />);
     expect(document.querySelector('.enhanced-loading')?.textContent).toBe(
       'Loading library data...',
     );
   });
 
   it('shows the failure instead of an empty view', () => {
-    render(<EnhancedView data={null} status={{ loading: false, error: 'boom' }} />);
+    render(<EnhancedView isAdmin={false} data={null} status={{ loading: false, error: 'boom' }} />);
     expect(document.querySelector('.enhanced-loading')?.textContent).toBe('Failed to load: boom');
   });
 });
 
 describe('the stats bar', () => {
   it('lists the five stats in order', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const labels = [...document.querySelectorAll('.enhanced-stat-label')].map((n) => n.textContent);
     expect(labels).toEqual(['Albums', 'EPs', 'Singles', 'Tracks', 'Duration']);
   });
 
   it('badges each format with its count, commonest first', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const badges = [...document.querySelectorAll('.enhanced-stats-formats .enhanced-format-badge')];
     expect(badges.map((n) => n.textContent)).toEqual(['FLAC (2)', 'MP3 (1)']);
     expect(badges[0].className).toContain('flac');
@@ -55,7 +55,7 @@ describe('the stats bar', () => {
 
 describe('sections', () => {
   it('renders only the buckets that have albums', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const titles = [...document.querySelectorAll('.enhanced-section-title')].map(
       (n) => n.textContent,
     );
@@ -68,6 +68,7 @@ describe('sections', () => {
     // it, exactly as the vanilla did.
     render(
       <EnhancedView
+        isAdmin={false}
         data={{ albums: [{ id: 9, title: 'Live At', record_type: 'live', tracks: [] }] }}
         status={READY}
       />,
@@ -76,7 +77,7 @@ describe('sections', () => {
   });
 
   it('counts releases and tracks in the section header', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const counts = [...document.querySelectorAll('.enhanced-section-count')].map(
       (n) => n.textContent,
     );
@@ -86,7 +87,7 @@ describe('sections', () => {
 
 describe('album rows', () => {
   it('shows the title, meta line, type badge and format badge', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const row = document.getElementById('enhanced-album-row-1') as HTMLElement;
     expect(row.querySelector('.enhanced-album-title')?.textContent).toBe('SAW 85-92');
     expect(row.querySelector('.enhanced-album-meta-line')?.textContent).toBe(
@@ -97,14 +98,14 @@ describe('album rows', () => {
   });
 
   it('falls back to the music note when the album has no art', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const row = document.getElementById('enhanced-album-row-2') as HTMLElement;
     expect(row.querySelector('.enhanced-album-thumb')).toBeNull();
     expect(row.querySelector('.enhanced-album-thumb-fallback')).not.toBeNull();
   });
 
   it('swaps a BROKEN thumbnail for the fallback', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const img = document.querySelector('.enhanced-album-thumb') as HTMLImageElement;
     fireEvent.error(img);
     const row = document.getElementById('enhanced-album-row-1') as HTMLElement;
@@ -113,14 +114,20 @@ describe('album rows', () => {
   });
 
   it('titles an untitled album "Unknown"', () => {
-    render(<EnhancedView data={{ albums: [{ id: 3, title: '', tracks: [] }] }} status={READY} />);
+    render(
+      <EnhancedView
+        isAdmin={false}
+        data={{ albums: [{ id: 3, title: '', tracks: [] }] }}
+        status={READY}
+      />,
+    );
     expect(document.querySelector('.enhanced-album-title')?.textContent).toBe('Unknown');
   });
 });
 
 describe('expanding an album', () => {
   it('starts collapsed', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     expect(document.getElementById('enhanced-album-wrapper-1')?.className).not.toContain(
       'expanded',
     );
@@ -128,7 +135,7 @@ describe('expanding an album', () => {
   });
 
   it('marks the row, wrapper and panel on click, and unmarks on a second', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     const row = document.getElementById('enhanced-album-row-1') as HTMLElement;
 
     fireEvent.click(row);
@@ -141,8 +148,18 @@ describe('expanding an album', () => {
     expect(document.getElementById('enhanced-tracks-panel-1')?.className).not.toContain('visible');
   });
 
+  it('does not render the panel body until the album is expanded', () => {
+    // The vanilla's lazy render: a large library can have hundreds of albums,
+    // and each panel is a full header plus track table.
+    render(<EnhancedView isAdmin data={DATA} status={READY} />);
+    expect(document.querySelector('.enhanced-expanded-header')).toBeNull();
+
+    fireEvent.click(document.getElementById('enhanced-album-row-1') as HTMLElement);
+    expect(document.querySelectorAll('.enhanced-expanded-header')).toHaveLength(1);
+  });
+
   it('expands each album independently', () => {
-    render(<EnhancedView data={DATA} status={READY} />);
+    render(<EnhancedView isAdmin={false} data={DATA} status={READY} />);
     fireEvent.click(document.getElementById('enhanced-album-row-1') as HTMLElement);
     expect(document.getElementById('enhanced-tracks-panel-2')?.className).not.toContain('visible');
   });

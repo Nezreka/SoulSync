@@ -10,11 +10,15 @@ import {
   sectionCountLabel,
   sectionTrackTotal,
 } from '../-artist-detail.enhanced';
+import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
+import { ExpandedAlbumHeader } from './expanded-album-header';
 
 interface Props {
   data: EnhancedData | null;
   /** Non-null while the request is in flight or after it failed. */
   status: { loading: boolean; error: string };
+  /** Drives the admin-only action row inside each expanded album. */
+  isAdmin: boolean;
 }
 
 /**
@@ -25,7 +29,7 @@ interface Props {
  * bucket for any other record_type, and the vanilla ignored it the same way —
  * an album typed "live" is grouped and then never shown.
  */
-export function EnhancedView({ data, status }: Props) {
+export function EnhancedView({ data, status, isAdmin }: Props) {
   if (status.error) {
     return (
       <div className="enhanced-loading" style={{ color: '#ff6b6b' }}>
@@ -46,7 +50,16 @@ export function EnhancedView({ data, status }: Props) {
         // An empty section is omitted entirely, not rendered as a header with
         // nothing under it.
         if (albums.length === 0) return null;
-        return <EnhancedSection key={type} type={type} label={label} albums={albums} />;
+        return (
+          <EnhancedSection
+            key={type}
+            type={type}
+            label={label}
+            albums={albums}
+            artist={data.artist}
+            isAdmin={isAdmin}
+          />
+        );
       })}
     </>
   );
@@ -79,10 +92,14 @@ function EnhancedSection({
   type,
   label,
   albums,
+  artist,
+  isAdmin,
 }: {
   type: string;
   label: string;
   albums: EnhancedAlbum[];
+  artist: Record<string, unknown> | undefined;
+  isAdmin: boolean;
 }) {
   return (
     <div className="enhanced-section">
@@ -94,7 +111,13 @@ function EnhancedSection({
       </div>
       <div className="enhanced-album-grid">
         {albums.map((album) => (
-          <EnhancedAlbumWrapper album={album} type={type} key={String(album.id)} />
+          <EnhancedAlbumWrapper
+            album={album}
+            type={type}
+            artist={artist}
+            isAdmin={isAdmin}
+            key={String(album.id)}
+          />
         ))}
       </div>
     </div>
@@ -113,7 +136,17 @@ function EnhancedSection({
  * kept because a large library can have hundreds of albums and each panel is a
  * full track table.
  */
-function EnhancedAlbumWrapper({ album, type }: { album: EnhancedAlbum; type: string }) {
+function EnhancedAlbumWrapper({
+  album,
+  type,
+  artist,
+  isAdmin,
+}: {
+  album: EnhancedAlbum;
+  type: string;
+  artist: Record<string, unknown> | undefined;
+  isAdmin: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const meta = albumRowMeta(album);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -165,11 +198,19 @@ function EnhancedAlbumWrapper({ album, type }: { album: EnhancedAlbum; type: str
         className={`enhanced-tracks-panel${expanded ? ' visible' : ''}`}
         id={`enhanced-tracks-panel-${album.id}`}
       >
-        {/* The panel body — expanded header, meta row and track table — lands
-            in the next slice with _attachTableDelegation. Rendering nothing
-            here rather than a placeholder: a placeholder is content that can
-            ship by accident. */}
-        <div className="enhanced-tracks-panel-inner" />
+        {/* The meta row and track table land in the next slices, with
+            _attachTableDelegation. */}
+        <div className="enhanced-tracks-panel-inner">
+          {expanded ? (
+            <ExpandedAlbumHeader
+              album={album}
+              rows={getAlbumTrackRows(album)}
+              artistId={artist?.id}
+              artistName={String(artist?.name ?? '')}
+              isAdmin={isAdmin}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );
