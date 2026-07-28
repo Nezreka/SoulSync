@@ -111,6 +111,13 @@ declare global {
     observeLazyBackgrounds?: (container: Element | null) => void;
     /** core.js — reads the AudioDB logo off an existing img.audiodb-logo. */
     getAudioDBLogoURL?: () => string | null;
+    /** stats-automations.js — reads artistDetailPageState for the artist id.
+     *  Must be given the id explicitly once React owns the page. */
+    playArtistRadio?: (artistId?: string | number, artistName?: string) => void;
+    /** library.js — artist photo picker, opened from the hero image. */
+    openArtistArtPicker?: () => void;
+    /** library.js — the Download Discography modal. */
+    openDiscographyModal?: () => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
