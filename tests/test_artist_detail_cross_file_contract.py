@@ -124,3 +124,71 @@ def test_artist_detail_state_is_reached_from_stats_automations():
     assert "artistDetailPageState.currentArtistId" in source
     for fn in ("playArtistRadio",):
         assert re.search(rf"function {fn}\b", source), f"{fn} moved; recheck the coupling"
+
+
+# ---------------------------------------------------------------------------
+# The flip: only ONE page may load
+# ---------------------------------------------------------------------------
+
+
+def test_navigate_to_artist_detail_stops_before_the_legacy_load_when_react_owns_it():
+    """`navigateToArtistDetail` must not run the vanilla page load under React.
+
+    Search, label-detail and enrichment still call this function, and it used to
+    fall straight through into `loadArtistDetailData`. With artist-detail
+    React-owned that meant two pages loading over each other: the legacy load
+    targets DOM by id and class, the React page reuses those same ids, and
+    `applyDiscographyFilters` hides every `.release-card` on the document using
+    the legacy filter state -- so the whole discography vanished on any artist
+    reached from Search.
+
+    The state assignments above the guard are deliberate: React reads
+    currentArtistId / currentArtistName / currentArtistSource back out of them.
+    """
+    source = (Path(__file__).resolve().parents[1] / "webui/static/library.js").read_text(
+        encoding="utf-8"
+    )
+    start = source.index("function navigateToArtistDetail(")
+    end = source.index("\nfunction ", start + 1)
+    body = source[start:end]
+
+    guard = body.index("routeManifest")
+    guard_return = body.index("return;", guard)
+    legacy_load = body.index("loadArtistDetailData(")
+
+    assert guard_return < legacy_load, (
+        "navigateToArtistDetail reaches loadArtistDetailData even when the React "
+        "page owns the route — two pages will load over each other"
+    )
+    assert "kind === 'react'" in body[guard:guard_return]
+
+
+def test_the_label_stack_is_cleared_in_place_not_reassigned():
+    """React holds a reference to the same array via window.artistDetailLabelStack.
+
+    Reassigning `_artistDetailLabelStack = []` would leave React reading a
+    detached copy, and the Back button would keep naming a page you had already
+    left.
+    """
+    source = (Path(__file__).resolve().parents[1] / "webui/static/library.js").read_text(
+        encoding="utf-8"
+    )
+    assert "_artistDetailLabelStack.length = 0" in source
+    assert not re.search(r"_artistDetailLabelStack\s*=\s*\[\]\s*;(?!\s*//\s*declaration)", 
+                         source.split("let _artistDetailLabelStack")[1])
+
+
+def test_selected_tracks_set_identity_survives_navigation():
+    """The vanilla deletes from this Set after a track delete.
+
+    React mirrors its selection into the SAME object, so replacing it here would
+    leave those writes landing on a Set nobody reads.
+    """
+    source = (Path(__file__).resolve().parents[1] / "webui/static/library.js").read_text(
+        encoding="utf-8"
+    )
+    start = source.index("function navigateToArtistDetail(")
+    end = source.index("\nfunction ", start + 1)
+    body = source[start:end]
+    assert "selectedTracks.clear()" in body
+    assert "selectedTracks = new Set()" not in body

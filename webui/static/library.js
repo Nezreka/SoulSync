@@ -428,9 +428,31 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     artistDetailPageState.currentArtistSource = normalizedSource;
     artistDetailPageState.enhancedData = null;
     artistDetailPageState.expandedAlbums = new Set();
-    artistDetailPageState.selectedTracks = new Set();
+    // Cleared IN PLACE: React mirrors its selection into this same Set, and the
+    // vanilla track-delete path deletes from it. Swapping the object out would
+    // leave both writing somewhere nobody reads.
+    artistDetailPageState.selectedTracks.clear();
     artistDetailPageState.enhancedTrackSort = {};
     artistDetailPageState.enhancedView = false;
+
+    // When the React page owns this route, STOP here. Everything below —
+    // resetting the legacy view chrome and loadArtistDetailData — targets DOM
+    // by id and class, and the React page reuses those same ids, so running it
+    // means two pages loading over each other: applyDiscographyFilters hides
+    // React's .release-card elements using the legacy filter state and the
+    // whole discography disappears. React fetches its own data and renders its
+    // own back-button label; the state written above is all it needs from here.
+    const _adRoute = window.SoulSyncWebRouter?.routeManifest?.find(
+        (entry) => entry.pageId === 'artist-detail'
+    );
+    if (_adRoute?.kind === 'react') {
+        navigateToPage('artist-detail', {
+            artistId,
+            artistSource: normalizedSource,
+            skipRouteChange: options.skipRouteChange === true
+        });
+        return;
+    }
 
     // Reset enhanced view toggle to standard
     const toggleBtns = document.querySelectorAll('.enhanced-view-toggle-btn');
