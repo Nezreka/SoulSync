@@ -45,7 +45,23 @@ PORTED = ["loadArtistDetailData","populateArtistDetailPage","updateArtistHeroSec
           "updateArtistSummaryStats","updateCategoryStats","updateArtistGenres",
           "createReleaseCard","populateReleaseSection","populateDiscographySections",
           "applyDiscographyFilters","_classifyReleaseContent","resetDiscographyFilters",
-          "initializeDiscographyFilters"]
+          "initializeDiscographyFilters",
+          # Enhanced Management view
+          "toggleEnhancedView","loadEnhancedViewData","renderEnhancedView","renderEnhancedStatsBar",
+          "renderEnhancedSection","renderAlbumRow","renderExpandedAlbumHeader","renderAlbumMetaRow",
+          "renderTrackTable","_buildTrackRow","_attachTableDelegation","_getEnhancedAlbumTrackRows",
+          "_normalizeExpectedMissingTrack","_deriveEnhancedMissingTracks","sortEnhancedTracks",
+          "saveAlbumMetadata","startInlineEdit","saveInlineEdit","updateBulkBar",
+          "showBulkEditModal","executeBulkEdit","batchAnalyzeReplayGainSelected",
+          "batchWriteTagsSelected","clearTrackSelection","extractFormat","formatDurationMs",
+          "getServiceUrl","makeClickableBadge","_getEnhancedAlbumCanonicalSource",
+          # DB record inspector + top tracks + gap-fill
+          "setupArtistRecordButton","_arecRenderFields","_arecApplyFilter",
+          "_loadArtistTopTracks","playTrackByMetadata","_topTrackDownloadOne","_topTrackDownloadAll",
+          "_gapFillEnabled","_gapNorm","_gapYear","_gapSameRelease","_loadDiscographyGapFill",
+          "_streamGapOwnership","checkLibraryCompletion","updateLibraryReleaseCard",
+          "updateCategoryStatsFromStream","recalculateSummaryStats","_libraryViewModeKey",
+          "isEnhancedAdmin","_trackSlotKey","_normTitleForMatch"]
 
 SKIP_FIELDS = {"map","filter","some","forEach","length","push","find","join","split","replace",
                "trim","toString","toLowerCase","includes","slice","concat","every","sort","style",
@@ -65,6 +81,8 @@ DEFERRED = {
     "checkArtistEnhanceEligibility": "fire-and-forget after load, page component",
     "loadSimilarArtists": "stays vanilla; invoked from the page component",
     "getAudioDBLogoURL": "deferred to via window in audioDbLogoUrl()",
+    "escapeHtml": "only used to escape an error message into innerHTML; React escapes text",
+    "_escAttr": "only used to escape values into an innerHTML string; React escapes attributes",
 }
 
 problems = []
