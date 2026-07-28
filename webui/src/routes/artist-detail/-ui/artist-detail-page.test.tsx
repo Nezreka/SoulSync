@@ -22,6 +22,7 @@ vi.mock('@/platform/shell/route-manifest', async (importOriginal) => {
 });
 
 let requested: string[] = [];
+let streamFrames: string[] = [];
 
 function stubDetail(body: unknown, status = 200) {
   requested = [];
@@ -30,6 +31,19 @@ function stubDetail(body: unknown, status = 200) {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
       requested.push(url);
+      if (url.includes('/api/library/completion-stream')) {
+        const encoder = new TextEncoder();
+        let i = 0;
+        return new Response(
+          new ReadableStream({
+            pull(controller) {
+              if (i < streamFrames.length) controller.enqueue(encoder.encode(streamFrames[i++]));
+              else controller.close();
+            },
+          }),
+          { status: 200 },
+        );
+      }
       if (url.includes('/api/album/')) {
         return new Response(JSON.stringify({ success: true, tracks: [{ id: 1 }] }), {
           status: 200,
@@ -65,6 +79,7 @@ beforeEach(() => {
   window.checkArtistEnhanceEligibility = vi.fn();
   window.initializeLibraryWatchlistButton = vi.fn();
   window.observeLazyBackgrounds = vi.fn();
+  streamFrames = [];
   stubDetail(LIBRARY);
 });
 
@@ -205,5 +220,59 @@ describe('MusicBrainz declutter', () => {
     ) as HTMLElement;
     expect(live.textContent).toBe('Live');
     expect(live.className).toContain('active');
+  });
+});
+
+describe('ownership completion stream', () => {
+  const UNRESOLVED = {
+    success: true,
+    artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
+    discography: {
+      albums: [
+        { id: 1, title: 'SAW', owned: null },
+        { id: 2, title: 'Drukqs', owned: null },
+      ],
+      source: 'spotify',
+    },
+  };
+
+  it('merges streamed ownership into the bars and the section counts', async () => {
+    streamFrames = [
+      'data: {"type":"completion","id":1,"category":"albums","status":"ok","formats":["FLAC"]}\n',
+      'data: {"type":"completion","id":2,"category":"albums","status":"missing"}\n',
+      'data: {"type":"complete","processed_count":2}\n',
+    ];
+    stubDetail(UNRESOLVED);
+    renderPage();
+
+    await waitFor(() => expect(document.getElementById('albums-stats')?.textContent).toBe('1/2'));
+    // The cards move with the bar — the section counts read from the same
+    // merged discography, so this proves the merge reaches the grid too.
+    expect(screen.getByText('1 owned')).toBeTruthy();
+    expect(screen.getByText('1 missing')).toBeTruthy();
+    // Formats are artist-level and only appear on the terminal frame.
+    expect(document.querySelector('.artist-format-tag')?.textContent).toBe('FLAC');
+  });
+
+  it('does not open a stream when every release is already resolved', async () => {
+    stubDetail(LIBRARY);
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(requested.some((u) => u.includes('completion-stream'))).toBe(false);
+  });
+
+  it('does not open a stream for a source artist', async () => {
+    // No library to check against; settleOwnershipForSourceArtist resolves the
+    // cards to "missing" up front instead.
+    stubDetail({
+      success: true,
+      artist: { id: 'sp1', name: 'X' },
+      discography: { albums: [{ id: 1, title: 'A', owned: null }], source: 'deezer' },
+    });
+    renderPage();
+    await screen.findByText('X');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(requested.some((u) => u.includes('completion-stream'))).toBe(false);
   });
 });

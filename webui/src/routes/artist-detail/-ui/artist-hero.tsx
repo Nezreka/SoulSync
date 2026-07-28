@@ -1,24 +1,59 @@
 import { useEffect, useState } from 'react';
 
+import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
 
 import { buildHeroBadges } from '../-artist-detail.hero';
 import {
+  artistFormatTags,
   buildGenreChips,
   categoryStats,
+  type CategoryStats,
   cleanArtistBio,
   formatHeroNumber,
   heroImage,
   type HeroImageStage,
   heroImageSrc,
   nextHeroImageStage,
+  resolvedCategoryStats,
+  streamCategoryStats,
   totalReleaseCount,
 } from '../-artist-detail.hero-stats';
+import { bucketCounts } from '../-artist-detail.use-completion';
 
 interface Props {
   artist: ArtistInfo;
   discography: Discography;
   isSourceArtist: boolean;
+  /** Running per-bucket tallies while the ownership stream runs. */
+  streamCounts?: StreamCounts | null;
+  /** True once the stream reported `complete`. */
+  streamCompleted?: boolean;
+}
+
+/**
+ * The completion bar for one bucket, in the three states the vanilla had:
+ *
+ *   - no stream yet    -> categoryStats over the whole bucket ("..." if pending)
+ *   - stream running   -> the running tallies, denominator = resolved so far
+ *   - stream complete  -> recounted from the merged discography
+ *
+ * Reproducing all three matters because they disagree: mid-stream the bar reads
+ * "2/3" of a twelve-album discography, and after `complete` anything the
+ * backend never reported drops out of the denominator instead of pinning the
+ * bar back to "...".
+ */
+function bucketStats(
+  bucket: DiscographyBucket,
+  discography: Discography,
+  streamCounts: StreamCounts | null | undefined,
+  streamCompleted: boolean,
+): CategoryStats {
+  const releases = discography[bucket] ?? [];
+  if (streamCompleted) return resolvedCategoryStats(releases);
+  const counts = bucketCounts(streamCounts ?? null, bucket);
+  if (counts) return streamCategoryStats(counts.owned, counts.missing);
+  return categoryStats(releases);
 }
 
 const CATEGORY_LABELS: { bucket: DiscographyBucket; label: string }[] = [
@@ -79,13 +114,22 @@ function ArtistPhoto({ artist, discography }: { artist: ArtistInfo; discography:
  * live in stats-automations.js and library.js respectively and are not
  * reimplemented here.
  */
-export function ArtistHero({ artist, discography, isSourceArtist }: Props) {
+export function ArtistHero({
+  artist,
+  discography,
+  isSourceArtist,
+  streamCounts,
+  streamCompleted = false,
+}: Props) {
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
   const chips = buildGenreChips(artist);
   const bio = cleanArtistBio(artist.lastfm_bio);
   const [bioExpanded, setBioExpanded] = useState(false);
   const hasReleases = totalReleaseCount(discography) > 0;
+  // Only after `complete`, matching the vanilla: the set accumulates through
+  // the whole stream but the block was not rendered until it ended.
+  const formats = streamCompleted ? artistFormatTags(streamCounts?.formats) : [];
 
   return (
     <div className="artist-hero-section" id="artist-hero-section">
@@ -178,6 +222,16 @@ export function ArtistHero({ artist, discography, isSourceArtist }: Props) {
             ))}
           </div>
 
+          {formats.length > 0 ? (
+            <div className="artist-formats">
+              {formats.map((format) => (
+                <span className="artist-format-tag" key={format}>
+                  {format}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
           {bio ? (
             <div
               className={`artist-hero-bio${bioExpanded ? ' expanded' : ''}`}
@@ -210,7 +264,7 @@ export function ArtistHero({ artist, discography, isSourceArtist }: Props) {
           {isSourceArtist ? null : (
             <div className="collection-overview">
               {CATEGORY_LABELS.map(({ bucket, label }) => {
-                const stats = categoryStats(discography[bucket] ?? []);
+                const stats = bucketStats(bucket, discography, streamCounts, streamCompleted);
                 return (
                   <div className="collection-category" key={bucket}>
                     <span className="category-label">{label}</span>

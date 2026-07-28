@@ -1,14 +1,37 @@
 import { fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography } from '../-artist-detail.types';
 
+import { emptyStreamCounts } from '../-artist-detail.completion';
 import { ArtistHero } from './artist-hero';
 
-function renderHero(artist: ArtistInfo, discography: Discography = {}, isSourceArtist = false) {
+function renderHero(
+  artist: ArtistInfo,
+  discography: Discography = {},
+  isSourceArtist = false,
+  stream: { counts?: StreamCounts | null; completed?: boolean } = {},
+) {
   return render(
-    <ArtistHero artist={artist} discography={discography} isSourceArtist={isSourceArtist} />,
+    <ArtistHero
+      artist={artist}
+      discography={discography}
+      isSourceArtist={isSourceArtist}
+      streamCounts={stream.counts}
+      streamCompleted={stream.completed}
+    />,
   );
+}
+
+function countsWith(
+  owned: Partial<Record<'albums' | 'eps' | 'singles', number>>,
+  total: Partial<Record<'albums' | 'eps' | 'singles', number>>,
+): StreamCounts {
+  const counts = emptyStreamCounts();
+  Object.assign(counts.owned, owned);
+  Object.assign(counts.total, total);
+  return counts;
 }
 
 const img = () => document.getElementById('artist-detail-image') as HTMLImageElement;
@@ -203,5 +226,89 @@ describe('stats and actions', () => {
       renderHero({ name: 'A' }, { albums: [{ id: 1 }] });
       fireEvent.click(document.getElementById('library-artist-radio-btn')!);
     }).not.toThrow();
+  });
+});
+
+const barText = (bucket: string) => document.getElementById(`${bucket}-stats`)?.textContent;
+const barFill = (bucket: string) =>
+  document.getElementById(`${bucket}-completion-fill`) as HTMLElement;
+
+describe('completion bars across the three stream states', () => {
+  const DISC: Discography = {
+    albums: [
+      { id: 1, owned: null },
+      { id: 2, owned: null },
+      { id: 3, owned: null },
+    ],
+  };
+
+  it('shows the pending state before the stream reports anything', () => {
+    renderHero({ name: 'A' }, DISC);
+    expect(barText('albums')).toBe('...');
+    expect(barFill('albums').className).toContain('checking');
+  });
+
+  it('shows resolved-so-far while the stream runs, NOT the whole bucket', () => {
+    // One of three albums checked, and it was owned: "1/1", not "1/3".
+    renderHero({ name: 'A' }, DISC, false, { counts: countsWith({ albums: 1 }, { albums: 1 }) });
+    expect(barText('albums')).toBe('1/1');
+    expect(barFill('albums').className).not.toContain('checking');
+    expect(barFill('albums').style.width).toBe('100%');
+  });
+
+  it('recounts from the merged discography once the stream completes', () => {
+    const merged: Discography = {
+      albums: [
+        { id: 1, owned: true },
+        { id: 2, owned: false },
+        { id: 3, owned: null },
+      ],
+    };
+    // The running tallies said 1/1; the recount sees the third album never
+    // resolved and reports 1/2 rather than falling back to "...".
+    renderHero({ name: 'A' }, merged, false, {
+      counts: countsWith({ albums: 1 }, { albums: 1 }),
+      completed: true,
+    });
+    expect(barText('albums')).toBe('1/2');
+    expect(barFill('albums').style.width).toBe('50%');
+  });
+});
+
+describe('artist format tags', () => {
+  const counts = () => {
+    const c = emptyStreamCounts();
+    c.formats.add('MP3');
+    c.formats.add('FLAC');
+    return c;
+  };
+
+  it('renders sorted format tags after the stream completes', () => {
+    renderHero({ name: 'A' }, {}, false, { counts: counts(), completed: true });
+    const tags = [...document.querySelectorAll('.artist-formats .artist-format-tag')];
+    expect(tags.map((n) => n.textContent)).toEqual(['FLAC', 'MP3']);
+  });
+
+  it('stays hidden while the stream is still running', () => {
+    // The set fills up as events arrive, but the vanilla only built the block
+    // on the terminal frame — tags must not appear and grow mid-stream.
+    renderHero({ name: 'A' }, {}, false, { counts: counts(), completed: false });
+    expect(document.querySelector('.artist-formats')).toBeNull();
+  });
+
+  it('renders no empty block when nothing reported a format', () => {
+    renderHero({ name: 'A' }, {}, false, { counts: emptyStreamCounts(), completed: true });
+    expect(document.querySelector('.artist-formats')).toBeNull();
+  });
+
+  it('sits between the genre chips and the bio', () => {
+    renderHero({ name: 'A', genres: ['idm'], lastfm_bio: 'words' }, {}, false, {
+      counts: counts(),
+      completed: true,
+    });
+    const info = document.querySelector('.artist-info') as HTMLElement;
+    const order = [...info.children].map((n) => n.className);
+    expect(order.indexOf('artist-formats')).toBe(order.indexOf('artist-genres-container') + 1);
+    expect(order.indexOf('artist-hero-bio')).toBe(order.indexOf('artist-formats') + 1);
   });
 });

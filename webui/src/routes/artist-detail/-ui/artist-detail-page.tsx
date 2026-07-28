@@ -9,6 +9,7 @@ import { Route } from '../$source/$id';
 import {
   artistDetailQueryOptions,
   isSourceOnlyArtist,
+  needsCompletionStream,
   readArtistDetail,
   settleOwnershipForSourceArtist,
   watchlistIdentity,
@@ -27,6 +28,7 @@ import {
   releaseToAlbumData,
   stillCheckingMessage,
 } from '../-artist-detail.open-release';
+import { useCompletionStream } from '../-artist-detail.use-completion';
 import { ArtistHero } from './artist-hero';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
@@ -63,7 +65,22 @@ export function ArtistDetailPage() {
     return sourceOnly ? settleOwnershipForSourceArtist(payload.discography) : payload.discography;
   }, [payload, sourceOnly]);
 
-  const isMusicBrainz = isMusicBrainzDiscography(discography.source);
+  /**
+   * Ownership streaming. The gate is the vanilla's: library artists only, and
+   * only when something is actually unresolved — a fully-resolved discography
+   * would open a stream that can never report anything.
+   *
+   * Everything below renders from `streamed`, not `discography`, so the section
+   * counts and the release cards move with the bars.
+   */
+  const stream = useCompletionStream(
+    payload?.artist?.name,
+    discography,
+    payload ? needsCompletionStream(payload) : false,
+  );
+  const streamed = stream.discography;
+
+  const isMusicBrainz = isMusicBrainzDiscography(streamed.source);
 
   /**
    * Filters reset on every artist change (resetDiscographyFilters ran BEFORE
@@ -134,7 +151,7 @@ export function ArtistDetailPage() {
     }
     if (!payload) return;
 
-    const image = heroImage(payload.artist ?? {}, discography);
+    const image = heroImage(payload.artist ?? {}, streamed);
     const artist = openReleaseArtist(payload, payload.artist?.id, image.primary);
     if (!artist) {
       window.showToast?.('Error: No artist information available', 'error');
@@ -194,8 +211,10 @@ export function ArtistDetailPage() {
     <>
       <ArtistHero
         artist={payload.artist ?? {}}
-        discography={discography}
+        discography={streamed}
         isSourceArtist={sourceOnly}
+        streamCounts={stream.counts}
+        streamCompleted={stream.completed}
       />
 
       <div className="artist-detail-content">
@@ -205,7 +224,7 @@ export function ArtistDetailPage() {
             <DiscographySection
               key={bucket}
               bucket={bucket}
-              releases={discography[bucket] ?? []}
+              releases={streamed[bucket] ?? []}
               filters={filters}
               isMusicBrainz={isMusicBrainz}
               isSourceArtist={sourceOnly}
