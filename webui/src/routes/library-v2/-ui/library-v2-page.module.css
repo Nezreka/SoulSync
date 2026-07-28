@@ -4272,3 +4272,75 @@ textarea.searchInput {
   background: rgba(255, 255, 255, 0.02);
   border-color: rgba(255, 255, 255, 0.1);
 }
+
+/* ldp-05: the legacy hero portrait. `.artist-image` in style.css is a bare
+   160px square; the legacy page overrode it with
+   `#artist-hero-section #artist-detail-image { width: 100%; height: auto }`
+   so the portrait fills `.artist-image-container`'s
+   `max-width: min(38%, 460px)` column. An id selector from the legacy DOM
+   cannot be reused here, so this reproduces exactly that override. The
+   aspect ratio is pinned because this class also lands on the `<div>`
+   placeholder, which has no intrinsic height to keep. */
+.heroImage {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  /* A flex child with only `width: 100%` and no intrinsic width collapses to
+     nothing — which is exactly what the placeholder `<div>` is when an artist
+     has no photo. 160px is legacy's own fallback size. */
+  min-width: 160px;
+}
+
+/* The legacy overlay sized its glyph with width/height attributes on the SVG
+   itself (26px). `SvgIcon` scales to its box, which inside the big hero
+   portrait meant a full-bleed icon that felt like an accidental click target
+   on every hover. */
+.heroImageOverlay svg {
+  width: 26px;
+  height: 26px;
+}
+
+.heroImageOverlay span {
+  font-size: 12px;
+}
+
+/* ldp-03: the release card's own bookmark, pinned opposite the ownership
+   badge. The wrapper only positions — the chrome goes on MonitorToggle's own
+   button, or the two boxes read as two stacked controls. No backdrop-filter:
+   a compositing layer inside the card re-rasterized `.album-card::after`'s
+   gradient and visibly darkened every cover. */
+.cardMonitor {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  line-height: 0;
+}
+
+.cardMonitor button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  background: rgba(10, 10, 10, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.85);
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.cardMonitor button:hover {
+  background: rgba(20, 20, 20, 0.92);
+  border-color: rgba(var(--accent-rgb), 0.7);
+  transform: scale(1.08);
+}
+
+.cardMonitor button svg {
+  width: 15px;
+  height: 15px;
+}

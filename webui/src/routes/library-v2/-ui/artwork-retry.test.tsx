@@ -203,3 +203,64 @@ describe('Artwork background-build delivery (rev25-02)', () => {
     expect(statusCalls).toEqual([]);
   });
 });
+
+/** ldp-07: the legacy artist page painted covers straight from the provider
+ *  CDN and never involved the server, which is exactly why it felt faster.
+ *  Library V2 keeps its own cached copy as the truth (a manual cover pick, an
+ *  embedded cover, offline/NAS) but must not make the user stare at a
+ *  placeholder while that copy is still being built. */
+describe('Artwork provider fallback while a local cover is pending (ldp-07)', () => {
+  beforeEach(() => {
+    resetPendingArtworkWatchers();
+    server.use(
+      http.get('/api/library/v2/artwork/status', () =>
+        HttpResponse.json({ success: true, states: { '7': { state: 'pending' } } }),
+      ),
+    );
+  });
+  afterEach(() => resetPendingArtworkWatchers());
+
+  it('shows the provider cover instead of the placeholder', () => {
+    render(
+      <Artwork
+        src="/api/library/v2/artwork/album/7"
+        remote="https://cdn.test/cover.jpg"
+        alt="Album"
+        className="c"
+      />,
+    );
+    fireEvent.error(screen.getByAltText('Album'));
+
+    expect(screen.getByAltText('Album').getAttribute('src')).toBe('https://cdn.test/cover.jpg');
+  });
+
+  it('falls through to the placeholder when the provider cover fails too', () => {
+    render(
+      <Artwork
+        src="/api/library/v2/artwork/album/7"
+        remote="https://cdn.test/gone.jpg"
+        alt="Album"
+        className="c"
+      />,
+    );
+    fireEvent.error(screen.getByAltText('Album'));
+    fireEvent.error(screen.getByAltText('Album'));
+
+    expect(screen.getByLabelText('Album').textContent).toBe('♪');
+  });
+
+  it('still prefers the local copy on the first paint', () => {
+    render(
+      <Artwork
+        src="/api/library/v2/artwork/album/7"
+        remote="https://cdn.test/cover.jpg"
+        alt="Album"
+        className="c"
+      />,
+    );
+
+    expect(screen.getByAltText('Album').getAttribute('src')).toBe(
+      '/api/library/v2/artwork/album/7',
+    );
+  });
+});

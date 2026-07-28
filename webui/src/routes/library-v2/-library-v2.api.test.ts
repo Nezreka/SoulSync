@@ -379,9 +379,9 @@ describe('library v2 match-status api', () => {
         }),
       ),
     );
-    const rows = await fetchLibraryV2ArtistMatchStatus(7);
-    expect(rows[0].status).toBe('matched');
-    expect(rows[0].legacy_entity_id).toBe(3);
+    const status = await fetchLibraryV2ArtistMatchStatus(7);
+    expect(status.services[0].status).toBe('matched');
+    expect(status.services[0].legacy_entity_id).toBe(3);
   });
 
   it('fetches album + per-track match bundle', async () => {

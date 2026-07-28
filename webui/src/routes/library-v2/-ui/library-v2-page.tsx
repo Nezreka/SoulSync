@@ -18,6 +18,16 @@ import { useReactPageShell } from '@/platform/shell/route-controllers';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
+  fetchArtistDiscographyGapFill,
+  fetchArtistLastfmInfo,
+  fetchArtistTopTracks,
+  fetchLibraryV2DiscoveryTrackStatus,
+  fetchProviderArtistDetail,
+  materializeLibraryV2DiscoveryArtist,
+  materializeLibraryV2DiscoveryTrack,
+  resolveLibraryV2DiscoveryArtist,
+  type ArtistTopTrack,
+  type ProviderRelease,
   bulkMonitorLibraryV2Releases,
   clearLibraryV2EntityMatch,
   deleteLibraryV2Entity,
@@ -118,6 +128,13 @@ import { Route } from '../route';
 import { describeRejection } from './acquisition-rejection';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
+import {
+  classifyReleaseContent,
+  DEFAULT_DISCOGRAPHY_FILTERS,
+  passesDiscographyFilters,
+  type DiscographyFilterState,
+  type DiscographyOwnership,
+} from './discography-filters';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
@@ -404,11 +421,16 @@ export function Artwork({
   alt,
   className,
   thumb,
+  remote,
 }: {
   src: string;
   alt: string;
   className: string;
   thumb?: boolean;
+  /** ldp-07: the provider CDN cover for this entity. Painted instead of the
+   *  placeholder while a cold local build is still running, so a first visit
+   *  shows real artwork at CDN speed exactly like the legacy page did. */
+  remote?: string | null;
 }) {
   // Only SoulSync's artwork endpoint understands ``size=thumb``. Appending it
   // to Spotify/Deezer/CDN URLs (the previous behavior) can invalidate signed
@@ -423,9 +445,10 @@ export function Artwork({
   // forcing every such change to load the image twice. Adjusting state during
   // render (React's documented pattern for this) means the corrected value is
   // what actually gets painted, never a transient wrong one.
-  const [state, setState] = useState({ base, failed: false, version: 0 });
-  if (state.base !== base) setState({ base, failed: false, version: 0 });
+  const [state, setState] = useState({ base, failed: false, remoteFailed: false, version: 0 });
+  if (state.base !== base) setState({ base, failed: false, remoteFailed: false, version: 0 });
   const failed = state.base === base && state.failed;
+  const remoteFailed = state.base === base && state.remoteFailed;
   const version = state.base === base ? state.version : 0;
   // A falsy `base` must stay falsy: `''` plus a suffix produces the truthy
   // string `'?v=1'`, which `<img>` resolves against the current document — a
@@ -444,14 +467,22 @@ export function Artwork({
     return watchPendingArtwork(target.kind, target.id, (readyVersion) => {
       if (readyVersion == null) return;
       setState((current) =>
-        current.base === base ? { base, failed: false, version: readyVersion } : current,
+        current.base === base
+          ? { base, failed: false, remoteFailed: current.remoteFailed, version: readyVersion }
+          : current,
       );
     });
   }, [failed, local, base]);
+  // The local copy stays the long-term truth (a manual cover pick, an embedded
+  // cover, offline/NAS); the CDN url only stands in for the wait. Its own
+  // failure is tracked separately, or falling back would re-trigger itself.
+  const usingRemote = failed && !remoteFailed && Boolean(remote) && remote !== url;
+  const shown = usingRemote ? (remote as string) : url;
   const handleError = () => {
-    setState((current) => (current.base === base ? { ...current, failed: true } : current));
+    const field = usingRemote ? 'remoteFailed' : 'failed';
+    setState((current) => (current.base === base ? { ...current, [field]: true } : current));
   };
-  if (!url || failed) {
+  if (!shown || (failed && !usingRemote)) {
     return (
       <div className={`${className} ${styles.artPlaceholder}`} aria-label={alt}>
         ♪
@@ -461,7 +492,7 @@ export function Artwork({
   return (
     <img
       className={className}
-      src={url}
+      src={shown}
       alt={alt}
       loading="lazy"
       referrerPolicy="no-referrer"
@@ -1409,20 +1440,25 @@ function EnrichDropdown({
 function ArtistMatchChips({
   artist,
   watchlistRowId,
+  abbreviated,
 }: {
   artist: LibraryV2ArtistDetail;
   watchlistRowId?: number;
+  /** ldp-05: the rich hero puts these in the legacy badge row under the
+   *  name, where short service codes read like the logo row they replace. */
+  abbreviated?: boolean;
 }) {
   const query = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
-  if (!query.data?.length) return null;
+  if (!query.data?.services.length) return null;
   return (
     <MatchChips
       entityType="artist"
       entityName={artist.name}
       entityImage={artist.image_url}
       artistReleases={[...artist.albums, ...(artist.eps ?? []), ...artist.singles]}
-      services={query.data}
+      services={query.data.services}
       watchlistRowId={watchlistRowId}
+      abbreviated={abbreviated}
     />
   );
 }
@@ -3652,11 +3688,30 @@ export function LibraryV2Page() {
     );
   }
 
+  // ldp-01: `<source>:<provider id>` — an artist that may not be in the
+  // catalogue at all. Split on the FIRST colon only; provider ids can contain
+  // one (MusicBrainz URLs, Bandcamp slugs).
+  const discoverSplit = search.discover ? search.discover.indexOf(':') : -1;
+  const discover =
+    search.discover && discoverSplit > 0
+      ? {
+          source: search.discover.slice(0, discoverSplit),
+          providerId: search.discover.slice(discoverSplit + 1),
+          name: search.discoverName ?? '',
+        }
+      : null;
+
   return (
     <>
       <MirrorStatusBanner />
       {search.album ? (
         <AlbumDetailView albumId={search.album} />
+      ) : discover && !search.artist ? (
+        <DiscoveryArtistView
+          source={discover.source}
+          providerId={discover.providerId}
+          name={discover.name}
+        />
       ) : search.artist ? (
         <ArtistDetailView artistId={search.artist} />
       ) : search.section === 'wanted' ? (
@@ -4451,6 +4506,7 @@ export function ArtistCard({
       >
         <Artwork
           src={artist.image_url ?? ''}
+          remote={artist.remote_image_url}
           alt={artist.name}
           className={styles.artistThumb}
           thumb
@@ -4483,9 +4539,7 @@ function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
         <ArtistCard
           key={artist.id}
           artist={artist}
-          onOpen={(artistId) =>
-            void navigate({ search: (p) => ({ ...p, artist: artistId, releases: undefined }) })
-          }
+          onOpen={(artistId) => void navigate({ search: (p) => openArtistSearch(p, artistId) })}
         />
       ))}
     </div>
@@ -4590,9 +4644,7 @@ function ArtistTable({
           <tr
             key={artist.id}
             className={styles.tableRow}
-            onClick={() =>
-              void navigate({ search: (p) => ({ ...p, artist: artist.id, releases: undefined }) })
-            }
+            onClick={() => void navigate({ search: (p) => openArtistSearch(p, artist.id) })}
           >
             <td>
               <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
@@ -4601,6 +4653,7 @@ function ArtistTable({
               <span className={styles.cellArtist}>
                 <Artwork
                   src={artist.image_url ?? ''}
+                  remote={artist.remote_image_url}
                   alt={artist.name}
                   className={styles.rowThumb}
                   thumb
@@ -4629,7 +4682,12 @@ function ArtistTable({
 function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId));
+  // `resolve` materializes the provider tracklist for a release that has no
+  // track rows yet. The inline expand always did this; opening the same
+  // release as its own page did not, so a discography-only release (a
+  // compilation nobody owns) rendered an empty track list. The server-side
+  // guard makes it a no-op for every release that already has tracks.
+  const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve: true }));
   const album = albumQuery.data;
   const [modalAction, setModalAction] = useState<{
     action: string;
@@ -4773,12 +4831,42 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
 
 /** Filter for the release toggle: "My Library" keeps owned or wanted releases;
  *  "All Releases" shows the full provider discography. */
+/** ldp-05: which artist view you land on depends on where you came from.
+ *  Opening an artist from inside Library V2 always starts in the V2 shape —
+ *  My Library, table, compact header — regardless of what the previous
+ *  artist's URL happened to carry. Coming from search is the opposite case
+ *  and is set by `DISCOVERY_ARTIST_VIEW` below. */
+function openArtistSearch<T extends Record<string, unknown>>(previous: T, artistId: number) {
+  return {
+    ...previous,
+    artist: artistId,
+    album: undefined,
+    releases: 'library' as const,
+    releaseView: 'table' as const,
+    header: 'compact' as const,
+  };
+}
+
+/** Arriving from a search result: the full discography, in the card view, with
+ *  the rich header — i.e. exactly what the legacy artist page showed, so the
+ *  switch to Library V2 is not something a user has to notice. */
+const DISCOVERY_ARTIST_VIEW = {
+  releases: 'all' as const,
+  releaseView: 'cards' as const,
+  header: 'rich' as const,
+};
+
 function visibleReleases(
   entries: LibraryV2AlbumSummary[],
   mode: 'library' | 'all',
 ): LibraryV2AlbumSummary[] {
   if (mode === 'all') return entries;
-  return entries.filter((e) => e.origin !== 'discography' || e.monitored);
+  // Guide §5: "My Library" is `origin='library' OR monitored`. A wanted TRACK
+  // counts as much as a monitored release — bookmarking one top track used to
+  // write a wishlist row the user could then not find anywhere in the library.
+  return entries.filter(
+    (e) => e.origin !== 'discography' || e.monitored || (e.monitored_tracks ?? 0) > 0,
+  );
 }
 
 /** Decides whether the "All Releases" tab should trigger a discography
@@ -4920,11 +5008,934 @@ function ArtistToolsMenu({
   );
 }
 
+// --- ldp-01…ldp-07: legacy artist hero, card grid and discovery mode --------
+//
+// Ported, not re-imagined (issues §28.5). The markup and every class name come
+// straight from the legacy artist page (`webui/index.html:4565-4655` and
+// `4676ff`) so `style.css` — which the React app already loads, unscoped —
+// dresses these components exactly as it dressed the originals. What changes
+// is only the plumbing: DOM mutation becomes React state, `getElementById`
+// becomes props/queries, and legacy action names become V2 semantics.
+
+/** Legacy's lazy background loader (`core.js:225-239`): covers only start
+ *  downloading once their card is within 200px of the viewport. Reuses the
+ *  shared IntersectionObserver when the legacy bundle is present, and paints
+ *  directly when it is not, so this survives the legacy page's removal. */
+function useLazyBackgrounds(ref: { current: HTMLElement | null }, key: unknown) {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const observe = (globalThis as { observeLazyBackgrounds?: (c: Element) => void })
+      .observeLazyBackgrounds;
+    if (observe) {
+      observe(root);
+      return;
+    }
+    root.querySelectorAll<HTMLElement>('[data-bg-src]').forEach((el) => {
+      el.style.backgroundImage = `url('${el.dataset.bgSrc}')`;
+    });
+  }, [ref, key]);
+}
+
+function releaseYear(releaseDate: string | null | undefined, year: number | null | undefined) {
+  const fromDate = /^(\d{4})/.exec(String(releaseDate ?? ''))?.[1];
+  const parsed = Number(fromDate ?? year ?? 0);
+  return parsed > 1900 && parsed <= new Date().getFullYear() + 1 ? String(parsed) : '';
+}
+
+/** One card, in the shape both sources can produce: a catalogue release and a
+ *  provider-only release from the discovery endpoint. */
+interface DiscographyCard {
+  key: string;
+  /** Only a catalogue release has one; a provider-only release does not. */
+  albumId?: number;
+  monitored: boolean;
+  /** #1067: set only on a "+ Other sources" card — the source that lists it. */
+  gapSource?: string;
+  title: string;
+  albumType: string;
+  year: string;
+  imageUrl: string;
+  explicit: boolean;
+  /** `null` while ownership is undetermined — legacy's "checking" state. */
+  owned: boolean | null;
+  ownedTracks: number;
+  totalTracks: number;
+}
+
+function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
+  return {
+    key: `lib2-${album.id}`,
+    albumId: album.id,
+    monitored: album.monitored,
+    title: album.title,
+    albumType: album.album_type,
+    year: releaseYear(album.release_date, album.year),
+    // ldp-07: a pure discography row already carries the provider CDN url
+    // here; an owned release carries its local cached cover.
+    imageUrl: album.image_url ?? album.remote_image_url ?? '',
+    explicit: album.explicit === true,
+    owned: album.tracks_present > 0,
+    ownedTracks: album.tracks_present,
+    totalTracks: album.track_count,
+  };
+}
+
+function providerCard(release: ProviderRelease): DiscographyCard {
+  const completion = release.track_completion ?? null;
+  return {
+    key: `provider-${release.id}`,
+    monitored: false,
+    title: release.title || release.name || '',
+    albumType: release.album_type || 'album',
+    year: releaseYear(release.release_date, release.year),
+    imageUrl: release.image_url ?? '',
+    explicit: release.explicit === true,
+    owned: release.owned ?? null,
+    ownedTracks: completion?.owned_tracks ?? 0,
+    totalTracks: completion?.total_tracks ?? 0,
+  };
+}
+
+/** The completion badge pinned to a card's corner (`library.js:2181-2220`). */
+function completionOverlay(card: DiscographyCard): { cls: string; label: string } {
+  if (card.owned === null) return { cls: 'checking', label: 'Checking…' };
+  if (!card.owned) return { cls: 'missing', label: 'Missing' };
+  const missing = Math.max(0, card.totalTracks - card.ownedTracks);
+  if (missing === 0 || card.totalTracks === 0) return { cls: 'completed', label: '✓ Owned' };
+  const pct = Math.round((card.ownedTracks / card.totalTracks) * 100);
+  return {
+    cls: pct >= 75 ? 'nearly_complete' : 'partial',
+    label: `${card.ownedTracks}/${card.totalTracks}`,
+  };
+}
+
+/** ldp-03: the legacy tile grid, as the alternative to the V2 track table. */
+function ReleaseCardGrid({
+  cards,
+  onOpen,
+  openTitle,
+  showOwnership = true,
+}: {
+  cards: DiscographyCard[];
+  onOpen?: (card: DiscographyCard) => void;
+  openTitle?: string;
+  /** Off for a provider artist: there is no library to compare against, so
+   *  legacy omitted the completion badge entirely rather than claim every
+   *  release is "Checking…" forever (`library.js:2178`). */
+  showOwnership?: boolean;
+}) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  useLazyBackgrounds(gridRef, cards.map((c) => c.key).join('|'));
+  if (cards.length === 0) return null;
+  return (
+    <div className="releases-grid" ref={gridRef}>
+      {cards.map((card) => {
+        const flags = classifyReleaseContent({ title: card.title, album_type: card.albumType });
+        const overlay = showOwnership ? completionOverlay(card) : null;
+        const state =
+          !showOwnership || card.owned ? '' : card.owned === null ? ' checking' : ' missing';
+        return (
+          <div
+            key={card.key}
+            className={`release-card album-card${state}`}
+            data-is-live={String(flags.isLive)}
+            data-is-compilation={String(flags.isCompilation)}
+            data-is-featured={String(flags.isFeatured)}
+            title={onOpen ? openTitle : card.title}
+            onClick={onOpen ? () => onOpen(card) : undefined}
+          >
+            <div className="album-card-image" data-bg-src={card.imageUrl || undefined} />
+            {card.albumId ? (
+              <div
+                className={styles.cardMonitor}
+                title="Bookmark this release"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MonitorToggle entity="albums" id={card.albumId} monitored={card.monitored} />
+              </div>
+            ) : null}
+            {overlay ? (
+              <div className={`completion-overlay ${overlay.cls}`}>
+                <span className="completion-status">{overlay.label}</span>
+              </div>
+            ) : null}
+            <div className="album-card-content">
+              <div className="album-card-name" title={card.title}>
+                {card.title}
+                {card.explicit ? <span className="explicit-badge">E</span> : null}
+              </div>
+              {card.year ? <div className="album-card-year">{card.year}</div> : null}
+            </div>
+            {card.gapSource ? (
+              <div
+                className="gapfill-source-badge"
+                title={`Only listed on ${card.gapSource} — opens and downloads from there`}
+              >
+                {card.gapSource}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The legacy section wrapper — and it is load-bearing, not decoration:
+ *  `.release-card` carries a fixed `height: 300px` that only
+ *  `.discography-sections .release-card { height: fit-content }` cancels.
+ *  Rendering the cards outside this ancestry left every card 300px tall while
+ *  `.album-card`'s `aspect-ratio: 1` fought it, so the covers overlapped. */
+function DiscographySections({ children }: { children: ReactNode }) {
+  return <div className="discography-sections">{children}</div>;
+}
+
+function DiscographySection({
+  title,
+  stats,
+  children,
+}: {
+  title: string;
+  stats?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="discography-section">
+      <div className="section-header">
+        <h3>{title}</h3>
+        {stats ? <div className="section-stats">{stats}</div> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const CATEGORY_LABELS = { albums: 'Albums', eps: 'EPs', singles: 'Singles' } as const;
+const CONTENT_LABELS = {
+  live: 'Live',
+  compilations: 'Compilations',
+  featured: 'Featured',
+} as const;
+const OWNERSHIP_LABELS = { all: 'All', owned: 'Owned', missing: 'Missing' } as const;
+
+/** ldp-04: Show / Include / Status, straight from `index.html:4676ff`. */
+function DiscographyFilterBar({
+  state,
+  onChange,
+  otherSources,
+  onToggleOtherSources,
+  otherSourcesBusy,
+}: {
+  state: DiscographyFilterState;
+  onChange: (next: DiscographyFilterState) => void;
+  /** #1067 "+ Other sources": omitted when there is no provider id to ask
+   *  with, because the endpoint refuses to name-search on purpose. */
+  otherSources?: boolean;
+  onToggleOtherSources?: () => void;
+  otherSourcesBusy?: boolean;
+}) {
+  return (
+    <div className="discography-filters">
+      <div className="filter-group">
+        <span className="filter-label">Show</span>
+        {(Object.keys(CATEGORY_LABELS) as (keyof typeof CATEGORY_LABELS)[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={`discography-filter-btn${state.categories[key] ? ' active' : ''}`}
+            onClick={() =>
+              onChange({
+                ...state,
+                categories: { ...state.categories, [key]: !state.categories[key] },
+              })
+            }
+          >
+            {CATEGORY_LABELS[key]}
+          </button>
+        ))}
+      </div>
+      <div className="filter-divider" />
+      <div className="filter-group">
+        <span className="filter-label">Include</span>
+        {(Object.keys(CONTENT_LABELS) as (keyof typeof CONTENT_LABELS)[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={`discography-filter-btn${state.content[key] ? ' active' : ''}`}
+            onClick={() =>
+              onChange({ ...state, content: { ...state.content, [key]: !state.content[key] } })
+            }
+          >
+            {CONTENT_LABELS[key]}
+          </button>
+        ))}
+      </div>
+      <div className="filter-divider" />
+      <div className="filter-group">
+        <span className="filter-label">Status</span>
+        {(Object.keys(OWNERSHIP_LABELS) as DiscographyOwnership[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={`discography-filter-btn${state.ownership === key ? ' active' : ''}`}
+            onClick={() => onChange({ ...state, ownership: key })}
+          >
+            {OWNERSHIP_LABELS[key]}
+          </button>
+        ))}
+      </div>
+      {onToggleOtherSources ? (
+        <>
+          <div className="filter-divider" />
+          <div className="filter-group">
+            <span className="filter-label">Sources</span>
+            <button
+              type="button"
+              className={`discography-filter-btn${otherSources ? ' active' : ''}`}
+              title="Also list releases your other metadata sources know about — each is marked with the source that has it (#1067)"
+              onClick={onToggleOtherSources}
+            >
+              {otherSourcesBusy ? 'Loading…' : '+ Other sources'}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** ldp-05/ldp-06: the legacy hero's Top Tracks column. The row action is
+ *  Bookmark with V2 monitoring semantics — never legacy's "Add to Wishlist"
+ *  and never "Download": bookmarking states intent, the pipeline decides when
+ *  to act on it (guide §2.2). */
+type BookmarkState = { status: 'busy' | 'done' } | { status: 'error'; message: string };
+
+function TopTracksSidebar({
+  artistName,
+  providerId,
+  source,
+}: {
+  artistName: string;
+  providerId: string | null;
+  source: string;
+}) {
+  const queryClient = useQueryClient();
+  const [bookmarked, setBookmarked] = useState<Record<string, BookmarkState>>({});
+  const topTracks = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'top-tracks', providerId, artistName],
+    queryFn: () => fetchArtistTopTracks({ providerId, name: artistName }),
+    enabled: Boolean(artistName),
+    staleTime: 5 * 60_000,
+  });
+  const tracks = topTracks.data?.tracks ?? [];
+  const titles = tracks.map((t) => t.name);
+  // The tick is a fact about the library, not about this component's
+  // lifetime: without this the bookmark looked applied until the next reload.
+  const status = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'top-track-status', source, providerId, artistName, titles],
+    queryFn: () =>
+      fetchLibraryV2DiscoveryTrackStatus({
+        source,
+        artistName,
+        artistProviderId: providerId,
+        titles,
+      }),
+    enabled: titles.length > 0,
+  });
+  if (topTracks.isLoading || tracks.length === 0) return null;
+
+  function stateOf(track: ArtistTopTrack): BookmarkState | undefined {
+    const local = bookmarked[track.name];
+    if (local) return local;
+    return status.data?.[track.name]?.monitored ? { status: 'done' } : undefined;
+  }
+
+  async function bookmark(track: ArtistTopTrack) {
+    setBookmarked((s) => ({ ...s, [track.name]: { status: 'busy' } }));
+    try {
+      const trackId = await materializeLibraryV2DiscoveryTrack({
+        source,
+        artistName,
+        artistProviderId: providerId,
+        trackTitle: track.name,
+        trackProviderId: track.id ?? null,
+        albumTitle: track.album?.name ?? null,
+        albumProviderId: track.album?.id ?? null,
+      });
+      await setLibraryV2Monitored('tracks', trackId, true);
+      await invalidateLibraryV2(queryClient);
+      setBookmarked((s) => ({ ...s, [track.name]: { status: 'done' } }));
+    } catch (error) {
+      setBookmarked((s) => ({
+        ...s,
+        [track.name]: { status: 'error', message: mutationErrorMessage(error, 'Bookmark failed') },
+      }));
+    }
+  }
+
+  return (
+    <div className="artist-hero-right">
+      <div className="hero-sidebar-title">
+        {topTracks.data?.source === 'lastfm' ? 'Popular on Last.fm' : 'Top Tracks'}
+      </div>
+      <div className="hero-top-tracks">
+        {tracks.map((track, index) => {
+          const state = stateOf(track);
+          return (
+            <div className="hero-top-track" key={`${track.name}-${index}`}>
+              <span className="hero-top-track-num">{index + 1}</span>
+              <span className="hero-top-track-name" title={track.name}>
+                {track.name}
+              </span>
+              {track.playcount ? (
+                <span className="hero-top-track-plays">{formatCompactNumber(track.playcount)}</span>
+              ) : null}
+              <button
+                type="button"
+                className="hero-top-track-download"
+                disabled={state?.status === 'busy' || state?.status === 'done'}
+                title={
+                  state?.status === 'error'
+                    ? state.message
+                    : state?.status === 'done'
+                      ? 'Bookmarked — this track is now wanted'
+                      : 'Bookmark — mark this track as wanted'
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void bookmark(track);
+                }}
+              >
+                {state?.status === 'done' ? '✓' : <SvgIcon name="monitor" filled />}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** ldp-05: the legacy hero, kept to its original vertical footprint. Used for
+ *  both a catalogue artist (`header=rich`) and a discovery artist, which is
+ *  the whole point — the two must be indistinguishable to a user arriving
+ *  from search. */
+/** ldp-05: the legacy hero's enrichment rings — per provider, the share of
+ *  this artist's tracks that actually carry that provider's id. Ported from
+ *  `renderArtistEnrichmentCoverage` (`library.js:1188`) including its class
+ *  names and SVG geometry, so `style.css` renders it identically. */
+const ENRICH_SERVICES_COVERAGE: Array<{ name: string; key: string; color: string }> = [
+  { name: 'Spotify', key: 'spotify', color: '#1db954' },
+  { name: 'MusicBrainz', key: 'musicbrainz', color: '#ba55d3' },
+  { name: 'Deezer', key: 'deezer', color: '#a238ff' },
+  { name: 'Last.fm', key: 'lastfm', color: '#d51007' },
+  { name: 'iTunes', key: 'itunes', color: '#fc3c44' },
+  { name: 'AudioDB', key: 'audiodb', color: '#1a9fff' },
+  { name: 'Discogs', key: 'discogs', color: '#D4A574' },
+  { name: 'Genius', key: 'genius', color: '#ffff64' },
+  { name: 'Tidal', key: 'tidal', color: '#00ffff' },
+  { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
+  { name: 'Bandcamp', key: 'bandcamp', color: '#1da0c3' },
+];
+
+const RING_RADIUS = 20;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+function EnrichmentCoverage({ coverage }: { coverage: Record<string, number> }) {
+  if (!coverage.total_tracks) return null;
+  return (
+    <div className="artist-enrichment-coverage">
+      <div className="artist-enrich-title">Enrichment Coverage</div>
+      <div className="artist-enrich-grid">
+        {ENRICH_SERVICES_COVERAGE.map((service) => {
+          const pct = coverage[service.key] ?? 0;
+          const offset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * pct) / 100;
+          return (
+            <div className="artist-enrich-circle" key={service.key}>
+              <div className="artist-enrich-ring">
+                <svg viewBox="0 0 48 48">
+                  <circle className="ring-bg" cx="24" cy="24" r={RING_RADIUS} />
+                  <circle
+                    className="ring-fill"
+                    cx="24"
+                    cy="24"
+                    r={RING_RADIUS}
+                    stroke={service.color}
+                    strokeDasharray={RING_CIRCUMFERENCE.toFixed(1)}
+                    strokeDashoffset={offset.toFixed(1)}
+                  />
+                </svg>
+                <span className="ring-pct">{Math.round(pct)}</span>
+              </div>
+              <span className="artist-enrich-label">{service.name}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** ldp-05: the legacy hero, structurally identical to
+ *  `index.html:4565-4655` — image column, info column, top-tracks column —
+ *  because that is what `style.css` lays out. Only the plumbing differs.
+ *
+ *  The image is deliberately NOT the plain 160px `.artist-image`: legacy
+ *  overrode that with `#artist-hero-section #artist-detail-image { width:100% }`
+ *  so the portrait fills its `max-width: min(38%, 460px)` column. An id
+ *  selector cannot be reused here, so `styles.heroImage` reproduces it. */
+function LegacyArtistHero({
+  name,
+  imageUrl,
+  remoteImageUrl,
+  genres,
+  bio,
+  listeners,
+  playcount,
+  sections,
+  providerId,
+  source,
+  badges,
+  actions,
+  coverage,
+  onPickImage,
+}: {
+  name: string;
+  imageUrl: string;
+  remoteImageUrl?: string | null;
+  genres: string[];
+  bio: string | null;
+  listeners: number | null;
+  playcount: number | null;
+  sections: Array<{ label: string; owned: number; total: number }>;
+  providerId: string | null;
+  source: string;
+  /** Provider chips — the V2 equivalent of legacy's service logo row. */
+  badges?: ReactNode;
+  actions?: ReactNode;
+  coverage?: Record<string, number>;
+  onPickImage?: () => void;
+}) {
+  const [expandedBio, setExpandedBio] = useState(false);
+  // Legacy shipped the bio as raw HTML with Last.fm's trailing link; strip the
+  // markup rather than render it — an artist bio is not a trusted template.
+  const cleanBio = (bio ?? '')
+    .replace(/<a\b[^>]*>.*?<\/a>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .trim();
+  return (
+    <div className="artist-hero-section">
+      <div className="artist-hero-content">
+        <div
+          className="artist-image-container"
+          title={onPickImage ? 'Change artist photo' : undefined}
+          onClick={onPickImage}
+        >
+          <Artwork
+            src={imageUrl}
+            remote={remoteImageUrl}
+            alt={name}
+            className={`artist-image ${styles.heroImage}`}
+          />
+          {onPickImage ? (
+            <div className={`artist-image-edit-overlay ${styles.heroImageOverlay}`}>
+              <SvgIcon name="cover" />
+              <span>Change photo</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="artist-info">
+          <div className="artist-hero-identity">
+            <h1 className="artist-name">{name}</h1>
+            {badges ? <div className="artist-hero-badges">{badges}</div> : null}
+          </div>
+          {actions ? <div className="artist-hero-actions">{actions}</div> : null}
+          {genres.length > 0 ? (
+            <div className="artist-genres-container">{genres.join(', ')}</div>
+          ) : null}
+          {cleanBio ? (
+            <div className={`artist-hero-bio${expandedBio ? ' expanded' : ''}`}>
+              <span className="bio-text">{cleanBio}</span>
+              <span
+                className="artist-hero-bio-toggle"
+                onClick={() => setExpandedBio((v) => !v)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && setExpandedBio((v) => !v)}
+              >
+                {expandedBio ? 'Show less' : 'Read more'}
+              </span>
+            </div>
+          ) : null}
+          {listeners || playcount ? (
+            <div className="artist-hero-numbers">
+              {listeners ? (
+                <div className="artist-hero-stat">
+                  <span className="hero-stat-value">{formatCompactNumber(listeners)}</span>
+                  <span className="hero-stat-label">listeners</span>
+                </div>
+              ) : null}
+              {playcount ? (
+                <div className="artist-hero-stat">
+                  <span className="hero-stat-value">{formatCompactNumber(playcount)}</span>
+                  <span className="hero-stat-label">plays</span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="collection-overview">
+            {sections.map((section) => (
+              <div className="collection-category" key={section.label}>
+                <span className="category-label">{section.label}</span>
+                <div className="completion-bar">
+                  <div
+                    className="completion-fill"
+                    style={{
+                      width: `${section.total ? clampPercent((section.owned / section.total) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+                <span className="category-stats">
+                  {section.owned}/{section.total}
+                </span>
+              </div>
+            ))}
+          </div>
+          {coverage ? <EnrichmentCoverage coverage={coverage} /> : null}
+        </div>
+        <TopTracksSidebar artistName={name} providerId={providerId} source={source} />
+      </div>
+    </div>
+  );
+}
+
+/** #1067 "+ Other sources": releases only OTHER configured metadata sources
+ *  list, appended to the normal sections with a source badge. Opt-in and
+ *  lazy — it costs one provider round trip per extra source. */
+function useOtherSources(input: {
+  providerId: string | null;
+  artistName: string;
+  baseSource?: string | null;
+}) {
+  const [enabled, setEnabled] = useState(false);
+  const query = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'gap-fill', input.providerId, input.artistName],
+    queryFn: () =>
+      fetchArtistDiscographyGapFill({
+        providerId: input.providerId ?? '',
+        artistName: input.artistName,
+        baseSource: input.baseSource,
+      }),
+    enabled: enabled && Boolean(input.providerId) && Boolean(input.artistName),
+    staleTime: 10 * 60_000,
+  });
+  const byBucket = (bucket: 'album' | 'ep' | 'single'): DiscographyCard[] =>
+    enabled
+      ? (query.data ?? [])
+          .filter((r) => r._bucket === bucket)
+          .map((r) => ({ ...providerCard(r), gapSource: r.gap_source }))
+      : [];
+  return {
+    available: Boolean(input.providerId) && Boolean(input.artistName),
+    enabled,
+    busy: query.isFetching,
+    toggle: () => setEnabled((v) => !v),
+    byBucket,
+  };
+}
+
+/** Everything the two "All Releases" render modes share: one filter bar, one
+ *  set of visible releases (ldp-03/ldp-04 both apply in either mode). */
+function useDiscographyFilters() {
+  const [filters, setFilters] = useState<DiscographyFilterState>(DEFAULT_DISCOGRAPHY_FILTERS);
+  return { filters, setFilters };
+}
+
+function visibleCards(cards: DiscographyCard[], filters: DiscographyFilterState) {
+  return cards.filter((card) =>
+    passesDiscographyFilters(
+      { title: card.title, album_type: card.albumType },
+      filters,
+      card.owned,
+    ),
+  );
+}
+
+/** ldp-01/ldp-02: an artist with no catalogue row at all, rendered from
+ *  provider data alone. Read-only by decision (issues §28.6 question 1): the
+ *  catalogue row is created the moment the user bookmarks the artist or opens
+ *  one of its releases, never just for looking. */
+type GroupLabel = 'Albums' | 'EPs' | 'Singles';
+
+function DiscoveryArtistView({
+  source,
+  providerId,
+  name,
+}: {
+  source: string;
+  providerId: string;
+  name: string;
+}) {
+  const navigate = useNavigate();
+  const { filters, setFilters } = useDiscographyFilters();
+  const [adopting, setAdopting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const otherSources = useOtherSources({ providerId, artistName: name, baseSource: source });
+
+  const existing = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-resolve', source, providerId, name],
+    queryFn: () => resolveLibraryV2DiscoveryArtist({ source, providerId, name }),
+  });
+  const knownArtistId = existing.data ?? null;
+  const detail = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-detail', source, providerId, name],
+    queryFn: () => fetchProviderArtistDetail({ source, providerId, name }),
+    enabled: existing.isSuccess && knownArtistId === null,
+    staleTime: 5 * 60_000,
+  });
+
+  /** Arriving at an artist we already have is not discovery — hand straight
+   *  over to the real Library V2 page, with the rich header preselected
+   *  because the user came from a search result (ldp-05). */
+  useEffect(() => {
+    if (!knownArtistId) return;
+    void navigate({
+      search: (p) => ({
+        ...p,
+        ...DISCOVERY_ARTIST_VIEW,
+        artist: knownArtistId,
+        discover: undefined,
+        discoverName: undefined,
+      }),
+      replace: true,
+    });
+  }, [knownArtistId, navigate]);
+
+  /** The one write this view can perform: adopt the artist into the catalogue
+   *  and continue on the normal page, where every V2 action already works.
+   *  `monitor` separates the two reasons to adopt — Bookmark states intent and
+   *  monitors (ldp-06), opening a release only needs the entity to exist. */
+  async function adopt({ monitor }: { monitor: boolean }) {
+    if (adopting) return;
+    setAdopting(true);
+    setError(null);
+    try {
+      const artistId = await materializeLibraryV2DiscoveryArtist({ source, providerId, name });
+      if (monitor) await setLibraryV2Monitored('artists', artistId, true);
+      await navigate({
+        search: (p) => ({
+          ...p,
+          ...DISCOVERY_ARTIST_VIEW,
+          artist: artistId,
+          discover: undefined,
+          discoverName: undefined,
+        }),
+        replace: true,
+      });
+    } catch (e) {
+      setError(mutationErrorMessage(e, 'Could not add this artist'));
+      setAdopting(false);
+    }
+  }
+
+  if (existing.isLoading || knownArtistId) {
+    return <div className={styles.loading}>Loading…</div>;
+  }
+  if (detail.isLoading) {
+    return <div className={styles.loading}>Loading Artist Discography…</div>;
+  }
+  if (existing.isError || detail.isError || !detail.data) {
+    return (
+      <div className={styles.page}>
+        <BackLink
+          onClick={() =>
+            void navigate({
+              search: (p) => ({ ...p, discover: undefined, discoverName: undefined }),
+            })
+          }
+        >
+          ← All artists
+        </BackLink>
+        <div className={styles.emptyState}>
+          <h2>Could not load this artist</h2>
+          <p>
+            {mutationErrorMessage(
+              existing.error ?? detail.error,
+              'The metadata source did not answer.',
+            )}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const { artist, discography } = detail.data;
+  const groups: Array<[GroupLabel, ProviderRelease[]]> = [
+    ['Albums', discography.albums ?? []],
+    ['EPs', discography.eps ?? []],
+    ['Singles', discography.singles ?? []],
+  ];
+  const categoryOf = { Albums: 'albums', EPs: 'eps', Singles: 'singles' } as const;
+  const bucketOf = { Albums: 'album', EPs: 'ep', Singles: 'single' } as const;
+
+  return (
+    <div className={styles.page}>
+      <BackLink
+        onClick={() =>
+          void navigate({ search: (p) => ({ ...p, discover: undefined, discoverName: undefined }) })
+        }
+      >
+        ← All artists
+      </BackLink>
+      {error ? <div className={`${styles.grabBanner} ${styles.grab_err}`}>{error}</div> : null}
+      <LegacyArtistHero
+        name={artist.name || name}
+        imageUrl={artist.image_url ?? ''}
+        genres={artist.genres ?? []}
+        bio={artist.lastfm_bio ?? null}
+        listeners={artist.lastfm_listeners ?? null}
+        playcount={artist.lastfm_playcount ?? null}
+        sections={groups.map(([label, releases]) => ({ label, owned: 0, total: releases.length }))}
+        providerId={providerId}
+        source={source}
+        actions={
+          <ActionButton
+            icon="monitor"
+            label={adopting ? 'Adding…' : 'Bookmark artist'}
+            title="Add this artist to your library and monitor them"
+            busy={adopting}
+            onClick={() => void adopt({ monitor: true })}
+          />
+        }
+      />
+      <DiscographyFilterBar
+        state={filters}
+        onChange={setFilters}
+        otherSources={otherSources.enabled}
+        otherSourcesBusy={otherSources.busy}
+        onToggleOtherSources={otherSources.available ? otherSources.toggle : undefined}
+      />
+      <DiscographySections>
+        {groups.map(([label, releases]) => {
+          if (!filters.categories[categoryOf[label as keyof typeof categoryOf]]) return null;
+          const cards = visibleCards(
+            [
+              ...releases.map(providerCard),
+              ...otherSources.byBucket(bucketOf[label as GroupLabel]),
+            ],
+            filters,
+          );
+          if (cards.length === 0) return null;
+          return (
+            <DiscographySection
+              key={label}
+              title={label}
+              stats={<span>{cards.length} releases</span>}
+            >
+              <ReleaseCardGrid
+                cards={cards}
+                showOwnership={false}
+                openTitle={`Add ${artist.name || name} to your library to manage this release`}
+                onOpen={() => void adopt({ monitor: false })}
+              />
+            </DiscographySection>
+          );
+        })}
+      </DiscographySections>
+    </div>
+  );
+}
+
+/** ldp-05: the rich hero for an artist that IS in the catalogue. Same layout
+ *  as the discovery hero — that is the point, a user arriving from search
+ *  must not be able to tell which of the two they are looking at. Bio and
+ *  stats come from the same Last.fm lookup the legacy hero used; the V2 match
+ *  chips stay (ldp-08) instead of legacy's metadata-source panel. */
+function CatalogueArtistHero({
+  artist,
+  onOpenSettings,
+  onPickImage,
+  headerToggle,
+}: {
+  artist: LibraryV2ArtistDetail;
+  onOpenSettings: () => void;
+  onPickImage: () => void;
+  headerToggle: ReactNode;
+}) {
+  const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
+  const info = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'lastfm-info', artist.name],
+    queryFn: () => fetchArtistLastfmInfo(artist.name),
+    enabled: Boolean(artist.name),
+    staleTime: 30 * 60_000,
+  });
+  const providerIds = artist.provider_ids ?? {};
+  // Only Spotify and Deezer expose a popularity ranking at all; for anything
+  // else the sidebar falls through to Last.fm by name, exactly like legacy.
+  const source = providerIds.spotify ? 'spotify' : providerIds.deezer ? 'deezer' : '';
+  const countOwned = (label: string, entries: LibraryV2AlbumSummary[]) => ({
+    label,
+    owned: entries.filter((e) => e.tracks_present > 0).length,
+    total: entries.length,
+  });
+  return (
+    <LegacyArtistHero
+      name={artist.name}
+      imageUrl={artist.image_url ?? ''}
+      remoteImageUrl={artist.remote_image_url}
+      genres={artist.genres}
+      bio={artist.summary || info.data?.bio || null}
+      listeners={info.data?.listeners ?? null}
+      playcount={info.data?.playcount ?? null}
+      sections={[
+        countOwned('Albums', artist.albums),
+        countOwned('EPs', artist.eps ?? []),
+        countOwned('Singles', artist.singles),
+      ]}
+      providerId={providerIds.spotify ?? providerIds.deezer ?? null}
+      source={source}
+      onPickImage={onPickImage}
+      // ldp-08 stays: the V2 match chips are the metadata-source display, not
+      // legacy's panel. The enrichment rings underneath are the part the user
+      // asked for on top — they answer a different question (how many of this
+      // artist's TRACKS a provider actually knows).
+      badges={<ArtistMatchChips artist={artist} abbreviated />}
+      coverage={matchStatus.data?.enrichmentCoverage}
+      actions={
+        <>
+          <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
+          {artist.monitored ? (
+            <IconActionButton
+              icon="settings"
+              title="Artist Settings — Watchlist, future releases, quality and provider match"
+              onClick={onOpenSettings}
+            />
+          ) : null}
+          {headerToggle}
+          <ArtistAliases artistId={artist.id} artistName={artist.name} />
+        </>
+      }
+    />
+  );
+}
+
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const search = Route.useSearch();
   const releasesMode = search.releases;
+  // ldp-03/ldp-04/ldp-05: how `All Releases` renders and how rich the header
+  // is are view settings, carried in the URL next to `releases` and `view`
+  // like every other Library V2 view setting.
+  const releaseView = search.releaseView;
+  const headerMode = search.header;
+  const { filters, setFilters } = useDiscographyFilters();
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
+  const artistProviderIds = artistQuery.data?.provider_ids ?? {};
+  const otherSources = useOtherSources({
+    providerId: artistProviderIds.spotify ?? artistProviderIds.deezer ?? null,
+    artistName: artistQuery.data?.name ?? '',
+  });
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
@@ -4993,6 +6004,25 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     void navigate({ search: (p) => ({ ...p, releases: mode }) });
   }
 
+  /** ldp-04: the filter bar governs `All Releases` in BOTH render modes, so
+   *  switching Table ↔ Legacy never silently changes which releases are on
+   *  screen. `My Library` is untouched by it, exactly as specified. */
+  function releasesOf(
+    entries: LibraryV2AlbumSummary[],
+    category: 'albums' | 'eps' | 'singles',
+  ): LibraryV2AlbumSummary[] {
+    const base = visibleReleases(entries, releasesMode);
+    if (releasesMode !== 'all') return base;
+    if (!filters.categories[category]) return [];
+    return base.filter((album) =>
+      passesDiscographyFilters(
+        { title: album.title, album_type: album.album_type },
+        filters,
+        album.tracks_present > 0,
+      ),
+    );
+  }
+
   // Auto-fetches the discography for "All Releases" — on an explicit toggle
   // click AND on mount when the URL already has `releases=all` (bookmark,
   // back-navigation), which a click-only handler would never see.
@@ -5029,6 +6059,24 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       runScoped(scope.entity, scope.id);
     }
   }
+
+  /** ldp-05: one switch, in both header shapes. Compact stays the default;
+   *  arriving from a search result preselects the rich hero. */
+  const headerToggle = (
+    <IconActionButton
+      icon={headerMode === 'rich' ? 'collapse' : 'expand'}
+      title={
+        headerMode === 'rich'
+          ? 'Compact header'
+          : 'Rich header — bio, listeners, plays and top tracks'
+      }
+      onClick={() =>
+        void navigate({
+          search: (p) => ({ ...p, header: headerMode === 'rich' ? 'compact' : 'rich' }),
+        })
+      }
+    />
+  );
 
   return (
     <div className={styles.page}>
@@ -5140,60 +6188,71 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </div>
           ) : null}
 
-          <header className={styles.detailHeader}>
-            <Artwork
-              src={artist.image_url ?? ''}
-              alt={artist.name}
-              className={styles.detailThumb}
+          {headerMode === 'rich' ? (
+            <CatalogueArtistHero
+              artist={artist}
+              onOpenSettings={() => setShowArtistSettings(true)}
+              onPickImage={() => setShowArtPicker(true)}
+              headerToggle={headerToggle}
             />
-            <div className={styles.detailMeta}>
-              <div className={styles.detailTitleRow}>
-                <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
-                <h1 className={styles.title}>{artist.name}</h1>
-                {artist.monitored ? (
-                  <IconActionButton
-                    icon="settings"
-                    title="Artist Settings — Watchlist, future releases, quality and provider match"
-                    onClick={() => setShowArtistSettings(true)}
-                  />
-                ) : null}
-              </div>
-              <p className={styles.subtitle}>
-                {artist.album_count} albums · {artist.single_count} singles
-                {artist.monitored ? ' · Monitored (watchlist)' : ''}
-              </p>
-              <div className={styles.detailLabels}>
-                <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
-                  <SvgIcon name="star" />
-                  {artist.quality_profile
-                    ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
-                    : 'No quality profile'}
-                </span>
-                <span
-                  className={`${styles.detailLabel} ${artist.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}
-                >
-                  <SvgIcon name={artist.monitored ? 'monitor' : 'close'} />
-                  {artist.monitored ? 'Monitored' : 'Unmonitored'}
-                </span>
-                <span className={styles.detailLabel}>
-                  <SvgIcon name="tracks" />
-                  {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length}{' '}
-                  releases
-                </span>
-                {artist.total_size_bytes > 0 ? (
-                  <span className={styles.detailLabel}>
-                    <SvgIcon name="folder" />
-                    {formatFileSize(artist.total_size_bytes)}
+          ) : (
+            <header className={styles.detailHeader}>
+              <Artwork
+                src={artist.image_url ?? ''}
+                remote={artist.remote_image_url}
+                alt={artist.name}
+                className={styles.detailThumb}
+              />
+              <div className={styles.detailMeta}>
+                <div className={styles.detailTitleRow}>
+                  <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
+                  <h1 className={styles.title}>{artist.name}</h1>
+                  {artist.monitored ? (
+                    <IconActionButton
+                      icon="settings"
+                      title="Artist Settings — Watchlist, future releases, quality and provider match"
+                      onClick={() => setShowArtistSettings(true)}
+                    />
+                  ) : null}
+                  {headerToggle}
+                </div>
+                <p className={styles.subtitle}>
+                  {artist.album_count} albums · {artist.single_count} singles
+                  {artist.monitored ? ' · Monitored (watchlist)' : ''}
+                </p>
+                <div className={styles.detailLabels}>
+                  <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
+                    <SvgIcon name="star" />
+                    {artist.quality_profile
+                      ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
+                      : 'No quality profile'}
                   </span>
+                  <span
+                    className={`${styles.detailLabel} ${artist.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}
+                  >
+                    <SvgIcon name={artist.monitored ? 'monitor' : 'close'} />
+                    {artist.monitored ? 'Monitored' : 'Unmonitored'}
+                  </span>
+                  <span className={styles.detailLabel}>
+                    <SvgIcon name="tracks" />
+                    {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length}{' '}
+                    releases
+                  </span>
+                  {artist.total_size_bytes > 0 ? (
+                    <span className={styles.detailLabel}>
+                      <SvgIcon name="folder" />
+                      {formatFileSize(artist.total_size_bytes)}
+                    </span>
+                  ) : null}
+                </div>
+                {artist.genres.length > 0 ? (
+                  <p className={styles.genres}>{artist.genres.join(', ')}</p>
                 ) : null}
+                <ArtistMatchChips artist={artist} />
+                <ArtistAliases artistId={artist.id} artistName={artist.name} />
               </div>
-              {artist.genres.length > 0 ? (
-                <p className={styles.genres}>{artist.genres.join(', ')}</p>
-              ) : null}
-              <ArtistMatchChips artist={artist} />
-              <ArtistAliases artistId={artist.id} artistName={artist.name} />
-            </div>
-          </header>
+            </header>
+          )}
 
           <div className={styles.releasesBar}>
             <div className={styles.releasesToggle}>
@@ -5215,6 +6274,24 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 ) : null}
               </button>
             </div>
+            {releasesMode === 'all' ? (
+              <div className={styles.releasesToggle}>
+                <button
+                  type="button"
+                  className={releaseView === 'table' ? styles.viewActive : ''}
+                  onClick={() => void navigate({ search: (p) => ({ ...p, releaseView: 'table' }) })}
+                >
+                  Table View
+                </button>
+                <button
+                  type="button"
+                  className={releaseView === 'cards' ? styles.viewActive : ''}
+                  onClick={() => void navigate({ search: (p) => ({ ...p, releaseView: 'cards' }) })}
+                >
+                  Discover View
+                </button>
+              </div>
+            ) : null}
             <span className={styles.releasesHint}>
               {releasesMode === 'all'
                 ? 'Full discography from the metadata provider — monitor a release to add it to Wanted.'
@@ -5222,30 +6299,86 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </span>
           </div>
 
-          <AlbumGroup
-            title="Albums"
-            albums={visibleReleases(artist.albums, releasesMode)}
-            artistId={artistId}
-            scope="albums"
-            queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
-            onAction={handleAction}
-          />
-          <AlbumGroup
-            title="EPs"
-            albums={visibleReleases(artist.eps ?? [], releasesMode)}
-            artistId={artistId}
-            scope="eps"
-            queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
-            onAction={handleAction}
-          />
-          <AlbumGroup
-            title="Singles"
-            albums={visibleReleases(artist.singles, releasesMode)}
-            artistId={artistId}
-            scope="singles"
-            queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
-            onAction={handleAction}
-          />
+          {releasesMode === 'all' ? (
+            <DiscographyFilterBar
+              state={filters}
+              onChange={setFilters}
+              otherSources={otherSources.enabled}
+              otherSourcesBusy={otherSources.busy}
+              onToggleOtherSources={otherSources.available ? otherSources.toggle : undefined}
+            />
+          ) : null}
+
+          {releasesMode === 'all' && releaseView === 'cards' ? (
+            <DiscographySections>
+              {(
+                [
+                  ['Albums', releasesOf(artist.albums, 'albums')],
+                  ['EPs', releasesOf(artist.eps ?? [], 'eps')],
+                  ['Singles', releasesOf(artist.singles, 'singles')],
+                ] as Array<[GroupLabel, LibraryV2AlbumSummary[]]>
+              ).map(([title, entries]) => {
+                const cards = [
+                  ...entries.map(catalogueCard),
+                  ...otherSources.byBucket(
+                    ({ Albums: 'album', EPs: 'ep', Singles: 'single' } as const)[
+                      title as GroupLabel
+                    ],
+                  ),
+                ];
+                if (cards.length === 0) return null;
+                return (
+                  <DiscographySection
+                    key={title}
+                    title={title}
+                    stats={
+                      <>
+                        <span>{entries.filter((e) => e.tracks_present > 0).length} owned</span>
+                        <span>{entries.filter((e) => e.tracks_present === 0).length} missing</span>
+                      </>
+                    }
+                  >
+                    <ReleaseCardGrid
+                      cards={cards}
+                      openTitle="Open release"
+                      onOpen={(card) =>
+                        card.albumId
+                          ? void navigate({ search: (p) => ({ ...p, album: card.albumId }) })
+                          : undefined
+                      }
+                    />
+                  </DiscographySection>
+                );
+              })}
+            </DiscographySections>
+          ) : (
+            <>
+              <AlbumGroup
+                title="Albums"
+                albums={releasesOf(artist.albums, 'albums')}
+                artistId={artistId}
+                scope="albums"
+                queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
+                onAction={handleAction}
+              />
+              <AlbumGroup
+                title="EPs"
+                albums={releasesOf(artist.eps ?? [], 'eps')}
+                artistId={artistId}
+                scope="eps"
+                queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
+                onAction={handleAction}
+              />
+              <AlbumGroup
+                title="Singles"
+                albums={releasesOf(artist.singles, 'singles')}
+                artistId={artistId}
+                scope="singles"
+                queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
+                onAction={handleAction}
+              />
+            </>
+          )}
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}
@@ -5600,6 +6733,7 @@ function AlbumBlock({
         <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
         <Artwork
           src={album.image_url ?? ''}
+          remote={album.remote_image_url}
           alt={album.title}
           className={styles.albumHeadThumb}
           thumb

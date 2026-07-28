@@ -1,6 +1,6 @@
 import { createMemoryHistory } from '@tanstack/react-router';
 import { render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { createTestQueryClient } from '@/test/query-client';
@@ -18,6 +18,13 @@ function renderArtistDetailRoute(initialEntries = ['/artist-detail/library/42'])
   };
 }
 
+/** ldp-01: this route used to hand off to the vanilla-JS artist page, which is
+ *  how a search hit for an artist you don't own yet still landed a user in the
+ *  legacy library. It now redirects into Library V2's discovery mode instead —
+ *  and because every caller (search, global search, media player, playlist
+ *  sync, similar-artist bubbles) navigates through this one URL, that single
+ *  redirect routes all of them. The old expectations pinned exactly the
+ *  behaviour this change removes, so they are replaced, not repaired. */
 describe('artist-detail route', () => {
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
@@ -27,18 +34,25 @@ describe('artist-detail route', () => {
     window.SoulSyncWebShellBridge = undefined;
   });
 
-  it('hands off canonical artist-detail URLs to the legacy shell', async () => {
-    renderArtistDetailRoute(['/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg']);
+  /** Asserts against the router's PARSED search, not the raw query string:
+   *  TanStack JSON-encodes values on write, so an all-digits name is stored
+   *  as `"311"` and only reads back as the string `311`. */
+  async function expectRedirect(entry: string, expected: Record<string, string>) {
+    const { history, router } = renderArtistDetailRoute([entry]);
+    await waitFor(() => expect(history.location.pathname).toBe('/library-v2'));
+    expect(router.state.location.search).toMatchObject(expected);
+    // The legacy shell must never be involved again.
+    expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).not.toHaveBeenCalled();
+  }
 
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '2YZyLoL8N0Wb9xBt1NhZWg',
-        '',
-        'spotify',
-        {
-          skipRouteChange: true,
-        },
-      );
+  it('redirects a provider artist into Library V2 discovery mode', async () => {
+    await expectRedirect('/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg', {
+      discover: 'spotify:2YZyLoL8N0Wb9xBt1NhZWg',
+      // Coming from search means landing on what the legacy artist page
+      // showed: full discography, card view, rich header (ldp-05).
+      releases: 'all',
+      releaseView: 'cards',
+      header: 'rich',
     });
   });
 
@@ -46,90 +60,39 @@ describe('artist-detail route', () => {
     // TanStack's search parser JSON-parses param values, so name=311 arrives
     // as a NUMBER. A bare z.string() schema threw SearchParamError, the route
     // died in its error boundary, and clicking the artist "did nothing".
-    renderArtistDetailRoute(['/artist-detail/deezer/2481?name=311']);
-
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '2481',
-        '311',
-        'deezer',
-        {
-          skipRouteChange: true,
-        },
-      );
+    await expectRedirect('/artist-detail/deezer/2481?name=311', {
+      discover: 'deezer:2481',
+      discoverName: '311',
     });
   });
 
   it('does not stringify structured search params as an artist name', async () => {
-    renderArtistDetailRoute(['/artist-detail/deezer/2481?name=%7B%22unexpected%22%3Atrue%7D']);
+    const { history, router } = renderArtistDetailRoute([
+      '/artist-detail/deezer/2481?name=%7B%22unexpected%22%3Atrue%7D',
+    ]);
 
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '2481',
-        '',
-        'deezer',
-        {
-          skipRouteChange: true,
-        },
-      );
-    });
+    await waitFor(() => expect(history.location.pathname).toBe('/library-v2'));
+    expect(router.state.location.search).not.toHaveProperty('discoverName');
   });
 
-  it('passes the ?name= search param through to the legacy shell', async () => {
+  it('carries the ?name= search param into discovery', async () => {
     // Bandcamp (and any other source with no numeric-ID lookup API) can only
     // resolve an artist by name — the URL is the only channel that survives
     // a page load / browser-back, so this must round-trip correctly.
-    renderArtistDetailRoute(['/artist-detail/bandcamp/3957198221?name=Radiohead']);
-
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '3957198221',
-        'Radiohead',
-        'bandcamp',
-        {
-          skipRouteChange: true,
-        },
-      );
+    await expectRedirect('/artist-detail/bandcamp/3957198221?name=Radiohead', {
+      discover: 'bandcamp:3957198221',
+      discoverName: 'Radiohead',
     });
   });
 
-  it('normalizes library sources before handing off', async () => {
-    renderArtistDetailRoute(['/artist-detail/library/42']);
-
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '42',
-        '',
-        null,
-        {
-          skipRouteChange: true,
-        },
-      );
-    });
+  it('keeps the legacy `library` namespace intact so the id stays resolvable', async () => {
+    // Not a provider id: an opaque legacy `artists.id`. The server resolves it
+    // through `lib2_artists.legacy_artist_id` and must never mistake it for a
+    // provider identity (guide §2.5).
+    await expectRedirect('/artist-detail/library/42', { discover: 'library:42' });
   });
 
-  it('cancels the similar artists stream when the route unmounts', async () => {
-    const { unmount } = renderArtistDetailRoute(['/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg']);
-
-    await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '2YZyLoL8N0Wb9xBt1NhZWg',
-        '',
-        'spotify',
-        {
-          skipRouteChange: true,
-        },
-      );
-    });
-
-    const cancelSimilarArtistsLoad = window.SoulSyncWebShellBridge
-      ?.cancelSimilarArtistsLoad as ReturnType<typeof vi.fn>;
-    cancelSimilarArtistsLoad.mockClear();
-
-    unmount();
-
-    await waitFor(() => {
-      expect(cancelSimilarArtistsLoad).toHaveBeenCalledTimes(1);
-    });
+  it('lower-cases the source segment', async () => {
+    await expectRedirect('/artist-detail/Spotify/abc', { discover: 'spotify:abc' });
   });
 });

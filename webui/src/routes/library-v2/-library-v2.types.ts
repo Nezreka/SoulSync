@@ -17,6 +17,14 @@ export type LibraryV2MonitorFilter = (typeof LIBRARY_V2_MONITOR_FILTERS)[number]
 export const LIBRARY_V2_WANTED_KINDS = ['missing', 'cutoff_unmet'] as const;
 export type LibraryV2WantedKind = (typeof LIBRARY_V2_WANTED_KINDS)[number];
 
+/** TanStack JSON-parses search-param values, so an all-digits artist name
+ *  ("311", "702") arrives as a NUMBER and a bare `z.string()` would kill the
+ *  whole route — the same trap the legacy `/artist-detail` route documents. */
+const coercedString = z.preprocess(
+  (v) => (typeof v === 'string' || typeof v === 'number' ? String(v) : undefined),
+  z.string(),
+);
+
 export const libraryV2SearchSchema = z.object({
   section: z.enum(['artists', 'wanted', 'import-review']).default('artists').catch('artists'),
   q: z.string().default('').catch(''),
@@ -29,6 +37,17 @@ export const libraryV2SearchSchema = z.object({
   /** Artist detail: show only owned releases or the full provider discography. */
   releases: z.enum(['library', 'all']).default('library').catch('library'),
   wantedKind: z.enum(LIBRARY_V2_WANTED_KINDS).default('missing').catch('missing'),
+  /** ldp-01/ldp-02 discovery mode: `<source>:<provider id>` of an artist that
+   *  has no catalogue row (yet). Set by every search/provider entry point so
+   *  nobody ever lands on the legacy artist page again. */
+  discover: coercedString.optional().catch(undefined),
+  /** The artist's display name — some sources (Bandcamp) have no id lookup at
+   *  all, so the name has to travel in the URL. */
+  discoverName: coercedString.optional().catch(undefined),
+  /** ldp-03: `All Releases` renders as the V2 table or as the legacy card grid. */
+  releaseView: z.enum(['table', 'cards']).default('table').catch('table'),
+  /** ldp-05: compact V2 artist header vs. the rich legacy hero. */
+  header: z.enum(['compact', 'rich']).default('compact').catch('compact'),
 });
 
 export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
@@ -76,6 +95,7 @@ export interface LibraryV2ArtistSummary {
   id: number;
   name: string;
   image_url: string | null;
+  remote_image_url?: string | null;
   genres: string[];
   monitored: boolean;
   monitor_new_items: string;
@@ -101,12 +121,19 @@ export interface LibraryV2AlbumSummary {
   release_date: string | null;
   year: number | null;
   image_url: string | null;
+  /** ldp-07: the provider CDN cover the catalogue already stores. Painted
+   *  immediately while a cold local build is pending, and the *only* url for
+   *  a pure discography row (which is deliberately never cached locally). */
+  remote_image_url?: string | null;
   monitored: boolean;
   quality_profile_id: number;
   quality_profile_source?: LibraryV2QualityProfileSource;
   quality_profile_source_id?: number | null;
   quality_profile_explicit?: boolean;
   origin: LibraryV2AlbumOrigin;
+  /** Tracks on this release the user has explicitly made wanted. Keeps a
+   *  bookmarked single track visible under "My Library" (guide §5). */
+  monitored_tracks?: number;
   spotify_id: string | null;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   explicit: boolean | null;
@@ -125,6 +152,10 @@ export interface LibraryV2ArtistDetail {
   id: number;
   name: string;
   image_url: string | null;
+  remote_image_url?: string | null;
+  /** ldp-05: qualified provider ids (guide §2.5) so the rich header can ask
+   *  the shared top-tracks endpoint about this artist. */
+  provider_ids?: Partial<Record<string, string>>;
   summary: string | null;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   style: string | null;

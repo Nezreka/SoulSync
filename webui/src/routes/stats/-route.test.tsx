@@ -130,17 +130,10 @@ describe('stats route', () => {
 
     fireEvent.click(bubbleLink);
 
-    await waitFor(() => expect(history.location.pathname).toBe('/artist-detail/library/7'));
-    await waitFor(() =>
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '7',
-        '',
-        null,
-        {
-          skipRouteChange: true,
-        },
-      ),
-    );
+    // ldp-01: the canonical `/artist-detail/...` URL stays the link target, but
+    // it now redirects into Library V2 instead of the legacy artist page.
+    await waitFor(() => expect(history.location.pathname).toBe('/library-v2'));
+    expect(new URLSearchParams(history.location.search).get('discover')).toBe('library:7');
   });
 
   it('falls back to streaming when track resolution fails', async () => {

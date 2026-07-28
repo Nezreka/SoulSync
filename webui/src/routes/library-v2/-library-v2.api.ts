@@ -355,16 +355,29 @@ export async function fetchLibraryV2Album(
 }
 
 /** Provider match chips for an artist (legacy Enhanced-View parity). */
+/** ldp-05: `enrichment_coverage` is the per-provider share of this artist's
+ *  TRACKS that carry a qualified id — the legacy hero's ring panel. It rides
+ *  along with the chips because it answers the same question one level down,
+ *  and a separate endpoint would mean a second round trip per header. */
+export interface LibraryV2ArtistMatchStatus {
+  services: LibraryV2MatchService[];
+  enrichmentCoverage: Record<string, number> & { total_tracks?: number };
+}
+
 export async function fetchLibraryV2ArtistMatchStatus(
   artistId: number,
-): Promise<LibraryV2MatchService[]> {
+): Promise<LibraryV2ArtistMatchStatus> {
   const payload = await readJson<{
     success: boolean;
     services: LibraryV2MatchService[];
+    enrichment_coverage?: Record<string, number>;
     error?: string;
   }>(apiClient.get(`library/v2/artists/${artistId}/match-status`));
   if (!payload.success) throw new Error(payload.error || 'Failed to load match status');
-  return payload.services ?? [];
+  return {
+    services: payload.services ?? [],
+    enrichmentCoverage: payload.enrichment_coverage ?? {},
+  };
 }
 
 export interface LibraryV2AlbumMatchBundle {
@@ -611,6 +624,224 @@ export async function refreshLibraryV2Discography(
   );
   if (!payload.success) throw new Error(payload.error || 'Discography refresh failed');
   return payload;
+}
+
+// --- ldp-01/ldp-02/ldp-05: provider-artist discovery ------------------------
+
+/** One release card exactly as the shared provider discography endpoint
+ *  returns it — the same payload the legacy artist page rendered, reused
+ *  verbatim rather than reshaped (issues §28.5). */
+export interface ProviderRelease {
+  id: string;
+  title?: string;
+  name?: string;
+  album_type?: string;
+  release_date?: string | null;
+  year?: number | null;
+  image_url?: string | null;
+  explicit?: boolean;
+  owned?: boolean | null;
+  musicbrainz_release_id?: string | null;
+  track_completion?: {
+    owned_tracks?: number;
+    total_tracks?: number;
+    missing_tracks?: number;
+  } | null;
+}
+
+export interface ProviderArtistDetail {
+  artist: {
+    id: string;
+    name: string;
+    image_url?: string | null;
+    genres?: string[];
+    lastfm_bio?: string | null;
+    lastfm_listeners?: number | null;
+    lastfm_playcount?: number | null;
+  };
+  discography: { albums?: ProviderRelease[]; eps?: ProviderRelease[]; singles?: ProviderRelease[] };
+}
+
+/** The artist page for someone who isn't in the catalogue. Reuses the endpoint
+ *  the legacy page already used — nothing new had to be built server-side. */
+export async function fetchProviderArtistDetail(input: {
+  source: string;
+  providerId: string;
+  name: string;
+}): Promise<ProviderArtistDetail> {
+  const payload = await readJson<
+    { success: boolean; error?: string } & Partial<ProviderArtistDetail>
+  >(
+    apiClient.get(`artist-detail/${encodeURIComponent(input.providerId)}`, {
+      searchParams: { source: input.source, name: input.name },
+      timeout: 60_000, // a cold provider discography walk is not fast
+    }),
+  );
+  if (!payload.success || !payload.artist) {
+    throw new Error(payload.error || 'Could not load this artist');
+  }
+  return { artist: payload.artist, discography: payload.discography ?? {} };
+}
+
+/** Read-only: the catalogue id for a provider artist, or `null` when there is
+ *  none yet. Opening a search result must not create anything (§28.6 q1). */
+export async function resolveLibraryV2DiscoveryArtist(input: {
+  source: string;
+  providerId: string;
+  name: string;
+}): Promise<number | null> {
+  const payload = await readJson<{ success: boolean; artist_id: number | null; error?: string }>(
+    apiClient.get('library/v2/discovery/artist', {
+      searchParams: { source: input.source, provider_id: input.providerId, name: input.name },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Artist lookup failed');
+  return payload.artist_id;
+}
+
+/** The first write: turn the provider artist into a real catalogue row so the
+ *  normal Library V2 artist page (and monitoring) can take over. */
+export async function materializeLibraryV2DiscoveryArtist(input: {
+  source: string;
+  providerId: string;
+  name: string;
+}): Promise<number> {
+  const payload = await readJson<{ success: boolean; artist_id: number; error?: string }>(
+    apiClient.post('library/v2/discovery/artist', {
+      json: { source: input.source, provider_id: input.providerId, name: input.name },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Could not add this artist');
+  return payload.artist_id;
+}
+
+/** ldp-06: which of these top-track titles the catalogue already has, and
+ *  whether they are wanted. The bookmark tick has to survive a reload — it
+ *  is a fact about the library, not about this component's lifetime. */
+export async function fetchLibraryV2DiscoveryTrackStatus(input: {
+  source: string;
+  artistName: string;
+  artistProviderId?: string | null;
+  titles: string[];
+}): Promise<Record<string, { track_id: number; monitored: boolean }>> {
+  if (!input.titles.length || !input.artistName) return {};
+  const params = new URLSearchParams({ artist_name: input.artistName, source: input.source });
+  if (input.artistProviderId) params.set('artist_provider_id', input.artistProviderId);
+  for (const title of input.titles) params.append('title', title);
+  const payload = await readJson<{
+    success: boolean;
+    statuses?: Record<string, { track_id: number; monitored: boolean }>;
+  }>(apiClient.get('library/v2/discovery/track-status', { searchParams: params }));
+  return payload.statuses ?? {};
+}
+
+/** ldp-06: give a provider Top Track its catalogue rows so the normal
+ *  Bookmark (`setLibraryV2Monitored('tracks', …)`) has something to act on. */
+export async function materializeLibraryV2DiscoveryTrack(input: {
+  source: string;
+  artistName: string;
+  artistProviderId?: string | null;
+  trackTitle: string;
+  trackProviderId?: string | null;
+  albumTitle?: string | null;
+  albumProviderId?: string | null;
+}): Promise<number> {
+  const payload = await readJson<{ success: boolean; track_id: number; error?: string }>(
+    apiClient.post('library/v2/discovery/track', {
+      json: {
+        source: input.source,
+        artist_name: input.artistName,
+        artist_provider_id: input.artistProviderId ?? null,
+        track_title: input.trackTitle,
+        track_provider_id: input.trackProviderId ?? null,
+        album_title: input.albumTitle ?? null,
+        album_provider_id: input.albumProviderId ?? null,
+      },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Could not bookmark this track');
+  return payload.track_id;
+}
+
+/** "+ Other sources" (#1067): releases that OTHER configured metadata sources
+ *  list and the base source does not. Reuses the legacy endpoint unchanged —
+ *  it is deliberately conservative (only sources with a verified artist id,
+ *  no fuzzy name search) and re-deriving that here would be a second, weaker
+ *  copy of the same policy. */
+export async function fetchArtistDiscographyGapFill(input: {
+  providerId: string;
+  artistName: string;
+  baseSource?: string | null;
+}): Promise<Array<ProviderRelease & { gap_source?: string; _bucket: 'album' | 'ep' | 'single' }>> {
+  const params = new URLSearchParams({ artist_name: input.artistName });
+  if (input.baseSource) params.set('base_source', input.baseSource);
+  const payload = await readJson<{
+    success: boolean;
+    gaps?: { albums?: ProviderRelease[]; eps?: ProviderRelease[]; singles?: ProviderRelease[] };
+  }>(
+    apiClient.get(`artist/${encodeURIComponent(input.providerId)}/discography/gap-fill`, {
+      searchParams: params,
+      timeout: 60_000,
+    }),
+  );
+  if (!payload.success) return [];
+  const gaps = payload.gaps ?? {};
+  return [
+    ...(gaps.albums ?? []).map((r) => ({ ...r, _bucket: 'album' as const })),
+    ...(gaps.eps ?? []).map((r) => ({ ...r, _bucket: 'ep' as const })),
+    ...(gaps.singles ?? []).map((r) => ({ ...r, _bucket: 'single' as const })),
+  ];
+}
+
+export interface ArtistLastfmInfo {
+  listeners: number | null;
+  playcount: number | null;
+  bio: string | null;
+}
+
+export async function fetchArtistLastfmInfo(name: string): Promise<ArtistLastfmInfo> {
+  const payload = await readJson<{ success: boolean } & Partial<ArtistLastfmInfo>>(
+    apiClient.get('artist/lastfm-info', { searchParams: { name } }),
+  );
+  return {
+    listeners: payload.listeners ?? null,
+    playcount: payload.playcount ?? null,
+    bio: payload.bio ?? null,
+  };
+}
+
+export interface ArtistTopTrack {
+  name: string;
+  playcount?: number | null;
+  /** Only present on provider (Spotify/Deezer) results, which carry enough
+   *  metadata for the Bookmark action to materialize a real track. */
+  album?: { id?: string; name?: string } | null;
+  artists?: Array<{ id?: string; name?: string }> | null;
+  id?: string;
+}
+
+/** Legacy's exact two-pass ladder (`library.js:1625-1745`): the primary
+ *  metadata source's popularity ranking first — it returns full track objects,
+ *  so each row can be bookmarked — and Last.fm's display-only playcounts when
+ *  the configured source has no popularity API at all. */
+export async function fetchArtistTopTracks(input: {
+  providerId: string | null;
+  name: string;
+}): Promise<{ source: 'provider' | 'lastfm'; tracks: ArtistTopTrack[] }> {
+  if (input.providerId) {
+    const payload = await readJson<{ success: boolean; tracks?: ArtistTopTrack[] }>(
+      apiClient.get(`artist/${encodeURIComponent(input.providerId)}/top-tracks`, {
+        searchParams: { limit: 10 },
+      }),
+    ).catch(() => null);
+    if (payload?.success && payload.tracks?.length) {
+      return { source: 'provider', tracks: payload.tracks };
+    }
+  }
+  const fallback = await readJson<{ success: boolean; tracks?: ArtistTopTrack[] }>(
+    apiClient.get('artist/0/lastfm-top-tracks', { searchParams: { name: input.name, limit: 10 } }),
+  ).catch(() => null);
+  return { source: 'lastfm', tracks: (fallback?.tracks ?? []).slice(0, 10) };
 }
 
 export async function bulkMonitorLibraryV2Releases(
