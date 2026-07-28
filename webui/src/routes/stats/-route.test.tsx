@@ -131,16 +131,9 @@ describe('stats route', () => {
     fireEvent.click(bubbleLink);
 
     await waitFor(() => expect(history.location.pathname).toBe('/artist-detail/library/7'));
-    await waitFor(() =>
-      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-        '7',
-        '',
-        null,
-        {
-          skipRouteChange: true,
-        },
-      ),
-    );
+    // Artist detail is React-owned now, so the click routes there directly
+    // rather than handing the URL back to the legacy shell.
+    expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).not.toHaveBeenCalled();
   });
 
   it('falls back to streaming when track resolution fails', async () => {

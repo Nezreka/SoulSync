@@ -78,20 +78,43 @@ export interface ReleaseFlags {
 }
 
 /**
+ * Title-based classification, ported verbatim from `_classifyReleaseContent`.
+ *
+ * That function is deliberately SHARED between artist detail and the Download
+ * Discography modal (#877) so the two can never drift apart on what counts as
+ * live/compilation/featured. Keep these patterns identical to it — a release
+ * classified one way in the modal and another way on the page is the exact bug
+ * that shared classifier exists to prevent.
+ *
+ * Note there are no `is_live` / `is_compilation` fields on a release: the
+ * backend does not send them. Classification is entirely client-side, off the
+ * title, plus `album_type === 'compilation'`.
+ */
+const LIVE_PATTERN = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
+const COMPILATION_PATTERN = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
+const FEATURED_PATTERN = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
+
+export function classifyReleaseContent(release: DiscographyRelease): ReleaseFlags {
+  // `title` on the artist page, `name` in the download modal — both are checked
+  // because the same classifier serves both shapes.
+  const title = String(release.title ?? release.name ?? '');
+  return {
+    isLive: LIVE_PATTERN.test(title),
+    isCompilation: release.album_type === 'compilation' || COMPILATION_PATTERN.test(title),
+    isFeatured: FEATURED_PATTERN.test(title),
+  };
+}
+
+/**
  * The three content flags for one release.
  *
  * On MusicBrainz, `secondary_types` is authoritative and REPLACES the
- * title-based guess — that is what stops a studio album called "Live Through
- * This" being hidden, and it also catches soundtrack/remix/demo which a title
- * guess never would. Off MusicBrainz there are no secondary types, so the
- * flags the backend already set on the release stand.
+ * title-based live guess — that is what stops a studio album called "Live
+ * Through This" being hidden, and it also catches soundtrack/remix/demo which a
+ * title guess never would. Off MusicBrainz the title heuristic governs.
  */
 export function releaseFlags(release: DiscographyRelease, isMusicBrainz: boolean): ReleaseFlags {
-  const base: ReleaseFlags = {
-    isLive: release.is_live === true,
-    isCompilation: release.is_compilation === true,
-    isFeatured: release.is_featured === true,
-  };
+  const base = classifyReleaseContent(release);
   if (!isMusicBrainz) return base;
 
   const secondary = Array.isArray(release.secondary_types)
@@ -152,6 +175,35 @@ export interface SectionCounts {
  * A release still being checked (`owned === null`) counts toward `visible` but
  * toward neither owned nor missing, so the two do not necessarily sum.
  */
+/**
+ * Whether a whole section is hidden.
+ *
+ * Two independent reasons, both from applyDiscographyFilters: its category
+ * toggle is off, or every card in it ended up filtered out.
+ */
+export function isSectionHidden(
+  bucket: DiscographyBucket,
+  counts: SectionCounts,
+  state: DiscographyFilterState,
+): boolean {
+  return !state.categories[bucket] || counts.visible === 0;
+}
+
+/**
+ * The "N owned" / "N missing" stats line.
+ *
+ * Always the FILTERED counts. `populateReleaseSection` first writes
+ * "Checking..." / "" when any ownership is still pending, but
+ * populateDiscographySections calls applyDiscographyFilters() immediately
+ * afterwards — in the same function, with no early return — which overwrites
+ * both labels before anything paints. So that "Checking..." state is
+ * unreachable in practice and is deliberately NOT reproduced here; during
+ * checking the user sees "0 owned" / "0 missing", exactly as they do today.
+ */
+export function sectionStatsLabels(counts: SectionCounts): { owned: string; missing: string } {
+  return { owned: `${counts.owned} owned`, missing: `${counts.missing} missing` };
+}
+
 export function sectionCounts(
   releases: DiscographyRelease[],
   isMusicBrainz: boolean,

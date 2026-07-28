@@ -6,6 +6,7 @@ import {
   needsCompletionStream,
   readArtistDetail,
   settleOwnershipForSourceArtist,
+  watchlistIdentity,
 } from './-artist-detail.api';
 import { artistDetailSearchSchema, normalizeSource } from './-artist-detail.types';
 
@@ -162,5 +163,42 @@ describe('needsCompletionStream', () => {
     expect(needsCompletionStream({ ...library, discography: { singles: [{ owned: null }] } })).toBe(
       false,
     );
+  });
+});
+
+describe('watchlistIdentity', () => {
+  it('prefers the canonical Spotify identity over the library record', () => {
+    // The watchlist is keyed on Spotify ids; using the library PK would create
+    // a second row for an artist already watched from the Watchlist page.
+    const identity = watchlistIdentity({
+      artist: { id: 42, name: 'Aphex Twin (library)' },
+      spotify_artist: { spotify_artist_id: 'sp1', spotify_artist_name: 'Aphex Twin' },
+    });
+    expect(identity).toEqual({ id: 'sp1', name: 'Aphex Twin' });
+  });
+
+  it('falls back to the arriving id for a source artist', () => {
+    // Deezer/iTunes/Discogs artists have no Spotify id at all.
+    expect(watchlistIdentity({ artist: { id: 'dz-9', name: 'Boards of Canada' } })).toEqual({
+      id: 'dz-9',
+      name: 'Boards of Canada',
+    });
+  });
+
+  it('falls back per FIELD, not all-or-nothing', () => {
+    // A half-populated spotify_artist still contributes what it has.
+    expect(
+      watchlistIdentity({
+        artist: { id: 42, name: 'From Library' },
+        spotify_artist: { spotify_artist_id: 'sp1' },
+      }),
+    ).toEqual({ id: 'sp1', name: 'From Library' });
+  });
+
+  it('returns null unless BOTH halves resolve', () => {
+    // The vanilla required id AND name before initialising the button.
+    expect(watchlistIdentity({ artist: { id: 42 } })).toBeNull();
+    expect(watchlistIdentity({ artist: { name: 'No id' } })).toBeNull();
+    expect(watchlistIdentity({})).toBeNull();
   });
 });

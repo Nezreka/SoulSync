@@ -102,6 +102,128 @@ declare global {
     showLibraryDownloadsSection?: () => void;
     currentMusicSourceName?: string;
     updateWatchlistCount?: () => void;
+    /** shared-helpers.js — drops JioSaavn entries unless the experimental
+     *  source is enabled. Kept as the single source of truth for that flag. */
+    filterJiosaavnServiceEntries?: <T>(items: T[], idKey?: string) => T[];
+    /** core.js — points the shared IntersectionObserver at every [data-bg-src]
+     *  inside a container. Cards render the attribute; without this call the
+     *  artwork is never fetched and every tile stays blank. */
+    observeLazyBackgrounds?: (container: Element | null) => void;
+    /** core.js — reads the AudioDB logo off an existing img.audiodb-logo. */
+    getAudioDBLogoURL?: () => string | null;
+    /** stats-automations.js — reads artistDetailPageState for the artist id.
+     *  Must be given the id explicitly once React owns the page. */
+    playArtistRadio?: (artistId?: string | number, artistName?: string) => void;
+    /** library.js — artist photo picker, opened from the hero image. */
+    openArtistArtPicker?: () => void;
+    /** library.js — the Download Discography modal. */
+    openDiscographyModal?: () => void;
+    /** shared-helpers.js / core.js — similar-artists section + its abort. */
+    loadSimilarArtists?: (artistName: string) => void;
+    cancelSimilarArtistsLoad?: () => void;
+    /** core.js — full-page loading overlay used while a release opens. */
+    showLoadingOverlay?: (message?: string) => void;
+    hideLoadingOverlay?: () => void;
+    /** library.js — quality-enhance eligibility probe (library artists only). */
+    checkArtistEnhanceEligibility?: (artistId: unknown) => void;
+    /** stats-automations.js — the Enhance Quality modal, opened from the hero. */
+    openEnhanceQualityModal?: () => void;
+    /**
+     * The Enhanced view's album actions. All of these still live in library.js
+     * (showReportIssueModal in stats-automations.js) and are invoked through
+     * window until the modals slice ports them; two of them take the button
+     * element itself, because they render progress onto it.
+     */
+    openAlbumArtPicker?: (album: unknown) => void;
+    openManualMatchModal?: (
+      entityType: string,
+      entityId: unknown,
+      service: string,
+      title: string,
+      artistId: unknown,
+    ) => void;
+    runEnrichment?: (
+      entityType: string,
+      entityId: unknown,
+      service: string,
+      title: string,
+      artistName: string,
+      artistId: unknown,
+    ) => void;
+    writeAlbumTags?: (albumId: unknown) => void;
+    analyzeAlbumReplayGain?: (albumId: unknown, button: HTMLElement) => void;
+    showReorganizeModal?: (albumId: unknown) => void;
+    redownloadLibraryAlbum?: (album: unknown, artistName: string, button: HTMLElement) => void;
+    deleteLibraryAlbum?: (albumId: unknown) => void;
+    showReportIssueModal?: (
+      entityType: string,
+      entityId: unknown,
+      title: string,
+      artistName: string,
+      /** Track reports add the album name; album reports omit it. */
+      albumName?: string,
+    ) => void;
+    /**
+     * The Enhanced view's per-track actions, still in library.js. The mobile
+     * popover keeps its underscore name: it is a private helper being called
+     * across the boundary until the popover itself is ported.
+     */
+    showTagPreview?: (trackId: unknown) => void;
+    analyzeTrackReplayGain?: (trackId: unknown, button: HTMLElement) => void;
+    showTrackSourceInfo?: (track: unknown, button: HTMLElement) => void;
+    openReidentifyModal?: (
+      trackId: unknown,
+      trackTitle: string,
+      artistName: string,
+      albumTitle: string,
+      albumArt: string,
+    ) => void;
+    showTrackRedownloadModal?: (track: unknown, album: unknown) => void;
+    deleteLibraryTrack?: (trackId: unknown, albumId: unknown) => void;
+    openMissingTrackManageModal?: (track: unknown, album: unknown) => void;
+    _showMobileTrackActions?: (track: unknown, album: unknown) => void;
+    /**
+     * library.js — the batch tag-preview modal. Safe to call across the
+     * boundary because it takes the track ids explicitly rather than reading
+     * the vanilla's selection state.
+     */
+    showBatchTagPreview?: (trackIds: unknown[], albumId: unknown) => void;
+    /** library.js — polls the batch ReplayGain job this page just started. */
+    _pollBatchRgStatus?: () => void;
+    /** media-player.js — the play queue. */
+    addToQueue?: (payload: unknown) => void;
+    playNext?: (payload: unknown) => void;
+    /**
+     * shared-helpers.js — the download-missing modal. Called directly rather
+     * than through the shell bridge because the bridge wrapper fixes the last
+     * two arguments, and the top-tracks bulk download needs contextType
+     * 'playlist' to render the playlist hero and route per-track album folders.
+     */
+    openDownloadMissingModalForArtistAlbum?: (
+      virtualPlaylistId: string,
+      playlistName: string,
+      tracks: unknown[],
+      album: unknown,
+      artist: unknown,
+      showLoadingOverlay?: boolean,
+      contextType?: string,
+    ) => void | Promise<void>;
+    /** library.js — wires the hero watchlist button to an identity. */
+    initializeLibraryWatchlistButton?: (artistId: unknown, artistName: string) => void;
+    /** downloads.js — the Add to Wishlist modal, opened from a release card. */
+    openAddToWishlistModal?: (
+      album: unknown,
+      artist: unknown,
+      tracks: unknown[],
+      albumType: unknown,
+    ) => Promise<void> | void;
+    /** shared-helpers.js — backfills per-track ownership behind the modal. */
+    lazyLoadTrackOwnership?: (
+      artistName: string,
+      tracks: unknown[],
+      card: unknown,
+      albumName: unknown,
+    ) => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;

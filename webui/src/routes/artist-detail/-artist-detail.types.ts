@@ -44,6 +44,9 @@ export function normalizeSource(source: string): string | null {
  */
 export interface DiscographyRelease {
   id?: string | number;
+  /** The artist page uses `title`; the download modal's shape uses `name`.
+   *  Both are declared because _classifyReleaseContent reads either. */
+  title?: string;
   name?: string;
   album_type?: string;
   release_date?: string;
@@ -76,6 +79,14 @@ export interface ArtistInfo {
   source?: string | null;
   musicbrainz_id?: string | null;
   spotify_artist_id?: string | null;
+  /** Enhanced-view meta panel image; distinct from image_url. */
+  thumb_url?: string | null;
+  genres?: string[];
+  /** Last.fm extras. `lastfm_tags` may arrive as a JSON STRING, not an array. */
+  lastfm_bio?: string | null;
+  lastfm_listeners?: number | null;
+  lastfm_playcount?: number | null;
+  lastfm_tags?: string | string[] | null;
   [key: string]: unknown;
 }
 
@@ -87,11 +98,37 @@ export interface ProviderError {
   status_code?: number;
 }
 
+/**
+ * Present only when the artist has a spotify_artist_id (web_server.py:9765).
+ * It is the CANONICAL Spotify identity, and the watchlist is keyed on it —
+ * an artist enriched from Deezer still gets watched under their Spotify id.
+ */
+export interface SpotifyArtistIdentity {
+  spotify_artist_id?: string | null;
+  spotify_artist_name?: string | null;
+  artist_image?: string | null;
+}
+
 export interface ArtistDetailResponse {
   success?: boolean;
   error?: string;
   artist?: ArtistInfo;
+  spotify_artist?: SpotifyArtistIdentity;
   discography?: Discography;
   enrichment_coverage?: Record<string, unknown>;
   provider_error?: ProviderError;
+}
+
+/**
+ * A top-tracks row. The metadata-source pass returns full track objects (the
+ * download action needs `artists`/`album`); the Last.fm pass returns little
+ * more than a name and a playcount, which is why every field is optional.
+ */
+export interface ArtistDetailTrack {
+  id?: string | number;
+  name?: string;
+  playcount?: number | string;
+  artists?: { id?: string | number; name?: string }[];
+  album?: { name?: string; album_type?: string; [key: string]: unknown };
+  [key: string]: unknown;
 }

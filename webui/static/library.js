@@ -244,6 +244,15 @@ const _ARTIST_DETAIL_BACK_LABELS = {
 let _artistDetailLabelStack = [];
 let _artistDetailGoingBack = false;
 
+// Exported for the React artist-detail page, which renders the back button now.
+// Arrivals from a still-vanilla page (search, label detail, enrichment) push
+// onto this stack here, so React has to read the SAME array to label the button
+// "Back to Search" rather than a bare "Back".
+if (typeof window !== 'undefined') {
+    window.artistDetailBackLabels = _ARTIST_DETAIL_BACK_LABELS;
+    window.artistDetailLabelStack = _artistDetailLabelStack;
+}
+
 let artistDetailPageState = {
     isInitialized: false,
     currentArtistId: null,
@@ -256,6 +265,14 @@ let artistDetailPageState = {
     editingCell: null,
     enhancedTrackSort: {}
 };
+
+// Exported for the React artist-detail page. `let` at the top level of a
+// classic script is a global LEXICAL binding and never lands on window, so a
+// module cannot see it — yet a dozen functions here (playArtistRadio,
+// openArtistArtPicker, openDiscographyModal, deleteLibraryAlbum, runEnrichment,
+// …) read this object when the React page invokes them. Same object, not a
+// copy, so both sides stay in step.
+if (typeof window !== 'undefined') window.artistDetailPageState = artistDetailPageState;
 
 function clearArtistDetailPageState() {
     if (artistDetailPageState.completionController) {
@@ -380,7 +397,10 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     } else {
         _artistDetailGoingBack = false; // clear any stale flag
         if (currentPage !== 'artist-detail') {
-            _artistDetailLabelStack = []; // fresh chain from a non-artist page
+            // Cleared IN PLACE, not reassigned: window.artistDetailLabelStack
+            // holds this same array for the React page, and swapping the
+            // binding would leave React reading a detached copy.
+            _artistDetailLabelStack.length = 0; // fresh chain from a non-artist page
         }
         if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistName) {
             _artistDetailLabelStack.push({ type: 'artist', name: artistDetailPageState.currentArtistName });
@@ -408,9 +428,31 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     artistDetailPageState.currentArtistSource = normalizedSource;
     artistDetailPageState.enhancedData = null;
     artistDetailPageState.expandedAlbums = new Set();
-    artistDetailPageState.selectedTracks = new Set();
+    // Cleared IN PLACE: React mirrors its selection into this same Set, and the
+    // vanilla track-delete path deletes from it. Swapping the object out would
+    // leave both writing somewhere nobody reads.
+    artistDetailPageState.selectedTracks.clear();
     artistDetailPageState.enhancedTrackSort = {};
     artistDetailPageState.enhancedView = false;
+
+    // When the React page owns this route, STOP here. Everything below —
+    // resetting the legacy view chrome and loadArtistDetailData — targets DOM
+    // by id and class, and the React page reuses those same ids, so running it
+    // means two pages loading over each other: applyDiscographyFilters hides
+    // React's .release-card elements using the legacy filter state and the
+    // whole discography disappears. React fetches its own data and renders its
+    // own back-button label; the state written above is all it needs from here.
+    const _adRoute = window.SoulSyncWebRouter?.routeManifest?.find(
+        (entry) => entry.pageId === 'artist-detail'
+    );
+    if (_adRoute?.kind === 'react') {
+        navigateToPage('artist-detail', {
+            artistId,
+            artistSource: normalizedSource,
+            skipRouteChange: options.skipRouteChange === true
+        });
+        return;
+    }
 
     // Reset enhanced view toggle to standard
     const toggleBtns = document.querySelectorAll('.enhanced-view-toggle-btn');
