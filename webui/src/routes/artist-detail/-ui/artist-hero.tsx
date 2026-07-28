@@ -20,6 +20,7 @@ import {
   totalReleaseCount,
 } from '../-artist-detail.hero-stats';
 import { bucketCounts } from '../-artist-detail.use-completion';
+import { ArtistDbRecord } from './artist-db-record';
 import { EnrichmentCoverage } from './enrichment-coverage';
 import { TopTracksSidebar } from './top-tracks-sidebar';
 
@@ -333,6 +334,10 @@ export function ArtistHero({
 
         <TopTracksSidebar artistId={artist.id} artistName={artist.name ?? ''} />
       </div>
+
+      {/* Appended to the hero SECTION, not the content row — the vanilla did
+          the same and the CSS positions it against the section. */}
+      <ArtistDbRecord artist={artist} isSourceArtist={isSourceArtist} />
     </div>
   );
 }
