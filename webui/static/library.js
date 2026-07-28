@@ -435,65 +435,21 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     artistDetailPageState.enhancedTrackSort = {};
     artistDetailPageState.enhancedView = false;
 
-    // When the React page owns this route, STOP here. Everything below —
-    // resetting the legacy view chrome and loadArtistDetailData — targets DOM
-    // by id and class, and the React page reuses those same ids, so running it
-    // means two pages loading over each other: applyDiscographyFilters hides
-    // React's .release-card elements using the legacy filter state and the
-    // whole discography disappears. React fetches its own data and renders its
-    // own back-button label; the state written above is all it needs from here.
-    const _adRoute = window.SoulSyncWebRouter?.routeManifest?.find(
-        (entry) => entry.pageId === 'artist-detail'
-    );
-    if (_adRoute?.kind === 'react') {
-        navigateToPage('artist-detail', {
-            artistId,
-            artistSource: normalizedSource,
-            skipRouteChange: options.skipRouteChange === true
-        });
-        return;
-    }
-
-    // Reset enhanced view toggle to standard
-    const toggleBtns = document.querySelectorAll('.enhanced-view-toggle-btn');
-    toggleBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-view') === 'standard');
-    });
-    const enhancedContainer = document.getElementById('enhanced-view-container');
-    if (enhancedContainer) enhancedContainer.classList.add('hidden');
-    const standardSections = document.querySelector('.discography-sections');
-    if (standardSections) standardSections.classList.remove('hidden');
-    // Restore standard view filter groups
-    const filterGroups = document.querySelectorAll('#discography-filters .filter-group');
-    filterGroups.forEach(group => {
-        const label = group.querySelector('.filter-label');
-        if (label && label.textContent !== 'View') group.style.display = '';
-    });
-    const dividers = document.querySelectorAll('#discography-filters .filter-divider');
-    dividers.forEach(d => d.style.display = '');
-    // Hide bulk bar
-    const bulkBar = document.getElementById('enhanced-bulk-bar');
-    if (bulkBar) bulkBar.classList.remove('visible');
-
-    // Navigate to artist detail page
+    // Hand off. React owns this route outright now — this function's remaining
+    // job is the state written above, which a dozen globals over in
+    // stats-automations.js and the Enhanced modals read back out.
+    //
+    // What used to follow here (resetting the legacy view chrome, then
+    // initializeArtistDetailPage + loadArtistDetailData) rendered the vanilla
+    // page on top of the React one: both target the same ids, so
+    // applyDiscographyFilters hid React's .release-card elements using legacy
+    // filter state and the discography vanished. It ran behind a manifest
+    // check; with the vanilla page deleted there is nothing left to run.
     navigateToPage('artist-detail', {
         artistId,
         artistSource: normalizedSource,
         skipRouteChange: options.skipRouteChange === true
     });
-
-    // Initialize if needed and load data
-    if (!artistDetailPageState.isInitialized) {
-        initializeArtistDetailPage();
-    }
-
-    _updateArtistDetailBackButtonLabel();
-
-    // Load artist data. The persisted Enhanced-view preference is applied INSIDE
-    // loadArtistDetailData, once we know whether this artist is in the library —
-    // source-only artists have no Enhanced view, so forcing it there left the
-    // Enhanced pane empty and hid the discography.
-    loadArtistDetailData(artistId, artistName);
 }
 
 function _updateArtistDetailBackButtonLabel() {
