@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 from utils.logging_config import get_logger
 
@@ -35,6 +35,28 @@ logger = get_logger("library2.importer")
 
 ProgressCb = Optional[Callable[[str, int, int], None]]
 IMPORT_BATCH_SIZE = 200
+
+# The three keyset walks over the legacy tables, in the order they run. A
+# resume point names the walk it stopped in; everything before it is complete.
+WALK_STAGES: Tuple[str, ...] = ("artists", "albums", "tracks")
+# The whole-library recomputations after the walks. A resume point naming this
+# stage means every walk finished, so only these idempotent steps are left.
+FINALIZE_STAGE = "finalizing"
+_FINALIZE_STEPS = 7
+
+
+class ResumePoint(NamedTuple):
+    """Where an interrupted import stopped, and which run it belonged to.
+
+    ``run_id`` is not bookkeeping: ``_reconcile_legacy_snapshot`` removes or
+    detaches every legacy-owned row that the *current* run did not observe. A
+    resumed run skips the walks that already finished, so it only keeps those
+    rows by continuing under the same run id as the attempt it resumes.
+    """
+
+    stage: str
+    rowid: int
+    run_id: str
 
 
 def _rebuild_album_artist_credits(cursor: Any, album_ids: Set[int]) -> None:
@@ -267,14 +289,19 @@ def _legacy_rows(
     columns: Iterable[str],
     *,
     batch_size: int = IMPORT_BATCH_SIZE,
+    after_rowid: int = 0,
 ) -> Iterable[Any]:
-    """Stream a rowid table in commit-safe, bounded keyset batches."""
+    """Stream a rowid table in commit-safe, bounded keyset batches.
+
+    ``after_rowid`` resumes the walk behind a checkpoint an earlier, interrupted
+    run already committed.
+    """
     selected = tuple(columns)
     if not selected:
         return
     size = max(int(batch_size), 1)
     projection = ", ".join(f'"{column}"' for column in selected)
-    last_rowid = 0
+    last_rowid = max(int(after_rowid or 0), 0)
     while True:
         rows = conn.execute(
             f'SELECT rowid AS "__lib2_source_rowid", {projection} '
@@ -929,7 +956,8 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
 
 
 def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb = None,
-                          profile_id: Optional[int] = None) -> Dict[str, int]:
+                          profile_id: Optional[int] = None,
+                          resume: Optional[ResumePoint] = None) -> Dict[str, int]:
     """Populate ``lib2_*`` from the legacy library. Returns a stats dict.
 
     ``database`` is a ``MusicDatabase`` instance (we use its ``_get_connection``).
@@ -937,6 +965,17 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     optional callback for UI progress. ``profile_id`` scopes the watchlist/
     wishlist-derived monitoring to the admin profile. Omitting it is an alias
     for admin profile 1, never for an all-profile import.
+
+    ``resume`` continues an interrupted run: the walks before ``resume.stage``
+    are skipped, ``resume.stage`` restarts behind ``resume.rowid``, and the run
+    keeps the interrupted attempt's ``run_id`` so the snapshot reconcile still
+    counts its rows as observed. A ``reset`` rebuild ignores it — there is
+    nothing left to continue after the tables are wiped.
+
+    A progress callback may opt into the extra checkpoint data by carrying a
+    truthy ``lib2_resume_aware`` attribute; it is then called as
+    ``progress(stage, current, total, rowid=..., run_id=...)``, where ``rowid``
+    is ``None`` for checkpoints that are not a position in a source walk.
 
     ADR-01 (admin-only): only the admin profile may drive this import. The
     lib2 monitored flags are GLOBAL columns derived from exactly one
@@ -963,29 +1002,55 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         "reconciled_albums": 0,
         "reconciled_artists": 0,
     }
+    if reset:
+        resume = None
     conn = database._get_connection()
     try:
         ensure_library_v2_schema(conn)
         cursor = conn.cursor()
-        run_id = uuid.uuid4().hex
+        run_id = resume.run_id if resume else uuid.uuid4().hex
 
         preserved_album_intent = {}
 
-        def report_progress(stage: str, current: int, total: int) -> None:
+        def report_progress(stage: str, current: int, total: int,
+                            rowid: Optional[int] = None) -> None:
             if not progress:
                 return
+            kwargs: Dict[str, Any] = {}
             if getattr(progress, "lib2_connection_aware", False):
-                progress(stage, current, total, connection=conn)
-            else:
-                progress(stage, current, total)
+                kwargs["connection"] = conn
+            if getattr(progress, "lib2_resume_aware", False):
+                kwargs["rowid"] = rowid
+                kwargs["run_id"] = run_id
+            progress(stage, current, total, **kwargs)
 
-        def checkpoint(stage: str, current: int, total: int) -> None:
+        def checkpoint(stage: str, current: int, total: int,
+                       rowid: Optional[int] = None) -> None:
             """Publish one restart-safe batch and its heartbeat."""
             conn.commit()
-            report_progress(stage, current, total)
+            report_progress(stage, current, total, rowid)
             # A connection-aware bootstrap heartbeat uses this connection so it
             # cannot become visible until the batch transaction is committed.
             conn.commit()
+
+        def walk_from(stage: str) -> Optional[int]:
+            """Where this walk starts: a rowid, or None when it is already done."""
+            if resume is None:
+                return 0
+            if resume.stage not in WALK_STAGES:
+                # The interrupted run was past every walk (post-import work).
+                return None
+            if WALK_STAGES.index(stage) < WALK_STAGES.index(resume.stage):
+                return None
+            return max(int(resume.rowid or 0), 0) if stage == resume.stage else 0
+
+        def walked_before(table: str, after_rowid: int) -> int:
+            """How many source rows the interrupted run already consumed."""
+            if after_rowid <= 0:
+                return 0
+            return int(cursor.execute(
+                f'SELECT COUNT(*) FROM "{table}" WHERE rowid<=?', (after_rowid,)
+            ).fetchone()[0])
 
         if reset:
             # Local ids change across a destructive rebuild. Preserve deliberate
@@ -1031,9 +1096,17 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             ),
         )
         artist_total = int(cursor.execute("SELECT COUNT(*) FROM artists").fetchone()[0])
-        checkpoint("artists", 0, artist_total)
+        artist_from = walk_from("artists")
+        artist_done = walked_before("artists", artist_from or 0)
+        if artist_from is not None:
+            # Publishing the walk's starting position (not just progress) means
+            # a crash between two batches resumes at this stage rather than at
+            # the last batch of the previous one.
+            checkpoint("artists", artist_done, artist_total, artist_from)
         for i, row in enumerate(
-            _legacy_rows(conn, "artists", artist_projection)
+            _legacy_rows(conn, "artists", artist_projection,
+                         after_rowid=artist_from or 0)
+            if artist_from is not None else ()
         ):
             name = row["name"]
             if not name:
@@ -1083,8 +1156,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             _merge_artist_enrichment(cursor, lib2_artist_id, _artist_enrichment_payload(row))
             stats["artists"] += 1
             if (i + 1) % IMPORT_BATCH_SIZE == 0:
-                checkpoint("artists", i + 1, artist_total)
-        checkpoint("artists", artist_total, artist_total)
+                checkpoint("artists", artist_done + i + 1, artist_total,
+                           int(row["__lib2_source_rowid"]))
+        if artist_from is not None:
+            checkpoint("artists", artist_total, artist_total)
 
         # --- Albums (map legacy album id -> lib2 album id) -----------------
         album_map: Dict[str, int] = {}
@@ -1106,7 +1181,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             ),
         )
         album_total = int(cursor.execute("SELECT COUNT(*) FROM albums").fetchone()[0])
-        checkpoint("albums", 0, album_total)
+        album_from = walk_from("albums")
+        album_done = walked_before("albums", album_from or 0)
+        if album_from is not None:
+            checkpoint("albums", album_done, album_total, album_from)
         # Legacy media-server ids are TEXT and may be provider-shaped (for
         # example a 22-character Spotify album id).  Use the same normalized
         # key as ``album_map`` instead of assuming that ``tracks.album_id`` is
@@ -1131,7 +1209,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             ).fetchall()
         }
         for i, row in enumerate(
-            _legacy_rows(conn, "albums", album_projection)
+            _legacy_rows(conn, "albums", album_projection,
+                         after_rowid=album_from or 0)
+            if album_from is not None else ()
         ):
             lib2_artist = resolver.get_legacy(row["artist_id"])
             if lib2_artist is None:
@@ -1232,8 +1312,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             imported_album_ids.add(int(album_id))
             stats["albums"] += 1
             if (i + 1) % IMPORT_BATCH_SIZE == 0:
-                checkpoint("albums", i + 1, album_total)
-        checkpoint("albums", album_total, album_total)
+                checkpoint("albums", album_done + i + 1, album_total,
+                           int(row["__lib2_source_rowid"]))
+        if album_from is not None:
+            checkpoint("albums", album_total, album_total)
 
         # --- Tracks + track files + track-artist junctions -----------------
         track_map: Dict[str, int] = {}
@@ -1291,10 +1373,24 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             ),
         )
         track_total = int(cursor.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
-        checkpoint("tracks", 0, track_total)
-        dirty_credit_album_ids = set(imported_album_ids)
+        track_from = walk_from("tracks")
+        track_done = walked_before("tracks", track_from or 0)
+        if track_from is not None:
+            checkpoint("tracks", track_done, track_total, track_from)
+        if album_from is None:
+            # The album walk belonged to the attempt we are resuming, so we no
+            # longer know which albums it touched. Derived credits are rebuilt
+            # from current ownership and are idempotent, so rebuilding all of
+            # them once is the cheap, correct answer.
+            dirty_credit_album_ids = {
+                int(r[0]) for r in cursor.execute("SELECT id FROM lib2_albums").fetchall()
+            }
+        else:
+            dirty_credit_album_ids = set(imported_album_ids)
         for i, row in enumerate(
-            _legacy_rows(conn, "tracks", track_projection)
+            _legacy_rows(conn, "tracks", track_projection,
+                         after_rowid=track_from or 0)
+            if track_from is not None else ()
         ):
             album_id = album_map.get(_legacy_key(row["album_id"]))
             if album_id is None:
@@ -1460,21 +1556,33 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             if (i + 1) % IMPORT_BATCH_SIZE == 0:
                 _rebuild_album_artist_credits(cursor, dirty_credit_album_ids)
                 dirty_credit_album_ids.clear()
-                checkpoint("tracks", i + 1, track_total)
+                checkpoint("tracks", track_done + i + 1, track_total,
+                           int(row["__lib2_source_rowid"]))
         _rebuild_album_artist_credits(cursor, dirty_credit_album_ids)
-        checkpoint("tracks", track_total, track_total)
+        if track_from is not None:
+            checkpoint("tracks", track_total, track_total)
+
+        # Every source walk is committed. Moving the checkpoint past them means
+        # a crash in the whole-library work below resumes here instead of
+        # walking the legacy tables again for nothing. The steps after this
+        # point are all idempotent recomputations over the finished catalogue.
+        checkpoint(FINALIZE_STAGE, 0, _FINALIZE_STEPS, 0)
 
         stats.update(_reconcile_legacy_snapshot(cursor, run_id))
         conn.commit()
+        checkpoint(FINALIZE_STAGE, 1, _FINALIZE_STEPS)
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
         conn.commit()
+        checkpoint(FINALIZE_STAGE, 2, _FINALIZE_STEPS)
         stats["linked_duplicates"] = link_single_album_duplicates(cursor)
         conn.commit()
+        checkpoint(FINALIZE_STAGE, 3, _FINALIZE_STEPS)
         apply_monitoring_from_watchlist_wishlist(cursor, profile_id)
         stats["monitoring_reconciled"] = reconcile_import_monitoring(
             cursor, profile_id=profile_id or 1
         )
         conn.commit()
+        checkpoint(FINALIZE_STAGE, 4, _FINALIZE_STEPS)
         # Mint provider-less stable ids for everything this run inserted
         # (audit P1-12) — the schema-ensure backfill ran before the inserts.
         from core.library2.stable_ids import backfill_stable_ids
@@ -1494,17 +1602,20 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         seed_legacy_rules(cursor)
         project_entity_monitor_rules(conn, profile_id=profile_id)
         conn.commit()
+        checkpoint(FINALIZE_STAGE, 5, _FINALIZE_STEPS)
         # Materialize the edition/recording shadow model for everything this
         # run inserted (audit P1-04 / ADR-04) — the schema-ensure backfill ran
         # before the inserts, so it has to run again here.
         from core.library2.editions import backfill_editions
         stats["editions"] = backfill_editions(cursor)
         conn.commit()
+        checkpoint(FINALIZE_STAGE, 6, _FINALIZE_STEPS)
         # Rebuild the wanted projection over the imported rules (§11.2).
         from core.library2.wanted import ensure_wanted_schema, recompute_wanted
         ensure_wanted_schema(cursor)
         stats["wanted"] = recompute_wanted(cursor, profile_id=profile_id or 1)
         conn.commit()
+        checkpoint(FINALIZE_STAGE, _FINALIZE_STEPS, _FINALIZE_STEPS)
         logger.info("Library v2 import complete: %s", stats)
     finally:
         conn.close()

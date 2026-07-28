@@ -19,9 +19,15 @@ depending on the UI. Three properties the docs call for:
   racing at boot (or a dev-reload overlap) can't both run
   ``import_legacy_library()`` at once against the same DB. A ``running``
   claim with a stale heartbeat (no process actually alive, e.g. after a
-  crash) is reclaimable, which also gives us crash "resumability" — cheap
-  here because the importer is upsert-by-``legacy_*_id`` and re-runnable
-  (see its docstring), so retrying from scratch is safe, just not free.
+  crash) is reclaimable.
+- **Resume instead of restart** — every batch heartbeat also records the
+  walk position the importer committed (stage, source rowid, run id). The
+  next attempt continues from there rather than re-walking the whole legacy
+  library, which on a large collection is the difference between seconds and
+  another full migration. The checkpoint is only honoured while the legacy
+  source still looks the same (``resume_point_for``); after a scan changed it
+  the run starts clean, because the recorded row offsets no longer describe
+  the same rows.
 - **Error status + retry** — a failed run is recorded with its error and
   stays claimable, so the next server start (or an explicit retry) tries
   again instead of getting stuck.
@@ -42,9 +48,10 @@ import time
 import uuid
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from core.library2 import ADMIN_PROFILE_ID
+from core.library2.importer import ResumePoint
 from core.library2.importer import import_legacy_library as _import_legacy_library
 from utils.logging_config import get_logger
 
@@ -66,9 +73,22 @@ CREATE TABLE IF NOT EXISTS lib2_bootstrap_state (
     finished_at TEXT,
     heartbeat_at TEXT,
     owner_token TEXT,
-    source_watermark TEXT
+    source_watermark TEXT,
+    resume_stage TEXT,
+    resume_rowid INTEGER,
+    resume_run_id TEXT,
+    resume_watermark TEXT
 )
 """
+
+_ADDED_COLUMNS = (
+    ("owner_token", "TEXT"),
+    ("source_watermark", "TEXT"),
+    ("resume_stage", "TEXT"),
+    ("resume_rowid", "INTEGER"),
+    ("resume_run_id", "TEXT"),
+    ("resume_watermark", "TEXT"),
+)
 
 
 def ensure_bootstrap_schema(cursor) -> None:
@@ -77,10 +97,11 @@ def ensure_bootstrap_schema(cursor) -> None:
     columns = {
         row[1] for row in cursor.execute("PRAGMA table_info(lib2_bootstrap_state)")
     }
-    if "owner_token" not in columns:
-        cursor.execute("ALTER TABLE lib2_bootstrap_state ADD COLUMN owner_token TEXT")
-    if "source_watermark" not in columns:
-        cursor.execute("ALTER TABLE lib2_bootstrap_state ADD COLUMN source_watermark TEXT")
+    for name, column_type in _ADDED_COLUMNS:
+        if name not in columns:
+            cursor.execute(
+                f"ALTER TABLE lib2_bootstrap_state ADD COLUMN {name} {column_type}"
+            )
     cursor.execute(
         "INSERT OR IGNORE INTO lib2_bootstrap_state (id, status) VALUES (1, 'pending')"
     )
@@ -125,6 +146,20 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _epoch_of(iso_value: Optional[str]) -> float:
+    """Unix timestamp of a stored heartbeat; 0.0 when absent or unparsable
+    (both mean "older than anything we could be comparing against")."""
+    if not iso_value:
+        return 0.0
+    try:
+        ts = datetime.fromisoformat(iso_value)
+    except ValueError:
+        return 0.0
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.timestamp()
+
+
 def _is_stale(iso_value: Optional[str], stale_after_seconds: int) -> bool:
     if not iso_value:
         return True
@@ -147,7 +182,8 @@ def get_state(database: Any) -> Dict[str, Any]:
         conn.commit()
         cursor.execute(
             "SELECT status, attempts, stage, current_count, total_count, "
-            "last_error, started_at, finished_at, heartbeat_at, source_watermark "
+            "last_error, started_at, finished_at, heartbeat_at, source_watermark, "
+            "resume_stage, resume_rowid, resume_run_id, resume_watermark "
             "FROM lib2_bootstrap_state WHERE id = 1"
         )
         row = cursor.fetchone()
@@ -158,7 +194,8 @@ def get_state(database: Any) -> Dict[str, Any]:
             "status": "pending", "attempts": 0, "stage": None,
             "current": 0, "total": 0, "last_error": None,
             "started_at": None, "finished_at": None, "heartbeat_at": None,
-            "source_watermark": None,
+            "source_watermark": None, "resume_stage": None, "resume_rowid": 0,
+            "resume_run_id": None, "resume_watermark": None,
         }
     return {
         "status": row["status"],
@@ -171,10 +208,34 @@ def get_state(database: Any) -> Dict[str, Any]:
         "finished_at": row["finished_at"],
         "heartbeat_at": row["heartbeat_at"],
         "source_watermark": row["source_watermark"],
+        "resume_stage": row["resume_stage"],
+        "resume_rowid": int(row["resume_rowid"] or 0),
+        "resume_run_id": row["resume_run_id"],
+        "resume_watermark": row["resume_watermark"],
     }
 
 
-def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS) -> Optional[str]:
+def resume_point_for(state: Dict[str, Any],
+                     current_watermark: str) -> Optional[ResumePoint]:
+    """Turn a persisted checkpoint into a usable resume point, or ``None``.
+
+    The checkpoint is row offsets into the legacy tables, so it only means
+    anything while those tables still hold the same rows. A media-server scan
+    that ran while we were down invalidates it and the next attempt starts
+    from the beginning — correctness over speed.
+    """
+    stage = (state.get("resume_stage") or "").strip()
+    run_id = (state.get("resume_run_id") or "").strip()
+    if not stage or not run_id:
+        return None
+    if state.get("resume_watermark") != current_watermark:
+        return None
+    return ResumePoint(stage=stage, rowid=int(state.get("resume_rowid") or 0),
+                       run_id=run_id)
+
+
+def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS,
+              watermark: Optional[str] = None) -> Optional[str]:
     """Try to acquire the exclusive right to run ``import_legacy_library`` now.
 
     Returns an opaque owner token iff this call won the race, otherwise None.
@@ -184,8 +245,14 @@ def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS) 
     The swap is a compare-and-swap on the exact ``(status, heartbeat_at)``
     pair just read, so two concurrent claimants can't both "win" a stale
     lock — only whichever commits first actually changes those columns.
+
+    ``watermark`` stamps the legacy-source snapshot this run walks, so the
+    checkpoints it writes can later be checked against the source they were
+    taken from. It is computed here when the caller has not already done so.
     """
     conn = database._get_connection()
+    if watermark is None:
+        watermark = source_watermark(database)
     try:
         cursor = conn.cursor()
         ensure_bootstrap_schema(cursor)
@@ -207,17 +274,18 @@ def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS) 
             cursor.execute(
                 "UPDATE lib2_bootstrap_state SET status='running', attempts=?, "
                 "last_error=NULL, started_at=?, finished_at=NULL, heartbeat_at=?, "
-                "owner_token=? "
+                "owner_token=?, resume_watermark=? "
                 "WHERE id=1 AND status=? AND heartbeat_at IS NULL",
-                (attempts + 1, now, now, owner_token, old_status),
+                (attempts + 1, now, now, owner_token, watermark, old_status),
             )
         else:
             cursor.execute(
                 "UPDATE lib2_bootstrap_state SET status='running', attempts=?, "
                 "last_error=NULL, started_at=?, finished_at=NULL, heartbeat_at=?, "
-                "owner_token=? "
+                "owner_token=?, resume_watermark=? "
                 "WHERE id=1 AND status=? AND heartbeat_at=?",
-                (attempts + 1, now, now, owner_token, old_status, old_heartbeat),
+                (attempts + 1, now, now, owner_token, watermark, old_status,
+                 old_heartbeat),
             )
         won = cursor.rowcount > 0
         conn.commit()
@@ -233,19 +301,81 @@ def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS) 
         conn.close()
 
 
-def heartbeat(database: Any, owner_token: str, *, stage: Optional[str] = None,
-              current: int = 0, total: int = 0, connection=None) -> bool:
-    """Extend a held claim's lease and record progress. Fenced by owner."""
-    conn = connection or database._get_connection()
-    owns_connection = connection is None
+def reclaim_abandoned_claim(database: Any, *, process_started_at: float) -> bool:
+    """Release a ``running`` claim that a previous process died holding.
+
+    SoulSync serves from a single application process (``workers = 1``), so the
+    only writer of this row is us. A claim whose heartbeat has not moved since
+    before this process existed therefore cannot belong to a live importer —
+    its owner went away with the old process. Marking it failed here (the
+    resume checkpoint is kept) lets the migration continue within seconds of a
+    restart instead of waiting out the full ``STALE_AFTER_SECONDS`` window.
+
+    Returns True when a claim was actually released.
+    """
+    conn = database._get_connection()
     try:
         cursor = conn.cursor()
+        ensure_bootstrap_schema(cursor)
+        row = cursor.execute(
+            "SELECT status, heartbeat_at FROM lib2_bootstrap_state WHERE id=1"
+        ).fetchone()
+        if row is None or row["status"] != "running":
+            conn.commit()
+            return False
+        heartbeat_at = row["heartbeat_at"]
+        if _epoch_of(heartbeat_at) >= process_started_at:
+            # Beaten since we booted: a live import in this process owns it.
+            conn.commit()
+            return False
         cursor.execute(
-            "UPDATE lib2_bootstrap_state SET heartbeat_at=?, stage=?, "
-            "current_count=?, total_count=? WHERE id=1 AND status='running' "
-            "AND owner_token=?",
-            (_now_iso(), stage, current, total, owner_token),
+            "UPDATE lib2_bootstrap_state SET status='failed', owner_token=NULL, "
+            "last_error=?, finished_at=? "
+            "WHERE id=1 AND status='running' AND heartbeat_at IS ?",
+            ("Interrupted by a restart", _now_iso(), heartbeat_at),
         )
+        released = cursor.rowcount > 0
+        conn.commit()
+        if released:
+            logger.info("Released a Library v2 migration claim left by a previous process")
+        return released
+    except sqlite3.OperationalError as exc:
+        logger.debug("lib2 bootstrap reclaim skipped: %s", exc)
+        return False
+    finally:
+        conn.close()
+
+
+def heartbeat(database: Any, owner_token: str, *, stage: Optional[str] = None,
+              current: int = 0, total: int = 0, connection=None,
+              rowid: Optional[int] = None, run_id: Optional[str] = None) -> bool:
+    """Extend a held claim's lease and record progress. Fenced by owner.
+
+    ``rowid``/``run_id`` additionally move the resume checkpoint. They are only
+    written together: a beat without a rowid is a stage that has no position in
+    a source walk (the post-import precache work), and must leave the import
+    checkpoint of the walk that preceded it intact.
+    """
+    conn = connection or database._get_connection()
+    owns_connection = connection is None
+    writes_checkpoint = rowid is not None and bool(run_id)
+    try:
+        cursor = conn.cursor()
+        if writes_checkpoint:
+            cursor.execute(
+                "UPDATE lib2_bootstrap_state SET heartbeat_at=?, stage=?, "
+                "current_count=?, total_count=?, resume_stage=?, resume_rowid=?, "
+                "resume_run_id=? WHERE id=1 AND status='running' AND owner_token=?",
+                (_now_iso(), stage, current, total, stage, int(rowid), run_id,
+                 owner_token),
+            )
+        else:
+            cursor.execute(
+                "UPDATE lib2_bootstrap_state SET heartbeat_at=?, stage=?, "
+                "current_count=?, total_count=? WHERE id=1 AND status='running' "
+                "AND owner_token=?",
+                (_now_iso(), stage, current, total, owner_token),
+            )
         updated = cursor.rowcount > 0
         if owns_connection:
             conn.commit()
@@ -263,9 +393,13 @@ def mark_done(database: Any, owner_token: str, *, watermark: Optional[str] = Non
     try:
         cursor = conn.cursor()
         now = _now_iso()
+        # A completed run has nothing left to resume; clearing the checkpoint
+        # keeps a later unrelated failure from continuing this run's walk.
         cursor.execute(
             "UPDATE lib2_bootstrap_state SET status='done', finished_at=?, "
-            "heartbeat_at=?, last_error=NULL, source_watermark=?, owner_token=NULL "
+            "heartbeat_at=?, last_error=NULL, source_watermark=?, owner_token=NULL, "
+            "resume_stage=NULL, resume_rowid=NULL, resume_run_id=NULL, "
+            "resume_watermark=NULL "
             "WHERE id=1 AND status='running' AND owner_token=?",
             (now, now, watermark, owner_token),
         )
@@ -277,6 +411,8 @@ def mark_done(database: Any, owner_token: str, *, watermark: Optional[str] = Non
 
 
 def mark_failed(database: Any, owner_token: str, error: str) -> bool:
+    """Record a failed run. The resume checkpoint is deliberately kept: the
+    retry should continue where this attempt stopped, not start over."""
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
@@ -311,8 +447,27 @@ def mark_waiting_for_source(database: Any, owner_token: str, *, watermark: str) 
         conn.close()
 
 
+def should_stop_autostart(result: Dict[str, Any]) -> bool:
+    """Whether the periodic autostart caller may retire for good.
+
+    Only a genuinely migrated library ends the loop. ``waiting_for_source``
+    also reports success — a fresh installation has nothing to import yet —
+    and treating that as finished used to retire the thread before the first
+    media-server scan ever produced rows, so nothing reached ``lib2_*`` until
+    the next restart.
+    """
+    if result.get("waiting_for_source"):
+        return False
+    if result.get("skipped") == "already_done":
+        return True
+    return result.get("success") is True
+
+
 def run_bootstrap_if_needed(database: Any, config_get, *,
-                            profile_id: int = ADMIN_PROFILE_ID) -> Dict[str, Any]:
+                            profile_id: int = ADMIN_PROFILE_ID,
+                            post_import: Optional[Callable[[Any], Any]] = None,
+                            stale_after_seconds: int = STALE_AFTER_SECONDS,
+                            ) -> Dict[str, Any]:
     """Run the legacy → v2 import exactly once, only if it's actually needed.
 
     Always returns a dict: either ``{"skipped": reason}`` (``"already_done"``,
@@ -320,6 +475,12 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     run (``{"success": True, "stats": {...}}`` / ``{"success": False,
     "error": str}``). Safe to call repeatedly from a periodic autostart
     loop — cheap no-ops once the import has completed.
+
+    ``post_import`` receives the same progress callback and runs the work that
+    finishes a migration but is not catalogue rows (tracklist/tag/artwork
+    precache). It runs while the claim is still held, so a restart cannot
+    interleave a second migration with it, and a failure inside it never fails
+    the migration: the rows are committed and the caches fill in later anyway.
     """
     from core.library2.feature import library_v2_enabled
 
@@ -332,31 +493,45 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             reason = "already_done" if state.get("status") == "done" else "empty_source"
             return {"skipped": reason}
 
-    owner_token = try_claim(database)
+    resume = resume_point_for(state, current_watermark)
+    owner_token = try_claim(database, stale_after_seconds=stale_after_seconds,
+                            watermark=current_watermark)
     if not owner_token:
         return {"skipped": "already_running"}
 
-    logger.info("Library v2 bootstrap import starting")
+    if resume:
+        logger.info("Library v2 bootstrap import resuming at %s row %s",
+                    resume.stage, resume.rowid)
+    else:
+        logger.info("Library v2 bootstrap import starting")
     last_beat = {"t": 0.0}
 
-    def _progress(stage, current, total, *, connection=None):
+    def _progress(stage, current, total, *, connection=None, rowid=None, run_id=None):
         now = time.monotonic()
         if current != total and now - last_beat["t"] < _HEARTBEAT_THROTTLE_SECONDS:
             return
         last_beat["t"] = now
         heartbeat(
             database, owner_token, stage=stage, current=current, total=total,
-            connection=connection,
+            connection=connection, rowid=rowid, run_id=run_id,
         )
 
     _progress.lib2_connection_aware = True
+    _progress.lib2_resume_aware = True
 
     try:
-        stats = _import_legacy_library(database, profile_id=profile_id, progress=_progress)
+        stats = _import_legacy_library(database, profile_id=profile_id,
+                                       progress=_progress, resume=resume)
     except Exception as exc:  # noqa: BLE001
         logger.error("Library v2 bootstrap import failed: %s", exc, exc_info=True)
         mark_failed(database, owner_token, str(exc))
         return {"success": False, "error": str(exc)}
+
+    if post_import is not None:
+        try:
+            post_import(_progress)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Library v2 post-import precache failed: %s", exc)
 
     final_watermark = source_watermark(database)
     if source_row_count(final_watermark) == 0:
@@ -372,6 +547,9 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
 __all__ = [
     "ensure_bootstrap_schema",
     "get_state",
+    "reclaim_abandoned_claim",
+    "resume_point_for",
+    "should_stop_autostart",
     "try_claim",
     "heartbeat",
     "mark_done",

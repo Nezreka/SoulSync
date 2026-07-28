@@ -32668,18 +32668,44 @@ def _autostart_popularity_backfill():
 
 
 def _autostart_library_v2_bootstrap_import():
-    """Existing installations only get `lib2_*` rows once someone opens the Library
-    v2 UI and clicks Import — native repair/quality/wanted jobs then have nothing to
-    work with until that happens (docs/library-v2.md §78). This makes the first
-    import happen on its own: no button, survives a restart, retries on failure, and
-    won't race a concurrent manual import — see core/library2/bootstrap.py for the
-    persisted claim/heartbeat/retry mechanics this loop just drives repeatedly.
+    """Migrate an upgrading installation into `lib2_*` on its own.
 
-    Exits for good once the import has actually completed; otherwise keeps
-    retrying with backoff so a transient failure is picked up without a
-    restart."""
+    Library is the native catalogue, so an installation that upgrades into it
+    must end up with rows without anyone clicking anything — the repair,
+    quality and wanted jobs all read `lib2_*`. This loop drives the persisted
+    claim/heartbeat/resume mechanics in core/library2/bootstrap.py; everything
+    interesting (locking, crash resume, retry) lives there.
+
+    Three things this loop is responsible for:
+
+    - releasing a claim a *previous* process died holding, so a restart mid
+      migration continues in seconds instead of waiting out the stale window;
+    - finishing the same post-import work the manual button does (tracklists,
+      tag facts, artwork), which used to be wired to the button only;
+    - retrying with backoff, and only retiring once the library is actually
+      migrated — a fresh install reports success with nothing to import, and
+      has to keep watching for its first media-server scan.
+    """
     import time as _t
     from core.library2 import bootstrap as lib2_bootstrap
+    from core.library2.post_import import run_post_import_precache
+    from api.library_v2 import start_artwork_precache
+
+    process_started_at = _t.time()
+
+    def _post_import(progress):
+        """Everything a migrated library needs beyond its catalogue rows."""
+        run_post_import_precache(get_database(), config_manager, progress=progress)
+        # Artwork runs in its own worker: the library is browsable without it.
+        start_artwork_precache(get_database, config_manager)
+
+    try:
+        lib2_bootstrap.reclaim_abandoned_claim(
+            get_database(), process_started_at=process_started_at
+        )
+    except Exception as e:
+        logger.debug(f"lib2 bootstrap claim reclaim skipped: {e}")
+
     delay = 30
     max_delay = 1800
     while True:
@@ -32687,8 +32713,10 @@ def _autostart_library_v2_bootstrap_import():
         delay = min(delay * 2, max_delay)
         try:
             database = get_database()
-            result = lib2_bootstrap.run_bootstrap_if_needed(database, config_manager.get)
-            if result.get("skipped") == "already_done" or result.get("success") is True:
+            result = lib2_bootstrap.run_bootstrap_if_needed(
+                database, config_manager.get, post_import=_post_import,
+            )
+            if lib2_bootstrap.should_stop_autostart(result):
                 return
         except Exception as e:
             logger.debug(f"lib2 bootstrap import tick skipped: {e}")

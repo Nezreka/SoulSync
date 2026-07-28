@@ -107,6 +107,16 @@ def _reset_artwork_cache_state() -> None:
         )
 
 
+def start_artwork_precache(get_database: Callable[[], Any], config_manager: Any) -> bool:
+    """Public entry point for callers outside the request path.
+
+    The automatic migration (web_server's bootstrap autostart) finishes with
+    the same artwork stage the manual Import button triggers, and reports into
+    the same state, so ``/api/library/v2/import/status`` describes both.
+    """
+    return _start_artwork_cache(get_database, config_manager)
+
+
 def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -> bool:
     """Start the non-critical artwork stage without extending import time."""
     with _artwork_cache_lock:
@@ -5004,36 +5014,30 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.importer import import_legacy_library
             import time as _t
 
-            def _progress(stage, current, total, *, connection=None):
+            def _progress(stage, current, total, *, connection=None,
+                          rowid=None, run_id=None):
                 _import_state.update(stage=stage, current=current, total=total)
                 lib2_bootstrap.heartbeat(
                     get_database(), bootstrap_owner,
                     stage=stage, current=current, total=total,
-                    connection=connection,
+                    connection=connection, rowid=rowid, run_id=run_id,
                 )
 
             _progress.lib2_connection_aware = True
+            # A manual import records the same checkpoints as the automatic one:
+            # if this click dies halfway, the background bootstrap continues it
+            # instead of starting the whole migration again.
+            _progress.lib2_resume_aware = True
 
             try:
                 stats = import_legacy_library(get_database(), reset=reset, progress=_progress,
                                               profile_id=active_profile)
                 _import_state.update(stats=stats, stage="tracklists", current=0, total=0)
 
-                # Resolve missing-track titles before artwork: cached tracklists
-                # can immediately become real, monitorable rows, while
-                # artwork/provider lookup can be slow.
-                try:
-                    from core.library2.completeness import precache_tracklists
-                    precache_tracklists(get_database(), config_manager, progress=_progress)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("tracklist precache failed: %s", e)
-
-                _import_state.update(stage="tags", current=0, total=0)
-                try:
-                    from core.library2.tag_cache import precache_tag_cache
-                    precache_tag_cache(get_database(), config_manager, progress=_progress)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("tag cache precache failed: %s", e)
+                # Shared with the automatic migration so the two cannot drift.
+                from core.library2.post_import import run_post_import_precache
+                run_post_import_precache(get_database(), config_manager,
+                                         progress=_progress)
 
                 # Artwork is optional presentation data: rows, monitoring,
                 # tracklists, tag facts and §63 dedup/namespace repairs are all
@@ -5076,4 +5080,4 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     logger.info("Library v2 routes registered (/api/library/v2/*)")
 
 
-__all__ = ["register_library_v2_routes"]
+__all__ = ["register_library_v2_routes", "start_artwork_precache"]
