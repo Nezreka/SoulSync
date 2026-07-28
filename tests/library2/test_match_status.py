@@ -292,3 +292,43 @@ def test_match_status_ignores_text_legacy_ids_and_provenance(tmp_path):
     assert track_spotify["external_id"] is None
     assert track_spotify["match_origin"] is None
     conn.close()
+
+
+def test_artist_enrichment_coverage_counts_tracks_per_provider(imported_conn):
+    """ldp-05: the rich header's rings answer "how many of this artist's
+    TRACKS does each provider actually know?" — a different question from the
+    artist-level chips, and the one legacy showed. Detection reuses the chips'
+    own id resolution, so a track cannot count as matched in one place and
+    unmatched in the other."""
+    conn = imported_conn
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name) VALUES('Portishead','Portishead')"
+    ).lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Dummy')",
+        (artist_id,),
+    ).lastrowid
+    for spotify_id, external in (("sp-1", "{}"), ("sp-2", '{"deezer":"dz-2"}'), (None, "{}")):
+        conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, spotify_id, external_ids) "
+            "VALUES(?, 'T', ?, ?)", (album_id, spotify_id, external))
+
+    from core.library2.match_status import artist_enrichment_coverage
+
+    coverage = artist_enrichment_coverage(conn, artist_id)
+
+    assert coverage["total_tracks"] == 3
+    assert coverage["spotify"] == pytest.approx(66.7, abs=0.1)
+    assert coverage["deezer"] == pytest.approx(33.3, abs=0.1)
+    assert "musicbrainz" not in coverage
+
+
+def test_artist_enrichment_coverage_is_empty_without_tracks(imported_conn):
+    conn = imported_conn
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name) VALUES('Nobody','Nobody')"
+    ).lastrowid
+
+    from core.library2.match_status import artist_enrichment_coverage
+
+    assert artist_enrichment_coverage(conn, artist_id) == {"total_tracks": 0}

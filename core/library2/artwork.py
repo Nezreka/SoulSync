@@ -934,7 +934,15 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
         return counts
     try:
         artist_ids = [r[0] for r in conn.execute("SELECT id FROM lib2_artists")]
-        album_ids = [r[0] for r in conn.execute("SELECT id FROM lib2_albums")]
+        # ldp-07: a pure discography row (provider metadata for a release
+        # nobody owns or monitors) is served straight from the provider CDN
+        # and deliberately never cached locally — see the user decision in
+        # issues §28.6 question 2. Caching them here anyway would put the
+        # cost right back, just on a background thread: browsing one prolific
+        # artist would otherwise pull hundreds of covers onto disk forever.
+        album_ids = [r[0] for r in conn.execute(
+            "SELECT id FROM lib2_albums "
+            "WHERE COALESCE(origin, 'library') <> 'discography' OR monitored = 1")]
     except Exception as e:  # noqa: BLE001
         logger.debug("artwork precache error: %s", e)
         return counts

@@ -105,6 +105,40 @@ def _native_chips(
     return chips
 
 
+def artist_enrichment_coverage(conn: Any, artist_id: int) -> Dict[str, Any]:
+    """Share of this artist's tracks that carry a qualified id per provider.
+
+    The legacy artist hero showed this as a ring per service; it answers a
+    question the per-entity chips cannot ("the artist is matched to Spotify,
+    but are its TRACKS?"). Counting reuses ``_source_ids`` — the same
+    detection the chips use — so a row can never count as matched in one
+    place and unmatched in the other.
+    """
+    from core.library2.artist_aliases import resolve_alias_group
+
+    group = resolve_alias_group(conn, int(artist_id)) or [int(artist_id)]
+    marks = ",".join("?" for _ in group)
+    rows = conn.execute(
+        f"""SELECT DISTINCT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
+              FROM lib2_tracks t
+              LEFT JOIN lib2_track_artists ta ON ta.track_id = t.id
+              LEFT JOIN lib2_albums al ON al.id = t.album_id
+             WHERE ta.artist_id IN ({marks}) OR al.primary_artist_id IN ({marks})""",
+        tuple(group) * 2,
+    ).fetchall()
+    total = len(rows)
+    coverage: Dict[str, Any] = {"total_tracks": total}
+    if not total:
+        return coverage
+    counts: Dict[str, int] = {}
+    for row in rows:
+        for service in _source_ids(row):
+            counts[service] = counts.get(service, 0) + 1
+    for service, matched in counts.items():
+        coverage[service] = round(matched / total * 100, 1)
+    return coverage
+
+
 def entity_match_status(
     conn: Any,
     entity_type: str,

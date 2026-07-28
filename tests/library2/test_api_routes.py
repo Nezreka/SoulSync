@@ -3061,3 +3061,242 @@ def test_artwork_status_validates_its_input(api):
         "/api/library/v2/artwork/status?kind=artist&ids=abc").status_code == 400
     assert client.get(
         "/api/library/v2/artwork/status?kind=artist").get_json()["states"] == {}
+
+
+# --- ldp-01/ldp-02/ldp-07: legacy artist/discovery parity ------------------
+
+
+def test_discography_rows_keep_their_provider_cover_url(api):
+    """ldp-07: a release that exists only as provider metadata is never routed
+    through the local artwork endpoint — that path costs a provider walk plus
+    two JPEG encodes through a 6-worker pool, which is the whole reason the
+    legacy page painted covers faster. Owned/monitored releases keep the local
+    cache as their truth and only carry the CDN url as a pending fallback."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute(
+        "UPDATE lib2_albums SET origin='discography', monitored=0, image_url=? "
+        "WHERE id=?", ("https://cdn.example/views.jpg", ids["views"]))
+    conn.execute(
+        "UPDATE lib2_albums SET origin='discography', monitored=1, image_url=? "
+        "WHERE id=?", ("https://cdn.example/ep.jpg", ids["ep"]))
+    conn.execute(
+        "UPDATE lib2_albums SET origin='library', image_url=? WHERE id=?",
+        ("https://cdn.example/single.jpg", ids["single"]))
+    conn.commit()
+    conn.close()
+
+    artist = client.get(f"/api/library/v2/artists/{ids['artist']}").get_json()["artist"]
+    by_id = {e["id"]: e for e in artist["albums"] + artist["eps"] + artist["singles"]}
+
+    assert by_id[ids["views"]]["image_url"] == "https://cdn.example/views.jpg"
+    for owned in (ids["ep"], ids["single"]):
+        assert by_id[owned]["image_url"] == f"/api/library/v2/artwork/album/{owned}"
+    assert by_id[ids["ep"]]["remote_image_url"] == "https://cdn.example/ep.jpg"
+    assert by_id[ids["single"]]["remote_image_url"] == "https://cdn.example/single.jpg"
+
+
+def test_non_http_image_url_never_becomes_a_remote_cover(api):
+    """A stored media-server path is not a browser-loadable CDN url; keeping it
+    would reintroduce exactly the Plex dependency guide §2.1 forbids."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute(
+        "UPDATE lib2_albums SET origin='discography', monitored=0, image_url=? "
+        "WHERE id=?", ("/library/metadata/1234/thumb", ids["views"]))
+    conn.commit()
+    conn.close()
+
+    artist = client.get(f"/api/library/v2/artists/{ids['artist']}").get_json()["artist"]
+    views = next(e for e in artist["albums"] if e["id"] == ids["views"])
+
+    assert views["image_url"] == f"/api/library/v2/artwork/album/{ids['views']}"
+    assert views["remote_image_url"] is None
+
+
+def test_discovery_resolve_is_read_only_and_finds_an_existing_artist(api):
+    """ldp-02: opening a provider artist must not create a catalogue row."""
+    client, db, _ids = api
+
+    known = client.get("/api/library/v2/discovery/artist",
+                       query_string={"source": "spotify", "provider_id": "sp-drake",
+                                     "name": "Drake"}).get_json()
+    unknown = client.get("/api/library/v2/discovery/artist",
+                         query_string={"source": "spotify", "provider_id": "sp-nobody",
+                                       "name": "Nobody At All"}).get_json()
+
+    assert known["artist_id"] == _ids_artist(db, "Drake")
+    assert unknown["artist_id"] is None
+    conn = _conn(db)
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_artists WHERE name='Nobody At All'"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_discovery_materialize_creates_the_artist_once(api):
+    """The bookmark/monitor action is the first write — and it is idempotent."""
+    client, db, _ids = api
+
+    first = client.post("/api/library/v2/discovery/artist",
+                        json={"source": "spotify", "provider_id": "sp-new",
+                              "name": "Fresh Artist"}).get_json()
+    second = client.post("/api/library/v2/discovery/artist",
+                         json={"source": "spotify", "provider_id": "sp-new",
+                               "name": "Fresh Artist"}).get_json()
+
+    assert first["artist_id"] == second["artist_id"]
+    conn = _conn(db)
+    try:
+        row = conn.execute(
+            "SELECT spotify_id FROM lib2_artists WHERE id=?", (first["artist_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["spotify_id"] == "sp-new"
+
+
+def test_discovery_never_writes_a_legacy_id_into_a_provider_column(api):
+    """`library` ids are opaque legacy keys, not provider identities."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("UPDATE lib2_artists SET legacy_artist_id='plex-77' WHERE id=?",
+                 (ids["artist"],))
+    conn.commit()
+    conn.close()
+
+    resolved = client.get("/api/library/v2/discovery/artist",
+                          query_string={"source": "library", "provider_id": "plex-77"})
+    created = client.post("/api/library/v2/discovery/artist",
+                          json={"source": "library", "provider_id": "plex-99",
+                                "name": "Legacy Only"}).get_json()
+
+    assert resolved.get_json()["artist_id"] == ids["artist"]
+    conn = _conn(db)
+    try:
+        row = conn.execute("SELECT spotify_id, external_ids FROM lib2_artists WHERE id=?",
+                           (created["artist_id"],)).fetchone()
+    finally:
+        conn.close()
+    assert row["spotify_id"] is None
+    assert "plex-99" not in (row["external_ids"] or "")
+
+
+def test_discovery_materialize_requires_the_admin_profile(api):
+    """ADR-01: catalogue writes stay admin-only, reads do not."""
+    client, db, _ids = api
+    db.active_profile = 7
+
+    assert client.post("/api/library/v2/discovery/artist",
+                       json={"name": "Someone"}).status_code == 403
+    assert client.get("/api/library/v2/discovery/artist",
+                      query_string={"name": "Someone"}).status_code == 200
+
+
+def test_discovery_rejects_an_empty_identity(api):
+    client, _db, _ids = api
+    assert client.get("/api/library/v2/discovery/artist").status_code == 400
+
+
+def _ids_artist(db, name: str) -> int:
+    conn = _conn(db)
+    try:
+        return conn.execute(
+            "SELECT id FROM lib2_artists WHERE name=?", (name,)).fetchone()["id"]
+    finally:
+        conn.close()
+
+
+def test_monitored_track_keeps_its_release_visible_in_my_library(api):
+    """Bookmarking one top track wrote a wishlist row the user could then not
+    find anywhere in their library: `My Library` hides a discography release,
+    and monitoring a TRACK does not monitor its album. Guide §5 says the rule
+    is `origin='library' OR monitored` — a wanted track satisfies that too, so
+    the release has to carry the count that proves it."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("UPDATE lib2_albums SET origin='discography', monitored=0 WHERE id=?",
+                 (ids["ep"],))
+    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (ids["ep_track"],))
+    conn.commit()
+    conn.close()
+
+    artist = client.get(f"/api/library/v2/artists/{ids['artist']}").get_json()["artist"]
+    ep = next(e for e in artist["eps"] if e["id"] == ids["ep"])
+
+    assert ep["monitored_tracks"] == 1
+    # The artist roll-up counts it as being in the library, too.
+    assert artist["album_count"] >= 1
+
+
+def test_discovery_track_status_reports_what_is_already_wanted(api):
+    """The Top Tracks bookmark tick must survive a reload — it is a fact about
+    the library, not about a component's lifetime."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (ids["album_track"],))
+    conn.commit()
+    conn.close()
+
+    body = client.get(
+        "/api/library/v2/discovery/track-status",
+        query_string=[("artist_name", "Drake"), ("source", "spotify"),
+                      ("artist_provider_id", "sp-drake"),
+                      ("title", "One Dance"), ("title", "Nothing Was The Same")],
+    ).get_json()
+
+    assert body["statuses"]["One Dance"]["monitored"] is True
+    assert body["statuses"]["One Dance"]["track_id"] == ids["album_track"]
+    assert "Nothing Was The Same" not in body["statuses"]
+
+
+def test_discovery_track_status_is_silent_for_an_unknown_artist(api):
+    client, _db, _ids = api
+    body = client.get(
+        "/api/library/v2/discovery/track-status",
+        query_string=[("artist_name", "Nobody At All"), ("title", "Any Song")],
+    ).get_json()
+    assert body["statuses"] == {}
+
+
+def test_album_resolve_fills_a_partially_materialized_tracklist(api, monkeypatch):
+    """Bookmarking one top track materializes exactly that recording. The old
+    "has ANY track row" guard then saw a track and never resolved, so the
+    release stayed a one-track album — the user could see their wanted track
+    but none of the record it came from."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("UPDATE lib2_albums SET expected_track_count=12 WHERE id=?", (ids["views"],))
+    conn.commit()
+    conn.close()
+    resolved = []
+    from core.library2 import completeness
+
+    monkeypatch.setattr(
+        completeness, "resolve_tracklist",
+        lambda _cfg, _conn, album_id: resolved.append(album_id))
+
+    client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
+
+    assert resolved == [ids["views"]]
+
+
+def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
+    """A complete release must not pay for a provider round trip on every open."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("UPDATE lib2_albums SET expected_track_count=1 WHERE id=?", (ids["views"],))
+    conn.commit()
+    conn.close()
+    resolved = []
+    from core.library2 import completeness
+
+    monkeypatch.setattr(
+        completeness, "resolve_tracklist",
+        lambda _cfg, _conn, album_id: resolved.append(album_id))
+
+    client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
+
+    assert resolved == []

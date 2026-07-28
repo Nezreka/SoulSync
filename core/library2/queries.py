@@ -121,6 +121,16 @@ def _json_list(raw: Any) -> List[str]:
         return []
 
 
+def _artist_provider_ids(row: Any) -> Dict[str, str]:
+    """Every qualified provider id stored on an artist row (guide §2.5): the
+    dedicated ``spotify_id`` column plus the ``external_ids`` namespaces."""
+    from core.library2.provider_ids import parse_external_ids
+    ids = parse_external_ids(row["external_ids"] if "external_ids" in row.keys() else None)
+    if row["spotify_id"]:
+        ids.setdefault("spotify", str(row["spotify_id"]))
+    return ids
+
+
 def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str = "all",
                  page: int = 1, limit: int = 75,
                  include_size: bool = True) -> Tuple[List[Dict[str, Any]], int]:
@@ -455,6 +465,12 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                     AND COALESCE(tf.file_state, 'active')
                         NOT IN ('missing_confirmed','deleted')
                    THEN t.id END) AS files_present,
+               -- Guide §5: "My Library" means `origin='library' OR monitored`.
+               -- A wanted TRACK on an otherwise unowned release satisfies that
+               -- just as much as a monitored album does — without this count
+               -- bookmarking a single top track wrote a wishlist row the user
+               -- could then not find anywhere in their library.
+               COUNT(DISTINCT CASE WHEN t.monitored=1 THEN t.id END) AS monitored_tracks,
                COALESCE(asz.total_size_bytes, 0) AS total_size_bytes
         FROM artist_albums aa
         JOIN lib2_albums al ON al.id = aa.album_id
@@ -513,6 +529,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "track_count": total,
             "tracks_present": present,
             "tracks_missing": max(0, total - present),
+            "monitored_tracks": r["monitored_tracks"] or 0,
             "total_size_bytes": r["total_size_bytes"] or 0,
             "user_overrides": overrides,
         }
@@ -524,7 +541,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             albums.append(entry)
 
     def _in_library(entries):
-        return sum(1 for e in entries if e["origin"] == "library" or e["monitored"])
+        return sum(1 for e in entries
+                   if e["origin"] == "library" or e["monitored"] or e["monitored_tracks"])
 
     return {
         "id": a["id"],
@@ -535,6 +553,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "mood": artist_effective["mood"],
         "label": artist_effective["label"],
         "genres": _json_list(artist_effective["genres"]),
+        # ldp-05: the rich artist header asks the shared provider endpoints
+        # (top tracks) for this artist — those key off a provider id, and a
+        # lib2 row id is not one. Expose what the row already stores instead
+        # of making the client take a second round trip to /match-status.
+        "provider_ids": _artist_provider_ids(a),
         "monitored": bool(a["monitored"]),
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),

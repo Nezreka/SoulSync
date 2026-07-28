@@ -122,7 +122,12 @@ def _adopt_external_id(conn, table: str, row_id: int, namespace: str,
 
 
 def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
-                           source: Optional[str] = None) -> Optional[int]:
+                           source: Optional[str] = None,
+                           create: bool = True) -> Optional[int]:
+    """``create=False`` makes this a pure lookup: no id backfill, no INSERT,
+    ``None`` when the artist has no catalogue row yet. ldp-02's discovery mode
+    needs to ask "do we already have this artist?" on a plain GET without
+    turning a read into a write."""
     # ID match first: cheap (indexed) and — unlike name matching — survives
     # name-spelling variants of the same provider identity (e.g. a kanji vs.
     # romaji release credit), the case G8's alias-awareness gap calls out.
@@ -168,6 +173,8 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
                 row = candidate
                 break
     if row is not None:
+        if not create:
+            return row["id"]
         if namespace == "spotify":
             # Backfill so the next finished download for this artist can take
             # the indexed ID path above instead of falling through to here.
@@ -177,6 +184,9 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
         elif namespace is not None:
             _adopt_external_id(conn, "lib2_artists", row["id"], namespace, provider_id)
         return row["id"]
+
+    if not create:
+        return None
 
     from core.library2.profile_lookup import default_quality_profile_id
     from core.library2.monitor_sync import artist_is_watchlisted

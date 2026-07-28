@@ -197,3 +197,33 @@ def test_precache_all_artwork_reports_small_library_progress(legacy_db_factory, 
 
     assert events[0] == ("artwork", 0, 3)
     assert events[-1] == ("artwork", 3, 3)
+
+
+def test_precache_skips_unowned_discography_releases(legacy_db_factory, monkeypatch):
+    """ldp-07: a release that exists only as provider metadata is served from
+    the provider CDN and never cached locally (user decision, issues §28.6
+    question 2). Precaching it in the background would put exactly the cost
+    back that the request path just shed — browsing one prolific artist would
+    otherwise pull their whole back catalogue onto disk. A monitored
+    discography release is a real intent and stays cached."""
+    database = _database(legacy_db_factory(n_albums=3))
+
+    conn = database._get_connection()
+    album_ids = [r[0] for r in conn.execute("SELECT id FROM lib2_albums ORDER BY id")]
+    conn.execute("UPDATE lib2_albums SET origin='discography', monitored=0 WHERE id=?",
+                 (album_ids[0],))
+    conn.execute("UPDATE lib2_albums SET origin='discography', monitored=1 WHERE id=?",
+                 (album_ids[1],))
+    conn.commit()
+    conn.close()
+
+    built = []
+    monkeypatch.setattr(
+        artwork, "build_artwork",
+        lambda _db, _conn, _cfg, kind, eid, **_kw: built.append((kind, eid)) or "/fake.jpg")
+
+    artwork.precache_all_artwork(database, None)
+
+    assert ("album", album_ids[0]) not in built
+    assert ("album", album_ids[1]) in built
+    assert ("album", album_ids[2]) in built

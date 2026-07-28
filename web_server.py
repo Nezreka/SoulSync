@@ -39939,6 +39939,44 @@ except Exception as e:
 # The auto-pause token cleanup + yield-override behavior is encoded on the
 # EnrichmentService descriptor (see core/enrichment/services.py).
 
+@app.route('/api/artist/lastfm-info', methods=['GET'])
+def get_artist_lastfm_info():
+    """Listeners / plays / bio for an artist by name (ldp-05).
+
+    The legacy artist hero read these off the library row; Library v2 has
+    provider-native artists with no legacy row at all, and discovery mode has
+    no row whatsoever. Last.fm resolves by name for every one of those cases,
+    which is exactly what ``core/artist_source_detail.py`` already does for a
+    source-only artist — same client, same fields, just reachable on its own.
+    """
+    artist_name = (request.args.get('name', '') or '').strip()
+    if not artist_name:
+        return jsonify({'success': False, 'error': 'Artist name required'}), 400
+    if not lastfm_worker or not lastfm_worker.client:
+        return jsonify({'success': True, 'listeners': None, 'playcount': None, 'bio': None})
+    try:
+        info = lastfm_worker.client.get_artist_info(artist_name) or {}
+        stats = info.get('stats') or {}
+        bio = info.get('bio') or {}
+
+        def _int_or_none(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        return jsonify({
+            'success': True,
+            'listeners': _int_or_none(stats.get('listeners')),
+            'playcount': _int_or_none(stats.get('playcount')),
+            'bio': bio.get('content') or bio.get('summary'),
+            'url': info.get('url'),
+        })
+    except Exception as e:
+        logger.debug(f"Last.fm artist info failed for {artist_name}: {e}")
+        return jsonify({'success': True, 'listeners': None, 'playcount': None, 'bio': None})
+
+
 @app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])
 def get_artist_lastfm_top_tracks(artist_id):
     """Get top tracks for an artist from Last.fm (lazy-loaded by frontend)."""

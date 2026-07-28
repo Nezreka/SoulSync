@@ -278,11 +278,35 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         suffix = f"?v={version}" if version else ""
         return f"/api/library/v2/artwork/{kind}/{int(entity_id)}{suffix}"
 
-    def _apply_artwork_urls(data: Any, kind: str) -> Any:
-        """Point a serialized entity's ``image_url`` at the local artwork endpoint."""
+    def _apply_artwork_urls(data: Any, kind: str, *, prefer_remote: bool = False) -> Any:
+        """Point a serialized entity's ``image_url`` at the local artwork endpoint.
+
+        ldp-07: the provider CDN url the catalogue already stores survives as
+        ``remote_image_url`` instead of being thrown away here. The client
+        paints it while a cold local build is still pending, which is the
+        entire reason the legacy artist page felt faster — it never routed
+        cover art through the server at all.
+
+        ``prefer_remote`` (user decision, issues §28.6 question 2) keeps the
+        CDN url as the *primary* url for entities we deliberately do not cache
+        locally: a pure discography row nobody owns or monitors. Browsing an
+        artist's full back catalogue must not fill the managed artwork cache
+        with hundreds of releases the user never asked for."""
         if isinstance(data, dict) and "id" in data:
-            data["image_url"] = _artwork_url(kind, data["id"])
+            remote = data.get("image_url")
+            if not (isinstance(remote, str) and remote.startswith(("http://", "https://"))):
+                remote = None
+            data["remote_image_url"] = remote
+            if not (prefer_remote and remote):
+                data["image_url"] = _artwork_url(kind, data["id"])
         return data
+
+    def _is_uncached_discography_row(entry: Any) -> bool:
+        """A release that exists only as provider metadata (never imported,
+        never monitored) — the one case that stays remote-only (ldp-07)."""
+        return (isinstance(entry, dict)
+                and entry.get("origin") == "discography"
+                and not entry.get("monitored"))
 
     def _profile() -> int:
         try:
@@ -1378,6 +1402,160 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
+    @app.route("/api/library/v2/discovery/artist", methods=["GET", "POST"])
+    def lib2_discovery_artist():
+        """ldp-01/ldp-02: bridge a provider artist identity into the catalogue.
+
+        ``GET`` answers "does this artist already have a Library-v2 row?" with
+        no side effects at all, so opening a search result stays read-only —
+        the discovery view renders straight from the provider until the user
+        actually asks for something (issues §28.6 question 1). ``POST`` is
+        that ask: it resolves-or-creates the row via the same
+        ``autolink`` resolver every other entry path uses, so a bookmark from
+        discovery lands on the identical entity a finished download would.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {} if request.method == "POST" else {}
+        source = str(body.get("source") or request.args.get("source") or "").strip().lower()
+        provider_id = str(body.get("provider_id") or request.args.get("provider_id") or "").strip()
+        name = str(body.get("name") or request.args.get("name") or "").strip()
+        if not provider_id and not name:
+            return jsonify({"success": False,
+                            "error": "provider_id or name is required"}), 400
+        # `library` is the legacy media-server namespace, not a metadata
+        # provider: its ids are opaque legacy `artists.id` values and must
+        # never be written into a provider id column (guide §5).
+        legacy = source in ("", "library")
+        create = request.method == "POST"
+        from core.library2.autolink import find_or_create_artist
+        conn = _conn()
+        try:
+            artist_id = None
+            if legacy and provider_id:
+                row = conn.execute(
+                    "SELECT id FROM lib2_artists WHERE legacy_artist_id = ? LIMIT 1",
+                    (provider_id,)).fetchone()
+                artist_id = row["id"] if row else None
+            if artist_id is None and name:
+                artist_id = find_or_create_artist(
+                    conn, name,
+                    spotify_id=None if legacy else (provider_id or None),
+                    source=None if legacy else (source or None),
+                    create=create)
+            if create:
+                conn.commit()
+        finally:
+            conn.close()
+        if create and artist_id is None:
+            return jsonify({"success": False,
+                            "error": "Could not materialize this artist"}), 400
+        return jsonify({"success": True, "artist_id": artist_id})
+
+    @app.route("/api/library/v2/discovery/track-status")
+    def lib2_discovery_track_status():
+        """Which of these provider track titles already exist and are wanted.
+
+        Without this the Top Tracks bookmark was write-only: the tick vanished
+        on reload because the button's state lived purely in component state.
+        Matching uses ``dedup_title_key`` — the same key
+        ``find_or_create_track`` writes with — so a title cannot resolve here
+        and miss there.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        titles = [t for t in request.args.getlist("title") if t.strip()]
+        artist_name = str(request.args.get("artist_name") or "").strip()
+        provider_id = str(request.args.get("artist_provider_id") or "").strip()
+        source = str(request.args.get("source") or "").strip().lower() or None
+        if not titles or not artist_name:
+            return jsonify({"success": True, "statuses": {}})
+        from core.library2.autolink import find_or_create_artist
+        from core.library2.importer import dedup_title_key
+        conn = _conn()
+        try:
+            artist_id = find_or_create_artist(
+                conn, artist_name, spotify_id=provider_id or None,
+                source=source, create=False)
+            statuses: Dict[str, Any] = {}
+            if artist_id is not None:
+                from core.library2.artist_aliases import resolve_alias_group
+                group = resolve_alias_group(conn, artist_id) or [artist_id]
+                marks = ",".join("?" for _ in group)
+                rows = conn.execute(
+                    f"""SELECT DISTINCT t.id, t.title, t.monitored
+                          FROM lib2_tracks t
+                          LEFT JOIN lib2_track_artists ta ON ta.track_id = t.id
+                          LEFT JOIN lib2_albums al ON al.id = t.album_id
+                         WHERE ta.artist_id IN ({marks})
+                            OR al.primary_artist_id IN ({marks})""",
+                    tuple(group) * 2).fetchall()
+                # A monitored row wins over an unmonitored duplicate of the
+                # same recording — the question is "is this wanted", not
+                # "which row id happens to sort first".
+                by_key: Dict[str, Any] = {}
+                for row in rows:
+                    key = dedup_title_key(row["title"] or "")
+                    current = by_key.get(key)
+                    if current is None or (row["monitored"] and not current["monitored"]):
+                        by_key[key] = row
+                for title in titles:
+                    match = by_key.get(dedup_title_key(title))
+                    if match is not None:
+                        statuses[title] = {"track_id": int(match["id"]),
+                                           "monitored": bool(match["monitored"])}
+        finally:
+            conn.close()
+        return jsonify({"success": True, "statuses": statuses})
+
+    @app.route("/api/library/v2/discovery/track", methods=["POST"])
+    def lib2_discovery_track():
+        """ldp-06: give a provider track (a Top Track row) the catalogue rows
+        it needs so the normal ``/tracks/<id>/monitor`` Bookmark can act on it.
+
+        Creation only — monitoring stays the caller's separate, already proven
+        call, so there is exactly one code path that turns Bookmark into a
+        wanted row plus wishlist mirror.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        artist_name = str(body.get("artist_name") or "").strip()
+        track_title = str(body.get("track_title") or "").strip()
+        if not artist_name or not track_title:
+            return jsonify({"success": False,
+                            "error": "artist_name and track_title are required"}), 400
+        source = str(body.get("source") or "").strip().lower() or None
+        from core.library2.autolink import (
+            find_or_create_album, find_or_create_artist, find_or_create_track,
+        )
+        conn = _conn()
+        try:
+            artist_id = find_or_create_artist(
+                conn, artist_name,
+                spotify_id=str(body.get("artist_provider_id") or "").strip() or None,
+                source=source)
+            if artist_id is None:
+                return jsonify({"success": False,
+                                "error": "Could not resolve this artist"}), 400
+            album_id = find_or_create_album(
+                conn, artist_id, str(body.get("album_title") or "").strip() or track_title,
+                album_type=str(body.get("album_type") or "album"),
+                spotify_album_id=str(body.get("album_provider_id") or "").strip() or None,
+                source=source)
+            track_id = find_or_create_track(
+                conn, album_id, artist_id, track_title, track_number=None,
+                spotify_track_id=str(body.get("track_provider_id") or "").strip() or None,
+                source=source)
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, "artist_id": artist_id,
+                        "album_id": album_id, "track_id": track_id})
+
     @app.route("/api/library/v2/artists/<int:artist_id>")
     def lib2_get_artist(artist_id):
         guard = _guard()
@@ -1393,7 +1571,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": "Artist not found"}), 404
         _apply_artwork_urls(data, "artist")
         for entry in data.get("albums", []) + data.get("eps", []) + data.get("singles", []):
-            _apply_artwork_urls(entry, "album")
+            _apply_artwork_urls(entry, "album",
+                                prefer_remote=_is_uncached_discography_row(entry))
         return jsonify({"success": True, "artist": data})
 
     @app.route("/api/library/v2/artists/<int:artist_id>/aliases")
@@ -1491,10 +1670,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # discography-only release (no track rows yet) shows its real
             # tracklist when the user expands it — Lidarr-style.
             if request.args.get("resolve") == "1":
-                has_tracks = conn.execute(
-                    "SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1", (album_id,)
+                # Not "has ANY track": bookmarking one top track materializes
+                # exactly that recording, which left the release looking like a
+                # one-track album forever — the guard saw a track row and
+                # stopped. Resolve whenever the rows do not yet cover the
+                # release, so the rest of the tracklist appears alongside it
+                # (unmonitored, which is correct — only that one track is
+                # wanted). `_persist_tracklist_tracks` matches existing rows by
+                # disc+track number and leaves them in place, so this only
+                # ever adds.
+                counts = conn.execute(
+                    "SELECT (SELECT COUNT(*) FROM lib2_tracks WHERE album_id=a.id) AS have, "
+                    "       COALESCE(a.expected_track_count, 0) AS expected "
+                    "  FROM lib2_albums a WHERE a.id=?", (album_id,)
                 ).fetchone()
-                if not has_tracks:
+                if counts is not None and counts["have"] < max(counts["expected"], 1):
                     try:
                         from core.library2.completeness import resolve_tracklist
                         resolve_tracklist(config_manager, conn, album_id)
@@ -1604,14 +1794,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        from core.library2.match_status import entity_match_status
+        from core.library2.match_status import (
+            artist_enrichment_coverage, entity_match_status,
+        )
         available = configured_match_services_getter() if configured_match_services_getter else None
         conn = _conn()
         try:
             services = entity_match_status(conn, "artist", artist_id, available_services=available)
+            # ldp-05: the rich header's enrichment rings. Same request as the
+            # chips it sits under — no second round trip for one panel.
+            coverage = artist_enrichment_coverage(conn, artist_id)
         finally:
             conn.close()
-        return jsonify({"success": True, "services": services})
+        return jsonify({"success": True, "services": services,
+                        "enrichment_coverage": coverage})
 
     @app.route("/api/library/v2/albums/<int:album_id>/match-status")
     def lib2_album_match_status(album_id):
