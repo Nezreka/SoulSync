@@ -10,6 +10,9 @@ import {
   heroReleaseImage,
   isUsableHeroImageUrl,
   nextHeroImageStage,
+  artistFormatTags,
+  resolvedCategoryStats,
+  streamCategoryStats,
   summaryStats,
   totalReleaseCount,
 } from './-artist-detail.hero-stats';
@@ -242,5 +245,63 @@ describe('buildGenreChips', () => {
 
   it('handles an artist with neither', () => {
     expect(buildGenreChips({})).toEqual([]);
+  });
+});
+
+describe('streamCategoryStats', () => {
+  it('uses only RESOLVED releases as the denominator', () => {
+    // Three of twelve checked so far reads "2/3", not "2/12" — the bar tracks
+    // progress through the check, not the final answer.
+    expect(streamCategoryStats(2, 1)).toEqual({ text: '2/3', width: '67%', checking: false });
+  });
+
+  it('drops the checking state as soon as the first result lands', () => {
+    // categoryStats would still say "..." here because pending releases exist.
+    expect(streamCategoryStats(1, 0).checking).toBe(false);
+    expect(streamCategoryStats(1, 0).text).toBe('1/1');
+  });
+
+  it('treats nothing-resolved as 100%, like categoryStats not summaryStats', () => {
+    expect(streamCategoryStats(0, 0)).toEqual({ text: '0/0', width: '100%', checking: false });
+  });
+
+  it('reaches 100% when everything resolved is owned', () => {
+    expect(streamCategoryStats(5, 0).width).toBe('100%');
+    expect(streamCategoryStats(0, 5).width).toBe('0%');
+  });
+});
+
+describe('resolvedCategoryStats', () => {
+  it('drops unresolved releases from the denominator instead of showing "..."', () => {
+    // categoryStats would return '...' here; the vanilla's post-stream recount
+    // only ever saw resolved cards, so a release the backend never reported on
+    // simply is not counted.
+    const stats = resolvedCategoryStats([{ owned: true }, { owned: false }, { owned: null }]);
+    expect(stats).toEqual({ text: '1/2', width: '50%', checking: false });
+    expect(categoryStats([{ owned: true }, { owned: false }, { owned: null }]).text).toBe('...');
+  });
+
+  it('agrees with categoryStats once everything resolved', () => {
+    const releases = [{ owned: true }, { owned: true }, { owned: false }];
+    expect(resolvedCategoryStats(releases)).toEqual(categoryStats(releases));
+  });
+
+  it('reads 0/0 at 100% for a bucket with nothing resolved', () => {
+    expect(resolvedCategoryStats([{ owned: null }])).toEqual({
+      text: '0/0',
+      width: '100%',
+      checking: false,
+    });
+  });
+});
+
+describe('artistFormatTags', () => {
+  it('sorts the accumulated formats', () => {
+    expect(artistFormatTags(new Set(['MP3', 'FLAC', 'AAC']))).toEqual(['AAC', 'FLAC', 'MP3']);
+  });
+
+  it('renders nothing for an empty or absent set', () => {
+    expect(artistFormatTags(new Set())).toEqual([]);
+    expect(artistFormatTags(undefined)).toEqual([]);
   });
 });

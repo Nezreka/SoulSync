@@ -199,3 +199,54 @@ export function buildGenreChips(artist: ArtistInfo): GenreChip[] {
   }
   return chips;
 }
+
+/**
+ * The completion bar WHILE the stream is running, from
+ * updateCategoryStatsFromStream (library.js:2090).
+ *
+ * Deliberately different from categoryStats: the denominator is only what has
+ * RESOLVED so far (owned + missing), not the whole bucket. So a 12-album
+ * discography reads "2/3" after three results, not "2/12" — the bar tracks
+ * progress through the check rather than the final answer, and the "checking"
+ * class is dropped as soon as the first result lands.
+ *
+ * An empty resolved set is 100%, matching categoryStats rather than
+ * summaryStats.
+ */
+export function streamCategoryStats(ownedCount: number, missingCount: number): CategoryStats {
+  const total = ownedCount + missingCount;
+  const completion = total > 0 ? Math.round((ownedCount / total) * 100) : 100;
+  return { text: `${ownedCount}/${total}`, width: `${completion}%`, checking: false };
+}
+
+/**
+ * The bars once the stream reports `complete`, from recalculateSummaryStats
+ * (library.js:2106).
+ *
+ * The vanilla recounted the CARDS rather than trusting its running tallies, and
+ * that recount excludes anything still unresolved — so a release the backend
+ * never reported on drops out of the denominator instead of pinning the bar
+ * back to "...". That is the only reason this is not just categoryStats: after
+ * a clean stream the two agree.
+ */
+export function resolvedCategoryStats(releases: { owned?: boolean | null }[] = []): CategoryStats {
+  let owned = 0;
+  let missing = 0;
+  for (const release of releases) {
+    if (release.owned === true) owned += 1;
+    else if (release.owned === false) missing += 1;
+  }
+  return streamCategoryStats(owned, missing);
+}
+
+/**
+ * Artist-level format tags, shown under the genre chips once the stream ends.
+ *
+ * Accumulated from OWNED releases only (tallyEvent), sorted, and rendered only
+ * when non-empty — the vanilla removed the block entirely rather than leaving
+ * an empty row.
+ */
+export function artistFormatTags(formats: Set<string> | undefined): string[] {
+  if (!formats || formats.size === 0) return [];
+  return [...formats].sort();
+}
