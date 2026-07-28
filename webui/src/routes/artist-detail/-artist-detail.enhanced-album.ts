@@ -355,3 +355,216 @@ export function expandedHeaderDetails(album: EnhancedAlbum, rows: EnhancedTrack[
 
   return details.join(' · ');
 }
+
+export interface AlbumMetaField {
+  key: string;
+  label: string;
+  value: string;
+  type?: string;
+  placeholder?: string;
+}
+
+/**
+ * The editable album metadata fields, in the vanilla's order.
+ *
+ * `genres` is a comma-joined string in the form and an ARRAY on the record;
+ * `explicit` is the string '1'/'0' rather than a checkbox.
+ */
+export function albumMetaFields(album: EnhancedAlbum): AlbumMetaField[] {
+  return [
+    { key: 'title', label: 'Title', value: String(album.title || '') },
+    { key: 'year', label: 'Year', value: String(album.year || ''), type: 'number' },
+    {
+      key: 'release_date',
+      label: 'Release Date',
+      value: String(album.release_date || ''),
+      placeholder: 'YYYY-MM-DD',
+    },
+    {
+      key: 'genres',
+      label: 'Genres',
+      value: Array.isArray(album.genres) ? album.genres.join(', ') : String(album.genres || ''),
+    },
+    { key: 'label', label: 'Label', value: String(album.label || '') },
+    { key: 'style', label: 'Style', value: String(album.style || '') },
+    { key: 'mood', label: 'Mood', value: String(album.mood || '') },
+    { key: 'record_type', label: 'Type', value: String(album.record_type || 'album') },
+    { key: 'explicit', label: 'Explicit', value: album.explicit ? '1' : '0' },
+  ];
+}
+
+/** #824: a release date may be just the year, year-month, or the full date. */
+export const RELEASE_DATE_PATTERN = /^\d{4}(-\d{2}(-\d{2})?)?$/;
+
+export interface AlbumMetaDiff {
+  updates: Record<string, unknown>;
+  /** True when a non-empty release date does not parse; nothing is saved. */
+  invalidDate: boolean;
+}
+
+/**
+ * Only what CHANGED, per field type.
+ *
+ * The diff matters: sending every field would overwrite columns another process
+ * touched between load and save, and the empty-vs-null distinction is what
+ * lets a user clear a field rather than merely blank the input.
+ */
+export function albumMetaUpdates(
+  album: EnhancedAlbum,
+  values: Record<string, string>,
+): AlbumMetaDiff {
+  const updates: Record<string, unknown> = {};
+  let invalidDate = false;
+
+  for (const [field, raw] of Object.entries(values)) {
+    const value = String(raw ?? '').trim();
+
+    if (field === 'genres') {
+      const next = value
+        ? value
+            .split(',')
+            .map((g) => g.trim())
+            .filter(Boolean)
+        : [];
+      const original = Array.isArray(album.genres) ? album.genres : [];
+      if (JSON.stringify(next) !== JSON.stringify(original)) updates[field] = next;
+    } else if (field === 'year' || field === 'explicit' || field === 'track_count') {
+      const numeric = value !== '' ? parseInt(value, 10) : null;
+      // `|| null` treats a stored 0 (or an absent field) as null, so a
+      // non-explicit album ALWAYS reports explicit:0 as a change. Verbatim
+      // vanilla: it means a save on such an album is never a no-op, and the
+      // "no changes" branch is only reachable for an explicit album. Fixing it
+      // would change what gets written on every save.
+      if (numeric !== (album[field] || null)) updates[field] = numeric;
+    } else if (field === 'release_date') {
+      if (value && !RELEASE_DATE_PATTERN.test(value)) {
+        invalidDate = true;
+        continue;
+      }
+      if ((value || '') !== (album.release_date || '')) updates[field] = value || null;
+    } else if ((value || '') !== (album[field] || '')) {
+      updates[field] = value || null;
+    }
+  }
+
+  return { updates, invalidDate };
+}
+
+/**
+ * Loose title key for owned-to-canonical matching.
+ *
+ * Mirrors core.library_reorganize._normalize_title: drop only the featured
+ * credit, then treat every OTHER separator as whitespace. Keeping bracket
+ * CONTENT rather than deleting it is what makes "X (Main Theme)" and
+ * "X - Main Theme" line up.
+ */
+export function normTitleForMatch(value: unknown): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[([]\s*(?:feat|ft|featuring)\b[^)\]]*[)\]]/g, ' ')
+    .replace(/\s+(?:feat|ft|featuring)\b\.?\s.*$/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Which source's tracklist counts as canonical, in priority order. */
+export function getAlbumCanonicalSource(
+  album: EnhancedAlbum,
+): { source: string; id: string } | null {
+  const priority: [string, string][] = [
+    ['spotify', 'spotify_album_id'],
+    ['deezer', 'deezer_id'],
+    ['itunes', 'itunes_album_id'],
+    ['musicbrainz', 'musicbrainz_release_id'],
+    ['discogs', 'discogs_id'],
+    ['tidal', 'tidal_id'],
+    ['qobuz', 'qobuz_id'],
+  ];
+  for (const [source, key] of priority) {
+    if (album[key]) return { source, id: String(album[key]) };
+  }
+  return null;
+}
+
+/**
+ * Which canonical tracks we do not own.
+ *
+ * #916: multi-disc albums store disc_number = 1 for EVERY track (the scanner
+ * does not split discs), so a strict slot match flags every canonical disc-2+
+ * track as missing. Each canonical track matches by SLOT first, then falls back
+ * to a normalised TITLE against any unused owned track — consuming each owned
+ * track once, so genuine missings and duplicate titles still count correctly.
+ */
+export function deriveMissingTracks(
+  album: EnhancedAlbum,
+  canonicalTracks: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const owned = (album.tracks ?? []).map((track) => ({
+    slot: trackSlotKey(track as Record<string, unknown>),
+    title: normTitleForMatch(track.title || track.name),
+    used: false,
+  }));
+
+  // '1:0' is the "no slot at all" key; indexing it would match everything.
+  const slotIndex = new Map<string, number>();
+  owned.forEach((entry, index) => {
+    if (entry.slot !== '1:0' && !slotIndex.has(entry.slot)) slotIndex.set(entry.slot, index);
+  });
+
+  const missing: Record<string, unknown>[] = [];
+  for (const track of canonicalTracks ?? []) {
+    // Indexing the slotless '1:0' key above is dead defensively — a canonical
+    // track with that key is skipped below, so the entry could never be looked
+    // up. Kept because the vanilla wrote it.
+    const key = trackSlotKey(track);
+    const normalized = normalizeExpectedMissingTrack(track, album);
+    if (key === '1:0' || !normalized._hasActionableContext) continue;
+
+    const slotMatch = slotIndex.get(key);
+    if (slotMatch != null && !owned[slotMatch].used) {
+      owned[slotMatch].used = true;
+      continue;
+    }
+
+    const title = normTitleForMatch(track.name || track.title);
+    if (title) {
+      const match = owned.find((entry) => !entry.used && entry.title === title);
+      if (match) {
+        match.used = true;
+        continue;
+      }
+    }
+
+    missing.push({
+      ...track,
+      name: track.name || track.title,
+      duration_ms: track.duration_ms || track.duration || 0,
+    });
+  }
+  return missing;
+}
+
+/** Flatten an /api/album/<id>/tracks payload into canonical track rows. */
+export function normalizeCanonicalTracks(
+  tracks: Record<string, unknown>[],
+  source: string,
+  albumSourceId: string,
+  payloadSource?: string,
+): Record<string, unknown>[] {
+  return (tracks ?? []).map((track, index) => ({
+    ...track,
+    title: track.title || track.name || `Track ${track.track_number || index + 1}`,
+    name: track.name || track.title || `Track ${track.track_number || index + 1}`,
+    track_number: track.track_number || index + 1,
+    disc_number: track.disc_number || 1,
+    duration: track.duration || track.duration_ms || 0,
+    source: payloadSource || source,
+    track_id: track.id || track.track_id || '',
+    // A source with no per-track id still needs a stable key, so one is
+    // synthesised from the album and the slot.
+    id:
+      track.id ||
+      track.track_id ||
+      `${source}:${albumSourceId}:${track.disc_number || 1}:${track.track_number || index + 1}`,
+  }));
+}

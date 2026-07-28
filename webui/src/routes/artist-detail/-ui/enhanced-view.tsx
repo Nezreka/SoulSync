@@ -11,6 +11,7 @@ import {
   sectionTrackTotal,
 } from '../-artist-detail.enhanced';
 import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
+import { AlbumMetaRow } from './album-meta-row';
 import { ExpandedAlbumHeader } from './expanded-album-header';
 
 interface Props {
@@ -137,7 +138,7 @@ function EnhancedSection({
  * full track table.
  */
 function EnhancedAlbumWrapper({
-  album,
+  album: albumProp,
   type,
   artist,
   isAdmin,
@@ -148,8 +149,21 @@ function EnhancedAlbumWrapper({
   isAdmin: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const meta = albumRowMeta(album);
   const [thumbBroken, setThumbBroken] = useState(false);
+
+  /**
+   * A saved edit is applied here rather than refetching the whole artist. The
+   * vanilla mutated the shared album object in place and hand-patched the row;
+   * holding the record in state does the same thing declaratively, and it
+   * resets whenever a real refetch hands down a new object.
+   */
+  const [seenAlbum, setSeenAlbum] = useState(albumProp);
+  const [album, setAlbum] = useState(albumProp);
+  if (albumProp !== seenAlbum) {
+    setSeenAlbum(albumProp);
+    setAlbum(albumProp);
+  }
+  const meta = albumRowMeta(album);
 
   return (
     <div
@@ -198,17 +212,24 @@ function EnhancedAlbumWrapper({
         className={`enhanced-tracks-panel${expanded ? ' visible' : ''}`}
         id={`enhanced-tracks-panel-${album.id}`}
       >
-        {/* The meta row and track table land in the next slices, with
+        {/* The track table lands in the next slice, with
             _attachTableDelegation. */}
         <div className="enhanced-tracks-panel-inner">
           {expanded ? (
-            <ExpandedAlbumHeader
-              album={album}
-              rows={getAlbumTrackRows(album)}
-              artistId={artist?.id}
-              artistName={String(artist?.name ?? '')}
-              isAdmin={isAdmin}
-            />
+            <>
+              <ExpandedAlbumHeader
+                album={album}
+                rows={getAlbumTrackRows(album)}
+                artistId={artist?.id}
+                artistName={String(artist?.name ?? '')}
+                isAdmin={isAdmin}
+              />
+              <AlbumMetaRow
+                album={album}
+                isAdmin={isAdmin}
+                onSaved={(updates) => setAlbum((current) => ({ ...current, ...updates }))}
+              />
+            </>
           ) : null}
         </div>
       </div>
