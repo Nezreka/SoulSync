@@ -41,7 +41,6 @@ function setActivePageChrome(pageId) {
         }
     }
     currentPage = pageId;
-    if (typeof _updateSidebarLibraryBreadcrumb === 'function') _updateSidebarLibraryBreadcrumb();
     if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
     const downloadSidebar = document.getElementById('discover-download-sidebar');
     if (downloadSidebar) {

@@ -3296,28 +3296,8 @@ async function loadPageData(pageId) {
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;
-            case 'library':
-                // Check if we should return to artist detail view instead of list
-                if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
-                    navigateToPage('artist-detail', {
-                        artistId: artistDetailPageState.currentArtistId,
-                        artistSource: artistDetailPageState.currentArtistSource,
-                    });
-                    if (!artistDetailPageState.isInitialized) {
-                        initializeArtistDetailPage();
-                        loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
-                    }
-                    // Already initialized — DOM content persists, no reload needed
-                } else {
-                    if (!libraryPageState.isInitialized) {
-                        initializeLibraryPage();
-                    }
-                    // Already initialized — DOM content persists, no reload needed
-                }
-                break;
-            case 'artist-detail':
-                // Artist detail page is entered through the route handoff and legacy navigator.
-                break;
+            // 'library' and 'artist-detail' are React routes: the router owns
+            // them end to end, so the shell has nothing to initialize here.
             case 'discover':
                 if (!discoverPageInitialized) {
                     await loadDiscoverPage();

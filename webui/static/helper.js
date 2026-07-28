@@ -92,11 +92,11 @@ const HELPER_CONTENT = {
     },
     '.nav-button[data-page="library"]': {
         title: 'Music Library',
-        description: 'Browse your complete collection organized by artists. Click any artist to see their albums with ownership stats. Enhanced view enables inline metadata editing, tag writing, and bulk operations.',
+        description: 'Your collection as SoulSync knows it: artists, releases, tracks and the files behind them. Monitor what you want, see what is missing or below its quality cutoff, and act on the files themselves.',
         tips: [
-            'Enhanced view toggle on artist detail pages enables advanced management',
+            'Monitoring an artist follows new releases; monitoring a release or track asks for that one thing',
             'Write tags directly to audio files (MP3, FLAC, OGG, M4A)',
-            'Bulk select tracks across albums for batch operations'
+            'Select tracks across releases for batch operations'
         ],
         docsId: 'library'
     },
@@ -1422,203 +1422,10 @@ const HELPER_CONTENT = {
         docsId: 'auto-history'
     },
 
-    // ─── LIBRARY PAGE ─────────────────────────────────────────────────
-
-    // Library Grid View
-    '#library-page .library-controls': {
-        title: 'Library Controls',
-        description: 'Search, filter, and navigate your music library. Find artists by name, filter by watchlist status, or jump to a letter.',
-        docsId: 'lib-standard'
-    },
-    '#library-search-input': {
-        title: 'Search Library',
-        description: 'Search your library by artist name. Results filter in real-time as you type.',
-    },
-    '#watchlist-filter': {
-        title: 'Watchlist Filter',
-        description: 'Filter artists by watchlist status: All shows everyone, Watched shows only artists you follow, Unwatched shows artists not on your watchlist.',
-    },
-    '#alphabet-selector': {
-        title: 'Alphabet Jump',
-        description: 'Jump to artists starting with a specific letter. Click "All" to reset. "#" shows artists starting with numbers.',
-    },
-    '#library-artists-grid': {
-        title: 'Artist Grid',
-        description: 'Your music library organized by artist. Each card shows the artist photo, name, track count, and service badges. Click any card to view their collection.',
-        docsId: 'lib-standard'
-    },
-    '.library-artist-card': {
-        title: 'Library Artist',
-        description: 'An artist in your library. Click to view their full collection with albums, EPs, and singles. Service badges show which metadata sources have enriched this artist.',
-        tips: [
-            'Badge icons link to the artist on external services',
-            'Eye icon toggles watchlist status',
-            'Track count shows total tracks in your library for this artist'
-        ]
-    },
-    '#library-pagination': {
-        title: 'Pagination',
-        description: 'Navigate through pages of artists. Your library shows 75 artists per page.',
-    },
-
-    // Artist Detail — Hero Section
-    '#artist-hero-section': {
-        title: 'Artist Profile',
-        description: 'Full artist profile with image, name, service badges, genres, bio, listening stats, and collection overview. Data is enriched from up to 9 metadata services.',
-        docsId: 'lib-standard'
-    },
-    '#artist-detail-name': {
-        title: 'Artist Name',
-        description: 'The artist\'s name as it appears in your library.',
-    },
-    '#artist-hero-badges': {
-        title: 'Service Badges',
-        description: 'Links to this artist on external platforms. Each badge indicates which services have matched and enriched this artist with metadata.',
-        tips: [
-            'Click any badge to open the artist on that platform',
-            'More badges = more complete metadata enrichment',
-            'Run the Metadata Updater on the dashboard to enrich more artists'
-        ],
-        docsId: 'lib-matching'
-    },
-    '#artist-genres': {
-        title: 'Genres',
-        description: 'Genre tags from Spotify, Last.fm, and other metadata sources. Merged and deduplicated across all enrichment sources.',
-    },
-    '#artist-hero-bio': {
-        title: 'Artist Biography',
-        description: 'Biography from Last.fm. Click "Read more" to expand. Populated by the Last.fm enrichment worker.',
-    },
-    '#artist-hero-listeners': {
-        title: 'Listeners',
-        description: 'Total unique listeners on Last.fm. Shows global popularity of this artist.',
-    },
-    '#artist-hero-playcount': {
-        title: 'Play Count',
-        description: 'Total plays on Last.fm across all listeners worldwide.',
-    },
-    '.collection-overview': {
-        title: 'Collection Overview',
-        description: 'Progress bars showing how complete your collection is for this artist — Albums, EPs, and Singles separately. Numbers show owned/total from the metadata source.',
-    },
-    '#artist-enrichment-coverage': {
-        title: 'Enrichment Coverage',
-        description: 'Animated rings showing metadata enrichment percentage per service. Each ring represents one metadata source — higher percentage means more tracks have been enriched by that service.',
-        docsId: 'lib-matching'
-    },
-
-    // Artist Detail — Action Buttons
-    '#library-artist-watchlist-btn': {
-        title: 'Watchlist',
-        description: 'Add or remove this artist from your Watchlist for new release monitoring.',
-        docsId: 'art-watchlist'
-    },
-    '#library-artist-enhance-btn': {
-        title: 'Enhance Quality',
-        description: 'Scan your collection for this artist and find higher-quality versions of tracks you own. Compares bitrate and format against available sources.',
-    },
-    '#library-artist-radio-btn': {
-        title: 'Artist Radio',
-        description: 'Generate and play a radio mix of this artist\'s tracks from your library. Streams directly from your media server.',
-    },
-
-    // Discography Filters
-    '#discography-filters': {
-        title: 'Discography Filters',
-        description: 'Filter the artist\'s releases by category, content type, and ownership status. Multiple filters can be combined.',
-        tips: [
-            'Category: toggle Albums, EPs, Singles on/off',
-            'Content: show/hide Live, Compilations, Featured releases',
-            'Ownership: All, Owned (in library), or Missing (not in library)'
-        ],
-        docsId: 'lib-standard'
-    },
-    '.discography-filter-btn[data-filter="ownership"][data-value="missing"]': {
-        title: 'Missing Releases',
-        description: 'Show only releases NOT in your library. Great for finding what to download next.',
-    },
-    '.discography-filter-btn[data-filter="ownership"][data-value="owned"]': {
-        title: 'Owned Releases',
-        description: 'Show only releases you already have in your library.',
-    },
-
-    // View Toggle
-    '.enhanced-view-toggle-btn[data-view="standard"]': {
-        title: 'Standard View',
-        description: 'Card grid view of releases. Click any card to open the download modal.',
-        docsId: 'lib-standard'
-    },
-    '.enhanced-view-toggle-btn[data-view="enhanced"]': {
-        title: 'Enhanced View',
-        description: 'Advanced management mode with accordion layout, inline editing, tag writing, and bulk operations. Admin-only feature.',
-        tips: [
-            'Expand albums to see track tables with editable fields',
-            'Select tracks across albums for batch operations',
-            'Write tags directly to audio files',
-            'Reorganize files with the album reorganize tool'
-        ],
-        docsId: 'lib-enhanced'
-    },
-
-    // Discography Sections
-    '#albums-section': {
-        title: 'Albums',
-        description: 'Full-length studio albums. Shows owned and missing counts in the header. Click any release card to download.',
-    },
-    '#eps-section': {
-        title: 'EPs',
-        description: 'Extended plays (4-6 tracks). Shows owned and missing counts.',
-    },
-    '#singles-section': {
-        title: 'Singles',
-        description: 'Single tracks and 2-3 track releases. Shows owned and missing counts.',
-    },
-    '.release-card': {
-        title: 'Release Card',
-        description: 'An album, EP, or single in the discography. Shows cover art, title, year, track count, and ownership status. Click to open the download modal.',
-    },
-
-    // Enhanced View
-    '#enhanced-view-container': {
-        title: 'Enhanced Library Manager',
-        description: 'Accordion layout with expandable albums showing track tables. Edit metadata inline, write tags to files, and perform bulk operations across albums.',
-        docsId: 'lib-enhanced'
-    },
-    '.enhanced-track-checkbox': {
-        title: 'Track Selection',
-        description: 'Select tracks for bulk operations. Hold Ctrl+Click for range selection. Selected tracks appear in the bulk actions bar at the bottom.',
-        docsId: 'lib-bulk'
-    },
-
-    // Bulk Actions Bar
-    '#enhanced-bulk-bar': {
-        title: 'Bulk Actions',
-        description: 'Appears when tracks are selected. Edit metadata for all selected tracks at once, write tags to files, or clear the selection.',
-        tips: [
-            'Edit Selected: opens a modal to change metadata fields for all selected tracks',
-            'Write Tags: writes database metadata to the actual audio files',
-            'Clear Selection: deselects all tracks'
-        ],
-        docsId: 'lib-bulk'
-    },
-
-    // Tag Preview Modal
-    '#tag-preview-overlay': {
-        title: 'Tag Preview',
-        description: 'Compare current file tags against database metadata before writing. Shows a diff table highlighting what will change. Choose whether to embed cover art and sync to your media server.',
-        docsId: 'lib-tags'
-    },
-    '#batch-tag-preview-overlay': {
-        title: 'Batch Tag Preview',
-        description: 'Preview tag changes for multiple tracks at once. Each track shows its own diff table. Write all tags in one batch operation.',
-        docsId: 'lib-tags'
-    },
-
-    // Reorganize Modal
-    '#reorganize-overlay': {
-        title: 'Reorganize Album',
-        description: 'Move and rename files in an album to match your file organization template. Preview the changes before applying.',
-    },
+    // ─── LIBRARY ──────────────────────────────────────────────────────
+    // The library is a React page: its class names are build-time hashes
+    // and it renders no stable ids, so there is nothing here to key hover
+    // help on. The page carries its own inline help instead.
 
     // ─── STATS PAGE ──────────────────────────────────────────────────
 
@@ -2413,25 +2220,17 @@ const HELPER_TOURS = {
     },
     'library': {
         title: 'Library Management',
-        description: 'Browse and manage your music collection.',
+        description: 'Own, monitor and repair your music collection.',
         icon: '📚',
+        // The library is a React page whose class names are build-time hashes,
+        // so there is nothing stable to point at inside it. Every step anchors
+        // on the sidebar entry and describes what you find once you are there
+        // (the same approach the Automations builder steps take).
         steps: [
-            // Header
-            { page: 'library', selector: '.library-header', title: 'Music Library', description: 'Your complete music collection synced from your media server. The header shows your total artist count. Everything here comes from your last Database Updater run.' },
-
-            // Controls
-            { page: 'library', selector: '#library-search-input', title: 'Search Artists', description: 'Type to filter your library by artist name. Results update instantly as you type.' },
-            { page: 'library', selector: '#watchlist-filter', title: 'Watchlist Filter', description: 'Filter by watchlist status: All, Watched (artists you follow for new releases), or Unwatched. The "Watch All Unwatched" button adds every remaining artist to your watchlist in one click.' },
-            { page: 'library', selector: '#alphabet-selector', title: 'Alphabet Jump', description: 'Click any letter to jump directly to artists starting with that letter. Great for navigating large libraries.' },
-
-            // Grid
-            { page: 'library', selector: '#library-artists-grid', title: 'Artist Grid', description: 'Your artists as cards with photos, track counts, and service badges (Spotify, MusicBrainz, etc.). Click any card to open their artist detail page with full discography.' },
-
-            // Pagination
-            { page: 'library', selector: '#library-pagination', title: 'Pagination', description: 'Shows 75 artists per page. Use Previous/Next to browse, or combine with the alphabet selector and search to find artists faster.' },
-
-            // Artist detail (describe what they'll see)
-            { page: 'library', selector: '#library-artists-grid', title: 'Artist Detail View', description: 'Clicking an artist opens their detail page. From there you can view/download their discography, toggle "Enhanced Management" mode for inline tag editing, bulk operations, and writing tags to files. 🎉' },
+            { page: 'library', selector: '[data-page="library"]', title: 'Your Library', description: 'Everything you own, plus everything you have asked for. Artists, releases, tracks and the actual files behind them all live here, in SoulSync\'s own database — no media server required.' },
+            { page: 'library', selector: '[data-page="library"]', title: 'Monitoring', description: 'Monitor an artist to follow new releases (this is your watchlist), or monitor single releases and tracks (this is your wishlist). Monitoring only says what you want; quality profiles say what counts as good enough.' },
+            { page: 'library', selector: '[data-page="library"]', title: 'Missing and Cutoff Unmet', description: 'The Wanted view lists what you are monitoring but do not own, and what you own below its quality cutoff. Automatic Search works through exactly that list.' },
+            { page: 'library', selector: '[data-page="library"]', title: 'Files and repair', description: 'Every file is a record: where it is, whether it is still there, what quality it is, what happened to it. Tag writing, ReplayGain, reorganize and bulk edits all act on those records. 🎉' },
         ]
     },
     'discover': {
@@ -3448,7 +3247,7 @@ function _guessPageFromSelector(selector) {
         'discover':    ['discover-', 'spotify-library', 'recent-releases', 'seasonal', 'release-radar', 'discovery-weekly', 'build-playlist', 'listenbrainz', 'decade-tabs', 'genre-tabs', 'daily-mixes', 'personalized-'],
         'artists':     ['artists-search', 'artists-hero', 'artist-detail', 'similar-artists'],
         'automations': ['automations-', 'auto-', 'builder-'],
-        'library':     ['library-', 'alphabet-selector', 'watchlist-filter'],
+        'library':     ['library-'],
         'stats':       ['stats-'],
         'import':      ['import-page-'],
         'settings':    ['settings-', 'stg-tab', 'api-service', 'server-toggle', 'save-button', 'spotify-client', 'soulseek-url', 'quality-profile'],
