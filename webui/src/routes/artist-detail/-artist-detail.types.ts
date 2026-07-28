@@ -79,6 +79,14 @@ export interface ArtistInfo {
   source?: string | null;
   musicbrainz_id?: string | null;
   spotify_artist_id?: string | null;
+  /** Enhanced-view meta panel image; distinct from image_url. */
+  thumb_url?: string | null;
+  genres?: string[];
+  /** Last.fm extras. `lastfm_tags` may arrive as a JSON STRING, not an array. */
+  lastfm_bio?: string | null;
+  lastfm_listeners?: number | null;
+  lastfm_playcount?: number | null;
+  lastfm_tags?: string | string[] | null;
   [key: string]: unknown;
 }
 

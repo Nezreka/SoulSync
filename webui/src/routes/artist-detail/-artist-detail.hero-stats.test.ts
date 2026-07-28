@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildGenreChips,
   categoryStats,
   cleanArtistBio,
   formatHeroNumber,
@@ -191,5 +192,55 @@ describe('totalReleaseCount', () => {
     expect(totalReleaseCount({ albums: [{}, {}], eps: [{}], singles: [] })).toBe(3);
     expect(totalReleaseCount({})).toBe(0);
     expect(totalReleaseCount(undefined)).toBe(0);
+  });
+});
+
+describe('buildGenreChips', () => {
+  it("lists the artist's own genres first, undimmed", () => {
+    expect(buildGenreChips({ genres: ['IDM', 'Ambient'] })).toEqual([
+      { label: 'IDM', fromLastfm: false },
+      { label: 'Ambient', fromLastfm: false },
+    ]);
+  });
+
+  it('appends Last.fm tags as dimmed extras', () => {
+    const chips = buildGenreChips({ genres: ['IDM'], lastfm_tags: ['electronic'] });
+    expect(chips).toEqual([
+      { label: 'IDM', fromLastfm: false },
+      { label: 'electronic', fromLastfm: true },
+    ]);
+  });
+
+  it('parses lastfm_tags when it arrives as a JSON STRING', () => {
+    // The backend stores it serialised; a bare array check would drop them.
+    const chips = buildGenreChips({ lastfm_tags: '["techno","acid"]' });
+    expect(chips.map((c) => c.label)).toEqual(['techno', 'acid']);
+  });
+
+  it('swallows malformed tags rather than taking the hero down', () => {
+    expect(buildGenreChips({ genres: ['IDM'], lastfm_tags: '{not json' })).toEqual([
+      { label: 'IDM', fromLastfm: false },
+    ]);
+  });
+
+  it('dedups against existing genres case-INSENSITIVELY', () => {
+    // The tag must differ in case from the genre, or a case-SENSITIVE
+    // comparison gives the same answer and the test proves nothing: the
+    // existing-set is already lowercased, so a lowercase tag matches either way.
+    const chips = buildGenreChips({ genres: ['Techno'], lastfm_tags: ['TECHNO', 'acid'] });
+    expect(chips.map((c) => c.label)).toEqual(['Techno', 'acid']);
+  });
+
+  it('caps the Last.fm extras at 5, but does not cap real genres', () => {
+    const chips = buildGenreChips({
+      genres: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+      lastfm_tags: ['t1', 't2', 't3', 't4', 't5', 't6', 't7'],
+    });
+    expect(chips.filter((c) => !c.fromLastfm)).toHaveLength(7);
+    expect(chips.filter((c) => c.fromLastfm)).toHaveLength(5);
+  });
+
+  it('handles an artist with neither', () => {
+    expect(buildGenreChips({})).toEqual([]);
   });
 });

@@ -156,3 +156,46 @@ export function totalReleaseCount(discography: Discography | undefined): number 
     0,
   );
 }
+
+/**
+ * Genre chips: the artist's own genres, then up to 5 Last.fm tags that are not
+ * already present.
+ *
+ * Three things the vanilla does here that are easy to lose:
+ *   - `lastfm_tags` may arrive as a JSON STRING rather than an array, and a
+ *     parse failure is swallowed — bad tags must not take the hero down
+ *   - the dedup is case-INSENSITIVE against existing genres
+ *   - the extra tags are capped at 5 and rendered dimmed (opacity 0.6) so they
+ *     read as secondary to real genres
+ */
+export interface GenreChip {
+  label: string;
+  /** Last.fm tags render dimmed; the artist's own genres do not. */
+  fromLastfm: boolean;
+}
+
+export function buildGenreChips(artist: ArtistInfo): GenreChip[] {
+  const genres = Array.isArray(artist.genres) ? artist.genres : [];
+  const chips: GenreChip[] = genres.map((label) => ({ label: String(label), fromLastfm: false }));
+
+  let tags: unknown = artist.lastfm_tags;
+  if (typeof tags === 'string') {
+    try {
+      tags = JSON.parse(tags);
+    } catch {
+      // Malformed tags are ignored rather than thrown — the vanilla swallowed
+      // this too, and the hero must still render.
+      tags = null;
+    }
+  }
+  if (!Array.isArray(tags) || tags.length === 0) return chips;
+
+  const existing = new Set(genres.map((g) => String(g).toLowerCase()));
+  for (const tag of tags) {
+    if (chips.filter((c) => c.fromLastfm).length >= 5) break;
+    const label = String(tag);
+    if (existing.has(label.toLowerCase())) continue;
+    chips.push({ label, fromLastfm: true });
+  }
+  return chips;
+}
