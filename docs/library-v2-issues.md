@@ -4321,14 +4321,42 @@ React/TypeScript, heißt „kopieren" konkret:
 - **Nicht zu übernehmen:** die Metadaten-Quellen-Darstellung (ldp-08) und alles,
   was die Kopfzeile vertikal wachsen lässt (ldp-05).
 
-### 28.6 Vor Umsetzungsbeginn zu klären
+### 28.6 Vor Umsetzungsbeginn zu klären — beantwortet am 28. Juli 2026
 
-Diese Punkte ändern den Zuschnitt spürbar und werden zu Beginn der nächsten
-Sitzung gefragt, nicht stillschweigend entschieden:
+Alle drei Punkte wurden vor Umsetzungsbeginn gestellt und vom Nutzer
+entschieden. Die Antworten sind Teil des Fix-Vertrags, nicht bloß Kontext:
 
-1. **ldp-02:** Discovery-Modus rein lesend (Katalogzeile erst bei
-   Bookmark/Monitor) oder Materialisierung schon beim Öffnen?
-2. **ldp-07:** Sollen Cover reiner Discography-Einträge überhaupt lokal
-   gecacht werden, oder nur für besessene/monitored Entitäten?
-3. **ldp-05:** Umschalter der Kopfdarstellung oder eine einzige verdichtete
-   Kopfzeile für beide Fälle?
+1. **ldp-02 — rein lesend.** Der Discovery-Modus rendert ausschließlich aus
+   Providerdaten; die `lib2_artists`-Zeile entsteht erst bei Bookmark/Monitor
+   bzw. beim Öffnen eines Release. Begründung: Katalog-Hygiene aus §62/§63 —
+   bloßes Durchblättern darf keine Entities anlegen.
+2. **ldp-07 — nur besessen/monitored lokal.** Reine Discography-Einträge
+   werden nicht lokal gecacht, weder auf Anfrage noch im Precache; für sie ist
+   die Provider-CDN-URL direkt die `image_url`. Besessene/monitored Entitäten
+   behalten den lokalen Cache als Wahrheit und bekommen die CDN-URL nur als
+   `remote_image_url`-Überbrückung, solange ein kalter Build läuft.
+3. **ldp-05 — Umschalter.** Kompakter V2-Kopf (Default) ↔ reicher
+   Legacy-Kopf, umschaltbar am Kopf selbst; aus der Suche kommend ist der
+   reiche Kopf vorbelegt. Damit ist die harte Auflage „vertikal nicht höher
+   als heute" ohne Kompromiss an der Legacy-Optik erfüllt.
+
+### 28.7 Zwei Punkte, die die Umsetzung zusätzlich festlegen musste
+
+Beides fiel erst beim Bauen auf und ist deshalb hier festgehalten, nicht nur
+im Code:
+
+- **Ein einziger Umleitungspunkt statt vieler Aufrufer.** `search.js` ist
+  nicht die einzige Stelle, die `/artist-detail/<source>/<id>` erzeugt —
+  Global Search, Media Player, Playlist-Sync, Similar-Artist-Bubbles und
+  `api-monitor.js` bauen dieselbe URL über `buildArtistDetailPath`
+  (`init.js:2988`). Die Umstellung passiert deshalb **in der Route**
+  (`webui/src/routes/artist-detail/$source/$id.tsx` leitet nach
+  `/library-v2?discover=<source>:<id>` um), nicht in den Aufrufern: ein
+  Änderungspunkt, und ldp-09 gilt für jeden Einstieg gleichzeitig. Die
+  URL-Form bleibt erhalten, damit Links und Browser-History weiter
+  funktionieren.
+- **`library` ist kein Provider-Namespace.** Der Quellsegmentwert `library`
+  transportiert eine opake Legacy-`artists.id`. Der Resolve-Endpunkt löst sie
+  über `lib2_artists.legacy_artist_id` auf und reicht sie **nie** als
+  Provider-ID an den Autolink-Resolver weiter — sonst landete eine
+  Media-Server-ID in einer Provider-ID-Spalte (Guide §2.5).

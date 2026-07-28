@@ -5,7 +5,9 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 28. Juli 2026. Die sieben realen UI-Findings aus §39 öffneten Teile der
+Stand: 28. Juli 2026. Zuletzt umgesetzt: §42, die Legacy-Artist-/
+Discovery-Parität (ldp-01…ldp-09) — der letzte bekannte Blocker vor
+PR-Entwurf und Löschung der alten Library. Davor: die sieben realen UI-Findings aus §39 öffneten Teile der
 am 27. Juli als abgeschlossen geführten UI-03/UI-05/F-13/F-16-Arbeit wieder
 und sind im aktuellen Arbeitsstand implementiert und regressionsgeprüft.
 Zuvor: einschließlich Foundation-Rebase (§14), der an diesem
@@ -46,10 +48,10 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 
 | ID | Feature | Status | Referenz | Abdeckung / Rest |
 |---|---|---|---|---|
-| [F-01](library-v2-features.md#feat-artwork) | Media-server-unabhängiges Artwork | Verified | Deep-Dive §28, Security-Fix `80b5af95`, §24 | Picker, Embed, Cache-Bust und Fetch-Hardening gezielt geprüft; Kaltstart-Nachlieferung seit §24 serverseitig getrieben |
+| [F-01](library-v2-features.md#feat-artwork) | Media-server-unabhängiges Artwork | Verified | Deep-Dive §28, Security-Fix `80b5af95`, §24, §42 | Picker, Embed, Cache-Bust und Fetch-Hardening gezielt geprüft; Kaltstart-Nachlieferung seit §24 serverseitig getrieben; seit §42 (ldp-07) überbrückt die Provider-CDN-URL den kalten Build und reine Discography-Zeilen werden bewusst nicht lokal gecacht |
 | [F-02](library-v2-features.md#feat-monitoring) | Monitoring, Watchlist/Wishlist, Outbox | Verified | P3/§82, Regression-Checkpoint | Bidirektionale Sync-, Reconcile- und Profilgrenzen geprüft |
 | [F-03](library-v2-features.md#feat-quality) | App-weite Quality Profiles und Vererbung | Implemented | §53/§60, §14, §15 | Track→Album→Artist→Global verified; Watchlist-Monitor-Mirroring inkl. `quality_profile_id`-Weitergabe an natives Watchlist jetzt verdrahtet (§15) |
-| [F-04](library-v2-features.md#feat-discography) | Discography, Tracklists, `monitor_new_items` | Verified | `2249f5d7`, `8f965d31` (später gesquasht) | Content-Filter und nie manuell expandierte Artists abgedeckt |
+| [F-04](library-v2-features.md#feat-discography) | Discography, Tracklists, `monitor_new_items` | Verified | `2249f5d7`, `8f965d31` (später gesquasht), §42 | Content-Filter und nie manuell expandierte Artists abgedeckt; seit §42 zusätzlich der rein lesende Discovery-Modus (ldp-02), der Table-↔-Legacy-Umschalter und die portierte Filterleiste |
 | [F-05](library-v2-features.md#feat-bootstrap) | Automatischer Initialimport | Verified | Review 4/5, `c2d99eda`, `e9730afe` | Bounded Transactions und Streaming; Owner-/Fresh-Install-Fixes im Regression-Checkpoint |
 | [F-06](library-v2-features.md#feat-alias) | Artist Alias Registry und Scope | Verified | `ce7b4516`, `a95e5309` | Listen, Suche, Totals und artist-weite Actions gezielt geprüft |
 | [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3, §27 | Album-Twin-Pass läuft seit §27 für jeden Artist, nicht nur für Merge-Survivor; Dry Run gegen die Produktiv-DB gelaufen. Rest: Track-Zeilen-Duplikate (§27 Teil 3) brauchen eine Produktentscheidung |
@@ -71,6 +73,7 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Implemented | §39: separate generische Check-Spalte (Verified/Human verified/Skipped/Not scanned); normalisierte benachbarte Relativbreiten; feste zentrierte Quality-Unterbereiche; viewport-gebundener Einstellungsdialog; gezielte Tests und Build grün, manueller Browser-Gate mangels installiertem Chromium ausstehend |
 | [UI-04](library-v2-features.md#ui-bulk) | Multi-Select/Bulk Bar | Implemented | Monitor, Profil, RG, Tags, Delete und Rich Bulk Edit |
 | [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Verified | Navigation/Maintenance sowie die als `Automatic Search` benannte und an den Re-Import-Nachbarbutton angeglichene globale Startseitenaktion geprüft (§39) |
+| [UI-09](library-v2-features.md#ui-artist-header) | Artist-Kopf kompakt ↔ legacy-reich | Implemented | §42: Umschalter am Kopf, aus der Suche reich vorbelegt; Listeners/Plays/Bio namensbasiert, Top-Track-Aktion heißt `Bookmark` (ldp-05/ldp-06); Metadaten-Quellen-Panel bewusst nicht portiert (ldp-08) |
 | F-12 UI | Acquisition Review | Removed | Per Nutzerentscheidung aus PR entfernt und gelöscht |
 
 
@@ -2134,45 +2137,61 @@ Neu ist die Regel, dass eine nicht eindeutig bestimmbare Edition **kein**
 Finding erzeugt — eine plausibel aussehende falsche Nummer ist schlimmer als
 gar keine Meldung.
 
-## 42. Legacy-Artist-/Discovery-Parität (ldp-01…ldp-09) — OFFEN, beauftragt am 28. Juli 2026
+## 42. Legacy-Artist-/Discovery-Parität (ldp-01…ldp-09) — Implemented, 28. Juli 2026
 
-Vollständiger Auftrag, Ist-Analyse und Fix-Verträge in
-[issues.md §28](library-v2-issues.md#28-legacy-artist-discovery-ansicht-nach-library-v2-überführen-auftrag-vom-28-juli-2026-abend).
+Auftrag, Ist-Analyse und Fix-Verträge in
+[issues.md §28](library-v2-issues.md#28-legacy-artist-discovery-ansicht-nach-library-v2-überführen-auftrag-vom-28-juli-2026-abend);
+Zielverhalten in [features F-01](library-v2-features.md#feat-artwork),
+[F-04](library-v2-features.md#feat-discography) und
+[UI-09](library-v2-features.md#ui-artist-header). Diese Tabelle enthält
+ausschließlich den Bearbeitungsstatus.
 
-**Status: nichts implementiert.** Dieser Abschnitt ist die letzte bekannte
-Vorbedingung vor PR-Entwurf und Löschung der alten Library. Solange ldp-01
-offen ist, landet ein Nutzer beim Klick auf einen Suchtreffer, der noch nicht
-in der Library ist, in der Legacy-Oberfläche — die alte Library kann deshalb
-nicht entfernt werden.
+Die drei offenen Zuschnittsfragen aus issues.md §28.6 wurden vor
+Umsetzungsbeginn gestellt und beantwortet (rein lesender Discovery-Modus,
+lokaler Artwork-Cache nur für besessene/monitored Entitäten, Umschalter am
+Artist-Kopf).
 
-Beauftragter Umfang in Kürze:
+| ID | Finding | Status | Umsetzung |
+|---|---|---|---|
+| [ldp-01](library-v2-issues.md#ldp-01) | Suchtreffer landet in der Legacy-Library | Implemented | `/artist-detail/$source/$id` leitet nach `/library-v2?discover=<source>:<id>` um. Bewusst in der Route, nicht in `search.js`: alle sechs Aufrufer bauen dieselbe URL über `buildArtistDetailPath` (issues.md §28.7) |
+| [ldp-02](library-v2-issues.md#ldp-02) | V2 kann keinen Artist ohne Katalogzeile darstellen | Implemented | Discovery-Ansicht aus dem bestehenden `/api/artist-detail/<id>?source=&name=`; neuer `GET/POST /api/library/v2/discovery/artist` (Resolve read-only / Materialisieren) plus `POST …/discovery/track` für ldp-06. Resolve nutzt `find_or_create_artist(create=False)` — dieselbe Identitätslogik wie jeder andere Einstieg, ohne Write |
+| [ldp-03](library-v2-issues.md#ldp-03) | `All Releases` braucht Table ↔ Legacy-Karten | Implemented | Zweite Umschaltgruppe, nur bei `All Releases`; Kachelgitter mit den Legacy-Klassen (`release-card album-card`, `album-card-image`, `completion-overlay`), also ohne eine Zeile neues CSS |
+| [ldp-04](library-v2-issues.md#ldp-04) | Discography-Filterleiste fehlt | Implemented | `discography-filters.ts` — `classifyReleaseContent` 1:1 aus `library.js` portiert (#877 bleibt eine Quelle), Filterleiste mit den Legacy-Klassen, wirksam in Table- **und** Kachelansicht |
+| [ldp-05](library-v2-issues.md#ldp-05) | Artist-Kopf ohne Listeners/Plays/Top Tracks | Implemented | Reicher Legacy-Kopf hinter einem Umschalter (Default kompakt, aus der Suche vorbelegt reich); neuer `GET /api/artist/lastfm-info?name=` liefert Listeners/Plays/Bio namensbasiert, weil V2-native Artists keine Legacy-Zeile haben; `provider_ids` neu in der Artist-Serialisierung für die Top-Tracks-Auflösung |
+| [ldp-06](library-v2-issues.md#ldp-06) | Top-Tracks-Aktion heißt falsch | Implemented | Aktion heißt `Bookmark`; sie materialisiert Artist/Album/Track und ruft danach den bestehenden `tracks/<id>/monitor`-Pfad — kein zweiter Weg zu Wanted/Wishlist |
+| [ldp-07](library-v2-issues.md#ldp-07) | Artwork-Geschwindigkeit | Implemented | `_apply_artwork_urls` wirft die Provider-URL nicht mehr weg (`remote_image_url`) und lässt sie bei reinen Discography-Zeilen sogar die primäre `image_url` bleiben; `precache_all_artwork` überspringt dieselben Zeilen. `Artwork` zeigt die CDN-URL statt des Platzhalters, solange ein kalter Build läuft, mit eigenem Fehlerzustand für die Remote-URL |
+| [ldp-08](library-v2-issues.md#ldp-08) | Metadaten-Quellen NICHT übernehmen | Verified | Nicht portiert; `ArtistMatchChips` bleiben auch im reichen Kopf |
+| [ldp-09](library-v2-issues.md#ldp-09) | Abschlussbedingung | Implemented | Über die Suche ist kein Weg mehr in die Legacy-Artist-Oberfläche offen; Regressionstest hält fest, dass `navigateToArtistDetail` nicht mehr aufgerufen wird |
 
-- **ldp-01/ldp-02** — Suche → Provider-Artist muss nach Library V2 routen; V2
-  braucht dafür einen Discovery-Modus für Artists ohne Katalogzeile (heute sind
-  alle V2-Routen auf `<int:artist_id>` typisiert).
-- **ldp-03/ldp-04** — `All Releases` wird zur Discovery-Ansicht mit Umschalter
-  `Table View` ↔ `Legacy View` plus portierter Filterleiste
-  (Albums/EPs/Singles, Live/Compilations/Featured, Status). `My Library` bleibt
-  unverändert.
-- **ldp-05/ldp-06** — Artist-Kopf erhält Listeners/Plays/Top Tracks, **ohne
-  vertikal zu wachsen**; Top-Track-Aktion heißt `Bookmark` und nutzt die
-  V2-Monitoring-Semantik.
-- **ldp-07** — Artwork-Geschwindigkeitsparität. Ursache ist analysiert:
-  `_apply_artwork_urls` (`api/library_v2.py:281`) ersetzt jede Provider-CDN-URL
-  durch `/api/library/v2/artwork/<kind>/<id>`; bei kaltem Cache antwortet der
-  Endpunkt mit `404 + X-Artwork-Pending` und baut im Hintergrund
-  (Provider-Walk + Download + zwei JPEG-Encodes) durch einen Pool mit Default 6
-  Workern. Legacy reicht dagegen die CDN-URL direkt an den Browser. Die
-  Provider-URL liegt bereits im Katalog (`lib2_albums.image_url`) und wird
-  ausschließlich im API-Layer verworfen.
-- **ldp-08** — Legacy-Darstellung der Metadaten-Quellen wird ausdrücklich
-  **nicht** übernommen.
+### Bewusste Entscheidungen in der Umsetzung
 
-Arbeitsweise laut Auftrag: Legacy-Code **kopieren/wiederverwenden**, nicht nach
-Augenmaß nachbauen (issues.md §28.5 listet die wörtlich zu übernehmenden
-Bausteine mit Fundstellen).
+| Thema | Entscheidung | Begründung |
+|---|---|---|
+| Wohin die Umstellung greift | In die Route, nicht in die einzelnen Aufrufer | Ein Änderungspunkt deckt Search, Global Search, Media Player, Playlist-Sync, Similar-Artist-Bubbles und `api-monitor.js` gleichzeitig ab; die URL-Form bleibt für Links/History erhalten |
+| Optik | Die globalen Legacy-CSS-Klassen wiederverwenden statt nachbauen | `style.css` ist ungescopet und wird von derselben Seite geladen, in der die React-App hängt — die portierten Komponenten sind dadurch pixelgleich, ohne neues CSS. Genau die vom Nutzer verlangte Arbeitsweise „kopieren statt nachbauen" |
+| Lazy Loading | Legacy-`observeLazyBackgrounds` wiederverwenden, mit direktem Fallback | Nach dem Löschen der alten Library darf das Kachelgitter nicht bildlos werden |
+| Klick auf eine Discovery-Kachel | Adoptiert den Artist und übergibt an die reguläre V2-Ansicht, **ohne** ihn zu monitoren | Ein Klick ist eine ausdrückliche Nutzerhandlung, kein passives Blättern — und danach greift die vollständige V2-Maschinerie statt einer zweiten, halben Release-Oberfläche. Monitoring bleibt der Bookmark-Aktion vorbehalten (Guide §2.2: ein Release öffnen ist kein Artist-Intent) |
+| Ownership-Badge im Discovery-Modus | Weggelassen | Es gibt keine Library zum Vergleich; ein dauerhaftes „Checking…" wäre eine Falschaussage. Legacy verhielt sich für Source-Artists genauso |
+| Persistenz der Ansichtswahl | Route-Suchparameter (`releaseView`, `header`) | Konsistent mit `view` und `releases`; `lib2_ui_preferences` trägt Spalten-/Provider-Sichtbarkeit, keine Seitenmodi |
 
-Drei Punkte sind vor Umsetzungsbeginn mit dem Nutzer zu klären
-(issues.md §28.6): Lesemodus vs. Sofort-Materialisierung im Discovery-Modus,
-lokaler Artwork-Cache für reine Discography-Einträge ja/nein, und Umschalter
-vs. einheitlich verdichteter Artist-Kopf.
+### Verifikation
+
+- Backend: `tests/library2` 1.123 bestanden (8 neue: Artwork-Auslieferungsweg
+  inkl. Nicht-HTTP-Pfad, Discovery-Resolve read-only, idempotentes
+  Materialisieren, Legacy-ID-Schutz, Admin-Grenze, leere Identität,
+  Precache-Ausschluss); `tests/search`, `tests/wishlist`, `tests/imports`
+  1.075 bestanden; Ruff über alle geänderten Python-Dateien bestanden.
+- Frontend: vollständige Suite 327 Tests in 53 Dateien bestanden — 19 neue
+  (16 in drei neuen Dateien: Filter-Portierung, Discovery-Modus,
+  Ansichts-/Kopfumschalter; plus 3 für den Artwork-Provider-Fallback);
+  `oxfmt --check` und `oxlint --type-check` ohne neue Befunde; Production
+  Build erfolgreich.
+- Bewusst ersetzt statt repariert: die sechs Tests in
+  `webui/src/routes/artist-detail/-route.test.tsx` und eine Assertion in
+  `stats/-route.test.tsx` pinnten die Legacy-Übergabe, also genau das
+  Verhalten, das ldp-01 entfernt (Guide §6 Regel 6).
+
+**Offen:** ein realer Browser-Durchlauf gegen die Produktiv-DB (Suchtreffer →
+Discovery → Bookmark → V2-Artist) sowie der Geschwindigkeitsvergleich der
+Cover in `All Releases` gegen die Legacy-Ansicht. Die physische Löschung der
+alten Library ist damit freigegeben, aber nicht Teil dieses Änderungssatzes.

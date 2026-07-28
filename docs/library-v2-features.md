@@ -180,6 +180,26 @@ Candidate-Identifier statt frei eingereichter URLs.
 
 ---
 
+
+#### Auslieferungsweg: lokaler Cache vs. Provider-CDN (ldp-07)
+
+Der lokale Cache bleibt die langfristige Wahrheit für alles, was der Nutzer
+besitzt oder monitort — nur er kennt manuelle Coverauswahl, eingebettete
+Cover und funktioniert ohne Provider. Er darf aber nicht der Grund sein, dass
+ein Nutzer auf ein Bild wartet:
+
+- Jede serialisierte Entity liefert zusätzlich `remote_image_url`, die
+  Provider-CDN-URL, die der Katalog ohnehin schon speichert. Der Client zeigt
+  sie, solange ein kalter lokaler Build noch läuft, und wechselt auf das
+  lokale Bild, sobald es fertig gemeldet ist.
+- Eine **reine Discography-Zeile** (nicht besessen, nicht monitored) wird
+  **überhaupt nicht** lokal gecacht (Nutzerentscheidung 28. Juli 2026): weder
+  auf Anfrage noch im Hintergrund-Precache. Für sie ist die CDN-URL direkt die
+  `image_url`. Sonst füllt jedes Durchblättern einer prolifischen Discography
+  den verwalteten Cache mit Releases, die der Nutzer nie haben will.
+- Ein Pfad ohne `http(s)`-Schema — etwa eine Media-Server-URL — ist keine
+  browserladbare CDN-URL und wird nie als `remote_image_url` weitergereicht.
+
 ### <a name="feat-monitoring"></a> F-02 — Ein Monitoring-Modell
 
 #### Fachliche Bedeutung
@@ -314,6 +334,30 @@ Der periodische Refresh berücksichtigt auch Artists, die noch nie manuell
 expanded wurden. Filter für Live, Remix, Acoustic, Compilation und
 Instrumental werden aus denselben Artist Settings gelesen wie im
 Watchlist-Pfad.
+
+#### Discovery-Modus für Artists ohne Katalogzeile (ldp-01/ldp-02)
+
+Ein über die Suche geöffneter Artist, den der Katalog noch nicht kennt, wird
+**innerhalb von Library V2** dargestellt — nie in der alten Library. Der Modus
+ist **rein lesend** (Nutzerentscheidung 28. Juli 2026): Er rendert
+ausschließlich aus Providerdaten des bereits vorhandenen Endpunkts
+`/api/artist-detail/<id>?source=&name=`. Eine `lib2_artists`-Zeile entsteht
+erst, wenn der Nutzer tatsächlich etwas verlangt — Artist bookmarken, einen
+Top Track bookmarken oder ein Release öffnen. Bloßes Durchblättern darf den
+Katalog nicht befüllen (Katalog-Hygiene, F-07).
+
+Die Übergabe ist ein Einbahn-Übergang: Sobald die Zeile existiert, übernimmt
+die normale V2-Artist-Ansicht mit allen ihren Aktionen. Ein Artist, der beim
+Öffnen bereits im Katalog liegt, überspringt den Discovery-Modus vollständig.
+
+#### Ansichtsumschalter und Filterleiste (ldp-03/ldp-04)
+
+`All Releases` — und nur dort — bietet zusätzlich `Table View` (Default) und
+`Legacy View` (Kachelgitter). `My Library` bleibt unverändert. Die
+Filterleiste `Show` (Albums/EPs/Singles), `Include` (Live/Compilations/
+Featured) und `Status` (All/Owned/Missing) wirkt in **beiden** Ansichtsmodi.
+Die Inhaltsklassifikation ist dieselbe reine Funktion, die auch das
+Download-Discography-Modal benutzt (#877) — es darf keine zweite Kopie geben.
 
 ---
 
@@ -884,6 +928,30 @@ Size-Tiebreak.
 
 Eine optionale „Only show results meeting cutoff“-Filterung darf Resultate
 ohne ausreichende Quality-Fakten nicht fälschlich verstecken.
+
+### <a name="ui-artist-header"></a> UI-09 — Artist-Kopf kompakt oder legacy-reich (ldp-05…ldp-08)
+
+Der Artist-Kopf hat zwei Darstellungen, umschaltbar direkt am Kopf:
+
+- **kompakt** — der bisherige V2-Kopf, Default;
+- **reich** — die Legacy-Darstellung mit Bild, Genres, Bio, Listeners, Plays,
+  Completion-Bars und Top-Tracks-Spalte.
+
+Die harte Auflage „der Kopf darf vertikal nicht wachsen“ ist über den
+Umschalter erfüllt: Wer nichts umstellt, sieht exakt den heutigen Kopf. Aus
+der Suche kommend ist die reiche Darstellung vorbelegt, weil der Nutzer von
+genau dieser Optik kommt. Die Wahl liegt wie `view` und `releases` in den
+Ansichtsparametern der Route.
+
+Bindend dabei:
+
+- Die Aktion an einem Top Track heißt **Bookmark** und benutzt die
+  V2-Monitoring-Semantik. Weder `Download` noch das Legacy-`Add to Wishlist`
+  wird übernommen (ldp-06).
+- Die Legacy-Darstellung der Metadaten-Quellen wird **nicht** übernommen; es
+  bleiben die V2-`ArtistMatchChips` (ldp-08).
+- Listeners/Plays/Bio werden namensbasiert über Last.fm aufgelöst, weil
+  V2-native Artists keine Legacy-Zeile haben, aus der Legacy sie las.
 
 ### UI-07 — Track-Detail und Pipeline
 
