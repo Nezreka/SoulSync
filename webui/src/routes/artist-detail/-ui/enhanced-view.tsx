@@ -12,6 +12,7 @@ import {
 } from '../-artist-detail.enhanced';
 import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
 import { AlbumMetaRow } from './album-meta-row';
+import { EnhancedBulkBar } from './enhanced-bulk-bar';
 import { EnhancedTrackTable } from './enhanced-track-table';
 import { ExpandedAlbumHeader } from './expanded-album-header';
 
@@ -50,6 +51,20 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
 
   const grouped = groupAlbumsByType(data.albums ?? []);
 
+  /**
+   * A batch edit is applied to the loaded payload in place, as
+   * updateLocalEnhancedData did — the panels re-render from it rather than
+   * re-fetching every track of every album.
+   */
+  const applyBatch = (trackIds: string[], updates: Record<string, unknown>) => {
+    const ids = new Set(trackIds);
+    for (const album of data.albums ?? []) {
+      album.tracks = (album.tracks ?? []).map((track) =>
+        ids.has(String(track.id)) ? { ...track, ...updates } : track,
+      );
+    }
+  };
+
   return (
     <>
       <EnhancedStatsBar data={data} />
@@ -71,6 +86,13 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
           />
         );
       })}
+
+      <EnhancedBulkBar
+        selected={selected}
+        isAdmin={isAdmin}
+        onClear={() => setSelected(new Set())}
+        onEdited={applyBatch}
+      />
     </>
   );
 }

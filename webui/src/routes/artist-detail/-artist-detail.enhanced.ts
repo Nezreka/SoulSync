@@ -242,3 +242,43 @@ export function albumRowMeta(album: EnhancedAlbum): AlbumRowMeta {
     formatClass: primaryFormat === 'FLAC' ? 'flac' : primaryFormat === 'MP3' ? 'mp3' : 'other',
   };
 }
+
+export interface BulkEditValues {
+  track_number: string;
+  bpm: string;
+  style: string;
+  mood: string;
+  explicit: string;
+}
+
+export const EMPTY_BULK_EDIT: BulkEditValues = {
+  track_number: '',
+  bpm: '',
+  style: '',
+  mood: '',
+  explicit: '',
+};
+
+/**
+ * Only the fields the user actually filled in.
+ *
+ * Every field is "leave blank to skip" — a batch edit writes the same value to
+ * many tracks, so an empty box must mean "don't touch this column", never
+ * "clear it on all of them".
+ */
+export function bulkEditUpdates(values: BulkEditValues): Record<string, unknown> {
+  const updates: Record<string, unknown> = {};
+  if (values.track_number !== '') updates.track_number = parseInt(values.track_number, 10);
+  if (values.bpm !== '') updates.bpm = parseFloat(values.bpm);
+  if (values.style !== '') updates.style = values.style;
+  if (values.mood !== '') updates.mood = values.mood;
+  // `!== ''` rather than a truthiness check for intent, though the two agree
+  // here: the value is a STRING from a <select>, so '0' is already truthy.
+  if (values.explicit !== '') updates.explicit = parseInt(values.explicit, 10);
+  return updates;
+}
+
+/** "Batch Edit 3 Tracks" — singular for one. */
+export function bulkEditTitle(count: number): string {
+  return `Batch Edit ${count} Track${count !== 1 ? 's' : ''}`;
+}
