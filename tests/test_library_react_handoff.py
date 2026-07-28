@@ -98,9 +98,14 @@ def test_vanilla_library_list_is_gone():
 
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     assert 'id="library-page"' not in index
-    # ...but the video library and artist detail must be untouched.
+    # ...but the VIDEO library must be untouched. It shares nothing with the
+    # music side except a similar name, which is exactly why it is pinned.
     assert 'id="video-library-page"' in index
-    assert 'id="artist-detail-page"' in index
+    # The artist-detail container was pinned here too, because the library-list
+    # cleanup nearly took it as collateral. Artist detail has since been ported
+    # and its markup deliberately deleted, so that guard has done its job —
+    # test_artist_detail_css_hook covers what replaced it.
+    assert 'id="artist-detail-page"' not in index
 
 
 def test_react_owned_pages_are_declared_once_each():
