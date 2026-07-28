@@ -122,3 +122,26 @@ describe('audioDbLogoUrl', () => {
     });
   });
 });
+
+describe('audioDbLogoUrl defers to core.js', () => {
+  it('uses getAudioDBLogoURL when core.js provides it', () => {
+    // core.js owns this lookup; duplicating it means a change there stops
+    // applying here without anything failing.
+    window.getAudioDBLogoURL = () => '/from/core.png';
+    try {
+      expect(audioDbLogoUrl()).toBe('/from/core.png');
+    } finally {
+      delete window.getAudioDBLogoURL;
+    }
+  });
+
+  it('falls back to the DOM lookup when core.js returns nothing', () => {
+    window.getAudioDBLogoURL = () => null;
+    document.body.innerHTML = '<img class="audiodb-logo" src="/static/adb.png">';
+    try {
+      expect(audioDbLogoUrl()).toContain('/static/adb.png');
+    } finally {
+      delete window.getAudioDBLogoURL;
+    }
+  });
+});

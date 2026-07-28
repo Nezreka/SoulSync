@@ -45,6 +45,12 @@ export interface HeroBadge {
  * as a lookup so the badge degrades to its 'ADB' text exactly as it does now.
  */
 export function audioDbLogoUrl(): string {
+  // Defer to core.js's getAudioDBLogoURL when it exists — it is the owner of
+  // this lookup, and duplicating it means a change there silently stops
+  // applying here. The inline fallback keeps the badge working in tests and
+  // if core.js has not loaded yet.
+  const fromCore = window.getAudioDBLogoURL?.();
+  if (fromCore) return fromCore;
   const el = typeof document === 'undefined' ? null : document.querySelector('img.audiodb-logo');
   return el instanceof HTMLImageElement ? el.src : '';
 }

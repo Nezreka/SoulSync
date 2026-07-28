@@ -109,6 +109,8 @@ declare global {
      *  inside a container. Cards render the attribute; without this call the
      *  artwork is never fetched and every tile stays blank. */
     observeLazyBackgrounds?: (container: Element | null) => void;
+    /** core.js — reads the AudioDB logo off an existing img.audiodb-logo. */
+    getAudioDBLogoURL?: () => string | null;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
