@@ -159,6 +159,25 @@ def _release_date_key(release_date: Any, year: Any = None) -> Optional[tuple[int
     return candidate
 
 
+def _synced_at_date_key(synced_at: Any) -> Optional[tuple[int, int, int]]:
+    """Date part of ``discography_synced_at``, or ``None`` if unusable.
+
+    dd28-51: both sides are naive dates, so this is a plain date comparison,
+    not a timezone conversion.
+    """
+    import re
+
+    match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", str(synced_at or "").strip())
+    if not match:
+        return None
+    candidate = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    try:
+        datetime(*candidate)
+    except ValueError:
+        return None
+    return candidate
+
+
 def _should_auto_monitor(
     policy: str,
     *,
@@ -166,6 +185,7 @@ def _should_auto_monitor(
     release_date: Any,
     year: Any,
     newest_existing: Optional[tuple[int, int, int]],
+    synced_before: Optional[tuple[int, int, int]] = None,
 ) -> bool:
     """Apply the single monitor-new-items policy for one discovered release."""
     if not eligible_reexpansion or policy == "none":
@@ -174,8 +194,28 @@ def _should_auto_monitor(
         return True
     if policy != "new" or newest_existing is None:
         return False
-    candidate = _release_date_key(release_date, year)
-    return candidate is not None and candidate > newest_existing
+    # dd28-43: ``_release_date_key`` fills missing parts with 1, so a bare year
+    # became a "date" of Jan 1 and an undated back-catalog release could clear
+    # the bar. Guide §5 is explicit that 'new' takes only unambiguously new,
+    # DATED releases — so the candidate needs all three parts. (The baseline
+    # keeps the lenient key: it is a floor, and a lenient floor is the higher,
+    # more conservative one.)
+    candidate = _full_release_date_key(release_date)
+    if candidate is None:
+        return False
+    if candidate > newest_existing:
+        return True
+    # dd28-51: ``newest_existing`` is the newest date in the catalog, which is
+    # not the same as "the newest thing we had already seen". A back-catalog
+    # release delivered late in an earlier run — or a pre-announced future
+    # release — sits in that maximum and can mask a genuinely new release with
+    # an equal or earlier date. A dated release published since the PREVIOUS
+    # sync is new by definition, whatever the inflated bar says. This only ever
+    # widens: an undated or genuinely older release still cannot qualify,
+    # because it must carry a full date at or after that stamp.
+    if synced_before is not None and candidate >= synced_before:
+        return True
+    return False
 
 
 _CONTENT_FILTER_DEFAULTS = {
@@ -469,6 +509,9 @@ def _expand_artist_discography(
         # Fixed pre-sync cutoff: provider ordering must not decide whether two
         # releases discovered in the same snapshot count as new.
         newest_existing = max(existing_dates) if existing_dates else None
+        # dd28-51: the PREVIOUS sync stamp — this run overwrites it afterwards,
+        # so it still describes the snapshot the index above was built from.
+        synced_before = _synced_at_date_key(artist["discography_synced_at"])
         from core.library2.profile_lookup import default_quality_profile_id
         fallback_profile = default_quality_profile_id(conn)
         seen_ids: set = set()
@@ -490,6 +533,7 @@ def _expand_artist_discography(
                 release_date=release_date,
                 year=year,
                 newest_existing=newest_existing,
+                synced_before=synced_before,
             )
             if (
                 auto_monitor_release

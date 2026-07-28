@@ -98,7 +98,7 @@ def test_enqueue_and_drain_happy_path(db):
     assert len(ids) == 1
     conn.commit()
     result = MO.drain(flaky)
-    assert result == {"done": 1, "failed": 0}
+    assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.adds and flaky.adds[0]["profile_id"] == 7
     assert flaky.adds[0]["user_initiated"] is True
     assert _outbox_rows(conn)[0]["status"] == "done"
@@ -158,7 +158,7 @@ def test_failed_mirror_stays_pending_and_later_drain_completes(db):
 
     flaky.fail_adds = True
     result = MO.drain(flaky)
-    assert result == {"done": 0, "failed": 1}
+    assert (result["done"], result["failed"]) == (0, 1)
     row = _outbox_rows(conn)[0]
     assert row["status"] == "pending"
     assert row["attempts"] == 1
@@ -167,7 +167,7 @@ def test_failed_mirror_stays_pending_and_later_drain_completes(db):
 
     flaky.fail_adds = False
     result = MO.drain(flaky)
-    assert result == {"done": 1, "failed": 0}
+    assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.adds
     assert _outbox_rows(conn)[0]["status"] == "done"
 
@@ -182,7 +182,7 @@ def test_outbox_uses_strict_legacy_write_mode(db):
 
     result = MO.drain(flaky)
 
-    assert result == {"done": 0, "failed": 1}
+    assert (result["done"], result["failed"]) == (0, 1)
     row = _outbox_rows(conn)[0]
     assert row["status"] == "pending"
     assert "legacy db locked" in row["last_error"]
@@ -199,7 +199,7 @@ def test_row_flips_to_failed_after_max_attempts_and_retry_resets(db):
     assert row["status"] == "failed"
     assert row["attempts"] == MO.MAX_ATTEMPTS
     # A further drain no longer touches it.
-    assert MO.drain(flaky) == {"done": 0, "failed": 0}
+    assert (MO.drain(flaky)["done"], MO.drain(flaky)["failed"]) == (0, 0)
     # Manual retry re-arms it.
     assert MO.retry_failed(conn) == 1
     conn.commit()
@@ -216,7 +216,7 @@ def test_unmonitor_enqueues_remove_that_survives_row_deletion(db):
     conn.execute("DELETE FROM lib2_tracks WHERE id=?", (flaky.ids["track"],))
     conn.commit()
     result = MO.drain(flaky)
-    assert result == {"done": 1, "failed": 0}
+    assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.removes == [{"id": "sp-t", "profile_id": 3}]
 
 
@@ -226,14 +226,51 @@ def test_artist_watchlist_ops(db):
         "SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1"
     ).fetchone()[0]
     assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], True, profile_id=2)
-    assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], False, profile_id=2)
     conn.commit()
-    result = MO.drain(flaky)
-    assert result == {"done": 2, "failed": 0}
+    first = MO.drain(flaky)
+    assert (first["done"], first["failed"]) == (1, 0)
     assert flaky.watchlist_adds == [
         {"ext": "sp-a", "profile_id": 2, "quality_profile_id": default_profile}
     ]
+
+    assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], False, profile_id=2)
+    conn.commit()
+    result = MO.drain(flaky)
+    assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.watchlist_removes == [{"ext": "sp-a", "profile_id": 2}]
+
+
+def test_a_newer_op_supersedes_an_older_pending_one_for_the_same_entity(db):
+    """dd28-13: the exact resurrection the finding describes.
+
+    Row N (``wishlist_add`` for T) fails transiently while row N+1
+    (``wishlist_remove`` for T) succeeds. Row N stayed pending, so the NEXT
+    drain replayed it and brought back a wishlist entry the user had just
+    removed. An op is an absolute assertion about one entity, so only the
+    newest row for that entity may run.
+    """
+    flaky, conn = db
+    track = flaky.ids["track"]
+
+    flaky.fail_adds = True
+    MO.enqueue_tracks(conn, [track], True, profile_id=3)
+    conn.commit()
+    first = MO.drain(flaky)
+    assert (first["done"], first["failed"]) == (0, 1)
+    assert conn.execute(
+        "SELECT status FROM lib2_mirror_outbox ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0] == "pending"
+
+    # The user now removes the track. That op is newer, and it succeeds.
+    MO.enqueue_tracks(conn, [track], False, profile_id=3)
+    conn.commit()
+    flaky.fail_adds = False
+    second = MO.drain(flaky)
+
+    assert second["superseded"] == 1, "the stale add must not be replayed"
+    assert flaky.adds == [], "a superseded add must never reach the legacy table"
+    assert len(flaky.removes) == 1
+    assert MO.drain(flaky)["done"] == 0, "nothing may remain queued"
 
 
 def test_artist_watchlist_add_pushes_explicit_catalog_profile(db):
@@ -253,7 +290,7 @@ def test_artist_watchlist_add_pushes_explicit_catalog_profile(db):
     assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], True, profile_id=2)
     conn.commit()
     result = MO.drain(flaky)
-    assert result == {"done": 1, "failed": 0}
+    assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.watchlist_adds == [
         {"ext": "sp-a", "profile_id": 2, "quality_profile_id": 9}
     ]
@@ -265,7 +302,7 @@ def test_artist_watchlist_remove_carries_no_quality_profile(db):
     assert MO.enqueue_artist_watchlist(conn, flaky.ids["artist"], False, profile_id=2)
     conn.commit()
     result = MO.drain(flaky)
-    assert result == {"done": 1, "failed": 0}
+    assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.watchlist_removes == [{"ext": "sp-a", "profile_id": 2}]
     assert flaky.watchlist_adds == []
 

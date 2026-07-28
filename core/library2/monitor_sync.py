@@ -468,6 +468,56 @@ def demonitor_lib2_tracks_for_removed_wishlist(
         conn.close()
 
 
+def monitor_lib2_tracks_for_added_wishlist(
+    db: Any,
+    descriptors: Sequence[Mapping[str, Any]],
+    *,
+    profile_id: int = 1,
+) -> Dict[str, int]:
+    """Apply a user-facing Wishlist addition as explicit track monitoring.
+
+    dd28-12: the mirror was asymmetric. Wishlist *removal* had a reverse edge
+    into lib2 (:func:`demonitor_lib2_tracks_for_removed_wishlist`), but
+    Wishlist *addition* had none — the API route and the wishlist service only
+    ever wrote the legacy table. A track that maps onto a lib2 row but owns no
+    lib2 rule making it wanted therefore ended up in the hourly reconciler's
+    ``prune`` set and was removed again within the hour. Failed downloads
+    silently stopped being retried, which is the one job the Wishlist has.
+
+    Guide §2.2 makes this the right direction, not just a patch: a wishlisted
+    track IS track-level monitoring intent.
+    """
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.wanted import recompute_wanted
+
+    conn = db._get_connection()
+    try:
+        track_ids = _descriptor_lib2_track_ids(conn, descriptors)
+        if not track_ids:
+            return {"matched": 0, "monitored": 0}
+        marks = ",".join("?" for _ in track_ids)
+        cur = conn.execute(
+            f"UPDATE lib2_tracks SET monitored=1, updated_at=CURRENT_TIMESTAMP "
+            f"WHERE id IN ({marks}) AND monitored=0",
+            track_ids,
+        )
+        monitored = int(cur.rowcount)
+        for track_id in track_ids:
+            record_rule(
+                conn, "track", track_id, True, PROVENANCE_USER,
+                profile_id=profile_id,
+            )
+        recompute_wanted(conn, profile_id=profile_id, track_ids=track_ids)
+        conn.commit()
+        logger.info(
+            "wishlist→library monitor: %d matched, %d newly monitored",
+            len(track_ids), monitored,
+        )
+        return {"matched": len(track_ids), "monitored": monitored}
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Feature-gated route adapters
 # ---------------------------------------------------------------------------
@@ -531,6 +581,33 @@ def sync_wishlist_removal(
     except Exception as exc:  # noqa: BLE001
         logger.debug("wishlist reverse-sync skipped: %s", exc)
         return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
+
+
+def sync_wishlist_addition(
+    db: Any,
+    config_manager: Any,
+    descriptors: Sequence[Mapping[str, Any]],
+    *,
+    profile_id: int = 1,
+) -> Dict[str, int]:
+    """Feature-gated, best-effort adapter for user-facing Wishlist adds (dd28-12).
+
+    Deliberately NOT hooked into ``db.add_to_wishlist`` itself: the mirror
+    outbox replays adds through that very method, and a reverse edge there
+    would feed the mirror its own output. Only genuine user/API-initiated adds
+    reach this adapter.
+    """
+    try:
+        from core.library2.feature import library_v2_enabled
+        library_v2_enabled(config_manager)
+        if not _is_admin_profile(profile_id) or not descriptors:
+            return {"matched": 0, "monitored": 0}
+        return monitor_lib2_tracks_for_added_wishlist(
+            db, descriptors, profile_id=profile_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("wishlist forward-sync skipped: %s", exc)
+        return {"matched": 0, "monitored": 0}
 
 
 # ---------------------------------------------------------------------------

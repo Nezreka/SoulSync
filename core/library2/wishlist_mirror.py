@@ -311,7 +311,18 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
              FROM lib2_tracks t
            JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
                 AND wt.profile_id=? AND wt.wanted=1
-           JOIN quality_profiles qp ON qp.id = t.quality_profile_id
+           -- dd28-11: joining on the DENORMALIZED t.quality_profile_id meant
+           -- the scan kept judging by whatever profile was current when the
+           -- row was inserted (a schema-trigger default). Switching the
+           -- app-wide default profile only flips `is_default`, so the scan
+           -- silently kept the old policy and returned zero candidates while
+           -- wanted_views.list_cutoff_unmet — which uses the live
+           -- effective_profile_id — listed the very same tracks as
+           -- cutoff-unmet. Guide §2.3 forbids exactly that. The projection
+           -- already resolves the cascade live; use its answer, and fall back
+           -- to the track column only when the projection has none.
+           JOIN quality_profiles qp
+                ON qp.id = COALESCE(wt.effective_profile_id, t.quality_profile_id)
           WHERE wt.projection_version=?
             AND qp.upgrade_policy IN ('until_top', 'until_cutoff')
             AND EXISTS (SELECT 1 FROM lib2_track_files f

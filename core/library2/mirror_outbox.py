@@ -40,6 +40,34 @@ _drain_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 
 
+def _legacy_wishlist_row_exists(conn, wishlist_id: Any, profile_id: int) -> bool:
+    """Whether the legacy Wishlist currently holds this track (dd28-41).
+
+    Best-effort: an install without the table (or mid-migration) reports False,
+    which only means "nothing to withdraw".
+    """
+    try:
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(wishlist_tracks)")
+        }
+        if not columns:
+            return False
+        if "profile_id" in columns:
+            row = conn.execute(
+                "SELECT 1 FROM wishlist_tracks WHERE spotify_track_id=? AND profile_id=? LIMIT 1",
+                (wishlist_id, profile_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT 1 FROM wishlist_tracks WHERE spotify_track_id=? LIMIT 1",
+                (wishlist_id,),
+            ).fetchone()
+        return row is not None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("wishlist presence check skipped for %s: %s", wishlist_id, exc)
+        return False
+
+
 def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
                    profile_id: int = 1, user_initiated: bool = False) -> List[int]:
     """Queue wishlist add/remove mirrors for lib2 tracks.
@@ -62,13 +90,25 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
         payload.pop("_source_album_id", "")
         source_info = payload.pop("_source_info", {})
         payload.pop("_has_file", None)
-        if monitored:
-            if not should_queue:
-                continue
+        if monitored and should_queue:
             op = "wishlist_add"
             data = {"payload": payload, "source_type": stype,
                     "source_info": source_info,
                     "quality_profile_id": payload.get("quality_profile_id")}
+        elif monitored:
+            # dd28-41: a monitored track with nothing to acquire right now (it
+            # already has a satisfying file) used to enqueue NOTHING. If it was
+            # ALREADY on the Wishlist — a file appeared outside SoulSync, or the
+            # profile's cutoff was lowered so the existing file now satisfies it
+            # — nothing ever took it off again and the wishlist processor kept
+            # trying to download a track that was fine. Withdrawing is safe: the
+            # moment it becomes an upgrade candidate again the projection re-adds
+            # it. Only emitted when a row actually exists, so the steady state
+            # does not fill the outbox with no-op removes.
+            if not _legacy_wishlist_row_exists(conn, payload["id"], profile_id):
+                continue
+            op = "wishlist_remove"
+            data = {"id": payload["id"]}
         else:
             op = "wishlist_remove"
             data = {"id": payload["id"]}
@@ -183,13 +223,91 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
         raise ValueError(f"Unknown mirror op: {op!r}")
 
 
+def _entity_key(op: str, data: Dict[str, Any]) -> Optional[tuple]:
+    """The mirrored entity a row asserts state for, or ``None`` if unknown.
+
+    Ops are absolute assertions about one entity ("this track is wishlisted
+    with this payload" / "it is not"), never deltas — so for a given entity
+    only the newest row describes the intended end state (dd28-13).
+    """
+    if op in ("wishlist_add", "wishlist_remove"):
+        target = (data.get("payload") or {}).get("id") if op == "wishlist_add" \
+            else data.get("id")
+        return ("wishlist", target) if target is not None else None
+    if op in ("watchlist_add", "watchlist_remove"):
+        target = data.get("ext")
+        return ("watchlist", target) if target is not None else None
+    return None
+
+
+def _superseded_ids(conn, rows: List[Dict[str, Any]]) -> set:
+    """Pending rows that a LATER row for the same entity already overrides.
+
+    dd28-13: ``drain`` iterates by id but does not stop at the first failure.
+    If row 100 (``wishlist_add`` for track T) failed transiently while row 101
+    (``wishlist_remove`` for T) succeeded, row 100 stayed pending and the next
+    drain replayed it — resurrecting a wishlist entry the user had just
+    removed. ``retry_failed`` made it worse by resetting arbitrarily old failed
+    rows with no ordering check at all. Rather than serializing the whole
+    drain behind one stuck entity, drop the rows that are provably obsolete.
+    """
+    keys: Dict[tuple, int] = {}
+    for row in rows:
+        try:
+            key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
+        except (TypeError, ValueError):
+            key = None
+        if key is None:
+            continue
+        keys.setdefault(key, row["id"])
+    if not keys:
+        return set()
+    obsolete = set()
+    for row in rows:
+        try:
+            data = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        key = _entity_key(row["op"], data)
+        if key is None:
+            continue
+        newer = conn.execute(
+            """SELECT 1 FROM lib2_mirror_outbox
+                WHERE id > ? AND op IN (?, ?) LIMIT 1""",
+            (row["id"], *_SIBLING_OPS[key[0]]),
+        ).fetchall()
+        if not newer:
+            continue
+        # Confirm the newer row really targets the same entity — the op-family
+        # filter above is only an index-friendly prefilter.
+        for candidate in conn.execute(
+            """SELECT id, op, payload FROM lib2_mirror_outbox
+                WHERE id > ? AND op IN (?, ?) ORDER BY id""",
+            (row["id"], *_SIBLING_OPS[key[0]]),
+        ):
+            try:
+                candidate_data = json.loads(candidate["payload"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            if _entity_key(candidate["op"], candidate_data) == key:
+                obsolete.add(row["id"])
+                break
+    return obsolete
+
+
+_SIBLING_OPS = {
+    "wishlist": ("wishlist_add", "wishlist_remove"),
+    "watchlist": ("watchlist_add", "watchlist_remove"),
+}
+
+
 def drain(db, *, limit: int = 500) -> Dict[str, int]:
     """Process pending outbox rows. Returns ``{"done": n, "failed": m}``.
 
     Safe to call from anywhere (request handlers, jobs): idempotent ops,
     per-row commits, serialized per process.
     """
-    done = failed = 0
+    done = failed = superseded = 0
     with _drain_lock:
         conn = db._get_connection()
         try:
@@ -197,8 +315,29 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
                 "SELECT id, op, payload, profile_id, user_initiated, attempts "
                 "FROM lib2_mirror_outbox WHERE status='pending' ORDER BY id LIMIT ?",
                 (limit,))]
+            obsolete = _superseded_ids(conn, rows)
         finally:
             conn.close()
+        if obsolete:
+            conn = db._get_connection()
+            try:
+                marks = ",".join("?" for _ in obsolete)
+                conn.execute(
+                    f"""UPDATE lib2_mirror_outbox
+                           SET status='superseded', last_error=NULL,
+                               processed_at=CURRENT_TIMESTAMP
+                         WHERE id IN ({marks})""",
+                    tuple(obsolete),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            superseded = len(obsolete)
+            logger.info(
+                "mirror outbox: skipped %d row(s) overridden by a newer op",
+                superseded,
+            )
+            rows = [r for r in rows if r["id"] not in obsolete]
         for row in rows:
             try:
                 data = json.loads(row["payload"] or "{}")
@@ -228,7 +367,7 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
                 conn.commit()
             finally:
                 conn.close()
-    return {"done": done, "failed": failed}
+    return {"done": done, "failed": failed, "superseded": superseded}
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +391,12 @@ def outbox_status(conn) -> Dict[str, Any]:
 
 
 def retry_failed(conn) -> int:
-    """Flip 'failed' rows back to 'pending' (manual retry). Caller commits."""
+    """Flip 'failed' rows back to 'pending' (manual retry). Caller commits.
+
+    Rows that a newer op already overrides are NOT resurrected (dd28-13) —
+    the next drain would only skip them anyway, and before the supersede check
+    existed they were exactly how a removed wishlist entry came back.
+    """
     cur = conn.execute(
         "UPDATE lib2_mirror_outbox SET status='pending', attempts=0 "
         "WHERE status='failed'")

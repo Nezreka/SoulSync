@@ -2702,6 +2702,36 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     from core.library2.wanted import recompute_wanted
                     recompute_wanted(conn, profile_id=_profile(),
                                      track_ids=auto_monitor_track_ids)
+            else:
+                # dd28-42: the DEFAULT UI path assigns a profile without
+                # monitor_existing, and that branch never recomputed the
+                # projection — so lib2_wanted_tracks.effective_profile_id kept
+                # the OLD profile until the next hourly full recompute, or
+                # forever if that job is disabled. Everything that reads the
+                # effective profile (cutoff-unmet, upgrade scan, search
+                # ranking) then judged by a profile the user had already
+                # replaced. Reprojecting is cheap and changes no monitoring
+                # intent: recompute_wanted derives wanted-ness from the rules,
+                # it does not create any.
+                affected_track_ids: List[int] = []
+                if entity == "artists":
+                    marks = ",".join("?" for _ in entity_ids)
+                    affected_track_ids = [r["id"] for r in conn.execute(
+                        f"SELECT id FROM lib2_tracks "
+                        f"WHERE album_id IN (SELECT id FROM lib2_albums "
+                        f"WHERE primary_artist_id IN ({marks}))",
+                        entity_ids,
+                    )]
+                elif entity == "albums":
+                    affected_track_ids = [r["id"] for r in conn.execute(
+                        "SELECT id FROM lib2_tracks WHERE album_id=?", (eid,),
+                    )]
+                elif entity == "tracks":
+                    affected_track_ids = [eid]
+                if affected_track_ids:
+                    from core.library2.wanted import recompute_wanted
+                    recompute_wanted(conn, profile_id=_profile(),
+                                     track_ids=affected_track_ids)
             conn.commit()
             mirrored = 0
             if auto_monitor_track_ids:

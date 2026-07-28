@@ -97,6 +97,19 @@ def register_routes(bp):
                 user_initiated=True,
             )
             if outcome["applied"]:
+                # dd28-12: mirror the intent BACK into lib2. Without this the
+                # hourly reconciler saw a wishlisted track with no lib2 rule
+                # making it wanted, pruned it, and the entry vanished within
+                # the hour — so failed downloads silently stopped retrying.
+                from config.settings import config_manager
+                from core.library2.monitor_sync import sync_wishlist_addition
+                sync_wishlist_addition(
+                    db, config_manager,
+                    [{"track_data": track_data,
+                      "source_info": {"lib2_track_id": (track_data or {}).get("lib2_track_id")}
+                      if isinstance(track_data, dict) else {}}],
+                    profile_id=profile_id,
+                )
                 # Read back by the key that was actually written: a second album
                 # for the same track is stored as ``<id>::<album>``, so looking
                 # the bare id up again returns the OTHER album's row (R2-09).

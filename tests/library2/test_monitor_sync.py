@@ -331,8 +331,10 @@ def test_watchlist_removal_supersedes_an_older_pending_add(imported_conn):
         db, ["pending-sp"], "Pending", profile_id=1,
     )
 
-    # The stale add is replayed first, then the newer explicit remove wins.
-    assert db.watchlist_added[0][0] == "pending-sp"
+    # dd28-13: the stale add is NOT replayed — the newer remove supersedes it.
+    # Replaying it first (the old behaviour) re-created a watchlist entry the
+    # user had just deleted, on every drain, until the add finally succeeded.
+    assert db.watchlist_added == []
     assert db.watchlist_removed[-1] == "pending-sp"
     assert conn.execute(
         "SELECT monitored FROM lib2_artists WHERE id=?", (artist,)
