@@ -62,9 +62,12 @@ export function DiscographySection({
       <div className="releases-grid" id={`${bucket}-grid`}>
         {visible.map((release, index) => (
           <ReleaseCard
-            // Ids can repeat across buckets on some sources, so the bucket and
-            // index are part of the key; a bare id would collide.
-            key={`${bucket}-${release.id ?? index}`}
+            // The index is ALWAYS part of the key, not merely a fallback for a
+            // missing id: MusicBrainz can list the same release-group id twice
+            // inside ONE bucket, and `id ?? index` still collides there —
+            // React then warns and may reuse the wrong DOM node. Cards are
+            // stateless, so an index-bearing key costs nothing.
+            key={`${bucket}-${index}-${release.id ?? ''}`}
             release={release}
             isMusicBrainz={isMusicBrainz}
             isSourceArtist={isSourceArtist}

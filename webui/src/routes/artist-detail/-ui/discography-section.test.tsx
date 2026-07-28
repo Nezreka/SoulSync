@@ -111,9 +111,8 @@ describe('DiscographySection', () => {
       { id: 1, title: 'A' },
       { id: 1, title: 'B' },
     ]);
-    const warned = spy.mock.calls.some((call) =>
-      call.some((arg) => typeof arg === 'string' && /same key|unique "key"/i.test(arg)),
-    );
+    const calls = spy.mock.calls.map((c) => c.map(String).join(' '));
+    const warned = calls.some((c) => /same key|unique "key"/i.test(c));
     spy.mockRestore();
     expect(warned).toBe(false);
     expect(document.querySelectorAll('.release-card')).toHaveLength(2);
