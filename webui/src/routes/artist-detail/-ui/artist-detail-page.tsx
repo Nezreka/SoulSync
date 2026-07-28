@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
@@ -14,7 +15,7 @@ import {
   settleOwnershipForSourceArtist,
   watchlistIdentity,
 } from '../-artist-detail.api';
-import { backButtonLabel, pushArtistOrigin } from '../-artist-detail.back-label';
+import { backButtonLabel, pushArtistOrigin, pushPageOrigin } from '../-artist-detail.back-label';
 import {
   readEnhancedViewMode,
   showsEnhancedToggle,
@@ -187,6 +188,22 @@ export function ArtistDetailPage() {
    */
   const previousArtistName = useRef<string | null>(null);
   const [backLabel, setBackLabel] = useState('← Back');
+
+  /**
+   * Where you came FROM, for arrivals that never touched
+   * navigateToArtistDetail — every React page, since those navigate through
+   * the router. `resolvedLocation` is the router's previous location (it is
+   * what getLocationChangeInfo reports as fromLocation); on a cold load
+   * straight onto an artist url it is undefined, and the label stays "← Back".
+   */
+  const cameFrom = useRouterState({ select: (state) => state.resolvedLocation?.pathname });
+  useEffect(() => {
+    pushPageOrigin(cameFrom);
+    setBackLabel(backButtonLabel());
+    // Only on arrival: re-running as the chain grows would rewrite it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const name = payload?.artist?.name ?? null;
     if (!name) return;

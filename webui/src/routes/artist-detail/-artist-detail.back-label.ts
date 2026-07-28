@@ -9,6 +9,8 @@
  * pushes onto that stack, so React reads the SAME array rather than guessing.
  */
 
+import { getShellRouteByPath, normalizeShellPath } from '@/platform/shell/route-manifest';
+
 export interface BackLabelEntry {
   type: 'page' | 'artist';
   pageId?: string;
@@ -82,6 +84,34 @@ export function pushArtistOrigin(previousArtistName: string | null | undefined):
   }
   if (!previousArtistName) return;
   backLabelStack().push({ type: 'artist', name: previousArtistName });
+}
+
+/**
+ * Record the PAGE you arrived from, when nothing else did.
+ *
+ * `navigateToArtistDetail` pushes this entry, and search/label-detail/
+ * enrichment all still go through it. React pages do not: the Library card is
+ * a plain `<a href="/artist-detail/library/42">` that routes through TanStack,
+ * so the stack stayed empty and the button read a bare "← Back" instead of
+ * "← Back to Library". That has been true since the Library page was ported —
+ * it is not something the vanilla cleanup broke, but the cleanup is what
+ * removed the last reason to keep relying on the vanilla path.
+ *
+ * Fixing it here rather than in each page means every React entry point —
+ * Library, Wishlist, Watchlist, Discover — is covered by one rule.
+ *
+ * Only fills an EMPTY stack: an artist → artist hop is pushArtistOrigin's job,
+ * and a chain already under way must not be rewritten. An unmappable path
+ * (or a cold load, where there is no previous location at all) leaves the
+ * stack empty, which is exactly what "← Back" means.
+ */
+export function pushPageOrigin(pathname: string | undefined | null): void {
+  if (!pathname) return;
+  if (backLabelStack().length) return;
+  if (normalizeShellPath(pathname).startsWith('/artist-detail')) return;
+  const route = getShellRouteByPath(pathname);
+  if (!route) return;
+  backLabelStack().push({ type: 'page', pageId: route.pageId });
 }
 
 /** Back navigation pops, so the label follows you back down the chain. */

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -20,16 +20,25 @@ function artist(over: Partial<LibraryArtist> = {}): LibraryArtist {
 
 describe('brand logos match the vanilla source', () => {
   // Most are top-level `const`s in core.js, which a module cannot read, so the
-  // helper restates them. One (SoulID) is not a constant at all — it is an
-  // inline literal in library.js's badge builder. Checking BOTH files is what
-  // makes this a real parity pin rather than a guess about where each lives;
-  // a moved or renamed asset would otherwise ship a silently broken image.
-  const vanilla =
-    readFileSync(resolve(process.cwd(), 'static/core.js'), 'utf8') +
-    readFileSync(resolve(process.cwd(), 'static/library.js'), 'utf8');
+  // helper restates them. SoulID's was never a constant at all: it was an
+  // inline literal in library.js's artist-detail badge builder, which the
+  // cleanup deleted along with the rest of the vanilla page — so the same
+  // brand's declaration in service-switch.js stands in for it. All three files
+  // are vanilla source; between them every logo still has a second declaration
+  // to disagree with.
+  const vanilla = ['static/core.js', 'static/library.js', 'static/service-switch.js']
+    .map((file) => readFileSync(resolve(process.cwd(), file), 'utf8'))
+    .join('\n');
 
   it.each(Object.entries(BRAND_LOGOS))('%s -> %s', (_key, path) => {
     expect(vanilla).toContain(`'${path}'`);
+  });
+
+  // The point of the pin is "a moved or renamed asset must not ship a silently
+  // broken image", and text parity only ever caught that second-hand. This
+  // catches it directly, and keeps catching it as more vanilla goes away.
+  it.each(Object.entries(BRAND_LOGOS))('%s exists on disk', (_key, path) => {
+    expect(existsSync(resolve(process.cwd(), path.replace(/^\//, '')))).toBe(true);
   });
 });
 

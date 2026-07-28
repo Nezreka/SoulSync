@@ -131,36 +131,51 @@ def test_artist_detail_state_is_reached_from_stats_automations():
 # ---------------------------------------------------------------------------
 
 
-def test_navigate_to_artist_detail_stops_before_the_legacy_load_when_react_owns_it():
-    """`navigateToArtistDetail` must not run the vanilla page load under React.
+_LEGACY_PAGE_ENTRY_POINTS = (
+    "loadArtistDetailData",
+    "initializeArtistDetailPage",
+    "populateArtistDetailPage",
+    "applyDiscographyFilters",
+    "_updateArtistDetailBackButtonLabel",
+)
+
+
+def test_navigate_to_artist_detail_only_hands_off_and_never_renders():
+    """`navigateToArtistDetail` must not render an artist-detail page itself.
 
     Search, label-detail and enrichment still call this function, and it used to
-    fall straight through into `loadArtistDetailData`. With artist-detail
+    fall straight through into `loadArtistDetailData`. Once artist-detail became
     React-owned that meant two pages loading over each other: the legacy load
     targets DOM by id and class, the React page reuses those same ids, and
-    `applyDiscographyFilters` hides every `.release-card` on the document using
+    `applyDiscographyFilters` hid every `.release-card` on the document using
     the legacy filter state -- so the whole discography vanished on any artist
     reached from Search.
 
-    The state assignments above the guard are deliberate: React reads
-    currentArtistId / currentArtistName / currentArtistSource back out of them.
+    That path first went behind a manifest check, and the cleanup deleted it
+    outright. What survives is the handoff plus the state writes above it, which
+    React and the still-vanilla Enhanced modals read back out
+    (currentArtistId / currentArtistName / currentArtistSource).
     """
     source = (Path(__file__).resolve().parents[1] / "webui/static/library.js").read_text(
         encoding="utf-8"
     )
     start = source.index("function navigateToArtistDetail(")
     end = source.index("\nfunction ", start + 1)
-    body = source[start:end]
+    body = _strip_comments(source[start:end])
 
-    guard = body.index("routeManifest")
-    guard_return = body.index("return;", guard)
-    legacy_load = body.index("loadArtistDetailData(")
-
-    assert guard_return < legacy_load, (
-        "navigateToArtistDetail reaches loadArtistDetailData even when the React "
-        "page owns the route — two pages will load over each other"
+    for name in _LEGACY_PAGE_ENTRY_POINTS:
+        assert name not in body, (
+            f"navigateToArtistDetail reaches {name}: the vanilla page is gone, so this "
+            f"either renders nothing or fights the React page for the same DOM ids"
+        )
+    # Pin the TAIL handoff specifically. There is a second, earlier
+    # navigateToPage in the already-on-this-artist short circuit, so merely
+    # finding the call somewhere in the body proves nothing -- drop the final
+    # one and the function would write state and then navigate nowhere.
+    assert body.rindex("navigateToPage('artist-detail'") > body.rindex("selectedTracks.clear()"), (
+        "navigateToArtistDetail writes the artist state but never hands off to the "
+        "React route -- callers from Search/label-detail/enrichment would go nowhere"
     )
-    assert "kind === 'react'" in body[guard:guard_return]
 
 
 def test_the_label_stack_is_cleared_in_place_not_reassigned():

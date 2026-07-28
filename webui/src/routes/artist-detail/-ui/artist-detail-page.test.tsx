@@ -218,6 +218,11 @@ describe('source artists', () => {
   });
 });
 
+/** Re-queried each time: React replaces the node when the filters change. */
+function liveToggle(): HTMLElement {
+  return document.querySelector('[data-filter="content"][data-value="live"]') as HTMLElement;
+}
+
 describe('MusicBrainz declutter', () => {
   it('applies once the discography source is known', async () => {
     stubDetail({
@@ -230,21 +235,25 @@ describe('MusicBrainz declutter', () => {
     renderPage();
     await screen.findByText('Studio');
     // The Live toggle is relabelled and starts OFF under the declutter.
-    const live = document.querySelector(
-      '[data-filter="content"][data-value="live"]',
-    ) as HTMLElement;
-    expect(live.textContent).toBe('Non-Studio');
-    expect(live.className).not.toContain('active');
+    //
+    // Waited for, not asserted straight after the card: the label reads
+    // filters.mbDeclutter, which an EFFECT sets once the discography's source
+    // is known — a render later than the one that paints the card. Asserting
+    // on the findByText tick passed locally every time and went red on CI,
+    // which is precisely the window between those two commits.
+    await waitFor(() => expect(liveToggle().textContent).toBe('Non-Studio'));
+    expect(liveToggle().className).not.toContain('active');
   });
 
   it('leaves other sources with the toggle on and labelled Live', async () => {
     renderPage();
     await screen.findByText('SAW');
-    const live = document.querySelector(
-      '[data-filter="content"][data-value="live"]',
-    ) as HTMLElement;
-    expect(live.textContent).toBe('Live');
-    expect(live.className).toContain('active');
+    // 'Live' is also the pre-effect default, so a bare assertion here would
+    // pass even if the declutter never ran. Settle first, then assert it
+    // STAYED — that is the actual claim.
+    await waitFor(() => expect(document.body.dataset.artistSource).toBe('library'));
+    expect(liveToggle().textContent).toBe('Live');
+    expect(liveToggle().className).toContain('active');
   });
 });
 
