@@ -775,18 +775,44 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         with self._lock:
             row = self.active_downloads.get(download_id)
             job_id = row.get('job_id') if row else None
+        if not job_id:
+            # The in-memory row can be gone after a restart, after
+            # clear_all_completed_downloads, or after an earlier remove=True.
+            # The persisted grab still knows the client job (ADR-07).
+            job_id = self._persisted_job_id(download_id)
         # Cancel is a two-step state machine (P1-21): persist the intent
         # first, count it done only after the client remove succeeded. A
         # restart mid-cancel adopts the pending intent and retries.
         from core.acquisition.grabs import STATUS_CANCELLED, STATUS_CANCEL_PENDING
-        cancel_confirmed = True
+        # dd28-14: this used to start at True, so a missing job_id or an
+        # unconfigured adapter skipped the client entirely and still wrote
+        # CANCELLED. The DB then said "cancelled" while the client kept
+        # downloading — and because CANCELLED is terminal, `_restore_open_grabs`
+        # never adopted the job again, leaving no way back without cleaning the
+        # client up by hand. The remove() RETURN VALUE was ignored too, unlike
+        # the central monitor which checks it (client_monitor `removed = ...`).
+        cancel_confirmed = False
+        self._update_grab(download_id, status=STATUS_CANCEL_PENDING)
         if adapter and job_id:
-            self._update_grab(download_id, status=STATUS_CANCEL_PENDING)
             try:
-                await adapter.remove(job_id, delete_files=remove)
+                cancel_confirmed = bool(
+                    await adapter.remove(job_id, delete_files=remove)
+                )
+                if not cancel_confirmed:
+                    logger.warning(
+                        "Usenet cancel not confirmed by client for %s (job %s); "
+                        "the grab stays cancel_pending for the monitor to retry",
+                        download_id[:8], job_id,
+                    )
             except Exception as e:
-                cancel_confirmed = False
                 logger.warning("Usenet cancel via adapter failed: %s", e)
+        else:
+            logger.warning(
+                "Usenet cancel for %s has no reachable client job "
+                "(adapter=%s, job_id=%s); leaving it cancel_pending rather "
+                "than claiming it was cancelled",
+                download_id[:8], bool(adapter), job_id,
+            )
         if cancel_confirmed:
             self._update_grab(download_id, status=STATUS_CANCELLED)
         with self._lock:
@@ -795,8 +821,24 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             else:
                 row = self.active_downloads.get(download_id)
                 if row is not None:
-                    row['state'] = 'Cancelled'
-        return True
+                    row['state'] = 'Cancelled' if cancel_confirmed else 'Cancelling'
+        return cancel_confirmed
+
+    def _persisted_job_id(self, download_id: str) -> Optional[str]:
+        """External client job id from the persisted grab (dd28-14)."""
+        conn = _grabs_conn()
+        if conn is None:
+            return None
+        try:
+            from core.acquisition.grabs import get_grab
+            grab = get_grab(conn, download_id)
+            value = (grab or {}).get("external_job_id")
+            return str(value) if value else None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("grab lookup for cancel failed (%s): %s", download_id[:8], exc)
+            return None
+        finally:
+            conn.close()
 
     async def clear_all_completed_downloads(self) -> bool:
         with self._lock:

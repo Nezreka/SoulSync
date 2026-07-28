@@ -42328,7 +42328,14 @@ def _acquisition_client_observations():
     if download_orchestrator is None:
         return {}
     try:
-        statuses = run_async(download_orchestrator.get_all_downloads()) or []
+        # dd28-17: this runs inside the Usenet monitor's cycle lock via
+        # persistent_reconciler_runner, so an unbounded wait on slskd would
+        # freeze Usenet reconciliation and the import pipeline too.
+        from core.acquisition.client_monitor import CLIENT_CALL_TIMEOUT_S
+        statuses = run_async(
+            download_orchestrator.get_all_downloads(),
+            timeout=CLIENT_CALL_TIMEOUT_S,
+        ) or []
     except Exception as exc:  # external evidence is optional, never inferred
         logger.warning("Persistent acquisition client snapshot failed: %s", exc)
         return {}

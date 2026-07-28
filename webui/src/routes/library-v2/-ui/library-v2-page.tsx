@@ -4266,7 +4266,9 @@ function WantedIndexView() {
   const queryClient = useQueryClient();
   const search = Route.useSearch();
   const searchDebounce = useRef<number | undefined>(undefined);
-  const [banner, setBanner] = useState<{ tone: 'busy' | 'ok' | 'err'; text: string } | null>(null);
+  // dd28-16: one shared banner + a run-sequence guard, so a slower earlier
+  // search can no longer overwrite a newer one's result.
+  const { banner, setBanner, busy: searchBusy, runScoped } = useScopedSearchBanner();
   const wantedQuery = useQuery(
     libraryV2WantedQueryOptions({ q: search.q, page: search.page, wantedKind: search.wantedKind }),
   );
@@ -4278,8 +4280,8 @@ function WantedIndexView() {
   }
 
   function runSearch(trackId: number) {
-    setBanner({ tone: 'busy', text: 'Searching…' });
-    void runScopedSearch(queryClient, 'tracks', trackId).then(setBanner);
+    if (searchBusy) return;
+    runScoped('tracks', trackId);
   }
 
   return (
@@ -4395,6 +4397,9 @@ function WantedIndexView() {
                   <IconActionButton
                     icon="automatic"
                     title="Search this track"
+                    // dd28-16: one banner is shared by every row, so a second
+                    // search must not start until the first has reported.
+                    disabled={searchBusy}
                     onClick={() => runSearch(row.track_id)}
                   />
                 </td>
@@ -4630,10 +4635,13 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     action: string;
     entity?: Lib2EntityRef;
   } | null>(null);
-  const [grabBanner, setGrabBanner] = useState<{
-    tone: 'busy' | 'ok' | 'err';
-    text: string;
-  } | null>(null);
+  // dd28-16: see useScopedSearchBanner.
+  const {
+    banner: grabBanner,
+    setBanner: setGrabBanner,
+    busy: searchBusy,
+    runScoped,
+  } = useScopedSearchBanner();
 
   function handleAction(action: string, entity?: Lib2EntityRef) {
     if (INTERACTIVE_RE.test(action)) {
@@ -4641,11 +4649,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
       return;
     }
     if (!SCOPED_SEARCH_RE.test(action)) return;
+    if (searchBusy) return;
     const scope = entity?.trackId
       ? { entity: 'tracks' as const, id: entity.trackId }
       : { entity: 'albums' as const, id: albumId };
-    setGrabBanner({ tone: 'busy', text: 'Searching…' });
-    void runScopedSearch(queryClient, scope.entity, scope.id).then(setGrabBanner);
+    runScoped(scope.entity, scope.id);
   }
 
   const goBack = () =>
@@ -4946,32 +4954,39 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     id: number;
     title: string;
   } | null>(null);
-  const [grabBanner, setGrabBanner] = useState<{
-    tone: 'busy' | 'ok' | 'err';
-    text: string;
-  } | null>(null);
+  // dd28-16: the discography refresh writes into the SAME banner as the
+  // scoped searches, so it has to share their run-sequence guard too.
+  const {
+    banner: grabBanner,
+    setBanner: setGrabBanner,
+    busy: searchBusy,
+    run: runBannerTask,
+    publish: publishBanner,
+    runScoped,
+  } = useScopedSearchBanner();
   const queryClient = useQueryClient();
   const artistName = artist?.name ?? '';
   const attemptedDiscographyFetchRef = useRef(false);
 
   async function updateDiscography() {
     setDiscographyBusy(true);
-    setGrabBanner({ tone: 'busy', text: 'Fetching full discography…' });
-    try {
-      const stats = await refreshLibraryV2Discography(artistId);
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      setGrabBanner({
-        tone: 'ok',
-        text: `Discography updated from ${stats.source ?? 'provider'}: ${stats.added} new, ${stats.enriched} matched.`,
-      });
-    } catch (e) {
-      setGrabBanner({
-        tone: 'err',
-        text: e instanceof Error ? e.message : 'Discography refresh failed',
-      });
-    } finally {
-      setDiscographyBusy(false);
-    }
+    await runBannerTask(async ({ sequence }) => {
+      publishBanner(sequence, { tone: 'busy', text: 'Fetching full discography…' });
+      try {
+        const stats = await refreshLibraryV2Discography(artistId);
+        await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+        publishBanner(sequence, {
+          tone: 'ok',
+          text: `Discography updated from ${stats.source ?? 'provider'}: ${stats.added} new, ${stats.enriched} matched.`,
+        });
+      } catch (e) {
+        publishBanner(sequence, {
+          tone: 'err',
+          text: e instanceof Error ? e.message : 'Discography refresh failed',
+        });
+      }
+    });
+    setDiscographyBusy(false);
   }
 
   function setReleasesMode(mode: 'library' | 'all') {
@@ -5009,9 +5024,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       return;
     }
     if (SCOPED_SEARCH_RE.test(action)) {
+      if (searchBusy) return;
       const scope = resolveSearchScope(entity, artistId);
-      setGrabBanner({ tone: 'busy', text: 'Searching…' });
-      void runScopedSearch(queryClient, scope.entity, scope.id).then(setGrabBanner);
+      runScoped(scope.entity, scope.id);
     }
   }
 
@@ -5031,6 +5046,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 icon="automatic"
                 label="Automatic Search"
                 title="Search missing/upgradable tracks for this artist"
+                // dd28-16: a double click double-POSTed; the server answered
+                // 409 (job already running) and the client rendered that as
+                // "Search failed" over a search that was in fact running.
+                busy={searchBusy}
                 onClick={() => handleAction('Automatic Search')}
               />
               <ActionButton
@@ -5314,9 +5333,16 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 async function awaitBulkJobState(
   queryClient: ReturnType<typeof useQueryClient>,
   jobId: string,
+  isCurrent?: () => boolean,
 ): Promise<LibraryV2JobState> {
   let polls = 0;
   for (;;) {
+    // §27 side finding: without this the poll loop kept running after the user
+    // navigated away mid-refresh. A leak rather than a data risk, but there is
+    // no reason to keep asking once nobody is listening.
+    if (isCurrent && !isCurrent()) {
+      return { running: false } as LibraryV2JobState;
+    }
     const state = await fetchLibraryV2JobStatus(jobId);
     if (!state.running) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
@@ -5347,10 +5373,11 @@ async function runScopedSearch(
   queryClient: ReturnType<typeof useQueryClient>,
   entity: 'artists' | 'albums' | 'tracks',
   id: number,
+  isCurrent?: () => boolean,
 ): Promise<{ tone: 'ok' | 'err'; text: string }> {
   try {
     const jobId = await startLibraryV2ScopedSearch(entity, id);
-    const state = await awaitBulkJobState(queryClient, jobId);
+    const state = await awaitBulkJobState(queryClient, jobId, isCurrent);
     if (state.error) return { tone: 'err', text: `Search failed: ${state.error}` };
     const dispatchError = state.result?.dispatch_error;
     if (dispatchError) return { tone: 'err', text: `Search failed: ${dispatchError}` };
@@ -5361,6 +5388,68 @@ async function runScopedSearch(
   } catch (e) {
     return { tone: 'err', text: e instanceof Error ? e.message : 'Search failed' };
   }
+}
+
+type ScopedSearchBanner = { tone: 'busy' | 'ok' | 'err'; text: string } | null;
+
+/** Shared owner of the scoped-search banner (dd28-16).
+ *
+ *  Every "Automatic Search"/"Search" button wrote into one shared banner via a
+ *  bare `void runScopedSearch(...).then(setBanner)`. Searching track A and then
+ *  track B meant A's slower result landed last and overwrote B's — the user
+ *  read the wrong outcome, up to an "ok" sitting over a real failure. The
+ *  buttons were not disabled while a request was in flight either, so a double
+ *  click double-POSTed; the server is idempotent (409 from the job registry)
+ *  but the client rendered that 409 as "Search failed: …" over a search that
+ *  was in fact running.
+ *
+ *  Interactive Search already solved this with a run-sequence ref; this is the
+ *  same guard, shared by every scoped-search caller (and by the discography
+ *  refresh, which writes into the same banner).
+ */
+function useScopedSearchBanner() {
+  const queryClient = useQueryClient();
+  const [banner, setBanner] = useState<ScopedSearchBanner>(null);
+  const [busy, setBusy] = useState(false);
+  const runSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
+  /** Publish a banner only if this is still the newest run and we're mounted. */
+  function publish(sequence: number, next: ScopedSearchBanner) {
+    if (!mountedRef.current || sequence !== runSequenceRef.current) return;
+    setBanner(next);
+  }
+
+  async function run<T>(
+    task: (signal: { sequence: number; isCurrent: () => boolean }) => Promise<T>,
+  ): Promise<void> {
+    const sequence = ++runSequenceRef.current;
+    setBusy(true);
+    try {
+      await task({
+        sequence,
+        isCurrent: () => mountedRef.current && sequence === runSequenceRef.current,
+      });
+    } finally {
+      if (mountedRef.current && sequence === runSequenceRef.current) setBusy(false);
+    }
+  }
+
+  function runScoped(entity: 'artists' | 'albums' | 'tracks', id: number) {
+    void run(async ({ sequence, isCurrent }) => {
+      publish(sequence, { tone: 'busy', text: 'Searching…' });
+      const result = await runScopedSearch(queryClient, entity, id, isCurrent);
+      publish(sequence, result);
+    });
+  }
+
+  return { banner, setBanner, busy, run, publish, runScoped };
 }
 
 /** Resolve the scope a fired "Automatic Search" / "Search" action targets:
@@ -5988,11 +6077,24 @@ function SortableHeader({
  *  providers). Persisted server-side so picks survive a reload. */
 function useUiPreferencesMutation() {
   const queryClient = useQueryClient();
+  // dd28-45: column resizing fires one mutation per drag settle, and the
+  // responses are not ordered. Writing whatever arrives last into the cache
+  // meant a slower older response could overwrite a newer one — the column
+  // width visibly "sprang back". Stamp each request and ignore any answer that
+  // is not the newest one this component instance issued.
+  const sequenceRef = useRef(0);
+  const settledRef = useRef(0);
   return useMutation({
-    mutationFn: (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) =>
-      updateLibraryV2UiPreferences(patch),
-    onSuccess: (preferences) =>
-      queryClient.setQueryData([...LIBRARY_V2_QUERY_KEY, 'ui-preferences'], preferences),
+    mutationFn: async (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) => {
+      const sequence = ++sequenceRef.current;
+      const preferences = await updateLibraryV2UiPreferences(patch);
+      return { sequence, preferences };
+    },
+    onSuccess: ({ sequence, preferences }) => {
+      if (sequence < settledRef.current) return;
+      settledRef.current = sequence;
+      queryClient.setQueryData([...LIBRARY_V2_QUERY_KEY, 'ui-preferences'], preferences);
+    },
   });
 }
 
@@ -8119,6 +8221,12 @@ function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: num
       void queryClient.invalidateQueries({
         queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-file-tags', trackId],
       });
+      // dd28-46: the track row's tag-gap cell reads `track.metadata_gaps` from
+      // the ALBUM query, not from this panel's query — so a successful manual
+      // tag write left the row still claiming "N tag gaps" until something
+      // else happened to refetch. Invalidating the whole namespace is the same
+      // thing every other write in this file does.
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       setEditingKey(null);
       setIsAdding(false);
       setNewKey('');

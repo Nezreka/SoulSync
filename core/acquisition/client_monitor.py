@@ -26,11 +26,17 @@ from core.acquisition.history import record_history_event
 from core.acquisition.imports import record_download_completed
 from core.acquisition.workflow import record_grab_cancelled, record_grab_outcome
 from core.usenet_clients.base import UsenetClientAdapter, UsenetStatus
-from utils.async_helpers import run_async
+from utils.async_helpers import AsyncCallTimeout, run_async
 from utils.logging_config import get_logger
 
 
 logger = get_logger("acquisition.client_monitor")
+
+# dd28-17: every external-client call below runs while `_cycle_lock` is held.
+# An unbounded wait there is a silent, permanent stall of the whole persistence
+# layer, so each one gets a budget generous enough for a slow SAB/NZBGet but
+# far short of "forever".
+CLIENT_CALL_TIMEOUT_S = 120
 
 
 _ACTIVE_STATE_TO_STATUS = {
@@ -166,6 +172,25 @@ async def collect_usenet_snapshot(
     )
 
 
+# dd28-15: SABnzbd's job list deliberately includes its HISTORY (the adapter
+# asks for the last 50), so already-finished jobs from *earlier* grabs are in
+# the snapshot. Adopting one of those binds a brand-new grab to a consumed
+# directory: `reconcile_usenet_snapshot` then sees state == "completed" with a
+# save_path and calls record_download_completed on a path that was already
+# imported or deleted — a phantom completion with no error anywhere. Adoption
+# is about attaching to work still in flight, so only non-terminal jobs
+# qualify. This also un-breaks the `unique_category_job` fallback (dd28-44),
+# which practically never fired because history flooded `remaining_jobs`.
+_TERMINAL_CLIENT_STATES = frozenset({
+    "completed", "complete", "failed", "error", "cancelled", "canceled",
+    "deleted", "removed",
+})
+
+
+def _is_adoptable_job(job: UsenetJobSnapshot) -> bool:
+    return str(job.state or "").strip().lower() not in _TERMINAL_CLIENT_STATES
+
+
 def _adoption_pairs(
     unresolved: list[dict], unknown_jobs: list[UsenetJobSnapshot],
 ) -> Tuple[list[tuple[dict, UsenetJobSnapshot, str]], list[str]]:
@@ -228,6 +253,7 @@ def reconcile_usenet_snapshot(
         job for job in snapshot.jobs
         if job.id not in known_ids
         and _category_key(job.category) == _category_key(snapshot.category)
+        and _is_adoptable_job(job)
     ]
     unresolved = [
         grab for grab in all_open
@@ -577,7 +603,8 @@ class UsenetAcquisitionMonitor:
                 continue
             try:
                 removed = bool(run_async(
-                    adapter.remove(job_id, delete_files=False)))
+                    adapter.remove(job_id, delete_files=False),
+                    timeout=CLIENT_CALL_TIMEOUT_S))
             except Exception as exc:  # noqa: BLE001 - external client boundary
                 logger.warning(
                     "Usenet acquisition cancel remains pending for %s: %s",
@@ -638,11 +665,14 @@ class UsenetAcquisitionMonitor:
                 str(grab["external_job_id"])
                 for grab in grabs if grab.get("external_job_id")
             )
-            snapshot = run_async(collect_usenet_snapshot(
-                adapter,
-                category,
-                known_job_ids=known_ids,
-            ))
+            snapshot = run_async(
+                collect_usenet_snapshot(
+                    adapter,
+                    category,
+                    known_job_ids=known_ids,
+                ),
+                timeout=CLIENT_CALL_TIMEOUT_S,
+            )
             reconciliation = self._apply_snapshot(snapshot)
             cancelled, cancel_failed = self._finish_cancellations(
                 adapter, reconciliation)
@@ -662,6 +692,16 @@ class UsenetAcquisitionMonitor:
                     len(reconciliation.ambiguous),
                 )
             return result
+        except AsyncCallTimeout as exc:
+            # dd28-17: this used to be an unbounded wait taken while holding
+            # `_cycle_lock`, so ONE hung client call stopped Usenet
+            # reconciliation, the import pipeline and cancel completion for
+            # good — while status() kept reporting running=True, last_error=None.
+            safe_error = f"download client did not respond: {exc}"
+            with self._state_lock:
+                self._last_error = safe_error
+            logger.warning("Usenet acquisition monitor cycle timed out: %s", exc)
+            return MonitorRunResult(open_grabs=0, skipped_reason="client_timeout")
         except Exception as exc:
             safe_error = redact_sensitive_text(exc)
             with self._state_lock:
