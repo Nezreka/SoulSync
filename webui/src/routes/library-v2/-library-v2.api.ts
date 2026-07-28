@@ -1862,6 +1862,12 @@ export function libraryV2AlbumQueryOptions(albumId: number, options: { resolve?:
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'album', albumId, options.resolve ?? false],
     queryFn: () => fetchLibraryV2Album(albumId, options),
     enabled: albumId > 0,
+    // Resolving a provider tracklist is a chain of blocking provider calls,
+    // so the server does it off the request thread and says `pending`. Poll
+    // until it lands instead of making the user wait on the open request —
+    // that was what hung the page and held the DB write lock.
+    refetchInterval: (query) =>
+      query.state.data?.tracklist_sync?.status === 'pending' ? 2000 : false,
   });
 }
 

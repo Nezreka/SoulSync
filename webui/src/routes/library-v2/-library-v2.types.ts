@@ -457,6 +457,12 @@ export interface LibraryV2AlbumDetail {
   /** I8: sum of each present track's primary file size, in bytes. */
   total_size_bytes: number;
   upgrades_available?: number;
+  /** Provider tracklist build state. `pending` means the server is fetching
+   *  it off the request thread and the track list below is still partial. */
+  tracklist_sync?: {
+    status: 'idle' | 'pending' | 'failed' | 'ready' | (string & {});
+    error: string | null;
+  };
   user_overrides: Record<string, unknown>;
 }
 

@@ -3274,16 +3274,11 @@ def test_album_resolve_fills_a_partially_materialized_tracklist(api, monkeypatch
                  "WHERE id=?", (ids["views"],))
     conn.commit()
     conn.close()
-    resolved = []
-    from core.library2 import completeness
-
-    monkeypatch.setattr(
-        completeness, "resolve_tracklist",
-        lambda _cfg, _conn, album_id: resolved.append(album_id))
+    resolved = _record_tracklist_resolves(monkeypatch)
 
     client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
 
-    assert resolved == [ids["views"]]
+    assert _drain(resolved) == [ids["views"]]
 
 
 def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
@@ -3294,16 +3289,11 @@ def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
                  "WHERE id=?", (ids["views"],))
     conn.commit()
     conn.close()
-    resolved = []
-    from core.library2 import completeness
-
-    monkeypatch.setattr(
-        completeness, "resolve_tracklist",
-        lambda _cfg, _conn, album_id: resolved.append(album_id))
+    resolved = _record_tracklist_resolves(monkeypatch)
 
     client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
 
-    assert resolved == []
+    assert _drain(resolved, expect=0) == []
 
 
 def test_discovery_track_never_monitors_the_whole_album(api, monkeypatch):
@@ -3372,16 +3362,11 @@ def test_album_resolve_runs_for_a_release_whose_tracklist_was_never_fetched(api,
                  "WHERE id=?", (ids["single"],))
     conn.commit()
     conn.close()
-    resolved = []
-    from core.library2 import completeness
-
-    monkeypatch.setattr(
-        completeness, "resolve_tracklist",
-        lambda _cfg, _conn, album_id: resolved.append(album_id))
+    resolved = _record_tracklist_resolves(monkeypatch)
 
     client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
 
-    assert resolved == [ids["single"]]
+    assert _drain(resolved) == [ids["single"]]
 
 
 def test_discovery_track_marks_a_new_release_as_provider_only(api, monkeypatch):
@@ -3433,3 +3418,109 @@ def test_discovery_enrich_only_walks_configured_providers(api, monkeypatch):
     })
 
     assert seen["services"] == {"spotify", "deezer"}
+
+
+def _record_tracklist_resolves(monkeypatch, result=("t",), chain=None):
+    """Capture the album ids the background resolver is handed.
+
+    Also stubs the follow-up chain: the real one arms a debounce timer and
+    walks providers, neither of which belongs in a route test.
+    """
+    from core.library2 import completeness, native_enrich, track_reconcile_trigger
+
+    seen = []
+
+    def _fake(_cfg, _conn, album_id):
+        seen.append(album_id)
+        return list(result) if result else None
+
+    monkeypatch.setattr(completeness, "resolve_tracklist", _fake)
+    monkeypatch.setattr(
+        native_enrich, "enrich_native_entity_all_services",
+        lambda _conn, entity, eid, **_kw: (
+            chain.append(("enrich", entity, eid)) if chain is not None else None) or {})
+    monkeypatch.setattr(
+        track_reconcile_trigger, "schedule_album_track_reconcile",
+        lambda _db, album_id, _cfg=None, **_kw: (
+            chain.append(("reconcile", album_id)) if chain is not None else None) or True)
+    return seen
+
+
+def test_resolved_tracklist_gets_every_provider_id_it_can(api, monkeypatch):
+    """`fetch_album_tracklist` stops at the first provider that answers, so a
+    release confirmed at four providers still got single-provider tracks. The
+    album is enriched first, then the exact-provider reconcile merges the
+    track ids from each confirmed provider tracklist (guide §2.5) — a chain
+    that previously only ever ran after an import."""
+    client, _db, ids = api
+    chain = []
+    resolved = _record_tracklist_resolves(monkeypatch, chain=chain)
+
+    client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
+    _drain(resolved)
+    for _ in range(200):
+        if len(chain) >= 2:
+            break
+        time.sleep(0.01)
+
+    assert chain == [("enrich", "album", ids["single"]), ("reconcile", ids["single"])]
+
+
+def _drain(seen, expect=1, timeout=5.0):
+    """The resolve runs off the request thread now, so give it a moment."""
+    deadline = time.time() + timeout
+    while len(seen) < expect and time.time() < deadline:
+        time.sleep(0.01)
+    if expect == 0:
+        time.sleep(0.1)
+    return seen
+
+
+def test_album_resolve_answers_immediately_and_reports_pending(api, monkeypatch):
+    """A provider tracklist walk must never happen on the request thread: it
+    hung the page for as long as the providers took, and — because it also
+    writes — held SQLite's single write lock long enough to fail every other
+    request with "database is locked"."""
+    client, db, ids = api
+    started = threading.Event()
+    release = threading.Event()
+    from core.library2 import completeness
+
+    def _slow(_cfg, _conn, _album_id):
+        started.set()
+        release.wait(timeout=5)
+        return ["t"]
+
+    monkeypatch.setattr(completeness, "resolve_tracklist", _slow)
+
+    began = time.time()
+    body = client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1").get_json()
+    elapsed = time.time() - began
+
+    assert started.wait(timeout=5), "resolve never ran"
+    assert elapsed < 2, f"request waited {elapsed:.1f}s on the provider walk"
+    assert body["album"]["tracklist_sync"]["status"] == "pending"
+    release.set()
+
+
+def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):
+    """Leaving the row 'pending' would make the client poll forever for a
+    tracklist that does not exist anywhere."""
+    client, db, ids = api
+    resolved = _record_tracklist_resolves(monkeypatch, result=None)
+
+    client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
+    _drain(resolved)
+
+    conn = _conn(db)
+    try:
+        for _ in range(200):
+            status = conn.execute(
+                "SELECT tracklist_status FROM lib2_albums WHERE id=?",
+                (ids["single"],)).fetchone()[0]
+            if status != "pending":
+                break
+            time.sleep(0.01)
+    finally:
+        conn.close()
+    assert status == "failed"

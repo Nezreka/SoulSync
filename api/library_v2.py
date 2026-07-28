@@ -1704,6 +1704,76 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "artist_id": artist_id})
 
+    _tracklist_resolves: set = set()
+    _tracklist_resolves_lock = threading.Lock()
+
+    def _tracklist_resolve_pending(album_id: int) -> bool:
+        with _tracklist_resolves_lock:
+            return int(album_id) in _tracklist_resolves
+
+    def _schedule_tracklist_resolve(album_id: int) -> None:
+        """Resolve one album's provider tracklist in the background.
+
+        Single-flight per album: the page polls while it runs, and a poll must
+        not queue another provider walk behind the one already in flight.
+        """
+        album_id = int(album_id)
+        with _tracklist_resolves_lock:
+            if album_id in _tracklist_resolves:
+                return
+            _tracklist_resolves.add(album_id)
+
+        def _run() -> None:
+            worker_conn = None
+            try:
+                database = get_database()
+                worker_conn = database._get_connection()
+                from core.library2.completeness import resolve_tracklist
+                resolved = resolve_tracklist(config_manager, worker_conn, album_id)
+                if resolved:
+                    # `_persist_tracklist_tracks` writes each track exactly as
+                    # the ONE provider that answered returned it, and
+                    # `fetch_album_tracklist` stops at the first provider with
+                    # a hit — so a release whose album id is confirmed at four
+                    # providers still got single-provider tracks. Two steps fix
+                    # that, in order: give the ALBUM every provider id it can
+                    # have, then merge the track ids from each of those exact
+                    # provider tracklists. The second is the reconcile guide
+                    # §2.5 describes; it was only ever triggered from the
+                    # import pipeline, so a tracklist materialized any other
+                    # way never got it.
+                    from core.library2.native_enrich import (
+                        enrich_native_entity_all_services,
+                    )
+                    from core.library2.track_reconcile_trigger import (
+                        schedule_album_track_reconcile,
+                    )
+                    enrich_native_entity_all_services(
+                        worker_conn, "album", album_id, commit=True,
+                        services=(configured_match_services_getter()
+                                  if configured_match_services_getter else None))
+                    schedule_album_track_reconcile(database, album_id, config_manager)
+                else:
+                    # Nothing came back. Leaving the row 'pending' would make
+                    # the client poll forever for a tracklist no provider has.
+                    worker_conn.execute(
+                        "UPDATE lib2_albums SET tracklist_status='failed' "
+                        "WHERE id=? AND tracklist_status='pending'", (album_id,))
+                    worker_conn.commit()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("background tracklist resolve failed (%s): %s", album_id, e)
+            finally:
+                if worker_conn is not None:
+                    try:
+                        worker_conn.close()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("tracklist resolve close failed: %s", e)
+                with _tracklist_resolves_lock:
+                    _tracklist_resolves.discard(album_id)
+
+        threading.Thread(target=_run, name=f"lib2-tracklist-{album_id}",
+                         daemon=True).start()
+
     @app.route("/api/library/v2/albums/<int:album_id>")
     def lib2_get_album(album_id):
         guard = _guard()
@@ -1715,7 +1785,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # ``?resolve=1``: materialize the provider tracklist first, so a
             # discography-only release (no track rows yet) shows its real
             # tracklist when the user expands it — Lidarr-style.
-            if request.args.get("resolve") == "1":
+            if request.args.get("resolve") == "1" and not _tracklist_resolve_pending(album_id):
                 # Not "has ANY track": bookmarking one top track materializes
                 # exactly that recording, which left the release looking like a
                 # one-track album forever — the guard saw a track row and
@@ -1739,11 +1809,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 if counts is not None and (
                         counts["status"] != "ready"
                         or counts["have"] < counts["expected"]):
-                    try:
-                        from core.library2.completeness import resolve_tracklist
-                        resolve_tracklist(config_manager, conn, album_id)
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("on-demand tracklist resolve failed (%s): %s", album_id, e)
+                    # Off the request thread. Resolving means a chain of
+                    # blocking provider calls; doing it inline made opening a
+                    # release hang the page, and — because the walk also writes
+                    # — held SQLite's single write lock long enough to fail
+                    # every other request with "database is locked". The client
+                    # gets what exists now plus `tracklist_sync.status`, and
+                    # refetches when the build lands.
+                    # Flag it before answering so this very response already
+                    # says "pending" and the client starts polling instead of
+                    # rendering a partial list as if it were final. A crash
+                    # mid-resolve leaves the flag set, which is safe: the
+                    # in-flight guard is per-process, so the next open
+                    # reschedules it.
+                    conn.execute(
+                        "UPDATE lib2_albums SET tracklist_status='pending' WHERE id=?",
+                        (album_id,))
+                    conn.commit()
+                    _schedule_tracklist_resolve(album_id)
             data = Q.get_album(conn, album_id)
         finally:
             conn.close()

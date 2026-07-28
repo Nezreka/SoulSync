@@ -486,6 +486,11 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
         "SELECT name FROM lib2_artists WHERE id=?", (al["primary_artist_id"],)
     ).fetchone()
     artist_name = artist["name"] if artist else ""
+    # Release the writer before the provider walk. The snapshot bookkeeping
+    # above writes without committing, and the walk below is a chain of
+    # blocking HTTP calls — holding SQLite's single write lock across them
+    # stalled every other request until the 30s busy timeout fired.
+    conn.commit()
     from core.library2.provider_adapters import fetch_album_tracklist
     provider_result = fetch_album_tracklist(
         al["title"],
