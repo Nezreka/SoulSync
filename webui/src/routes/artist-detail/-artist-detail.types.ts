@@ -118,3 +118,17 @@ export interface ArtistDetailResponse {
   enrichment_coverage?: Record<string, unknown>;
   provider_error?: ProviderError;
 }
+
+/**
+ * A top-tracks row. The metadata-source pass returns full track objects (the
+ * download action needs `artists`/`album`); the Last.fm pass returns little
+ * more than a name and a playcount, which is why every field is optional.
+ */
+export interface ArtistDetailTrack {
+  id?: string | number;
+  name?: string;
+  playcount?: number | string;
+  artists?: { id?: string | number; name?: string }[];
+  album?: { name?: string; album_type?: string; [key: string]: unknown };
+  [key: string]: unknown;
+}

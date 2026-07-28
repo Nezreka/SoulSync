@@ -126,6 +126,23 @@ declare global {
     hideLoadingOverlay?: () => void;
     /** library.js — quality-enhance eligibility probe (library artists only). */
     checkArtistEnhanceEligibility?: (artistId: unknown) => void;
+    /** stats-automations.js — the Enhance Quality modal, opened from the hero. */
+    openEnhanceQualityModal?: () => void;
+    /**
+     * shared-helpers.js — the download-missing modal. Called directly rather
+     * than through the shell bridge because the bridge wrapper fixes the last
+     * two arguments, and the top-tracks bulk download needs contextType
+     * 'playlist' to render the playlist hero and route per-track album folders.
+     */
+    openDownloadMissingModalForArtistAlbum?: (
+      virtualPlaylistId: string,
+      playlistName: string,
+      tracks: unknown[],
+      album: unknown,
+      artist: unknown,
+      showLoadingOverlay?: boolean,
+      contextType?: string,
+    ) => void | Promise<void>;
     /** library.js — wires the hero watchlist button to an identity. */
     initializeLibraryWatchlistButton?: (artistId: unknown, artistName: string) => void;
     /** downloads.js — the Add to Wishlist modal, opened from a release card. */
