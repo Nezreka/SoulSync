@@ -302,7 +302,7 @@ export function ArtistDetailPage() {
   // showing an empty shell over an error.
   if (failed) {
     return (
-      <>
+      <div className="artist-detail-page">
         <ArtistDetailBackButton label={backLabel} />
         <div className="artist-detail-content">
           <div className="artist-detail-error" id="artist-detail-error">
@@ -314,13 +314,13 @@ export function ArtistDetailPage() {
             </button>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   if (query.isPending || !payload) {
     return (
-      <>
+      <div className="artist-detail-page">
         <ArtistDetailBackButton label={backLabel} />
         <div className="artist-detail-content">
           <div className="artist-detail-loading" id="artist-detail-loading">
@@ -328,12 +328,19 @@ export function ArtistDetailPage() {
             <p>Loading artist discography...</p>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    /**
+     * The scoping hook the stylesheet needs. 17 rules are written against
+     * #artist-detail-page — the release cards' big-photo treatment, the hero,
+     * and the source-artist hides for Artist Radio / Enhance Quality /
+     * enrichment coverage. React renders inside #webui-react-root, so without
+     * this class every one of them silently stops applying.
+     */
+    <div className="artist-detail-page">
       <ArtistDetailBackButton label={backLabel} />
 
       <ArtistHero
@@ -387,6 +394,6 @@ export function ArtistDetailPage() {
           <SimilarArtistsSection />
         </div>
       </div>
-    </>
+    </div>
   );
 }
