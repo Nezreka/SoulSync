@@ -3765,3 +3765,43 @@ def test_second_refresh_of_the_same_artist_joins_the_running_job(api, monkeypatc
     release.set()
     _await_job(client, first["job_id"])
     assert calls == [ids["artist"]]
+
+
+def test_ui_preferences_write_fails_fast_when_the_database_is_busy(api):
+    """Cosmetic writes must not queue behind the full busy timeout.
+
+    One of these fires per column-resize settle. Waiting 30s for each pins a
+    request worker on a write nobody is waiting for, so a wedged database turns
+    a page of table headers into a dozen stuck workers. The click is lost
+    instead; the next one re-sends the same state.
+    """
+    import sqlite3 as _sqlite3
+
+    client, db, _ids = api
+    holder = db._get_connection()
+    holder.execute("PRAGMA busy_timeout = 0")
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        response = client.put(
+            "/api/library/v2/ui-preferences",
+            json={"artist_table": {"columns": {"albums": False}}},
+        )
+    finally:
+        holder.rollback()
+        holder.close()
+
+    assert response.status_code == 503
+    assert "busy" in response.get_json()["error"].lower()
+    assert isinstance(_sqlite3.OperationalError, type)
+
+
+def test_ui_preferences_write_still_works_normally(api):
+    client, _db, _ids = api
+
+    response = client.put(
+        "/api/library/v2/ui-preferences",
+        json={"artist_table": {"columns": {"albums": False}}},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True

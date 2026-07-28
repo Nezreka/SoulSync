@@ -2348,7 +2348,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.ui_preferences import update_ui_preferences
         conn = _conn()
         try:
+            # Column widths and toggles are cosmetic, and there is one of these
+            # per resize settle. Waiting out the full 30s busy timeout for them
+            # is never useful: it pins a request worker on a write nobody is
+            # waiting for, and a wedged database turns a page of table headers
+            # into a dozen stuck workers. Fail fast and let the click be lost;
+            # the next one re-sends the same state anyway.
+            conn.execute("PRAGMA busy_timeout = 2000")
             preferences = update_ui_preferences(conn, body)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
+            logger.debug("UI preference write skipped, database busy: %s", exc)
+            return jsonify({
+                "success": False,
+                "error": "The database is busy; the layout was not saved",
+            }), 503
         finally:
             conn.close()
         return jsonify({"success": True, "preferences": preferences})

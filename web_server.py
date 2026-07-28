@@ -43259,6 +43259,17 @@ def start_runtime_services():
         except Exception as _lib2_bootstrap_err:
             logger.debug(f"could not start lib2 bootstrap import autostart: {_lib2_bootstrap_err}")
 
+        # Name the holder when SQLite's single write lock gets stuck. Without
+        # this the log only ever shows victims ("database is locked" from
+        # notifications, automations, repair jobs, UI preferences) and the
+        # thread actually holding the lock stays anonymous. Silent on a healthy
+        # installation; see core/db_lock_watchdog.py.
+        try:
+            from core.db_lock_watchdog import start_watchdog as _start_lock_watchdog
+            _start_lock_watchdog(get_database())
+        except Exception as _lock_watchdog_err:
+            logger.debug(f"could not start db lock watchdog: {_lock_watchdog_err}")
+
         # Wishlist/watchlist timers are now managed by AutomationEngine system automations
 
         # Pre-build import suggestions cache in background
