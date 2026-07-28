@@ -828,3 +828,45 @@ describe('the Back button label', () => {
     expect(document.getElementById('artist-detail-back-btn')?.textContent).toBe('← Back');
   });
 });
+
+describe('scroll position', () => {
+  // body is overflow:hidden, so .main-content is the real scroller — the
+  // window never moves and a window.scrollTo would be a silent no-op.
+  const withMainContent = () => {
+    const main = document.createElement('div');
+    main.className = 'main-content';
+    document.body.appendChild(main);
+    Object.defineProperty(main, 'scrollTop', { value: 0, writable: true });
+    main.scrollTop = 900;
+    return main;
+  };
+
+  // Swept centrally, not per test: scrollArtistDetailToTop takes the FIRST
+  // .main-content, so one container left behind by a failing test silently
+  // makes every later test in this block assert against the wrong element.
+  afterEach(() => {
+    document.querySelectorAll('.main-content').forEach((el) => el.remove());
+  });
+
+  it('opens the artist at the top of the scroll container', async () => {
+    const main = withMainContent();
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(main.scrollTop).toBe(0);
+    main.remove();
+  });
+
+  it('resets again when the route moves to another artist', async () => {
+    const main = withMainContent();
+    const { router } = renderPage('/artist-detail/library/42');
+    await screen.findByText('Aphex Twin');
+
+    main.scrollTop = 1200;
+    await router.navigate({
+      to: '/artist-detail/$source/$id',
+      params: { source: 'library', id: '99' },
+    });
+    await waitFor(() => expect(main.scrollTop).toBe(0));
+    main.remove();
+  });
+});

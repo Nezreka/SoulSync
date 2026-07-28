@@ -35,6 +35,7 @@ import {
   releaseToAlbumData,
   stillCheckingMessage,
 } from '../-artist-detail.open-release';
+import { scrollArtistDetailToTop } from '../-artist-detail.scroll';
 import { useCompletionStream } from '../-artist-detail.use-completion';
 import { useEnhancedData } from '../-artist-detail.use-enhanced';
 import { useGapFill } from '../-artist-detail.use-gap-fill';
@@ -165,6 +166,19 @@ export function ArtistDetailPage() {
       delete document.body.dataset.artistSource;
     };
   }, [payload, sourceOnly]);
+
+  /**
+   * Every artist opens at the top — arriving, chaining to a similar artist, or
+   * coming back. The router is told to keep its hands off scroll for this
+   * route, so this is the only thing touching it and there is no race.
+   *
+   * Keyed on the ROUTE params rather than the payload: it has to fire before
+   * the fetch resolves, or you would sit at the previous artist's scroll
+   * position while the new one loads.
+   */
+  useEffect(() => {
+    scrollArtistDetailToTop();
+  }, [source, id]);
 
   /**
    * Record an artist → artist hop for the Back label, the way

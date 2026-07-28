@@ -57,7 +57,16 @@ describe('createAppRouter', () => {
     expect(router.options.context?.queryClient).toBe(queryClient);
     expect(router.options.defaultPreload).toBe('intent');
     expect(router.options.defaultPreloadStaleTime).toBe(0);
-    expect(router.options.scrollRestoration).toBe(true);
+    // A predicate now, not a flag: every route restores scroll EXCEPT artist
+    // detail, which always opens at the top. Its similar-artist row sits at the
+    // very bottom, so the position worth saving there is the footer.
+    const shouldRestore = router.options.scrollRestoration as (opts: {
+      location: { pathname: string };
+    }) => boolean;
+    expect(typeof shouldRestore).toBe('function');
+    expect(shouldRestore({ location: { pathname: '/library' } })).toBe(true);
+    expect(shouldRestore({ location: { pathname: '/wishlist' } })).toBe(true);
+    expect(shouldRestore({ location: { pathname: '/artist-detail/library/42' } })).toBe(false);
     expect(router.options.defaultErrorComponent).toBeDefined();
     expect(router.options.defaultNotFoundComponent).toBeDefined();
   });
