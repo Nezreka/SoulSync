@@ -1095,3 +1095,20 @@ def test_enrich_all_services_does_not_touch_the_connection_without_commit(monkey
         lambda *_a, **_k: {"success": False})
 
     assert native_enrich.enrich_native_entity_all_services(Boom(), "album", 7) == {}
+
+
+def test_enrich_all_services_skips_unconfigured_providers(monkeypatch):
+    """Tidal's client starts an interactive login, so walking a provider the
+    instance never configured opened an OAuth tab in the user's browser
+    seconds after a background enrich started."""
+    from core.library2 import native_enrich
+
+    calls = []
+    monkeypatch.setattr(
+        native_enrich, "enrich_native_entity_for_service",
+        lambda _c, _t, _i, service: calls.append(service) or {"success": False})
+
+    native_enrich.enrich_native_entity_all_services(
+        None, "album", 7, services={"spotify", "deezer"})
+
+    assert set(calls) == {"spotify", "deezer"}

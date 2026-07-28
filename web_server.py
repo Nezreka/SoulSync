@@ -39939,42 +39939,76 @@ except Exception as e:
 # The auto-pause token cleanup + yield-override behavior is encoded on the
 # EnrichmentService descriptor (see core/enrichment/services.py).
 
-@app.route('/api/artist/lastfm-info', methods=['GET'])
-def get_artist_lastfm_info():
-    """Listeners / plays / bio for an artist by name (ldp-05).
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
-    The legacy artist hero read these off the library row; Library v2 has
-    provider-native artists with no legacy row at all, and discovery mode has
-    no row whatsoever. Last.fm resolves by name for every one of those cases,
-    which is exactly what ``core/artist_source_detail.py`` already does for a
-    source-only artist — same client, same fields, just reachable on its own.
+
+@app.route('/api/artist/hero-stats', methods=['GET'])
+def get_artist_hero_stats():
+    """The numbers the rich artist header shows (ldp-05).
+
+    The legacy hero read listeners/plays off the library row, which a
+    Library-v2-native artist does not have — and on an instance without a
+    Last.fm key that row is empty anyway, so the header would show nothing at
+    all. Every number this can get is therefore resolved live: Last.fm
+    listeners/plays/bio by name (same lookup ``core/artist_source_detail.py``
+    does for a source-only artist, including its own client when the
+    enrichment worker is not running), plus the provider follower count, which
+    is the one figure that survives an unconfigured Last.fm.
+
+    Every field is independent and best-effort: a provider being down costs
+    that one number, never the response.
     """
     artist_name = (request.args.get('name', '') or '').strip()
-    if not artist_name:
-        return jsonify({'success': False, 'error': 'Artist name required'}), 400
-    if not lastfm_worker or not lastfm_worker.client:
-        return jsonify({'success': True, 'listeners': None, 'playcount': None, 'bio': None})
-    try:
-        info = lastfm_worker.client.get_artist_info(artist_name) or {}
-        stats = info.get('stats') or {}
-        bio = info.get('bio') or {}
+    spotify_id = (request.args.get('spotify_id', '') or '').strip()
+    deezer_id = (request.args.get('deezer_id', '') or '').strip()
+    if not artist_name and not spotify_id and not deezer_id:
+        return jsonify({'success': False, 'error': 'Artist name or id required'}), 400
 
-        def _int_or_none(value):
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return None
+    result = {'success': True, 'listeners': None, 'playcount': None,
+              'bio': None, 'url': None, 'followers': None, 'popularity': None}
 
-        return jsonify({
-            'success': True,
-            'listeners': _int_or_none(stats.get('listeners')),
-            'playcount': _int_or_none(stats.get('playcount')),
-            'bio': bio.get('content') or bio.get('summary'),
-            'url': info.get('url'),
-        })
-    except Exception as e:
-        logger.debug(f"Last.fm artist info failed for {artist_name}: {e}")
-        return jsonify({'success': True, 'listeners': None, 'playcount': None, 'bio': None})
+    if artist_name:
+        try:
+            client = lastfm_worker.client if lastfm_worker else None
+            if client is None:
+                api_key = config_manager.get('lastfm.api_key', '')
+                if api_key:
+                    from core.lastfm_client import LastFMClient
+                    client = LastFMClient(api_key=api_key)
+            if client is not None:
+                info = client.get_artist_info(artist_name) or {}
+                stats = info.get('stats') or {}
+                bio = info.get('bio') or {}
+                result['listeners'] = _int_or_none(stats.get('listeners'))
+                result['playcount'] = _int_or_none(stats.get('playcount'))
+                result['bio'] = bio.get('content') or bio.get('summary')
+                result['url'] = info.get('url')
+        except Exception as e:
+            logger.debug(f"Last.fm artist info failed for {artist_name}: {e}")
+
+    if spotify_id:
+        try:
+            stats = _library_v2_live_artist_stats(spotify_id)
+            if stats:
+                result['followers'] = _int_or_none(stats.get('followers'))
+                result['popularity'] = _int_or_none(stats.get('popularity'))
+        except Exception as e:
+            logger.debug(f"Spotify artist stats failed for {spotify_id}: {e}")
+
+    if result['followers'] is None and deezer_id:
+        try:
+            client = _get_deezer_client()
+            info = client.get_artist_info(deezer_id) if client else None
+            if info:
+                result['followers'] = _int_or_none((info.get('followers') or {}).get('total'))
+        except Exception as e:
+            logger.debug(f"Deezer artist stats failed for {deezer_id}: {e}")
+
+    return jsonify(result)
 
 
 @app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])

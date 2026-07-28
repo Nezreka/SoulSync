@@ -116,6 +116,7 @@ def api(tmp_path):
     db.config = {"features.library_v2": True}
     db.acquisition_search_adapters = []
     db.acquisition_submission_adapters = {}
+    db.configured_match_services = None
     app = flask.Flask(__name__)
     from api.library_v2 import register_library_v2_routes
     register_library_v2_routes(
@@ -130,6 +131,7 @@ def api(tmp_path):
         acquisition_async_runner=asyncio.run,
         acquisition_submission_adapter_getter=(
             lambda source: db.acquisition_submission_adapters.get(source)),
+        configured_match_services_getter=lambda: db.configured_match_services,
     )
     ids = {"artist": artist_id, "views": views_id, "single": single_id,
            "ep": ep_id, "album_track": album_track,
@@ -3346,7 +3348,7 @@ def test_discovery_track_resolves_new_rows_against_every_provider(api, monkeypat
     from core.library2 import native_enrich
 
     monkeypatch.setattr(native_enrich, "schedule_native_entity_enrich",
-                        lambda _db, targets: scheduled.append(list(targets)))
+                        lambda _db, targets, **_kw: scheduled.append(list(targets)))
 
     payload = {"source": "spotify", "artist_name": "Drake",
                "artist_provider_id": "sp-drake", "track_title": "Brand New",
@@ -3380,3 +3382,54 @@ def test_album_resolve_runs_for_a_release_whose_tracklist_was_never_fetched(api,
     client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
 
     assert resolved == [ids["single"]]
+
+
+def test_discovery_track_marks_a_new_release_as_provider_only(api, monkeypatch):
+    """`find_or_create_album` defaults new rows to origin='library' ("has/had
+    files") because it was written for the post-download path. A release the
+    user bookmarked one track of has no files at all, and calling it a library
+    release made the UI treat it as complete — so it never fetched the rest of
+    its tracklist and stayed a one-track album."""
+    client, db, _ids = api
+    from core.library2 import native_enrich
+
+    monkeypatch.setattr(native_enrich, "schedule_native_entity_enrich",
+                        lambda *_a, **_k: None)
+
+    body = client.post("/api/library/v2/discovery/track", json={
+        "source": "deezer", "artist_name": "Justin Bieber",
+        "track_title": "That Should Be Me", "album_title": "My World 2.0",
+        "album_provider_id": "512013",
+    }).get_json()
+
+    conn = _conn(db)
+    try:
+        album = conn.execute(
+            "SELECT origin, external_ids FROM lib2_albums WHERE id=?",
+            (body["album_id"],)).fetchone()
+    finally:
+        conn.close()
+    assert album["origin"] == "discography"
+    # And it keeps the identity it was created from, so the tracklist can
+    # actually be resolved later.
+    assert "512013" in album["external_ids"]
+
+
+def test_discovery_enrich_only_walks_configured_providers(api, monkeypatch):
+    """Walking an unconfigured provider is not merely wasted work: Tidal's
+    client starts an interactive login, so the background enrich popped an
+    OAuth tab in the user's browser seconds after they clicked Bookmark."""
+    client, db, _ids = api
+    db.configured_match_services = {"spotify", "deezer"}
+    seen = {}
+    from core.library2 import native_enrich
+
+    monkeypatch.setattr(
+        native_enrich, "schedule_native_entity_enrich",
+        lambda _db, targets, services=None: seen.update(services=services))
+
+    client.post("/api/library/v2/discovery/track", json={
+        "source": "spotify", "artist_name": "Drake", "track_title": "New One",
+    })
+
+    assert seen["services"] == {"spotify", "deezer"}

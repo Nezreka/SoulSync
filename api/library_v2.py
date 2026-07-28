@@ -1453,7 +1453,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # Adopted from one provider's search result — resolve the rest so
             # the artist arrives matched, not matched-to-one.
             from core.library2.native_enrich import schedule_native_entity_enrich
-            schedule_native_entity_enrich(get_database(), [("artist", artist_id)])
+            schedule_native_entity_enrich(
+                get_database(), [("artist", artist_id)],
+                services=(configured_match_services_getter()
+                          if configured_match_services_getter else None))
         if create and artist_id is None:
             return jsonify({"success": False,
                             "error": "Could not materialize this artist"}), 400
@@ -1573,6 +1576,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             created = [("album", album_id)] if album_id not in known_albums else []
             if track_id not in known_tracks:
                 created.append(("track", track_id))
+            if created and created[0][0] == "album":
+                # `find_or_create_album` defaults new rows to origin='library'
+                # ("has/had files", schema comment) because it was written for
+                # the post-download path. A release the user bookmarked one
+                # track of has no files at all — calling it a library release
+                # made the UI treat it as complete and never fetch the rest of
+                # its tracklist. It stays visible under "My Library" through
+                # its monitored track (guide §5).
+                conn.execute("UPDATE lib2_albums SET origin='discography' WHERE id=?",
+                             (album_id,))
             conn.commit()
         finally:
             conn.close()
@@ -1582,7 +1595,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # walks the stored ids, so resolve the rest in the background
             # rather than leaving the release effectively unmatched.
             from core.library2.native_enrich import schedule_native_entity_enrich
-            schedule_native_entity_enrich(db, created)
+            schedule_native_entity_enrich(
+                db, created,
+                services=(configured_match_services_getter()
+                          if configured_match_services_getter else None))
         return jsonify({"success": True, "artist_id": artist_id,
                         "album_id": album_id, "track_id": track_id})
 

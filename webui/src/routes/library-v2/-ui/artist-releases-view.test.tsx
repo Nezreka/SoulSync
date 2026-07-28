@@ -112,8 +112,14 @@ describe('Library V2 artist detail — All Releases views', () => {
       http.get('/api/library/v2/ui-preferences', () =>
         HttpResponse.json({ success: true, preferences: null }),
       ),
-      http.get('/api/artist/lastfm-info', () =>
-        HttpResponse.json({ success: true, listeners: 900_000, playcount: 12_000_000, bio: null }),
+      http.get('/api/artist/hero-stats', () =>
+        HttpResponse.json({
+          success: true,
+          listeners: 900_000,
+          playcount: 12_000_000,
+          followers: 3_400_000,
+          bio: null,
+        }),
       ),
       http.get('/api/artist/:id/top-tracks', () =>
         HttpResponse.json({ success: false, tracks: [] }),
@@ -168,6 +174,10 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(document.querySelector('.artist-hero-section')).not.toBeNull();
     expect(await screen.findByText('900K')).toBeInTheDocument();
     expect(screen.getByText('12M')).toBeInTheDocument();
+    // Followers share the same row, so the header does not grow vertically —
+    // and they are the one number that still resolves without a Last.fm key.
+    expect(screen.getByText('3.4M')).toBeInTheDocument();
+    expect(document.querySelectorAll('.artist-hero-numbers')).toHaveLength(1);
   });
 
   it('opening an artist from inside Library V2 always starts in the V2 shape', async () => {

@@ -658,6 +658,7 @@ export interface ProviderArtistDetail {
     lastfm_bio?: string | null;
     lastfm_listeners?: number | null;
     lastfm_playcount?: number | null;
+    followers?: number | null;
   };
   discography: { albums?: ProviderRelease[]; eps?: ProviderRelease[]; singles?: ProviderRelease[] };
 }
@@ -793,20 +794,32 @@ export async function fetchArtistDiscographyGapFill(input: {
   ];
 }
 
-export interface ArtistLastfmInfo {
+/** ldp-05: every number the rich header can show. `followers` is the one
+ *  that survives an instance without a Last.fm key, which is why it is here
+ *  rather than left to the chips. */
+export interface ArtistHeroStats {
   listeners: number | null;
   playcount: number | null;
+  followers: number | null;
   bio: string | null;
 }
 
-export async function fetchArtistLastfmInfo(name: string): Promise<ArtistLastfmInfo> {
-  const payload = await readJson<{ success: boolean } & Partial<ArtistLastfmInfo>>(
-    apiClient.get('artist/lastfm-info', { searchParams: { name } }),
-  );
+export async function fetchArtistHeroStats(input: {
+  name: string;
+  spotifyId?: string | null;
+  deezerId?: string | null;
+}): Promise<ArtistHeroStats> {
+  const params = new URLSearchParams({ name: input.name });
+  if (input.spotifyId) params.set('spotify_id', input.spotifyId);
+  if (input.deezerId) params.set('deezer_id', input.deezerId);
+  const payload = await readJson<{ success: boolean } & Partial<ArtistHeroStats>>(
+    apiClient.get('artist/hero-stats', { searchParams: params }),
+  ).catch(() => null);
   return {
-    listeners: payload.listeners ?? null,
-    playcount: payload.playcount ?? null,
-    bio: payload.bio ?? null,
+    listeners: payload?.listeners ?? null,
+    playcount: payload?.playcount ?? null,
+    followers: payload?.followers ?? null,
+    bio: payload?.bio ?? null,
   };
 }
 

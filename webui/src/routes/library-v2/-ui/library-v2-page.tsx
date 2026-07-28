@@ -19,7 +19,7 @@ import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
   fetchArtistDiscographyGapFill,
-  fetchArtistLastfmInfo,
+  fetchArtistHeroStats,
   fetchArtistTopTracks,
   fetchLibraryV2DiscoveryTrackStatus,
   fetchProviderArtistDetail,
@@ -5397,8 +5397,12 @@ function TopTracksSidebar({
         albumProviderId: track.album?.id ?? null,
       });
       await setLibraryV2Monitored('tracks', trackId, true);
-      await invalidateLibraryV2(queryClient);
       setBookmarked((s) => ({ ...s, [track.name]: { status: 'done' } }));
+      // Not awaited: refreshing the whole Library V2 cache is a page-wide
+      // refetch, and blocking the tick on it made bookmarking a top-ten list
+      // feel like ten page loads. The rows are independent, so the next
+      // bookmark can start immediately.
+      void invalidateLibraryV2(queryClient);
     } catch (error) {
       setBookmarked((s) => ({
         ...s,
@@ -5528,6 +5532,7 @@ function LegacyArtistHero({
   bio,
   listeners,
   playcount,
+  followers,
   sections,
   providerId,
   source,
@@ -5543,6 +5548,10 @@ function LegacyArtistHero({
   bio: string | null;
   listeners: number | null;
   playcount: number | null;
+  /** Provider follower count — the one figure that still resolves on an
+   *  instance with no Last.fm key. Shares the existing stat row, so the
+   *  header does not grow vertically. */
+  followers?: number | null;
   sections: Array<{ label: string; owned: number; total: number }>;
   providerId: string | null;
   source: string;
@@ -5603,7 +5612,7 @@ function LegacyArtistHero({
               </span>
             </div>
           ) : null}
-          {listeners || playcount ? (
+          {listeners || playcount || followers ? (
             <div className="artist-hero-numbers">
               {listeners ? (
                 <div className="artist-hero-stat">
@@ -5615,6 +5624,12 @@ function LegacyArtistHero({
                 <div className="artist-hero-stat">
                   <span className="hero-stat-value">{formatCompactNumber(playcount)}</span>
                   <span className="hero-stat-label">plays</span>
+                </div>
+              ) : null}
+              {followers ? (
+                <div className="artist-hero-stat">
+                  <span className="hero-stat-value">{formatCompactNumber(followers)}</span>
+                  <span className="hero-stat-label">followers</span>
                 </div>
               ) : null}
             </div>
@@ -5831,6 +5846,7 @@ function DiscoveryArtistView({
         bio={artist.lastfm_bio ?? null}
         listeners={artist.lastfm_listeners ?? null}
         playcount={artist.lastfm_playcount ?? null}
+        followers={artist.followers ?? null}
         sections={groups.map(([label, releases]) => ({ label, owned: 0, total: releases.length }))}
         providerId={providerId}
         source={source}
@@ -5899,13 +5915,18 @@ function CatalogueArtistHero({
   headerToggle: ReactNode;
 }) {
   const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
+  const providerIds = artist.provider_ids ?? {};
   const info = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'lastfm-info', artist.name],
-    queryFn: () => fetchArtistLastfmInfo(artist.name),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'hero-stats', artist.name],
+    queryFn: () =>
+      fetchArtistHeroStats({
+        name: artist.name,
+        spotifyId: providerIds.spotify,
+        deezerId: providerIds.deezer,
+      }),
     enabled: Boolean(artist.name),
     staleTime: 30 * 60_000,
   });
-  const providerIds = artist.provider_ids ?? {};
   // Only Spotify and Deezer expose a popularity ranking at all; for anything
   // else the sidebar falls through to Last.fm by name, exactly like legacy.
   const source = providerIds.spotify ? 'spotify' : providerIds.deezer ? 'deezer' : '';
@@ -5923,6 +5944,7 @@ function CatalogueArtistHero({
       bio={artist.summary || info.data?.bio || null}
       listeners={info.data?.listeners ?? null}
       playcount={info.data?.playcount ?? null}
+      followers={info.data?.followers ?? null}
       sections={[
         countOwned('Albums', artist.albums),
         countOwned('EPs', artist.eps ?? []),
@@ -6869,7 +6891,13 @@ function AlbumBlock({
           />
         </span>
       </div>
-      {open ? <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} /> : null}
+      {/* Always ask; the server decides. Tying this to `unowned` meant a
+          release the user owns nothing of but that is flagged origin='library'
+          — every release a track bookmark created — never fetched its
+          tracklist, so it stayed a one-track album. The endpoint's own guard
+          is a single row read and only calls a provider when the tracklist is
+          genuinely incomplete. */}
+      {open ? <AlbumTrackTable albumId={album.id} resolve onAction={onAction} /> : null}
     </div>
   );
 }

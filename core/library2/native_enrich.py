@@ -680,6 +680,7 @@ def enrich_native_entity_for_service(
 
 def enrich_native_entity_all_services(
     conn, entity_type: str, entity_id: int, *, commit: bool = False,
+    services: Optional[set] = None,
 ) -> Dict[str, str]:
     """Resolve an entity against EVERY provider that supports it.
 
@@ -697,6 +698,12 @@ def enrich_native_entity_all_services(
     resolved: Dict[str, str] = {}
     for service, _label, supported in SERVICES:
         if entity_type not in supported:
+            continue
+        # Only providers this instance has actually configured. Walking an
+        # unconfigured one is not merely wasted: Tidal's client starts an
+        # interactive login, so a background enrich popped an OAuth tab in the
+        # user's browser seconds after they clicked Bookmark.
+        if services is not None and service not in services:
             continue
         try:
             result = enrich_native_entity_for_service(conn, entity_type, entity_id, service)
@@ -720,12 +727,15 @@ def enrich_native_entity_all_services(
     return resolved
 
 
-def schedule_native_entity_enrich(database: Any, targets: List[tuple]) -> Any:
+def schedule_native_entity_enrich(
+    database: Any, targets: List[tuple], *, services: Optional[set] = None,
+) -> Any:
     """Run :func:`enrich_native_entity_all_services` off the caller's thread.
 
     Same contract as :func:`schedule_native_artist_artwork`: the caller
     commits first, the worker opens its own connection, and nothing here can
-    fail the request. ``targets`` is a list of ``(entity_type, entity_id)``.
+    fail the request. ``targets`` is a list of ``(entity_type, entity_id)``;
+    ``services`` restricts the walk to the providers this instance configured.
     """
     import threading
 
@@ -735,7 +745,8 @@ def schedule_native_entity_enrich(database: Any, targets: List[tuple]) -> Any:
             conn = database._get_connection()
             for entity_type, entity_id in targets:
                 enrich_native_entity_all_services(
-                    conn, str(entity_type), int(entity_id), commit=True)
+                    conn, str(entity_type), int(entity_id), commit=True,
+                    services=services)
         except Exception as exc:  # noqa: BLE001
             logger.debug("native entity enrich failed (%s): %s", targets, exc)
         finally:
