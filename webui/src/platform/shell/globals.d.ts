@@ -118,6 +118,30 @@ declare global {
     openArtistArtPicker?: () => void;
     /** library.js — the Download Discography modal. */
     openDiscographyModal?: () => void;
+    /** shared-helpers.js / core.js — similar-artists section + its abort. */
+    loadSimilarArtists?: (artistName: string) => void;
+    cancelSimilarArtistsLoad?: () => void;
+    /** core.js — full-page loading overlay used while a release opens. */
+    showLoadingOverlay?: (message?: string) => void;
+    hideLoadingOverlay?: () => void;
+    /** library.js — quality-enhance eligibility probe (library artists only). */
+    checkArtistEnhanceEligibility?: (artistId: unknown) => void;
+    /** library.js — wires the hero watchlist button to an identity. */
+    initializeLibraryWatchlistButton?: (artistId: unknown, artistName: string) => void;
+    /** downloads.js — the Add to Wishlist modal, opened from a release card. */
+    openAddToWishlistModal?: (
+      album: unknown,
+      artist: unknown,
+      tracks: unknown[],
+      albumType: unknown,
+    ) => Promise<void> | void;
+    /** shared-helpers.js — backfills per-track ownership behind the modal. */
+    lazyLoadTrackOwnership?: (
+      artistName: string,
+      tracks: unknown[],
+      card: unknown,
+      albumName: unknown,
+    ) => void;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;
