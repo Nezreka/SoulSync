@@ -44,6 +44,9 @@ export function normalizeSource(source: string): string | null {
  */
 export interface DiscographyRelease {
   id?: string | number;
+  /** The artist page uses `title`; the download modal's shape uses `name`.
+   *  Both are declared because _classifyReleaseContent reads either. */
+  title?: string;
   name?: string;
   album_type?: string;
   release_date?: string;
