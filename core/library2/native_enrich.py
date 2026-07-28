@@ -622,6 +622,18 @@ def enrich_native_entity_for_service(
         actor="native_enrichment",
     )
 
+    # Release the writer before the provider walk (same rule as
+    # completeness.resolve_tracklist). Holding it here deadlocked this thread
+    # against itself: the provider clients cache their responses in the SAME
+    # database through their own connection, so `fetch_descriptive_metadata`
+    # below opens a second connection and writes — which cannot proceed while
+    # this one still has an open transaction. It then waited out the full 30s
+    # busy timeout, and every other writer in the process waited with it. That
+    # is the "database is locked" storm: notifications, automations, repair
+    # jobs and UI preferences all failing while one enrichment thread blocked
+    # on its own uncommitted match write.
+    conn.commit()
+
     from core.library2.provider_adapters import fetch_descriptive_metadata
     metadata = fetch_descriptive_metadata(
         canonical,
@@ -635,6 +647,7 @@ def enrich_native_entity_for_service(
     image_url = metadata_image or str(hit.get("image") or "").strip() or None
     if canonical == "artist":
         if not image_url:
+            conn.commit()  # artwork lookup is another provider call
             image_url = default_artwork_fetcher(
                 artist_name, {actual_source: provider_id},
             )
@@ -645,6 +658,7 @@ def enrich_native_entity_for_service(
             )
     elif canonical == "album":
         if not image_url:
+            conn.commit()  # artwork lookup is another provider call
             from core.library2.provider_adapters import fetch_artwork_url
             artwork = fetch_artwork_url(
                 "album",

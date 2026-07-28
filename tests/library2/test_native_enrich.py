@@ -1112,3 +1112,68 @@ def test_enrich_all_services_skips_unconfigured_providers(monkeypatch):
         None, "album", 7, services={"spotify", "deezer"})
 
     assert set(calls) == {"spotify", "deezer"}
+
+
+def test_enrichment_releases_the_write_lock_before_calling_a_provider(
+    legacy_db, monkeypatch,
+):
+    """The provider clients cache into the SAME database on their own
+    connection, so holding a write transaction across a provider call
+    deadlocked the enrichment thread against itself: its second connection
+    waited out the full busy timeout while every other writer in the process
+    waited behind it. That is the production "database is locked" storm.
+
+    This reproduces the shape exactly — the fake provider call does what the
+    real Spotify client does, a write through an independent connection — and
+    fails on the previous code with 'database is locked'.
+    """
+    from core.library2.importer import import_legacy_library
+    from core.library2.schema import ensure_library_v2_schema
+
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    ensure_library_v2_schema(conn)
+    try:
+        artist_id = _insert_native_artist(conn, "Deadlock Artist")
+        conn.commit()
+
+        observed = {}
+
+        def _fake_provider(*_args, **_kwargs):
+            # Exactly what a provider client does after answering: cache the
+            # response through its own connection to the same database.
+            other = legacy_db._get_connection()
+            try:
+                other.execute("PRAGMA busy_timeout = 1500")
+                other.execute(
+                    "UPDATE lib2_artists SET summary='cached' WHERE id=?",
+                    (artist_id,),
+                )
+                other.commit()
+                observed["cached"] = True
+            finally:
+                other.close()
+            return None
+
+        monkeypatch.setattr(
+            "core.library2.provider_adapters.fetch_descriptive_metadata",
+            _fake_provider,
+        )
+
+        result = NE.enrich_native_entity_for_service(
+            conn, "artist", artist_id, "spotify",
+            searcher=lambda service, entity, query: [{
+                "id": "SP-DEADLOCK",
+                "name": "Deadlock Artist",
+                "provider": "spotify",
+                "image": "https://img.example/a.jpg",
+            }],
+        )
+
+        assert result["success"] is True
+        assert observed.get("cached") is True, (
+            "the provider's own cache write could not get the write lock — "
+            "the enrichment transaction was still open across the call"
+        )
+    finally:
+        conn.close()
