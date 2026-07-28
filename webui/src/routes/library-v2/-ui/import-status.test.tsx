@@ -11,7 +11,9 @@ import {
   describeLibraryV2ImportCompletion,
   describeLibraryV2ArtworkCacheProgress,
   describeLibraryV2ImportProgress,
+  describeLibraryV2Migration,
   ImportButton,
+  LibraryEmptyState,
 } from './library-v2-page';
 
 function importState(overrides: Partial<LibraryV2ImportState> = {}): LibraryV2ImportState {
@@ -211,5 +213,119 @@ describe('library v2 import progress', () => {
       await screen.findByText('Failed: Legacy database became unavailable'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-import library' })).toBeEnabled();
+  });
+});
+
+describe('automatic migration of an upgrading installation', () => {
+  function bootstrapState(
+    overrides: Partial<NonNullable<LibraryV2ImportState['bootstrap']>> = {},
+  ): NonNullable<LibraryV2ImportState['bootstrap']> {
+    return {
+      status: 'running',
+      attempts: 1,
+      stage: 'albums',
+      current: 40,
+      total: 100,
+      last_error: null,
+      started_at: '2026-07-28T10:00:00+00:00',
+      finished_at: null,
+      heartbeat_at: '2026-07-28T10:00:10+00:00',
+      ...overrides,
+    };
+  }
+
+  it('reports a migration this browser session never started', () => {
+    expect(
+      describeLibraryV2Migration(
+        importState({ running: false, stage: null, bootstrap: bootstrapState() }),
+      ),
+    ).toEqual({ tone: 'busy', text: 'Migrating your library · Importing albums · 40/100 · 40%' });
+  });
+
+  it('says nothing once the migration is done', () => {
+    expect(
+      describeLibraryV2Migration(
+        importState({ running: false, bootstrap: bootstrapState({ status: 'done' }) }),
+      ),
+    ).toBeNull();
+    expect(describeLibraryV2Migration(importState({ running: false }))).toBeNull();
+  });
+
+  it('explains a failed migration and that it keeps retrying', () => {
+    const described = describeLibraryV2Migration(
+      importState({
+        running: false,
+        bootstrap: bootstrapState({ status: 'failed', last_error: 'disk full' }),
+      }),
+    );
+    expect(described?.tone).toBe('error');
+    expect(described?.text).toContain('disk full');
+    expect(described?.text).toContain('retries on its own');
+  });
+
+  it('blocks the Import button while the background migration holds the lock', async () => {
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json(
+          importState({ running: false, stage: null, bootstrap: bootstrapState() }),
+        ),
+      ),
+    );
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ImportButton hasArtists={false} pollIntervalMs={20} />
+      </QueryClientProvider>,
+    );
+
+    const button = await screen.findByRole('button', { name: 'Migrating…' });
+    expect(button).toBeDisabled();
+    expect(
+      await screen.findByText('Migrating your library · Importing albums · 40/100 · 40%'),
+    ).toBeInTheDocument();
+  });
+
+  it('tells an upgrading user why the library still looks empty', async () => {
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json(
+          importState({ running: false, stage: null, bootstrap: bootstrapState() }),
+        ),
+      ),
+    );
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LibraryEmptyState pollIntervalMs={20} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Migrating your library…')).toBeInTheDocument();
+    expect(screen.queryByText('Your library is empty')).not.toBeInTheDocument();
+  });
+
+  it('keeps the plain empty state when there is nothing to migrate', async () => {
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json(
+          importState({
+            running: false,
+            stage: null,
+            bootstrap: bootstrapState({ status: 'waiting_for_source', stage: null }),
+          }),
+        ),
+      ),
+    );
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LibraryEmptyState pollIntervalMs={20} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Your library is empty')).toBeInTheDocument();
   });
 });

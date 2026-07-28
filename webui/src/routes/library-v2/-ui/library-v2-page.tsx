@@ -3891,11 +3891,7 @@ function ArtistIndexView() {
       {artistsQuery.isLoading ? (
         <div className={styles.loading}>Loading…</div>
       ) : isEmpty ? (
-        <div className={styles.emptyState}>
-          <h2>Your v2 library is empty</h2>
-          <p>Import your existing library to populate the new manager.</p>
-          <ImportButton hasArtists={false} prominent />
-        </div>
+        <LibraryEmptyState />
       ) : search.view === 'table' ? (
         <ArtistTable
           artists={artists}
@@ -10018,6 +10014,39 @@ export function describeLibraryV2ImportCompletion(state: LibraryV2ImportState): 
   return `Import complete — ${summary}.`;
 }
 
+/** How the automatic migration is doing, or null when it has nothing to say.
+ *
+ * An upgrading installation migrates itself in the background, so a user can
+ * open this page while it is still running. Without this the page would just
+ * look empty, and a failed migration would look like an empty library forever.
+ */
+export function describeLibraryV2Migration(
+  state: LibraryV2ImportState | undefined,
+): { tone: 'busy' | 'error'; text: string } | null {
+  const bootstrap = state?.bootstrap;
+  if (!bootstrap) return null;
+  if (bootstrap.status === 'running') {
+    const label = IMPORT_STAGE_LABELS[bootstrap.stage ?? ''] ?? 'Migrating your library';
+    const total = Math.max(0, Math.round(bootstrap.total));
+    if (total <= 0) return { tone: 'busy', text: `${label}…` };
+    const current = Math.min(total, Math.max(0, Math.round(bootstrap.current)));
+    const percent = clampPercent((current / total) * 100);
+    return {
+      tone: 'busy',
+      text: `Migrating your library · ${label} · ${current}/${total} · ${percent}%`,
+    };
+  }
+  if (bootstrap.status === 'failed') {
+    return {
+      tone: 'error',
+      text:
+        `Migrating your library failed: ${bootstrap.last_error || 'unknown error'}. ` +
+        'It retries on its own; you can also start it here.',
+    };
+  }
+  return null;
+}
+
 export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportState): string {
   const cache = state.artwork_cache;
   if (!Number.isFinite(cache.total) || cache.total <= 0) {
@@ -10082,6 +10111,43 @@ export function GlobalAutomaticSearchButton() {
   );
 }
 
+/** What an empty library actually means right now.
+ *
+ * On an installation that just upgraded, "empty" almost always means "the
+ * migration has not reached this table yet" — telling that user to press
+ * Import would be wrong (the button is refused while the migration holds the
+ * lock) and alarming. Only a library that genuinely has nothing to migrate
+ * gets the call to action.
+ */
+export function LibraryEmptyState({ pollIntervalMs = 1000 }: { pollIntervalMs?: number }) {
+  const importQuery = useQuery(libraryV2ImportStatusQueryOptions(pollIntervalMs));
+  const bootstrap = importQuery.data?.bootstrap;
+  const migrating = bootstrap?.status === 'running';
+  const failed = bootstrap?.status === 'failed';
+
+  return (
+    <div className={styles.emptyState}>
+      <h2>
+        {migrating
+          ? 'Migrating your library…'
+          : failed
+            ? 'Your library could not be migrated'
+            : 'Your library is empty'}
+      </h2>
+      <p>
+        {migrating
+          ? 'This runs by itself and continues where it left off after a restart. ' +
+            'Artists appear here as they are migrated.'
+          : failed
+            ? 'It retries on its own, and continues from where it stopped rather ' +
+              'than starting over. You can also start it here.'
+            : 'Import your existing library to populate the manager.'}
+      </p>
+      <ImportButton hasArtists={false} prominent />
+    </div>
+  );
+}
+
 export function ImportButton({
   hasArtists,
   prominent,
@@ -10110,7 +10176,11 @@ export function ImportButton({
   const importState = importQuery.data;
   const running = importState?.running === true;
   const artworkRunning = importState?.artwork_cache.running === true;
-  const busy = startImport.isPending || running;
+  // The persisted migration may be running in a worker this browser session
+  // never started, in which case pressing Import would only be refused.
+  const migration = describeLibraryV2Migration(importState);
+  const migrating = migration?.tone === 'busy';
+  const busy = startImport.isPending || running || migrating;
 
   useEffect(() => {
     if (!importState) return;
@@ -10132,17 +10202,23 @@ export function ImportButton({
     ? describeLibraryV2ImportProgress(importState)
     : startImport.isPending
       ? 'Starting import…'
-      : artworkRunning && importState
-        ? `${message ? `${message} ` : ''}${describeLibraryV2ArtworkCacheProgress(importState)}`
-        : importState?.artwork_cache.error
-          ? `${message ? `${message} ` : 'Library ready to browse. '}Artwork caching failed; covers will load on demand.`
-          : message;
+      : migration
+        ? migration.text
+        : artworkRunning && importState
+          ? `${message ? `${message} ` : ''}${describeLibraryV2ArtworkCacheProgress(importState)}`
+          : importState?.artwork_cache.error
+            ? `${message ? `${message} ` : 'Library ready to browse. '}Artwork caching failed; covers will load on demand.`
+            : message;
   const progress =
     running && importState.total > 0
       ? clampPercent((importState.current / importState.total) * 100)
-      : artworkRunning && importState.artwork_cache.total > 0
-        ? clampPercent((importState.artwork_cache.current / importState.artwork_cache.total) * 100)
-        : null;
+      : migrating && importState?.bootstrap && importState.bootstrap.total > 0
+        ? clampPercent((importState.bootstrap.current / importState.bootstrap.total) * 100)
+        : artworkRunning && importState.artwork_cache.total > 0
+          ? clampPercent(
+              (importState.artwork_cache.current / importState.artwork_cache.total) * 100,
+            )
+          : null;
 
   return (
     <span className={styles.importWrap}>
@@ -10151,13 +10227,21 @@ export function ImportButton({
         className={prominent ? styles.btnPrimary : styles.btnGhost}
         disabled={busy || artworkRunning}
         title={
-          artworkRunning
-            ? 'The library is ready; wait for background artwork caching before re-importing'
-            : undefined
+          migrating
+            ? 'Your library is being migrated in the background'
+            : artworkRunning
+              ? 'The library is ready; wait for background artwork caching before re-importing'
+              : undefined
         }
         onClick={() => startImport.mutate()}
       >
-        {busy ? 'Importing…' : hasArtists ? 'Re-import library' : 'Import library'}
+        {migrating
+          ? 'Migrating…'
+          : busy
+            ? 'Importing…'
+            : hasArtists
+              ? 'Re-import library'
+              : 'Import library'}
       </button>
       {statusMessage ? (
         <span className={styles.importStatus} role="status" aria-live="polite">

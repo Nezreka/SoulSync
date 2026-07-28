@@ -496,6 +496,30 @@ export interface LibraryV2ImportState {
   error: string | null;
   finished_at: number | null;
   artwork_cache: LibraryV2ArtworkCacheState;
+  /** Persisted migration state, unlike the fields above which only describe an
+   * import this browser session started. An installation that upgrades has its
+   * library migrated by a background worker, so this is the only thing that
+   * can explain a still-empty page to the user. */
+  bootstrap?: LibraryV2BootstrapState;
+}
+
+export type LibraryV2BootstrapStatus =
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'waiting_for_source';
+
+export interface LibraryV2BootstrapState {
+  status: LibraryV2BootstrapStatus;
+  attempts: number;
+  stage: string | null;
+  current: number;
+  total: number;
+  last_error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  heartbeat_at: string | null;
 }
 
 export interface LibraryV2ArtworkCacheState {
