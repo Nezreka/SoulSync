@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useEnhancedData } from './-artist-detail.use-enhanced';
@@ -50,6 +50,9 @@ describe('useEnhancedData across artists', () => {
     // Synchronous: a stale payload must never render under a new artist, not
     // even for the frame before the new request lands.
     expect(result.current.data).toBeNull();
+    // Let the remaining in-flight request settle inside act(), so its state
+    // update does not land after the test returns (React's act warning).
+    await act(async () => {});
   });
 
   it('retries a FAILED artist once its id changes', async () => {

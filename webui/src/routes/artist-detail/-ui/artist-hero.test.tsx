@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography } from '../-artist-detail.types';
@@ -42,7 +42,28 @@ function countsWith(
 const img = () => document.getElementById('artist-detail-image') as HTMLImageElement;
 const fallback = () => document.getElementById('artist-detail-image-fallback') as HTMLElement;
 
+/**
+ * The hero mounts the top-tracks sidebar, which fetches on sight — two calls,
+ * per render. Without a stub those hit MSW's `onUnhandledRequest: 'error'` and
+ * surface as unhandled rejections: the tests still pass, but vitest warns that
+ * 34 of them "might cause false positive tests", which is a warning worth
+ * keeping at zero.
+ */
+beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: false }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    ),
+  );
+});
+
 afterEach(() => {
+  vi.unstubAllGlobals();
   // NOT document.body.innerHTML = '': anything rendered through BodyPortal
   // lives there, and wiping the body out from under Testing Library's cleanup
   // makes it throw "The node to be removed is not a child of this node".

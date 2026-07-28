@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { emptyStreamCounts } from './-artist-detail.completion';
@@ -95,7 +95,11 @@ describe('useCompletionStream', () => {
       ok: false,
     });
     const { result } = renderHook(() => useCompletionStream('X', DISC, true));
-    await new Promise((r) => setTimeout(r, 30));
+    // The stream's state updates land on a timer, so the wait itself has to
+    // be inside act() — otherwise React warns they were never wrapped.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
     expect(result.current.discography.albums?.[0].owned).toBeNull();
     expect(result.current.streaming).toBe(false);
   });
@@ -111,7 +115,11 @@ describe('useCompletionStream', () => {
     // detect a missing type check. This one carries an id and a status.
     stubStream(['data: {"type":"complete","id":1,"category":"albums","status":"ok"}\n']);
     const { result } = renderHook(() => useCompletionStream('X', DISC, true));
-    await new Promise((r) => setTimeout(r, 30));
+    // The stream's state updates land on a timer, so the wait itself has to
+    // be inside act() — otherwise React warns they were never wrapped.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
     expect(result.current.discography.albums?.[0].owned).toBeNull();
     expect(result.current.counts?.total.albums ?? 0).toBe(0);
   });
@@ -153,6 +161,9 @@ describe('the terminal complete frame', () => {
     expect(result.current.discography).toBe(next);
     expect(result.current.counts).toBeNull();
     expect(result.current.completed).toBe(false);
+    // Let the remaining in-flight request settle inside act(), so its state
+    // update does not land after the test returns (React's act warning).
+    await act(async () => {});
   });
 });
 

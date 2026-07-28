@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -606,6 +606,9 @@ describe('the page header', () => {
     expect(back).toHaveBeenCalled();
     back.mockRestore();
     length.mockRestore();
+    // Let the remaining in-flight request settle inside act(), so its state
+    // update does not land after the test returns (React's act warning).
+    await act(async () => {});
   });
 
   it('falls back to the Library on a COLD load, where back would leave SoulSync', async () => {
@@ -867,9 +870,15 @@ describe('scroll position', () => {
     await screen.findByText('Aphex Twin');
 
     main.scrollTop = 1200;
-    await router.navigate({
-      to: '/artist-detail/$source/$id',
-      params: { source: 'library', id: '99' },
+    // The navigate itself has to be inside act(): the router commits the new
+    // match -- and the page starts the second artist's fetches -- as it
+    // resolves, and those updates are React state.
+    await act(async () => {
+      await router.navigate({
+        to: '/artist-detail/$source/$id',
+        params: { source: 'library', id: '99' },
+      });
+      await new Promise((r) => setTimeout(r, 30));
     });
     await waitFor(() => expect(main.scrollTop).toBe(0));
     main.remove();
