@@ -244,6 +244,14 @@ function EnhancedAlbumWrapper({
                 artist={artist}
                 selected={selected}
                 onSelectedChange={setSelected}
+                onTrackEdited={(trackId, field, value) =>
+                  setAlbum((current) => ({
+                    ...current,
+                    tracks: (current.tracks ?? []).map((t) =>
+                      String(t.id) === String(trackId) ? { ...t, [field]: value } : t,
+                    ),
+                  }))
+                }
               />
             </>
           ) : null}

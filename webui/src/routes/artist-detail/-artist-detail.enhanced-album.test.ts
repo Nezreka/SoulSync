@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   albumEnrichServices,
+  inlineEditDisplay,
+  inlineEditInput,
+  inlineEditUrl,
+  inlineEditValue,
   albumMetaFields,
   albumMetaUpdates,
   deriveMissingTracks,
@@ -546,5 +550,58 @@ describe('normalizeCanonicalTracks', () => {
   it('prefers the source the PAYLOAD reports over the one we asked for', () => {
     const [row] = normalizeCanonicalTracks([{ id: 'a' }], 'spotify', 'al1', 'spotify_free');
     expect(row.source).toBe('spotify_free');
+  });
+});
+
+describe('inlineEditValue', () => {
+  it('parses whole numbers for the track and disc slots', () => {
+    expect(inlineEditValue('track_number', '7.9')).toBe(7);
+    expect(inlineEditValue('disc_number', '2')).toBe(2);
+  });
+
+  it('keeps BPM fractional', () => {
+    expect(inlineEditValue('bpm', '128.5')).toBe(128.5);
+  });
+
+  it('CLEARS a number to null so the field can be emptied', () => {
+    expect(inlineEditValue('bpm', '')).toBeNull();
+    expect(inlineEditValue('track_number', 'abc')).toBeNull();
+  });
+
+  it('floors explicit to 0, never null — the column is a flag', () => {
+    // A flag has no "unknown" state, so an empty input means "not explicit".
+    expect(inlineEditValue('explicit', '')).toBe(0);
+    expect(inlineEditValue('explicit', 'x')).toBe(0);
+    expect(inlineEditValue('explicit', '1')).toBe(1);
+  });
+
+  it('passes text through untouched', () => {
+    expect(inlineEditValue('title', '  Xtal ')).toBe('  Xtal ');
+  });
+});
+
+describe('inlineEditDisplay', () => {
+  it('shows a dash for a cleared value', () => {
+    expect(inlineEditDisplay(null)).toBe('-');
+    expect(inlineEditDisplay('')).toBe('-');
+  });
+
+  it('shows a real zero rather than a dash', () => {
+    expect(inlineEditDisplay(0)).toBe('0');
+  });
+});
+
+describe('inlineEditInput', () => {
+  it('is a number box for the numeric fields only', () => {
+    expect(inlineEditInput('bpm').type).toBe('number');
+    expect(inlineEditInput('title').type).toBe('text');
+    expect(inlineEditInput('title').className).not.toContain('num');
+  });
+});
+
+describe('inlineEditUrl', () => {
+  it('routes each entity to its own endpoint', () => {
+    expect(inlineEditUrl('track', 5)).toBe('/api/library/track/5');
+    expect(inlineEditUrl('album', 9)).toBe('/api/library/album/9');
   });
 });

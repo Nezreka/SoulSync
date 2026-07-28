@@ -748,3 +748,48 @@ export function trackMatchQuery(
   }
   return String(track.title || '');
 }
+
+const NUMERIC_EDIT_FIELDS = ['track_number', 'disc_number', 'bpm'];
+
+export interface InlineEditInput {
+  type: 'number' | 'text';
+  className: string;
+  step?: string;
+  min?: string;
+}
+
+/** The input an inline-edited cell puts up, per field. */
+export function inlineEditInput(field: string): InlineEditInput {
+  const numeric = NUMERIC_EDIT_FIELDS.includes(field);
+  return {
+    type: numeric ? 'number' : 'text',
+    className: `enhanced-inline-input${numeric ? ' num' : ''}`,
+    // BPM is fractional; track and disc numbers are whole and start at 1.
+    step: field === 'bpm' ? '0.1' : numeric ? '1' : undefined,
+    min: field === 'track_number' || field === 'disc_number' ? '1' : undefined,
+  };
+}
+
+/**
+ * The value an inline edit sends.
+ *
+ * An unparseable number becomes NULL rather than NaN — which is how a user
+ * clears a field — except `explicit`, which floors to 0 because the column is
+ * a flag with no "unknown" state.
+ */
+export function inlineEditValue(field: string, raw: string): string | number | null {
+  if (field === 'track_number' || field === 'disc_number') return parseInt(raw, 10) || null;
+  if (field === 'bpm') return parseFloat(raw) || null;
+  if (field === 'explicit') return parseInt(raw, 10) || 0;
+  return raw;
+}
+
+/** What the cell shows once saved; an empty value reads as a dash. */
+export function inlineEditDisplay(value: string | number | null): string {
+  return value !== null && value !== '' ? String(value) : '-';
+}
+
+/** Track edits hit the track endpoint, album edits the album one. */
+export function inlineEditUrl(type: 'track' | 'album', id: unknown): string {
+  return type === 'track' ? `/api/library/track/${id}` : `/api/library/album/${id}`;
+}

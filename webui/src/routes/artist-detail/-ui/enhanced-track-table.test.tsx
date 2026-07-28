@@ -38,6 +38,7 @@ const ALBUM: EnhancedAlbum = {
 
 function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = new Set<string>()) {
   const onSelectedChange = vi.fn();
+  const onTrackEdited = vi.fn();
   const view = render(
     <EnhancedTrackTable
       album={album}
@@ -45,9 +46,10 @@ function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = ne
       artist={ARTIST}
       selected={selected}
       onSelectedChange={onSelectedChange}
+      onTrackEdited={onTrackEdited}
     />,
   );
-  return { onSelectedChange, ...view };
+  return { onSelectedChange, onTrackEdited, ...view };
 }
 
 const ARTIST = { id: 42, name: 'Aphex Twin', thumb_url: 'artist.jpg' };
@@ -412,6 +414,7 @@ describe('row actions', () => {
           artist={ARTIST}
           selected={new Set()}
           onSelectedChange={vi.fn()}
+          onTrackEdited={vi.fn()}
         />
       </div>,
     );

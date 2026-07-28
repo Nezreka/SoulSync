@@ -16,12 +16,15 @@ import {
   trackMatchChips,
   trackMatchQuery,
 } from '../-artist-detail.enhanced-album';
+import { EditableCell } from './editable-cell';
 
 interface Props {
   album: EnhancedAlbum;
   isAdmin: boolean;
   /** Supplies the artist name and id every track action needs. */
   artist: Record<string, unknown> | undefined;
+  /** Applies a saved inline edit to the album in the panel's state. */
+  onTrackEdited: (trackId: unknown, field: string, value: string | number | null) => void;
   /** Track ids currently ticked, owned by the panel so the bulk bar can read them. */
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
@@ -38,7 +41,14 @@ interface Props {
  * a port, so the arrow behaviour is kept and the row order still comes from
  * getAlbumTrackRows.
  */
-export function EnhancedTrackTable({ album, isAdmin, artist, selected, onSelectedChange }: Props) {
+export function EnhancedTrackTable({
+  album,
+  isAdmin,
+  artist,
+  selected,
+  onSelectedChange,
+  onTrackEdited,
+}: Props) {
   const [sort, setSort] = useState<TrackSort | undefined>(undefined);
   const rows = getAlbumTrackRows(album);
 
@@ -114,6 +124,7 @@ export function EnhancedTrackTable({ album, isAdmin, artist, selected, onSelecte
             artist={artist}
             selected={selected.has(String(track.id))}
             onToggle={() => toggleOne(String(track.id))}
+            onEdited={(field, value) => onTrackEdited(track.id, field, value)}
           />
         ))}
       </tbody>
@@ -128,6 +139,7 @@ function TrackRow({
   artist,
   selected,
   onToggle,
+  onEdited,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
@@ -135,6 +147,7 @@ function TrackRow({
   artist: Record<string, unknown> | undefined;
   selected: boolean;
   onToggle: () => void;
+  onEdited: (field: string, value: string | number | null) => void;
 }) {
   const missing = Boolean((track as { _missingExpected?: boolean })._missingExpected);
   const editable = isAdmin && !missing ? ' editable' : '';
@@ -205,14 +218,40 @@ function TrackRow({
       {/* The track NUMBER stays editable on a missing row — it is the slot the
           row claims. The disc and title describe a real file's tags, so those
           two lose `editable` (#1051). */}
-      <td className={`col-num${isAdmin ? ' editable' : ''}`}>
+      <EditableCell
+        className={`col-num${isAdmin ? ' editable' : ''}`}
+        editable={isAdmin}
+        entityType="track"
+        entityId={track.id}
+        field="track_number"
+        value={track.track_number as string | number | null}
+        onSaved={onEdited}
+      >
         {String(track.track_number || '-')}
-      </td>
-      <td className={`col-disc${editable}`}>{String(track.disc_number || '-')}</td>
-      <td className={`col-title${editable}`}>
+      </EditableCell>
+      <EditableCell
+        className={`col-disc${editable}`}
+        editable={Boolean(editable)}
+        entityType="track"
+        entityId={track.id}
+        field="disc_number"
+        value={track.disc_number as string | number | null}
+        onSaved={onEdited}
+      >
+        {String(track.disc_number || '-')}
+      </EditableCell>
+      <EditableCell
+        className={`col-title${editable}`}
+        editable={Boolean(editable)}
+        entityType="track"
+        entityId={track.id}
+        field="title"
+        value={track.title as string | null}
+        onSaved={onEdited}
+      >
         {String(track.title || 'Unknown')}
         {missing ? <span className="enhanced-missing-track-badge">Missing</span> : null}
-      </td>
+      </EditableCell>
 
       <td className="col-duration">{formatDurationMs(track.duration)}</td>
 
@@ -236,7 +275,17 @@ function TrackRow({
         </span>
       </td>
 
-      <td className={`col-bpm${isAdmin ? ' editable' : ''}`}>{String(track.bpm || '-')}</td>
+      <EditableCell
+        className={`col-bpm${isAdmin ? ' editable' : ''}`}
+        editable={isAdmin}
+        entityType="track"
+        entityId={track.id}
+        field="bpm"
+        value={track.bpm as string | number | null}
+        onSaved={onEdited}
+      >
+        {String(track.bpm || '-')}
+      </EditableCell>
 
       <td className="col-path" title={String(track.file_path || '-')}>
         {trackFileName(track)}
