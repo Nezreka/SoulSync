@@ -241,6 +241,7 @@ function EnhancedAlbumWrapper({
               <EnhancedTrackTable
                 album={album}
                 isAdmin={isAdmin}
+                artist={artist}
                 selected={selected}
                 onSelectedChange={setSelected}
               />

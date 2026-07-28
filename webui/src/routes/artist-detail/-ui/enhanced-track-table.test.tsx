@@ -1,5 +1,7 @@
 import { fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createShellBridge } from '@/test/shell-bridge';
 
 import type { EnhancedAlbum } from '../-artist-detail.enhanced';
 
@@ -40,6 +42,7 @@ function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = ne
     <EnhancedTrackTable
       album={album}
       isAdmin={isAdmin}
+      artist={ARTIST}
       selected={selected}
       onSelectedChange={onSelectedChange}
     />,
@@ -47,9 +50,33 @@ function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = ne
   return { onSelectedChange, ...view };
 }
 
+const ARTIST = { id: 42, name: 'Aphex Twin', thumb_url: 'artist.jpg' };
+
 const rows = () => [...document.querySelectorAll('tbody tr')] as HTMLElement[];
 
+const ACTIONS = [
+  'showTagPreview',
+  'analyzeTrackReplayGain',
+  'showTrackSourceInfo',
+  'openReidentifyModal',
+  'showTrackRedownloadModal',
+  'deleteLibraryTrack',
+  'openMissingTrackManageModal',
+  'showReportIssueModal',
+  'openManualMatchModal',
+  '_showMobileTrackActions',
+  'addToQueue',
+  'playNext',
+] as const;
+
+beforeEach(() => {
+  window.SoulSyncWebShellBridge = createShellBridge();
+  for (const action of ACTIONS) window[action] = vi.fn() as never;
+});
+
 afterEach(() => {
+  for (const action of ACTIONS) delete window[action];
+  delete window.SoulSyncWebShellBridge;
   document.body.innerHTML = '';
 });
 
@@ -261,5 +288,172 @@ describe('selection', () => {
     renderTable(ALBUM, true, new Set(['1']));
     expect(rows()[0].className).toContain('selected');
     expect(rows()[1].className).not.toContain('selected');
+  });
+});
+
+describe('row actions', () => {
+  const click = (selector: string, row = 0) =>
+    fireEvent.click(rows()[row].querySelector(selector) as HTMLElement);
+
+  it('plays through the library player with the album and artist names', () => {
+    renderTable();
+    click('.enhanced-play-btn');
+    expect(window.SoulSyncWebShellBridge?.playLibraryTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      '',
+      'Aphex Twin',
+    );
+  });
+
+  it('queues with a library payload, art falling back to the ARTIST thumbnail', () => {
+    renderTable();
+    click('.enhanced-queue-btn');
+    expect(window.addToQueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_library: true,
+        file_path: '/music/Aphex/SAW/01 Xtal.flac',
+        album: 'Unknown Album',
+        artist: 'Aphex Twin',
+        image_url: 'artist.jpg',
+        artist_id: 42,
+        album_id: 7,
+      }),
+    );
+  });
+
+  it('play-next uses playNext, not the plain enqueue', () => {
+    renderTable();
+    click('.enhanced-playnext-btn');
+    expect(window.playNext).toHaveBeenCalled();
+    expect(window.addToQueue).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a plain enqueue when the player has no play-next', () => {
+    delete window.playNext;
+    renderTable();
+    click('.enhanced-playnext-btn');
+    expect(window.addToQueue).toHaveBeenCalled();
+  });
+
+  it('wires each admin action to its own handler', () => {
+    renderTable();
+    click('.enhanced-write-tag-btn');
+    expect(window.showTagPreview).toHaveBeenCalledWith(1);
+
+    click('.enhanced-redownload-btn');
+    expect(window.showTrackRedownloadModal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      ALBUM,
+    );
+
+    click('.enhanced-delete-btn');
+    expect(window.deleteLibraryTrack).toHaveBeenCalledWith(1, 7);
+  });
+
+  it('hands the button element to the two actions that render onto it', () => {
+    renderTable();
+    const rg = rows()[0].querySelector('.enhanced-rg-btn') as HTMLElement;
+    fireEvent.click(rg);
+    expect(window.analyzeTrackReplayGain).toHaveBeenCalledWith(1, rg);
+
+    const info = rows()[0].querySelector('.enhanced-source-info-btn') as HTMLElement;
+    fireEvent.click(info);
+    expect(window.showTrackSourceInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      info,
+    );
+  });
+
+  it('re-identifies with the album art and title for context', () => {
+    renderTable({ ...ALBUM, title: 'SAW 85-92', thumb_url: 'cover.jpg' });
+    click('.enhanced-reidentify-btn');
+    expect(window.openReidentifyModal).toHaveBeenCalledWith(
+      1,
+      'Xtal',
+      'Aphex Twin',
+      'SAW 85-92',
+      'cover.jpg',
+    );
+  });
+
+  it('manages a missing track from either role', () => {
+    renderTable();
+    click('.enhanced-missing-manage-btn', 2);
+    expect(window.openMissingTrackManageModal).toHaveBeenCalledWith(
+      expect.objectContaining({ _missingExpected: true }),
+      ALBUM,
+    );
+
+    document.body.innerHTML = '';
+    renderTable(ALBUM, false);
+    click('.enhanced-missing-manage-btn', 2);
+    expect(window.openMissingTrackManageModal).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a track issue with its ALBUM name too', () => {
+    renderTable(ALBUM, false);
+    click('.enhanced-track-report-btn');
+    expect(window.showReportIssueModal).toHaveBeenCalledWith('track', 1, 'Xtal', 'Aphex Twin', '');
+  });
+
+  it('opens the mobile action popover', () => {
+    renderTable();
+    click('.enhanced-mobile-actions-btn');
+    expect(window._showMobileTrackActions).toHaveBeenCalled();
+  });
+
+  it('does not let an action bubble into the album toggle', () => {
+    const onPanelClick = vi.fn();
+    render(
+      <div onClick={onPanelClick}>
+        <EnhancedTrackTable
+          album={ALBUM}
+          isAdmin
+          artist={ARTIST}
+          selected={new Set()}
+          onSelectedChange={vi.fn()}
+        />
+      </div>,
+    );
+    fireEvent.click(document.querySelector('.enhanced-delete-btn') as HTMLElement);
+    expect(onPanelClick).not.toHaveBeenCalled();
+  });
+});
+
+describe('re-matching a track', () => {
+  it('opens the matcher for the clicked service, with the BARE track title', () => {
+    // The album has a title here on purpose: every service except Bandcamp
+    // searched better on the title alone.
+    renderTable({ ...ALBUM, title: 'SAW 85-92' });
+    fireEvent.click(rows()[0].querySelectorAll('.enhanced-track-match-chip')[1]);
+    expect(window.openManualMatchModal).toHaveBeenCalledWith('track', 1, 'musicbrainz', 'Xtal', 42);
+  });
+
+  it('does not leave a leading space when the album is untitled', () => {
+    renderTable();
+    const chips = rows()[0].querySelectorAll('.enhanced-track-match-chip');
+    fireEvent.click(chips[chips.length - 1]);
+    expect(window.openManualMatchModal).toHaveBeenCalledWith('track', 1, 'bandcamp', 'Xtal', 42);
+  });
+
+  it('sends the ALBUM name alongside the title for Bandcamp only', () => {
+    // Bandcamp searches release pages, where a bare track title is ambiguous
+    // across compilations, remixes and covers.
+    renderTable({ ...ALBUM, title: 'SAW 85-92' });
+    const chips = rows()[0].querySelectorAll('.enhanced-track-match-chip');
+    fireEvent.click(chips[chips.length - 1]);
+    expect(window.openManualMatchModal).toHaveBeenCalledWith(
+      'track',
+      1,
+      'bandcamp',
+      'SAW 85-92 Xtal',
+      42,
+    );
+  });
+
+  it('is inert for a non-admin', () => {
+    renderTable(ALBUM, false);
+    fireEvent.click(rows()[0].querySelectorAll('.enhanced-track-match-chip')[1]);
+    expect(window.openManualMatchModal).not.toHaveBeenCalled();
   });
 });

@@ -701,3 +701,50 @@ export function trackFileName(track: EnhancedTrack): string {
   if ((track as { _missingExpected?: boolean })._missingExpected) return 'Missing from library';
   return path !== '-' ? String(path).split(/[\\/]/).pop() || '-' : '-';
 }
+
+/**
+ * The queue payload for a library track.
+ *
+ * `is_library: true` is what tells the player this is a local file rather than
+ * something to stream, and the art falls back to the ARTIST thumbnail so a
+ * queued track from an album with no cover still shows something.
+ */
+export function queueTrackPayload(
+  track: EnhancedTrack,
+  album: EnhancedAlbum,
+  artist: Record<string, unknown> | undefined,
+) {
+  return {
+    title: track.title || 'Unknown Track',
+    artist: String(artist?.name || '') || 'Unknown Artist',
+    album: album.title || 'Unknown Album',
+    file_path: track.file_path,
+    filename: track.file_path,
+    is_library: true,
+    image_url: album.thumb_url || artist?.thumb_url || null,
+    id: track.id,
+    artist_id: artist?.id ?? null,
+    album_id: album.id,
+    bitrate: track.bitrate,
+    sample_rate: track.sample_rate,
+  };
+}
+
+/**
+ * The default search text when re-matching a TRACK.
+ *
+ * Bandcamp alone gets the album name alongside the title: it searches release
+ * pages, and a bare track title is ambiguous across compilations, remixes and
+ * covers. Every other service takes an id directly and searched better with the
+ * bare title.
+ */
+export function trackMatchQuery(
+  service: string,
+  track: EnhancedTrack,
+  album: EnhancedAlbum,
+): string {
+  if (service === 'bandcamp') {
+    return [album.title, track.title].filter(Boolean).join(' ');
+  }
+  return String(track.title || '');
+}

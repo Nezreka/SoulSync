@@ -160,7 +160,31 @@ declare global {
       entityId: unknown,
       title: string,
       artistName: string,
+      /** Track reports add the album name; album reports omit it. */
+      albumName?: string,
     ) => void;
+    /**
+     * The Enhanced view's per-track actions, still in library.js. The mobile
+     * popover keeps its underscore name: it is a private helper being called
+     * across the boundary until the popover itself is ported.
+     */
+    showTagPreview?: (trackId: unknown) => void;
+    analyzeTrackReplayGain?: (trackId: unknown, button: HTMLElement) => void;
+    showTrackSourceInfo?: (track: unknown, button: HTMLElement) => void;
+    openReidentifyModal?: (
+      trackId: unknown,
+      trackTitle: string,
+      artistName: string,
+      albumTitle: string,
+      albumArt: string,
+    ) => void;
+    showTrackRedownloadModal?: (track: unknown, album: unknown) => void;
+    deleteLibraryTrack?: (trackId: unknown, albumId: unknown) => void;
+    openMissingTrackManageModal?: (track: unknown, album: unknown) => void;
+    _showMobileTrackActions?: (track: unknown, album: unknown) => void;
+    /** media-player.js — the play queue. */
+    addToQueue?: (payload: unknown) => void;
+    playNext?: (payload: unknown) => void;
     /**
      * shared-helpers.js — the download-missing modal. Called directly rather
      * than through the shell bridge because the bridge wrapper fixes the last
