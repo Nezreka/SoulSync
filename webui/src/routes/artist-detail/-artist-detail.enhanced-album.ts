@@ -1,6 +1,6 @@
 import type { EnhancedAlbum, EnhancedTrack } from './-artist-detail.enhanced';
 
-import { formatDurationMs } from './-artist-detail.enhanced';
+import { extractFormat, formatDurationMs } from './-artist-detail.enhanced';
 import { filterJiosaavnEntries } from './-artist-detail.enrichment';
 
 /**
@@ -567,4 +567,137 @@ export function normalizeCanonicalTracks(
       track.track_id ||
       `${source}:${albumSourceId}:${track.disc_number || 1}:${track.track_number || index + 1}`,
   }));
+}
+
+export interface TrackMatchChip {
+  service: string;
+  label: string;
+  matched: boolean;
+  className: string;
+  title: string;
+}
+
+const TRACK_MATCH_SERVICES = [
+  { svc: 'spotify', col: 'spotify_track_id', label: 'SP' },
+  { svc: 'musicbrainz', col: 'musicbrainz_recording_id', label: 'MB' },
+  { svc: 'deezer', col: 'deezer_id', label: 'Dz' },
+  { svc: 'jiosaavn', col: 'jiosaavn_id', label: 'JS' },
+  { svc: 'audiodb', col: 'audiodb_id', label: 'ADB' },
+  { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
+  { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
+  { svc: 'genius', col: 'genius_id', label: 'Gen' },
+  { svc: 'bandcamp', col: 'bandcamp_url', label: 'BC' },
+];
+
+/** A chip per service, matched or not — the gaps are the point. */
+export function trackMatchChips(track: EnhancedTrack): TrackMatchChip[] {
+  return filterJiosaavnEntries(TRACK_MATCH_SERVICES, 'svc').map((service) => {
+    const id = track[service.col];
+    const matched = Boolean(id);
+    return {
+      service: service.svc,
+      label: service.label,
+      matched,
+      className: `enhanced-track-match-chip ${matched ? 'matched' : 'not-found'}`,
+      title: matched ? `${service.svc}: ${id}` : `${service.svc}: no match`,
+    };
+  });
+}
+
+export interface TrackColumn {
+  label: string;
+  cls: string;
+  sortField?: string;
+}
+
+/**
+ * The track table's columns.
+ *
+ * An admin gets a leading select-all cell (not in this list), write-tag and
+ * delete columns; everyone else gets a single report column instead.
+ *
+ * The header's admin `col-delete` does NOT match the body's
+ * `col-track-actions` — verbatim from the vanilla, where the two drifted.
+ */
+export function trackColumns(admin: boolean): TrackColumn[] {
+  return [
+    { label: '', cls: 'col-play' },
+    { label: '#', cls: 'col-num', sortField: 'track_number' },
+    { label: 'Disc', cls: 'col-disc', sortField: 'disc_number' },
+    { label: 'Title', cls: 'col-title', sortField: 'title' },
+    { label: 'Duration', cls: 'col-duration', sortField: 'duration' },
+    { label: 'Format', cls: 'col-format', sortField: 'format' },
+    { label: 'Bitrate', cls: 'col-bitrate', sortField: 'bitrate' },
+    { label: 'BPM', cls: 'col-bpm', sortField: 'bpm' },
+    { label: 'File', cls: 'col-path' },
+    { label: 'Match', cls: 'col-match' },
+    { label: '', cls: 'col-queue' },
+    ...(admin
+      ? [
+          { label: '', cls: 'col-writetag' },
+          { label: '', cls: 'col-delete' },
+        ]
+      : [{ label: '', cls: 'col-report' }]),
+    { label: '', cls: 'col-mobile-actions' },
+  ];
+}
+
+export interface TrackSort {
+  field: string;
+  ascending: boolean;
+}
+
+/** The sort arrow appended to a sorted column's label. */
+export function sortIndicator(column: TrackColumn, sort: TrackSort | undefined): string {
+  if (!sort || sort.field !== column.sortField) return column.label;
+  return `${column.label}${sort.ascending ? ' ▲' : ' ▼'}`;
+}
+
+const NUMERIC_SORT_FIELDS = ['track_number', 'disc_number', 'bpm', 'bitrate', 'duration'];
+
+/**
+ * Sort the album's OWNED tracks, as sortEnhancedTracks did.
+ *
+ * NOTE: this does not change the rendered order. The vanilla sorted
+ * album.tracks and then fed the table from _getEnhancedAlbumTrackRows, which
+ * re-sorts by disc, then track, then title — so a column click updates the
+ * arrow and nothing else. Reproduced verbatim rather than "fixed", because
+ * making the columns actually sort is a behaviour change, not a port. See the
+ * note in enhanced-track-table.tsx.
+ */
+export function sortTracks(
+  tracks: EnhancedTrack[],
+  field: string,
+  ascending: boolean,
+): EnhancedTrack[] {
+  return [...tracks].sort((a, b) => {
+    let valueA: unknown = field === 'format' ? extractFormat(a.file_path) : a[field];
+    let valueB: unknown = field === 'format' ? extractFormat(b.file_path) : b[field];
+
+    // A null always sinks, whichever direction the sort runs.
+    if (valueA == null) return 1;
+    if (valueB == null) return -1;
+
+    if (NUMERIC_SORT_FIELDS.includes(field)) {
+      return ascending ? Number(valueA) - Number(valueB) : Number(valueB) - Number(valueA);
+    }
+    valueA = String(valueA).toLowerCase();
+    valueB = String(valueB).toLowerCase();
+    return ascending
+      ? (valueA as string).localeCompare(valueB as string)
+      : (valueB as string).localeCompare(valueA as string);
+  });
+}
+
+/** 320+ is high, 192+ medium, anything else low. */
+export function bitrateClass(bitrate: unknown): string {
+  const value = Number(bitrate) || 0;
+  return value >= 320 ? 'high' : value >= 192 ? 'medium' : 'low';
+}
+
+/** The base name of the file, or a "missing" note for an unowned row. */
+export function trackFileName(track: EnhancedTrack): string {
+  const path = track.file_path || '-';
+  if ((track as { _missingExpected?: boolean })._missingExpected) return 'Missing from library';
+  return path !== '-' ? String(path).split(/[\\/]/).pop() || '-' : '-';
 }

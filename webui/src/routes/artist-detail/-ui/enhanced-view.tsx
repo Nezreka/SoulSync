@@ -12,6 +12,7 @@ import {
 } from '../-artist-detail.enhanced';
 import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
 import { AlbumMetaRow } from './album-meta-row';
+import { EnhancedTrackTable } from './enhanced-track-table';
 import { ExpandedAlbumHeader } from './expanded-album-header';
 
 interface Props {
@@ -150,6 +151,9 @@ function EnhancedAlbumWrapper({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
+  // Selection is per album, and clears when the panel closes — the vanilla's
+  // shared Set leaked ticks between albums.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   /**
    * A saved edit is applied here rather than refetching the whole artist. The
@@ -173,7 +177,12 @@ function EnhancedAlbumWrapper({
       <div
         className={`enhanced-album-row${expanded ? ' expanded' : ''}`}
         id={`enhanced-album-row-${album.id}`}
-        onClick={() => setExpanded((open) => !open)}
+        onClick={() =>
+          setExpanded((open) => {
+            if (open) setSelected(new Set());
+            return !open;
+          })
+        }
       >
         <span className="enhanced-album-expand-icon">▶</span>
 
@@ -212,8 +221,8 @@ function EnhancedAlbumWrapper({
         className={`enhanced-tracks-panel${expanded ? ' visible' : ''}`}
         id={`enhanced-tracks-panel-${album.id}`}
       >
-        {/* The track table lands in the next slice, with
-            _attachTableDelegation. */}
+        {/* The row interactions — inline edit, play, queue, per-track actions —
+            land in the next slice with _attachTableDelegation. */}
         <div className="enhanced-tracks-panel-inner">
           {expanded ? (
             <>
@@ -228,6 +237,12 @@ function EnhancedAlbumWrapper({
                 album={album}
                 isAdmin={isAdmin}
                 onSaved={(updates) => setAlbum((current) => ({ ...current, ...updates }))}
+              />
+              <EnhancedTrackTable
+                album={album}
+                isAdmin={isAdmin}
+                selected={selected}
+                onSelectedChange={setSelected}
               />
             </>
           ) : null}
