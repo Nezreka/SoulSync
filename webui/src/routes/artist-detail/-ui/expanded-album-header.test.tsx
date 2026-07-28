@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnhancedAlbum } from '../-artist-detail.enhanced';
@@ -49,7 +49,10 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const action of ACTIONS) delete window[action];
-  document.body.innerHTML = '';
+  // NOT document.body.innerHTML = '': anything rendered through BodyPortal
+  // lives there, and wiping the body out from under Testing Library's cleanup
+  // makes it throw "The node to be removed is not a child of this node".
+  cleanup();
 });
 
 describe('the header body', () => {

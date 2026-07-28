@@ -38,6 +38,7 @@ import { useCompletionStream } from '../-artist-detail.use-completion';
 import { useEnhancedData } from '../-artist-detail.use-enhanced';
 import { useGapFill } from '../-artist-detail.use-gap-fill';
 import { clearVanillaArtist, syncVanillaArtist } from '../-artist-detail.vanilla-state';
+import { ArtistDetailBackButton } from './artist-detail-back-button';
 import { ArtistHero } from './artist-hero';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
@@ -263,32 +264,40 @@ export function ArtistDetailPage() {
   // showing an empty shell over an error.
   if (failed) {
     return (
-      <div className="artist-detail-content">
-        <div className="artist-detail-error" id="artist-detail-error">
-          <div className="error-icon">⚠️</div>
-          <h3>Failed to load artist details</h3>
-          <p id="artist-detail-error-message">{errorMessage}</p>
-          <button type="button" className="retry-btn" onClick={() => void query.refetch()}>
-            Retry
-          </button>
+      <>
+        <ArtistDetailBackButton />
+        <div className="artist-detail-content">
+          <div className="artist-detail-error" id="artist-detail-error">
+            <div className="error-icon">⚠️</div>
+            <h3>Failed to load artist details</h3>
+            <p id="artist-detail-error-message">{errorMessage}</p>
+            <button type="button" className="retry-btn" onClick={() => void query.refetch()}>
+              Retry
+            </button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   if (query.isPending || !payload) {
     return (
-      <div className="artist-detail-content">
-        <div className="artist-detail-loading" id="artist-detail-loading">
-          <div className="loading-spinner" />
-          <p>Loading artist discography...</p>
+      <>
+        <ArtistDetailBackButton />
+        <div className="artist-detail-content">
+          <div className="artist-detail-loading" id="artist-detail-loading">
+            <div className="loading-spinner" />
+            <p>Loading artist discography...</p>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
     <>
+      <ArtistDetailBackButton />
+
       <ArtistHero
         artist={payload.artist ?? {}}
         discography={displayed}

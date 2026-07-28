@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { applyMusicBrainzDeclutter, defaultFilterState } from '../-artist-detail.filters';
@@ -32,7 +32,10 @@ const btn = (filter: string, value: string) =>
   document.querySelector(`[data-filter="${filter}"][data-value="${value}"]`) as HTMLElement;
 
 afterEach(() => {
-  document.body.innerHTML = '';
+  // NOT document.body.innerHTML = '': anything rendered through BodyPortal
+  // lives there, and wiping the body out from under Testing Library's cleanup
+  // makes it throw "The node to be removed is not a child of this node".
+  cleanup();
 });
 
 describe('DiscographyFilters markup', () => {

@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { DiscographyRelease } from '../-artist-detail.types';
@@ -24,7 +24,10 @@ function renderSection(
 }
 
 afterEach(() => {
-  document.body.innerHTML = '';
+  // NOT document.body.innerHTML = '': anything rendered through BodyPortal
+  // lives there, and wiping the body out from under Testing Library's cleanup
+  // makes it throw "The node to be removed is not a child of this node".
+  cleanup();
   delete window.observeLazyBackgrounds;
 });
 

@@ -6,6 +6,7 @@ import {
   bulkEditUpdates,
   EMPTY_BULK_EDIT,
 } from '../-artist-detail.enhanced';
+import { BodyPortal } from './portal';
 
 interface Props {
   /** Track ids currently ticked across every open album. */
@@ -46,8 +47,10 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
     }
   };
 
+  // Both the bar and the modal are position:fixed, and the vanilla kept them at
+  // body level for that reason.
   return (
-    <>
+    <BodyPortal>
       <div className={`enhanced-bulk-bar${visible ? ' visible' : ''}`} id="enhanced-bulk-bar">
         <div className="enhanced-bulk-bar-info">
           <span className="enhanced-bulk-bar-count" id="enhanced-bulk-count">
@@ -100,7 +103,7 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
           }}
         />
       ) : null}
-    </>
+    </BodyPortal>
   );
 }
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ArtistDbRecord } from './artist-db-record';
@@ -40,7 +40,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  document.body.innerHTML = '';
+  // NOT document.body.innerHTML = '': these render through a portal, and
+  // wiping the body out from under Testing Library's own cleanup makes it throw
+  // "The node to be removed is not a child of this node". cleanup() unmounts
+  // the tree, which takes the portal with it.
+  cleanup();
 });
 
 describe('the DB Record button', () => {

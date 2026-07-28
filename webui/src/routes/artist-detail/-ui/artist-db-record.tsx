@@ -12,6 +12,7 @@ import {
   recordRows,
   showsDbRecordButton,
 } from '../-artist-detail.db-record';
+import { BodyPortal } from './portal';
 
 interface Props {
   artist: ArtistInfo;
@@ -119,157 +120,159 @@ function ArtistRecordModal({
   const stats = payload ? recordFooterStats(payload) : null;
 
   return (
-    <div
-      id="artist-record-overlay"
-      className={`arec-overlay${visible ? ' visible' : ''}`}
-      // Only a click on the backdrop itself closes; a click that started inside
-      // the card must not.
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="arec-card" role="dialog" aria-label="Artist database record">
-        <div className="arec-header">
-          <div className="arec-title-wrap">
-            <div className="arec-title">
-              <span className="arec-dot" />
-              Artist DB Record
+    <BodyPortal>
+      <div
+        id="artist-record-overlay"
+        className={`arec-overlay${visible ? ' visible' : ''}`}
+        // Only a click on the backdrop itself closes; a click that started inside
+        // the card must not.
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div className="arec-card" role="dialog" aria-label="Artist database record">
+          <div className="arec-header">
+            <div className="arec-title-wrap">
+              <div className="arec-title">
+                <span className="arec-dot" />
+                Artist DB Record
+              </div>
+              <div className="arec-sub" id="arec-sub">
+                {artistName}
+              </div>
             </div>
-            <div className="arec-sub" id="arec-sub">
-              {artistName}
+            <button className="arec-close" id="arec-close" title="Close (Esc)" onClick={onClose}>
+              ×
+            </button>
+          </div>
+
+          <div className="arec-toolbar">
+            <div className="arec-tabs">
+              <button
+                className={`arec-tab${tab === 'fields' ? ' active' : ''}`}
+                data-tab="fields"
+                onClick={() => setTab('fields')}
+              >
+                Fields
+              </button>
+              <button
+                className={`arec-tab${tab === 'json' ? ' active' : ''}`}
+                data-tab="json"
+                onClick={() => setTab('json')}
+              >
+                JSON
+              </button>
+            </div>
+            {/* Hidden with visibility, not display: the toolbar keeps its layout
+                so the action buttons do not shift when you switch tabs. */}
+            <input
+              id="arec-filter"
+              className="arec-filter"
+              type="text"
+              placeholder="filter fields…"
+              autoComplete="off"
+              spellCheck={false}
+              style={{ visibility: tab === 'json' ? 'hidden' : undefined }}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            <div className="arec-actions">
+              <button
+                className="arec-btn"
+                id="arec-copy"
+                onClick={() => {
+                  void copyRecordText(JSON.stringify(record, null, 2));
+                  window.showToast?.('Full record copied as JSON', 'success');
+                }}
+              >
+                Copy JSON
+              </button>
+              <button
+                className="arec-btn"
+                id="arec-download"
+                onClick={() =>
+                  window.showToast?.(`Saved ${downloadRecord(record, artistName)}`, 'success')
+                }
+              >
+                Save .json
+              </button>
             </div>
           </div>
-          <button className="arec-close" id="arec-close" title="Close (Esc)" onClick={onClose}>
-            ×
-          </button>
-        </div>
 
-        <div className="arec-toolbar">
-          <div className="arec-tabs">
-            <button
-              className={`arec-tab${tab === 'fields' ? ' active' : ''}`}
-              data-tab="fields"
-              onClick={() => setTab('fields')}
-            >
-              Fields
-            </button>
-            <button
-              className={`arec-tab${tab === 'json' ? ' active' : ''}`}
-              data-tab="json"
-              onClick={() => setTab('json')}
-            >
-              JSON
-            </button>
-          </div>
-          {/* Hidden with visibility, not display: the toolbar keeps its layout
-              so the action buttons do not shift when you switch tabs. */}
-          <input
-            id="arec-filter"
-            className="arec-filter"
-            type="text"
-            placeholder="filter fields…"
-            autoComplete="off"
-            spellCheck={false}
-            style={{ visibility: tab === 'json' ? 'hidden' : undefined }}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          <div className="arec-actions">
-            <button
-              className="arec-btn"
-              id="arec-copy"
-              onClick={() => {
-                void copyRecordText(JSON.stringify(record, null, 2));
-                window.showToast?.('Full record copied as JSON', 'success');
-              }}
-            >
-              Copy JSON
-            </button>
-            <button
-              className="arec-btn"
-              id="arec-download"
-              onClick={() =>
-                window.showToast?.(`Saved ${downloadRecord(record, artistName)}`, 'success')
-              }
-            >
-              Save .json
-            </button>
-          </div>
-        </div>
-
-        <div className="arec-body" id="arec-body">
-          {error ? (
-            <div className="arec-error">Could not load record: {error}</div>
-          ) : !payload ? (
-            <div className="arec-loading">Loading record…</div>
-          ) : tab === 'json' ? (
-            <pre className="arec-code">
-              {jsonHighlightTokens(record).map((token, index) =>
-                token.className ? (
-                  <span className={token.className} key={index}>
-                    {token.text}
-                  </span>
-                ) : (
-                  token.text
-                ),
-              )}
-            </pre>
-          ) : (
-            <div className="arec-fields">
-              {recordRows(record).map((row) => (
-                <div
-                  className={`arec-row${row.isEmpty ? ' is-empty' : ''}`}
-                  key={row.key}
-                  data-field={row.filterKey}
-                  style={{ display: matchesRecordFilter(row, filter) ? undefined : 'none' }}
-                >
-                  <span className="arec-key">{row.key}</span>
-                  <span className="arec-val">
-                    {row.isEmpty ? (
-                      <span className="arec-null">null</span>
-                    ) : row.isJson ? (
-                      <span className="arec-json">{row.text}</span>
-                    ) : (
-                      row.text
-                    )}
-                  </span>
-                  <button
-                    className="arec-rowcopy"
-                    title="Copy value"
-                    data-copy={row.copyValue}
-                    onClick={() => {
-                      void copyRecordText(row.copyValue);
-                      window.showToast?.('Value copied', 'success');
-                    }}
+          <div className="arec-body" id="arec-body">
+            {error ? (
+              <div className="arec-error">Could not load record: {error}</div>
+            ) : !payload ? (
+              <div className="arec-loading">Loading record…</div>
+            ) : tab === 'json' ? (
+              <pre className="arec-code">
+                {jsonHighlightTokens(record).map((token, index) =>
+                  token.className ? (
+                    <span className={token.className} key={index}>
+                      {token.text}
+                    </span>
+                  ) : (
+                    token.text
+                  ),
+                )}
+              </pre>
+            ) : (
+              <div className="arec-fields">
+                {recordRows(record).map((row) => (
+                  <div
+                    className={`arec-row${row.isEmpty ? ' is-empty' : ''}`}
+                    key={row.key}
+                    data-field={row.filterKey}
+                    style={{ display: matchesRecordFilter(row, filter) ? undefined : 'none' }}
                   >
-                    ⧉
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    <span className="arec-key">{row.key}</span>
+                    <span className="arec-val">
+                      {row.isEmpty ? (
+                        <span className="arec-null">null</span>
+                      ) : row.isJson ? (
+                        <span className="arec-json">{row.text}</span>
+                      ) : (
+                        row.text
+                      )}
+                    </span>
+                    <button
+                      className="arec-rowcopy"
+                      title="Copy value"
+                      data-copy={row.copyValue}
+                      onClick={() => {
+                        void copyRecordText(row.copyValue);
+                        window.showToast?.('Value copied', 'success');
+                      }}
+                    >
+                      ⧉
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-        <div className="arec-footer" id="arec-footer">
-          {stats ? (
-            <>
-              <span>
-                <b>{stats.fields}</b> fields
-              </span>
-              <span>
-                <b>{stats.albums}</b> albums
-              </span>
-              <span>
-                <b>{stats.tracks}</b> tracks
-              </span>
-              <span>
-                <b>{stats.matched}</b> sources matched
-              </span>
-              <span className="arec-id">id {stats.id}</span>
-            </>
-          ) : null}
+          <div className="arec-footer" id="arec-footer">
+            {stats ? (
+              <>
+                <span>
+                  <b>{stats.fields}</b> fields
+                </span>
+                <span>
+                  <b>{stats.albums}</b> albums
+                </span>
+                <span>
+                  <b>{stats.tracks}</b> tracks
+                </span>
+                <span>
+                  <b>{stats.matched}</b> sources matched
+                </span>
+                <span className="arec-id">id {stats.id}</span>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
-    </div>
+    </BodyPortal>
   );
 }

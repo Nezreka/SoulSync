@@ -76,7 +76,11 @@ function renderPage(entry = '/artist-detail/library/42') {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
   const router = createAppRouter({ history, queryClient });
-  return { router, ...render(<AppRouterProvider router={router} queryClient={queryClient} />) };
+  return {
+    router,
+    history,
+    ...render(<AppRouterProvider router={router} queryClient={queryClient} />),
+  };
 }
 
 const LIBRARY = {
@@ -567,5 +571,192 @@ describe('the vanilla page-state bridge', () => {
     // The React page must not depend on the vanilla bundle existing.
     renderPage();
     await screen.findByText('Aphex Twin');
+  });
+});
+
+describe('the page header', () => {
+  it('renders the Back button — it lives in markup the React host replaces', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    const back = document.getElementById('artist-detail-back-btn') as HTMLElement;
+    expect(back).not.toBeNull();
+    expect(back.textContent).toBe('← Back');
+    expect(back.closest('.page-header')).not.toBeNull();
+  });
+
+  it('is there while loading and on failure too', async () => {
+    stubDetail({ success: false, error: 'nope' });
+    renderPage();
+    await screen.findByText('Failed to load artist details');
+    expect(document.getElementById('artist-detail-back-btn')).not.toBeNull();
+  });
+
+  it('goes back through history when there is history to go back to', async () => {
+    const length = vi.spyOn(window.history, 'length', 'get').mockReturnValue(3);
+    const { router } = renderPage();
+    await screen.findByText('Aphex Twin');
+    const back = vi.spyOn(router.history, 'back');
+
+    fireEvent.click(document.getElementById('artist-detail-back-btn') as HTMLElement);
+    expect(back).toHaveBeenCalled();
+    back.mockRestore();
+    length.mockRestore();
+  });
+
+  it('falls back to the Library on a COLD load, where back would leave SoulSync', async () => {
+    const length = vi.spyOn(window.history, 'length', 'get').mockReturnValue(1);
+    const { router, history } = renderPage();
+    await screen.findByText('Aphex Twin');
+    const back = vi.spyOn(router.history, 'back');
+
+    fireEvent.click(document.getElementById('artist-detail-back-btn') as HTMLElement);
+    expect(back).not.toHaveBeenCalled();
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    back.mockRestore();
+    length.mockRestore();
+  });
+});
+
+describe('overlays must escape the hero', () => {
+  // .artist-hero-section sets backdrop-filter, which makes it the CONTAINING
+  // BLOCK for any position:fixed descendant. An overlay rendered inside it has
+  // its inset:0 clamped to the hero box — wrong place, cut off at the top, and
+  // a click anywhere else never reaches the backdrop so it cannot be closed.
+  const escapesHero = (el: Element | null) => {
+    expect(el).not.toBeNull();
+    expect(el?.closest('.artist-hero-section')).toBeNull();
+    expect(el?.parentElement).toBe(document.body);
+  };
+
+  it('portals the DB Record modal to the body', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    fireEvent.click(document.getElementById('artist-db-record-btn') as HTMLElement);
+
+    await waitFor(() => expect(document.getElementById('artist-record-overlay')).not.toBeNull());
+    escapesHero(document.getElementById('artist-record-overlay'));
+  });
+
+  it('closes the DB Record modal on a backdrop click', async () => {
+    // Only reachable once the overlay actually covers the viewport.
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    fireEvent.click(document.getElementById('artist-db-record-btn') as HTMLElement);
+    await waitFor(() => expect(document.getElementById('artist-record-overlay')).not.toBeNull());
+
+    fireEvent.click(document.getElementById('artist-record-overlay') as HTMLElement);
+    await waitFor(() => expect(document.getElementById('artist-record-overlay')).toBeNull());
+  });
+
+  it('portals the bulk bar to the body', async () => {
+    localStorage.setItem('soulsync-library-view-mode:2', 'enhanced');
+    renderPage();
+    await screen.findByText('SAW');
+    escapesHero(document.getElementById('enhanced-bulk-bar'));
+  });
+});
+
+describe('the filter bar actually filters the page', () => {
+  const FULL = {
+    success: true,
+    artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
+    discography: {
+      albums: [
+        { id: 1, title: 'SAW', owned: true },
+        { id: 2, title: 'Live At Wembley', owned: false },
+      ],
+      eps: [{ id: 3, title: 'Digeridoo', owned: false }],
+      singles: [{ id: 4, title: 'On', owned: true }],
+      source: 'spotify',
+    },
+  };
+
+  const shown = () =>
+    [...document.querySelectorAll('.release-card')]
+      .filter((c) => (c as HTMLElement).style.display !== 'none')
+      .map((c) => c.getAttribute('data-album-name'));
+
+  it('drops a whole category when its chip is switched off', async () => {
+    stubDetail(FULL);
+    renderPage();
+    await screen.findByText('SAW');
+    expect(shown()).toContain('Digeridoo');
+
+    fireEvent.click(
+      document.querySelector('[data-filter="category"][data-value="eps"]') as HTMLElement,
+    );
+    await waitFor(() => expect(shown()).not.toContain('Digeridoo'));
+    // The others are untouched — category chips are independent toggles.
+    expect(shown()).toContain('SAW');
+  });
+
+  it('filters by ownership as a single-select', async () => {
+    stubDetail(FULL);
+    renderPage();
+    await screen.findByText('SAW');
+
+    fireEvent.click(
+      document.querySelector('[data-filter="ownership"][data-value="missing"]') as HTMLElement,
+    );
+    await waitFor(() => expect(shown()).not.toContain('SAW'));
+    expect(shown()).toContain('Digeridoo');
+
+    fireEvent.click(
+      document.querySelector('[data-filter="ownership"][data-value="owned"]') as HTMLElement,
+    );
+    await waitFor(() => expect(shown()).toContain('SAW'));
+    expect(shown()).not.toContain('Digeridoo');
+  });
+
+  it('excludes live releases via the content chip', async () => {
+    stubDetail(FULL);
+    renderPage();
+    await screen.findByText('SAW');
+    expect(shown()).toContain('Live At Wembley');
+
+    fireEvent.click(
+      document.querySelector('[data-filter="content"][data-value="live"]') as HTMLElement,
+    );
+    await waitFor(() => expect(shown()).not.toContain('Live At Wembley'));
+  });
+
+  it('+ Other sources loads gap cards, and switching it off removes them', async () => {
+    stubDetail(FULL);
+    gapFillBody = {
+      success: true,
+      gaps: { albums: [{ id: 'g1', title: 'Only On Deezer', gap_source: 'deezer', year: 2001 }] },
+    };
+    renderPage();
+    await screen.findByText('SAW');
+
+    const chip = document.getElementById('gapfill-toggle-btn') as HTMLElement;
+    expect(chip.className).not.toContain('active');
+
+    fireEvent.click(chip);
+    await screen.findByText('Only On Deezer');
+    expect(chip.className).toContain('active');
+    expect(document.querySelector('.gapfill-source-badge')?.textContent).toBe('Deezer');
+
+    fireEvent.click(chip);
+    await waitFor(() => expect(screen.queryByText('Only On Deezer')).toBeNull());
+    expect(chip.className).not.toContain('active');
+  });
+
+  it('the ownership filter applies to gap cards too', async () => {
+    // They arrive owned:false, so a Missing filter must keep them and an Owned
+    // filter must hide them.
+    stubDetail(FULL);
+    gapFillBody = {
+      success: true,
+      gaps: { albums: [{ id: 'g1', title: 'Only On Deezer', gap_source: 'deezer' }] },
+    };
+    localStorage.setItem('discog_gapfill', '1');
+    renderPage();
+    await screen.findByText('Only On Deezer');
+
+    fireEvent.click(
+      document.querySelector('[data-filter="ownership"][data-value="owned"]') as HTMLElement,
+    );
+    await waitFor(() => expect(shown()).not.toContain('Only On Deezer'));
   });
 });

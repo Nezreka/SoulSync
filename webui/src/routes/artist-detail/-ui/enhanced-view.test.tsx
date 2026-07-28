@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { EnhancedView } from './enhanced-view';
@@ -21,7 +21,10 @@ const DATA = {
 };
 
 afterEach(() => {
-  document.body.innerHTML = '';
+  // NOT document.body.innerHTML = '': anything rendered through BodyPortal
+  // lives there, and wiping the body out from under Testing Library's cleanup
+  // makes it throw "The node to be removed is not a child of this node".
+  cleanup();
 });
 
 describe('EnhancedView states', () => {
