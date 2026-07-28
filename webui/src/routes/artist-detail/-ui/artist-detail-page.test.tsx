@@ -760,3 +760,71 @@ describe('the filter bar actually filters the page', () => {
     await waitFor(() => expect(shown()).not.toContain('Only On Deezer'));
   });
 });
+
+describe('Similar Artists', () => {
+  it('renders the section the vanilla loader fills', async () => {
+    // Its markup lived inside #artist-detail-page, which the React host
+    // replaces — so the whole section disappeared and loadSimilarArtists,
+    // which resolves four elements by id, silently did nothing.
+    renderPage();
+    await screen.findByText('Aphex Twin');
+
+    expect(document.getElementById('ad-similar-artists-section')).not.toBeNull();
+    expect(document.getElementById('ad-similar-artists-loading')).not.toBeNull();
+    expect(document.getElementById('ad-similar-artists-error')).not.toBeNull();
+    expect(document.getElementById('ad-similar-artists-bubbles-container')).not.toBeNull();
+    expect(screen.getByText('Similar Artists')).toBeTruthy();
+  });
+
+  it('has the section in the DOM by the time the loader runs', async () => {
+    // Ordering is the whole difference between a populated section and an
+    // empty one.
+    let sectionAtCallTime: Element | null = null;
+    window.loadSimilarArtists = vi.fn(() => {
+      sectionAtCallTime = document.getElementById('ad-similar-artists-section');
+    });
+
+    renderPage();
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalled());
+    expect(sectionAtCallTime).not.toBeNull();
+  });
+
+  it('leaves bubbles the vanilla inserted alone across a re-render', async () => {
+    // React must not reconcile away nodes it did not create.
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    const container = document.getElementById(
+      'ad-similar-artists-bubbles-container',
+    ) as HTMLElement;
+    container.innerHTML = '<a class="similar-artist-bubble">Squarepusher</a>';
+
+    fireEvent.click(
+      document.querySelector('[data-filter="category"][data-value="eps"]') as HTMLElement,
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.querySelector('.similar-artist-bubble')).not.toBeNull();
+  });
+});
+
+describe('the Back button label', () => {
+  type W = { artistDetailLabelStack?: { type: string; pageId?: string; name?: string }[] };
+
+  afterEach(() => {
+    delete (window as W).artistDetailLabelStack;
+  });
+
+  it('names the page you arrived from', async () => {
+    // navigateToArtistDetail pushed this when you came from a vanilla page.
+    (window as W).artistDetailLabelStack = [{ type: 'page', pageId: 'search' }];
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(document.getElementById('artist-detail-back-btn')?.textContent).toBe('← Back to Search');
+  });
+
+  it('is a plain Back on a cold load', async () => {
+    (window as W).artistDetailLabelStack = [];
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(document.getElementById('artist-detail-back-btn')?.textContent).toBe('← Back');
+  });
+});

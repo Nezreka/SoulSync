@@ -244,6 +244,15 @@ const _ARTIST_DETAIL_BACK_LABELS = {
 let _artistDetailLabelStack = [];
 let _artistDetailGoingBack = false;
 
+// Exported for the React artist-detail page, which renders the back button now.
+// Arrivals from a still-vanilla page (search, label detail, enrichment) push
+// onto this stack here, so React has to read the SAME array to label the button
+// "Back to Search" rather than a bare "Back".
+if (typeof window !== 'undefined') {
+    window.artistDetailBackLabels = _ARTIST_DETAIL_BACK_LABELS;
+    window.artistDetailLabelStack = _artistDetailLabelStack;
+}
+
 let artistDetailPageState = {
     isInitialized: false,
     currentArtistId: null,
@@ -388,7 +397,10 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     } else {
         _artistDetailGoingBack = false; // clear any stale flag
         if (currentPage !== 'artist-detail') {
-            _artistDetailLabelStack = []; // fresh chain from a non-artist page
+            // Cleared IN PLACE, not reassigned: window.artistDetailLabelStack
+            // holds this same array for the React page, and swapping the
+            // binding would leave React reading a detached copy.
+            _artistDetailLabelStack.length = 0; // fresh chain from a non-artist page
         }
         if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistName) {
             _artistDetailLabelStack.push({ type: 'artist', name: artistDetailPageState.currentArtistName });

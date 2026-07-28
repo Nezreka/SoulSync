@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -14,6 +14,7 @@ import {
   settleOwnershipForSourceArtist,
   watchlistIdentity,
 } from '../-artist-detail.api';
+import { backButtonLabel, pushArtistOrigin } from '../-artist-detail.back-label';
 import {
   readEnhancedViewMode,
   showsEnhancedToggle,
@@ -43,6 +44,7 @@ import { ArtistHero } from './artist-hero';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
 import { EnhancedView } from './enhanced-view';
+import { SimilarArtistsSection } from './similar-artists-section';
 
 const BUCKETS: DiscographyBucket[] = ['albums', 'eps', 'singles'];
 
@@ -165,6 +167,23 @@ export function ArtistDetailPage() {
   }, [payload, sourceOnly]);
 
   /**
+   * Record an artist → artist hop for the Back label, the way
+   * navigateToArtistDetail did. Recomputed on every artist change so the label
+   * is read AFTER the push, not before.
+   */
+  const previousArtistName = useRef<string | null>(null);
+  const [backLabel, setBackLabel] = useState('← Back');
+  useEffect(() => {
+    const name = payload?.artist?.name ?? null;
+    if (!name) return;
+    if (previousArtistName.current && previousArtistName.current !== name) {
+      pushArtistOrigin(previousArtistName.current);
+    }
+    previousArtistName.current = name;
+    setBackLabel(backButtonLabel());
+  }, [payload?.artist?.name]);
+
+  /**
    * Hand the artist down to the vanilla page state.
    *
    * Artist Radio, the artist art picker and the Download Discography modal all
@@ -194,7 +213,12 @@ export function ArtistDetailPage() {
     }
   }, [payload]);
 
-  /** Fire-and-forget, exactly as the vanilla did — never awaited. */
+  /**
+   * Fire-and-forget, exactly as the vanilla did — but only once the section
+   * this renders is in the DOM. loadSimilarArtists resolves its four elements
+   * by id and returns silently when they are missing, so ordering here is the
+   * difference between a populated section and an empty one.
+   */
   useEffect(() => {
     if (!payload?.artist?.name) return;
     window.cancelSimilarArtistsLoad?.();
@@ -265,7 +289,7 @@ export function ArtistDetailPage() {
   if (failed) {
     return (
       <>
-        <ArtistDetailBackButton />
+        <ArtistDetailBackButton label={backLabel} />
         <div className="artist-detail-content">
           <div className="artist-detail-error" id="artist-detail-error">
             <div className="error-icon">⚠️</div>
@@ -283,7 +307,7 @@ export function ArtistDetailPage() {
   if (query.isPending || !payload) {
     return (
       <>
-        <ArtistDetailBackButton />
+        <ArtistDetailBackButton label={backLabel} />
         <div className="artist-detail-content">
           <div className="artist-detail-loading" id="artist-detail-loading">
             <div className="loading-spinner" />
@@ -296,7 +320,7 @@ export function ArtistDetailPage() {
 
   return (
     <>
-      <ArtistDetailBackButton />
+      <ArtistDetailBackButton label={backLabel} />
 
       <ArtistHero
         artist={payload.artist ?? {}}
@@ -342,6 +366,11 @@ export function ArtistDetailPage() {
               ))}
             </div>
           )}
+
+          {/* Standard view only — the vanilla hid it in Enhanced. Mounted
+              BEFORE loadSimilarArtists can run, or the loader finds no section
+              and bails. */}
+          <SimilarArtistsSection />
         </div>
       </div>
     </>
