@@ -228,6 +228,57 @@ def _journal_previous_file_replaced(context: dict, *, reason: str, message: str 
         return False
 
 
+def _record_replaced_file_path(context: dict, removed_path: str) -> None:
+    """Remember a library file this run physically deleted (dd28-08).
+
+    ``core.library2.autolink`` reads this when it links the replacement, so the
+    catalog row for the deleted file is retired in the same transaction that
+    records the new one — instead of both rows surviving with the *stale* one
+    still flagged primary.
+    """
+    if not removed_path:
+        return
+    try:
+        paths = context.setdefault("_replaced_file_paths", [])
+        if isinstance(paths, list) and removed_path not in paths:
+            paths.append(removed_path)
+    except Exception as exc:  # noqa: BLE001 — bookkeeping cannot block import
+        logger.debug("replaced-path bookkeeping skipped: %s", exc)
+
+
+def _retire_lib2_path_after_redownload(old_path: str, new_path: str) -> None:
+    """Point the lib2 row of a redownloaded track at its new file (dd28-08).
+
+    The redownload hook fires outside the autolink callback for tracks that
+    were already in the catalog, so the retirement has to happen here too.
+    """
+    try:
+        from core.library2.feature import library_v2_enabled
+        from config.settings import config_manager as _cm
+        if not library_v2_enabled(_cm):
+            return
+        from core.library2.track_files import retire_replaced_files
+        from database.music_database import get_database
+
+        conn = get_database()._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT track_id FROM lib2_track_files WHERE path=? LIMIT 1",
+                (old_path,),
+            ).fetchone()
+            if row is None or row[0] is None:
+                return
+            retire_replaced_files(
+                conn, row[0], keep_path=new_path, removed_paths=[old_path],
+                config_manager=_cm,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 — reconciliation stays fail-open
+        logger.debug("lib2 redownload path retirement skipped: %s", exc)
+
+
 def _quality_history_payload(context: dict, actual_quality: str | None) -> dict:
     track_info = context.get("track_info")
     track_info = track_info if isinstance(track_info, dict) else {}
@@ -425,6 +476,8 @@ def import_rejection_reason(context: dict) -> str | None:
         return "rejected by audio guard (incomplete or silent audio)"
     if context.get('_race_guard_failed'):
         return "source file disappeared before import completed"
+    if context.get('_context_failure_msg'):
+        return str(context['_context_failure_msg'])
     return None
 
 
@@ -1252,7 +1305,16 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         has_clean_metadata = get_import_has_clean_metadata(context)
 
         if not artist_context:
+            # dd28-39: returning with no flag set left the outer wrapper with
+            # no ``_final_processed_path`` and no rejection reason, so it logged
+            # "cannot verify, assuming success" and marked the task COMPLETED
+            # while the file sat unimported in the download folder. Name the
+            # failure so both the download path and the manual-import routes
+            # report it.
             logger.error("Post-processing failed: Missing artist context.")
+            context['_context_failure_msg'] = (
+                "no artist context — the download could not be attributed to an artist"
+            )
             return
 
         _junk_artist_names = {'', 'unknown', 'unknown artist', 'various artists', 'none', 'null'}
@@ -1618,6 +1680,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             if os.path.normpath(original_enhance_path) != os.path.normpath(final_path) and os.path.exists(original_enhance_path):
                 try:
                     os.remove(original_enhance_path)
+                    # dd28-08: the new file lands at a DIFFERENT path (new
+                    # extension), so the catalog row for the old one has to be
+                    # retired explicitly — autolink keys on (track_id, path)
+                    # and would otherwise just add a second row.
+                    _record_replaced_file_path(context, original_enhance_path)
                     old_fmt = os.path.splitext(original_enhance_path)[1]
                     new_fmt = os.path.splitext(final_path)[1]
                     logger.info(f"[Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")
@@ -1666,6 +1733,15 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if blasphemy_path:
             context['_final_processed_path'] = blasphemy_path
             context['_quality_fallback_lossy_copy'] = True
+            # dd28-40: with delete_original=False both files are on disk, but
+            # only the lossy copy was ever handed to lib2 — the retained
+            # lossless file read as an orphan, and every later quality/cutoff
+            # evaluation judged the track by its MP3. Register it as a second
+            # file of the same track; ADR-03's primary election prefers
+            # lossless, so it also becomes the file the app acts on.
+            if os.path.normpath(blasphemy_path) != os.path.normpath(final_path) \
+                    and os.path.exists(final_path):
+                context.setdefault('_companion_file_paths', []).append(final_path)
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         cleanup_empty_directories(downloads_path, file_path)
@@ -1999,6 +2075,21 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             return
 
         expected_final_path = context.get('_final_processed_path')
+        if not expected_final_path and context.get('_context_failure_msg'):
+            # dd28-39: an explicit early bail-out, not an unverifiable success.
+            failure_msg = str(context['_context_failure_msg'])
+            logger.error(
+                "Post-processing did not import (task=%s): %s", task_id, failure_msg,
+            )
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = failure_msg
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
         if not expected_final_path:
             logger.info(f"No _final_processed_path in context for task {task_id} — cannot verify, assuming success")
             with tasks_lock:
@@ -2041,6 +2132,11 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     if redownload_ctx.get('delete_old_file') and old_path and os.path.exists(old_path):
                         if os.path.normpath(old_path) != os.path.normpath(expected_final_path):
                             os.remove(old_path)
+                            # dd28-08: the redownload hook used to update only
+                            # the LEGACY tracks.file_path, leaving the lib2 row
+                            # pointing at the file it had just deleted.
+                            _record_replaced_file_path(context, old_path)
+                            _retire_lib2_path_after_redownload(old_path, expected_final_path)
                             logger.info(f"[Redownload] Deleted old file: {old_path}")
                     if lib_track_id and expected_final_path:
                         _rd_db = get_database()

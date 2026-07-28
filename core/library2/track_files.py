@@ -31,6 +31,7 @@ from the schema-ensure step and repairs installs that predate the columns.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Iterable, Optional
 
 from core.quality.lossless import LOSSLESS_FORMATS as _CANONICAL_LOSSLESS
@@ -120,6 +121,29 @@ def primary_file_rows(conn, track_ids: Iterable[int]) -> Dict[int, Dict[str, Any
     return {int(row["track_id"]): dict(row) for row in rows}
 
 
+def writable_file_rows(conn, track_id: int) -> list:
+    """Every file of a track a content write should reach, primary first.
+
+    dd28-38: tags, ReplayGain and lyrics were written only into the primary
+    file (``primary_order(...) LIMIT 1``) while the operation reported plain
+    success — so a deliberate FLAC+MP3 pair silently diverged, and "Write Tags"
+    was not true of the library.  ADR-03 allows several files per track; a
+    metadata write is about the *recording*, so it belongs on all of them.
+
+    Excludes states whose file must not be touched (``deleted``,
+    ``missing_confirmed``, ``quarantined``).
+    """
+    return conn.execute(
+        f"""SELECT id, path, file_state, is_primary, format
+              FROM lib2_track_files
+             WHERE track_id=? AND path IS NOT NULL AND path <> ''
+               AND COALESCE(file_state,'active')
+                   NOT IN ('missing_confirmed','deleted','quarantined')
+             ORDER BY {primary_order()}""",
+        (int(track_id),),
+    ).fetchall()
+
+
 def set_primary_file(conn, track_id: int, file_id: int) -> bool:
     """Explicitly make ``file_id`` the track's primary file.
 
@@ -171,6 +195,76 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
             conn.execute("UPDATE lib2_track_files SET is_primary=1 WHERE id=?",
                          (replacement[0],))
     return True
+
+
+def retire_replaced_files(
+    conn,
+    track_id: int,
+    *,
+    keep_path: str,
+    removed_paths: Iterable[str] = (),
+    config_manager: Any = None,
+) -> int:
+    """Retire this track's file rows whose file the pipeline just replaced.
+
+    dd28-08: a quality upgrade / enhance writes to ``<same stem>.<new ext>``
+    and deletes the original.  Autolink keys on ``(track_id, path)`` and simply
+    INSERTs the new row; the insert trigger only promotes it when the track has
+    no active primary, so the *stale* row kept ``is_primary=1``/``active`` while
+    pointing at a file that no longer exists.  Every lib2 read path — retag,
+    ReplayGain, lyrics, the wishlist mirror, quality evaluation, queue status —
+    then acted on a deleted file, and the track showed two files, until the
+    user happened to run "Refresh & Scan".
+
+    ``removed_paths`` are the paths the pipeline knows it deleted.  Rows are
+    also retired when their file is simply gone from disk — but only when the
+    storage root is healthy, so an unmounted NAS can never mass-retire a
+    library (guide §5).  Returns the number of rows retired.  Does not commit.
+    """
+    from core.library2.paths import missing_path_root_is_healthy, resolve_lib2_path
+
+    def _norm(value: Any) -> str:
+        text = str(value or "").strip()
+        return os.path.normcase(os.path.normpath(text)) if text else ""
+
+    keep = _norm(keep_path)
+    removed = {_norm(p) for p in removed_paths if str(p or "").strip()}
+    removed.discard(keep)
+
+    rows = conn.execute(
+        """SELECT id, path FROM lib2_track_files
+            WHERE track_id=? AND COALESCE(file_state,'active')<>'deleted'""",
+        (int(track_id),),
+    ).fetchall()
+
+    retired = 0
+    for row in rows:
+        stored = row["path"] if isinstance(row, dict) or hasattr(row, "keys") else row[1]
+        file_id = row["id"] if isinstance(row, dict) or hasattr(row, "keys") else row[0]
+        normalized = _norm(stored)
+        if not normalized or normalized == keep:
+            continue
+        if normalized not in removed:
+            # Not an explicitly reported replacement — only retire it if the
+            # file is genuinely gone AND absence is credible. The shared
+            # resolver returns None both for "unmappable" and for "mapped but
+            # absent", so fall back to the stored path for the health check;
+            # an unhealthy root then defers, exactly as it must.
+            try:
+                resolved = resolve_lib2_path(stored, config_manager=config_manager)
+            except Exception:  # noqa: BLE001
+                continue
+            if resolved and os.path.exists(resolved):
+                continue
+            if not missing_path_root_is_healthy(resolved or stored, config_manager):
+                continue
+        if set_file_state(conn, file_id, "deleted"):
+            retired += 1
+            logger.info(
+                "Library v2: retired replaced file row %s (%s) for track %s",
+                file_id, stored, track_id,
+            )
+    return retired
 
 
 def backfill_primary_flags(cursor) -> int:

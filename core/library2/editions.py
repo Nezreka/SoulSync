@@ -323,6 +323,51 @@ def ensure_release_track(cursor: Any, track_row: Any, edition_id: int) -> bool:
     return True
 
 
+def attach_track_to_edition(
+    cursor: Any, track_id: int, *, edition_id: Optional[int] = None,
+) -> bool:
+    """Give one freshly created ``lib2_tracks`` row its edition membership.
+
+    dd28-10: autolink created catalog tracks but never called
+    :func:`ensure_release_track`, so a newly imported track was invisible to
+    every edition-scoped consumer (bundle matching, the acquisition catalog).
+    The only thing that eventually attached it was ``backfill_editions``, which
+    runs at schema-ensure/legacy-import time and pins whatever it finds to
+    ``default_edition_id`` — regardless of which edition was actually
+    downloaded. Because the backfill is idempotent per ``(edition, track)``,
+    that mis-assignment then became permanent.
+
+    Attaching at creation time keeps the default-edition fallback (we usually
+    genuinely do not know the edition) but lets a caller that DOES know pass
+    ``edition_id`` and get it right the first time. Idempotent; does not commit.
+    """
+    # ``_ensure_default_edition``/``ensure_release_track`` read ``lastrowid``,
+    # which only a Cursor exposes — autolink hands us its Connection.
+    if hasattr(cursor, "cursor") and not hasattr(cursor, "lastrowid"):
+        cursor = cursor.cursor()
+    track_row = cursor.execute(
+        """SELECT id, album_id, title, duration, isrc, musicbrainz_id,
+                  spotify_id, disc_number, track_number
+             FROM lib2_tracks WHERE id=?""",
+        (int(track_id),),
+    ).fetchone()
+    if track_row is None or track_row["album_id"] is None:
+        return False
+    if edition_id is None:
+        edition_id = default_edition_id(cursor, track_row["album_id"])
+    if edition_id is None:
+        album_row = cursor.execute(
+            """SELECT id, title, spotify_id, musicbrainz_id, release_date,
+                      expected_track_count, track_count
+                 FROM lib2_albums WHERE id=?""",
+            (track_row["album_id"],),
+        ).fetchone()
+        if album_row is None:
+            return False
+        edition_id = _ensure_default_edition(cursor, album_row)
+    return ensure_release_track(cursor, track_row, int(edition_id))
+
+
 def _review_unverified_canonical_links(cursor: Any) -> int:
     """File a review finding for every canonical link whose pair shares no
     hard identifier — those may well be different recordings with the same
@@ -409,6 +454,7 @@ def backfill_editions(cursor: Any) -> Dict[str, int]:
 
 
 __all__ = [
+    "attach_track_to_edition",
     "backfill_editions",
     "default_edition_id",
     "edition_signature",

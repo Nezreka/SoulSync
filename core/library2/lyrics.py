@@ -65,10 +65,17 @@ def fetch_track_lyrics(
     if not getattr(client, "api", None):
         return {"fetched": False, "error": "LRClib is not enabled"}
 
-    from core.library2.track_files import primary_file_row
+    # dd28-38: an .lrc sidecar is written next to the file it belongs to, so a
+    # track with several files (FLAC + MP3, possibly in different folders)
+    # needs one per file — otherwise only the primary ever gets lyrics while
+    # the operation reports plain success.
+    from core.library2.track_files import writable_file_rows
 
-    file_row = primary_file_row(conn, track_id)
-    stored_path = file_row["path"] if file_row and file_row.get("path") else None
+    file_rows = writable_file_rows(conn, track_id)
+    if not file_rows:
+        return {"fetched": False, "error": "Track has no file"}
+    file_row = file_rows[0]
+    stored_path = file_row["path"]
     if not stored_path:
         return {"fetched": False, "error": "Track has no file"}
 
@@ -110,6 +117,32 @@ def fetch_track_lyrics(
         logger.debug(
             "Failed to rescan file tags after lyrics fetch for %s: %s", resolved, scan_err,
         )
+
+    # dd28-38: same lyrics, next to every other file of this track. A failure
+    # here is logged, never surfaced — the track DID get its lyrics.
+    for sibling in file_rows[1:]:
+        sibling_path = sibling["path"]
+        if not sibling_path:
+            continue
+        try:
+            sibling_resolved = resolve(sibling_path)
+            if not sibling_resolved:
+                continue
+            client.create_lrc_file(
+                sibling_resolved,
+                context["title"],
+                context["artist"],
+                album_name=context["album_title"],
+                duration_seconds=context["duration_seconds"],
+            )
+            from core.library2.tag_cache import read_and_persist_tag_cache
+            read_and_persist_tag_cache(conn, sibling["id"], sibling_resolved)
+            conn.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(
+                "Lyrics for secondary file %s of track %s failed: %s",
+                sibling["id"], track_id, e,
+            )
 
     return {"fetched": True, "error": None}
 

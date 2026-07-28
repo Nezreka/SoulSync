@@ -156,10 +156,20 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
 def track_contexts(conn, track_ids: List[int]) -> List[Dict[str, Any]]:
     """Materialize all DB metadata needed by preview/write before file I/O."""
     contexts: List[Dict[str, Any]] = []
+    from core.library2.track_files import writable_file_rows
     for start in range(0, len(track_ids), MAX_TRACKS):
         for row in _track_rows(conn, track_ids[start:start + MAX_TRACKS]):
             context = dict(row)
             context["db_data"] = _db_data_for_row(conn, row)
+            # dd28-38: a track may legitimately own several files (FLAC + MP3).
+            # The preview stays primary-centric — one diff per track is what
+            # the user reads — but the write has to reach all of them, or
+            # "Write Tags" quietly leaves the secondary file behind.
+            context["sibling_files"] = [
+                {"id": f["id"], "path": f["path"]}
+                for f in writable_file_rows(conn, row["id"])
+                if f["id"] != row["file_id"]
+            ]
             contexts.append(context)
     return contexts
 
@@ -271,6 +281,52 @@ def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any]) -> boo
         conn.close()
 
 
+def _write_sibling_files(database, row: Dict[str, Any], db_data: Dict[str, Any],
+                         *, cover, stats: Dict[str, Any]) -> None:
+    """Apply the same tag write to a track's non-primary files (dd28-38).
+
+    Counted into ``written``/``failed`` like any other file, because from the
+    user's point of view the operation covers the track, not one chosen file.
+    Never raises: a sibling problem must not fail the primary's result.
+    """
+    siblings = row.get("sibling_files") or []
+    if not siblings:
+        return
+    from core.library2.paths import resolve_lib2_path
+    from core.library2.tag_cache import read_tag_snapshot
+    from core.tag_writer import write_tags_to_file
+
+    for sibling in siblings:
+        stored = sibling.get("path")
+        if not stored:
+            continue
+        try:
+            abs_path = resolve_lib2_path(stored)
+            if not abs_path:
+                stats["failed"] += 1
+                stats["errors"].append({
+                    "track_id": row["id"],
+                    "error": f"Secondary file not found on disk: {stored}",
+                })
+                continue
+            result = write_tags_to_file(
+                abs_path, db_data,
+                embed_cover=bool(cover), cover_data=cover,
+            )
+            if result.get("success"):
+                stats["written"] += 1
+                _persist_file_tags(database, sibling["id"], read_tag_snapshot(abs_path))
+            else:
+                stats["failed"] += 1
+                stats["errors"].append({
+                    "track_id": row["id"],
+                    "error": result.get("error") or "secondary write failed",
+                })
+        except Exception as e:  # noqa: BLE001
+            stats["failed"] += 1
+            stats["errors"].append({"track_id": row["id"], "error": str(e)})
+
+
 def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                force_cover: bool = False, progress=None) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
@@ -339,6 +395,13 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                 ):
                     _persist_file_tags(database, row["file_id"], file_tags)
                     stats["skipped"] += 1
+                    # dd28-38: an unchanged primary says nothing about the
+                    # siblings — an MP3 copy added later still needs the write.
+                    _write_sibling_files(
+                        database, row, db_data,
+                        cover=_cover() if embed_cover else None,
+                        stats=stats,
+                    )
                     continue
             cover = _cover() if embed_cover else None
             result = write_tags_to_file(
@@ -354,6 +417,9 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                 stats["failed"] += 1
                 stats["errors"].append({"track_id": row["id"],
                                         "error": result.get("error") or "write failed"})
+            _write_sibling_files(
+                database, row, db_data, cover=cover, stats=stats,
+            )
         except Exception as e:  # noqa: BLE001
             stats["failed"] += 1
             stats["errors"].append({"track_id": row["id"], "error": str(e)})

@@ -199,11 +199,23 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
     provider_id = str(spotify_album_id).strip() if spotify_album_id else None
     namespace = _provider_namespace(provider_id, source)
     key = release_title_key(title)
+    # dd28-09: ``_find_or_create_artist`` happily resolves an ALIAS row, but
+    # the album lookup used to scope to that one artist id. A download booked
+    # on the rōmaji spelling while the album sits under the kanji canonical
+    # therefore created a SECOND lib2_albums row under the alias: the artist
+    # page showed the album twice, the file landed on the duplicate, and the
+    # original stayed fileless-but-monitored, so the wanted projection kept
+    # proposing it for download forever. Searching the whole alias group is
+    # exactly what the alias feature (§24/§40) exists for.
+    from core.library2.artist_aliases import resolve_alias_group
+    scope_ids = resolve_alias_group(conn, artist_id) or [artist_id]
+    placeholders = ",".join("?" for _ in scope_ids)
     rows = conn.execute(
-        """SELECT al.id, al.title, al.spotify_id, al.external_ids
-           FROM lib2_album_artists aa
-           JOIN lib2_albums al ON al.id = aa.album_id WHERE aa.artist_id=?""",
-        (artist_id,),
+        f"""SELECT DISTINCT al.id, al.title, al.spotify_id, al.external_ids
+            FROM lib2_album_artists aa
+            JOIN lib2_albums al ON al.id = aa.album_id
+            WHERE aa.artist_id IN ({placeholders})""",
+        tuple(scope_ids),
     ).fetchall()
     if provider_id:
         for row in rows:
@@ -320,6 +332,15 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
     conn.execute(
         "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position) "
         "VALUES(?,?, 'primary', 0)", (track_id, artist_id))
+    # dd28-10: without an edition row the new track is invisible to every
+    # edition-scoped consumer (bundle matching, acquisition catalog) until the
+    # next schema-ensure backfill happens to run — and that backfill then pins
+    # it to the default edition permanently.
+    try:
+        from core.library2.editions import attach_track_to_edition
+        attach_track_to_edition(conn, track_id)
+    except Exception as exc:  # noqa: BLE001 - never fail track creation
+        logger.debug("edition attachment failed (track %s): %s", track_id, exc)
     return track_id
 
 
@@ -447,6 +468,50 @@ def _fallback_identity(context: Dict[str, Any],
         "track_number": tags.get("track_number"),
         "disc_number": tags.get("disc_number"),
     }
+
+
+def _link_companion_file(conn, track_id: int, file_path: str) -> Optional[int]:
+    """Record an extra on-disk file that belongs to an already-linked track.
+
+    dd28-40: ``create_lossy_copy`` with ``delete_original=False`` leaves BOTH
+    files on disk but only reports the lossy one as ``_final_processed_path``.
+    Without this the lossless original is invisible to lib2 — the orphan
+    detector flags it, and quality/cutoff evaluation permanently judges the
+    track by its MP3. Idempotent per ``(track_id, path)``; does not commit.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return None
+    existing = conn.execute(
+        "SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
+        (track_id, file_path),
+    ).fetchone()
+    if existing:
+        return existing["id"]
+    fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
+    bitrate = sample_rate = bit_depth = tier = None
+    try:
+        from core.imports.file_ops import probe_audio_quality
+        from core.library2.status import quality_tier
+        quality = probe_audio_quality(file_path)
+        if quality:
+            fmt = quality.format or fmt
+            bitrate = quality.bitrate
+            sample_rate = quality.sample_rate
+            bit_depth = quality.bit_depth
+            tier = quality_tier(fmt, bitrate, bit_depth)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("companion quality probe failed (%s): %s", file_path, exc)
+    try:
+        size = os.path.getsize(file_path)
+    except OSError:
+        size = None
+    cur = conn.execute(
+        """INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate,
+               bit_depth, format, quality_tier, import_status)
+           VALUES(?,?,?,?,?,?,?,?, 'imported')""",
+        (track_id, file_path, size, bitrate, sample_rate, bit_depth, fmt, tier),
+    )
+    return cur.lastrowid
 
 
 def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
@@ -632,6 +697,28 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                      verification_status, acoustid_status, pipeline_result_json),
                 )
                 file_id = cur.lastrowid
+            # dd28-40: a retained lossless original next to a generated lossy
+            # copy is a second file of the SAME track, not an orphan.
+            for companion in (context.get("_companion_file_paths") or []):
+                try:
+                    _link_companion_file(conn, track_id, str(companion))
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("companion file link failed (%s): %s", companion, exc)
+            # dd28-08: an upgrade/enhance/redownload writes a NEW path and
+            # deletes the old file. Without this, the stale row stayed
+            # is_primary/active and every lib2 read path kept working against a
+            # file that no longer exists.
+            try:
+                from core.library2.track_files import retire_replaced_files
+                replaced = context.get("_replaced_file_paths") or []
+                retire_replaced_files(
+                    conn, track_id,
+                    keep_path=file_path,
+                    removed_paths=replaced if isinstance(replaced, (list, tuple, set)) else [],
+                    config_manager=config_manager,
+                )
+            except Exception as exc:  # noqa: BLE001 - never fail the link
+                logger.debug("replaced-file retirement failed (track %s): %s", track_id, exc)
             # The album now owns a real file — a provider-only discography row
             # must graduate to the library, or "My Library" (which filters on
             # origin/monitored) would hide an album whose file exists.

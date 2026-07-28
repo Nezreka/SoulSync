@@ -177,36 +177,56 @@ def analyze_track_replaygain(
         def resolve(path: str) -> Optional[str]:
             return resolve_lib2_path(path, config_manager)
 
-    from core.library2.track_files import primary_file_row
+    # dd28-38: gain belongs on every file of the track, not just the primary.
+    # Each file is analyzed on its own — a FLAC and its MP3 transcode do not
+    # have identical loudness, so copying one file's gain to the other would be
+    # a guess. The primary's result is what the caller sees, preserving the
+    # previous single-file contract.
+    from core.library2.track_files import writable_file_rows
 
-    file_row = primary_file_row(conn, track_id)
-    stored_path = file_row["path"] if file_row and file_row.get("path") else None
-    if not stored_path:
+    file_rows = writable_file_rows(conn, track_id)
+    if not file_rows:
         return {"analyzed": False, "track_gain_db": None, "error": "Track has no file"}
-    resolved = resolve(stored_path)
-    if not resolved:
-        return {"analyzed": False, "track_gain_db": None, "error": "File not found on disk"}
-    try:
-        lufs, peak_dbfs = analyze(resolved)
-    except Exception as e:  # noqa: BLE001
-        return {"analyzed": False, "track_gain_db": None, "error": str(e)}
-    track_gain_db = RG_REFERENCE_LUFS - lufs
+
     from core.metadata.common import get_file_lock
 
-    try:
-        with get_file_lock(resolved):
-            write(resolved, track_gain_db, peak_dbfs, None, None)
-
-        # Rescan tags into database cache
-        try:
-            from core.library2.tag_cache import read_and_persist_tag_cache
-            read_and_persist_tag_cache(conn, file_row["id"], resolved)
-            conn.commit()
-        except Exception as scan_err:
-            logger.debug("Failed to rescan file tags after track ReplayGain write for %s: %s", resolved, scan_err)
-    except Exception as e:  # noqa: BLE001
-        return {"analyzed": False, "track_gain_db": None, "error": str(e)}
-    return {"analyzed": True, "track_gain_db": track_gain_db, "error": None}
+    primary_result: Optional[Dict[str, Any]] = None
+    for index, file_row in enumerate(file_rows):
+        stored_path = file_row["path"]
+        outcome: Dict[str, Any]
+        resolved = resolve(stored_path) if stored_path else None
+        if not resolved:
+            outcome = {"analyzed": False, "track_gain_db": None,
+                       "error": "File not found on disk"}
+        else:
+            try:
+                lufs, peak_dbfs = analyze(resolved)
+                track_gain_db = RG_REFERENCE_LUFS - lufs
+                with get_file_lock(resolved):
+                    write(resolved, track_gain_db, peak_dbfs, None, None)
+                try:
+                    from core.library2.tag_cache import read_and_persist_tag_cache
+                    read_and_persist_tag_cache(conn, file_row["id"], resolved)
+                    conn.commit()
+                except Exception as scan_err:
+                    logger.debug(
+                        "Failed to rescan file tags after track ReplayGain write for %s: %s",
+                        resolved, scan_err,
+                    )
+                outcome = {"analyzed": True, "track_gain_db": track_gain_db,
+                           "error": None}
+            except Exception as e:  # noqa: BLE001
+                outcome = {"analyzed": False, "track_gain_db": None, "error": str(e)}
+        if index == 0:
+            primary_result = outcome
+        elif not outcome["analyzed"]:
+            logger.debug(
+                "ReplayGain for secondary file %s of track %s failed: %s",
+                file_row["id"], track_id, outcome["error"],
+            )
+    return primary_result or {
+        "analyzed": False, "track_gain_db": None, "error": "Track has no file",
+    }
 
 
 __all__ = ["analyze_album_replaygain", "analyze_track_replaygain"]
