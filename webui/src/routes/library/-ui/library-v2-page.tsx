@@ -3971,24 +3971,11 @@ function LibrarySectionTabs() {
       >
         Wanted
       </button>
-      <button
-        type="button"
-        className={search.section === 'import-review' ? styles.viewActive : ''}
-        onClick={() =>
-          void navigate({
-            search: (previous) => ({
-              ...previous,
-              section: 'import-review',
-              q: '',
-              artist: undefined,
-              album: undefined,
-              page: 1,
-            }),
-          })
-        }
-      >
-        Import review
-      </button>
+      {/* No Import review entry: the user does not want that surface offered
+          right now (the guide already strikes the standalone /import-review
+          page). The section itself is left in place and still renders for
+          ?section=import-review, so this is one button to put back, not a
+          feature to rebuild. */}
     </div>
   );
 }
