@@ -9,6 +9,7 @@ import {
   releaseYearText,
 } from '../-artist-detail.card';
 import { releaseFlags } from '../-artist-detail.filters';
+import { gapSourceLabel } from '../-artist-detail.gap-fill';
 
 interface Props {
   release: DiscographyRelease;
@@ -34,10 +35,13 @@ export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen }: 
   const bg = releaseBackgroundSrc(release);
   const mbUrl = musicbrainzReleaseUrl(release);
   const releaseId = release.id ?? '';
+  // Gap-fill cards (#1067) live in the real grids; the badge is what marks
+  // them, and it names the source the click will resolve from.
+  const gapSource = release._gap_source ? gapSourceLabel(String(release._gap_source)) : '';
 
   return (
     <div
-      className={releaseCardClassName(release)}
+      className={`${releaseCardClassName(release)}${release._gap_source ? ' gapfill-card' : ''}`}
       data-release-id={String(releaseId)}
       data-album-id={String(releaseId)}
       data-album-name={release.title ?? ''}
@@ -64,6 +68,15 @@ export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen }: 
         </div>
         {year ? <div className="album-card-year">{year}</div> : null}
       </div>
+
+      {gapSource ? (
+        <div
+          className="gapfill-source-badge"
+          title={`Only listed on ${gapSource} — opens and downloads from there`}
+        >
+          {gapSource}
+        </div>
+      ) : null}
 
       {/* Rendered LAST so it sits above the gradient overlay. */}
       {mbUrl ? (

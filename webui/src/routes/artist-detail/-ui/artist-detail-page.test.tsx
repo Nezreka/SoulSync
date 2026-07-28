@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -23,6 +23,7 @@ vi.mock('@/platform/shell/route-manifest', async (importOriginal) => {
 
 let requested: string[] = [];
 let streamFrames: string[] = [];
+let gapFillBody: unknown = { success: true, gaps: {} };
 
 function stubDetail(body: unknown, status = 200) {
   requested = [];
@@ -31,6 +32,12 @@ function stubDetail(body: unknown, status = 200) {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
       requested.push(url);
+      if (url.includes('/discography/gap-fill')) {
+        return new Response(JSON.stringify(gapFillBody), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.includes('/api/library/completion-stream')) {
         const encoder = new TextEncoder();
         let i = 0;
@@ -80,6 +87,8 @@ beforeEach(() => {
   window.initializeLibraryWatchlistButton = vi.fn();
   window.observeLazyBackgrounds = vi.fn();
   streamFrames = [];
+  gapFillBody = { success: true, gaps: {} };
+  localStorage.clear();
   stubDetail(LIBRARY);
 });
 
@@ -274,5 +283,47 @@ describe('ownership completion stream', () => {
     await screen.findByText('X');
     await new Promise((r) => setTimeout(r, 20));
     expect(requested.some((u) => u.includes('completion-stream'))).toBe(false);
+  });
+});
+
+describe('gap-fill (#1067)', () => {
+  it('does not ask for gaps until the chip is on', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(requested.some((u) => u.includes('gap-fill'))).toBe(false);
+  });
+
+  it('merges gap cards into the REAL grids, badged with their source', async () => {
+    // Boulder's live feedback: a separate section felt bolted-on, so gap cards
+    // slot into the Album/EP/Single grids and the badge is what marks them.
+    localStorage.setItem('discog_gapfill', '1');
+    gapFillBody = {
+      success: true,
+      gaps: { albums: [{ id: 'g1', title: 'Only On Deezer', gap_source: 'deezer', year: 2001 }] },
+    };
+    renderPage();
+
+    await screen.findByText('Only On Deezer');
+    const grid = document.getElementById('albums-grid') as HTMLElement;
+    expect(grid.querySelector('.gapfill-card')).not.toBeNull();
+    expect(grid.querySelector('.gapfill-source-badge')?.textContent).toBe('Deezer');
+    // The base release is still there — gap-fill only ever appends.
+    expect(screen.getByText('SAW')).toBeTruthy();
+  });
+
+  it('toggling the chip loads and then removes the gap cards', async () => {
+    gapFillBody = {
+      success: true,
+      gaps: { albums: [{ id: 'g1', title: 'Only On Deezer', gap_source: 'deezer' }] },
+    };
+    renderPage();
+    await screen.findByText('SAW');
+
+    fireEvent.click(document.getElementById('gapfill-toggle-btn') as HTMLElement);
+    await screen.findByText('Only On Deezer');
+
+    fireEvent.click(document.getElementById('gapfill-toggle-btn') as HTMLElement);
+    await waitFor(() => expect(screen.queryByText('Only On Deezer')).toBeNull());
   });
 });

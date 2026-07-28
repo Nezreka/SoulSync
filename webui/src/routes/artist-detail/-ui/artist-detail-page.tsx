@@ -20,6 +20,7 @@ import {
   type DiscographyFilterState,
   isMusicBrainzDiscography,
 } from '../-artist-detail.filters';
+import { mergeGapReleases } from '../-artist-detail.gap-fill';
 import { heroImage } from '../-artist-detail.hero-stats';
 import {
   albumTracksParams,
@@ -29,6 +30,7 @@ import {
   stillCheckingMessage,
 } from '../-artist-detail.open-release';
 import { useCompletionStream } from '../-artist-detail.use-completion';
+import { useGapFill } from '../-artist-detail.use-gap-fill';
 import { ArtistHero } from './artist-hero';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
@@ -80,7 +82,24 @@ export function ArtistDetailPage() {
   );
   const streamed = stream.discography;
 
-  const isMusicBrainz = isMusicBrainzDiscography(streamed.source);
+  /**
+   * Gap-fill (#1067) merges AFTER the ownership stream, never before: gap
+   * releases belong to other sources and must not ride the base artist's
+   * completion-stream payload, so they come in with their own ownership
+   * already resolved.
+   */
+  const gapFill = useGapFill(
+    payload?.artist?.id,
+    payload?.artist?.name,
+    discography.source ?? undefined,
+    streamed,
+  );
+  const displayed = useMemo(
+    () => mergeGapReleases(streamed, gapFill.releases),
+    [streamed, gapFill.releases],
+  );
+
+  const isMusicBrainz = isMusicBrainzDiscography(displayed.source);
 
   /**
    * Filters reset on every artist change (resetDiscographyFilters ran BEFORE
@@ -151,7 +170,7 @@ export function ArtistDetailPage() {
     }
     if (!payload) return;
 
-    const image = heroImage(payload.artist ?? {}, streamed);
+    const image = heroImage(payload.artist ?? {}, displayed);
     const artist = openReleaseArtist(payload, payload.artist?.id, image.primary);
     if (!artist) {
       window.showToast?.('Error: No artist information available', 'error');
@@ -211,7 +230,7 @@ export function ArtistDetailPage() {
     <>
       <ArtistHero
         artist={payload.artist ?? {}}
-        discography={streamed}
+        discography={displayed}
         isSourceArtist={sourceOnly}
         streamCounts={stream.counts}
         streamCompleted={stream.completed}
@@ -220,12 +239,18 @@ export function ArtistDetailPage() {
 
       <div className="artist-detail-content">
         <div className="artist-detail-main" id="artist-detail-main">
-          <DiscographyFilters filters={filters} onChange={setFilters} isSourceArtist={sourceOnly} />
+          <DiscographyFilters
+            filters={filters}
+            onChange={setFilters}
+            isSourceArtist={sourceOnly}
+            gapFillEnabled={gapFill.enabled}
+            onToggleGapFill={gapFill.toggle}
+          />
           {BUCKETS.map((bucket) => (
             <DiscographySection
               key={bucket}
               bucket={bucket}
-              releases={streamed[bucket] ?? []}
+              releases={displayed[bucket] ?? []}
               filters={filters}
               isMusicBrainz={isMusicBrainz}
               isSourceArtist={sourceOnly}

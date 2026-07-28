@@ -127,3 +127,28 @@ describe('ReleaseCard interaction', () => {
     expect(renderCard({ id: 1, title: 'X' }).card.querySelector('.mb-card-icon')).toBeNull();
   });
 });
+
+describe('gap-fill cards (#1067)', () => {
+  const gap = { id: 'g1', title: 'Gap Album', owned: false, _gap_source: 'itunes' };
+
+  it('names the source it will open from', () => {
+    renderCard(gap);
+    const badge = document.querySelector('.gapfill-source-badge') as HTMLElement;
+    expect(badge.textContent).toBe('Apple Music');
+    expect(badge.title).toBe('Only listed on Apple Music — opens and downloads from there');
+  });
+
+  it('carries the gapfill-card class alongside the normal state classes', () => {
+    renderCard(gap);
+    const card = document.querySelector('.release-card') as HTMLElement;
+    expect(card.className).toContain('gapfill-card');
+    // Still a missing card in every other respect.
+    expect(card.className).toContain('missing');
+  });
+
+  it('leaves ordinary cards unbadged', () => {
+    renderCard({ id: 1, title: 'Normal', owned: true });
+    expect(document.querySelector('.gapfill-source-badge')).toBeNull();
+    expect(document.querySelector('.release-card')?.className).not.toContain('gapfill-card');
+  });
+});

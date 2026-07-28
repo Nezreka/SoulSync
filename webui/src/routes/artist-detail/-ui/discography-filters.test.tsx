@@ -4,12 +4,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyMusicBrainzDeclutter, defaultFilterState } from '../-artist-detail.filters';
 import { DiscographyFilters } from './discography-filters';
 
-function renderBar(filters = defaultFilterState(), isSourceArtist = false) {
+function renderBar(filters = defaultFilterState(), isSourceArtist = false, gapFill = false) {
   const onChange = vi.fn();
+  const onToggleGapFill = vi.fn();
   render(
-    <DiscographyFilters filters={filters} onChange={onChange} isSourceArtist={isSourceArtist} />,
+    <DiscographyFilters
+      filters={filters}
+      onChange={onChange}
+      isSourceArtist={isSourceArtist}
+      gapFillEnabled={gapFill}
+      onToggleGapFill={onToggleGapFill}
+    />,
   );
-  return { onChange };
+  return { onChange, onToggleGapFill };
 }
 
 const btn = (filter: string, value: string) =>
@@ -133,6 +140,43 @@ describe('source artists', () => {
 
   it('drops the divider along with the group, not leaving a stray one', () => {
     renderBar(defaultFilterState(), true);
-    expect(document.querySelectorAll('.filter-divider')).toHaveLength(1);
+    // Show | Include | Sources — the Status group and its divider are gone.
+    expect(document.querySelectorAll('.filter-divider')).toHaveLength(2);
+    expect(document.querySelectorAll('.filter-group')).toHaveLength(3);
+  });
+});
+
+describe('the gap-fill chip', () => {
+  it('sits in a Sources group after Status', () => {
+    renderBar();
+    const groups = [...document.querySelectorAll('.filter-group .filter-label')].map(
+      (n) => n.textContent,
+    );
+    expect(groups).toEqual(['Show', 'Include', 'Status', 'Sources']);
+  });
+
+  it('shows for a SOURCE artist too', () => {
+    // Unlike Status, this group keeps a button, so the vanilla's
+    // `:has(.filter-label:only-child)` rule never hides it.
+    renderBar(defaultFilterState(), true);
+    expect(document.getElementById('gapfill-toggle-btn')).not.toBeNull();
+  });
+
+  it('reflects the persisted state in its active class', () => {
+    renderBar(defaultFilterState(), false, true);
+    expect(document.getElementById('gapfill-toggle-btn')?.className).toContain('active');
+  });
+
+  it('is inactive when gap-fill is off', () => {
+    renderBar();
+    expect(document.getElementById('gapfill-toggle-btn')?.className).not.toContain('active');
+  });
+
+  it('toggles on click', () => {
+    const { onToggleGapFill, onChange } = renderBar();
+    fireEvent.click(document.getElementById('gapfill-toggle-btn') as HTMLElement);
+    expect(onToggleGapFill).toHaveBeenCalled();
+    // It is a view option, not a discography filter — filter state is untouched.
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

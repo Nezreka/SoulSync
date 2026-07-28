@@ -7,6 +7,8 @@ interface Props {
   onChange: (next: DiscographyFilterState) => void;
   /** The Status group is library-only — a source artist owns nothing. */
   isSourceArtist: boolean;
+  gapFillEnabled: boolean;
+  onToggleGapFill: () => void;
 }
 
 const CATEGORIES: { value: DiscographyBucket; label: string }[] = [
@@ -29,7 +31,13 @@ const OWNERSHIP: { value: DiscographyFilterState['ownership']; label: string }[]
  *   - category and content are MULTI-toggles; each button flips independently
  *   - ownership is SINGLE-select; picking one clears its siblings
  */
-export function DiscographyFilters({ filters, onChange, isSourceArtist }: Props) {
+export function DiscographyFilters({
+  filters,
+  onChange,
+  isSourceArtist,
+  gapFillEnabled,
+  onToggleGapFill,
+}: Props) {
   const toggleCategory = (value: DiscographyBucket) =>
     onChange({
       ...filters,
@@ -120,6 +128,23 @@ export function DiscographyFilters({ filters, onChange, isSourceArtist }: Props)
           </div>
         </>
       )}
+
+      {/* Rendered for source artists too: unlike Status, this group keeps a
+          button so the vanilla's `:has(.filter-label:only-child)` rule never
+          hides it, and other sources are exactly what a source artist has. */}
+      <div className="filter-divider" />
+      <div className="filter-group">
+        <span className="filter-label">Sources</span>
+        <button
+          type="button"
+          className={cls(gapFillEnabled)}
+          id="gapfill-toggle-btn"
+          title="Also list releases your other metadata sources know about — shown in the sections below with a source badge (#1067)"
+          onClick={onToggleGapFill}
+        >
+          + Other sources
+        </button>
+      </div>
     </div>
   );
 }
