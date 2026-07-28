@@ -251,7 +251,8 @@ def _superseded_ids(conn, rows: List[Dict[str, Any]]) -> set:
     rows with no ordering check at all. Rather than serializing the whole
     drain behind one stuck entity, drop the rows that are provably obsolete.
     """
-    keys: Dict[tuple, int] = {}
+    pending: list[tuple[int, tuple]] = []
+    families: set[str] = set()
     for row in rows:
         try:
             key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
@@ -259,40 +260,34 @@ def _superseded_ids(conn, rows: List[Dict[str, Any]]) -> set:
             key = None
         if key is None:
             continue
-        keys.setdefault(key, row["id"])
-    if not keys:
+        pending.append((row["id"], key))
+        families.add(key[0])
+    if not pending:
         return set()
-    obsolete = set()
-    for row in rows:
+
+    # One pass over the candidate rows instead of a query per pending row: the
+    # newest id per entity is all that matters, and a drain batch is small.
+    lowest_pending = min(row_id for row_id, _ in pending)
+    newest_by_key: Dict[tuple, int] = {}
+    ops = sorted({op for family in families for op in _SIBLING_OPS[family]})
+    marks = ",".join("?" for _ in ops)
+    for candidate in conn.execute(
+        f"""SELECT id, op, payload FROM lib2_mirror_outbox
+             WHERE id > ? AND op IN ({marks}) ORDER BY id""",
+        (lowest_pending, *ops),
+    ):
         try:
-            data = json.loads(row["payload"] or "{}")
+            key = _entity_key(candidate["op"], json.loads(candidate["payload"] or "{}"))
         except (TypeError, ValueError):
             continue
-        key = _entity_key(row["op"], data)
         if key is None:
             continue
-        newer = conn.execute(
-            """SELECT 1 FROM lib2_mirror_outbox
-                WHERE id > ? AND op IN (?, ?) LIMIT 1""",
-            (row["id"], *_SIBLING_OPS[key[0]]),
-        ).fetchall()
-        if not newer:
-            continue
-        # Confirm the newer row really targets the same entity — the op-family
-        # filter above is only an index-friendly prefilter.
-        for candidate in conn.execute(
-            """SELECT id, op, payload FROM lib2_mirror_outbox
-                WHERE id > ? AND op IN (?, ?) ORDER BY id""",
-            (row["id"], *_SIBLING_OPS[key[0]]),
-        ):
-            try:
-                candidate_data = json.loads(candidate["payload"] or "{}")
-            except (TypeError, ValueError):
-                continue
-            if _entity_key(candidate["op"], candidate_data) == key:
-                obsolete.add(row["id"])
-                break
-    return obsolete
+        newest_by_key[key] = max(newest_by_key.get(key, 0), int(candidate["id"]))
+
+    return {
+        row_id for row_id, key in pending
+        if newest_by_key.get(key, 0) > row_id
+    }
 
 
 _SIBLING_OPS = {

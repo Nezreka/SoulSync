@@ -197,6 +197,50 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
     return True
 
 
+def _absence_is_credible(stored: str, keep_path: str, config_manager: Any) -> bool:
+    """Whether a stored path being absent really means the file is gone.
+
+    Deliberately narrow.  ``resolve_lib2_path`` returns ``None`` both for "this
+    path cannot be mapped into this container" and for "mapped fine, but the
+    file is not there" — so absence alone proves nothing, and a media-server
+    path on a correctly configured install would otherwise look exactly like a
+    deleted file (the same trap as dd28-19).
+
+    Two conditions must hold:
+
+    1. the row lives in the SAME directory as the file we are keeping — which
+       is the entire shape of the replacement this function exists for
+       (``<same stem>.<new extension>``); and
+    2. that directory genuinely resolves and exists, so its contents are
+       observable right now.
+
+    Anything else is left alone for the scanners, which have the whole-library
+    context needed to judge it.
+    """
+    from core.library2.paths import resolve_lib2_directory, resolve_lib2_path
+
+    stored_text = str(stored or "").strip()
+    keep_text = str(keep_path or "").strip()
+    if not stored_text or not keep_text:
+        return False
+    stored_dir = os.path.dirname(stored_text.replace("\\", "/"))
+    keep_dir = os.path.dirname(keep_text.replace("\\", "/"))
+    if not stored_dir or os.path.normcase(stored_dir) != os.path.normcase(keep_dir):
+        return False
+    try:
+        resolved_dir = resolve_lib2_directory(stored_text, config_manager)
+        if not resolved_dir:
+            return False
+        resolved = resolve_lib2_path(stored_text, config_manager=config_manager)
+    except Exception:  # noqa: BLE001
+        return False
+    if resolved and os.path.exists(resolved):
+        return False
+    return not os.path.exists(
+        os.path.join(resolved_dir, os.path.basename(stored_text))
+    )
+
+
 def retire_replaced_files(
     conn,
     track_id: int,
@@ -216,12 +260,12 @@ def retire_replaced_files(
     then acted on a deleted file, and the track showed two files, until the
     user happened to run "Refresh & Scan".
 
-    ``removed_paths`` are the paths the pipeline knows it deleted.  Rows are
-    also retired when their file is simply gone from disk — but only when the
-    storage root is healthy, so an unmounted NAS can never mass-retire a
-    library (guide §5).  Returns the number of rows retired.  Does not commit.
+    ``removed_paths`` are the paths the pipeline knows it deleted — those are
+    retired unconditionally, because the caller just deleted them.  A row whose
+    file is merely *absent* is retired only under the narrow conditions in
+    :func:`_absence_is_credible` below; guide §5 forbids concluding a miss from
+    an unhealthy root.  Returns the number of rows retired.  Does not commit.
     """
-    from core.library2.paths import missing_path_root_is_healthy, resolve_lib2_path
 
     def _norm(value: Any) -> str:
         text = str(value or "").strip()
@@ -244,20 +288,10 @@ def retire_replaced_files(
         normalized = _norm(stored)
         if not normalized or normalized == keep:
             continue
-        if normalized not in removed:
-            # Not an explicitly reported replacement — only retire it if the
-            # file is genuinely gone AND absence is credible. The shared
-            # resolver returns None both for "unmappable" and for "mapped but
-            # absent", so fall back to the stored path for the health check;
-            # an unhealthy root then defers, exactly as it must.
-            try:
-                resolved = resolve_lib2_path(stored, config_manager=config_manager)
-            except Exception:  # noqa: BLE001
-                continue
-            if resolved and os.path.exists(resolved):
-                continue
-            if not missing_path_root_is_healthy(resolved or stored, config_manager):
-                continue
+        if normalized not in removed and not _absence_is_credible(
+            stored, keep_path, config_manager,
+        ):
+            continue
         if set_file_state(conn, file_id, "deleted"):
             retired += 1
             logger.info(

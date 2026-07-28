@@ -132,6 +132,51 @@ def test_a_vanished_file_under_a_healthy_root_is_retired(imported_conn, track_id
     ).fetchone()[0] == "deleted"
 
 
+def test_an_unmappable_media_server_path_is_left_alone(imported_conn, track_id, tmp_path):
+    """A stored path this container cannot map is not evidence of deletion.
+
+    ``resolve_lib2_path`` answers None for BOTH "cannot be mapped here" and
+    "mapped, but absent" — so a media-server path on a correctly configured
+    install would look exactly like a deleted file. That is the dd28-19 trap;
+    only a sibling in the SAME, observable directory counts.
+    """
+    keep = str(tmp_path / "New.flac")
+    open(keep, "wb").close()
+    media_server_path = "/data/music/Artist/Album/Old.flac"
+    _add_file(imported_conn, track_id, keep, fmt="flac")
+    old_id = _add_file(imported_conn, track_id, media_server_path, fmt="flac")
+    imported_conn.commit()
+
+    retired = retire_replaced_files(imported_conn, track_id, keep_path=keep)
+
+    assert retired == 0
+    assert imported_conn.execute(
+        "SELECT COALESCE(file_state,'active') FROM lib2_track_files WHERE id=?", (old_id,)
+    ).fetchone()[0] == "active"
+
+
+def test_an_explicitly_deleted_path_is_retired_wherever_it_lives(
+    imported_conn, track_id, tmp_path,
+):
+    """The caller just deleted it — no inference needed, so no restrictions."""
+    keep = str(tmp_path / "New.flac")
+    open(keep, "wb").close()
+    elsewhere = "/data/music/Artist/Album/Old.flac"
+    _add_file(imported_conn, track_id, keep, fmt="flac")
+    old_id = _add_file(imported_conn, track_id, elsewhere, fmt="flac")
+    imported_conn.commit()
+
+    retired = retire_replaced_files(
+        imported_conn, track_id, keep_path=keep, removed_paths=[elsewhere],
+    )
+    imported_conn.commit()
+
+    assert retired == 1
+    assert imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id=?", (old_id,)
+    ).fetchone()[0] == "deleted"
+
+
 # --------------------------------------------------------------------------
 # dd28-09
 # --------------------------------------------------------------------------
