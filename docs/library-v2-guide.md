@@ -35,6 +35,15 @@ Rollback und Dual-Write-Grenzen ausdrücklich beschrieben und getestet sein.
 Ein Feature-Flag darf niemals dazu führen, dass Repair still gar nichts tut
 und „keine Findings“ fälschlich wie „alles sauber“ aussieht.
 
+Seit dem Cutover vom 28. Juli 2026 ist das Opt-in beendet: Library V2 **ist**
+die Library, liegt unter `/library` und hat keine parallele Alt-Oberfläche mehr
+(Status §43). Die Legacy-Tabellen bleiben davon unberührt — sie sind weiterhin
+die Quelle der Migration und die Projektionsfläche für den Media-Server. Wer
+aktualisiert, muss deshalb ohne jede Bedienhandlung migriert werden: Der
+Bootstrap läuft von selbst, setzt nach einem Abbruch an seinem Checkpoint auf
+und sagt der Oberfläche, dass er läuft. Eine Library, die während der Migration
+leer aussieht und dem Nutzer nicht erklärt warum, gilt als Fehler.
+
 ### 1.1 Produktziel
 
 Library V2 stellt einen zusammenhängenden Katalog und eine verständliche
@@ -415,6 +424,12 @@ ein Kandidat Track oder Album-Bundle ist.
   entfernt; Remix/Live/Remaster bleiben eigene Entities.
 - Ein Import ist erst abgeschlossen, wenn Disk, V2, Legacy-/Media-Projektion,
   Runtime und Acquisition entweder synchron oder explizit fehlgeschlagen sind.
+- Ein fortgesetzter Legacy→V2-Import läuft unter der **Run-ID des
+  abgebrochenen Versuchs** weiter. Der Importer löst am Ende jede
+  legacy-eigene Zeile ab, die dieser Lauf nicht gesehen hat; mit frischer
+  Run-ID würde ein Resume also genau das entwerten, was der abgestürzte
+  Versuch bereits migriert hat. Ein Resume-Checkpoint gilt außerdem nur,
+  solange das Quell-Watermark unverändert ist.
 - **Import-Review UI gestrichen (Entscheidung 27. Juli 2026):** Die eigenständige `Import Review`-Oberfläche (`/import-review`) wurde für diese PR gestrichen und aus den aktiven Routen entfernt. Automatisierte Importe laufen direkt durch die gemeinsame Post-Processing-Pipeline. *(Hinweis für den nächsten Chat: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
 - **Reorganize All bei geänderten Einstellungs-Templates:** Wenn die Ordner- oder Dateinamenstruktur in den Einstellungen geändert wird, evaluiert `Reorganize All` (`core/reorganize_runner.py` & `core/library_reorganize.py`) alle verwalteten `lib2_track_files` gegen die neuen Pfad-Templates (per-run Config-Auflösung), erstellt vorab einen atomaren Verschiebeplan (Preview), verifiziert die Storage-Root-Gesundheit, führt physische Move-/Rename-Operationen durch und synchronisiert atomar `lib2_track_files.path`, Legacy-Pfadreferenzen (`tracks.file_path`), Media-Server-Projektionen und die `library_history`. *(Hinweis für den nächsten Chat: Vor der Umsetzung selbstständig im Code recherchieren und bei Unklarheiten gezielt Gegenfragen an den Nutzer stellen!)*
 

@@ -2195,3 +2195,103 @@ Artist-Kopf).
 Discovery → Bookmark → V2-Artist) sowie der Geschwindigkeitsvergleich der
 Cover in `All Releases` gegen die Legacy-Ansicht. Die physische Löschung der
 alten Library ist damit freigegeben, aber nicht Teil dieses Änderungssatzes.
+
+---
+
+## 43. Library V2 wird die Library — Cutover und Löschung der alten Oberfläche (28. Juli 2026)
+
+Auftrag des Nutzers: die alte Library verschwindet vollständig aus dem
+Frontend, Library V2 heißt und liegt fortan schlicht „Library", das Opt-in
+entfällt, und wer aktualisiert, bekommt eine Migration, die von allein läuft
+und nach einem Abbruch weitermacht statt neu anzufangen.
+
+Die Arbeit liegt auf dem Zweig `library-legacy-removal` (Kopie von
+`library-overhaul`), damit die eigentlichen Features auf `library-overhaul`
+weiter testbar bleiben. Die beiden Migrations-Commits sind bereits nach
+`library-overhaul` übernommen, weil sie nichts entfernen; die Löschung bleibt
+bis zur Freigabe auf dem Zweig.
+
+### 43.1 Migration einer aktualisierenden Installation
+
+| # | Befund | Status | Umsetzung |
+|---|---|---|---|
+| mig-01 | Ein Absturz mitten in der Migration begann beim nächsten Start wieder beim ersten Artist | Implemented | Jeder Batch-Heartbeat schreibt zusätzlich die committete Walk-Position (`resume_stage`, `resume_rowid`, `resume_run_id`); der nächste Versuch setzt dort auf. Nach den drei Walks rückt der Checkpoint auf `finalizing` vor, damit ein Abbruch in der Nachbereitung die Quelltabellen nicht erneut abläuft |
+| mig-02 | Ein Resume hätte die bereits migrierten Zeilen entwertet | Implemented | `ResumePoint.run_id`: Der Importer ist ein Snapshot-Reconciler — er löst jede Legacy-Zeile ab, die *dieser* Lauf nicht gesehen hat. Ein Resume mit frischer Run-ID hätte alles vom abgestürzten Versuch Migrierte von seiner Legacy-ID getrennt und beim nächsten Lauf als Dublette neu importiert. Ein Test hält genau diesen Schaden fest |
+| mig-03 | Ein Checkpoint über eine veränderte Quelle ist bedeutungslos | Implemented | `resume_point_for` vergleicht das beim Claim gestempelte `resume_watermark` mit dem aktuellen; nach einem Media-Server-Scan startet der Lauf sauber neu |
+| mig-04 | Nach einem Neustart blockierte der tote Claim des Vorgängerprozesses bis zu zehn Minuten | Implemented | `reclaim_abandoned_claim`: SoulSync läuft mit genau einem Anwendungsprozess (`workers = 1`), also kann ein Claim, dessen Heartbeat älter ist als der Start dieses Prozesses, keinem lebenden Importer gehören. Der Checkpoint bleibt dabei erhalten |
+| mig-05 | Auf einer frischen Installation beendete sich der Autostart-Thread endgültig | Implemented | `should_stop_autostart`: `waiting_for_source` ist Erfolg *ohne* Migration; nur eine tatsächlich migrierte Library beendet die Schleife. Vorher erreichte der erste Media-Server-Scan `lib2_*` erst nach dem nächsten Neustart |
+| mig-06 | Tracklist-, Tag- und Artwork-Precache hingen allein am Import-Knopf | Implemented | `core/library2/post_import.py` — beide Aufrufer (Knopf und Autostart) teilen sich dieselbe Kette, jede Stufe best effort. Eine Installation, die sich selbst migriert hat, bekam vorher Zeilen, aber keine aufgelösten Tracklisten, keine Tag-Fakten und kein Artwork |
+| mig-07 | Die Seite konnte eine laufende Hintergrundmigration nicht benennen | Implemented | Der Statusendpunkt trug den persistierten Bootstrap-Zustand längst, der Client ignorierte ihn. Leerzustand, Import-Knopf und Fortschrittsanzeige sprechen jetzt von „Migrating your library", der Knopf sperrt sich, solange die Migration den Claim hält, und ein Fehlschlag wird mit seinem Grund genannt |
+
+### 43.2 Cutover der Oberfläche
+
+| Thema | Entscheidung | Begründung |
+|---|---|---|
+| Route | `/library` ist die V2-Seite; `/library-v2` bleibt als Weiterleitung mit vollständigem Query-String | Wer die Seite im Opt-in benutzt hat, hat `/library-v2` in Lesezeichen, History und offenen Tabs |
+| Verzeichnis vs. Dateinamen | `src/routes/library-v2/` → `src/routes/library/`, die Dateien darin behalten ihre `-library-v2.*`-Namen | Rund 60 Module umzubenennen hätte den Cutover in Rauschen begraben, ohne Verhalten zu ändern; die internen Namen sieht kein Nutzer |
+| Berechtigung | Schlicht `library` | Der Sonderfall, der `library-v2` die `library`-Berechtigung erben ließ, entfällt. `library-v2` bleibt als Alias in `LEGACY_PROFILE_PAGE_ALIASES`, damit ein alter persistierter Wert nicht auf eine unbekannte Seite zeigt |
+| Sidebar | Ein Eintrag statt zweier, ohne Feature-Probe | `revealLibraryV2NavIfEnabled` und der versteckte zweite Eintrag sind ersatzlos weg |
+
+### 43.3 Was aus `library.js` weiterlebt
+
+`webui/static/library-shared.js` (447 Zeilen statt 10.185). Es enthält
+ausschließlich, was von *anderen* Seiten benutzt wird: `_esc`,
+`playLibraryTrack`, `navigateToArtistDetail` und den Dialog „Manual Library
+Match", der von der Sync- und der Tools-Seite geöffnet wird.
+
+`navigateToArtistDetail` ist auf vier Zeilen geschrumpft: Der ganze
+Legacy-Seitenzustand (Label-Stack, Reload-Wächter) beschrieb eine Seite, die es
+nicht mehr gibt; die Route `/artist-detail/:source/:id` löst der React-Router
+ohnehin in die Library auf.
+
+Mitgelöscht, weil ihr einziger Einstieg im entfernten Markup lag: die
+Sidebar-Breadcrumb, die Library-Download-Bubbles in `shared-helpers.js`, die
+Hover-Hilfe auf Library-DOM-IDs und die Tour-Schritte (die Tour beschreibt die
+Library jetzt vom Sidebar-Eintrag aus — eine React-Seite mit gehashten
+Klassennamen bietet nichts Stabiles zum Anheften).
+
+### 43.4 Verlorene Funktionen
+
+| Funktion | Verbleib |
+|---|---|
+| Re-identify (#889) | Geparkt in `docs/legacy-parked/reidentify/`, ausdrücklich zum Nachbauen in V2 vorgemerkt. Backend (`/api/reidentify/*`, `core/imports/rematch_*.py`) läuft unverändert weiter |
+| Artist „Enhance Quality" | Geparkt in `docs/legacy-parked/artist-enhance-quality/`. Offene Produktfrage: V2 löst dasselbe über Quality-Profile mit Cutoff plus Automatic Search |
+| „Write Artist Image" (#572) | Ebenda. Steht in Spannung zu Guide §2.1 (Media-Server-Unabhängigkeit) — ein Nachbau wäre ein bewusster Export-Knopf |
+| Watch All Unwatched | Ersatzlos; V2 hat Bulk-Monitoring |
+| Artist-Export (JSON/CSV/Text) | Ersatzlos |
+| A-Z-Sprungselektor | Ersatzlos; ausdrückliches Nicht-Ziel (Guide §1.2) |
+
+### 43.5 `style.css` bleibt unangetastet
+
+Die Video-Library und die Label-Seite verwenden die Klassen der
+Musik-Library weiter (`library-artists-grid`, `alphabet-selector`,
+`library-search-input`, `library-pagination`, `library-artist-watchlist-btn`
+…), und die V2-Discovery-Ansicht wurde bewusst auf ihnen gebaut (§42). Totes
+CSS schadet nicht; ein Aufräumen wäre eine eigene, gezielt zu verifizierende
+Arbeit.
+
+### 43.6 Verifikation
+
+- Backend: `tests/library2`, `tests/imports`, `tests/acquisition`,
+  `tests/wishlist` — 2.405 bestanden, 3 übersprungen. 27 neue Tests in
+  `tests/library2/test_bootstrap_resume.py` (Resume über Stages und Zeilen,
+  Run-ID-Schutz mit beiden Richtungen, Watermark-Invalidierung, Reclaim,
+  Post-Import-Hook, Autostart-Abbruchbedingung).
+- Frontend: vollständige Suite 342 Tests in 54 Dateien bestanden (12 neue:
+  Migrationsanzeige, Leerzustand, `/library-v2`-Weiterleitung mit
+  Suchparametern); `oxfmt --check` und `oxlint --type-check` ohne neue
+  Befunde (zwei Warnungen bestanden schon auf sauberem HEAD); Production
+  Build erfolgreich.
+- Reale Anwendung (laufender `dev.py`, Chromium): `/library` rendert die
+  V2-Seite mit aktivem Sidebar-Eintrag, `/library-v2?section=wanted` leitet
+  unter Erhalt der Parameter weiter, ein Provider-Artist landet weiter im
+  Discovery-Modus mit reichem Kopf, „Manual Library Match" öffnet aus Sync,
+  und Search/Watchlist/Sync/Tools/Stats/Dashboard laden ohne einen einzigen
+  JS-Fehler.
+- Bewusst ersetzt statt repariert: die Tests, die `/library-v2` als Ziel
+  festhielten, pinnten genau das, was dieser Cutover verschiebt (Guide §6
+  Regel 6).
+
+**Offen:** ein Durchlauf gegen eine Kopie der Produktiv-DB — insbesondere ein
+Neustart mitten in der Migration auf einer großen Library, um den
+Resume-Checkpoint unter realer Datenmenge zu belegen.
