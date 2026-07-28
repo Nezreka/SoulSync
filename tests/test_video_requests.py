@@ -69,8 +69,9 @@ def test_member_files_and_sees_only_their_own(app_db):
     assert len(rows) == 1 and rows[0]["requester_name"] == "Kid" and rows[0]["note"] == "please!"
 
 
-def test_approve_movie_lands_on_the_wishlist(app_db):
+def test_approve_movie_lands_on_the_wishlist(app_db, video_wishlist_forensics):
     client, db, persona = app_db
+    video_wishlist_forensics.arm(db)
     _as_member(persona)
     rid = client.post("/api/video/requests",
                       json={"kind": "movie", "tmdb_id": 603, "title": "The Matrix",
@@ -107,12 +108,14 @@ def test_approve_movie_lands_on_the_wishlist(app_db):
         raise AssertionError(
             "approve said %r but wishlist_counts()=%r\n"
             "  request rows   : %r          <- kind here decides movie-vs-show branch\n"
-            "  wishlist rows  : %r          <- empty + approved => inserted then removed\n"
+            "  wishlist rows  : %r\n"
             "  watchlist rows : %r          <- populated => the SHOW branch ran\n"
             "  db path        : %s\n"
-            "  fixture db %s / api._video_db %s / same object: %s"
+            "  fixture db %s / api._video_db %s / same object: %s\n"
+            "%s"
             % (out, counts, rq, wl, wa, db.database_path,
-               hex(id(db)), hex(id(videoapi._video_db)), db is videoapi._video_db))
+               hex(id(db)), hex(id(videoapi._video_db)), db is videoapi._video_db,
+               video_wishlist_forensics(db, "approve said %r" % out)))
     assert counts.get("movie") == 1
     req = db.get_video_request(rid)
     assert req["status"] == "approved" and req["admin_response"] == "enjoy"
