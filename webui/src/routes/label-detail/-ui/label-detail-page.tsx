@@ -11,6 +11,7 @@ import {
   emptyStateText,
   filterCounts,
   releaseKey,
+  releaseListKey,
   visibleReleases,
 } from '../-label-detail.helpers';
 import { openLabelRelease } from '../-label-detail.open-release';
@@ -107,7 +108,11 @@ export function LabelDetailPage({ labelId, labelName }: { labelId: string; label
   const showEmpty = firstPageIn && !catalog.error && rows.length === 0;
 
   return (
-    <div className="page label-detail-page">
+    // NOT className="page": .page is display:none until the shell adds .active,
+    // and the shell only does that for legacy pages it owns. A React page
+    // renders inside #webui-react-root and must style itself — copying the
+    // vanilla's class list wholesale hid this entire page.
+    <div className="label-detail-page">
       <div className="page-shell label-detail-container">
         <button
           className="label-detail-back"
@@ -164,9 +169,9 @@ export function LabelDetailPage({ labelId, labelName }: { labelId: string; label
         ) : null}
 
         <div className="label-release-grid" id="label-detail-grid">
-          {rows.map((release) => (
+          {rows.map((release, index) => (
             <LabelReleaseCard
-              key={releaseKey(release)}
+              key={releaseListKey(release, index)}
               release={release}
               owned={catalog.owned}
               checked={catalog.checked}

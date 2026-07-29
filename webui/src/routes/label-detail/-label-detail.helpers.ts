@@ -21,6 +21,22 @@ export function releaseKey(release: LabelRelease | undefined | null): string {
   return `${(release?.artist || '').toLowerCase()}||${(release?.album || '').toLowerCase()}`;
 }
 
+/**
+ * The REACT LIST key, which is not the ownership key.
+ *
+ * releaseKey is artist||album on purpose — ownership is per album, so two
+ * pressings of one record share it. A label catalog legitimately lists both
+ * (Sub Pop carries Seaweed / Despised twice), and React requires list keys to
+ * be unique or it may omit or duplicate children and leak state between them.
+ *
+ * Prefers the release-group id, which distinguishes real re-releases; falls
+ * back to position, which is stable for a given filter+sort pass.
+ */
+export function releaseListKey(release: LabelRelease, index: number): string {
+  const distinct = release.release_group_id || release.release_id;
+  return distinct ? `${releaseKey(release)}::${distinct}` : `${releaseKey(release)}::#${index}`;
+}
+
 /** `_normStr` — the looser form, used ONLY to pick a match out of search results. */
 export function normalizeForMatch(value: unknown): string {
   return String(value || '')

@@ -36,7 +36,7 @@ HOOK = "label-detail-page"
 
 
 def test_the_page_still_renders_the_class_the_stylesheet_targets():
-    assert f'className="page {HOOK}"' in _PAGE, (
+    assert f'className="{HOOK}"' in _PAGE, (
         f"the page no longer renders className={HOOK!r}, so every rule scoped to it is "
         f"dead — the hero, the toolbar and the full-bleed release cards all lose their "
         f"styling silently"
