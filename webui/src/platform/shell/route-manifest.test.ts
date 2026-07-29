@@ -60,6 +60,7 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('automations')?.kind).toBe('react');
     expect(getShellRouteByPageId('library')?.kind).toBe('react');
     expect(getShellRouteByPageId('artist-detail')?.kind).toBe('react');
+    expect(getShellRouteByPageId('label-detail')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'watchlist',
       'wishlist',
@@ -67,6 +68,7 @@ describe('shellRouteManifest', () => {
       'import',
       'library',
       'artist-detail',
+      'label-detail',
       'stats',
       'issues',
     ]);

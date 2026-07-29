@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { LabelRelease } from './-label-detail.types';
 
+import { LABEL_PAGE_SIZE } from './-label-detail.api';
 import {
   catalogMetaLine,
   coverUrl,
@@ -177,28 +176,27 @@ describe('ownershipOverlay', () => {
   });
 });
 
-describe('parity with static/label-detail.js', () => {
-  const vanilla = readFileSync(resolve(process.cwd(), 'static/label-detail.js'), 'utf8');
+describe('values recorded from static/label-detail.js before it was deleted', () => {
+  // These three were differential checks against the vanilla source while both
+  // existed. The vanilla page is gone in this same PR, so the values it held
+  // are pinned here with their provenance — losing the check entirely would
+  // let them drift silently, and they are all shared with the BACKEND.
 
-  it('keeps the vanilla page size', () => {
-    // The port must page in the same 60s or "has_more" arrives at different
-    // boundaries than the backend was tuned for.
-    expect(vanilla).toContain('const PAGE_SIZE = 60;');
+  it('pages in 60s, as the endpoint was tuned for', () => {
+    // label-detail.js: `const PAGE_SIZE = 60;`
+    expect(LABEL_PAGE_SIZE).toBe(60);
   });
 
-  it('keeps the cache-bust token in step with the vanilla', () => {
-    // Both hit the same server-side cache; bumping one without the other
-    // leaves half the app pinned to a stale 302.
-    const token = /cb=(\d+)/.exec(vanilla)?.[1];
-    expect(token).toBeTruthy();
-    expect(coverUrl({ artist: 'x' })).toContain(`cb=${token}`);
+  it('keeps the cover cache-bust token', () => {
+    // label-detail.js: `p.push('cb=2')` — an earlier build cached the 302 for a
+    // day and pinned a dead Cover Art Archive target. Bump it (here) if that
+    // ever needs breaking again.
+    expect(coverUrl({ artist: 'x' })).toContain('cb=2');
   });
 
-  it('keeps the ownership key definition identical', () => {
-    // Read the vanilla's own expression rather than restating it: this is the
-    // one string that has to agree, and it is easy to "tidy" apart.
-    expect(vanilla).toContain(
-      "const _key = (r) => `${(r.artist || '').toLowerCase()}||${(r.album || '').toLowerCase()}`;",
-    );
+  it('keeps the ownership key shape the library-check response is matched on', () => {
+    // label-detail.js:
+    //   const _key = (r) => `${(r.artist || '').toLowerCase()}||${(r.album || '').toLowerCase()}`;
+    expect(releaseKey({ artist: 'Aphex Twin', album: 'Drukqs' })).toBe('aphex twin||drukqs');
   });
 });
