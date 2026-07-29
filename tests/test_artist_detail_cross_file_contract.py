@@ -39,18 +39,23 @@ _LIBRARY_JS = (_STATIC / "library.js").read_text(encoding="utf-8")
 _CONTRACT = {
     "_esc": {
         "stats-automations.js", "auto-sync.js", "discover.js",
-        "pages-extra.js", "label-detail.js", "wishlist-tools.js",
+        "pages-extra.js", "wishlist-tools.js",
     },
     "playLibraryTrack": {
         "stats-automations.js", "shell-bridge.js", "downloads.js",
         "enrichment.js", "search.js",
     },
     "navigateToArtistDetail": {
-        "label-detail.js", "shell-bridge.js", "enrichment.js", "search.js",
+        "shell-bridge.js", "enrichment.js", "search.js",
     },
     "artistDetailPageState": {"stats-automations.js"},
     "_updateSidebarLibraryBreadcrumb": {"shell-bridge.js"},
-    "_handoffLibrarySearchToEnhancedSearch": {"label-detail.js"},
+    # label-detail.js was this one's only consumer. The coupling did not go
+    # away with it — the React label page calls the same global as its
+    # no-modal fallback — so it is recorded where it lives now.
+    "_handoffLibrarySearchToEnhancedSearch": {
+        "src/routes/label-detail/-label-detail.open-release.ts",
+    },
 }
 
 
@@ -101,7 +106,11 @@ def test_every_recorded_consumer_still_uses_it(name, consumers):
     contract shrinks DELIBERATELY rather than the entry quietly going stale."""
     still_using = set()
     for filename in consumers:
-        path = _STATIC / filename
+        # A bare name is a vanilla script; a path is a React module. Pages that
+        # move to React keep their coupling to library.js — recording it here
+        # rather than deleting the entry is what stops the port quietly
+        # dropping a guard.
+        path = (_STATIC / filename) if "/" not in filename else (_STATIC.parent / filename)
         if not path.exists():
             continue
         source = _strip_comments(path.read_text(encoding="utf-8", errors="replace"))
