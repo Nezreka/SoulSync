@@ -1,8 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useLayoutEffect } from 'react';
 import { z } from 'zod';
 
-import { useShellBridge } from '@/platform/shell/route-controllers';
+import { LabelDetailPage } from './-ui/label-detail-page';
 
 // The label's display name travels as a search param so a refresh / direct
 // load has something to show before the catalog fetch resolves the canonical
@@ -18,21 +17,13 @@ const labelDetailSearchSchema = z.object({
 
 export const Route = createFileRoute('/label-detail/$id')({
   validateSearch: labelDetailSearchSchema,
-  component: LabelDetailPage,
+  component: LabelDetailRoute,
 });
 
-// Thin legacy handoff: TanStack owns the URL shape (/label-detail/:id), but the
-// vanilla JS label-detail page still renders the actual experience. Mounting
-// this route (click OR refresh) hands the id back to the vanilla renderer.
-function LabelDetailPage() {
-  const bridge = useShellBridge();
+function LabelDetailRoute() {
   const { id } = Route.useParams();
   const { name } = Route.useSearch();
-
-  useLayoutEffect(() => {
-    if (!bridge) return;
-    bridge.navigateToLabelDetail(id, name, { skipRouteChange: true });
-  }, [bridge, id, name]);
-
-  return null;
+  // Keyed by id so a label → label hop remounts rather than threading a reset
+  // through every piece of page state.
+  return <LabelDetailPage key={id} labelId={id} labelName={name} />;
 }
