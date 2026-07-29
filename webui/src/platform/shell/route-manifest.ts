@@ -44,7 +44,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'library', path: '/library', kind: 'react' },
   { pageId: 'tools', path: '/tools', kind: 'legacy' },
   { pageId: 'artist-detail', path: '/artist-detail', kind: 'react' },
-  { pageId: 'label-detail', path: '/label-detail', kind: 'legacy' },
+  { pageId: 'label-detail', path: '/label-detail', kind: 'react' },
   { pageId: 'stats', path: '/stats', kind: 'react' },
   { pageId: 'settings', path: '/settings', kind: 'legacy' },
   { pageId: 'issues', path: '/issues', kind: 'react' },

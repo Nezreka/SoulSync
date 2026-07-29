@@ -3008,14 +3008,6 @@ function buildLabelDetailPath(labelId, name = null) {
     return path;
 }
 
-function parseLabelDetailPath(pathname = window.location.pathname) {
-    const segs = String(pathname || '').split('/').filter(Boolean);
-    if (segs[0] !== 'label-detail' || segs.length < 2) return null;
-    const id = decodeURIComponent(segs.slice(1).join('/'));
-    if (!id) return null;
-    const name = new URLSearchParams(window.location.search || '').get('name') || '';
-    return { id, name };
-}
 
 function navigateToLabelDetail(labelId, name = null, options = {}) {
     if (!labelId) return;
@@ -3277,18 +3269,9 @@ async function loadPageData(pageId) {
                 initializeSearchModeToggle();
                 initializeFilters();
                 break;
-            case 'label-detail': {
-                // Resolve the label from nav state, falling back to the URL
-                // (reload / browser-back). label-detail.js owns the render.
-                const lab = (_labelDetailState && _labelDetailState.id)
-                    ? _labelDetailState
-                    : (typeof parseLabelDetailPath === 'function' ? parseLabelDetailPath() : null);
-                if (lab && lab.id && typeof loadLabelDetailData === 'function') {
-                    if (typeof initializeLabelDetailPage === 'function') initializeLabelDetailPage();
-                    loadLabelDetailData(lab.id, lab.name || '');
-                }
-                break;
-            }
+            // No 'label-detail' case: React owns /label-detail, and loadPageData
+            // only runs for legacy-kind pages. The vanilla renderer it used to
+            // call (label-detail.js) is deleted.
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;

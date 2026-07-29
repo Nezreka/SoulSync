@@ -21,6 +21,12 @@ beforeEach(() => {
     http.get('/status', () =>
       HttpResponse.json({ media_server: { type: 'plex', connected: true } }),
     ),
+    // Shell chrome, not page data: the nav's Issues badge fetches this on every
+    // page render, so without a default handler EVERY route test logs an
+    // unhandled-request error and vitest warns that unhandled errors "might
+    // cause false positive tests". A test that cares about the badge overrides
+    // this with its own handler.
+    http.get('/api/issues/counts', () => HttpResponse.json({ success: true, counts: {} })),
   );
 });
 

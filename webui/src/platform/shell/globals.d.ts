@@ -208,6 +208,25 @@ declare global {
       showLoadingOverlay?: boolean,
       contextType?: string,
     ) => void | Promise<void>;
+    /**
+     * search.js — the shared enhanced-search call. Label detail uses it to
+     * re-resolve a MusicBrainz release onto a source whose images actually
+     * load; Cover Art Archive does not.
+     */
+    enhancedSearchFetch?: (
+      query: string,
+      options?: Record<string, unknown>,
+    ) => Promise<{
+      albums?: { id?: string; name?: string; artist?: string; source?: string }[];
+      metadata_source?: string;
+    }>;
+    /**
+     * init.js — where the label-detail Back button returns to.
+     *
+     * navigateToLabelDetail records the page you came from, because raw
+     * history.back() is unreliable through the SPA router.
+     */
+    _labelDetailReturnTo?: string;
     /** library.js — wires the hero watchlist button to an identity. */
     initializeLibraryWatchlistButton?: (artistId: unknown, artistName: string) => void;
     /** downloads.js — the Add to Wishlist modal, opened from a release card. */
