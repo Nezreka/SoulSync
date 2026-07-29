@@ -26,9 +26,21 @@ export function useLabelCovers(labelId: string) {
     });
   }
 
-  useEffect(() => {
+  /**
+   * Created on FIRST USE, not in an effect.
+   *
+   * Effects run child-first: every card's effect fires before this hook's
+   * would, so an effect-created observer is still null when the cards ask for
+   * it — and they all fall through to the immediate-request path. The queue's
+   * concurrency cap still holds, but the visible-first ORDERING is lost, which
+   * is the entire reason the vanilla used an observer. Creating it lazily means
+   * it exists whenever the first card asks.
+   */
+  const ensureObserver = useCallback(() => {
+    if (observerRef.current || typeof IntersectionObserver === 'undefined') {
+      return observerRef.current;
+    }
     const pending = pendingRef.current;
-    if (typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -45,12 +57,17 @@ export function useLabelCovers(labelId: string) {
       { rootMargin: '150px' },
     );
     observerRef.current = observer;
-    return () => {
-      observer.disconnect();
-      observerRef.current = null;
-      pending.clear();
-    };
+    return observer;
   }, []);
+
+  useEffect(
+    () => () => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      pendingRef.current.clear();
+    },
+    [],
+  );
 
   // A new label means new art: drop the queue and the cache, or the previous
   // label's covers keep the two slots and its urls paint under new cards that
@@ -62,21 +79,24 @@ export function useLabelCovers(labelId: string) {
 
   useEffect(() => () => loaderRef.current?.dispose(), []);
 
-  const observe = useCallback((key: string, url: string, element: Element) => {
-    const observer = observerRef.current;
-    if (!observer) {
-      // No IntersectionObserver (jsdom, ancient browsers): ask immediately
-      // rather than never. The concurrency cap still protects the endpoint.
-      loaderRef.current?.request(key, url);
-      return () => {};
-    }
-    pendingRef.current.set(element, { key, url });
-    observer.observe(element);
-    return () => {
-      observer.unobserve(element);
-      pendingRef.current.delete(element);
-    };
-  }, []);
+  const observe = useCallback(
+    (key: string, url: string, element: Element) => {
+      const observer = ensureObserver();
+      if (!observer) {
+        // No IntersectionObserver (jsdom, ancient browsers): ask immediately
+        // rather than never. The concurrency cap still protects the endpoint.
+        loaderRef.current?.request(key, url);
+        return () => {};
+      }
+      pendingRef.current.set(element, { key, url });
+      observer.observe(element);
+      return () => {
+        observer.unobserve(element);
+        pendingRef.current.delete(element);
+      };
+    },
+    [ensureObserver],
+  );
 
   return { resolved, observe };
 }
