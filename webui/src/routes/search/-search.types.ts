@@ -188,7 +188,8 @@ export interface SearchVideo {
   title?: string;
   channel?: string;
   thumbnail?: string;
-  duration?: string;
+  /** SECONDS, not milliseconds — see formatVideoDuration. */
+  duration?: number;
   view_count?: number;
 }
 

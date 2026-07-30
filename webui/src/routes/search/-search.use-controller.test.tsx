@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw';
 
@@ -35,9 +35,26 @@ function stubSearch(bySource: Record<string, unknown>) {
   return seen;
 }
 
-const flush = () => new Promise((r) => setTimeout(r, 10));
+/**
+ * Let pending promises and timers land.
+ *
+ * Wrapped in act() because a settling fetch writes state, and this hook has one
+ * request in flight from the moment it mounts (config status) that no individual
+ * test asked for.
+ */
+const flush = () =>
+  act(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+  });
 
 describe('useSearchController', () => {
+  // Every mount fetches config status. Left unhandled it is not a failure — the
+  // catch swallows it — but MSW logs an error for each one and the real noise
+  // hides a real miss. Tests that care register their own handler after this.
+  beforeEach(() => {
+    server.use(http.get('/api/settings/config-status', () => HttpResponse.json({})));
+  });
+
   it('starts with every source usable, so no flash of dimmed icons', () => {
     const { result } = renderHook(() => useSearchController());
     expect(result.current.state.configuredSources.spotify).toBe(true);
@@ -166,6 +183,11 @@ describe('useSearchController', () => {
     // Deliberately not a no-op — clicking it again is how a basic search is
     // re-run.
     const onSoulseekSelected = vi.fn();
+    // submitQuery runs while SPOTIFY is still active, so it really does fetch.
+    // Stubbed and drained here rather than left in flight: an unstubbed request
+    // settling after the test ends lands inside the NEXT one, as an unhandled
+    // MSW request and an act() warning nowhere near its cause.
+    stubSearch({ spotify: { spotify_albums: [] } });
     const { result } = renderHook(() => useSearchController({ onSoulseekSelected }));
 
     act(() => result.current.submitQuery('aphex'));
@@ -173,6 +195,9 @@ describe('useSearchController', () => {
     act(() => result.current.setActiveSource('soulseek'));
 
     expect(onSoulseekSelected).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await flush();
+    });
   });
 
   it('fetches a newly-selected source but not one already cached', async () => {

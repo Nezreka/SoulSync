@@ -172,6 +172,20 @@ export function formatDuration(durationMs: number | undefined | null): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+/**
+ * Video durations are SECONDS, unlike track durations which are milliseconds.
+ *
+ * Two fields both called `duration`, in different units, on shapes that sit
+ * side by side in the same results — kept as separate functions so no caller
+ * has to remember which is which.
+ */
+export function formatVideoDuration(seconds: number | undefined | null): string {
+  const total = Number(seconds);
+  if (!Number.isFinite(total) || total <= 0) return '';
+  const minutes = Math.floor(total / 60);
+  return `${minutes}:${String(Math.floor(total % 60)).padStart(2, '0')}`;
+}
+
 /** An artist's display line: the vanilla showed a library track count or the source. */
 export function artistMetaLine(artist: SearchArtist, inLibrary: boolean): string {
   if (inLibrary) {
