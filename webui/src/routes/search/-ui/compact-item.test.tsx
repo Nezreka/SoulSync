@@ -12,7 +12,11 @@ function renderItem(over: Partial<CompactItemProps> = {}) {
   return document.querySelector('.enh-compact-item') as HTMLElement;
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  delete window.extractImageColors;
+  delete window.applyDynamicGlow;
+});
 
 describe('CompactItem', () => {
   it('wears the compound class its kind needs, never the bare one', () => {
@@ -87,6 +91,50 @@ describe('CompactItem', () => {
     // The lazy loader queries `[data-needs-image="true"]` app-wide; an album card
     // answering that query would be asked to resolve an artist photo.
     expect(renderItem().hasAttribute('data-needs-image')).toBe(false);
+  });
+
+  it('glows from its artwork — on an ALBUM, not just an artist', () => {
+    // renderCompactSection ran this for every card with an image
+    // (shared-helpers.js:748-753), and the stylesheet turns the sampled palette
+    // into the hover border and shadow of album, track and artist cards alike.
+    const applyDynamicGlow = vi.fn();
+    window.extractImageColors = vi.fn((_url: string, cb: (colors: unknown) => void) => {
+      cb(['#111', '#222']);
+    }) as never;
+    window.applyDynamicGlow = applyDynamicGlow as never;
+
+    const card = renderItem({ kind: 'album', image: 'https://cdn/cover.jpg' });
+
+    expect(window.extractImageColors).toHaveBeenCalledWith(
+      'https://cdn/cover.jpg',
+      expect.any(Function),
+    );
+    expect(applyDynamicGlow.mock.calls[0][0]).toBe(card);
+  });
+
+  it('does not glow a card that has no artwork', () => {
+    window.extractImageColors = vi.fn() as never;
+    renderItem({ kind: 'album' });
+    expect(window.extractImageColors).not.toHaveBeenCalled();
+  });
+
+  it('stops glowing when the image turns out to be broken', () => {
+    // A 404 falls back to the placeholder; sampling the dead url would paint the
+    // card from nothing.
+    window.extractImageColors = vi.fn() as never;
+    renderItem({ kind: 'album', image: 'https://cdn/missing.jpg' });
+    (window.extractImageColors as unknown as { mockClear: () => void }).mockClear();
+
+    fireEvent.error(document.querySelector('img') as HTMLImageElement);
+    expect(window.extractImageColors).not.toHaveBeenCalled();
+  });
+
+  it('still renders when sampling the palette throws', () => {
+    // Reading pixels off a CORS-opaque image throws; the card must survive it.
+    window.extractImageColors = vi.fn(() => {
+      throw new Error('canvas is tainted');
+    }) as never;
+    expect(renderItem({ kind: 'album', image: 'https://cdn/cover.jpg' })).not.toBeNull();
   });
 
   it('stacks extra badges alongside the source badge', () => {

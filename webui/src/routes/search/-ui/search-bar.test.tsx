@@ -7,14 +7,12 @@ import { SearchBar } from './search-bar';
 /** A host that actually re-renders, so the controlled input behaves like the page. */
 function Host({
   onQueryChange,
-  loading = false,
-  onCancel = () => {},
+  onClear,
   onSubmit = () => {},
   onIdSubmit = () => {},
 }: {
   onQueryChange?: (value: string) => void;
-  loading?: boolean;
-  onCancel?: () => void;
+  onClear?: () => void;
   onSubmit?: () => void;
   onIdSubmit?: () => void;
 }) {
@@ -23,13 +21,15 @@ function Host({
   return (
     <SearchBar
       query={query}
-      loading={loading}
       onQueryChange={(value) => {
         setQuery(value);
         onQueryChange?.(value);
       }}
       onSubmit={onSubmit}
-      onCancel={onCancel}
+      onClear={() => {
+        setQuery('');
+        onClear?.();
+      }}
       idValue={idValue}
       onIdChange={setIdValue}
       onIdSubmit={onIdSubmit}
@@ -131,15 +131,28 @@ describe('SearchBar', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('offers cancel only while a search is in flight', () => {
-    render(<Host />);
+  it('shows the ✕ whenever there is text, not while a search runs', () => {
+    // search.js:241-243 toggles it on `query.length === 0` — nothing to do with
+    // a request being in flight. Tying it to loading hides it while you type.
+    const onClear = vi.fn();
+    render(<Host onClear={onClear} />);
     expect(document.getElementById('enhanced-cancel-btn')).toBeNull();
 
-    cleanup();
-    const onCancel = vi.fn();
-    render(<Host loading onCancel={onCancel} />);
+    typeInto(input(), 'aphex');
+    expect(document.getElementById('enhanced-cancel-btn')).not.toBeNull();
+  });
+
+  it('empties the box when the ✕ is clicked', () => {
+    // It CLEARS; it does not cancel (search.js:278-283).
+    const onClear = vi.fn();
+    render(<Host onClear={onClear} />);
+    typeInto(input(), 'aphex');
+
     fireEvent.click(document.getElementById('enhanced-cancel-btn') as HTMLElement);
-    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onClear).toHaveBeenCalledOnce();
+    expect(input().value).toBe('');
+    // And the button goes away with the text.
+    expect(document.getElementById('enhanced-cancel-btn')).toBeNull();
   });
 
   it('runs an ID lookup from the button and from Enter', () => {
@@ -151,8 +164,27 @@ describe('SearchBar', () => {
     expect(idInput.value).toBe('https://open.spotify.com/album/x');
 
     fireEvent.keyDown(idInput, { key: 'Enter' });
-    fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Look up' }));
     expect(onIdSubmit).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the ID box’s own affordances', () => {
+    // The placeholder is the only place this feature explains itself (#775),
+    // and autocomplete/spellcheck are wrong for pasted URLs and UUIDs.
+    render(<Host />);
+    const idInput = document.getElementById('enh-id-input') as HTMLInputElement;
+    expect(idInput.placeholder).toBe(
+      '…or paste a Spotify / Apple Music / MusicBrainz / Deezer link, or a MusicBrainz ID',
+    );
+    expect(idInput.getAttribute('autocomplete')).toBe('off');
+    expect(idInput.getAttribute('spellcheck')).toBe('false');
+  });
+
+  it('wears the vanilla’s search glyph', () => {
+    render(<Host />);
+    const glyph = document.querySelector('.enhanced-search-icon');
+    expect(glyph?.tagName).toBe('DIV');
+    expect(glyph?.textContent).toBe('✨');
   });
 
   it('keeps the ids the rest of the app reaches for', () => {

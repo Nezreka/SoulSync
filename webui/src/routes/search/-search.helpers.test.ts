@@ -6,6 +6,7 @@ import type { SearchAlbum } from './-search.types';
 
 import {
   albumIdentity,
+  albumMetaLine,
   albumOwnershipByIdentity,
   artistMetaLine,
   fallbackBannerText,
@@ -22,6 +23,7 @@ import {
   shouldSearch,
   sourceResultsFromResponse,
   splitAlbums,
+  trackMetaLine,
   visibleSources,
 } from './-search.helpers';
 import { emptySourceResults } from './-search.helpers';
@@ -114,9 +116,17 @@ describe('fallbackFor', () => {
     expect(fallbackFor('deezer', { primary_source: 'deezer' })).toBeNull();
   });
 
-  it('does not treat spotify_free as a fallback from spotify', () => {
-    // Same icon, same provider — banner-worthy only if the PROVIDER changed.
-    expect(fallbackFor('spotify', { primary_source: 'spotify_free' })).toBeNull();
+  it('DOES report spotify_free as a fallback from spotify', () => {
+    // A raw comparison, as the vanilla has it (shared-helpers.js:504). On a
+    // no-credentials instance the server answers a 'spotify' request with
+    // 'spotify_free', and the banner naming both is the point — normalising the
+    // two through pickerSource would silently swallow it.
+    expect(fallbackFor('spotify', { primary_source: 'spotify_free' })).toBe('spotify_free');
+  });
+
+  it('reports nothing when the server served exactly what was asked for', () => {
+    expect(fallbackFor('spotify', { primary_source: 'spotify' })).toBeNull();
+    expect(fallbackFor('deezer', { primary_source: 'deezer' })).toBeNull();
   });
 
   it('falls back to metadata_source when primary_source is absent', () => {
@@ -195,7 +205,10 @@ describe('albumOwnershipByIdentity — the badge-misalignment fix', () => {
 });
 
 describe('formatViewCount', () => {
-  it('abbreviates millions and thousands', () => {
+  it('abbreviates billions, millions and thousands', () => {
+    // Billions are ordinary on a music-video grid; without that branch a
+    // 1.2B-view video reads "1200.0M".
+    expect(formatViewCount(1_200_000_000)).toBe('1.2B');
     expect(formatViewCount(1_200_000)).toBe('1.2M');
     expect(formatViewCount(3_400)).toBe('3.4K');
     expect(formatViewCount(742)).toBe('742');
@@ -248,14 +261,26 @@ describe('formatVideoDuration', () => {
 });
 
 describe('meta lines', () => {
-  it('shows a library artist its track count, pluralised', () => {
-    expect(artistMetaLine({ track_count: 1 }, true)).toBe('1 track');
-    expect(artistMetaLine({ track_count: 12 }, true)).toBe('12 tracks');
-    expect(artistMetaLine({}, true)).toBe('0 tracks');
+  it('labels an artist by which section it is in, not by a count', () => {
+    // A count is tempting and wrong: _build_db_artists sends only id, name and
+    // image_url (core/search/orchestrator.py:121-134), so every library artist
+    // would read "0 tracks".
+    expect(artistMetaLine(true)).toBe('In Your Library');
+    expect(artistMetaLine(false)).toBe('Artist');
   });
 
-  it('shows a source artist its source', () => {
-    expect(artistMetaLine({ source: 'deezer' }, false)).toBe('Deezer');
+  it('joins a track artist and album, both being plain strings', () => {
+    // `album` is the album NAME — sources.py copies Track.album, a str.
+    expect(trackMetaLine({ artist: 'Aphex Twin', album: 'Drukqs' })).toBe('Aphex Twin • Drukqs');
+    expect(trackMetaLine({ artist: 'Aphex Twin' })).toBe('Aphex Twin');
+    expect(trackMetaLine({})).toBe('');
+  });
+
+  it('gives an album its year, or the vanilla N/A', () => {
+    expect(albumMetaLine({ artist: 'Aphex Twin', release_date: '2001-10-22' })).toBe(
+      'Aphex Twin • 2001',
+    );
+    expect(albumMetaLine({ artist: 'Aphex Twin' })).toBe('Aphex Twin • N/A');
   });
 
   it('joins a label type and area, or says what it is', () => {

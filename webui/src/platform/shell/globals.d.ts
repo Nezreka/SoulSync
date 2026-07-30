@@ -209,6 +209,33 @@ declare global {
       contextType?: string,
     ) => void | Promise<void>;
     /**
+     * core.js — shows the modal of an already-active download process.
+     *
+     * `activeDownloadProcesses` is a top-level `let` in a classic script, so it
+     * is not a window property and no module can read it. The search page needs
+     * the answer BEFORE fetching album detail: on a re-click while the source is
+     * down, the fetch fails and the modal the user already had would never come
+     * back. Returns true when a modal was shown.
+     */
+    reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
+    /** shared-helpers.js — registers a download in the search bubbles. */
+    registerSearchDownload?: (
+      item: Record<string, unknown>,
+      type: string,
+      virtualPlaylistId: string,
+      artistName?: string,
+    ) => void;
+    /** media-player.js — can this browser decode that file's format? */
+    isAudioFormatSupported?: (filename: string) => boolean;
+    getFileExtension?: (filename: string) => string;
+    /**
+     * shared-helpers.js — samples an image and hands back its palette, which
+     * applyDynamicGlow turns into the card's shadow. Callback-style, not a
+     * promise.
+     */
+    extractImageColors?: (imageUrl: string, callback: (colors: unknown) => void) => void;
+    applyDynamicGlow?: (cardElement: HTMLElement, colors: unknown) => void;
+    /**
      * search.js — the shared enhanced-search call. Label detail uses it to
      * re-resolve a MusicBrainz release onto a source whose images actually
      * load; Cover Art Archive does not.

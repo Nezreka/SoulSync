@@ -1,4 +1,5 @@
 import type {
+  LibraryCheckTrack,
   SearchAlbum,
   SearchArtist,
   SearchLabel,
@@ -9,11 +10,13 @@ import type { VideoProgress } from './video-grid';
 
 import {
   albumIdentity,
+  albumMetaLine,
   artistMetaLine,
   formatDuration,
   labelMetaLine,
   splitAlbums,
   trackIdentity,
+  trackMetaLine,
 } from '../-search.helpers';
 import { SOURCE_LABELS } from '../-search.types';
 import { CompactItem, ResultSection } from './compact-item';
@@ -24,23 +27,50 @@ export interface OwnershipState {
   ownedAlbums: ReadonlySet<string>;
   ownedTracks: ReadonlySet<string>;
   wishlistTracks: ReadonlySet<string>;
-  /** Track identity → local file path, when the library has one. */
-  playableTracks: ReadonlyMap<string, string>;
+  /**
+   * Track identity → the library row, for tracks that have a local file.
+   *
+   * The whole row, not just the path: playLibraryTrack wants the library track
+   * id, its title, the album thumb and the album/artist names, and those come
+   * from the library check rather than from the search result.
+   */
+  libraryTracks: ReadonlyMap<string, LibraryCheckTrack>;
 }
 
 export const EMPTY_OWNERSHIP: OwnershipState = {
   ownedAlbums: new Set(),
   ownedTracks: new Set(),
   wishlistTracks: new Set(),
-  playableTracks: new Map(),
+  libraryTracks: new Map(),
 };
 
 const LIBRARY_BADGE = { text: 'In Library', className: 'enh-item-lib-badge' };
-const WISHLIST_BADGE = { text: 'Wishlisted', className: 'enh-item-wishlist-badge' };
+const WISHLIST_BADGE = { text: 'In Wishlist', className: 'enh-item-wishlist-badge' };
 
+/**
+ * The badges cascaded in 30ms apart in the vanilla, which staggered its
+ * setTimeout inserts with ONE counter shared across albums, singles and tracks
+ * (search.js:586-644). They animate on arrival (libBadgeFadeIn,
+ * style.css:40417), so appearing together is a visibly different effect —
+ * an animation-delay is the same thing said declaratively.
+ */
+const BADGE_STAGGER_MS = 30;
+
+/**
+ * The badge naming a source.
+ *
+ * Built from the ACTIVE source, not from each item's own `source` field, and
+ * worn only by the Artists section — search.js:465-499 passes `sourceBadge` to
+ * that one renderCompactSection call and to no other. Albums, singles and tracks
+ * carry no badge at all; the lit icon in the picker is what says where results
+ * came from, and a badge on every card was noise the design deliberately
+ * dropped.
+ */
 function sourceBadge(source: string | undefined) {
   const info = source ? SOURCE_LABELS[source] : undefined;
-  return info ? { text: info.text, className: info.badgeClass } : undefined;
+  const fallback = SOURCE_LABELS.spotify;
+  const chosen = info ?? fallback;
+  return { text: chosen.text, className: chosen.badgeClass };
 }
 
 function artistImage(artist: SearchArtist): string | undefined {
@@ -49,6 +79,13 @@ function artistImage(artist: SearchArtist): string | undefined {
 
 function albumImage(album: SearchAlbum): string | undefined {
   return album.image_url || album.images?.[0]?.url || undefined;
+}
+
+/** True for the two sources that show no metadata sections at all. */
+function suppressesLabels(source: string): boolean {
+  // search.js:429-434 — the Labels section is fetched additively, so it has to
+  // be hidden explicitly for both of these, not merely left unfilled.
+  return source === 'youtube_videos' || source === 'soulseek';
 }
 
 /**
@@ -102,10 +139,17 @@ export function SearchResults({
   onLabelHref: (label: SearchLabel) => string;
   onAlbumClick: (album: SearchAlbum) => void;
   onTrackClick: (track: SearchTrack) => void;
-  onTrackPlay: (track: SearchTrack, filePath: string | undefined) => void;
+  /** The library row is present only for an owned track with a local file. */
+  onTrackPlay: (track: SearchTrack, libraryRow: LibraryCheckTrack | undefined) => void;
   onVideoDownload: (video: SearchVideo) => void;
 }) {
   const { albums: fullAlbums, singlesAndEps } = splitAlbums(albums);
+
+  // One counter across all three badged sections, consumed in render order —
+  // albums, then singles, then tracks — which is the order the vanilla's loops
+  // ran in. Reset every render, so it is deterministic rather than stateful.
+  let badgeSlot = 0;
+  const nextBadgeDelay = () => `${badgeSlot++ * BADGE_STAGGER_MS}ms`;
 
   // The grid carries its own "No music videos found" state, which is the whole
   // reason it can be rendered unconditionally here: a videos search that found
@@ -116,16 +160,17 @@ export function SearchResults({
 
   const albumCard = (album: SearchAlbum, index: number) => {
     const identity = albumIdentity(album);
+    const owned = ownership.ownedAlbums.has(identity);
     return (
       <CompactItem
         key={`${identity}::${index}`}
         kind="album"
         name={album.name ?? ''}
-        meta={[album.artist, album.release_date?.slice(0, 4)].filter(Boolean).join(' • ')}
+        meta={albumMetaLine(album)}
         placeholder={album.album_type === 'single' || album.album_type === 'ep' ? '🎶' : '💿'}
         image={albumImage(album)}
-        badge={sourceBadge(album.source)}
-        extraBadges={ownership.ownedAlbums.has(identity) ? [LIBRARY_BADGE] : undefined}
+        // No source badge: only the Artists section wears one. See sourceBadge.
+        extraBadges={owned ? [{ ...LIBRARY_BADGE, delay: nextBadgeDelay() }] : undefined}
         onClick={() => onAlbumClick(album)}
       />
     );
@@ -156,11 +201,17 @@ export function SearchResults({
                 key={`${artist.id ?? artist.name}::${index}`}
                 kind="artist"
                 name={artist.name ?? ''}
-                meta={artistMetaLine(artist, true)}
+                meta={artistMetaLine(true)}
                 placeholder="📚"
-                image={artistImage(artist)}
+                image={artistImages[String(artist.id ?? '')] || artistImage(artist)}
                 href={onArtistHref(artist)}
                 badge={{ text: 'Library', className: 'enh-badge-library' }}
+                // Library artists take part in lazy image loading too:
+                // renderCompactSection stamped these attributes on EVERY artist
+                // card with an id, and a library artist whose server has no
+                // thumb is exactly the case that needs resolving.
+                artistId={artist.id}
+                artistName={artist.name}
               />
             ))}
           </ResultSection>
@@ -180,12 +231,14 @@ export function SearchResults({
                 key={`${artist.id ?? artist.name}::${index}`}
                 kind="artist"
                 name={artist.name ?? ''}
-                meta={artistMetaLine(artist, false)}
+                meta={artistMetaLine(false)}
                 placeholder="🎤"
                 // A lazily-resolved image wins; otherwise whatever the source gave.
                 image={artistImages[String(artist.id ?? '')] || artistImage(artist)}
                 href={onArtistHref(artist)}
-                badge={sourceBadge(artist.source)}
+                // The badge names the source being VIEWED, not the row's own
+                // `source` field — the vanilla derives it from the active tab.
+                badge={sourceBadge(activeSource)}
                 artistId={artist.id}
                 artistName={artist.name}
               />
@@ -229,27 +282,33 @@ export function SearchResults({
       >
         {tracks.map((track, index) => {
           const identity = trackIdentity(track);
-          const filePath = ownership.playableTracks.get(identity);
-          const extras = [
-            ...(ownership.ownedTracks.has(identity) ? [LIBRARY_BADGE] : []),
-            ...(ownership.wishlistTracks.has(identity) ? [WISHLIST_BADGE] : []),
-          ];
+          const libraryRow = ownership.libraryTracks.get(identity);
+          // Either/or, never both — the vanilla's else-if. On a card where both
+          // badges are absolutely positioned at the same corner, two would
+          // simply cover each other.
+          const owned = ownership.ownedTracks.has(identity);
+          const wished = !owned && ownership.wishlistTracks.has(identity);
+          const extras = owned
+            ? [{ ...LIBRARY_BADGE, delay: nextBadgeDelay() }]
+            : wished
+              ? [{ ...WISHLIST_BADGE, delay: nextBadgeDelay() }]
+              : [];
           return (
             <CompactItem
               key={`${identity}::${index}`}
               kind="track"
               name={track.name ?? ''}
-              meta={[track.artist, track.album?.name].filter(Boolean).join(' • ')}
+              meta={trackMetaLine(track)}
               placeholder="🎵"
-              image={track.image_url || albumImage(track.album ?? {})}
+              image={track.image_url}
               duration={formatDuration(track.duration_ms)}
-              badge={sourceBadge(track.source)}
               extraBadges={extras.length ? extras : undefined}
               onClick={() => onTrackClick(track)}
               // An owned track plays from disk; everything else streams. The
               // vanilla achieved this by cloning the button to drop the stream
               // listener — a prop is the same decision, made once.
-              onPlay={() => onTrackPlay(track, filePath)}
+              onPlay={() => onTrackPlay(track, libraryRow)}
+              playTitle={libraryRow ? 'Play from library' : 'Stream this track'}
             />
           );
         })}
@@ -262,7 +321,7 @@ export function SearchResults({
         icon="🏷️"
         title="Labels"
         kind="label"
-        count={labels.length}
+        count={suppressesLabels(activeSource) ? 0 : labels.length}
       >
         {labels.map((label, index) => (
           <CompactItem

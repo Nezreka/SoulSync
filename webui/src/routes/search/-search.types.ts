@@ -146,8 +146,6 @@ export interface SearchArtist {
   images?: { url?: string }[];
   source?: string;
   followers?: number;
-  /** DB artists only — drives the "In Your Library" section. */
-  track_count?: number;
 }
 
 export interface SearchAlbum {
@@ -161,19 +159,38 @@ export interface SearchAlbum {
   release_date?: string;
   total_tracks?: number;
   source?: string;
-  plugin?: string;
-  bandcamp_url?: string;
+  release_group_id?: string;
+  /**
+   * Per-source escape hatches, not just links:
+   *   - `hydrabase_plugin` names the plugin an album came from, and the server
+   *     needs it to route the detail fetch to the right client.
+   *   - `bandcamp` is the release URL; Bandcamp has no id-lookup API, so it is
+   *     the only way to fetch that exact release instead of re-searching.
+   */
+  external_urls?: Record<string, string | undefined>;
 }
 
 export interface SearchTrack {
   id?: string | number;
   name?: string;
+  /** The joined display string ("A, B"); `artists` carries the real list. */
   artist?: string;
-  artists?: { id?: string | number; name?: string }[];
-  album?: SearchAlbum;
+  artists?: string[];
+  /**
+   * The album NAME, not an album object.
+   *
+   * core/search/sources.py:105 copies `track.album` straight from the Track
+   * dataclass, where it is a plain string (core/spotify_client.py:438). Typing
+   * it as an object silently loses the album from every track's meta line.
+   */
+  album?: string;
   duration_ms?: number;
   image_url?: string;
+  release_date?: string;
   source?: string;
+  popularity?: number;
+  preview_url?: string | null;
+  external_urls?: Record<string, string | undefined> | null;
 }
 
 export interface SearchLabel {
@@ -191,6 +208,13 @@ export interface SearchVideo {
   /** SECONDS, not milliseconds — see formatVideoDuration. */
   duration?: number;
   view_count?: number;
+  /**
+   * The watch URL. Not decoration: the download POST sends
+   * {video_id, url, title, channel} (downloads.js:5463), so dropping this field
+   * from the type means the request goes out with `url: undefined`.
+   */
+  url?: string;
+  upload_date?: string;
 }
 
 /** One source's slice of results, as cached per (query, source). */

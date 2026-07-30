@@ -49,6 +49,29 @@ let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let playlistTrackSnapshotCache = {}; // Key: playlist_id, Value: upstream snapshot_id at cache time
 let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
+/**
+ * Show the modal of an already-active download process, for the React pages.
+ *
+ * `activeDownloadProcesses` is a top-level `let`, so it lives in the script's
+ * lexical scope and is NOT a window property — a module cannot reach it. The
+ * download modal reopens an existing process by itself
+ * (openDownloadMissingModalForArtistAlbum, shared-helpers.js:1767), but the
+ * search page checks FIRST so it can skip fetching album detail it does not
+ * need. That is not just an optimisation: when the re-click happens while the
+ * metadata source is down, the fetch fails and the user gets an error toast
+ * instead of the modal they already had open.
+ *
+ * Returns whether a modal was shown, so the caller knows to stop.
+ */
+window.reopenActiveDownloadModal = function (virtualPlaylistId) {
+    const process = activeDownloadProcesses[virtualPlaylistId];
+    if (!process || !process.modalElement) return false;
+    if (process.status === 'complete') {
+        showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+    }
+    process.modalElement.style.display = 'flex';
+    return true;
+};
 let sequentialSyncManager = null;
 
 // --- YouTube Playlist State Management ---

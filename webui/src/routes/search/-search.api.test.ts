@@ -41,6 +41,22 @@ describe('fetchEnhancedSearch', () => {
     expect(body).toEqual({ query: 'aphex', source: 'deezer' });
   });
 
+  it('omits the source when there is none to send', async () => {
+    // enhancedSearchFetch's contract (shared-helpers.js:22-23): no source, or
+    // 'auto', means fan out — not "search a source called empty-string".
+    const bodies: unknown[] = [];
+    server.use(
+      http.post('/api/enhanced-search', async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({});
+      }),
+    );
+
+    await fetchEnhancedSearch('aphex', '');
+    await fetchEnhancedSearch('aphex', 'auto');
+    expect(bodies).toEqual([{ query: 'aphex' }, { query: 'aphex' }]);
+  });
+
   it('is abortable', async () => {
     server.use(http.post('/api/enhanced-search', () => new Promise(() => {})));
     const controller = new AbortController();

@@ -15,6 +15,7 @@ function stateOf(over: Partial<SearchControllerState> = {}): SearchControllerSta
     loadingSources: new Set(),
     configuredSources: {},
     enabledExperimental: new Set(),
+    userPickedSource: false,
     ...over,
   };
 }
@@ -79,8 +80,25 @@ describe('SourceRow', () => {
   });
 
   it('names both sources in a fallback tooltip', () => {
+    // "served from" on the icon; the banner over the results says "showing".
+    // Two different strings in the vanilla, and both are user-visible.
     renderRow({ fallbacks: { discogs: 'deezer' } });
-    expect(icon('discogs').getAttribute('title')).toBe('Discogs unavailable — showing Deezer');
+    expect(icon('discogs').getAttribute('title')).toBe('Discogs unavailable — served from Deezer');
+  });
+
+  it('swaps a loading source’s logo for an hourglass', () => {
+    // The `loading` class animates the button, but the glyph swap is what makes
+    // an in-flight source unmistakable (shared-helpers.js:325-330).
+    renderRow({ loadingSources: new Set(['spotify']) });
+    expect(icon('spotify').querySelector('img')).toBeNull();
+    expect(icon('spotify').querySelector('.enh-source-icon-glyph')?.textContent).toBe('⏳');
+    // Its neighbour keeps its logo.
+    expect(icon('deezer').querySelector('img')).not.toBeNull();
+  });
+
+  it('lazy-loads the brand logos', () => {
+    renderRow();
+    expect(icon('spotify').querySelector('img')?.getAttribute('loading')).toBe('lazy');
   });
 
   it('selects a configured source', () => {
@@ -96,7 +114,7 @@ describe('SourceRow', () => {
     const { onSelect, onOpenSettings } = renderRow({ configuredSources: { deezer: false } });
     const button = icon('deezer');
     expect(button.className).toContain('unconfigured');
-    expect(button.getAttribute('title')).toContain('not configured');
+    expect(button.getAttribute('title')).toBe('Deezer — set up in Settings');
 
     fireEvent.click(button);
     expect(onOpenSettings).toHaveBeenCalledWith('deezer');

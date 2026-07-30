@@ -48,11 +48,29 @@ const flush = () =>
   });
 
 describe('useSearchController', () => {
-  // Every mount fetches config status. Left unhandled it is not a failure — the
-  // catch swallows it — but MSW logs an error for each one and the real noise
-  // hides a real miss. Tests that care register their own handler after this.
+  /**
+   * Every mount runs the init sequence: /status then config-status.
+   *
+   * The config payload has to be REALISTIC. An empty `{}` says Spotify has no
+   * credentials, and the picker then correctly falls forward to the first
+   * source that needs none — Amazon — which is right behaviour and a useless
+   * baseline for testing everything else. Tests that care register their own
+   * handlers after these.
+   */
   beforeEach(() => {
-    server.use(http.get('/api/settings/config-status', () => HttpResponse.json({})));
+    server.use(
+      http.get('/status', () => HttpResponse.json({ metadata_source: { source: 'spotify' } })),
+      http.get('/api/settings/config-status', () =>
+        HttpResponse.json({
+          spotify: { configured: true },
+          itunes: { configured: true },
+          deezer: { configured: true },
+          discogs: { configured: true },
+          hydrabase: { configured: true },
+          soulseek: { configured: true },
+        }),
+      ),
+    );
   });
 
   it('starts with every source usable, so no flash of dimmed icons', () => {

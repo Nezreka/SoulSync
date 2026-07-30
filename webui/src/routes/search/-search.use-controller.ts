@@ -3,11 +3,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IdLookupResponse } from './-search.api';
 import type { SearchSource, SourceResults } from './-search.types';
 
-import { fetchConfigStatus, fetchEnhancedSearch, streamVideoSearch } from './-search.api';
 import {
+  fetchConfigStatus,
+  fetchEnhancedSearch,
+  fetchMetadataStatus,
+  streamVideoSearch,
+} from './-search.api';
+import {
+  canSelectSource,
   emptySourceResults,
   fallbackFor,
   pickerSource,
+  resolveInitialSource,
   sourceResultsFromResponse,
 } from './-search.helpers';
 import { SOURCE_ORDER } from './-search.types';
@@ -22,6 +29,14 @@ export interface SearchControllerState {
   loadingSources: ReadonlySet<string>;
   configuredSources: Record<string, boolean>;
   enabledExperimental: ReadonlySet<string>;
+  /**
+   * Has the user clicked a source themselves?
+   *
+   * The init sequence resolves a default from /status and config-status, and
+   * both land asynchronously. Without this flag a click made while they were in
+   * flight would be overwritten a moment later.
+   */
+  userPickedSource: boolean;
 }
 
 export interface SearchController {
@@ -63,9 +78,12 @@ function optimisticConfigured(): Record<string, boolean> {
  */
 export function useSearchController({
   onSoulseekSelected,
+  onUnconfiguredSource,
   initialSource = 'spotify',
 }: {
   onSoulseekSelected?: (query: string) => void;
+  /** Called instead of switching when a source has no credentials. */
+  onUnconfiguredSource?: (source: string) => void;
   initialSource?: string;
 } = {}): SearchController {
   const [state, setState] = useState<SearchControllerState>(() => ({
@@ -76,6 +94,7 @@ export function useSearchController({
     loadingSources: new Set<string>(),
     configuredSources: optimisticConfigured(),
     enabledExperimental: new Set<string>(),
+    userPickedSource: false,
   }));
 
   const tokensRef = useRef<Record<string, number>>(Object.create(null));
@@ -85,22 +104,52 @@ export function useSearchController({
   stateRef.current = state;
   const soulseekRef = useRef(onSoulseekSelected);
   soulseekRef.current = onSoulseekSelected;
+  const unconfiguredRef = useRef(onUnconfiguredSource);
+  unconfiguredRef.current = onUnconfiguredSource;
 
-  /** Real config status replaces the optimistic map once it lands. */
+  /**
+   * The init sequence, in the vanilla's order (shared-helpers.js:355-397).
+   *
+   * /status first — it names the user's primary source AND carries the
+   * experimental flags, so a config-status failure still leaves opted-in
+   * experimental sources visible. Then config-status, which is the fresher read
+   * of both. Only then is the active source resolvable: it depends on which
+   * sources are visible and which have credentials.
+   */
   useEffect(() => {
     let live = true;
-    void fetchConfigStatus().then(({ configured, enabledExperimental }) => {
-      if (!live || !Object.keys(configured).length) return;
+    void (async () => {
+      const status = await fetchMetadataStatus();
+      if (!live) return;
+      const config = await fetchConfigStatus();
+      if (!live) return;
+
+      const enabledExperimental = config.enabledExperimental.size
+        ? config.enabledExperimental
+        : status.enabledExperimental;
+      const configured = Object.keys(config.configured).length
+        ? config.configured
+        : optimisticConfigured();
+
       setState((prev) => ({
         ...prev,
         configuredSources: { ...prev.configuredSources, ...configured },
         enabledExperimental,
+        // Only adopted while the user has not picked anything themselves; their
+        // click always outranks the configured default.
+        activeSource: prev.userPickedSource
+          ? prev.activeSource
+          : resolveInitialSource({
+              statusSource: status.source || initialSource,
+              enabledExperimental,
+              configured,
+            }),
       }));
-    });
+    })();
     return () => {
       live = false;
     };
-  }, []);
+  }, [initialSource]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -217,7 +266,21 @@ export function useSearchController({
   const setActiveSource = useCallback(
     (source: string) => {
       const previous = stateRef.current;
-      setState((prev) => ({ ...prev, activeSource: source }));
+
+      // Unknown, or an experimental source the user has not enabled — there is
+      // no icon for it, so activating it would leave the row with nothing lit.
+      if (!canSelectSource(source, previous.enabledExperimental)) return;
+
+      // No credentials: hand off to Settings and DO NOT swap the active source,
+      // so the user's working pick is still current when they come back
+      // (shared-helpers.js:466-472). The row gates this too, but the rule
+      // belongs here — a caller that is not the row must not slip past it.
+      if (previous.configuredSources[source] === false) {
+        unconfiguredRef.current?.(source);
+        return;
+      }
+
+      setState((prev) => ({ ...prev, activeSource: source, userPickedSource: true }));
 
       if (source === 'soulseek') {
         // Deliberately fires even when soulseek is ALREADY active: clicking it

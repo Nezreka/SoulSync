@@ -1,4 +1,4 @@
-import { apiClient, readJson } from '@/app/api-client';
+import { apiClient, readJson, shellClient } from '@/app/api-client';
 
 import type {
   EnhancedSearchResponse,
@@ -24,12 +24,14 @@ export function fetchEnhancedSearch(
   source: string,
   signal?: AbortSignal,
 ): Promise<EnhancedSearchResponse> {
+  // `source` is omitted rather than sent empty when there is none to send, and
+  // 'auto' means the same thing — that is enhancedSearchFetch's contract
+  // (shared-helpers.js:22-23), and it is what makes the server fan out across
+  // sources instead of searching one called ''.
+  const json: { query: string; source?: string } = { query };
+  if (source && source !== 'auto') json.source = source;
   return readJson<EnhancedSearchResponse>(
-    apiClient.post('enhanced-search', {
-      json: { query, source },
-      timeout: false,
-      signal,
-    }),
+    apiClient.post('enhanced-search', { json, timeout: false, signal }),
   );
 }
 
@@ -150,19 +152,34 @@ export async function fetchLabels(query: string, signal?: AbortSignal): Promise<
   }
 }
 
-/** One artist's image, fetched lazily per card. */
+/**
+ * One artist's image, fetched lazily per card.
+ *
+ * `source` is omitted when it is spotify, which is the vanilla's rule
+ * (search.js:741). Worth being explicit that this is a port, not a judgement:
+ * the endpoint reads a missing `source` as "use the configured primary source"
+ * (web_server.py:10092), so viewing Spotify results while Deezer is primary
+ * resolves Spotify ids against Deezer. That asymmetry is left exactly as it is —
+ * changing it would alter which images resolve, for every user, on a hunch.
+ *
+ * `name` matters for sources that store no artist art at all: MusicBrainz has
+ * MBIDs only, so the resolver searches iTunes/Deezer by name instead.
+ */
 export async function fetchArtistImage(
   artistId: string | number,
   source: string,
   name: string,
 ): Promise<string> {
+  const searchParams: Record<string, string> = {};
+  if (source && source !== 'spotify') searchParams.source = source;
+  if (name) searchParams.name = name;
   try {
     const data = await readJson<{ success?: boolean; image_url?: string }>(
-      apiClient.get(`artist/${encodeURIComponent(String(artistId))}/image`, {
-        searchParams: { source, name },
-      }),
+      apiClient.get(`artist/${encodeURIComponent(String(artistId))}/image`, { searchParams }),
     );
-    return data?.image_url ?? '';
+    // The endpoint answers 200 with success:false on failure, so the flag is the
+    // only signal — a url next to success:false is not one to trust.
+    return data?.success && data.image_url ? data.image_url : '';
   } catch {
     return '';
   }
@@ -183,6 +200,40 @@ export function parseEnabledExperimental(data: unknown): Set<string> {
 export interface ConfigStatus {
   configured: Record<string, boolean>;
   enabledExperimental: Set<string>;
+}
+
+/** What /status says about the configured primary source. */
+export interface MetadataStatus {
+  /** The user's primary metadata source, or '' when /status did not say. */
+  source: string;
+  enabledExperimental: Set<string>;
+}
+
+/**
+ * Read the primary source (and the experimental flags) from /status.
+ *
+ * `/status` rather than `/api/settings`, because settings is admin-only and
+ * answers 403 for a member profile — which used to make every non-admin fall
+ * back to Spotify no matter what the admin had configured
+ * (shared-helpers.js:344-350).
+ *
+ * `metadata_source` is a DICT (`{source, connected, …}`). Reading it as a string
+ * was a real bug: `SOURCE_LABELS[<dict>]` is always undefined, so the picker
+ * silently stayed on Spotify. The legacy string shape is still accepted.
+ */
+export async function fetchMetadataStatus(): Promise<MetadataStatus> {
+  try {
+    // shellClient, not apiClient: /status is a root path, not under /api.
+    const data = await readJson<{ metadata_source?: unknown }>(shellClient.get('status'));
+    const raw = data?.metadata_source;
+    const source =
+      raw && typeof raw === 'object'
+        ? String((raw as { source?: unknown }).source ?? '')
+        : String(raw ?? '');
+    return { source, enabledExperimental: parseEnabledExperimental(data) };
+  } catch {
+    return { source: '', enabledExperimental: new Set() };
+  }
 }
 
 /**

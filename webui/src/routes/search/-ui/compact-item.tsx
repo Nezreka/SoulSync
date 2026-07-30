@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * One result card, ported from renderCompactSection's per-item DOM.
@@ -47,12 +47,23 @@ export interface CompactItemProps {
   href?: string;
   duration?: string;
   badge?: { text: string; className: string };
-  /** Extra badges the library check adds — in-library / on-wishlist. */
-  extraBadges?: { text: string; className: string }[];
+  /**
+   * Extra badges the library check adds — in-library / on-wishlist.
+   *
+   * `delay` staggers the arrival animation, which is how the vanilla's
+   * setTimeout cascade reads without any timers.
+   */
+  extraBadges?: { text: string; className: string; delay?: string }[];
   artistId?: string | number;
   artistName?: string;
-  onClick?: () => void;
+  /**
+   * Receives the event: a link card has to be able to preventDefault so the
+   * click routes in-app instead of reloading the page.
+   */
+  onClick?: (event: React.MouseEvent | React.KeyboardEvent) => void;
   onPlay?: () => void;
+  /** The play button's tooltip — it streams, or plays a local file. */
+  playTitle?: string;
 }
 
 export function CompactItem({
@@ -69,6 +80,7 @@ export function CompactItem({
   artistName,
   onClick,
   onPlay,
+  playTitle = 'Stream this track',
 }: CompactItemProps) {
   /**
    * A deterministic image URL that 404s is common — MusicBrainz Cover Art
@@ -77,6 +89,32 @@ export function CompactItem({
    */
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = Boolean(image) && !imageFailed;
+
+  /**
+   * Every card with artwork gets a glow sampled from that artwork.
+   *
+   * Not an artist-only flourish: renderCompactSection ran this for ANY card with
+   * an image (shared-helpers.js:748-753), and the stylesheet turns the sampled
+   * palette into the hover border and box-shadow of album, track and artist
+   * cards alike (style.css:40314/40538). Skipping it leaves every result card
+   * with the plain grey hover it has when art fails to load.
+   *
+   * Keyed on the url, so a lazily-resolved artist photo arriving later glows
+   * too — the same path, one effect.
+   */
+  const cardRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card || !image || imageFailed) return;
+    try {
+      window.extractImageColors?.(image, (colors) => {
+        window.applyDynamicGlow?.(card, colors);
+      });
+    } catch {
+      // Reading pixels can throw on a CORS-opaque image. A card without a glow
+      // is fine; a card that failed to render is not.
+    }
+  }, [image, imageFailed]);
 
   const content = (
     <>
@@ -104,7 +142,7 @@ export function CompactItem({
           {duration}
           <button
             className="enh-item-play-btn"
-            title="Stream this track"
+            title={playTitle}
             type="button"
             onClick={(event) => {
               // Without this the card's own click fires too and the download
@@ -119,7 +157,11 @@ export function CompactItem({
       ) : null}
       {badge ? <div className={`enh-item-badge ${badge.className}`}>{badge.text}</div> : null}
       {extraBadges?.map((extra) => (
-        <div key={extra.className} className={extra.className}>
+        <div
+          key={extra.className}
+          className={extra.className}
+          style={extra.delay ? { animationDelay: extra.delay } : undefined}
+        >
           {extra.text}
         </div>
       ))}
@@ -140,10 +182,13 @@ export function CompactItem({
   if (href && (kind === 'artist' || kind === 'label')) {
     return (
       <a
+        ref={cardRef as React.Ref<HTMLAnchorElement>}
         className={CARD_CLASS[kind]}
         href={href}
         aria-label={name || 'Artist'}
         style={{ color: 'inherit', textDecoration: 'none' }}
+        // The handler receives the event so the page can preventDefault and
+        // route in-app; the href stays real for middle-click and copy-link.
         onClick={onClick}
         {...dataAttrs}
       >
@@ -154,6 +199,7 @@ export function CompactItem({
 
   return (
     <div
+      ref={cardRef as React.Ref<HTMLDivElement>}
       className={CARD_CLASS[kind]}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
@@ -162,7 +208,7 @@ export function CompactItem({
         if (!onClick) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onClick();
+          onClick(event);
         }
       }}
       {...dataAttrs}

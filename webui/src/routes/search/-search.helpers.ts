@@ -64,6 +64,49 @@ export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source]?.text ?? source;
 }
 
+/**
+ * Which source the picker should start on.
+ *
+ * Four rules, in the order shared-helpers.js:361-395 applies them, and each one
+ * exists because of a way the picker can otherwise open unusable:
+ *
+ *   1. take /status's primary source, mapped through pickerSource;
+ *   2. anything unrecognised falls back to spotify;
+ *   3. an experimental source that is not enabled is not in the row at all, so
+ *      starting on it would leave nothing selected;
+ *   4. a source with no credentials would show an empty result set and blame the
+ *      provider — fall forward to the first source that IS configured.
+ */
+export function resolveInitialSource({
+  statusSource,
+  enabledExperimental,
+  configured,
+}: {
+  statusSource: string;
+  enabledExperimental: ReadonlySet<string>;
+  configured: Record<string, boolean>;
+}): string {
+  let source = pickerSource(statusSource);
+  if (!SOURCE_LABELS[source]) source = 'spotify';
+  if (EXPERIMENTAL_SOURCES.has(source) && !enabledExperimental.has(source)) source = 'spotify';
+  if (configured[source] === false) {
+    const usable = visibleSources(enabledExperimental).find((s) => configured[s] !== false);
+    if (usable) source = usable;
+  }
+  return source;
+}
+
+/** May the picker switch to this source at all? */
+export function canSelectSource(
+  source: string,
+  enabledExperimental: ReadonlySet<string>,
+): boolean {
+  if (!SOURCE_LABELS[source]) return false;
+  // A hidden experimental source has no icon; selecting it programmatically
+  // would strand the row with nothing active.
+  return !EXPERIMENTAL_SOURCES.has(source) || enabledExperimental.has(source);
+}
+
 /** Empty slice — every consumer reads five arrays, so none of them may be absent. */
 export function emptySourceResults(): SourceResults {
   return { db_artists: [], artists: [], albums: [], tracks: [], videos: [] };
@@ -89,7 +132,12 @@ export function sourceResultsFromResponse(data: EnhancedSearchResponse): SourceR
 export function fallbackFor(requested: string, data: EnhancedSearchResponse): string | null {
   const served = data.primary_source || data.metadata_source;
   if (!served) return null;
-  return pickerSource(served) === pickerSource(requested) ? null : served;
+  // A RAW comparison, as shared-helpers.js:504 has it — deliberately not
+  // normalised through pickerSource. On a no-credentials instance the server
+  // answers a 'spotify' request with 'spotify_free', and that IS worth saying:
+  // normalising would collapse the two and silently drop the banner telling the
+  // user which Spotify actually served their results.
+  return served === requested ? null : served;
 }
 
 export function fallbackBannerText(requested: string, served: string): string {
@@ -153,10 +201,17 @@ export function albumOwnershipByIdentity(
   return owned;
 }
 
-/** `_formatViewCount` — 1.2M / 3.4K / raw. */
+/**
+ * `_formatViewCount` — 1.2B / 1.2M / 3.4K / raw.
+ *
+ * The billions branch is not hypothetical on a music-video grid: plenty of the
+ * things people search for here have passed a billion plays, and without it they
+ * render as "1200.0M".
+ */
 export function formatViewCount(count: number | undefined | null): string {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 0) return '';
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
@@ -186,13 +241,27 @@ export function formatVideoDuration(seconds: number | undefined | null): string 
   return `${minutes}:${String(Math.floor(total % 60)).padStart(2, '0')}`;
 }
 
-/** An artist's display line: the vanilla showed a library track count or the source. */
-export function artistMetaLine(artist: SearchArtist, inLibrary: boolean): string {
-  if (inLibrary) {
-    const count = artist.track_count ?? 0;
-    return `${count} track${count === 1 ? '' : 's'}`;
-  }
-  return sourceLabel(artist.source ?? '');
+/**
+ * An artist's display line — two fixed strings, as search.js:480/494 has them.
+ *
+ * Deliberately NOT a track count: `_build_db_artists`
+ * (core/search/orchestrator.py:121-134) sends only id, name and image_url, so a
+ * count would read "0 tracks" on every library artist. The badge beside it
+ * already says Library or names the source.
+ */
+export function artistMetaLine(inLibrary: boolean): string {
+  return inLibrary ? 'In Your Library' : 'Artist';
+}
+
+/** A track's display line — `artist • album`, skipping whichever is missing. */
+export function trackMetaLine(track: SearchTrack): string {
+  return [track.artist, track.album].filter(Boolean).join(' • ');
+}
+
+/** An album's display line — `artist • year`, with the vanilla's N/A year. */
+export function albumMetaLine(album: SearchAlbum): string {
+  const year = album.release_date ? album.release_date.slice(0, 4) : 'N/A';
+  return `${album.artist ?? ''} • ${year}`;
 }
 
 /** A label's display line — `type • area`, or a plain fallback. */

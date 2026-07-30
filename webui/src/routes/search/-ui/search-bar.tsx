@@ -26,20 +26,28 @@ type ClaimedEvent = { _nativeHandled?: boolean };
  */
 export function SearchBar({
   query,
-  loading,
   onQueryChange,
   onSubmit,
-  onCancel,
+  onClear,
   idValue,
   onIdChange,
   onIdSubmit,
 }: {
   query: string;
-  loading: boolean;
   onQueryChange: (value: string) => void;
   /** Enter — bypasses the debounce entirely. */
   onSubmit: () => void;
-  onCancel: () => void;
+  /**
+   * The ✕ CLEARS the box; it does not cancel a search.
+   *
+   * Worth being blunt about because the first version of this got it backwards:
+   * search.js:241-243 shows the button whenever the input has ANY text and
+   * hides it when empty — nothing to do with a request being in flight — and
+   * search.js:278-283 empties the input and closes the dropdown when it is
+   * clicked. Tying it to a loading flag hides it while you type and turns it
+   * into a different feature.
+   */
+  onClear: () => void;
   idValue: string;
   onIdChange: (value: string) => void;
   onIdSubmit: () => void;
@@ -67,7 +75,9 @@ export function SearchBar({
     <div className="enhanced-search-input-wrapper">
       <div className="enhanced-search-bar-container">
         <div className="enhanced-search-wrapper">
-          <span className="enhanced-search-icon">🔍</span>
+          {/* ✨ in a div, both as in index.html:4155 — the stylesheet sizes and
+              positions this by class, and the glyph is part of the page's look. */}
+          <div className="enhanced-search-icon">✨</div>
           <input
             ref={inputRef}
             id="enhanced-search-input"
@@ -85,27 +95,31 @@ export function SearchBar({
               }
             }}
           />
-          {loading ? (
+          {query ? (
             <button
               className="enhanced-cancel-btn"
               id="enhanced-cancel-btn"
               type="button"
-              title="Cancel search"
-              onClick={onCancel}
+              title="Clear search"
+              onClick={onClear}
             >
               ✕
             </button>
           ) : null}
         </div>
 
-        {/* Paste a provider URL or a MusicBrainz id to resolve one exact release. */}
+        {/* Paste a provider URL or a MusicBrainz id to resolve one exact release.
+            The placeholder names the four providers on purpose — it is the only
+            place the feature explains itself (#775). */}
         <div className="enh-id-lookup">
           <span className="enh-id-lookup-icon">🔗</span>
           <input
             id="enh-id-input"
             className="enh-id-input"
             type="text"
-            placeholder="Paste a link or ID"
+            placeholder="…or paste a Spotify / Apple Music / MusicBrainz / Deezer link, or a MusicBrainz ID"
+            autoComplete="off"
+            spellCheck={false}
             value={idValue}
             onChange={(event) => onIdChange(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -116,7 +130,7 @@ export function SearchBar({
             }}
           />
           <button className="enh-id-btn" id="enh-id-btn" type="button" onClick={onIdSubmit}>
-            Go
+            Look up
           </button>
         </div>
       </div>
