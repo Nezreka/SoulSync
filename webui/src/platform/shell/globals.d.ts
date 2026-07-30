@@ -253,6 +253,17 @@ declare global {
       isAlbumDownload?: boolean,
       albumResult?: unknown,
     ) => void;
+    /**
+     * Download a basic-search result the user declined to match.
+     *
+     * Set by the React search page and called by the still-vanilla
+     * matched-download modal's "Skip Matching" button
+     * (wishlist-tools.js:skipMatching). It exists because the call that used to
+     * be there could not work: it looked the result up by index in an array
+     * nothing populates, after the state holding the result had already been
+     * cleared, and POSTed a route that does not exist.
+     */
+    _basicDownloadUnmatched?: (result: unknown) => void | Promise<void>;
     /** media-player.js — starts streaming a search result in the player. */
     startStream?: (searchResult: unknown) => void | Promise<void>;
     /** media-player.js — 'flac' from 'a/b/c.flac'; '' when there is no extension. */

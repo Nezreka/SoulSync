@@ -2247,18 +2247,34 @@ function showNoResultsMessage(containerId, message) {
 function skipMatching() {
     console.log('🎯 Skipping matching, proceeding with normal download');
 
-    // Close modal
+    // Captured BEFORE closing: closeMatchingModal() resets currentMatchingData
+    // to nulls, and this function used to read it afterwards.
+    //
+    // For an album, searchResult is its FIRST TRACK (matchedDownloadAlbum hands
+    // the modal a real track to identify) — the thing to download is the album.
+    const target = currentMatchingData.isAlbumDownload
+        ? (currentMatchingData.albumResult || currentMatchingData.searchResult)
+        : currentMatchingData.searchResult;
+
     closeMatchingModal();
 
-    // Start normal download
-    if (currentMatchingData.isAlbumDownload) {
-        // For albums, we need to download each track
-        showToast('⬇️ Starting album download (unmatched)', 'info');
-        // This would need to be implemented to download all album tracks
-    } else {
-        // Single track download
-        startDownload(window.currentSearchResults.indexOf(currentMatchingData.searchResult));
+    if (!target) {
+        showToast('Nothing to download', 'error');
+        return;
     }
+
+    // The search page owns the download call. Previously this went through
+    // startDownload(currentSearchResults.indexOf(result)), which could not work
+    // for three independent reasons: the state was already cleared (so indexOf
+    // got null), startDownload indexed a DIFFERENT array (`searchResults`, the
+    // core.js global, which nothing populates), and it POSTed
+    // /api/downloads/start, which is not a route. The album branch was a stub
+    // that toasted a download it never started.
+    if (typeof window._basicDownloadUnmatched === 'function') {
+        window._basicDownloadUnmatched(target);
+        return;
+    }
+    showToast('Open the Search page to download this', 'error');
 }
 
 function matchSlskdTracksToSpotify(slskdTracks, spotifyTracks) {
