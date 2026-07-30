@@ -60,9 +60,7 @@ describe('useVideoDownloads', () => {
   });
 
   it('marks the card downloading straight away, before any answer', () => {
-    server.use(
-      http.post('/api/music-video/download', () => new Promise(() => {})),
-    );
+    server.use(http.post('/api/music-video/download', () => new Promise(() => {})));
     const { result } = renderHook(() => useVideoDownloads());
     act(() => result.current.download(video()));
 

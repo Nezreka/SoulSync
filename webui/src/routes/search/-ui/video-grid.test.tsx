@@ -114,10 +114,9 @@ describe('VideoGrid', () => {
   });
 
   it('tracks progress per video, not across the grid', () => {
-    renderGrid(
-      [video({ video_id: 'v1' }), video({ video_id: 'v2', title: 'Second' })],
-      { v2: { state: 'downloading', percent: 25 } },
-    );
+    renderGrid([video({ video_id: 'v1' }), video({ video_id: 'v2', title: 'Second' })], {
+      v2: { state: 'downloading', percent: 25 },
+    });
     const cards = document.querySelectorAll('.enh-video-card');
     expect(cards[0].className).not.toContain('downloading');
     expect(cards[1].className).toContain('downloading');

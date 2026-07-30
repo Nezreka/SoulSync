@@ -75,7 +75,13 @@ export function SourceRow({
               {/* An in-flight source shows an hourglass INSTEAD of its logo —
                   shared-helpers.js:325-330. The `loading` class animates the
                   button, but the glyph swap is what makes it unmistakable. */}
-              {loading ? '⏳' : info.logo ? <img src={info.logo} alt="" loading="lazy" /> : info.icon}
+              {loading ? (
+                '⏳'
+              ) : info.logo ? (
+                <img src={info.logo} alt="" loading="lazy" />
+              ) : (
+                info.icon
+              )}
             </span>
             <span className="enh-source-icon-label">{info.text}</span>
           </button>

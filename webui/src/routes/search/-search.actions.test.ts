@@ -168,7 +168,11 @@ describe('modal payloads', () => {
   it('reads an artist id out of a compound album id when there is nothing else', () => {
     // Some sources mint `<artistId>_<rest>`. Nonsense elsewhere, which is why it
     // is the last resort.
-    const built = buildArtistObject({ ...detail, artists: [] }, album({ id: 'art9_alb3' }), 'itunes');
+    const built = buildArtistObject(
+      { ...detail, artists: [] },
+      album({ id: 'art9_alb3' }),
+      'itunes',
+    );
     expect(built.id).toBe('art9');
     expect(built.source).toBe('itunes');
   });

@@ -3,13 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SearchAlbum, SearchArtist, SearchLabel, SearchTrack } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
 
-import { fetchLabels, lookupById } from '../-search.api';
 import {
   openSearchAlbum,
   openSearchTrack,
   playOwnedTrack,
   streamSearchTrack,
 } from '../-search.actions';
+import { fetchLabels, lookupById } from '../-search.api';
 import {
   artistDetailPath,
   fallbackBannerText,
@@ -19,8 +19,8 @@ import {
   shouldSearch,
   sourceLabel,
 } from '../-search.helpers';
-import { useAdoptedBasicSection } from '../-search.use-basic-section';
 import { useArtistImages } from '../-search.use-artist-images';
+import { useAdoptedBasicSection } from '../-search.use-basic-section';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
 import { useDismissOnOutsideClick } from '../-search.use-dismiss';
 import { useLibraryCheck } from '../-search.use-library-check';
@@ -146,8 +146,11 @@ export function SearchPage() {
    * appears on its own.
    */
   const hasSourceResults =
-    results.db_artists.length + results.artists.length + results.albums.length +
-      results.tracks.length + results.videos.length >
+    results.db_artists.length +
+      results.artists.length +
+      results.albums.length +
+      results.tracks.length +
+      results.videos.length >
     0;
   useEffect(() => {
     const trimmed = state.query.trim();
@@ -239,7 +242,10 @@ export function SearchPage() {
         */}
         <div ref={setBasicHost} style={{ display: 'contents' }} />
 
-        <div className={`search-section${soulseekActive ? '' : ' active'}`} id="enhanced-search-section">
+        <div
+          className={`search-section${soulseekActive ? '' : ' active'}`}
+          id="enhanced-search-section"
+        >
           <SearchBar
             query={query}
             onQueryChange={setQuery}
@@ -268,7 +274,10 @@ export function SearchPage() {
                 <span>✕</span> Close Results
               </button>
 
-              <div className={`enhanced-loading${view === 'loading' ? '' : ' hidden'}`} id="enhanced-loading">
+              <div
+                className={`enhanced-loading${view === 'loading' ? '' : ' hidden'}`}
+                id="enhanced-loading"
+              >
                 <div className="spinner" />
                 <p id="enhanced-loading-text">
                   {idLookupPending
@@ -277,7 +286,10 @@ export function SearchPage() {
                 </p>
               </div>
 
-              <div className={`enhanced-empty${view === 'empty' ? '' : ' hidden'}`} id="enhanced-empty">
+              <div
+                className={`enhanced-empty${view === 'empty' ? '' : ' hidden'}`}
+                id="enhanced-empty"
+              >
                 <div className="empty-icon">🔍</div>
                 <p>No results found</p>
               </div>
@@ -306,7 +318,9 @@ export function SearchPage() {
                   artistImages={artistImages}
                   onArtistHref={onArtistHref}
                   onLabelHref={onLabelHref}
-                  onAlbumClick={(album: SearchAlbum) => void openSearchAlbum(album, state.activeSource)}
+                  onAlbumClick={(album: SearchAlbum) =>
+                    void openSearchAlbum(album, state.activeSource)
+                  }
                   onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
                   onTrackPlay={(track: SearchTrack, row: LibraryCheckTrack | undefined) => {
                     if (row) playOwnedTrack(row);

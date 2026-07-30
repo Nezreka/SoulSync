@@ -6,9 +6,7 @@ import type { CompactItemProps } from './compact-item';
 import { CompactItem, ResultSection } from './compact-item';
 
 function renderItem(over: Partial<CompactItemProps> = {}) {
-  render(
-    <CompactItem kind="album" name="Drukqs" meta="Aphex Twin" placeholder="💿" {...over} />,
-  );
+  render(<CompactItem kind="album" name="Drukqs" meta="Aphex Twin" placeholder="💿" {...over} />);
   return document.querySelector('.enh-compact-item') as HTMLElement;
 }
 
@@ -81,7 +79,12 @@ describe('CompactItem', () => {
   });
 
   it('marks a resolved artist image as not needing one', () => {
-    renderItem({ kind: 'artist', artistId: 'sp1', artistName: 'Aphex', image: 'https://cdn/a.jpg' });
+    renderItem({
+      kind: 'artist',
+      artistId: 'sp1',
+      artistName: 'Aphex',
+      image: 'https://cdn/a.jpg',
+    });
     const card = document.querySelector('[data-artist-id="sp1"]') as HTMLElement;
     expect(card.getAttribute('data-needs-image')).toBe('false');
     expect(card.getAttribute('data-artist-name')).toBe('Aphex');
@@ -154,15 +157,7 @@ describe('CompactItem', () => {
 describe('ResultSection', () => {
   it('renders nothing at all when the count is zero', () => {
     render(
-      <ResultSection
-        id="s"
-        listId="l"
-        countId="c"
-        icon="💿"
-        title="Albums"
-        kind="album"
-        count={0}
-      >
+      <ResultSection id="s" listId="l" countId="c" icon="💿" title="Albums" kind="album" count={0}>
         <div>child</div>
       </ResultSection>,
     );
@@ -174,15 +169,7 @@ describe('ResultSection', () => {
   it('gives each kind its own grid class', () => {
     const section = (kind: 'album' | 'track' | 'artist') =>
       render(
-        <ResultSection
-          id="s"
-          listId="l"
-          countId="c"
-          icon="x"
-          title="T"
-          kind={kind}
-          count={1}
-        >
+        <ResultSection id="s" listId="l" countId="c" icon="x" title="T" kind={kind} count={1}>
           <div>child</div>
         </ResultSection>,
       );

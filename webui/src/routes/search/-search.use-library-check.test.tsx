@@ -134,7 +134,10 @@ describe('useLibraryCheck', () => {
     // Best effort by design: an unbadged owned album is a small loss, an error
     // state over the whole result list is not.
     server.use(
-      http.post('/api/enhanced-search/library-check', () => new HttpResponse(null, { status: 500 })),
+      http.post(
+        '/api/enhanced-search/library-check',
+        () => new HttpResponse(null, { status: 500 }),
+      ),
     );
     const { result } = renderHook(() => useLibraryCheck([album()], [track()]));
     await new Promise((r) => setTimeout(r, 20));
@@ -180,8 +183,8 @@ describe('useLibraryCheck', () => {
       }),
     );
 
-    const { rerender } = renderHook(({ albums }: { albums: SearchAlbum[] }) =>
-      useLibraryCheck(albums, []),
+    const { rerender } = renderHook(
+      ({ albums }: { albums: SearchAlbum[] }) => useLibraryCheck(albums, []),
       { initialProps: { albums: [album()] } },
     );
     await waitFor(() => expect(asks).toBe(1));

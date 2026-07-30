@@ -97,10 +97,7 @@ export function resolveInitialSource({
 }
 
 /** May the picker switch to this source at all? */
-export function canSelectSource(
-  source: string,
-  enabledExperimental: ReadonlySet<string>,
-): boolean {
+export function canSelectSource(source: string, enabledExperimental: ReadonlySet<string>): boolean {
   if (!SOURCE_LABELS[source]) return false;
   // A hidden experimental source has no icon; selecting it programmatically
   // would strand the row with nothing active.
@@ -281,7 +278,10 @@ export function artistDetailPath(
   source?: string | null,
   name?: string | null,
 ): string {
-  const normalized = String(source ?? '').trim().toLowerCase() || 'library';
+  const normalized =
+    String(source ?? '')
+      .trim()
+      .toLowerCase() || 'library';
   const path = `/artist-detail/${encodeURIComponent(normalized)}/${encodeURIComponent(String(artistId))}`;
   return name ? `${path}?name=${encodeURIComponent(name)}` : path;
 }

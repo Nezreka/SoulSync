@@ -177,8 +177,9 @@ describe('the dropdown state machine', () => {
   /** Type into the real input the way a keystroke does. */
   function type(value: string) {
     const input = document.getElementById('enhanced-search-input') as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
-      .set as (v: string) => void;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set as (
+      v: string,
+    ) => void;
     act(() => {
       setter.call(input, value);
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -348,8 +349,9 @@ describe('the global widget handoff', () => {
 describe('where a result card points', () => {
   function type(value: string) {
     const input = document.getElementById('enhanced-search-input') as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
-      .set as (v: string) => void;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set as (
+      v: string,
+    ) => void;
     act(() => {
       setter.call(input, value);
       input.dispatchEvent(new Event('input', { bubbles: true }));

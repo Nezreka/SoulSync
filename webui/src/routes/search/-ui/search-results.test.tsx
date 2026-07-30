@@ -205,7 +205,12 @@ describe('SearchResults', () => {
   it('opens an album, and a track, through their own handlers', () => {
     const onAlbumClick = vi.fn();
     const onTrackClick = vi.fn();
-    renderResults({ albums: [album()], tracks: [{ id: 't1', name: 'Xtal' }], onAlbumClick, onTrackClick });
+    renderResults({
+      albums: [album()],
+      tracks: [{ id: 't1', name: 'Xtal' }],
+      onAlbumClick,
+      onTrackClick,
+    });
 
     fireEvent.click(screen.getByText('Drukqs'));
     fireEvent.click(screen.getByText('Xtal'));
@@ -342,7 +347,10 @@ describe('SearchResults', () => {
   });
 
   it('shows a library artist a resolved image', () => {
-    renderResults({ dbArtists: [{ id: 7, name: 'Owned' }], artistImages: { 7: 'https://cdn/a.jpg' } });
+    renderResults({
+      dbArtists: [{ id: 7, name: 'Owned' }],
+      artistImages: { 7: 'https://cdn/a.jpg' },
+    });
     expect(document.querySelector('img')?.getAttribute('src')).toBe('https://cdn/a.jpg');
   });
 
