@@ -264,6 +264,34 @@ export function albumMetaLine(album: SearchAlbum): string {
   return `${album.artist ?? ''} • ${year}`;
 }
 
+/**
+ * Where an artist card points, mirroring buildArtistDetailPath (init.js:2964).
+ *
+ * The SOURCE SEGMENT is not optional. `/artist-detail/<source>/<id>` is what
+ * parseArtistDetailPath splits on, and it rejects anything with fewer than three
+ * segments outright — so a path without it resolves to nothing at all. An artist
+ * from the library has no metadata source, and the literal 'library' is what
+ * fills the slot (_normalizeArtistDetailSource, init.js:2959).
+ *
+ * `name` rides along because some sources have no id lookup at all (Bandcamp):
+ * on a cold page load the name is the only thing left to resolve against.
+ */
+export function artistDetailPath(
+  artistId: string | number,
+  source?: string | null,
+  name?: string | null,
+): string {
+  const normalized = String(source ?? '').trim().toLowerCase() || 'library';
+  const path = `/artist-detail/${encodeURIComponent(normalized)}/${encodeURIComponent(String(artistId))}`;
+  return name ? `${path}?name=${encodeURIComponent(name)}` : path;
+}
+
+/** Where a label card points — buildLabelDetailPath (init.js:3003). */
+export function labelDetailPath(labelId: string | number, name?: string | null): string {
+  const path = `/label-detail/${encodeURIComponent(String(labelId))}`;
+  return name ? `${path}?name=${encodeURIComponent(name)}` : path;
+}
+
 /** A label's display line — `type • area`, or a plain fallback. */
 export function labelMetaLine(label: { type?: string; area?: string }): string {
   const parts = [label.type, label.area].filter(Boolean);

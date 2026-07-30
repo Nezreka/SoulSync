@@ -11,8 +11,10 @@ import {
   streamSearchTrack,
 } from '../-search.actions';
 import {
+  artistDetailPath,
   fallbackBannerText,
   isIdLookupQuery,
+  labelDetailPath,
   SEARCH_DEBOUNCE_MS,
   shouldSearch,
   sourceLabel,
@@ -199,10 +201,17 @@ export function SearchPage() {
 
   const served = state.fallbacks[state.activeSource];
 
-  const onArtistHref = (artist: SearchArtist) =>
-    `/artist-detail/${encodeURIComponent(String(artist.id ?? ''))}`;
-  const onLabelHref = (label: SearchLabel) =>
-    `/label-detail/${encodeURIComponent(String(label.id ?? ''))}`;
+  /**
+   * A library artist resolves under 'library'; a found one under the source it
+   * came from, with its name in tow. Both need the source SEGMENT — the route is
+   * /artist-detail/$source/$id and a two-segment path resolves to nothing.
+   */
+  const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
+    inLibrary
+      ? artistDetailPath(artist.id ?? '')
+      : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
+
+  const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
 
   return (
     <div className="downloads-content">

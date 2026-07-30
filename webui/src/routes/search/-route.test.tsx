@@ -344,3 +344,63 @@ describe('the global widget handoff', () => {
     delete window.performDownloadsSearch;
   });
 });
+
+describe('where a result card points', () => {
+  function type(value: string) {
+    const input = document.getElementById('enhanced-search-input') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
+      .set as (v: string) => void;
+    act(() => {
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('links a library artist to /artist-detail/library/<id> and a found one to its source', async () => {
+    // The href IS the feature. The first version guessed `/artist-detail/<id>`,
+    // which matches no route and resolves to nothing — clicking an artist did
+    // nothing at all, and no test noticed.
+    server.use(
+      http.post('/api/enhanced-search', () =>
+        HttpResponse.json({
+          db_artists: [{ id: 7, name: 'Owned Artist' }],
+          spotify_artists: [{ id: 'sp1', name: 'Found Artist', source: 'spotify' }],
+        }),
+      ),
+      http.post('/api/labels/search', () => HttpResponse.json({ labels: [] })),
+      http.post('/api/enhanced-search/library-check', () => HttpResponse.json({})),
+      http.get('/api/artist/:id/image', () => HttpResponse.json({ success: false })),
+    );
+
+    renderRoute('/search');
+    await screen.findByText('Search');
+    type('aphex twin');
+
+    const owned = await screen.findByText('Owned Artist', undefined, { timeout: 3000 });
+    expect(owned.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/7');
+
+    const found = screen.getByText('Found Artist');
+    expect(found.closest('a')?.getAttribute('href')).toBe(
+      '/artist-detail/spotify/sp1?name=Found%20Artist',
+    );
+  });
+
+  it('links a label to /label-detail/<id>', async () => {
+    server.use(
+      http.post('/api/enhanced-search', () =>
+        HttpResponse.json({ spotify_albums: [{ id: 'a1', name: 'Drukqs', artist: 'Aphex Twin' }] }),
+      ),
+      http.post('/api/labels/search', () =>
+        HttpResponse.json({ labels: [{ id: 'l1', name: 'Warp' }] }),
+      ),
+      http.post('/api/enhanced-search/library-check', () => HttpResponse.json({})),
+    );
+
+    renderRoute('/search');
+    await screen.findByText('Search');
+    type('warp');
+
+    const label = await screen.findByText('Warp', undefined, { timeout: 3000 });
+    expect(label.closest('a')?.getAttribute('href')).toBe('/label-detail/l1?name=Warp');
+  });
+});

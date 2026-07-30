@@ -135,7 +135,11 @@ export function SearchResults({
   ownership: OwnershipState;
   /** Lazily-resolved images, keyed by artist id. */
   artistImages: Record<string, string>;
-  onArtistHref: (artist: SearchArtist) => string;
+  /**
+   * `inLibrary` decides the URL, not just the styling: a library artist resolves
+   * under /artist-detail/library/<id>, a found one under its metadata source.
+   */
+  onArtistHref: (artist: SearchArtist, inLibrary: boolean) => string;
   onLabelHref: (label: SearchLabel) => string;
   onAlbumClick: (album: SearchAlbum) => void;
   onTrackClick: (track: SearchTrack) => void;
@@ -204,7 +208,7 @@ export function SearchResults({
                 meta={artistMetaLine(true)}
                 placeholder="📚"
                 image={artistImages[String(artist.id ?? '')] || artistImage(artist)}
-                href={onArtistHref(artist)}
+                href={onArtistHref(artist, true)}
                 badge={{ text: 'Library', className: 'enh-badge-library' }}
                 // Library artists take part in lazy image loading too:
                 // renderCompactSection stamped these attributes on EVERY artist
@@ -235,7 +239,7 @@ export function SearchResults({
                 placeholder="🎤"
                 // A lazily-resolved image wins; otherwise whatever the source gave.
                 image={artistImages[String(artist.id ?? '')] || artistImage(artist)}
-                href={onArtistHref(artist)}
+                href={onArtistHref(artist, false)}
                 // The badge names the source being VIEWED, not the row's own
                 // `source` field — the vanilla derives it from the active tab.
                 badge={sourceBadge(activeSource)}

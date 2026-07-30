@@ -8,6 +8,7 @@ import {
   albumIdentity,
   albumMetaLine,
   albumOwnershipByIdentity,
+  artistDetailPath,
   artistMetaLine,
   fallbackBannerText,
   fallbackFor,
@@ -16,6 +17,7 @@ import {
   formatViewCount,
   hasAnyResults,
   isIdLookupQuery,
+  labelDetailPath,
   labelMetaLine,
   MIN_QUERY_LENGTH,
   pickerSource,
@@ -349,5 +351,53 @@ describe('parity with the vanilla source tables', () => {
 
   it('keeps the experimental set in step', () => {
     expect(vanilla).toContain("const EXPERIMENTAL_SOURCES = new Set(['jiosaavn', 'bandcamp']);");
+  });
+});
+
+describe('detail paths', () => {
+  /**
+   * These mirror buildArtistDetailPath / buildLabelDetailPath (init.js:2964,
+   * 3003) and feed the routes /artist-detail/$source/$id and /label-detail/$id.
+   *
+   * Pinned because the first version of them was GUESSED — `/artist-detail/<id>`
+   * with no source segment, which parseArtistDetailPath rejects outright
+   * (`segs.length < 3`) and which matches no route. Clicking an artist did
+   * nothing at all.
+   */
+  it('puts the SOURCE segment in an artist path', () => {
+    expect(artistDetailPath('sp1', 'spotify')).toBe('/artist-detail/spotify/sp1');
+    // Three segments. Two is not a shorter version of this — it is unroutable.
+    expect(artistDetailPath('sp1', 'spotify').split('/').filter(Boolean)).toHaveLength(3);
+  });
+
+  it('files a library artist under the literal "library"', () => {
+    // A library artist has no metadata source, and the slot cannot be empty.
+    expect(artistDetailPath(42)).toBe('/artist-detail/library/42');
+    expect(artistDetailPath(42, null)).toBe('/artist-detail/library/42');
+    expect(artistDetailPath(42, '')).toBe('/artist-detail/library/42');
+    expect(artistDetailPath(42, '   ')).toBe('/artist-detail/library/42');
+  });
+
+  it('lowercases the source, as _normalizeArtistDetailSource does', () => {
+    expect(artistDetailPath('x', 'Deezer')).toBe('/artist-detail/deezer/x');
+  });
+
+  it('carries the name for sources with no id lookup', () => {
+    // Bandcamp cannot resolve by id at all; on a cold load the name is all
+    // there is to go on.
+    expect(artistDetailPath('abc', 'bandcamp', 'Aphex Twin')).toBe(
+      '/artist-detail/bandcamp/abc?name=Aphex%20Twin',
+    );
+    expect(artistDetailPath('abc', 'bandcamp')).toBe('/artist-detail/bandcamp/abc');
+  });
+
+  it('encodes ids and names that would otherwise break the path', () => {
+    expect(artistDetailPath('a/b', 'spotify')).toBe('/artist-detail/spotify/a%2Fb');
+    expect(artistDetailPath('1', 'spotify', 'AC/DC')).toBe('/artist-detail/spotify/1?name=AC%2FDC');
+  });
+
+  it('builds a label path with its optional name', () => {
+    expect(labelDetailPath('l1')).toBe('/label-detail/l1');
+    expect(labelDetailPath('l1', 'Warp')).toBe('/label-detail/l1?name=Warp');
   });
 });
