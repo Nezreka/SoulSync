@@ -201,6 +201,108 @@ def test_backwards_compat_alias_still_works():
     assert basic.run_basic_soulseek_search is basic.run_basic_search
 
 
+# ── The real dataclasses ───────────────────────────────────────────────
+#
+# Every fake above stores ``quality_score`` in ``__dict__``. The real
+# ``SearchResult``/``AlbumResult`` declare it as a ``@property``, which
+# ``__dict__`` does not contain — so the fakes tested a shape that never
+# occurs in production, and the serialiser silently dropped the score for
+# years. These tests use the production classes so that cannot recur.
+
+
+def _real_track(**over):
+    from core.download_plugins.types import TrackResult
+    kwargs = dict(
+        username='peer', filename='a.flac', size=10_000_000, bitrate=1000,
+        duration=200_000, quality='flac', free_upload_slots=1,
+        upload_speed=1_000_000, queue_length=0, artist='A', title='T',
+        album='Al', track_number=1,
+    )
+    kwargs.update(over)
+    return TrackResult(**kwargs)
+
+
+def _real_album(**over):
+    from core.download_plugins.types import AlbumResult
+    kwargs = dict(
+        username='peer', album_path='/p', album_title='Al', artist='A',
+        track_count=10, total_size=100_000_000, tracks=[_real_track()],
+        dominant_quality='flac',
+    )
+    kwargs.update(over)
+    return AlbumResult(**kwargs)
+
+
+def test_real_track_result_carries_its_quality_score_to_the_payload():
+    """The score is a property; without an explicit copy it never ships."""
+    track = _real_track(quality='flac', bitrate=1000)
+    client = _FakeSoulseek(tracks=[track])
+
+    result = basic.run_basic_search('q', client, _sync_run_async)
+
+    assert 'quality_score' not in track.__dict__, 'precondition: it is a property'
+    assert result[0]['quality_score'] == track.quality_score
+    assert result[0]['quality_score'] > 0
+
+
+def test_real_album_result_carries_its_quality_score_to_the_payload():
+    album = _real_album()
+    client = _FakeSoulseek(albums=[album])
+
+    result = basic.run_basic_search('q', client, _sync_run_async)
+
+    assert result[0]['quality_score'] == album.quality_score
+    assert result[0]['quality_score'] > 0
+
+
+def test_album_tracks_carry_their_own_quality_score():
+    """The per-track rows inside an album are rendered as their own list in
+    the UI and sortable there, so they need the score too."""
+    album = _real_album(tracks=[_real_track(quality='mp3', bitrate=128)])
+    client = _FakeSoulseek(albums=[album])
+
+    result = basic.run_basic_search('q', client, _sync_run_async)
+
+    assert result[0]['tracks'][0]['quality_score'] == album.tracks[0].quality_score
+
+
+def test_album_track_payload_does_not_alias_the_live_object():
+    """The serialised dict must be a copy — handing out ``track.__dict__``
+    means a caller mutating the response mutates the search result."""
+    album = _real_album()
+    client = _FakeSoulseek(albums=[album])
+
+    result = basic.run_basic_search('q', client, _sync_run_async)
+    result[0]['tracks'][0]['title'] = 'MUTATED'
+
+    assert album.tracks[0].title == 'T'
+
+
+def test_real_results_are_actually_ordered_by_quality():
+    """The end-to-end claim in the module docstring, on real objects: a FLAC
+    outranks a 128kbps MP3."""
+    flac = _real_track(title='flac', quality='flac', bitrate=1000)
+    mp3 = _real_track(title='mp3', quality='mp3', bitrate=128)
+    client = _FakeSoulseek(tracks=[mp3, flac])
+
+    result = basic.run_basic_search('q', client, _sync_run_async)
+
+    assert [r['title'] for r in result] == ['flac', 'mp3']
+
+
+def test_a_result_whose_score_raises_does_not_kill_the_search():
+    """``quality_score`` calls ``.lower()`` on the quality string; a source
+    that leaves it None must cost that one row its score, not the search."""
+    broken = _real_track(title='broken', quality=None)
+    fine = _real_track(title='fine', quality='flac')
+    client = _FakeSoulseek(tracks=[broken, fine])
+
+    result = basic.run_basic_search('q', client, _sync_run_async)
+
+    assert {r['title'] for r in result} == {'broken', 'fine'}
+    assert next(r for r in result if r['title'] == 'broken')['quality_score'] == 0.0
+
+
 def test_source_targeted_search_serialises_albums_with_tracks():
     """Source-targeted path goes through the same normaliser as the
     default path, so albums returned via a specific source still get
