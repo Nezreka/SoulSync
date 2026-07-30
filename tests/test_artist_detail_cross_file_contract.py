@@ -41,12 +41,20 @@ _CONTRACT = {
         "stats-automations.js", "auto-sync.js", "discover.js",
         "pages-extra.js", "wishlist-tools.js",
     },
+    # search.js was deleted when /search became React. The two entries below
+    # were updated DELIBERATELY, which is what this test exists to force:
+    #   - playLibraryTrack's coupling did NOT go away, it moved. The React
+    #     search page calls the same global to play an owned track, so it is
+    #     recorded where it lives now (same treatment as label-detail below).
+    #   - navigateToArtistDetail's coupling genuinely IS gone: the React page
+    #     renders /artist-detail/$source/$id hrefs and lets the router handle
+    #     it instead of calling the global.
     "playLibraryTrack": {
         "stats-automations.js", "shell-bridge.js", "downloads.js",
-        "enrichment.js", "search.js",
+        "enrichment.js", "src/routes/search/-search.actions.ts",
     },
     "navigateToArtistDetail": {
-        "shell-bridge.js", "enrichment.js", "search.js",
+        "shell-bridge.js", "enrichment.js",
     },
     "artistDetailPageState": {"stats-automations.js"},
     "_updateSidebarLibraryBreadcrumb": {"shell-bridge.js"},
