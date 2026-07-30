@@ -100,24 +100,49 @@ describe('the search route', () => {
     // MOVED into the React tree — and initializeSearch, which used to run from
     // init.js's legacy `case 'search'`, has to be called or its Search button
     // does nothing.
-    mountVanillaBasicSection();
+    const legacyPage = mountVanillaBasicSection();
     const initializeSearch = vi.fn();
     const initializeFilters = vi.fn();
     window.initializeSearch = initializeSearch;
     window.initializeFilters = initializeFilters;
 
-    const { unmount } = renderRoute('/search');
+    // `container` is the element React renders into. Asserting against
+    // document.body instead would be vacuous — the legacy page is in the body
+    // too, so `contains` is true whether the node moved or not. That exact
+    // mistake let a "removed the appendChild" mutant survive.
+    const { unmount, container } = renderRoute('/search');
     await screen.findByText('Search');
 
-    const section = document.getElementById('basic-search-section');
-    const reactHost = document.getElementById('webui-react-root') ?? document.body;
-    expect(reactHost.contains(section as Node)).toBe(true);
+    const section = document.getElementById('basic-search-section') as HTMLElement;
+    expect(container.contains(section)).toBe(true);
+    expect(legacyPage.contains(section)).toBe(false);
     expect(initializeSearch).toHaveBeenCalledOnce();
     expect(initializeFilters).toHaveBeenCalledOnce();
 
     // And it goes home again, or basic search stays broken until a reload.
     unmount();
-    expect(document.getElementById('search-page')?.contains(section as Node)).toBe(true);
+    expect(legacyPage.contains(section)).toBe(true);
+    expect(container.contains(section)).toBe(false);
+  });
+
+  it('shows the basic panel only when Soulseek is the active source', async () => {
+    // `.search-section` is display:none until `.active`, so this class IS
+    // whether basic search is on screen at all.
+    mountVanillaBasicSection();
+    renderRoute('/search');
+    await screen.findByText('Search');
+
+    const section = document.getElementById('basic-search-section') as HTMLElement;
+    const enhanced = document.getElementById('enhanced-search-section') as HTMLElement;
+    expect(section.classList.contains('active')).toBe(false);
+    expect(enhanced.classList.contains('active')).toBe(true);
+
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    act(() => (icon as HTMLButtonElement).click());
+
+    await waitFor(() => expect(section.classList.contains('active')).toBe(true));
+    // And exactly one of the two is showing.
+    expect(enhanced.classList.contains('active')).toBe(false);
   });
 
   it('does not re-bind the basic listeners on a second visit', async () => {

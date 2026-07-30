@@ -366,9 +366,15 @@ describe('syncQuery', () => {
     const { result } = renderHook(() => useSearchController());
 
     act(() => result.current.syncQuery('from the widget'));
-    await flush();
 
+    // Checked SYNCHRONOUSLY, because a fetch marks its source loading before it
+    // awaits anything. Waiting for the request to show up in `seen` instead is
+    // a race the mutant wins: 10ms is not always enough for MSW to record it,
+    // which is exactly how a "syncQuery also searches" mutant survived once.
+    expect(result.current.state.loadingSources.size).toBe(0);
     expect(result.current.state.query).toBe('from the widget');
+
+    await new Promise((r) => setTimeout(r, 100));
     expect(seen).toEqual([]);
   });
 
