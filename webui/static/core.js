@@ -7,7 +7,6 @@ let currentPage = 'dashboard';
 let currentTrack = null;
 let isPlaying = false;
 let mediaPlayerExpanded = false;
-let searchResults = [];
 let currentStream = {
     status: 'stopped',
     progress: 0,
@@ -21,12 +20,6 @@ let audioPlayer = null;
 let streamPollingRetries = 0;
 let streamPollingInterval = 1000; // Start with 1-second polling
 const maxStreamPollingRetries = 10;
-let allSearchResults = [];
-let currentFilterType = 'all';
-let currentFilterFormat = 'all';
-let currentSortBy = 'quality_score';
-let isSortReversed = false;
-let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
 let duplicateCleanerStatusInterval = null;

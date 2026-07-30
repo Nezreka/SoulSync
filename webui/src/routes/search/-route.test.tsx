@@ -9,7 +9,6 @@ import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 import { SEARCH_DEBOUNCE_MS } from './-search.helpers';
-import { resetBasicSectionBinding } from './-search.use-basic-section';
 import { resetPersistedSearch } from './-search.use-controller';
 
 function renderRoute(path: string) {
@@ -20,27 +19,16 @@ function renderRoute(path: string) {
 }
 
 /**
- * The vanilla basic-search panel, as index.html ships it.
+ * Wait for the page to be on screen.
  *
- * The React page MOVES this element into its own tree; these tests need a real
- * one in the document to move.
+ * The subtitle rather than the word "Search": the page title and the basic
+ * panel's submit button both read "Search", so matching on it is ambiguous.
  */
-function mountVanillaBasicSection() {
-  const page = document.createElement('div');
-  page.className = 'page';
-  page.id = 'search-page';
-  page.innerHTML = `
-    <div id="basic-search-section" class="search-section">
-      <input id="downloads-search-input" />
-      <button id="downloads-search-btn">Search</button>
-    </div>`;
-  document.body.appendChild(page);
-  return page;
-}
+const settled = () =>
+  screen.findByText('Find artists, albums, and tracks from any metadata source');
 
 beforeEach(() => {
   resetPersistedSearch();
-  resetBasicSectionBinding();
   // Without a bridge the route's beforeLoad cannot ask whether the page is
   // allowed, and redirects to the profile home before rendering anything.
   window.SoulSyncWebShellBridge = createShellBridge();
@@ -49,6 +37,14 @@ beforeEach(() => {
     // soulseek included on purpose: it needs an slskd URL like any other
     // credentialed source, so leaving it out makes the picker (correctly) send
     // its clicks to Settings instead of switching to basic mode.
+    // Basic search asks for its chip row on mount.
+    http.get('/api/search/sources', () =>
+      HttpResponse.json({
+        mode: 'soulseek',
+        sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
+      }),
+    ),
+    http.post('/api/search', () => HttpResponse.json({ results: [] })),
     http.get('/api/settings/config-status', () =>
       HttpResponse.json({
         spotify: { configured: true },
@@ -62,8 +58,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   document.querySelectorAll('#search-page').forEach((node) => node.remove());
-  delete window.initializeSearch;
-  delete window.initializeFilters;
   delete window._searchPageSetQuery;
 });
 
@@ -73,7 +67,7 @@ describe('the search route', () => {
     // pages, so a React page wearing it renders invisibly — with every test
     // still passing. This is the label-detail trap.
     await renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
 
     const host = document.getElementById('webui-react-root') ?? document.body;
     expect(host.querySelector('.page')).toBeNull();
@@ -91,46 +85,32 @@ describe('the search route', () => {
     // showSearchDownloadBubbles renders into this id and silently returns
     // without it, so every download started from search would draw nowhere.
     await renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
     expect(document.getElementById('enhanced-main-results-area')).not.toBeNull();
   });
 
-  it('adopts the vanilla basic-search panel and binds its listeners once', async () => {
-    // The shell hides #search-page to show a React page, so the panel has to be
-    // MOVED into the React tree — and initializeSearch, which used to run from
-    // init.js's legacy `case 'search'`, has to be called or its Search button
-    // does nothing.
-    const legacyPage = mountVanillaBasicSection();
-    const initializeSearch = vi.fn();
-    const initializeFilters = vi.fn();
-    window.initializeSearch = initializeSearch;
-    window.initializeFilters = initializeFilters;
+  it('renders the basic-search panel itself', async () => {
+    // It used to be the vanilla #basic-search-section, MOVED into the React
+    // tree by an adoption hook. React owns it now, so the panel and its
+    // controls must exist without any legacy markup in the document.
+    const { container } = renderRoute('/search');
+    await settled();
 
-    // `container` is the element React renders into. Asserting against
-    // document.body instead would be vacuous — the legacy page is in the body
-    // too, so `contains` is true whether the node moved or not. That exact
-    // mistake let a "removed the appendChild" mutant survive.
-    const { unmount, container } = renderRoute('/search');
-    await screen.findByText('Search');
-
-    const section = document.getElementById('basic-search-section') as HTMLElement;
-    expect(container.contains(section)).toBe(true);
-    expect(legacyPage.contains(section)).toBe(false);
-    expect(initializeSearch).toHaveBeenCalledOnce();
-    expect(initializeFilters).toHaveBeenCalledOnce();
-
-    // And it goes home again, or basic search stays broken until a reload.
-    unmount();
-    expect(legacyPage.contains(section)).toBe(true);
-    expect(container.contains(section)).toBe(false);
+    const section = container.querySelector('#basic-search-section') as HTMLElement;
+    expect(section).not.toBeNull();
+    expect(section.querySelector('#downloads-search-input')).not.toBeNull();
+    expect(section.querySelector('#downloads-search-btn')).not.toBeNull();
+    expect(section.querySelector('#bs-source-row')).not.toBeNull();
+    expect(section.querySelector('#search-results-area')).not.toBeNull();
+    // Asserted against `container`, not document.body: the question is whether
+    // REACT rendered it, and a body-scoped query answers yes to anything.
   });
 
   it('shows the basic panel only when Soulseek is the active source', async () => {
     // `.search-section` is display:none until `.active`, so this class IS
     // whether basic search is on screen at all.
-    mountVanillaBasicSection();
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
 
     const section = document.getElementById('basic-search-section') as HTMLElement;
     const enhanced = document.getElementById('enhanced-search-section') as HTMLElement;
@@ -145,26 +125,32 @@ describe('the search route', () => {
     expect(enhanced.classList.contains('active')).toBe(false);
   });
 
-  it('does not re-bind the basic listeners on a second visit', async () => {
-    // initializeSearch uses addEventListener with no guard of its own; calling
-    // it twice makes every basic search fire twice.
-    mountVanillaBasicSection();
-    const initializeSearch = vi.fn();
-    window.initializeSearch = initializeSearch;
+  it('takes the whole panel with it on unmount', async () => {
+    // The adoption hook had to put the borrowed node back or basic search
+    // stayed broken until a reload. Owning the markup removes that hazard —
+    // this pins that nothing is left behind in the document.
+    const { unmount } = renderRoute('/search');
+    await settled();
+    expect(document.getElementById('basic-search-section')).not.toBeNull();
 
-    const first = renderRoute('/search');
-    await screen.findByText('Search');
-    first.unmount();
+    unmount();
+    expect(document.getElementById('basic-search-section')).toBeNull();
+  });
 
-    const second = renderRoute('/search');
-    await screen.findByText('Search');
-    expect(initializeSearch).toHaveBeenCalledOnce();
-    second.unmount();
+  it('exposes _basicDownloadUnmatched for the vanilla matched-download modal', async () => {
+    // skipMatching() in wishlist-tools.js calls this; that modal has no way to
+    // run a download itself.
+    const { unmount } = renderRoute('/search');
+    await settled();
+    expect(typeof window._basicDownloadUnmatched).toBe('function');
+
+    unmount();
+    await waitFor(() => expect(window._basicDownloadUnmatched).toBeUndefined());
   });
 
   it('exposes _searchPageSetQuery for the global widget handoff', async () => {
     const { unmount } = renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
     expect(typeof window._searchPageSetQuery).toBe('function');
 
     unmount();
@@ -190,7 +176,7 @@ describe('the dropdown state machine', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderRoute('/search');
-      await screen.findByText('Search');
+      await settled();
 
       type('a');
       act(() => vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS + 50));
@@ -227,7 +213,7 @@ describe('the dropdown state machine', () => {
     );
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
     type('aphex twin');
 
     // The text names the ACTIVE source rather than a hardcoded "Spotify", and
@@ -247,7 +233,7 @@ describe('the dropdown state machine', () => {
     );
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
     type('aphex twin');
 
     await waitFor(() => expect(visibleBody()).toBe('results'), { timeout: 3000 });
@@ -262,7 +248,7 @@ describe('the dropdown state machine', () => {
     );
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
 
     type('nothing at all');
     await waitFor(() => expect(visibleBody()).toBe('empty'), { timeout: 3000 });
@@ -278,7 +264,7 @@ describe('the dropdown state machine', () => {
     );
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
     type('aphex twin');
     await screen.findByText('Drukqs');
 
@@ -292,57 +278,88 @@ describe('the dropdown state machine', () => {
 });
 
 describe('the global widget handoff', () => {
+  /** Record every basic search the page actually runs. */
+  function watchBasicSearches() {
+    const queries: string[] = [];
+    server.use(
+      http.post('/api/search', async ({ request }) => {
+        queries.push(((await request.json()) as { query: string }).query);
+        return HttpResponse.json({ results: [] });
+      }),
+    );
+    return queries;
+  }
+
   it('runs the basic search ONCE, not once per path into it', async () => {
     // Three ways to trigger it converge here: this sync, the icon click the
     // widget makes next, and the debounce catching up. Only the click should
     // search — the vanilla's equivalent line is a plain state assignment
     // (downloads.js:5729-5731), and every extra call is another slskd search.
-    mountVanillaBasicSection();
-    const performDownloadsSearch = vi.fn();
-    window.performDownloadsSearch = performDownloadsSearch;
+    const queries = watchBasicSearches();
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
 
     act(() => {
       window._searchPageSetQuery?.('aphex twin');
     });
     // The sync alone must not search.
-    expect(performDownloadsSearch).not.toHaveBeenCalled();
+    expect(queries).toEqual([]);
 
     // Now the widget's icon click, which is the part that does.
     const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
-    act(() => (icon as HTMLButtonElement).click());
-    expect(performDownloadsSearch).toHaveBeenCalledOnce();
+    await act(async () => {
+      (icon as HTMLButtonElement).click();
+    });
+    await waitFor(() => expect(queries).toEqual(['aphex twin']));
 
-    // And the debounce does not add a third: the sync never touched the
+    // And the debounce does not add a second: the sync never touched the
     // enhanced input, so there is nothing pending.
-    await new Promise((r) => setTimeout(r, SEARCH_DEBOUNCE_MS + 200));
-    expect(performDownloadsSearch).toHaveBeenCalledOnce();
-
-    delete window.performDownloadsSearch;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, SEARCH_DEBOUNCE_MS + 200));
+    });
+    expect(queries).toEqual(['aphex twin']);
   });
 
   it('hands the widget’s query to basic search, not a remembered one', async () => {
-    mountVanillaBasicSection();
-    const performDownloadsSearch = vi.fn();
-    window.performDownloadsSearch = performDownloadsSearch;
+    // The page keeps its query across navigation, so without the sync the icon
+    // click would search whatever was last looked up here.
+    const queries = watchBasicSearches();
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
 
-    // The widget writes the input first, then syncs, then clicks.
-    const basicInput = document.getElementById('downloads-search-input') as HTMLInputElement;
-    basicInput.value = 'from the widget';
     act(() => {
       window._searchPageSetQuery?.('from the widget');
     });
     const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
-    act(() => (icon as HTMLButtonElement).click());
+    await act(async () => {
+      (icon as HTMLButtonElement).click();
+    });
 
+    await waitFor(() => expect(queries).toEqual(['from the widget']));
+    // The input shows what was searched, so the results are not sitting under
+    // somebody else's query.
+    const basicInput = document.getElementById('downloads-search-input') as HTMLInputElement;
     expect(basicInput.value).toBe('from the widget');
-    expect(performDownloadsSearch).toHaveBeenCalledOnce();
-    delete window.performDownloadsSearch;
+  });
+
+  it('switches to the basic panel without searching when there is no query', async () => {
+    // Clicking Soulseek on a page nobody has typed into should show the panel,
+    // not scold the user for an empty search.
+    const queries = watchBasicSearches();
+
+    renderRoute('/search');
+    await settled();
+
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    await act(async () => {
+      (icon as HTMLButtonElement).click();
+    });
+
+    const section = document.getElementById('basic-search-section') as HTMLElement;
+    await waitFor(() => expect(section.classList.contains('active')).toBe(true));
+    expect(queries).toEqual([]);
   });
 });
 
@@ -375,7 +392,7 @@ describe('where a result card points', () => {
     );
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
     type('aphex twin');
 
     const owned = await screen.findByText('Owned Artist', undefined, { timeout: 3000 });
@@ -399,7 +416,7 @@ describe('where a result card points', () => {
     );
 
     renderRoute('/search');
-    await screen.findByText('Search');
+    await settled();
     type('warp');
 
     const label = await screen.findByText('Warp', undefined, { timeout: 3000 });

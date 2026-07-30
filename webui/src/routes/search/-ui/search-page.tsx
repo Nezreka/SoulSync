@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { BasicAlbum, BasicTrack } from '../-basic.types';
 import type { SearchAlbum, SearchArtist, SearchLabel, SearchTrack } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
 
+import {
+  downloadAlbum,
+  downloadAlbumTrack,
+  downloadTrack,
+  downloadUnmatched,
+  matchedDownloadAlbum,
+  matchedDownloadAlbumTrack,
+  matchedDownloadTrack,
+  streamAlbumTrack,
+  streamTrack,
+} from '../-basic.actions';
+import { useBasicSearchController } from '../-basic.use-controller';
 import {
   openSearchAlbum,
   openSearchTrack,
@@ -20,11 +33,11 @@ import {
   sourceLabel,
 } from '../-search.helpers';
 import { useArtistImages } from '../-search.use-artist-images';
-import { useAdoptedBasicSection } from '../-search.use-basic-section';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
 import { useDismissOnOutsideClick } from '../-search.use-dismiss';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
+import { BasicSearch } from './basic-search';
 import { SearchBar } from './search-bar';
 import { SearchResults } from './search-results';
 import { SourceRow } from './source-row';
@@ -46,7 +59,6 @@ type DropdownView = 'hidden' | 'loading' | 'empty' | 'results';
  * the empty state — exactly as it does today.
  */
 export function SearchPage() {
-  const [basicHost, setBasicHost] = useState<HTMLElement | null>(null);
   // Seeded from the restored cache: coming back to results sitting above an
   // empty search box reads as a bug even when the results are right.
   const [query, setQuery] = useState(getPersistedQuery);
@@ -55,13 +67,18 @@ export function SearchPage() {
   const [labels, setLabels] = useState<SearchLabel[]>([]);
   const [idLookupPending, setIdLookupPending] = useState(false);
 
+  const basic = useBasicSearchController();
+  const basicSearchRef = useRef(basic.search);
+  basicSearchRef.current = basic.search;
+
   const controller = useSearchController({
     onSoulseekSelected: (handoffQuery) => {
-      // Basic search owns this one: fill its input and run the vanilla's search.
-      const input = document.getElementById('downloads-search-input') as HTMLInputElement | null;
-      if (input && handoffQuery) input.value = handoffQuery;
+      // Soulseek is not a metadata source: selecting it shows the basic panel
+      // and runs the file search there.
       setDismissed(true);
-      if (input?.value) window.performDownloadsSearch?.();
+      // Only with something to search for — clicking the icon on an empty page
+      // should switch panels, not scold the user for an empty query.
+      if (handoffQuery) basicSearchRef.current(handoffQuery);
     },
     onUnconfiguredSource: (source) => window.openSettingsForSource?.(source),
   });
@@ -70,7 +87,37 @@ export function SearchPage() {
   const results = activeResults(state);
   const soulseekActive = state.activeSource === 'soulseek';
 
-  useAdoptedBasicSection(basicHost, soulseekActive);
+  const basicActions = useMemo(
+    () => ({
+      onDownloadTrack: (track: BasicTrack) => void downloadTrack(track),
+      onStreamTrack: (track: BasicTrack) => void streamTrack(track),
+      onMatchedTrack: (track: BasicTrack) => matchedDownloadTrack(track),
+      onDownloadAlbum: (albumRow: BasicAlbum) => void downloadAlbum(albumRow),
+      onMatchedAlbum: (albumRow: BasicAlbum) => matchedDownloadAlbum(albumRow),
+      onDownloadAlbumTrack: (albumRow: BasicAlbum, _albumIndex: number, trackIndex: number) =>
+        void downloadAlbumTrack(albumRow, trackIndex),
+      onStreamAlbumTrack: (albumRow: BasicAlbum, _albumIndex: number, trackIndex: number) =>
+        void streamAlbumTrack(albumRow, trackIndex),
+      onMatchedAlbumTrack: (albumRow: BasicAlbum, _albumIndex: number, trackIndex: number) =>
+        matchedDownloadAlbumTrack(albumRow, trackIndex),
+    }),
+    [],
+  );
+
+  /**
+   * The matched-download modal's "Skip Matching" button reaches back here.
+   *
+   * That modal is still vanilla (wishlist-tools.js) and has no way to run a
+   * download itself — the path it used to take was broken three ways over; see
+   * downloadUnmatched.
+   */
+  useEffect(() => {
+    window._basicDownloadUnmatched = (result) =>
+      void downloadUnmatched(result as Parameters<typeof downloadUnmatched>[0]);
+    return () => {
+      delete window._basicDownloadUnmatched;
+    };
+  }, []);
 
   const ownership = useLibraryCheck(results.albums, results.tracks);
   const artistImages = useArtistImages(results.db_artists, results.artists, state.activeSource);
@@ -235,12 +282,7 @@ export function SearchPage() {
 
         <SourceRow state={state} onSelect={setActiveSource} onOpenSettings={openSettings} />
 
-        {/*
-          The vanilla basic-search panel is MOVED in here; see the hook.
-          display:contents so this wrapper adds nothing to the layout — the
-          panel keeps the box it has as a direct child of the main panel.
-        */}
-        <div ref={setBasicHost} style={{ display: 'contents' }} />
+        <BasicSearch controller={basic} actions={basicActions} active={soulseekActive} />
 
         <div
           className={`search-section${soulseekActive ? '' : ' active'}`}

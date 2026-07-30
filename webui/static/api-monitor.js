@@ -1224,28 +1224,24 @@ function _searchWishlistTrackManually(artistName, trackName) {
     let attempts = 0;
     const tryHandoff = () => {
         attempts += 1;
-        const basicInput = document.getElementById('downloads-search-input');
         const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
         if (soulseekIcon) {
-            if (basicInput) basicInput.value = query;
-            // Sync the controller's query BEFORE clicking — otherwise
-            // onSoulseekSelected fires with a stale query and overwrites it.
-            if (typeof _searchPageController !== 'undefined' && _searchPageController) {
-                _searchPageController.state.query = query;
+            // Sync the query into the search page BEFORE clicking: the icon
+            // click hands off whatever query that page is holding, and it keeps
+            // its query across navigation, so without this the wishlist's
+            // "search manually" would run the LAST thing searched on /search
+            // instead of this track. Same seam downloads.js uses.
+            if (typeof window._searchPageSetQuery === 'function') {
+                window._searchPageSetQuery(query || '');
             }
             soulseekIcon.click();
             return;
         }
-        if (attempts < 25) { setTimeout(tryHandoff, 160); return; }
-        // Controller never came up — swap sections and run the search directly.
-        const basicSection = document.getElementById('basic-search-section');
-        const enhancedSection = document.getElementById('enhanced-search-section');
-        if (basicSection) basicSection.classList.add('active');
-        if (enhancedSection) enhancedSection.classList.remove('active');
-        if (basicInput) basicInput.value = query;
-        if (basicInput && basicInput.value && typeof performDownloadsSearch === 'function') {
-            performDownloadsSearch();
-        }
+        // Keep waiting: the icon row is React-rendered with the page, so it
+        // arrives once the route mounts. There is no manual fallback any more —
+        // the old one swapped #basic-search-section's classes and called
+        // performDownloadsSearch, and React owns both of those now.
+        if (attempts < 25) setTimeout(tryHandoff, 160);
     };
     setTimeout(tryHandoff, 200);
 }

@@ -22,6 +22,7 @@ describe('vanilla shell scripts parse', () => {
     'static/api-monitor.js',
     'static/downloads.js',
     'static/sync-services.js',
+    'static/wishlist-tools.js',
   ]) {
     it(file, () => {
       const source = readFileSync(resolve(process.cwd(), file), 'utf8');

@@ -29,9 +29,12 @@ JSX_ID = re.compile(r"""\bid=["']([A-Za-z][\w-]*)["']""")
 HTML_ID = re.compile(r"""\bid=["']([A-Za-z][\w-]*)["']""")
 
 # Ids the React page renders ON PURPOSE into markup the vanilla still owns.
-# There is exactly one: the basic-search panel, which the search page ADOPTS —
-# it is the same element, moved, not a copy.
-ADOPTED = {"basic-search-section"}
+#
+# Empty, and that is the point. It used to hold "basic-search-section", the one
+# element the search page ADOPTED — moved out of index.html rather than copied.
+# Basic search is React's own now and the vanilla markup is deleted, so there is
+# no longer any id legitimately living on both sides.
+ADOPTED: set[str] = set()
 
 # Collisions that predate this guard.
 #
@@ -103,8 +106,14 @@ def test_the_known_collisions_are_still_real():
 def test_the_guard_can_see_the_ids_it_is_guarding():
     """A regex that matched nothing would make the test above pass vacuously."""
     react_ids = {i for ids in _react_page_ids().values() for i in ids}
+    # The enhanced half...
     assert "enhanced-search-input" in react_ids
     assert "enhanced-main-results-area" in react_ids
     assert "enh-source-row" in react_ids
-    # And the vanilla side is being read at all.
-    assert "basic-search-section" in _index_ids()
+    # ...and the basic half, whose markup this guard is what allowed deleting.
+    assert "downloads-search-input" in react_ids
+    assert "search-results-area" in react_ids
+    assert "filters-container" in react_ids
+    # And the vanilla side is being read at all. #webui-react-root is the mount
+    # point itself, so it is in index.html for as long as any React page exists.
+    assert "webui-react-root" in _index_ids()

@@ -219,18 +219,44 @@ declare global {
      */
     reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
     /**
-     * search.js — binds the BASIC search panel's button, Enter key and Cancel.
+     * The basic-search results currently on screen, published for the vanilla
+     * matched-download modal.
      *
-     * Called by the React search page after it adopts #basic-search-section,
-     * because the `case 'search':` in init.js that used to call it only runs for
-     * legacy pages. It uses addEventListener with no guard, so it must be called
-     * exactly once per page load.
+     * `skipMatching` and the three `matchedDownload*` handlers in
+     * wishlist-tools.js read this by INDEX — and one of them by `indexOf` on
+     * the object — so it must be the same array the page renders, in the same
+     * order, holding the same object references. Owned by the React basic
+     * search controller; it goes away when that modal is ported too.
      */
-    initializeSearch?: () => void;
-    /** wishlist-tools.js — the basic panel's Filters disclosure. */
-    initializeFilters?: () => void;
-    /** downloads.js — runs the basic (Soulseek file) search. */
-    performDownloadsSearch?: () => void;
+    currentSearchResults?: unknown[];
+    /**
+     * wishlist-tools.js — opens the matched-download modal for a search result.
+     *
+     * `isAlbumDownload` drives whether the modal asks for an album selection;
+     * `albumResult` is the album context a track came from, or null.
+     */
+    openMatchingModal?: (
+      searchResult: unknown,
+      isAlbumDownload?: boolean,
+      albumResult?: unknown,
+    ) => void;
+    /**
+     * Download a basic-search result the user declined to match.
+     *
+     * Set by the React search page and called by the still-vanilla
+     * matched-download modal's "Skip Matching" button
+     * (wishlist-tools.js:skipMatching). It exists because the call that used to
+     * be there could not work: it looked the result up by index in an array
+     * nothing populates, after the state holding the result had already been
+     * cleared, and POSTed a route that does not exist.
+     */
+    _basicDownloadUnmatched?: (result: unknown) => void | Promise<void>;
+    /** media-player.js — starts streaming a search result in the player. */
+    startStream?: (searchResult: unknown) => void | Promise<void>;
+    /** media-player.js — 'flac' from 'a/b/c.flac'; '' when there is no extension. */
+    getFileExtension?: (filename: string) => string;
+    /** media-player.js — can this browser play that file at all? */
+    isAudioFormatSupported?: (filename: string) => boolean;
     /**
      * shared-helpers.js — sends the user to the Settings card for a source that
      * has no credentials, rather than firing a search that cannot succeed.
