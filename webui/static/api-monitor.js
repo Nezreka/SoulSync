@@ -1228,9 +1228,16 @@ function _searchWishlistTrackManually(artistName, trackName) {
         const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
         if (soulseekIcon) {
             if (basicInput) basicInput.value = query;
-            // Sync the controller's query BEFORE clicking — otherwise
-            // onSoulseekSelected fires with a stale query and overwrites it.
-            if (typeof _searchPageController !== 'undefined' && _searchPageController) {
+            // Sync the search page's query BEFORE clicking — the icon click
+            // hands off whatever query the page is holding, and that page keeps
+            // its query across navigation, so without this the wishlist's
+            // "search manually" runs the LAST thing searched on /search instead
+            // of this track. React page first; the vanilla controller behind it
+            // is gone, but the check is harmless and _searchPageSetQuery is the
+            // supported seam (mirrors downloads.js:_gsNavigateToSearchPage).
+            if (typeof window._searchPageSetQuery === 'function') {
+                window._searchPageSetQuery(query || '');
+            } else if (typeof _searchPageController !== 'undefined' && _searchPageController) {
                 _searchPageController.state.query = query;
             }
             soulseekIcon.click();
