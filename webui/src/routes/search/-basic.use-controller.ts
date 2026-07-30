@@ -62,6 +62,35 @@ const INITIAL: BasicSearchState = {
   filtersVisible: false,
 };
 
+/**
+ * What survives leaving the page.
+ *
+ * The vanilla panel was a persistent DOM node — the React page borrowed it and
+ * put it back rather than owning it, so it was never destroyed and its rendered
+ * results were still on screen when you came back. Owning the markup means an
+ * unmount really does throw everything away, so the cache has to live out here
+ * to keep that behaviour. The enhanced half does the same thing for the same
+ * reason.
+ *
+ * Deliberately NOT the whole state: `searching` is about a request that the
+ * unmount aborted, and `sources` is re-fetched on mount.
+ */
+interface PersistedBasicSearch {
+  query: string;
+  results: BasicResult[];
+  filters: FilterState;
+  filtersVisible: boolean;
+  status: string;
+  activeSource: string | null;
+}
+
+let persisted: PersistedBasicSearch | null = null;
+
+/** Test seam — a module-level cache would otherwise leak between tests. */
+export function resetPersistedBasicSearch() {
+  persisted = null;
+}
+
 /** `✨ Found 12 results • 3 albums, 9 singles` */
 function foundStatus(results: BasicResult[]): string {
   const albums = results.filter((result) => result.result_type === 'album').length;
@@ -81,7 +110,20 @@ function foundStatus(results: BasicResult[]): string {
  * cancelled." over a search that is happily running.
  */
 export function useBasicSearchController(): BasicSearchController {
-  const [state, setState] = useState<BasicSearchState>(INITIAL);
+  const [state, setState] = useState<BasicSearchState>(() =>
+    persisted ? { ...INITIAL, ...persisted } : INITIAL,
+  );
+
+  // Mirrored on every change rather than on unmount: an unmount hook would not
+  // run if the tab were closed mid-search, and this costs nothing.
+  persisted = {
+    query: state.query,
+    results: state.results,
+    filters: state.filters,
+    filtersVisible: state.filtersVisible,
+    status: state.status,
+    activeSource: state.activeSource,
+  };
 
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
@@ -94,14 +136,23 @@ export function useBasicSearchController(): BasicSearchController {
       const response = await fetchBasicSources();
       if (!live || !response.sources.length) return;
       const single = isSingleSourceMode(response);
-      setState((prev) => ({
-        ...prev,
-        sources: response.sources,
-        singleSource: single,
-        // The default is the first source in the chain. In single-source mode
-        // it stays null so the request omits `source` entirely.
-        activeSource: single ? null : (response.sources[0]?.name ?? null),
-      }));
+      setState((prev) => {
+        // A source the user picked before navigating away wins over the
+        // default — but only while it is still in the chain, since the
+        // configuration can have changed since.
+        const restored =
+          prev.activeSource && response.sources.some((s) => s.name === prev.activeSource)
+            ? prev.activeSource
+            : null;
+        return {
+          ...prev,
+          sources: response.sources,
+          singleSource: single,
+          // The default is the first source in the chain. In single-source mode
+          // it stays null so the request omits `source` entirely.
+          activeSource: single ? null : (restored ?? response.sources[0]?.name ?? null),
+        };
+      });
     })();
     return () => {
       live = false;
@@ -128,6 +179,14 @@ export function useBasicSearchController(): BasicSearchController {
 
     try {
       const results = await performBasicSearch(query, source, controller.signal);
+      // Honest about its weight: a new search aborts the previous request
+      // first, and that abort cancels the body read, so a superseded request
+      // reaches the CATCH rather than here. A mutant deleting this line
+      // survives the suite, and I could not construct a case that reaches it —
+      // the guard stays as defence in depth against a future caller that
+      // supersedes a search without aborting it, but no test proves it and
+      // pretending otherwise would be worse than saying so. The same guard in
+      // the catch below IS proven (see the cancel tests).
       if (!current()) return;
 
       setState((prev) => ({

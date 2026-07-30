@@ -146,6 +146,13 @@ export function filterResults(results: BasicResult[], filters: FilterState): Bas
  *
  * `Array.prototype.sort` is stable per spec, so equal-scoring rows keep the
  * order the server sent — which is itself quality-ranked.
+ *
+ * The spread before `.sort` is redundant today and kept on purpose:
+ * `filterResults` already returns a fresh array, so sorting it in place cannot
+ * be observed, and a mutant that drops the spread survives the suite. It stays
+ * because the guarantee callers rely on is "does not touch what you gave me",
+ * and that would quietly stop being true the day filterResults gets a
+ * fast path returning its input.
  */
 export function applyFiltersAndSort(
   results: BasicResult[],
@@ -184,6 +191,11 @@ export function albumFormatLabel(album: BasicAlbum): string {
  * A multi-disc folder arrives as one flat track list, and the only signal is a
  * track number that fails to advance. Index 0 is never a break — the header for
  * disc 1 is rendered from the set being non-empty, not from a break at the top.
+ *
+ * `index > 0` is belt-and-braces: `lastNumber` starts at 0, so `number <= 0`
+ * is already false for any real track number and index 0 could not break
+ * anyway. A mutant that removes it survives, and it stays because the
+ * invariant it states is what makes the loop readable.
  */
 export function detectDiscBreaks(tracks: BasicTrack[]): Set<number> {
   const breaks = new Set<number>();

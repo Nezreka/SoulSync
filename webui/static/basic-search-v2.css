@@ -225,6 +225,66 @@
 }
 
 
+/* — Status animations.
+   Both elements have been in the markup, and toggled correctly, since the
+   basic-search redesign — but no rule was ever written for either, so they
+   rendered as empty zero-size divs and the status bar had no motion at all
+   while a search ran. The panel adds/removes `hidden` on them; this is the
+   styling that makes that visible. */
+.spinner-animation {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    border: 2px solid rgba(255, 255, 255, 0.12);
+    border-top-color: rgb(var(--accent-rgb));
+    border-radius: 50%;
+    animation: bs-spin 0.7s linear infinite;
+}
+
+.dots-animation {
+    width: 18px;
+    flex: none;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.dots-animation::after {
+    content: '';
+    animation: bs-dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes bs-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes bs-dots {
+    0% {
+        content: '';
+    }
+
+    25% {
+        content: '.';
+    }
+
+    50% {
+        content: '..';
+    }
+
+    75% {
+        content: '...';
+    }
+}
+
+/* Both animations respect the `hidden` utility the panel toggles. */
+.spinner-animation.hidden,
+.dots-animation.hidden {
+    display: none;
+}
+
 /* — Filters: compact pill row, always visible after first search. */
 .bs-filters {
     display: flex;

@@ -4,11 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw';
 
-import { IDLE_STATUS, useBasicSearchController } from './-basic.use-controller';
+import {
+  IDLE_STATUS,
+  resetPersistedBasicSearch,
+  useBasicSearchController,
+} from './-basic.use-controller';
 
 let toasts: { message: string; type?: string }[] = [];
 
 beforeEach(() => {
+  resetPersistedBasicSearch();
   toasts = [];
   window.showToast = vi.fn((message: string, type?: string) => {
     toasts.push({ message, type });
@@ -112,6 +117,20 @@ async function mounted() {
   return view;
 }
 
+/**
+ * Give a request that SHOULD NOT happen every chance to happen.
+ *
+ * Asserting `expect(bodies).toEqual([])` straight after an act() proves
+ * nothing: the request would not have reached the handler yet either way.
+ * Mutation testing caught exactly that — a mutant removing the re-click guard
+ * survived three negative assertions written that way.
+ */
+async function letAnyRequestLand() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+}
+
 describe('initial state', () => {
   it('starts idle with the prompt the vanilla shipped', async () => {
     const { result } = await mounted();
@@ -148,6 +167,7 @@ describe('search', () => {
     const { result } = await mounted();
 
     act(() => result.current.search('   '));
+    await letAnyRequestLand();
 
     expect(bodies).toEqual([]);
     expect(toasts).toEqual([{ message: 'Please enter a search term', type: 'error' }]);
@@ -309,6 +329,31 @@ describe('cancel', () => {
     expect(toasts).toEqual([]);
   });
 
+  it('aborts the previous request when a new search starts', async () => {
+    // Not just "ignores its result" — the request itself is cancelled. Without
+    // this a user typing three searches leaves two slskd queries running
+    // against a network that is slow enough to make that matter.
+    const aborted: boolean[] = [];
+    server.use(
+      http.post('/api/search', async ({ request }) => {
+        return new Promise((resolve) => {
+          request.signal.addEventListener('abort', () => {
+            aborted.push(true);
+            resolve(HttpResponse.json({ results: [] }));
+          });
+        });
+      }),
+    );
+    const { result } = await mounted();
+
+    act(() => result.current.search('first'));
+    await waitFor(() => expect(result.current.state.searching).toBe(true));
+
+    act(() => result.current.search('second'));
+
+    await waitFor(() => expect(aborted).toHaveLength(1));
+  });
+
   it('does not let an aborted search overwrite the one that replaced it', async () => {
     // The abort rejects asynchronously, so its catch can run AFTER the next
     // search is already showing "Searching for...". Without the generation
@@ -389,6 +434,7 @@ describe('source picker', () => {
     const { result } = await mounted();
 
     await act(async () => result.current.selectSource('tidal'));
+    await letAnyRequestLand();
 
     expect(bodies).toEqual([]);
     expect(result.current.state.activeSource).toBe('tidal');
@@ -396,11 +442,18 @@ describe('source picker', () => {
 
   it('ignores a re-click on the source already active', async () => {
     hybridSources();
+    // Stubbed BEFORE the first search, so it actually returns results. Without
+    // that the search failed, `results` stayed empty, and the re-click guard
+    // was never reached — the test passed either way, and a mutant removing
+    // the guard survived it.
+    stubSearch([trackRow()]);
     const { result } = await mounted();
     await act(async () => result.current.search('aphex'));
+    expect(result.current.visible).toHaveLength(1);
 
     const bodies = stubSearch([trackRow()]);
     await act(async () => result.current.selectSource('soulseek'));
+    await letAnyRequestLand();
 
     expect(bodies).toEqual([]);
   });
@@ -410,6 +463,7 @@ describe('source picker', () => {
     const { result } = await mounted();
 
     await act(async () => result.current.selectSource('tidal'));
+    await letAnyRequestLand();
 
     expect(result.current.state.activeSource).toBeNull();
     expect(bodies).toEqual([]);
@@ -433,6 +487,89 @@ describe('source picker', () => {
 
     expect(result.current.visible).toHaveLength(1);
     expect(bodies[0]).toEqual({ query: 'aphex' });
+  });
+});
+
+describe('surviving navigation', () => {
+  // The vanilla panel was a DOM node the React page BORROWED and put back, so
+  // it was never destroyed and its results were still there when you returned.
+  // Owning the markup means unmounting really does throw it away — so the
+  // cache lives outside the hook, exactly as the enhanced half's does.
+  it('brings the results, query and status back', async () => {
+    stubSearch([trackRow({ title: 'Xtal' }), albumRow()]);
+    const first = await mounted();
+    await act(async () => first.result.current.search('aphex'));
+    const status = first.result.current.state.status;
+    first.unmount();
+
+    const second = await mounted();
+
+    expect(second.result.current.state.query).toBe('aphex');
+    expect(second.result.current.visible).toHaveLength(2);
+    expect(second.result.current.state.status).toBe(status);
+    expect(second.result.current.state.filtersVisible).toBe(true);
+  });
+
+  it('brings the filters back, so the list looks the way it was left', async () => {
+    stubSearch([trackRow(), albumRow()]);
+    const first = await mounted();
+    await act(async () => first.result.current.search('aphex'));
+    act(() => first.result.current.setFilters({ type: 'album' }));
+    first.unmount();
+
+    const second = await mounted();
+
+    expect(second.result.current.state.filters.type).toBe('album');
+    expect(second.result.current.visible).toHaveLength(1);
+  });
+
+  it('does not come back mid-search', async () => {
+    // The unmount aborted that request; restoring `searching` would leave a
+    // spinner running for a search nobody is waiting on.
+    deferredSearch();
+    const first = await mounted();
+    act(() => first.result.current.search('aphex'));
+    await waitFor(() => expect(first.result.current.state.searching).toBe(true));
+    first.unmount();
+
+    const second = await mounted();
+
+    expect(second.result.current.state.searching).toBe(false);
+  });
+
+  it('keeps the source the user picked', async () => {
+    hybridSources();
+    const first = await mounted();
+    await act(async () => first.result.current.selectSource('tidal'));
+    first.unmount();
+
+    const second = await mounted();
+
+    expect(second.result.current.state.activeSource).toBe('tidal');
+  });
+
+  it('drops a remembered source that is no longer configured', async () => {
+    // The chain can change while you are away; pointing at a source that is
+    // gone would send every search to a name the server cannot route.
+    hybridSources();
+    const first = await mounted();
+    await act(async () => first.result.current.selectSource('tidal'));
+    first.unmount();
+
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [
+            { name: 'soulseek', display_name: 'Soulseek' },
+            { name: 'qobuz', display_name: 'Qobuz' },
+          ],
+        }),
+      ),
+    );
+    const second = await mounted();
+
+    expect(second.result.current.state.activeSource).toBe('soulseek');
   });
 });
 

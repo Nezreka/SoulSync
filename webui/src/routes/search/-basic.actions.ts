@@ -57,6 +57,12 @@ export async function downloadAlbum(album: BasicAlbum): Promise<void> {
  * `result_type` is overridden to 'track': the row came out of an album, and
  * without this the server would take the album branch and look for a `tracks`
  * array the track does not have.
+ *
+ * In practice the override is redundant — `TrackResult.__post_init__` sets
+ * `result_type = "track"` server-side, so every serialised album track already
+ * carries it, and a mutant that drops the override survives. Kept because this
+ * function's correctness would then depend on a detail of a Python dataclass
+ * three layers away, which is not a dependency worth having.
  */
 export async function downloadAlbumTrack(album: BasicAlbum, trackIndex: number): Promise<void> {
   const track = album.tracks?.[trackIndex];

@@ -267,6 +267,22 @@ describe('relevanceScore', () => {
     expect(relevanceScore(good, 'xtal') - relevanceScore(poor, 'xtal')).toBeCloseTo(0.25, 10);
   });
 
+  it('ignores single-character terms rather than matching on them', () => {
+    // A one-letter term matches nearly everything, so counting it would let a
+    // stray initial carry a result to the top. The filter is what drops it —
+    // a mutant relaxing it to `length > 0` used to survive.
+    const hit = track({ title: 'Alpha', artist: 'Nobody', album: '' });
+    const miss = track({ title: 'Zulu', artist: 'Nobody', album: '' });
+
+    // 'a' alone is dropped, so neither row earns any term score...
+    expect(relevanceScore(hit, 'a')).toBe(relevanceScore(miss, 'a'));
+    // ...while a real term still separates them.
+    expect(relevanceScore(hit, 'alpha')).toBeGreaterThan(relevanceScore(miss, 'alpha'));
+    // And a 1-char term mixed with a real one does not dilute the score: only
+    // the usable term counts, so a full match is still a full match.
+    expect(relevanceScore(hit, 'a alpha')).toBe(relevanceScore(hit, 'alpha'));
+  });
+
   it('never returns NaN for a query with no usable terms', () => {
     // 'a' is one character, so it is dropped as a term and the vanilla divided
     // by zero — one NaN poisons every comparison it takes part in.
