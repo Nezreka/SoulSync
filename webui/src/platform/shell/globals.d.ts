@@ -232,6 +232,34 @@ declare global {
     /** downloads.js — runs the basic (Soulseek file) search. */
     performDownloadsSearch?: () => void;
     /**
+     * The basic-search results currently on screen, published for the vanilla
+     * matched-download modal.
+     *
+     * `skipMatching` and the three `matchedDownload*` handlers in
+     * wishlist-tools.js read this by INDEX — and one of them by `indexOf` on
+     * the object — so it must be the same array the page renders, in the same
+     * order, holding the same object references. Owned by the React basic
+     * search controller; it goes away when that modal is ported too.
+     */
+    currentSearchResults?: unknown[];
+    /**
+     * wishlist-tools.js — opens the matched-download modal for a search result.
+     *
+     * `isAlbumDownload` drives whether the modal asks for an album selection;
+     * `albumResult` is the album context a track came from, or null.
+     */
+    openMatchingModal?: (
+      searchResult: unknown,
+      isAlbumDownload?: boolean,
+      albumResult?: unknown,
+    ) => void;
+    /** media-player.js — starts streaming a search result in the player. */
+    startStream?: (searchResult: unknown) => void | Promise<void>;
+    /** media-player.js — 'flac' from 'a/b/c.flac'; '' when there is no extension. */
+    getFileExtension?: (filename: string) => string;
+    /** media-player.js — can this browser play that file at all? */
+    isAudioFormatSupported?: (filename: string) => boolean;
+    /**
      * shared-helpers.js — sends the user to the Settings card for a source that
      * has no credentials, rather than firing a search that cannot succeed.
      */
