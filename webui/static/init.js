@@ -3264,13 +3264,10 @@ async function loadPageData(pageId) {
                 initializeSyncPage();
                 await loadSyncData();
                 break;
-            // No 'search' case: React owns /search, and loadPageData only runs
-            // for legacy-kind pages, so this could never fire again. The React
-            // page calls initializeSearch() and initializeFilters() itself after
-            // it adopts #basic-search-section — those still bind the BASIC
-            // panel, which has not been ported yet. initializeSearchModeToggle
-            // is deliberately not called anywhere: it is the vanilla enhanced
-            // controller React replaces.
+            // No 'search' case: React owns /search — BOTH panels, enhanced and
+            // basic — and loadPageData only runs for legacy-kind pages, so this
+            // could never fire again. search.js, which used to bind the basic
+            // panel, is deleted.
             // No 'label-detail' case: React owns /label-detail, and loadPageData
             // only runs for legacy-kind pages. The vanilla renderer it used to
             // call (label-detail.js) is deleted.
@@ -3516,3 +3513,65 @@ async function loadPageData(pageId) {
         snapToCenterIfReady();
     });
 })();
+
+
+// ===========================================
+// APP BOOT
+// ===========================================
+
+/**
+ * Hydrate the persisted download bubbles, then navigate to the landing page.
+ *
+ * Moved here from search.js when basic search was ported to React and that
+ * file was deleted. It never had anything to do with search — it is the boot
+ * routine, and init.js is where it is called from.
+ */
+async function loadInitialData() {
+    try {
+        const initialPath = window.location.pathname;
+        const initialNavigationEpoch = navigationEpoch;
+
+        // Load artist bubble state first
+        await hydrateArtistBubblesFromSnapshot();
+
+        // Load search bubble state
+        await hydrateSearchBubblesFromSnapshot();
+
+        // Load discover download state
+        await hydrateDiscoverDownloadsFromSnapshot();
+
+        // Navigate to user's home page (or dashboard for admin)
+        const homePage = getProfileHomePage();
+        const urlPage = _getPageFromPath();
+        const targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
+            ? urlPage
+            : homePage;
+
+        if (window.location.pathname !== initialPath || navigationEpoch !== initialNavigationEpoch) {
+            return;
+        }
+
+        if (targetPage === 'artist-detail') {
+            const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
+            if (artistRoute && typeof navigateToArtistDetail === 'function') {
+                navigateToArtistDetail(artistRoute.artistId, artistRoute.name || '', artistRoute.source);
+            }
+            return;
+        }
+
+        // Always apply the target page to the legacy shell chrome.
+        const router = getWebRouter();
+        const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
+
+        if (route?.kind === 'react') {
+            showReactHost(targetPage);
+            setActivePageChrome(targetPage);
+            // Keep nested react-tab URLs like /import/auto or /import/singles intact.
+            return;
+        }
+
+        navigateToPage(targetPage, { forceReload: true });
+    } catch (error) {
+        console.error('Error loading initial data:', error);
+    }
+}

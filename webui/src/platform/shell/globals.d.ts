@@ -219,19 +219,6 @@ declare global {
      */
     reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
     /**
-     * search.js — binds the BASIC search panel's button, Enter key and Cancel.
-     *
-     * Called by the React search page after it adopts #basic-search-section,
-     * because the `case 'search':` in init.js that used to call it only runs for
-     * legacy pages. It uses addEventListener with no guard, so it must be called
-     * exactly once per page load.
-     */
-    initializeSearch?: () => void;
-    /** wishlist-tools.js — the basic panel's Filters disclosure. */
-    initializeFilters?: () => void;
-    /** downloads.js — runs the basic (Soulseek file) search. */
-    performDownloadsSearch?: () => void;
-    /**
      * The basic-search results currently on screen, published for the vanilla
      * matched-download modal.
      *

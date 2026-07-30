@@ -957,29 +957,36 @@ const HELPER_CONTENT = {
     },
 
     // Basic Search
-    '#basic-search-section .search-bar-container': {
+    //
+    // These selectors are the React panel's (webui/src/routes/search/-ui/).
+    // Four of them used to point at elements that did not exist —
+    // `.search-bar-container`, `#filter-toggle-btn`, `#filter-content` and
+    // `.search-status-container` — so those tour steps silently highlighted
+    // nothing. document.querySelector just returns null and the step is skipped.
+    '#bs-source-row': {
+        title: 'Search Source',
+        description: 'Which download source the search is sent to. With one source configured this is a label; with several, pick the one to search.',
+        docsId: 'search-basic'
+    },
+    '.bs-search-bar': {
         title: 'Basic Search',
-        description: 'Direct search query sent to Soulseek. Enter artist name, song title, or any keywords. Results show raw P2P file listings.',
+        description: 'Direct search query sent to your download source. Enter artist name, song title, or any keywords. Results show raw P2P file listings.',
         docsId: 'search-basic'
     },
-    '#filter-toggle-btn': {
-        title: 'Filters',
-        description: 'Toggle the filter panel to narrow results by type (Albums/Singles), format (FLAC/MP3/OGG/AAC/WMA), and sort order.',
-        docsId: 'search-basic'
-    },
-    '#filter-content': {
+    '#filters-container': {
         title: 'Search Filters',
-        description: 'Filter and sort Soulseek results. Type filters hide non-matching results. Format filters show only specific audio formats. Sort reorders by relevance, quality, bitrate, size, speed, or name.',
+        description: 'Filter and sort the results. Type filters hide non-matching results. Format filters show only specific audio formats. Sort reorders by relevance, quality, size, name, uploader, bitrate or duration.',
         tips: [
-            'Type: All, Albums (grouped results), or Singles (individual files)',
+            'Type: All, Albums (grouped results), or Tracks (individual files)',
             'Format: FLAC for lossless, MP3 for compressed, or specific formats',
-            'Sort: Relevance uses the matching engine score; Quality uses bitrate density'
+            'Sort: Relevance uses the matching engine score; Quality uses bitrate density',
+            'The arrow flips the order — down is best-first, up reverses it'
         ],
         docsId: 'search-basic'
     },
-    '.search-status-container': {
+    '.bs-status-bar': {
         title: 'Search Status',
-        description: 'Shows the current search state — ready, searching, or results count. The spinner animates while Soulseek is being queried.',
+        description: 'Shows the current search state — ready, searching, or results count. The spinner animates while the source is being queried.',
     },
     '#search-results-area': {
         title: 'Search Results',

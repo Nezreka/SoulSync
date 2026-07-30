@@ -4078,82 +4078,18 @@
                              its id with the React one, and getElementById answers with
                              whichever comes first in the document. -->
 
-                        <!-- Basic Search Section -->
-                        <div id="basic-search-section" class="search-section">
+                        <!-- BOTH search panels are React's now: the enhanced/metadata
+                             half and the basic (Soulseek/download-source file) half both
+                             live in webui/src/routes/search/.
 
-                            <!-- Source picker: chip row, one chip per active download source.
-                                 Populated by downloads.js:initBasicSearchSources().
-                                 Hidden until sources load; in single-source mode shows one
-                                 non-interactive chip so the user knows what they're searching. -->
-                            <div class="bs-source-row" id="bs-source-row" aria-label="Search source" role="tablist"></div>
-
-                            <!-- Search bar -->
-                            <div class="bs-search-bar">
-                                <div class="bs-search-input-wrap">
-                                    <svg class="bs-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M15 15l3 3"/></svg>
-                                    <input type="text" id="downloads-search-input"
-                                           placeholder="Search artists, albums, tracks…"
-                                           autocomplete="off" spellcheck="false">
-                                    <button id="downloads-cancel-btn" class="bs-cancel-btn hidden" aria-label="Cancel">✕</button>
-                                </div>
-                                <button id="downloads-search-btn" class="bs-search-btn">Search</button>
-                            </div>
-
-                            <!-- Status / loading bar -->
-                            <div class="bs-status-bar">
-                                <div class="spinner-animation hidden"></div>
-                                <span id="search-status-text" class="bs-status-text">Enter an artist, album, or track name to search</span>
-                                <div class="dots-animation hidden"></div>
-                            </div>
-
-                            <!-- Filters: always-visible compact pill row -->
-                            <div id="filters-container" class="bs-filters hidden">
-                                <div class="bs-filter-group">
-                                    <span class="bs-filter-label">Type</span>
-                                    <button class="filter-btn bs-filter-pill active" data-filter-type="type" data-value="all">All</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="album">Albums</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="track">Tracks</button>
-                                </div>
-                                <div class="bs-filter-group">
-                                    <span class="bs-filter-label">Format</span>
-                                    <button class="filter-btn bs-filter-pill active" data-filter-type="format" data-value="all">All</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="flac">FLAC</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="mp3">MP3</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="ogg">OGG</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="aac">AAC</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="wma">WMA</button>
-                                </div>
-                                <div class="bs-filter-group">
-                                    <span class="bs-filter-label">Sort</span>
-                                    <button id="sort-order-btn" class="filter-btn bs-filter-pill sort-order-btn" data-order="desc">↓</button>
-                                    <button class="filter-btn bs-filter-pill active" data-filter-type="sort" data-value="relevance">Relevance</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="quality_score">Quality</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="size">Size</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="title">Name</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="username">Uploader</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="bitrate">Bitrate</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="duration">Duration</button>
-                                </div>
-                            </div>
-
-                            <!-- Results area -->
-                            <div class="bs-results-wrap" id="search-results-area">
-                                <div class="search-results-placeholder">
-                                    <p>Enter a search term to get started.</p>
-                                </div>
-                            </div>
-
-                        </div>
-                        <!-- End Basic Search Section -->
-
-                        <!-- Enhanced search is React's: webui/src/routes/search/.
-                             Its markup is deleted rather than left unused, because every id
-                             in it (#enhanced-search-input, #enhanced-main-results-area,
-                             #enh-source-row) is looked up by the global download widget or
-                             by showSearchDownloadBubbles. Two elements answering to one id
-                             is resolved by document order, which is not a contract.
-                             #basic-search-section above STAYS: it is still vanilla, and the
-                             React page moves that very node into its own tree. -->
+                             Their markup is deleted rather than left unused. Every id in
+                             it — #enhanced-search-input, #enhanced-main-results-area,
+                             #enh-source-row, #downloads-search-input, #search-results-area,
+                             #bs-source-row, #filters-container — is looked up by id by the
+                             global download widget, the wishlist handoff, the tour or
+                             showSearchDownloadBubbles, and two elements answering to one id
+                             resolves by document order, which is not a contract.
+                             tests/test_react_ids_are_not_duplicated.py guards this. -->
                     </div>
 
                 </div>
@@ -10864,7 +10800,6 @@
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='server-activity.js', v=static_v) }}"></script>
