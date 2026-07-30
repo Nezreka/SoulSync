@@ -3264,11 +3264,13 @@ async function loadPageData(pageId) {
                 initializeSyncPage();
                 await loadSyncData();
                 break;
-            case 'search':
-                initializeSearch();
-                initializeSearchModeToggle();
-                initializeFilters();
-                break;
+            // No 'search' case: React owns /search, and loadPageData only runs
+            // for legacy-kind pages, so this could never fire again. The React
+            // page calls initializeSearch() and initializeFilters() itself after
+            // it adopts #basic-search-section — those still bind the BASIC
+            // panel, which has not been ported yet. initializeSearchModeToggle
+            // is deliberately not called anywhere: it is the vanilla enhanced
+            // controller React replaces.
             // No 'label-detail' case: React owns /label-detail, and loadPageData
             // only runs for legacy-kind pages. The vanilla renderer it used to
             // call (label-detail.js) is deleted.

@@ -4073,10 +4073,10 @@
                             </div>
                         </div>
 
-                        <!-- Search source picker — icon row populated by search.js.
-                             Each icon triggers a single-source fetch (no fan-out);
-                             results are cached per (query, source) pair. -->
-                        <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
+                        <!-- The source picker is React's (webui/src/routes/search/-ui/
+                             source-row.tsx). The empty div that used to live here shared
+                             its id with the React one, and getElementById answers with
+                             whichever comes first in the document. -->
 
                         <!-- Basic Search Section -->
                         <div id="basic-search-section" class="search-section">
@@ -4146,144 +4146,14 @@
                         </div>
                         <!-- End Basic Search Section -->
 
-                        <!-- Enhanced Search Section (New) -->
-                        <div id="enhanced-search-section" class="search-section active">
-                            <!-- Enhanced Search Bar with Dropdown -->
-                            <div class="enhanced-search-input-wrapper">
-                                <div class="enhanced-search-bar-container">
-                                    <div class="enhanced-search-wrapper">
-                                        <div class="enhanced-search-icon">✨</div>
-                                        <input type="text" id="enhanced-search-input"
-                                            placeholder="Search for artists, albums, or tracks...">
-                                        <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
-                                    </div>
-                                </div>
-
-                                <!-- Link lookup (#775): paste a provider link and resolve
-                                     it directly on the owning source (Spotify / Apple Music
-                                     / MusicBrainz / Deezer) — no fuzzy search. Results render
-                                     in the dropdown below and reuse the normal download/
-                                     import flow. Links only: a bare ID is ambiguous. -->
-                                <div class="enh-id-lookup">
-                                    <span class="enh-id-lookup-icon">🔗</span>
-                                    <input type="text" id="enh-id-input" class="enh-id-input"
-                                        placeholder="…or paste a Spotify / Apple Music / MusicBrainz / Deezer link, or a MusicBrainz ID"
-                                        autocomplete="off" spellcheck="false">
-                                    <button id="enh-id-btn" class="enh-id-btn" type="button">Look up</button>
-                                </div>
-
-                                <!-- Enhanced Search Dropdown (Overlay Panel) -->
-                                <div id="enhanced-dropdown" class="enhanced-dropdown hidden">
-                                    <div class="enhanced-dropdown-content">
-                                        <!-- Mobile close bar -->
-                                        <button id="enhanced-dropdown-close" class="enhanced-dropdown-close">
-                                            <span>✕</span> Close Results
-                                        </button>
-                                        <!-- Loading State -->
-                                        <div id="enhanced-loading" class="enhanced-loading hidden">
-                                            <div class="spinner"></div>
-                                            <p id="enhanced-loading-text">Searching across Spotify and your library...
-                                            </p>
-                                        </div>
-
-                                        <!-- Empty State -->
-                                        <div id="enhanced-empty" class="enhanced-empty hidden">
-                                            <div class="empty-icon">🔍</div>
-                                            <p>No results found</p>
-                                        </div>
-
-                                        <!-- Results Container -->
-                                        <div id="enhanced-results-container" class="enhanced-results-container hidden">
-
-                                            <!-- Fallback banner — shown when user clicked Spotify but backend
-                                                 served Deezer due to rate-limit, etc. Populated by search.js. -->
-                                            <div id="enh-fallback-banner" class="enh-fallback-banner hidden"></div>
-
-                                            <!-- Artists Container (Side by Side) -->
-                                            <div class="enh-artists-wrapper">
-                                                <!-- DB Artists -->
-                                                <div id="enh-db-artists-section"
-                                                    class="enh-dropdown-section enh-artist-section hidden">
-                                                    <div class="enh-section-header">
-                                                        <span class="enh-section-icon">📚</span>
-                                                        <h4 class="enh-section-title">In Your Library</h4>
-                                                        <span class="enh-section-count"
-                                                            id="enh-db-artists-count">0</span>
-                                                    </div>
-                                                    <div class="enh-compact-list" id="enh-db-artists-list"></div>
-                                                </div>
-
-                                                <!-- Spotify Artists -->
-                                                <div id="enh-spotify-artists-section"
-                                                    class="enh-dropdown-section enh-artist-section hidden">
-                                                    <div class="enh-section-header">
-                                                        <span class="enh-section-icon">🎤</span>
-                                                        <h4 class="enh-section-title">Artists</h4>
-                                                        <span class="enh-section-count"
-                                                            id="enh-spotify-artists-count">0</span>
-                                                    </div>
-                                                    <div class="enh-compact-list" id="enh-spotify-artists-list"></div>
-                                                </div>
-                                            </div>
-
-                                            <!-- Albums -->
-                                            <div id="enh-albums-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">💿</span>
-                                                    <h4 class="enh-section-title">Albums</h4>
-                                                    <span class="enh-section-count" id="enh-albums-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-albums-list"></div>
-                                            </div>
-
-                                            <!-- Singles & EPs -->
-                                            <div id="enh-singles-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">🎶</span>
-                                                    <h4 class="enh-section-title">Singles & EPs</h4>
-                                                    <span class="enh-section-count" id="enh-singles-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-singles-list"></div>
-                                            </div>
-
-                                            <!-- Tracks -->
-                                            <div id="enh-tracks-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">🎵</span>
-                                                    <h4 class="enh-section-title">Tracks</h4>
-                                                    <span class="enh-section-count" id="enh-tracks-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-tracks-list"></div>
-                                            </div>
-
-                                            <!-- Labels (record labels — monitored like an artist watchlist) -->
-                                            <div id="enh-labels-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">🏷️</span>
-                                                    <h4 class="enh-section-title">Labels</h4>
-                                                    <span class="enh-section-count" id="enh-labels-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-labels-list"></div>
-                                            </div>
-
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Main Search Results Area (for slskd results) -->
-                            <div class="search-results-container">
-                                <div class="search-results-header">
-                                    <h3>Search Results</h3>
-                                </div>
-                                <div class="search-results-scroll-area" id="enhanced-main-results-area">
-                                    <div class="search-results-placeholder">
-                                        <p>Search results will appear here when you select an album or track.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- End Enhanced Search Section -->
+                        <!-- Enhanced search is React's: webui/src/routes/search/.
+                             Its markup is deleted rather than left unused, because every id
+                             in it (#enhanced-search-input, #enhanced-main-results-area,
+                             #enh-source-row) is looked up by the global download widget or
+                             by showSearchDownloadBubbles. Two elements answering to one id
+                             is resolved by document order, which is not a contract.
+                             #basic-search-section above STAYS: it is still vanilla, and the
+                             React page moves that very node into its own tree. -->
                     </div>
 
                 </div>

@@ -5731,6 +5731,12 @@ function _gsNavigateToSearchPage(query, src) {
             if (typeof _searchPageController !== 'undefined' && _searchPageController) {
                 _searchPageController.state.query = query || '';
             }
+            // The React search page's equivalent. It keeps its results across
+            // navigation, so without this the icon click below hands off a
+            // query from a PREVIOUS visit and overwrites what we just wrote.
+            if (typeof window._searchPageSetQuery === 'function') {
+                window._searchPageSetQuery(query || '');
+            }
 
             const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
             if (soulseekIcon) {

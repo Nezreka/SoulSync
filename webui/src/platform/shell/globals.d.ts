@@ -209,6 +209,57 @@ declare global {
       contextType?: string,
     ) => void | Promise<void>;
     /**
+     * core.js — shows the modal of an already-active download process.
+     *
+     * `activeDownloadProcesses` is a top-level `let` in a classic script, so it
+     * is not a window property and no module can read it. The search page needs
+     * the answer BEFORE fetching album detail: on a re-click while the source is
+     * down, the fetch fails and the modal the user already had would never come
+     * back. Returns true when a modal was shown.
+     */
+    reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
+    /**
+     * search.js — binds the BASIC search panel's button, Enter key and Cancel.
+     *
+     * Called by the React search page after it adopts #basic-search-section,
+     * because the `case 'search':` in init.js that used to call it only runs for
+     * legacy pages. It uses addEventListener with no guard, so it must be called
+     * exactly once per page load.
+     */
+    initializeSearch?: () => void;
+    /** wishlist-tools.js — the basic panel's Filters disclosure. */
+    initializeFilters?: () => void;
+    /** downloads.js — runs the basic (Soulseek file) search. */
+    performDownloadsSearch?: () => void;
+    /**
+     * shared-helpers.js — sends the user to the Settings card for a source that
+     * has no credentials, rather than firing a search that cannot succeed.
+     */
+    openSettingsForSource?: (source: string) => void;
+    /**
+     * Set by the React search page so the global download widget can sync the
+     * query BEFORE clicking the Soulseek icon. Without it the icon click hands
+     * off whatever the search page last had, overwriting the widget's query.
+     */
+    _searchPageSetQuery?: (query: string) => void;
+    /** shared-helpers.js — registers a download in the search bubbles. */
+    registerSearchDownload?: (
+      item: Record<string, unknown>,
+      type: string,
+      virtualPlaylistId: string,
+      artistName?: string,
+    ) => void;
+    /** media-player.js — can this browser decode that file's format? */
+    isAudioFormatSupported?: (filename: string) => boolean;
+    getFileExtension?: (filename: string) => string;
+    /**
+     * shared-helpers.js — samples an image and hands back its palette, which
+     * applyDynamicGlow turns into the card's shadow. Callback-style, not a
+     * promise.
+     */
+    extractImageColors?: (imageUrl: string, callback: (colors: unknown) => void) => void;
+    applyDynamicGlow?: (cardElement: HTMLElement, colors: unknown) => void;
+    /**
      * search.js — the shared enhanced-search call. Label detail uses it to
      * re-resolve a MusicBrainz release onto a source whose images actually
      * load; Cover Art Archive does not.
