@@ -13,6 +13,7 @@ import { Route as SplatRouteImport } from './routes/$'
 import { Route as WishlistRouteRouteImport } from './routes/wishlist/route'
 import { Route as WatchlistRouteRouteImport } from './routes/watchlist/route'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
+import { Route as SearchRouteRouteImport } from './routes/search/route'
 import { Route as LibraryRouteRouteImport } from './routes/library/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
@@ -43,6 +44,11 @@ const WatchlistRouteRoute = WatchlistRouteRouteImport.update({
 const StatsRouteRoute = StatsRouteRouteImport.update({
   id: '/stats',
   path: '/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRouteRoute = SearchRouteRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LibraryRouteRoute = LibraryRouteRouteImport.update({
@@ -107,6 +113,7 @@ export interface FileRoutesByFullPath {
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/automations': typeof AutomationsRouteRoute
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/issues'
     | '/library'
+    | '/search'
     | '/stats'
     | '/watchlist'
     | '/wishlist'
@@ -176,6 +186,7 @@ export interface FileRouteTypes {
     | '/automations'
     | '/issues'
     | '/library'
+    | '/search'
     | '/stats'
     | '/watchlist'
     | '/wishlist'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/issues'
     | '/library'
+    | '/search'
     | '/stats'
     | '/watchlist'
     | '/wishlist'
@@ -211,6 +223,7 @@ export interface RootRouteChildren {
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
   LibraryRouteRoute: typeof LibraryRouteRoute
+  SearchRouteRoute: typeof SearchRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
   WatchlistRouteRoute: typeof WatchlistRouteRoute
   WishlistRouteRoute: typeof WishlistRouteRoute
@@ -247,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/stats'
       fullPath: '/stats'
       preLoaderRoute: typeof StatsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/library': {
@@ -353,6 +373,7 @@ const rootRouteChildren: RootRouteChildren = {
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
   LibraryRouteRoute: LibraryRouteRoute,
+  SearchRouteRoute: SearchRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
   WatchlistRouteRoute: WatchlistRouteRoute,
   WishlistRouteRoute: WishlistRouteRoute,

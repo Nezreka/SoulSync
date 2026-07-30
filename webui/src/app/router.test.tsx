@@ -90,16 +90,17 @@ describe('createAppRouter', () => {
   });
 
   it('routes non-migrated paths through the legacy fallback handler', async () => {
+    // /sync, because /search is React now. Any still-legacy path does.
     window.SoulSyncWebShellBridge = createShellBridge();
 
     const queryClient = createTestQueryClient();
-    const history = createMemoryHistory({ initialEntries: ['/search'] });
+    const history = createMemoryHistory({ initialEntries: ['/sync'] });
     const router = createAppRouter({ history, queryClient });
 
     render(<AppRouterProvider router={router} queryClient={queryClient} />);
 
     await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/search');
+      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/sync');
     });
   });
 
@@ -142,8 +143,10 @@ describe('createAppRouter', () => {
   });
 
   it('redirects the root route to the profile home page', async () => {
+    // A LEGACY home page, so the assertion is about the redirect reaching the
+    // legacy handler — /search is React now and would render in place instead.
     window.SoulSyncWebShellBridge = createShellBridge({
-      getProfileHomePage: vi.fn<() => ShellPageId>(() => 'search'),
+      getProfileHomePage: vi.fn<() => ShellPageId>(() => 'sync'),
     });
 
     const queryClient = createTestQueryClient();
@@ -153,9 +156,9 @@ describe('createAppRouter', () => {
     render(<AppRouterProvider router={router} queryClient={queryClient} />);
 
     await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/search');
+      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/sync');
     });
 
-    expect(history.location.pathname).toBe('/search');
+    expect(history.location.pathname).toBe('/sync');
   });
 });

@@ -76,6 +76,43 @@ function optimisticConfigured(): Record<string, boolean> {
  * lands after the query was cleared would otherwise still match its token and
  * write stale results into the freshly-emptied cache.
  */
+/**
+ * What survives leaving the page.
+ *
+ * The vanilla page is never torn down, so its controller keeps the last query
+ * and its per-source cache; `_searchPageRestoreOnEnter` (search.js:226-234)
+ * exists purely to re-render them on the way back, and its comment names the
+ * problem it solves: "results vanish on navigate-back". A React route unmounts,
+ * which would take the cache with it — so the cache lives out here instead.
+ *
+ * Deliberately NOT the whole state: loadingSources and configuredSources are
+ * about a live page and would be lies by the time anyone came back.
+ */
+interface PersistedSearch {
+  query: string;
+  activeSource: string;
+  sources: Record<string, SourceResults>;
+  fallbacks: Record<string, string>;
+  userPickedSource: boolean;
+}
+
+let persisted: PersistedSearch | null = null;
+
+/** Test seam — a module-level cache would otherwise leak between tests. */
+export function resetPersistedSearch() {
+  persisted = null;
+}
+
+/**
+ * The query the page came back to, for seeding the input.
+ *
+ * Restoring the cache without this leaves the results on screen above an EMPTY
+ * search box — which reads as a bug even though the results are correct.
+ */
+export function getPersistedQuery(): string {
+  return persisted?.query ?? '';
+}
+
 export function useSearchController({
   onSoulseekSelected,
   onUnconfiguredSource,
@@ -87,15 +124,25 @@ export function useSearchController({
   initialSource?: string;
 } = {}): SearchController {
   const [state, setState] = useState<SearchControllerState>(() => ({
-    query: '',
-    activeSource: pickerSource(initialSource),
-    sources: {},
-    fallbacks: {},
+    query: persisted?.query ?? '',
+    activeSource: persisted?.activeSource ?? pickerSource(initialSource),
+    sources: persisted?.sources ?? {},
+    fallbacks: persisted?.fallbacks ?? {},
     loadingSources: new Set<string>(),
     configuredSources: optimisticConfigured(),
     enabledExperimental: new Set<string>(),
-    userPickedSource: false,
+    userPickedSource: persisted?.userPickedSource ?? false,
   }));
+
+  // Mirrored on every change rather than on unmount: an unmount hook would not
+  // run if the tab were closed mid-search, and this costs nothing.
+  persisted = {
+    query: state.query,
+    activeSource: state.activeSource,
+    sources: state.sources,
+    fallbacks: state.fallbacks,
+    userPickedSource: state.userPickedSource,
+  };
 
   const tokensRef = useRef<Record<string, number>>(Object.create(null));
   const seqRef = useRef(0);

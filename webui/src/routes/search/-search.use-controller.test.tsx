@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw';
 
-import { activeResults, useSearchController } from './-search.use-controller';
+import { activeResults, resetPersistedSearch, useSearchController } from './-search.use-controller';
 
 /** A search handler you can settle per source, so races are observable. */
 function deferredSearch() {
@@ -58,6 +58,9 @@ describe('useSearchController', () => {
    * handlers after these.
    */
   beforeEach(() => {
+    // The navigate-back cache is module-level by design; without this it would
+    // carry one test's query into the next.
+    resetPersistedSearch();
     server.use(
       http.get('/status', () => HttpResponse.json({ metadata_source: { source: 'spotify' } })),
       http.get('/api/settings/config-status', () =>
@@ -293,5 +296,63 @@ describe('useSearchController', () => {
     const { result } = renderHook(() => useSearchController());
     act(() => result.current.seedFromIdLookup('x', { source: 'spotify_free', albums: [] }));
     expect(result.current.state.activeSource).toBe('spotify');
+  });
+});
+
+describe('surviving navigation', () => {
+  it('still has its results when the page comes back', async () => {
+    // A React route unmounts on navigation, so without the module-level cache
+    // the user returns to an empty page — the exact "results vanish on
+    // navigate-back" problem _searchPageRestoreOnEnter exists to solve.
+    resetPersistedSearch();
+    const seen = stubSearch({ spotify: { spotify_albums: [{ id: 'a1', name: 'Drukqs' }] } });
+
+    const first = renderHook(() => useSearchController());
+    act(() => first.result.current.submitQuery('aphex'));
+    await waitFor(() => expect(activeResults(first.result.current.state).albums).toHaveLength(1));
+    first.unmount();
+
+    // Remount, as the router does on the way back.
+    const second = renderHook(() => useSearchController());
+    expect(second.result.current.state.query).toBe('aphex');
+    expect(activeResults(second.result.current.state).albums).toHaveLength(1);
+    // And it did NOT re-fetch to get them back.
+    expect(seen).toEqual(['spotify']);
+    await flush();
+    second.unmount();
+  });
+
+  it('comes back on the source the user had picked', async () => {
+    resetPersistedSearch();
+    stubSearch({ deezer: { spotify_albums: [] } });
+
+    const first = renderHook(() => useSearchController());
+    act(() => first.result.current.setActiveSource('deezer'));
+    await waitFor(() => expect(first.result.current.state.activeSource).toBe('deezer'));
+    await flush();
+    first.unmount();
+
+    const second = renderHook(() => useSearchController());
+    expect(second.result.current.state.activeSource).toBe('deezer');
+    // userPickedSource travels too, so init does not overwrite the choice.
+    await flush();
+    expect(second.result.current.state.activeSource).toBe('deezer');
+    second.unmount();
+  });
+
+  it('does not carry a spinner across the remount', async () => {
+    // loadingSources describes a request that died with the old page; restoring
+    // it would leave an icon spinning forever.
+    resetPersistedSearch();
+    deferredSearch();
+
+    const first = renderHook(() => useSearchController());
+    act(() => first.result.current.submitQuery('aphex'));
+    await waitFor(() => expect(first.result.current.state.loadingSources.size).toBe(1));
+    first.unmount();
+
+    const second = renderHook(() => useSearchController());
+    expect(second.result.current.state.loadingSources.size).toBe(0);
+    second.unmount();
   });
 });
