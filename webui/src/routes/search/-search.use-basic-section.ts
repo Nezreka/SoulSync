@@ -66,7 +66,13 @@ export function useAdoptedBasicSection(host: HTMLElement | null, active: boolean
 
     return () => {
       const origin = originRef.current;
-      if (origin?.parent) origin.parent.insertBefore(section, origin.next);
+      if (!origin?.parent) return;
+      // insertBefore throws if the sibling it was recorded next to has since
+      // been removed, so fall back to appending. Losing the ORDER inside a
+      // hidden legacy page is nothing; throwing during unmount would take the
+      // navigation with it.
+      const next = origin.next && origin.next.parentNode === origin.parent ? origin.next : null;
+      origin.parent.insertBefore(section, next);
     };
   }, [host]);
 

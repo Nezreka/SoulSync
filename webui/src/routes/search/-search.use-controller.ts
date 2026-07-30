@@ -43,6 +43,8 @@ export interface SearchController {
   state: SearchControllerState;
   submitQuery: (query: string) => void;
   setActiveSource: (source: string) => void;
+  /** Adopt a query without searching for it — the widget handoff. */
+  syncQuery: (query: string) => void;
   /**
    * The ID-lookup seam.
    *
@@ -264,6 +266,38 @@ export function useSearchController({
     }
   }, []);
 
+  /**
+   * Adopt a query WITHOUT searching for it.
+   *
+   * This is the global download widget's handoff. It writes the basic-search
+   * input itself and then clicks the Soulseek icon; all it needs from here is
+   * for the controller to agree what the query is, so that the click hands off
+   * the right one. The vanilla did it by assigning `state.query` directly
+   * (downloads.js:5729-5731) — a plain assignment, no fetch and no callback.
+   *
+   * Searching here instead would run the basic search THREE times for one
+   * handoff: once from this call, once from the icon click, and once more when
+   * the debounce caught up.
+   *
+   * The cache is cleared when the query actually differs, which the vanilla's
+   * raw assignment did not do — leaving it would let a later search for this
+   * query serve results that belong to the previous one.
+   */
+  const syncQuery = useCallback((query: string) => {
+    const previous = stateRef.current;
+    if (query === previous.query) return;
+    for (const key of Object.keys(tokensRef.current)) delete tokensRef.current[key];
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setState((prev) => ({
+      ...prev,
+      query,
+      sources: {},
+      fallbacks: {},
+      loadingSources: new Set<string>(),
+    }));
+  }, []);
+
   const submitQuery = useCallback(
     (query: string) => {
       const previous = stateRef.current;
@@ -362,7 +396,7 @@ export function useSearchController({
     }));
   }, []);
 
-  return { state, submitQuery, setActiveSource, seedFromIdLookup };
+  return { state, submitQuery, setActiveSource, syncQuery, seedFromIdLookup };
 }
 
 /** The slice the page renders — the active source's results, or an empty one. */

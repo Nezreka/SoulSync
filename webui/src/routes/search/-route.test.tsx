@@ -46,8 +46,15 @@ beforeEach(() => {
   window.SoulSyncWebShellBridge = createShellBridge();
   server.use(
     http.get('/status', () => HttpResponse.json({ metadata_source: { source: 'spotify' } })),
+    // soulseek included on purpose: it needs an slskd URL like any other
+    // credentialed source, so leaving it out makes the picker (correctly) send
+    // its clicks to Settings instead of switching to basic mode.
     http.get('/api/settings/config-status', () =>
-      HttpResponse.json({ spotify: { configured: true }, deezer: { configured: true } }),
+      HttpResponse.json({
+        spotify: { configured: true },
+        deezer: { configured: true },
+        soulseek: { configured: true },
+      }),
     ),
   );
 });
@@ -255,5 +262,60 @@ describe('the dropdown state machine', () => {
     await waitFor(() =>
       expect(document.getElementById('enhanced-dropdown')?.className).toContain('hidden'),
     );
+  });
+});
+
+describe('the global widget handoff', () => {
+  it('runs the basic search ONCE, not once per path into it', async () => {
+    // Three ways to trigger it converge here: this sync, the icon click the
+    // widget makes next, and the debounce catching up. Only the click should
+    // search — the vanilla's equivalent line is a plain state assignment
+    // (downloads.js:5729-5731), and every extra call is another slskd search.
+    mountVanillaBasicSection();
+    const performDownloadsSearch = vi.fn();
+    window.performDownloadsSearch = performDownloadsSearch;
+
+    renderRoute('/search');
+    await screen.findByText('Search');
+
+    act(() => {
+      window._searchPageSetQuery?.('aphex twin');
+    });
+    // The sync alone must not search.
+    expect(performDownloadsSearch).not.toHaveBeenCalled();
+
+    // Now the widget's icon click, which is the part that does.
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    act(() => (icon as HTMLButtonElement).click());
+    expect(performDownloadsSearch).toHaveBeenCalledOnce();
+
+    // And the debounce does not add a third: the sync never touched the
+    // enhanced input, so there is nothing pending.
+    await new Promise((r) => setTimeout(r, SEARCH_DEBOUNCE_MS + 200));
+    expect(performDownloadsSearch).toHaveBeenCalledOnce();
+
+    delete window.performDownloadsSearch;
+  });
+
+  it('hands the widget’s query to basic search, not a remembered one', async () => {
+    mountVanillaBasicSection();
+    const performDownloadsSearch = vi.fn();
+    window.performDownloadsSearch = performDownloadsSearch;
+
+    renderRoute('/search');
+    await screen.findByText('Search');
+
+    // The widget writes the input first, then syncs, then clicks.
+    const basicInput = document.getElementById('downloads-search-input') as HTMLInputElement;
+    basicInput.value = 'from the widget';
+    act(() => {
+      window._searchPageSetQuery?.('from the widget');
+    });
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    act(() => (icon as HTMLButtonElement).click());
+
+    expect(basicInput.value).toBe('from the widget');
+    expect(performDownloadsSearch).toHaveBeenCalledOnce();
+    delete window.performDownloadsSearch;
   });
 });

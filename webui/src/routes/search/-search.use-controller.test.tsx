@@ -356,3 +356,54 @@ describe('surviving navigation', () => {
     second.unmount();
   });
 });
+
+describe('syncQuery', () => {
+  it('adopts the query without searching for it', async () => {
+    // The widget's handoff. It clicks the Soulseek icon straight after, and
+    // that click is what searches — doing it here too runs the basic search
+    // twice for one handoff.
+    const seen = stubSearch({ spotify: {} });
+    const { result } = renderHook(() => useSearchController());
+
+    act(() => result.current.syncQuery('from the widget'));
+    await flush();
+
+    expect(result.current.state.query).toBe('from the widget');
+    expect(seen).toEqual([]);
+  });
+
+  it('does not hand a soulseek query off by itself', async () => {
+    const onSoulseekSelected = vi.fn();
+    const { result } = renderHook(() => useSearchController({ onSoulseekSelected }));
+    await flush();
+
+    act(() => result.current.syncQuery('aphex'));
+    expect(onSoulseekSelected).not.toHaveBeenCalled();
+  });
+
+  it('empties the cache when the query actually changed', async () => {
+    // The vanilla assigned state.query raw, which would leave the previous
+    // query's results in place to be served for this one.
+    stubSearch({ spotify: { spotify_albums: [{ id: 'a1' }] } });
+    const { result } = renderHook(() => useSearchController());
+
+    act(() => result.current.submitQuery('aphex'));
+    await waitFor(() => expect(result.current.state.sources.spotify).toBeDefined());
+
+    act(() => result.current.syncQuery('squarepusher'));
+    expect(result.current.state.sources).toEqual({});
+    expect(result.current.state.query).toBe('squarepusher');
+  });
+
+  it('leaves a matching query completely alone', async () => {
+    stubSearch({ spotify: { spotify_albums: [{ id: 'a1' }] } });
+    const { result } = renderHook(() => useSearchController());
+
+    act(() => result.current.submitQuery('aphex'));
+    await waitFor(() => expect(result.current.state.sources.spotify).toBeDefined());
+
+    // Same query: the cache is still good and must not be thrown away.
+    act(() => result.current.syncQuery('aphex'));
+    expect(result.current.state.sources.spotify).toBeDefined();
+  });
+});

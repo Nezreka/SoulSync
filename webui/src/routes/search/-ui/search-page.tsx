@@ -63,7 +63,7 @@ export function SearchPage() {
     },
     onUnconfiguredSource: (source) => window.openSettingsForSource?.(source),
   });
-  const { state, submitQuery, setActiveSource, seedFromIdLookup } = controller;
+  const { state, submitQuery, setActiveSource, syncQuery, seedFromIdLookup } = controller;
 
   const results = activeResults(state);
   const soulseekActive = state.activeSource === 'soulseek';
@@ -179,17 +179,19 @@ export function SearchPage() {
 
   /**
    * The global download widget syncs its query here before clicking the
-   * Soulseek icon (downloads.js:5710-5735). Without it the click hands off THIS
+   * Soulseek icon (downloads.js:5710-5740). Without it the click hands off THIS
    * page's last query — which, now that results survive navigation, can be a
    * stale one — and overwrites what the widget just typed.
+   *
+   * It SYNCS and does not search. The widget writes the basic input and then
+   * clicks the icon, which is what runs the search; searching here as well
+   * would run it twice, and updating the enhanced input would start the
+   * debounce and run it a third time.
    */
-  const submitRef = useRef(submitQuery);
-  submitRef.current = submitQuery;
+  const syncRef = useRef(syncQuery);
+  syncRef.current = syncQuery;
   useEffect(() => {
-    window._searchPageSetQuery = (next: string) => {
-      setQuery(next);
-      submitRef.current(next.trim());
-    };
+    window._searchPageSetQuery = (next: string) => syncRef.current(next.trim());
     return () => {
       delete window._searchPageSetQuery;
     };
