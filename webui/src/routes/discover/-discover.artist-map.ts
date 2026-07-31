@@ -151,6 +151,22 @@ export interface ArtMapState {
   _panelOpen?: boolean;
   _gloss?: HTMLCanvasElement;
   _halos?: Record<string, HTMLCanvasElement>;
+  // Render-loop bookkeeping. Declared rather than left to the index signature —
+  // an `unknown` from the catch-all silently defeats the arithmetic these take
+  // part in, which the typechecker only notices at the use site.
+  _animating?: number | null;
+  _rafPending?: number | null;
+  _bgGrad?: CanvasGradient;
+  _bgW?: number;
+  _bgH?: number;
+  _constellationFade?: number;
+  _constellationActive?: boolean;
+  _constellationCache?: { nodeId: ArtMapNodeId; nodes: ArtMapNode[] } | null;
+  _perf?: boolean;
+  _perfPostTs?: number;
+  _lastPerfTs?: number;
+  _rebuildMs?: number;
+  _loadToken?: number;
   [key: string]: unknown;
 }
 
