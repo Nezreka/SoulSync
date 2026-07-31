@@ -1,6 +1,6 @@
 # discover page → React: status
 
-Branch `react-migration-discover`, 27 commits, **not pushed**.
+Branch `react-migration-discover`, 38 commits, **not pushed**.
 
 ## the honest summary
 
@@ -91,10 +91,10 @@ listed that feeder as live a commit earlier.
   the ListenBrainz playlists section (3397-4259). Both were read this session
   but not yet transcribed.
 * PR 2 (delete discover.js + the dead code) — not started.
-* **22 live functions outside the visualisations remain un-ported** (down from
-  40 — the gaps inside regions I had called done are closed). Full list with
-  line numbers in `discover_coverage_gaps.md`. Re-run the union coverage check
-  there before claiming any region is complete.
+* ~~live functions outside the visualisations un-ported~~ — **ZERO**. The union
+  coverage check went 40 → 24 → 0. Re-run it (`discover_coverage_gaps.md`)
+  before claiming any region is complete; it is the only claim of completeness
+  worth trusting, mine included.
 * **`startDecadeSync` / `startDecadeSyncPolling` / `openDownloadModalForDecade`
   are LIVE** (reached from the decade mix card at 2672) even though the tabbed
   decade browser around them is dead. Do not delete them with the dead region.

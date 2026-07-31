@@ -1,10 +1,14 @@
 # discover port — coverage gaps found by verification
 
-> **STATUS: the gaps inside regions I had called "done" are now CLOSED.**
-> Re-running the union check after the fixes: **40 → 24** un-ported live
-> functions outside the two visualisations (~1,243 → ~768 lines). Two of the
-> remaining 24 are false positives (see below), so the real figure is **22**,
-> all in regions already reported as not started.
+> **STATUS: ALL of them are now closed.**
+> The union check went **40 → 24 → 0** un-ported live functions outside the two
+> visualisations. Everything the audit found — both the gaps inside regions I had
+> wrongly called done, and the regions I had correctly reported as not started —
+> is ported, each with its own mutation pass.
+>
+> What remains un-ported is only: `rehydrateDiscoverDownloadModal` (~327 lines,
+> documented in `-discover.download-bar.ts`) and the Artist Map + Artist Web
+> (~3,970 lines). Plus the UI/route/mount, which has never been started.
 
 Produced by auditing my own work rather than re-reading my own prose. Four
 mechanical checks; the fourth found real overstatement.
@@ -123,3 +127,23 @@ False positives, confirmed by hand:
 Still entirely untouched and NOT counted above: `rehydrateDiscoverDownloadModal`
 (~327 lines, documented in `-discover.download-bar.ts`), and the Artist Map +
 Artist Web (~3,970 lines).
+
+
+## every gap, closed
+
+| gap | mutants |
+|---|---|
+| download bar — `openDiscoverDownloadModal`, `initializeDiscoverDownloadBar` | 8/8 |
+| mixes — 4 live feeders, `renderCompactPlaylist`, the #1079 selection bar | 10/10 |
+| hero watchlist check, "View All" modal, playlist download modal | 8/8 |
+| decade shelf + `startDecadeSync`/`startDecadeSyncPolling`/`openDownloadModalForDecade` | 12/12 |
+| Last.fm Track Radio | 12/12 |
+| ListenBrainz — tabs, grouping, cards, track table | 16/16 |
+| Blocked Artists modal | 11/11 |
+| Recent Releases | 11/11 |
+
+**88 mutants raised across the gap closures, 88 killed.**
+
+The `_yaaShowDisconnectedHint` false positive was resolved by citing its line in
+`-discover.your-albums-actions.ts`, where its behaviour has been ported as
+`disconnectedHint` since the your-albums commit. The checker now reports zero.

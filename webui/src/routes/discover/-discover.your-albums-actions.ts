@@ -426,7 +426,7 @@ export function initialSourcesState(enabled: string[]): Record<string, boolean> 
 }
 
 /**
- * Per-source setup hints (1668-1673).
+ * Per-source setup hints (1668-1673), shown by `_yaaShowDisconnectedHint` (1675).
  *
  * These exist because the toggle used to bail silently on a disconnected
  * source, which read as a broken switch. The generic fallback covers a source
