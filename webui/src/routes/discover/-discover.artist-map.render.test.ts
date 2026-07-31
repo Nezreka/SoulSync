@@ -451,7 +451,8 @@ describe('artMapStreamImages', () => {
     artMapStreamImages(
       Array.from({ length: 100 }, (_, i) => node({ id: i, image_url: `/${i}.jpg` })),
     );
-    expect(requested).toHaveLength(ARTMAP_IMAGE_CONCURRENCY);
+    expect(requested).toHaveLength(24);
+    expect(ARTMAP_IMAGE_CONCURRENCY).toBe(24);
   });
 
   it('drops bitmaps from a superseded stream', async () => {

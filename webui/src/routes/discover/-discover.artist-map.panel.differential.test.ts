@@ -301,8 +301,11 @@ describe('artMapPanelModel', () => {
     V._artMapRefreshPanel();
     const body = document.getElementById('artmap-panel-body') as HTMLElement;
     const rows = body.querySelectorAll('[onclick^="_artMapPanelArtistById"]');
-    expect(rows).toHaveLength(ARTMAP_TOP_ARTISTS);
-    expect(artMapPanelModel().topArtists).toHaveLength(ARTMAP_TOP_ARTISTS);
+    // LITERAL 14, then the constant pinned separately — asserting against the
+    // constant would move with it and let the cap change unnoticed.
+    expect(rows).toHaveLength(14);
+    expect(artMapPanelModel().topArtists).toHaveLength(14);
+    expect(ARTMAP_TOP_ARTISTS).toBe(14);
   });
 
   it('reports island coverage against the GENRE size, not the placed bubbles', () => {
@@ -690,7 +693,8 @@ describe('the shortcuts overlay', () => {
     V.artMapShowShortcuts();
     const overlay = document.getElementById('artmap-shortcuts-overlay') as HTMLElement;
     const rows = Array.from(overlay.querySelectorAll('.artmap-shortcut'));
-    expect(rows).toHaveLength(ARTMAP_SHORTCUTS.length);
+    expect(rows).toHaveLength(10);
+    expect(ARTMAP_SHORTCUTS).toHaveLength(10);
     rows.forEach((row, i) => {
       const keys = Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent);
       expect(keys).toEqual(ARTMAP_SHORTCUTS[i].keys);

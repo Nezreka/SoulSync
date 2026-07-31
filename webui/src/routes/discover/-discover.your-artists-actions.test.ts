@@ -302,6 +302,8 @@ describe('the artists sources modal', () => {
 
   it('enables ALL FOUR by default, unlike the albums modal', () => {
     expect(ARTISTS_DEFAULT_SOURCES).toEqual(['spotify', 'tidal', 'lastfm', 'deezer']);
+    // pin-ok: the claim is that the defaults cover EVERY known source, so it
+    // must track the source list; the literal four is pinned on the line above.
     expect(ARTISTS_DEFAULT_SOURCES).toHaveLength(ARTISTS_SOURCE_INFO.length);
   });
 

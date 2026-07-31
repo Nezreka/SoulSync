@@ -69,6 +69,8 @@ describe('buildLayoutRows', () => {
   it('renders every row when everything has content', () => {
     const rows = buildLayoutRows(all);
     expect(rows.filter((r) => r.kind === 'two-col')).toHaveLength(4);
+    // pin-ok: the RELATIONSHIP is the assertion — one row per layout entry —
+    // so it should track the layout rather than a frozen number.
     expect(rows).toHaveLength(DISCOVER_LAYOUT.length);
   });
 
