@@ -23,6 +23,18 @@ would let a file mask the deletion of its own state.
 Baselines are per file and pinned. They are pre-existing findings, not a
 target: several are genuine latent bugs worth fixing on their own. The test
 guards the DELTA -- it fails when a change adds a new unresolved name.
+
+Widened 2026-07-30 to cover EVERY static script, after it missed a second
+breakage of exactly the kind it was written for. The Downloads-page port
+deleted the only definition of `_updateDlNavBadge`, which core.js:664 and
+shared-helpers.js:4040 both still call from the websocket status handler --
+a ReferenceError on every push, aborting the rest of both handlers. The test
+could not see it because it was parametrized over `_BASELINE`, and that dict
+held one entry: library.js. The other 42 scripts were never linted at all.
+
+A guard that covers one file is a guard against one incident. Files with no
+recorded baseline default to zero, so a newly-orphaned reference in any script
+now fails.
 """
 
 from __future__ import annotations
@@ -39,10 +51,20 @@ _ROOT = Path(__file__).resolve().parent.parent
 _WEBUI = _ROOT / "webui"
 _STATIC = _WEBUI / "static"
 
-# Pre-existing unresolved names per file, recorded 2026-07-27. Lowering a number
-# is always fine; raising one means a change introduced a new ReferenceError
-# waiting to happen, and needs justifying rather than re-baselining.
-_BASELINE = {"library.js": 18}
+# Pre-existing unresolved names per file, re-measured across every script on
+# 2026-07-30. Lowering a number is always fine; raising one means a change
+# introduced a new ReferenceError waiting to happen, and needs justifying
+# rather than re-baselining. Any script NOT listed here must be at zero.
+_BASELINE = {
+    "api-monitor.js": 7,
+    "core.js": 8,
+    "discover.js": 14,
+    "downloads.js": 2,
+    "library.js": 18,
+    "setup-wizard.js": 1,
+    "stats-automations.js": 4,
+    "wishlist-tools.js": 1,
+}
 
 _DECL = re.compile(r"^(?:async )?function ([A-Za-z_$][\w$]*)", re.M)
 _VAR = re.compile(r"^(?:const|let|var)\s+([A-Za-z_$][\w$]*)", re.M)
@@ -75,7 +97,12 @@ def _globals_excluding(target: Path) -> set[str]:
     return names
 
 
-@pytest.mark.parametrize("filename", sorted(_BASELINE))
+def _all_scripts() -> list[str]:
+    """Every static script, not just the ones with a recorded baseline."""
+    return sorted(p.name for p in _STATIC.glob("*.js"))
+
+
+@pytest.mark.parametrize("filename", _all_scripts())
 def test_no_new_unresolved_globals(filename, tmp_path):
     npx = _npx()
     if npx is None:
@@ -103,13 +130,17 @@ def test_no_new_unresolved_globals(filename, tmp_path):
         config_path.unlink(missing_ok=True)
 
     output = proc.stdout + proc.stderr
-    match = re.search(r"Found \d+ warnings and (\d+) errors", output)
+    # oxlint singularises: "Found 0 warnings and 1 error". Requiring the plural
+    # made this silently unparseable for any file sitting at exactly one.
+    match = re.search(r"Found \d+ warnings? and (\d+) errors?", output)
     assert match, f"could not parse oxlint output:\n{output[-2000:]}"
 
     count = int(match.group(1))
     names = sorted(set(re.findall(r"'([A-Za-z_$][\w$]*)' is not defined", output)))
-    assert count <= _BASELINE[filename], (
-        f"{filename}: {count} unresolved names, baseline {_BASELINE[filename]}.\n"
-        f"A declaration was probably deleted along with the code around it.\n"
+    baseline = _BASELINE.get(filename, 0)
+    assert count <= baseline, (
+        f"{filename}: {count} unresolved names, baseline {baseline}.\n"
+        f"A declaration was probably deleted along with the code around it, or\n"
+        f"a page port removed a global that a classic script still calls.\n"
         f"Unresolved: {names}"
     )

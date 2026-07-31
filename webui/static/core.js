@@ -65,6 +65,71 @@ window.reopenActiveDownloadModal = function (virtualPlaylistId) {
     process.modalElement.style.display = 'flex';
     return true;
 };
+
+/**
+ * Open the download modal for a batch shown on the Downloads page.
+ *
+ * Lives here for the same reason as the function above: `activeDownloadProcesses`
+ * is a top-level `let` in this script's lexical scope, so a module cannot read
+ * it. `rehydrateModal` and `WishlistModalState` are likewise script-scoped.
+ * Moved verbatim from _adlOpenBatchModal (pages-extra.js) when the Downloads
+ * page became React.
+ *
+ * Wishlist gets its own branch because its modal is a singleton keyed by the
+ * literal 'wishlist' rather than by batch id, and it has visibility state of
+ * its own that has to be told the modal is showing again.
+ */
+window.openDownloadBatchModal = function (batchId, playlistId, batchName) {
+    if (playlistId === 'wishlist') {
+        const clientProcess = activeDownloadProcesses['wishlist'];
+        if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+            clientProcess.modalElement.style.display = 'flex';
+            if (typeof WishlistModalState !== 'undefined') WishlistModalState.setVisible();
+        } else {
+            rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+        }
+        return;
+    }
+
+    // Any other batch: show the modal it already has, or rebuild from the server.
+    for (const [, process] of Object.entries(activeDownloadProcesses)) {
+        if (process.batchId === batchId && process.modalElement && document.body.contains(process.modalElement)) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+    rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+};
+
+/**
+ * Paint the downloads count on the nav button.
+ *
+ * Moved verbatim from pages-extra.js when the Downloads page became React. It
+ * has to live in a classic script rather than in the React page, because the
+ * websocket status handler below (and its twin in shared-helpers.js) calls it
+ * on every push — including on pages where the Downloads route is not mounted.
+ *
+ * It reads NOTHING from the downloads page: the count is the real server-side
+ * active total from the status push, not the page's list. That distinction is
+ * why the vanilla deliberately never called this from its own poll — the poll
+ * caps at 300 rows and would under-report a bigger queue.
+ */
+function _updateDlNavBadge(count) {
+    const badge = document.getElementById('dl-nav-badge');
+    if (badge) {
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+    const dlBtn = document.querySelector('.nav-button[data-page="active-downloads"]');
+    if (dlBtn) {
+        dlBtn.classList.toggle('nav-downloads-active', count > 0);
+    }
+}
+
 let sequentialSyncManager = null;
 
 // --- YouTube Playlist State Management ---

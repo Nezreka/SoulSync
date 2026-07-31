@@ -3271,9 +3271,9 @@ async function loadPageData(pageId) {
             // No 'label-detail' case: React owns /label-detail, and loadPageData
             // only runs for legacy-kind pages. The vanilla renderer it used to
             // call (label-detail.js) is deleted.
-            case 'active-downloads':
-                loadActiveDownloadsPage();
-                break;
+            // No 'active-downloads' case: React owns /active-downloads, and
+            // loadPageData only runs for legacy-kind pages. The vanilla page
+            // it used to call lives in pages-extra.js and is deleted.
             // No 'library' case: React owns /library, and loadPageData only runs
             // for legacy-kind pages. resolvePageId() returns null for a React
             // path and #library-page no longer exists, so neither route into

@@ -251,6 +251,35 @@ declare global {
      * cleared, and POSTed a route that does not exist.
      */
     _basicDownloadUnmatched?: (result: unknown) => void | Promise<void>;
+    /**
+     * wishlist-tools.js — groups quarantined entries that are alternative
+     * candidates for the SAME track.
+     *
+     * Shared with the library-history quarantine tab, so the downloads page
+     * calls it rather than reimplementing the rule; two copies of "are these
+     * the same track" would drift apart.
+     */
+    _groupQuarantineEntries?: (entries: unknown[]) => { key: string | null; members: unknown[] }[];
+    /**
+     * core.js — opens the download modal for a batch on the Downloads page.
+     *
+     * Cannot move into React: it reads `activeDownloadProcesses`,
+     * `rehydrateModal` and `WishlistModalState`, all script-scoped `let`s that
+     * a module cannot reach. Moved there verbatim from _adlOpenBatchModal.
+     */
+    openDownloadBatchModal?: (batchId: string, playlistId: string, batchName: string) => void;
+    /** wishlist-tools.js — relative time for a history row ("5h ago"). */
+    formatHistoryTime?: (iso: string) => string;
+    /** stats-automations.js — the per-download audit trail modal. */
+    openDownloadAuditModal?: (entry: unknown) => void;
+    /** library.js — the full download + import history modal. */
+    openLibraryHistoryModal?: () => void;
+    /** media-player.js — fills the player chrome before playback starts. */
+    setTrackInfo?: (info: Record<string, unknown>) => void;
+    showLoadingAnimation?: () => void;
+    hideLoadingAnimation?: () => void;
+    /** media-player.js — plays whatever the server just staged. */
+    startAudioPlayback?: () => void | Promise<void>;
     /** media-player.js — starts streaming a search result in the player. */
     startStream?: (searchResult: unknown) => void | Promise<void>;
     /** media-player.js — 'flac' from 'a/b/c.flac'; '' when there is no extension. */

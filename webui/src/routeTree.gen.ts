@@ -18,6 +18,7 @@ import { Route as LibraryRouteRouteImport } from './routes/library/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
 import { Route as AutomationsRouteRouteImport } from './routes/automations/route'
+import { Route as ActiveDownloadsRouteRouteImport } from './routes/active-downloads/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
@@ -71,6 +72,11 @@ const AutomationsRouteRoute = AutomationsRouteRouteImport.update({
   path: '/automations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ActiveDownloadsRouteRoute = ActiveDownloadsRouteRouteImport.update({
+  id: '/active-downloads',
+  path: '/active-downloads',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -109,6 +115,7 @@ const ArtistDetailSourceIdRoute = ArtistDetailSourceIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
   '/automations': typeof AutomationsRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
@@ -127,6 +134,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
   '/automations': typeof AutomationsRouteRoute
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
@@ -145,6 +153,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
   '/automations': typeof AutomationsRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/active-downloads'
     | '/automations'
     | '/import'
     | '/issues'
@@ -183,6 +193,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/active-downloads'
     | '/automations'
     | '/issues'
     | '/library'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/active-downloads'
     | '/automations'
     | '/import'
     | '/issues'
@@ -219,6 +231,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActiveDownloadsRouteRoute: typeof ActiveDownloadsRouteRoute
   AutomationsRouteRoute: typeof AutomationsRouteRoute
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
@@ -297,6 +310,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AutomationsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/active-downloads': {
+      id: '/active-downloads'
+      path: '/active-downloads'
+      fullPath: '/active-downloads'
+      preLoaderRoute: typeof ActiveDownloadsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -369,6 +389,7 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActiveDownloadsRouteRoute: ActiveDownloadsRouteRoute,
   AutomationsRouteRoute: AutomationsRouteRoute,
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
