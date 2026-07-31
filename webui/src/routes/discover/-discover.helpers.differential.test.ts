@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { loadVanilla } from '../../test/vanilla-extract';
 import { advColor, advState, advWaveY } from './-discover.adventurousness';
 import {
   cleanArtistName,
@@ -20,87 +19,10 @@ import { pickArtistDetailSource } from './-discover.your-artists';
 /**
  * Differential parity: run MY port and the REAL vanilla side by side.
  *
- * Reading a function and re-implementing it is how the search port shipped an
- * artist link that went nowhere. So the parity claim here is checkable rather
- * than asserted: the vanilla functions are lifted out of discover.js by
- * brace-matching (a regex cannot — the bodies contain nested braces, template
- * literals and regex literals with braces in them), evaluated, and compared
- * against this port over a matrix of awkward inputs.
- *
- * SOURCE NOTE: this reads the LIVE webui/static/discover.js on purpose. The
- * file still exists during the port PR, so there is no reason to commit a
- * 12,319-line copy of it. When the cleanup PR deletes discover.js, this switches
- * to a frozen `__fixtures__/-vanilla-discover.js` — the same way the downloads
- * port did it — because converting to hand-written expectations would swap
- * "matches the code it replaced" for "matches what I believed it did", which is
- * the exact failure this test exists to rule out.
+ * The extraction machinery lives in `src/test/vanilla-extract` — three
+ * differential suites share it now (helpers, artist map, artist web). See that
+ * module for why the vanilla is read live and why escapeHtml is neutralised.
  */
-const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
-
-/**
- * Lift one function out by brace-matching, string- and regex-literal aware.
- *
- * The body's opening brace is found by first walking the PARAMETER LIST to its
- * closing paren. Jumping to the first `{` after the declaration looks
- * equivalent and is not: a default-valued object parameter
- * (`sourceData = {}`) puts a brace inside the parameter list, and matching from
- * there returns a truncated function that fails to parse. That is exactly how
- * `_buildDiscoverArtistContext` broke this harness.
- */
-function extractFunction(name: string): string {
-  const decl = new RegExp(`^(?:async )?function ${name}\\s*\\(`, 'm');
-  const m = decl.exec(SOURCE);
-  if (!m) throw new Error(`vanilla function ${name} not found in discover.js`);
-
-  // Walk the parameter list to its matching ')', then take the next '{'.
-  let p = SOURCE.indexOf('(', m.index);
-  let parens = 0;
-  for (; p < SOURCE.length; p++) {
-    if (SOURCE[p] === '(') parens++;
-    else if (SOURCE[p] === ')') {
-      parens--;
-      if (parens === 0) break;
-    }
-  }
-  let i = SOURCE.indexOf('{', p);
-  let depth = 0;
-  let inString: string | null = null;
-  let escaped = false;
-
-  for (; i < SOURCE.length; i++) {
-    const c = SOURCE[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (c === '\\') escaped = true;
-      else if (c === inString) inString = null;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === '`') inString = c;
-    else if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) return SOURCE.slice(m.index, i + 1);
-    }
-  }
-  throw new Error(`unbalanced braces extracting ${name}`);
-}
-
-/**
- * Evaluate the named vanilla functions.
- *
- * `escapeHtml` is supplied as IDENTITY on purpose. The vanilla reason-strings
- * escape inline because they are destined for innerHTML; the React port returns
- * raw text and lets React escape at render. Neutralising escapeHtml makes the
- * vanilla return raw text too, so the comparison comes down to the LOGIC — which
- * is the thing that has to match. (Escaping itself is covered by React.)
- */
-function loadVanilla<T>(names: string[], extraPreamble = '', extraExports: string[] = []): T {
-  const preamble = `const escapeHtml = (s) => s;\n${extraPreamble}`;
-  const body = names.map(extractFunction).join('\n');
-  const exports = [...names, ...extraExports].join(', ');
-  return new Function(`${preamble}\n${body}\nreturn { ${exports} };`)() as T;
-}
-
 const V = loadVanilla<{
   cleanArtistName: (s: unknown) => unknown;
   _normalizeTrack: (t: unknown) => unknown;
