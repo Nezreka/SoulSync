@@ -48,11 +48,25 @@ export interface DiscoverResult {
 async function shelf<T>(path: string, key: string, empty: T): Promise<T> {
   try {
     const data = await readJson<Record<string, unknown>>(apiClient.get(path));
-    if (!data?.success) return empty;
+    if (!isSuccess(data)) return empty;
     return (data[key] as T) ?? empty;
   } catch {
     return empty;
   }
+}
+
+/**
+ * Did this response succeed?
+ *
+ * Mirrors `_isSuccess` in discover-section-controller.js exactly, and the last
+ * line is the part that matters: a payload with NO `success` key counts as a
+ * SUCCESS, not a failure. Treating absent-as-failure would silently blank any
+ * endpoint that returns a bare `{albums: [...]}`.
+ */
+function isSuccess(data: Record<string, unknown> | null | undefined): boolean {
+  if (!data) return false;
+  if (Object.prototype.hasOwnProperty.call(data, 'success')) return Boolean(data.success);
+  return true;
 }
 
 // ── Hero ──────────────────────────────────────────────────────────────────

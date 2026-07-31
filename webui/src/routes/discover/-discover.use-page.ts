@@ -60,8 +60,27 @@ import { discoverLimiter } from './-discover.limiter';
  * dead external service leaves one empty shelf, never a broken page.
  */
 
-/** How long a shelf stays fresh. These are cache-backed and change slowly. */
-const SHELF_STALE_MS = 5 * 60 * 1000;
+/**
+ * The discover page loads ONCE per session, and that is the vanilla's rule,
+ * not a performance opinion of mine:
+ *
+ *     case 'discover':
+ *         if (!discoverPageInitialized) {
+ *             await loadDiscoverPage();
+ *             discoverPageInitialized = true;
+ *         }
+ *         // Already initialized — DOM content persists, no reload needed
+ *
+ * Navigating away and back re-shows the existing DOM without a single request.
+ * `Infinity` on both is the faithful equivalent: data never goes stale and is
+ * never garbage-collected while the session lives, so a revisit is instant and
+ * silent. An earlier draft used a 5-minute staleTime, which was invented — and
+ * wrong in the direction of refetching MORE than the vanilla ever does.
+ *
+ * A real refresh still comes from a page reload, exactly as before.
+ */
+const SHELF_STALE_MS = Number.POSITIVE_INFINITY;
+const SHELF_GC_MS = Number.POSITIVE_INFINITY;
 
 interface Section<T> {
   data: T | undefined;
@@ -88,6 +107,7 @@ function shelfQuery<T>(key: string, fn: () => Promise<T>, enabled = true) {
     queryKey: ['discover', key] as const,
     queryFn: () => discoverLimiter.run(fn),
     staleTime: SHELF_STALE_MS,
+    gcTime: SHELF_GC_MS,
     retry: false,
     enabled,
   };
@@ -202,9 +222,35 @@ export function useDiscoverPage(): DiscoverPageController {
 
   const hasContent = (id: DiscoverSectionId): boolean => {
     if (id === 'your-mixes-section') {
-      // One section fed by three endpoints — present if ANY has rows, or
-      // requiring all three would hide it whenever one happened to be empty.
-      return nonEmpty(popularPicks.data) || nonEmpty(hiddenGems.data) || nonEmpty(shuffle.data);
+      /**
+       * Not a shelf — a REGISTRY.
+       *
+       * The vanilla has no single loader for this section. Seven live loaders
+       * each call `_upsertMixCard({key, ...})`, which pushes into
+       * `_discoverMixRegistry` and reveals the section. So it is present if ANY
+       * feeder produced a mix, and hidden only when none did.
+       *
+       * Ported feeders (keys as the vanilla registers them):
+       *   popular_picks      loadPersonalizedPopularPicks
+       *   hidden_gems        loadPersonalizedHiddenGems
+       *   discovery_shuffle  loadDiscoveryShuffle
+       *   listening_mix      loadPersonalizedListeningMix
+       *
+       * STILL TO COME, and each must be added here when its phase lands or the
+       * shelf will wrongly hide for users who only have that one:
+       *   release_radar      loadDiscoverReleaseRadar  (slow-external tier)
+       *   discovery_weekly   loadDiscoverWeekly        (slow-external tier)
+       *   seasonal_playlist  loadSeasonalPlaylist      (below-fold)
+       *
+       * `daily_mixes` is deliberately absent — loadPersonalizedDailyMixes is
+       * dead code that Discover 2.0 orphaned.
+       */
+      return (
+        nonEmpty(popularPicks.data) ||
+        nonEmpty(hiddenGems.data) ||
+        nonEmpty(shuffle.data) ||
+        nonEmpty(listeningMix.data)
+      );
     }
     return isSectionVisible(id, nonEmpty(items[id]), Boolean(settled[id]));
   };

@@ -76,6 +76,27 @@ describe('a dead shelf never takes the page down', () => {
     await expect(fetchDeepCuts()).resolves.toEqual([]);
   });
 
+  it('treats a payload with NO success key as a SUCCESS', async () => {
+    // Mirrors the vanilla controller's _isSuccess: only an explicit
+    // `success: false` is a failure. Treating absent-as-failure would silently
+    // blank any endpoint returning a bare {tracks: [...]}.
+    server.use(
+      http.get('/api/discover/deep-cuts', () =>
+        HttpResponse.json({ tracks: [{ track_name: 'No envelope' }] }),
+      ),
+    );
+    await expect(fetchDeepCuts()).resolves.toHaveLength(1);
+  });
+
+  it('still treats an explicit success:false as a failure', async () => {
+    server.use(
+      http.get('/api/discover/deep-cuts', () =>
+        HttpResponse.json({ success: false, tracks: [{ track_name: 'ghost' }] }),
+      ),
+    );
+    await expect(fetchDeepCuts()).resolves.toEqual([]);
+  });
+
   it('passes the rows through when the shelf is healthy', async () => {
     server.use(
       http.get('/api/discover/deep-cuts', () =>

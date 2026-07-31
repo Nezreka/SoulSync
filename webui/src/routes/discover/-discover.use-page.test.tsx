@@ -73,8 +73,13 @@ function stub({ holdAboveFold = false } = {}) {
   );
 }
 
-function render() {
-  const queryClient = createTestQueryClient();
+/**
+ * `client` lets a test share ONE QueryClient across renders, which is what the
+ * real app does — a single client lives for the session. Without it a remount
+ * gets an empty cache and refetches, which models nothing.
+ */
+function render(client?: ReturnType<typeof createTestQueryClient>) {
+  const queryClient = client ?? createTestQueryClient();
   return renderHook(() => useDiscoverPage(), {
     wrapper: ({ children }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -160,6 +165,42 @@ describe('the load tiering', () => {
     expect(peak).toBeLessThanOrEqual(DISCOVER_REQUEST_LIMIT);
 
     hold.forEach((release) => release());
+  });
+
+  it('never refetches a shelf that already loaded, matching load-once', async () => {
+    // The vanilla loads this page exactly once per session:
+    //   if (!discoverPageInitialized) { await loadDiscoverPage(); ... }
+    //   // Already initialized — DOM content persists, no reload needed
+    // So a remount must not re-hit the server.
+    const client = createTestQueryClient();
+    const first = render(client);
+    await waitFor(() => expect(first.result.current.aboveFoldSettled).toBe(true));
+    const afterFirst = hits.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    first.unmount();
+    // Give react-query's garbage collector a chance to run. Remounting in the
+    // same tick passes even with gcTime:0, because GC is scheduled rather than
+    // synchronous — so without this wait the test proves nothing about caching
+    // surviving a real navigation, which takes far longer than a tick.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const second = render(client); //  same client, as in the real app
+    await waitFor(() => expect(second.result.current.aboveFoldSettled).toBe(true));
+    expect(hits.length).toBe(afterFirst);
+  });
+
+  it('counts the listening mix toward the Your Mixes shelf', async () => {
+    // your-mixes-section is a REGISTRY fed by several loaders via
+    // _upsertMixCard, not a single endpoint. Omitting listening_mix — as an
+    // earlier draft did — hides the shelf for anyone whose only mix is that one.
+    server.use(
+      http.get('/api/discover/personalized/listening-mix', () =>
+        HttpResponse.json({ success: true, tracks: [{ track_name: 'Xtal' }] }),
+      ),
+    );
+    const { result } = render();
+    await waitFor(() => expect(result.current.hasContent('your-mixes-section')).toBe(true));
   });
 
   it('survives every endpoint failing', async () => {
