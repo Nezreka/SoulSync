@@ -1,11 +1,21 @@
 /**
  * Shapes the discover endpoints actually return.
  *
- * Traced from the handlers in web_server.py (and core/discovery/hero.py), not
- * inferred from the consuming JS — the vanilla reads these defensively with
- * long `||` chains, which hides which fields are genuinely optional and which
- * are always present. Where a field is optional here, the server really can
- * omit it.
+ * ── VERIFICATION STATUS — read before building UI on these ─────────────────
+ *
+ * `DiscoverHeroArtist` is TRACED field-for-field against core/discovery/hero.py.
+ *
+ * The others are NOT yet traced to that standard. They were written from the
+ * consuming JS, which reads everything through long `||` chains and therefore
+ * hides which fields genuinely exist. That already produced one real error: the
+ * hero interface invented `name`, `id`, `logo_url`, `followers` and
+ * `in_watchlist`, and the `[key: string]: unknown` index signature meant tsc
+ * never objected.
+ *
+ * So: before building the UI for a section, trace ITS response shape against
+ * the handler and correct the interface here first. Several handlers return
+ * `jsonify(result)` rather than a literal, so the shape lives in the function
+ * that builds `result` — follow it rather than guessing.
  */
 
 /** Every discover endpoint answers inside this envelope. */
@@ -16,16 +26,37 @@ export interface DiscoverEnvelope {
 
 // ── Hero ──────────────────────────────────────────────────────────────────
 
+/**
+ * A hero artist, field-for-field as core/discovery/hero.py emits it.
+ *
+ * TRACED, not inferred. An earlier version of this interface invented `name`,
+ * `id`, `logo_url`, `followers` and `in_watchlist` — none of which the server
+ * sends. The index signature at the bottom meant tsc never complained, so the
+ * mistake was invisible until the field names were checked against the handler.
+ *
+ * The two construction sites differ, which is why so much is optional:
+ *   • the watchlist FALLBACK branch adds `is_watchlist: true` and only
+ *     `image_url`
+ *   • the normal branch adds `musicbrainz_artist_id`, and adds `genres` /
+ *     `popularity` ONLY when a cached image exists
+ */
 export interface DiscoverHeroArtist {
-  name: string;
-  id?: string;
+  /** The id for the ACTIVE source — already resolved server-side. */
+  artist_id: string | null;
+  artist_name: string;
+  /** Per-source ids, present regardless of which one `artist_id` came from. */
+  spotify_artist_id?: string | null;
+  itunes_artist_id?: string | null;
+  musicbrainz_artist_id?: string | null;
+  occurrence_count?: number;
+  similarity_rank?: number;
+  source?: string;
+  /** Only on the watchlist-fallback branch. */
+  is_watchlist?: boolean;
+  /** Conditional: present only when a cached image was found. */
   image_url?: string;
-  logo_url?: string;
   genres?: string[];
-  followers?: number;
   popularity?: number;
-  /** Present when the artist is already on the watchlist — drives the toggle. */
-  in_watchlist?: boolean;
   [key: string]: unknown;
 }
 
