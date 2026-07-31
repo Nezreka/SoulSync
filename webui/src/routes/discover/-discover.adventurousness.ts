@@ -221,7 +221,7 @@ export const ADV_REFETCH_BYPASSES_COALESCE = true;
  * the page took tens of seconds to become usable.
  */
 export async function runLoadersLimited(
-  thunks: (() => unknown | Promise<unknown>)[],
+  thunks: (() => unknown)[],
   limit = 5,
 ): Promise<void> {
   let cursor = 0;

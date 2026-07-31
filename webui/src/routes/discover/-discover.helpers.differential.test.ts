@@ -13,6 +13,7 @@ import {
   recommendationReasonTitle,
   whyIcon,
 } from './-discover.helpers';
+import { buildDiscoverArtistContext } from './-discover.seasonal';
 import { yourAlbumsPickSource } from './-discover.your-albums-actions';
 import { pickArtistDetailSource } from './-discover.your-artists';
 
@@ -36,13 +37,32 @@ import { pickArtistDetailSource } from './-discover.your-artists';
  */
 const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
 
-/** Lift one function out by brace-matching, string- and regex-literal aware. */
+/**
+ * Lift one function out by brace-matching, string- and regex-literal aware.
+ *
+ * The body's opening brace is found by first walking the PARAMETER LIST to its
+ * closing paren. Jumping to the first `{` after the declaration looks
+ * equivalent and is not: a default-valued object parameter
+ * (`sourceData = {}`) puts a brace inside the parameter list, and matching from
+ * there returns a truncated function that fails to parse. That is exactly how
+ * `_buildDiscoverArtistContext` broke this harness.
+ */
 function extractFunction(name: string): string {
   const decl = new RegExp(`^(?:async )?function ${name}\\s*\\(`, 'm');
   const m = decl.exec(SOURCE);
   if (!m) throw new Error(`vanilla function ${name} not found in discover.js`);
 
-  let i = SOURCE.indexOf('{', m.index);
+  // Walk the parameter list to its matching ')', then take the next '{'.
+  let p = SOURCE.indexOf('(', m.index);
+  let parens = 0;
+  for (; p < SOURCE.length; p++) {
+    if (SOURCE[p] === '(') parens++;
+    else if (SOURCE[p] === ')') {
+      parens--;
+      if (parens === 0) break;
+    }
+  }
+  let i = SOURCE.indexOf('{', p);
   let depth = 0;
   let inString: string | null = null;
   let escaped = false;
@@ -395,4 +415,106 @@ describe('_advWaveY', () => {
       expect(advWaveY(u, 0, 2.2)).toBeCloseTo(ADV._advWaveY(u, 0), 12);
     }
   });
+});
+
+/**
+ * `_buildDiscoverArtistContext` is argument-pure and is the single hardest
+ * fallback chain on the page — three fallbacks per provider id, plus an id that
+ * is computed and then deliberately overwritten. It is shared by Seasonal and
+ * both cache-section open paths, so a drift here misroutes every album download.
+ */
+const CTX = loadVanilla<{
+  _buildDiscoverArtistContext: (s: unknown, n: unknown, sd?: unknown, ad?: unknown) => unknown;
+}>(['_buildDiscoverArtistContext']);
+
+describe('_buildDiscoverArtistContext', () => {
+  const albumWith = (id?: string, name?: string) => ({ artists: [{ id, name }] });
+  const cases: [string, unknown, unknown, unknown, unknown][] = [
+    ['bare', 'spotify', 'Aphex Twin', {}, {}],
+    ['no source at all', '', '', {}, {}],
+    ['source from active_source', '', 'A', { active_source: 'deezer', deezer_artist_id: 'dz' }, {}],
+    ['source from source alias', '', 'A', { source: 'itunes', itunes_artist_id: 'it' }, {}],
+    ['explicit source beats the row', 'spotify', 'A', { active_source: 'deezer' }, {}],
+    ['UPPERCASE source is lowercased', 'SPOTIFY', 'A', { spotify_artist_id: 'sp' }, {}],
+    // the artist_-prefixed aliases
+    ['spotify alias', 'spotify', 'A', { artist_spotify_id: 'sp2' }, {}],
+    ['itunes alias', 'itunes', 'A', { artist_itunes_id: 'it2' }, {}],
+    ['deezer alias', 'deezer', 'A', { artist_deezer_id: 'dz2' }, {}],
+    ['deezer bare id', 'deezer', 'A', { deezer_id: 'dz3' }, {}],
+    ['discogs aliases', 'discogs', 'A', { discogs_id: 'dc' }, {}],
+    ['amazon aliases', 'amazon', 'A', { amazon_id: 'am' }, {}],
+    ['hydrabase via soul_id', 'hydrabase', 'A', { soul_id: 'hb' }, {}],
+    ['hydrabase via alias', 'hydrabase', 'A', { hydrabase_artist_id: 'hb2' }, {}],
+    // the album-artist fallback, which applies ONLY to the active provider
+    [
+      'album artist fills the ACTIVE provider',
+      'spotify',
+      '',
+      {},
+      albumWith('alb1', 'Album Artist'),
+    ],
+    ['album artist does NOT fill an inactive one', 'deezer', '', {}, albumWith('alb1', 'X')],
+    ['album artist supplies the name', 'spotify', '', {}, albumWith('alb1', 'From Album')],
+    [
+      'explicit name beats the album artist',
+      'spotify',
+      'Explicit',
+      {},
+      albumWith('a', 'From Album'),
+    ],
+    // id resolution + the deliberate overwrite
+    ['id from active_source_id', 'spotify', 'A', { active_source_id: 'as1' }, {}],
+    [
+      'active provider id OVERWRITES active_source_id',
+      'spotify',
+      'A',
+      { active_source_id: 'as1', spotify_artist_id: 'sp9' },
+      {},
+    ],
+    [
+      'unknown active source keeps the generic id',
+      'bandcamp',
+      'A',
+      { active_source_id: 'as1', spotify_artist_id: 'sp9' },
+      {},
+    ],
+    ['id from artist_id', 'spotify', 'A', { artist_id: 'ar1' }, {}],
+    // extra keys must survive the spread
+    ['unknown keys pass through', 'spotify', 'A', { custom_field: 'keep me' }, {}],
+    // awkward shapes
+    ['artists not an array', 'spotify', 'A', {}, { artists: 'nope' }],
+    // The Array.isArray guard only shows itself on an ARRAY-LIKE non-array:
+    // `'nope'?.[0]` is 'n', whose .id is undefined, so a string cannot tell the
+    // guarded and unguarded versions apart. An object with a numeric key can —
+    // dropping the guard would hand back that artist's id.
+    [
+      'artists is an array-LIKE object',
+      'spotify',
+      'A',
+      {},
+      { artists: { 0: { id: 'fake', name: 'Fake' } } },
+    ],
+    ['artists is a plain object', 'spotify', 'A', {}, { artists: { id: 'x' } }],
+    ['artists is a number', 'spotify', 'A', {}, { artists: 42 }],
+    ['empty artists array', 'spotify', 'A', {}, { artists: [] }],
+    ['no albumData at all', 'spotify', 'A', {}, undefined],
+    ['no sourceData at all', 'spotify', 'A', undefined, undefined],
+  ];
+  for (const [label, src, name, sd, ad] of cases) {
+    it(`matches the vanilla — ${label}`, () => {
+      const mine =
+        sd === undefined
+          ? buildDiscoverArtistContext(src as string, name as string)
+          : ad === undefined
+            ? buildDiscoverArtistContext(src as string, name as string, sd as never)
+            : buildDiscoverArtistContext(src as string, name as string, sd as never, ad as never);
+      const theirs =
+        sd === undefined
+          ? CTX._buildDiscoverArtistContext(src, name)
+          : ad === undefined
+            ? CTX._buildDiscoverArtistContext(src, name, sd)
+            : CTX._buildDiscoverArtistContext(src, name, sd, ad);
+      expect(mine).toEqual(theirs);
+    });
+  }
 });
