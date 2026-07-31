@@ -643,8 +643,8 @@ describe('artWebBuildCommunity', () => {
 
   it('builds an identical graph', () => {
     rewind();
-    (globalThis as unknown as { window: Record<string, unknown> }).window =
-      globalThis.window || ({} as Window & typeof globalThis);
+    // The vanilla builder reaches for the CDN global directly; the port takes it
+    // as an argument, so both get the same function.
     (window as unknown as { graphologyLibrary: unknown }).graphologyLibrary = {
       communitiesLouvain: louvain,
     };
