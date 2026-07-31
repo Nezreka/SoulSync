@@ -61,11 +61,13 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('library')?.kind).toBe('react');
     expect(getShellRouteByPageId('artist-detail')?.kind).toBe('react');
     expect(getShellRouteByPageId('label-detail')?.kind).toBe('react');
+    expect(getShellRouteByPageId('active-downloads')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'search',
       'watchlist',
       'wishlist',
       'automations',
+      'active-downloads',
       'import',
       'library',
       'artist-detail',
@@ -78,14 +80,14 @@ describe('shellRouteManifest', () => {
 
   it('only resolves legacy page ids for legacy-owned paths', () => {
     expect(resolveLegacyShellPageFromPath('/sync')).toBe('sync');
-    expect(resolveLegacyShellPageFromPath('/active-downloads')).toBe('active-downloads');
     expect(resolveLegacyShellPageFromPath('/tools')).toBe('tools');
     expect(resolveLegacyShellPageFromPath('/artist-detail')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail/deezer/12345')).toBe('artist-detail');
     expect(resolveLegacyShellPageFromPath('/issues')).toBeNull();
-    // React owns /search now; resolving it as legacy would show the vanilla
-    // page underneath the React one.
+    // React owns /search and /active-downloads now; resolving either as legacy
+    // would show the vanilla page underneath the React one.
     expect(resolveLegacyShellPageFromPath('/search')).toBeNull();
+    expect(resolveLegacyShellPageFromPath('/active-downloads')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/does-not-exist')).toBeNull();
   });
 

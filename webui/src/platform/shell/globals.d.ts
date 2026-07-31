@@ -260,6 +260,14 @@ declare global {
      * the same track" would drift apart.
      */
     _groupQuarantineEntries?: (entries: unknown[]) => { key: string | null; members: unknown[] }[];
+    /**
+     * core.js — opens the download modal for a batch on the Downloads page.
+     *
+     * Cannot move into React: it reads `activeDownloadProcesses`,
+     * `rehydrateModal` and `WishlistModalState`, all script-scoped `let`s that
+     * a module cannot reach. Moved there verbatim from _adlOpenBatchModal.
+     */
+    openDownloadBatchModal?: (batchId: string, playlistId: string, batchName: string) => void;
     /** wishlist-tools.js — relative time for a history row ("5h ago"). */
     formatHistoryTime?: (iso: string) => string;
     /** stats-automations.js — the per-download audit trail modal. */

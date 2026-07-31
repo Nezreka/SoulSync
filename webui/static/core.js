@@ -65,6 +65,41 @@ window.reopenActiveDownloadModal = function (virtualPlaylistId) {
     process.modalElement.style.display = 'flex';
     return true;
 };
+
+/**
+ * Open the download modal for a batch shown on the Downloads page.
+ *
+ * Lives here for the same reason as the function above: `activeDownloadProcesses`
+ * is a top-level `let` in this script's lexical scope, so a module cannot read
+ * it. `rehydrateModal` and `WishlistModalState` are likewise script-scoped.
+ * Moved verbatim from _adlOpenBatchModal (pages-extra.js) when the Downloads
+ * page became React.
+ *
+ * Wishlist gets its own branch because its modal is a singleton keyed by the
+ * literal 'wishlist' rather than by batch id, and it has visibility state of
+ * its own that has to be told the modal is showing again.
+ */
+window.openDownloadBatchModal = function (batchId, playlistId, batchName) {
+    if (playlistId === 'wishlist') {
+        const clientProcess = activeDownloadProcesses['wishlist'];
+        if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+            clientProcess.modalElement.style.display = 'flex';
+            if (typeof WishlistModalState !== 'undefined') WishlistModalState.setVisible();
+        } else {
+            rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+        }
+        return;
+    }
+
+    // Any other batch: show the modal it already has, or rebuild from the server.
+    for (const [, process] of Object.entries(activeDownloadProcesses)) {
+        if (process.batchId === batchId && process.modalElement && document.body.contains(process.modalElement)) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+    rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+};
 let sequentialSyncManager = null;
 
 // --- YouTube Playlist State Management ---
