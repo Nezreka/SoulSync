@@ -181,6 +181,17 @@ describe('hasContent drives which sections render', () => {
     expect(result.current.hasContent('your-albums-section')).toBe(false);
   });
 
+  it('KEEPS an empty-state section visible so its message can show', async () => {
+    // recent-releases has no hideWhenEmpty flag, so the vanilla's controller
+    // default (false) applies: it stays and renders "No recent releases found".
+    // Hiding it — which an earlier draft did — deletes that explanation.
+    const { result } = render();
+    await waitFor(() => expect(result.current.aboveFoldSettled).toBe(true));
+    expect(result.current.hasContent('recent-releases')).toBe(true);
+    // ...while an opted-in section next to it still vanishes.
+    expect(result.current.hasContent('your-albums-section')).toBe(false);
+  });
+
   it('always renders the dial, which is a control rather than a shelf', async () => {
     const { result } = render();
     await waitFor(() => expect(result.current.aboveFoldSettled).toBe(true));

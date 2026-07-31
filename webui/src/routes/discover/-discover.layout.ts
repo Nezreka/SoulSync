@@ -71,6 +71,77 @@ export const DISCOVER_LAYOUT: DiscoverLayoutEntry[] = [
   single('build-a-playlist'),
 ];
 
+/**
+ * What a section does when it loads successfully but has no items.
+ *
+ * This is NOT uniform, and collapsing it loses real behaviour. The vanilla's
+ * `createDiscoverSectionController` defaults to `hideWhenEmpty: false` with
+ * `renderEmptyState: true` — so unless a section opts in, an empty result
+ * renders an explanatory message rather than making the section vanish.
+ *
+ *   'hide'        the section disappears entirely (hideWhenEmpty: true)
+ *   'empty-state' the section stays and shows `emptyMessage`
+ *
+ * Messages are verbatim from the vanilla configs — they are user-visible and
+ * several of them tell the user what to DO ("run a watchlist scan"), which is
+ * lost if the section just disappears.
+ */
+export type EmptyPolicy = { kind: 'hide' } | { kind: 'empty-state'; message: string };
+
+const HIDE: EmptyPolicy = { kind: 'hide' };
+const emptyState = (message: string): EmptyPolicy => ({ kind: 'empty-state', message });
+
+/** The controller's own default, for sections that set no message. */
+export const DEFAULT_EMPTY_MESSAGE = 'Nothing to show';
+
+export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy>> = {
+  // hideWhenEmpty: true — these vanish.
+  'recommended-artists-section': HIDE,
+  'listening-recs-section': HIDE,
+  'your-albums-section': HIDE,
+  'your-artists-section': HIDE,
+
+  // hideWhenEmpty absent → the controller default (false): stay and explain.
+  'recent-releases': emptyState('No recent releases found'),
+  'seasonal-albums-section': emptyState('No seasonal albums found'),
+  'discover-bylt-sections': emptyState(DEFAULT_EMPTY_MESSAGE),
+
+  // The cache-* shelves do not use the controller at all: their loaders early-
+  // return without ever creating the section, so an empty result means the
+  // section never exists. Effectively 'hide'.
+  'cache-genre-explorer': HIDE,
+  'cache-genre-releases': HIDE,
+  'cache-undiscovered': HIDE,
+  'cache-label-explorer': HIDE,
+  'cache-deep-cuts': HIDE,
+};
+
+/** Sections that render regardless of data — controls, not shelves. */
+export const ALWAYS_VISIBLE: DiscoverSectionId[] = ['adv-wave'];
+
+/**
+ * Should this section be in the layout at all?
+ *
+ * `hasItems` answers "did the shelf return rows"; this answers the different
+ * question of whether the section renders — which for an 'empty-state' section
+ * is true even with zero rows, as long as its data actually loaded.
+ */
+export function isSectionVisible(
+  id: DiscoverSectionId,
+  hasItems: boolean,
+  loaded: boolean,
+): boolean {
+  if (ALWAYS_VISIBLE.includes(id)) return true;
+  if (hasItems) return true;
+  const policy = SECTION_EMPTY_POLICY[id];
+  // Unknown sections (phases not yet ported) stay out of the layout.
+  if (!policy) return false;
+  // An empty-state section still needs its load to have COMPLETED — the
+  // vanilla's loader bails before showing the section when the fetch fails or
+  // there is nothing to show at all (no current season, say).
+  return policy.kind === 'empty-state' && loaded;
+}
+
 /** A row ready to render: either one full-width section or a genuine two-up row. */
 export type DiscoverLayoutRow =
   | { kind: 'full'; id: DiscoverSectionId }

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { DiscoverSectionId } from './-discover.layout';
 
-import { DISCOVER_LAYOUT, buildLayoutRows } from './-discover.layout';
+import {
+  DISCOVER_LAYOUT,
+  SECTION_EMPTY_POLICY,
+  buildLayoutRows,
+  isSectionVisible,
+} from './-discover.layout';
 
 /** Treat every listed id as having content. */
 const only =
@@ -122,5 +127,75 @@ describe('buildLayoutRows', () => {
     const first = buildLayoutRows(all);
     const second = buildLayoutRows(all);
     expect(second).toEqual(first);
+  });
+});
+
+describe('the empty policy is NOT uniform', () => {
+  it('only the four sections that opted in actually vanish', () => {
+    // createDiscoverSectionController defaults to hideWhenEmpty:false with
+    // renderEmptyState:true. Treating every empty shelf as "hide" silently
+    // deletes messages that tell the user what to do next.
+    const hiders = Object.entries(SECTION_EMPTY_POLICY)
+      .filter(([, p]) => p?.kind === 'hide')
+      .map(([id]) => id)
+      .sort();
+    expect(hiders).toEqual([
+      'cache-deep-cuts',
+      'cache-genre-explorer',
+      'cache-genre-releases',
+      'cache-label-explorer',
+      'cache-undiscovered',
+      'listening-recs-section',
+      'recommended-artists-section',
+      'your-albums-section',
+      'your-artists-section',
+    ]);
+  });
+
+  it('keeps the vanilla empty messages verbatim', () => {
+    expect(SECTION_EMPTY_POLICY['recent-releases']).toEqual({
+      kind: 'empty-state',
+      message: 'No recent releases found',
+    });
+    expect(SECTION_EMPTY_POLICY['seasonal-albums-section']).toEqual({
+      kind: 'empty-state',
+      message: 'No seasonal albums found',
+    });
+  });
+});
+
+describe('isSectionVisible', () => {
+  it('shows anything that has rows', () => {
+    expect(isSectionVisible('your-albums-section', true, true)).toBe(true);
+    expect(isSectionVisible('recent-releases', true, true)).toBe(true);
+  });
+
+  it('hides an opted-in section when empty, even after loading', () => {
+    expect(isSectionVisible('your-albums-section', false, true)).toBe(false);
+    expect(isSectionVisible('listening-recs-section', false, true)).toBe(false);
+  });
+
+  it('KEEPS an empty-state section visible when empty, so its message shows', () => {
+    // The bug this exists to prevent: hiding these makes "No recent releases
+    // found" disappear instead of explaining itself.
+    expect(isSectionVisible('recent-releases', false, true)).toBe(true);
+    expect(isSectionVisible('seasonal-albums-section', false, true)).toBe(true);
+  });
+
+  it('does not show an empty-state section before its data has loaded', () => {
+    // The vanilla bails before showing the section when the fetch fails or
+    // there is nothing at all (no current season) — no empty frame on load.
+    expect(isSectionVisible('recent-releases', false, false)).toBe(false);
+    expect(isSectionVisible('seasonal-albums-section', false, false)).toBe(false);
+  });
+
+  it('always shows the dial regardless of data or load state', () => {
+    expect(isSectionVisible('adv-wave', false, false)).toBe(true);
+  });
+
+  it('keeps unported sections out of the layout entirely', () => {
+    for (const id of ['lastfm-radio', 'listenbrainz', 'build-a-playlist'] as const) {
+      expect(isSectionVisible(id, false, true)).toBe(false);
+    }
   });
 });

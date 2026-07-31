@@ -22,6 +22,7 @@ import {
   fetchYourAlbums,
   fetchYourArtists,
 } from './-discover.api';
+import { isSectionVisible } from './-discover.layout';
 import { discoverLimiter } from './-discover.limiter';
 
 /**
@@ -150,60 +151,62 @@ export function useDiscoverPage(): DiscoverPageController {
   const decades = useQuery(shelfQuery('decades', fetchAvailableDecades, aboveFoldSettled));
 
   /**
-   * Which sections have something to show.
+   * Which sections belong in the layout.
    *
-   * The vanilla expressed this as `style.display !== 'none'` — each loader hid
-   * its own section when it came back empty, and the reorder pass then skipped
-   * hidden nodes. Here it is a predicate over the data, which is the same rule
-   * without the DOM round-trip.
+   * The vanilla expressed this as `style.display !== 'none'`, and it is NOT a
+   * single rule: `createDiscoverSectionController` defaults to
+   * `hideWhenEmpty: false`, so an empty shelf normally STAYS and renders an
+   * explanatory message. Only four sections opt into vanishing.
    *
-   * `adv-wave` is always present: the dial is a control, not a data shelf, so
-   * it renders regardless of what the shelves around it returned.
+   * So this asks two things and hands both to `isSectionVisible`:
+   *   hasItems  did the shelf return rows
+   *   loaded    did its query finish (an 'empty-state' section still has to
+   *             have loaded — the vanilla's loader bails before showing the
+   *             section when there is no current season, say)
+   *
+   * `adv-wave` is always visible: the dial is a control, not a shelf.
    */
   const nonEmpty = (v: unknown): boolean =>
     Array.isArray(v) ? v.length > 0 : Boolean(v && typeof v === 'object');
 
+  const items: Partial<Record<DiscoverSectionId, unknown>> = {
+    'cache-genre-explorer': genreExplorer.data,
+    'year-mixes-section': decades.data,
+    'listening-recs-section': listeningRecs.data?.artists,
+    'recommended-artists-section': recommendedArtists.data?.artists,
+    'recent-releases': recentReleases.data,
+    'cache-genre-releases': genreNewReleases.data,
+    'seasonal-albums-section': seasonal.data?.albums,
+    'cache-undiscovered': undiscovered.data,
+    'cache-label-explorer': labelExplorer.data?.albums,
+    'your-albums-section': yourAlbums.data?.albums,
+    'your-artists-section': yourArtists.data?.artists,
+    'cache-deep-cuts': deepCuts.data,
+  };
+
+  /** The query backing each section, so we know whether it has settled. */
+  const settled: Partial<Record<DiscoverSectionId, boolean>> = {
+    'cache-genre-explorer': !genreExplorer.isPending,
+    'year-mixes-section': !decades.isPending,
+    'listening-recs-section': !listeningRecs.isPending,
+    'recommended-artists-section': !recommendedArtists.isPending,
+    'recent-releases': !recentReleases.isPending,
+    'cache-genre-releases': !genreNewReleases.isPending,
+    'seasonal-albums-section': !seasonal.isPending && Boolean(seasonal.data?.success),
+    'cache-undiscovered': !undiscovered.isPending,
+    'cache-label-explorer': !labelExplorer.isPending,
+    'your-albums-section': !yourAlbums.isPending,
+    'your-artists-section': !yourArtists.isPending,
+    'cache-deep-cuts': !deepCuts.isPending,
+  };
+
   const hasContent = (id: DiscoverSectionId): boolean => {
-    switch (id) {
-      case 'adv-wave':
-        return true;
-      case 'cache-genre-explorer':
-        return nonEmpty(genreExplorer.data);
-      case 'your-mixes-section':
-        return nonEmpty(popularPicks.data) || nonEmpty(hiddenGems.data) || nonEmpty(shuffle.data);
-      case 'year-mixes-section':
-        return nonEmpty(decades.data);
-      case 'listening-recs-section':
-        return nonEmpty(listeningRecs.data?.artists);
-      case 'recommended-artists-section':
-        return nonEmpty(recommendedArtists.data?.artists);
-      case 'recent-releases':
-        return nonEmpty(recentReleases.data);
-      case 'cache-genre-releases':
-        return nonEmpty(genreNewReleases.data);
-      case 'seasonal-albums-section':
-        return nonEmpty(seasonal.data?.albums);
-      case 'cache-undiscovered':
-        return nonEmpty(undiscovered.data);
-      case 'cache-label-explorer':
-        return nonEmpty(labelExplorer.data?.albums);
-      case 'your-albums-section':
-        return nonEmpty(yourAlbums.data?.albums);
-      case 'your-artists-section':
-        return nonEmpty(yourArtists.data?.artists);
-      case 'cache-deep-cuts':
-        return nonEmpty(deepCuts.data);
-      // The remaining sections belong to phases not yet ported; they render
-      // nothing until their controllers land, which keeps them out of the
-      // layout rather than showing an empty frame.
-      case 'discover-bylt-sections':
-      case 'lastfm-radio':
-      case 'listenbrainz':
-      case 'build-a-playlist':
-        return false;
-      default:
-        return false;
+    if (id === 'your-mixes-section') {
+      // One section fed by three endpoints — present if ANY has rows, or
+      // requiring all three would hide it whenever one happened to be empty.
+      return nonEmpty(popularPicks.data) || nonEmpty(hiddenGems.data) || nonEmpty(shuffle.data);
     }
+    return isSectionVisible(id, nonEmpty(items[id]), Boolean(settled[id]));
   };
 
   return {
