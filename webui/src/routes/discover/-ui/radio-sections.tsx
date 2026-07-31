@@ -59,6 +59,9 @@ export function LastfmRadioSection({
   return (
     <DiscoverSection
       id="lastfm-radio"
+      // The layout KEY is `lastfm-radio`; the vanilla's element is
+      // `#lastfm-radio-section`, and style.css targets that.
+      domId="lastfm-radio-section"
       title="📻 Last.fm Radio"
       subtitle="Search a track to generate a similar-tracks playlist"
       // This section is its own search UI, so it stays even with no radios yet.

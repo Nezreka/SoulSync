@@ -233,8 +233,8 @@ describe('the toolbar', () => {
       '#artist-map-stats',
       '.artmap-content-row',
       '#artist-map-canvas',
-      '#artist-map-tooltip',
-      '#artist-map-search-results',
+      // NOT '#artist-map-tooltip' / '#artist-map-search-results': the chrome
+      // components own those, and rendering them here too duplicated the ids.
     ]) {
       expect(container.querySelector(sel), sel).not.toBeNull();
     }

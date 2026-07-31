@@ -723,6 +723,8 @@ describe('webRunLayoutSync', () => {
 interface VanillaKeys {
   openArtistWeb: (lens: string) => Promise<void>;
   vlog: string[];
+  /** The vanilla's singleton, returned through loadVanilla's extraExports. */
+  _artistWeb: { onKey: ((e: KeyboardEvent) => void) | null; pathMode: boolean };
 }
 
 /**

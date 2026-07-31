@@ -37,6 +37,15 @@ export interface DiscoverSectionProps {
    * Rows outrank this: content is proof the fetch answered.
    */
   loaded: boolean;
+  /**
+   * The element id, when it differs from the layout key.
+   *
+   * Most DiscoverSectionIds ARE the vanilla's DOM id. Three are not: they are
+   * layout keys for sections the vanilla identified by class alone, or — like
+   * Last.fm Radio — by a different id (`lastfm-radio-section`). Rendering the
+   * key there would detach the stylesheet rule that hides and shows it.
+   */
+  domId?: string;
   /** Overrides the layout module's message for this section. */
   emptyMessage?: string;
   children?: React.ReactNode;
@@ -49,6 +58,7 @@ export function DiscoverSection({
   actions,
   count,
   loaded,
+  domId,
   emptyMessage,
   children,
 }: DiscoverSectionProps) {
@@ -66,7 +76,7 @@ export function DiscoverSection({
     // DOM ids, several of which end in '-section' themselves — appending one
     // here would produce `listening-recs-section-section` and quietly detach
     // every stylesheet rule and scroll target that names it.
-    <div className="discover-section" id={id}>
+    <div className="discover-section" id={domId ?? id}>
       <div className="discover-section-header">
         <div>
           <h2 className="discover-section-title">{title}</h2>

@@ -7,7 +7,7 @@ import type { BuildPlaylistSectionProps } from './build-playlist';
 
 import { AdventurousnessDial } from './adventurousness-dial';
 import { BuildPlaylistSection } from './build-playlist';
-import { DownloadBar } from './download-bar';
+import { DownloadBar, declarationToStyle } from './download-bar';
 
 /**
  * The three page controls.
@@ -148,17 +148,25 @@ describe('the download bar', () => {
     ...over,
   });
 
-  it('is absent with nothing downloading', () => {
-    // A transient overlay, not permanent chrome — an empty one covers content
-    // for nothing.
+  it('hides with the class the vanilla toggles, rather than unmounting', () => {
+    // The stylesheet owns the slide-out transition; unmounting skips it, and
+    // the header's live count has nowhere to live between downloads.
     const { container } = render(<DownloadBar state={{}} onOpen={vi.fn()} />);
-    expect(container.querySelector('#discover-download-bar')).toBeNull();
+    const sidebar = container.querySelector('#discover-download-sidebar')!;
+    expect(sidebar).toHaveClass('hidden');
+    expect(container.querySelector('#discover-download-count')!.textContent).toBe('0');
+  });
+
+  it('shows itself and counts once something is downloading', () => {
+    const { container } = render(<DownloadBar state={state()} onOpen={vi.fn()} />);
+    expect(container.querySelector('#discover-download-sidebar')).not.toHaveClass('hidden');
+    expect(container.querySelector('#discover-download-count')!.textContent).toBe('1');
   });
 
   it('shows a bubble per download, with an in-progress icon', () => {
     const { container } = render(<DownloadBar state={state()} onOpen={vi.fn()} />);
     expect(container.querySelectorAll('.discover-download-bubble')).toHaveLength(1);
-    expect(container.querySelector('.discover-download-icon')!.textContent).toBe('⏳');
+    expect(container.querySelector('.discover-download-bubble-icon')!.textContent).toBe('⏳');
     expect(screen.getByText('Winter Mix')).toBeInTheDocument();
   });
 
@@ -169,20 +177,50 @@ describe('the download bar', () => {
         onOpen={vi.fn()}
       />,
     );
-    expect(container.querySelector('.discover-download-bubble')).toHaveClass('completed');
-    expect(container.querySelector('.discover-download-icon')!.textContent).toBe('✅');
+    expect(container.querySelector('.discover-download-bubble-card')).toHaveClass('completed');
+    expect(container.querySelector('.discover-download-bubble-icon')!.textContent).toBe('✅');
   });
 
   it('opens a download by its playlist id', () => {
     const onOpen = vi.fn();
     const { container } = render(<DownloadBar state={state()} onOpen={onOpen} />);
-    fireEvent.click(container.querySelector('.discover-download-bubble')!);
+    fireEvent.click(container.querySelector('.discover-download-bubble-card')!);
     expect(onOpen).toHaveBeenCalledWith('p1');
+  });
+
+  it('converts the vanilla CSS declaration into a React style object', () => {
+    // `bubbleBackground` returns a string built for a style="…" attribute.
+    // React ignores an unparsed string silently, so every bubble would render
+    // bare with nothing in the console.
+    expect(declarationToStyle("background-image: url('/a.jpg');")).toEqual({
+      backgroundImage: "url('/a.jpg')",
+    });
+    // The gradient's own colons must survive the split.
+    // A value containing its OWN colon must survive: splitting on the first
+    // colon and keeping only the next piece silently truncates the url.
+    expect(declarationToStyle("background-image: url('https://x/a.jpg');")).toEqual({
+      backgroundImage: "url('https://x/a.jpg')",
+    });
+    expect(
+      declarationToStyle('background: linear-gradient(135deg, rgba(29,185,84,0.3) 0%);'),
+    ).toEqual({ background: 'linear-gradient(135deg, rgba(29,185,84,0.3) 0%)' });
+    expect(declarationToStyle('nonsense')).toEqual({});
+  });
+
+  it('paints the cover onto the image layer', () => {
+    const { container } = render(
+      <DownloadBar
+        state={{ p1: { name: 'Mix', status: 'in_progress', imageUrl: '/a.jpg' } as never }}
+        onOpen={vi.fn()}
+      />,
+    );
+    const layer = container.querySelector('.discover-download-bubble-image') as HTMLElement;
+    expect(layer.style.backgroundImage).toContain('/a.jpg');
   });
 
   it('keeps the playlist id as a data hook', () => {
     const { container } = render(<DownloadBar state={state()} onOpen={vi.fn()} />);
-    expect(container.querySelector('.discover-download-bubble')).toHaveAttribute(
+    expect(container.querySelector('.discover-download-bubble-card')).toHaveAttribute(
       'data-playlist-id',
       'p1',
     );
@@ -198,100 +236,141 @@ describe('build a playlist', () => {
     return {
       query: '',
       results: [],
-      dropdownOpen: false,
       selected: [],
-      loaded: true,
+      hasResults: false,
       onQueryChange: vi.fn(),
       onAdd: vi.fn(),
       onRemove: vi.fn(),
       onGenerate: vi.fn(),
       onDownload: vi.fn(),
+      onSync: vi.fn(),
       ...over,
     };
   }
 
+  it('keeps the ids and classes the vanilla styling and handlers target', () => {
+    // The first draft invented almost all of these, which type-checked and
+    // would have rendered an unstyled column the vanilla could not find.
+    const { container } = render(<BuildPlaylistSection {...bp()} />);
+    for (const sel of [
+      '.build-playlist-container',
+      '.build-playlist-search-section',
+      '.bp-search-input-wrapper',
+      '#build-playlist-search',
+      '#build-playlist-search-results.build-playlist-search-results',
+      '.build-playlist-selected-section',
+      '.bp-selected-header',
+      '#bp-selected-counter.bp-selected-counter',
+      '#build-playlist-selected-artists.build-playlist-selected-artists',
+      '.build-playlist-actions',
+      '#build-playlist-generate-btn.build-playlist-generate-btn',
+    ]) {
+      expect(container.querySelector(sel), sel).not.toBeNull();
+    }
+  });
+
   it('hints at what to do with nothing selected, and cannot generate', () => {
-    render(<BuildPlaylistSection {...bp()} />);
+    const { container } = render(<BuildPlaylistSection {...bp()} />);
+    expect(container.querySelector('.build-playlist-no-selection')).not.toBeNull();
     expect(screen.getByText('Search above to add seed artists')).toBeInTheDocument();
-    expect(screen.getByText('Generate')).toBeDisabled();
-    expect(screen.getByText('0 / 5')).toBeInTheDocument();
+    expect(screen.getByText('Generate Playlist')).toBeDisabled();
+    expect(container.querySelector('#bp-selected-counter')!.textContent).toBe('0 / 5');
   });
 
   it('lists the seeds and can generate from one', () => {
     const { container } = render(
       <BuildPlaylistSection {...bp({ selected: [seed('1', 'Aphex')] })} />,
     );
-    expect(container.querySelectorAll('.bp-seed')).toHaveLength(1);
-    expect(screen.getByText('Generate')).not.toBeDisabled();
-    expect(screen.getByText('1 / 5')).toBeInTheDocument();
+    expect(container.querySelectorAll('.build-playlist-selected-artist')).toHaveLength(1);
+    expect(container.querySelector('.build-playlist-no-selection')).toBeNull();
+    expect(screen.getByText('Generate Playlist')).not.toBeDisabled();
+    expect(container.querySelector('#bp-selected-counter')!.textContent).toBe('1 / 5');
   });
 
-  it('closes the search box at the cap', () => {
-    // The generator takes five; offering a sixth would be a promise it drops.
-    const selected = Array.from({ length: 5 }, (_, i) => seed(String(i), `A${i}`));
-    const { container } = render(<BuildPlaylistSection {...bp({ selected })} />);
-    expect(container.querySelector('#build-playlist-input')).toBeDisabled();
-    expect(screen.getByText('5 / 5')).toBeInTheDocument();
+  it('shows the search spinner only while searching', () => {
+    const { container, rerender } = render(<BuildPlaylistSection {...bp()} />);
+    expect(container.querySelector('#bp-search-spinner')).toBeNull();
+    rerender(<BuildPlaylistSection {...bp({ searching: true })} />);
+    expect(container.querySelector('#bp-search-spinner')).not.toBeNull();
   });
 
-  it('locks input and generate while a playlist is building', () => {
+  it('renders search results as the vanilla row, with its Add affordance', () => {
+    const { container } = render(
+      <BuildPlaylistSection {...bp({ results: [seed('1', 'Aphex')] })} />,
+    );
+    const row = container.querySelector('.build-playlist-search-result')!;
+    expect(row.querySelector('.bp-result-name')!.textContent).toBe('Aphex');
+    expect(row.querySelector('.bp-result-add')!.textContent).toBe('+ Add');
+  });
+
+  it('locks generate and shows the loader while building', () => {
     const { container } = render(
       <BuildPlaylistSection {...bp({ selected: [seed('1', 'Aphex')], generating: true })} />,
     );
-    expect(container.querySelector('#build-playlist-input')).toBeDisabled();
-    expect(screen.getByText('Generate')).toBeDisabled();
-  });
-
-  it('shows the dropdown only with results to show', () => {
-    const { container, rerender } = render(
-      <BuildPlaylistSection {...bp({ dropdownOpen: true, results: [] })} />,
-    );
-    expect(container.querySelector('#build-playlist-dropdown')).toBeNull();
-    rerender(
-      <BuildPlaylistSection {...bp({ dropdownOpen: true, results: [seed('1', 'Aphex')] })} />,
-    );
-    expect(container.querySelector('#build-playlist-dropdown')).not.toBeNull();
+    expect(screen.getByText('Generate Playlist')).toBeDisabled();
+    expect(container.querySelector('#build-playlist-loading')).not.toBeNull();
   });
 
   it('adds, removes and generates', () => {
-    const p = bp({
-      dropdownOpen: true,
-      results: [seed('1', 'Aphex')],
-      selected: [seed('2', 'BoC')],
-    });
+    const p = bp({ results: [seed('1', 'Aphex')], selected: [seed('2', 'BoC')] });
     render(<BuildPlaylistSection {...p} />);
     fireEvent.click(screen.getByText('Aphex'));
     fireEvent.click(screen.getByLabelText('Remove BoC'));
-    fireEvent.click(screen.getByText('Generate'));
+    fireEvent.click(screen.getByText('Generate Playlist'));
     expect(p.onAdd).toHaveBeenCalledWith(seed('1', 'Aphex'));
     expect(p.onRemove).toHaveBeenCalledWith('2');
     expect(p.onGenerate).toHaveBeenCalled();
   });
 
-  it('shows the result panel only once there are tracks', () => {
+  it('shows the results wrapper only once there is a playlist', () => {
     const { container, rerender } = render(
-      <BuildPlaylistSection {...bp({ selected: [seed('1', 'Aphex')], trackCount: 0 })} />,
+      <BuildPlaylistSection {...bp({ selected: [seed('1', 'Aphex')] })} />,
     );
-    expect(container.querySelector('#build-playlist-result')).toBeNull();
+    expect(container.querySelector('#build-playlist-results-wrapper')).toBeNull();
 
     rerender(
+      <BuildPlaylistSection {...bp({ selected: [seed('1', 'Aphex')], hasResults: true })} />,
+    );
+    for (const sel of [
+      '#build-playlist-results-wrapper',
+      '#build-playlist-results-title',
+      '#build-playlist-results-subtitle',
+      '#build-playlist-sync-btn',
+      '#build-playlist-metadata-display',
+      '#build-playlist-results.discover-playlist-container.compact',
+    ]) {
+      expect(container.querySelector(sel), sel).not.toBeNull();
+    }
+  });
+
+  it("shows the sync panel with THIS section's ids while syncing", () => {
+    const { container } = render(
       <BuildPlaylistSection
         {...bp({
           selected: [seed('1', 'Aphex')],
-          trackCount: 40,
-          metadata: { total_tracks: 40, similar_artists_count: 12, albums_count: 25 } as never,
+          hasResults: true,
+          syncing: true,
+          syncProgress: { total_tracks: 10, matched_tracks: 4, failed_tracks: 1 },
         })}
       />,
     );
-    expect(screen.getByText('Custom Playlist')).toBeInTheDocument();
-    expect(container.querySelectorAll('.bp-stat')).toHaveLength(3);
-    expect(screen.getByText('Similar Artists')).toBeInTheDocument();
+    expect(container.querySelector('#build-playlist-sync-status')).not.toBeNull();
+    expect(container.querySelector('#build-playlist-sync-percentage')!.textContent).toBe('50');
   });
 
-  it('downloads the generated playlist', () => {
-    const p = bp({ selected: [seed('1', 'Aphex')], trackCount: 40 });
+  it('hides the sync panel when nothing is syncing', () => {
+    const { container } = render(
+      <BuildPlaylistSection {...bp({ selected: [seed('1', 'Aphex')], hasResults: true })} />,
+    );
+    expect(container.querySelector('#build-playlist-sync-status')).toBeNull();
+  });
+
+  it('downloads and syncs the generated playlist', () => {
+    const p = bp({ selected: [seed('1', 'Aphex')], hasResults: true });
     render(<BuildPlaylistSection {...p} />);
-    fireEvent.click(screen.getByText('Download playlist'));
+    fireEvent.click(screen.getByTitle('Download missing tracks'));
+    fireEvent.click(screen.getByTitle('Sync to media server'));
     expect(p.onDownload).toHaveBeenCalled();
+    expect(p.onSync).toHaveBeenCalled();
   });
 });

@@ -326,8 +326,13 @@ export function ArtMapOverlay({
         </div>
       )}
 
-      <div className="artist-map-tooltip" id="artist-map-tooltip" />
-      <div className="artist-map-search-results" id="artist-map-search-results" />
+      {/*
+        The tooltip and the search dropdown are NOT rendered here. The vanilla's
+        static markup declares them empty and its JS writes into them by id; in
+        React they are ArtMapTooltipView and ArtMapSearchResults, which arrive
+        through `children`. Declaring placeholders here as well put two elements
+        on the page per id, and getElementById reached the empty one.
+      */}
       {children}
     </div>
   );
