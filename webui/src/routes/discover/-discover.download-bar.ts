@@ -318,3 +318,107 @@ export function publishDownloadGlobals(
 export function syncDownloadState(target: Record<string, unknown>, state: DownloadState): void {
   target.discoverDownloads = state;
 }
+
+// ── Opening a bubble (11793) ────────────────────────────────────────────────
+
+/**
+ * The sidebar starts HIDDEN (11851-11859).
+ *
+ * `initializeDiscoverDownloadBar` runs at DOMContentLoaded and only adds the
+ * `hidden` class — it never reveals. Hydration is what decides whether there is
+ * anything to show, and it runs later, so a bar that defaulted to visible would
+ * flash empty on every page load.
+ */
+export const DOWNLOAD_BAR_STARTS_HIDDEN = true;
+
+/**
+ * A download's modal is reached three different ways, in order (11805-11836).
+ *
+ * Album downloads keep a live `modalElement`; sync downloads keep a `modalId`
+ * to look up; and a download whose process was lost (page reloaded mid-flight)
+ * has neither and must be rehydrated from the backend first. Only after all
+ * three fail does the user get a toast instead of a modal.
+ *
+ * `display = 'flex'`, not 'block' — these modals are flex containers and
+ * 'block' collapses their layout.
+ */
+export const MODAL_DISPLAY = 'flex';
+
+export type OpenModalPlan =
+  | { via: 'element' }
+  | { via: 'id'; modalId: string }
+  | { via: 'rehydrate' }
+  | { via: 'toast'; message: string }
+  | { via: 'nothing' };
+
+export interface DownloadProcess {
+  modalElement?: unknown;
+  modalId?: string;
+}
+
+/**
+ * Which route to take for a click, BEFORE any rehydration is attempted.
+ *
+ * `modalId` that resolves to no element falls through to rehydration rather
+ * than stopping — a stale id is the same situation as no id.
+ */
+export function planOpenModal(
+  process: DownloadProcess | undefined,
+  modalExists: (id: string) => boolean,
+): OpenModalPlan {
+  if (process?.modalElement) return { via: 'element' };
+  if (process?.modalId && modalExists(process.modalId)) {
+    return { via: 'id', modalId: process.modalId };
+  }
+  return { via: 'rehydrate' };
+}
+
+/**
+ * What happens after rehydration is attempted (11828-11845).
+ *
+ * A successful rehydrate is re-checked for a `modalElement` — success only
+ * means the backend had a batch, not that a modal was rebuilt. The final
+ * fallback names the download and its status rather than saying "not found",
+ * because from the user's side the download plainly exists: they can see its
+ * bubble.
+ */
+export function planAfterRehydrate(
+  rehydrated: boolean,
+  process: DownloadProcess | undefined,
+  download: DiscoverDownload | undefined,
+): OpenModalPlan {
+  if (rehydrated && process?.modalElement) return { via: 'element' };
+  if (download) {
+    return { via: 'toast', message: `Download: ${download.name} - ${download.status}` };
+  }
+  return { via: 'nothing' };
+}
+
+/**
+ * NOT PORTED: `rehydrateDiscoverDownloadModal` (11863-12190, ~327 lines).
+ *
+ * It refetches `/api/download_status/batch`, finds the batch whose
+ * `playlist_id` matches, and rebuilds the modal — with separate paths for album
+ * downloads (`discover_album_*`, refetched from `/api/spotify/album/<id>`) and
+ * playlist downloads. Sized and located here so the gap is explicit rather than
+ * implied by absence; `planOpenModal` already routes to it.
+ */
+export const REHYDRATE_ENDPOINT = '/api/download_status/batch';
+
+/** `playlistId.startsWith('discover_album_')` (11907) picks the album path. */
+export const ALBUM_DOWNLOAD_PREFIX = 'discover_album_';
+
+export function isAlbumDownload(playlistId: string): boolean {
+  return playlistId.startsWith(ALBUM_DOWNLOAD_PREFIX);
+}
+
+/** The batch whose `playlist_id` matches (11884-11890). */
+export function findBatchFor(
+  batches: Record<string, { playlist_id?: string }> | undefined,
+  playlistId: string,
+): { batchId: string; batch: { playlist_id?: string } } | null {
+  for (const [batchId, batch] of Object.entries(batches ?? {})) {
+    if (batch?.playlist_id === playlistId) return { batchId, batch };
+  }
+  return null;
+}

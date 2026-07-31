@@ -28,6 +28,13 @@ import {
   snapshotPayload,
   socketStatusIsTerminal,
   syncDownloadState,
+  DOWNLOAD_BAR_STARTS_HIDDEN,
+  MODAL_DISPLAY,
+  REHYDRATE_ENDPOINT,
+  findBatchFor,
+  isAlbumDownload,
+  planAfterRehydrate,
+  planOpenModal,
 } from './-discover.download-bar';
 
 const NOW = new Date('2026-07-31T12:00:00.000Z');
@@ -320,5 +327,88 @@ describe('the window contract', () => {
     syncDownloadState(target, next);
     expect(target.discoverDownloads).toBe(next);
     expect(Object.keys(target.discoverDownloads as object)).toEqual(['p1']);
+  });
+});
+
+describe('opening a bubble', () => {
+  it('starts the sidebar HIDDEN and never reveals it itself', () => {
+    // Hydration decides whether there is anything to show and runs later, so a
+    // bar defaulting to visible would flash empty on every page load.
+    expect(DOWNLOAD_BAR_STARTS_HIDDEN).toBe(true);
+  });
+
+  it('prefers a live modalElement — the album-download path', () => {
+    expect(planOpenModal({ modalElement: {} }, () => true)).toEqual({ via: 'element' });
+  });
+
+  it('falls back to modalId — the sync-download path', () => {
+    expect(planOpenModal({ modalId: 'm1' }, (id) => id === 'm1')).toEqual({
+      via: 'id',
+      modalId: 'm1',
+    });
+  });
+
+  it('treats a STALE modalId as no id and rehydrates', () => {
+    // A dangling id is the same situation as no id — stopping there would leave
+    // the click doing nothing at all.
+    expect(planOpenModal({ modalId: 'gone' }, () => false)).toEqual({ via: 'rehydrate' });
+  });
+
+  it('rehydrates when there is no process at all', () => {
+    expect(planOpenModal(undefined, () => true)).toEqual({ via: 'rehydrate' });
+    expect(planOpenModal({}, () => true)).toEqual({ via: 'rehydrate' });
+  });
+
+  it('re-checks for a modal AFTER a successful rehydrate', () => {
+    // Success only means the backend had a batch, not that a modal was rebuilt.
+    expect(planAfterRehydrate(true, { modalElement: {} }, undefined)).toEqual({ via: 'element' });
+    expect(planAfterRehydrate(true, {}, undefined).via).not.toBe('element');
+  });
+
+  it('names the download and its status in the fallback toast', () => {
+    // "Not found" would be absurd — the user can see the bubble.
+    const d = seeded().p1;
+    expect(planAfterRehydrate(false, undefined, d)).toEqual({
+      via: 'toast',
+      message: 'Download: Release Radar - in_progress',
+    });
+  });
+
+  it('does nothing when there is no download either', () => {
+    expect(planAfterRehydrate(false, undefined, undefined)).toEqual({ via: 'nothing' });
+  });
+
+  it('uses flex, not block — these modals are flex containers', () => {
+    expect(MODAL_DISPLAY).toBe('flex');
+  });
+});
+
+describe('rehydration inputs', () => {
+  it('recognises the album-download id prefix', () => {
+    expect(isAlbumDownload('discover_album_abc')).toBe(true);
+    expect(isAlbumDownload('discover_release_radar')).toBe(false);
+  });
+
+  it('matches the PREFIX, not merely the word "album" anywhere', () => {
+    // seasonal_album_* is a real id built by -discover.seasonal.ts. A substring
+    // check would route a seasonal download into the discover-album rehydration
+    // path and refetch the wrong thing from /api/spotify/album.
+    expect(isAlbumDownload('seasonal_album_a1')).toBe(false);
+    expect(isAlbumDownload('build_playlist_custom')).toBe(false);
+  });
+
+  it('finds the batch by playlist_id, not by batch id', () => {
+    const batches = { b1: { playlist_id: 'other' }, b2: { playlist_id: 'want' } };
+    expect(findBatchFor(batches, 'want')?.batchId).toBe('b2');
+  });
+
+  it('returns null when no batch matches', () => {
+    expect(findBatchFor({ b1: { playlist_id: 'other' } }, 'want')).toBeNull();
+    expect(findBatchFor(undefined, 'want')).toBeNull();
+    expect(findBatchFor({ b1: {} }, 'want')).toBeNull();
+  });
+
+  it('reads the batch endpoint', () => {
+    expect(REHYDRATE_ENDPOINT).toBe('/api/download_status/batch');
   });
 });
