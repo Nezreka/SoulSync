@@ -47,23 +47,37 @@ export interface MixAction {
 /**
  * Every key that feeds the shared shelf, traced to its `_upsertMixCard` call.
  *
- * Eight sites, not seven — and `daily_mix_*` is the odd one out twice over: it
- * is VARIADIC (one call per daily mix, keyed by index) and it is the only
- * feeder with no `syncKey`, so its modal gets no default Download/Sync pair.
+ * There are eight call sites but only SEVEN live feeders. `daily_mix_*` is
+ * produced solely by `loadPersonalizedDailyMixes` (4639), which the
+ * reachability closure over discover.js reports as unreachable — no other
+ * function's body names it, and it is absent from index.html and every other
+ * static script. `-discover.api.ts` already recorded its endpoint as dead. It
+ * is listed here so the port does not silently "restore" a section that has not
+ * rendered for users, and so nobody re-adds it without reconnecting a caller.
  *
- * This list exists so a feeder cannot be silently dropped during the port. It
- * is not used to render — the shelf renders whatever has actually registered.
+ * This list is documentation, not a render source — the shelf renders whatever
+ * actually registered.
  */
 export const YOUR_MIX_FEEDERS = [
-  { key: 'release_radar', title: 'Fresh Tape', syncKey: 'release_radar' },
-  { key: 'discovery_weekly', title: 'The Archives', syncKey: 'discovery_weekly' },
-  { key: 'seasonal_playlist', title: null, syncKey: 'seasonal_playlist' }, // title is built from the season
-  { key: 'popular_picks', title: 'Popular Picks', syncKey: 'popular_picks' },
-  { key: 'hidden_gems', title: 'Hidden Gems', syncKey: 'hidden_gems' },
-  { key: 'listening_mix', title: 'Your Listening Mix', syncKey: 'listening_mix' },
-  { key: 'daily_mix_*', title: null, syncKey: null }, // variadic, and NO syncKey
-  { key: 'discovery_shuffle', title: 'Discovery Shuffle', syncKey: 'discovery_shuffle' },
+  { key: 'release_radar', title: 'Fresh Tape', syncKey: 'release_radar', live: true },
+  { key: 'discovery_weekly', title: 'The Archives', syncKey: 'discovery_weekly', live: true },
+  // title is built from the season
+  { key: 'seasonal_playlist', title: null, syncKey: 'seasonal_playlist', live: true },
+  { key: 'popular_picks', title: 'Popular Picks', syncKey: 'popular_picks', live: true },
+  { key: 'hidden_gems', title: 'Hidden Gems', syncKey: 'hidden_gems', live: true },
+  { key: 'listening_mix', title: 'Your Listening Mix', syncKey: 'listening_mix', live: true },
+  // variadic, no syncKey — and its only producer is unreachable
+  { key: 'daily_mix_*', title: null, syncKey: null, live: false },
+  {
+    key: 'discovery_shuffle',
+    title: 'Discovery Shuffle',
+    syncKey: 'discovery_shuffle',
+    live: true,
+  },
 ] as const;
+
+/** The seven feeders that can actually put a card on the shelf. */
+export const LIVE_MIX_FEEDERS = YOUR_MIX_FEEDERS.filter((f) => f.live);
 
 /**
  * Track count for the card's meta line (4854).

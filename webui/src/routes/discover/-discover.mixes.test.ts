@@ -7,6 +7,7 @@ import {
   MIX_ACTION_SYNC,
   MIX_COVER_PLACEHOLDER,
   MIX_COVER_TILES,
+  LIVE_MIX_FEEDERS,
   YOUR_MIX_FEEDERS,
   emptyMixRegistry,
   mixActions,
@@ -27,9 +28,7 @@ const track = (cover?: string) => ({ track_name: 't', album_cover_url: cover });
 const mix = (over: Partial<DiscoverMix> = {}): DiscoverMix => ({ key: 'k', title: 'T', ...over });
 
 describe('the feeder inventory', () => {
-  it('names all EIGHT shelf feeders', () => {
-    // Traced to their _upsertMixCard call sites. An earlier count of seven was
-    // wrong; this list is what stops a feeder going missing in the port.
+  it('names all eight _upsertMixCard call sites', () => {
     expect(YOUR_MIX_FEEDERS.map((f) => f.key)).toEqual([
       'release_radar',
       'discovery_weekly',
@@ -45,6 +44,15 @@ describe('the feeder inventory', () => {
   it('records that daily mixes are the ONLY feeder with no syncKey', () => {
     const noSync = YOUR_MIX_FEEDERS.filter((f) => f.syncKey === null);
     expect(noSync.map((f) => f.key)).toEqual(['daily_mix_*']);
+  });
+
+  it('marks daily mixes DEAD — only seven feeders can reach the shelf', () => {
+    // loadPersonalizedDailyMixes (4639) is unreachable: no reachable function
+    // names it, and it is absent from index.html and every other static script.
+    // Listing it as live would "restore" a section users have never seen.
+    expect(YOUR_MIX_FEEDERS.filter((f) => !f.live).map((f) => f.key)).toEqual(['daily_mix_*']);
+    expect(LIVE_MIX_FEEDERS).toHaveLength(7);
+    expect(LIVE_MIX_FEEDERS.every((f) => f.syncKey !== null)).toBe(true);
   });
 
   it('records the two feeders whose titles are built at runtime', () => {
