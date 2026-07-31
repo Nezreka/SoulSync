@@ -9,6 +9,11 @@
  *
  * It is never loaded by the app. Nothing imports it. Changing it would only
  * make the parity test agree with a lie.
+ *
+ * The leading dash is required, not cosmetic: this lives under src/routes/,
+ * and TanStack's generator treats every file there as a route candidate. It
+ * warns on each build about a route file that exports no Route until the name
+ * is prefixed (routeFileIgnorePrefix: '-').
  */
 
 // ============================================

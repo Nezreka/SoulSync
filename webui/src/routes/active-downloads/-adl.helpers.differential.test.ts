@@ -52,7 +52,7 @@ import {
  * myself. The fixture is frozen — nothing should ever edit it.
  */
 const SOURCE = readFileSync(
-  resolve(process.cwd(), 'src/routes/active-downloads/__fixtures__/vanilla-adl.js'),
+  resolve(process.cwd(), 'src/routes/active-downloads/__fixtures__/-vanilla-adl.js'),
   'utf8',
 );
 
