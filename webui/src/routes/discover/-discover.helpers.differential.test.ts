@@ -12,6 +12,7 @@ import {
   recommendationReasonTitle,
   whyIcon,
 } from './-discover.helpers';
+import { yourAlbumsPickSource } from './-discover.your-albums-actions';
 import { pickArtistDetailSource } from './-discover.your-artists';
 
 /**
@@ -88,6 +89,7 @@ const V = loadVanilla<{
   _listeningRecommendationReason: (a: unknown) => string;
   _listeningRecommendationReasonTitle: (a: unknown) => string;
   _pickArtistDetailSource: (a: unknown) => unknown;
+  _yourAlbumsPickSource: (a: unknown) => unknown;
 }>([
   'cleanArtistName',
   '_normalizeTrack',
@@ -98,6 +100,7 @@ const V = loadVanilla<{
   '_listeningRecommendationReason',
   '_listeningRecommendationReasonTitle',
   '_pickArtistDetailSource',
+  '_yourAlbumsPickSource',
 ]);
 
 describe('cleanArtistName', () => {
@@ -271,6 +274,40 @@ describe('pickArtistDetailSource', () => {
   for (const [i, input] of cases.entries()) {
     it(`matches the vanilla for case ${i}`, () => {
       expect(pickArtistDetailSource(input as never)).toEqual(V._pickArtistDetailSource(input));
+    });
+  }
+});
+
+describe('_yourAlbumsPickSource', () => {
+  const cases: unknown[] = [
+    {},
+    // the priority order, each source alone
+    { spotify_album_id: 'sp1' },
+    { deezer_album_id: 'dz1' },
+    { tidal_album_id: 'td1' },
+    { discogs_release_id: 'dc1' },
+    { discogs_id: 'dc2' },
+    // ...and each pair, so a reordered branch is caught
+    { spotify_album_id: 'sp1', deezer_album_id: 'dz1' },
+    { deezer_album_id: 'dz1', tidal_album_id: 'td1' },
+    { tidal_album_id: 'td1', discogs_release_id: 'dc1' },
+    { spotify_album_id: 'sp1', discogs_id: 'dc2' },
+    { spotify_album_id: 'sp1', deezer_album_id: 'dz1', tidal_album_id: 'td1', discogs_id: 'dc2' },
+    // discogs_release_id wins over discogs_id
+    { discogs_release_id: 'dc1', discogs_id: 'dc2' },
+    // numeric ids must come back as STRINGS — deezer and discogs send numbers
+    { deezer_album_id: 123456 },
+    { discogs_id: 987654 },
+    // falsy-but-present ids must not be picked
+    { spotify_album_id: '', deezer_album_id: 'dz1' },
+    { spotify_album_id: 0, tidal_album_id: 'td1' },
+    { spotify_album_id: null, discogs_id: 'dc2' },
+    { discogs_release_id: 0, discogs_id: 'dc2' },
+    { spotify_album_id: '', deezer_album_id: '', tidal_album_id: '', discogs_id: '' },
+  ];
+  for (const [i, input] of cases.entries()) {
+    it(`matches the vanilla for case ${i}`, () => {
+      expect(yourAlbumsPickSource(input as never)).toEqual(V._yourAlbumsPickSource(input));
     });
   }
 });
