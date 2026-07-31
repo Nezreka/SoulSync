@@ -88,7 +88,7 @@ const dl = (over: Partial<AdlDownload> = {}): AdlDownload =>
 
 const ok = (
   path: string,
-  body: unknown = { success: true },
+  body: Record<string, unknown> = { success: true },
   method: 'post' | 'get' | 'delete' = 'post',
 ) => {
   const calls: unknown[] = [];

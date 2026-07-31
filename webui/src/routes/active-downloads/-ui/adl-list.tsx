@@ -43,7 +43,8 @@ export function BatchFilterBanner({
 export interface AdlListProps {
   rows: AdlDownload[];
   filter: AdlFilter;
-  onCancel: (dl: AdlDownload) => void;
+  /** Returning the promise is what lets a row lock its button while in flight. */
+  onCancel: (dl: AdlDownload) => void | Promise<void>;
 }
 
 /**

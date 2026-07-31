@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react';
+
 import type { AdlDownload } from '../-adl.types';
 
 import {
@@ -63,8 +65,12 @@ function RetryChip({ dl }: { dl: AdlDownload }) {
 
 export interface AdlRowProps {
   dl: AdlDownload;
-  /** Rendered only for cancellable rows with real cancel coordinates. */
-  onCancel?: (dl: AdlDownload) => void;
+  /**
+   * Rendered only for cancellable rows with real cancel coordinates.
+   *
+   * May return a promise — the row locks its button until it settles.
+   */
+  onCancel?: (dl: AdlDownload) => void | Promise<void>;
   /** Set in the unverified view — makes the whole row open the audit trail. */
   onRowAudit?: (dl: AdlDownload) => void;
   /** The review action strip, supplied by the unverified view. */
@@ -75,6 +81,26 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
   const cls = statusClass(dl.status);
   const label = statusLabel(dl.status);
   const badge = verificationBadge(dl);
+  /**
+   * Locks the cancel button while its request is in flight.
+   *
+   * Two clicks fire two cancels, and the second fails on a task the first
+   * already took — the user sees an error for an action that worked. The
+   * vanilla guarded it with a synchronous `dataset.cancelling` flag plus an
+   * `adl-row-cancel-pending` class.
+   *
+   * Both halves are needed here and they are not redundant. `disabled` alone
+   * only stops the SECOND event loop turn: two clicks dispatched in the same
+   * tick both run before React re-renders, and both would read the same stale
+   * `false` from state. The ref is the part that is actually synchronous —
+   * it is the direct equivalent of the vanilla's dataset flag. State drives
+   * the class and the disabled attribute, which a ref cannot do.
+   *
+   * Local state is safe here: rows are keyed by task_id, so it survives the
+   * 2s poll re-render rather than resetting.
+   */
+  const cancellingRef = useRef(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const meta = [dl.artist, dl.album].filter(Boolean).join(' · ');
   // "3 of 19" — only meaningful for a real multi-track batch.
@@ -153,13 +179,30 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
       {cancellable && onCancel ? (
         <button
           type="button"
-          className="adl-row-cancel"
+          className={`adl-row-cancel${cancelling ? ' adl-row-cancel-pending' : ''}`}
           title="Cancel this download"
           aria-label="Cancel download"
+          disabled={cancelling}
           onClick={(event) => {
             // The row itself may be an audit trigger in the review view.
             event.stopPropagation();
-            onCancel(dl);
+            if (cancellingRef.current) return;
+            cancellingRef.current = true;
+            setCancelling(true);
+            void (async () => {
+              try {
+                await onCancel(dl);
+              } catch {
+                // The handler owns error reporting — it toasts. All the row
+                // has to do is make sure a rejection cannot escape as an
+                // unhandled rejection or leave the button stuck disabled.
+              } finally {
+                // On success the row is usually refetched away and this never
+                // runs; when it stays, the button has to become usable again.
+                cancellingRef.current = false;
+                setCancelling(false);
+              }
+            })();
           }}
         >
           <svg

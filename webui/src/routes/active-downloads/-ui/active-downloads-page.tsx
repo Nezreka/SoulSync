@@ -284,7 +284,9 @@ export function ActiveDownloadsPage() {
               )}
             </div>
           ) : (
-            <AdlList rows={visible} filter={state.filter} onCancel={(dl) => void onCancelRow(dl)} />
+            // Passed through, not wrapped in `void`: the row awaits it to keep
+            // its cancel button locked until the request settles.
+            <AdlList rows={visible} filter={state.filter} onCancel={onCancelRow} />
           )}
         </div>
       </div>
