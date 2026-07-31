@@ -10,6 +10,7 @@ import {
   fetchArtistInfo,
   fetchDeepCuts,
   fetchHero,
+  isSuccess,
   fetchLabelExplorer,
   fetchLbPlaylist,
   fetchPopularPicks,
@@ -42,83 +43,73 @@ function capture(
   return seen;
 }
 
-describe('a dead shelf never takes the page down', () => {
-  // This page fans out ~20 requests, several to external services that can hang
-  // or 500 (Last.fm, ListenBrainz). The vanilla gave every loader its own
-  // try/catch so one bad shelf renders empty instead of killing the render.
+describe('the section reader returns an OUTCOME, not just data', () => {
+  // The whole point of the rework: the vanilla renders its EMPTY copy for
+  // `success: false` but its ERROR copy (plus a toast on most sections) when
+  // the request actually throws. Collapsing both into "empty" — which the old
+  // shelf() did — loses one of those states entirely.
 
-  it('returns empty on a network failure', async () => {
+  it('reports an error outcome on a network failure', async () => {
     server.use(http.get('/api/discover/deep-cuts', () => HttpResponse.error()));
-    await expect(fetchDeepCuts()).resolves.toEqual([]);
+    const outcome = await fetchDeepCuts();
+    expect(outcome.kind).toBe('error');
   });
 
-  it('returns empty on a 500', async () => {
+  it('reports an error outcome on a 500', async () => {
     server.use(
       http.get(
         '/api/discover/personalized/popular-picks',
         () => new HttpResponse(null, { status: 500 }),
       ),
     );
-    await expect(fetchPopularPicks()).resolves.toEqual([]);
+    expect((await fetchPopularPicks()).kind).toBe('error');
   });
 
-  it('discards a success:false payload rather than half-rendering it', async () => {
+  it('reports OK — not error — for an explicit success:false', async () => {
+    // This is an empty state in the vanilla, so the api layer must not
+    // mislabel it as a failure. resolveSection makes the empty/error call.
     server.use(
-      http.get('/api/discover/deep-cuts', () =>
-        HttpResponse.json({ success: false, tracks: [{ name: 'ghost' }] }),
-      ),
+      http.get('/api/discover/deep-cuts', () => HttpResponse.json({ success: false, tracks: [] })),
     );
-    await expect(fetchDeepCuts()).resolves.toEqual([]);
+    const outcome = await fetchDeepCuts();
+    expect(outcome.kind).toBe('ok');
+    expect(
+      isSuccess(outcome.kind === 'ok' ? (outcome.data as Record<string, unknown>) : null),
+    ).toBe(false);
   });
 
-  it('tolerates a success payload missing its data key', async () => {
-    server.use(http.get('/api/discover/deep-cuts', () => HttpResponse.json({ success: true })));
-    await expect(fetchDeepCuts()).resolves.toEqual([]);
-  });
-
-  it('treats a payload with NO success key as a SUCCESS', async () => {
-    // Mirrors the vanilla controller's _isSuccess: only an explicit
-    // `success: false` is a failure. Treating absent-as-failure would silently
-    // blank any endpoint returning a bare {tracks: [...]}.
-    server.use(
-      http.get('/api/discover/deep-cuts', () =>
-        HttpResponse.json({ tracks: [{ track_name: 'No envelope' }] }),
-      ),
-    );
-    await expect(fetchDeepCuts()).resolves.toHaveLength(1);
-  });
-
-  it('still treats an explicit success:false as a failure', async () => {
-    server.use(
-      http.get('/api/discover/deep-cuts', () =>
-        HttpResponse.json({ success: false, tracks: [{ track_name: 'ghost' }] }),
-      ),
-    );
-    await expect(fetchDeepCuts()).resolves.toEqual([]);
-  });
-
-  it('passes the rows through when the shelf is healthy', async () => {
+  it('hands back the raw payload on success', async () => {
     server.use(
       http.get('/api/discover/deep-cuts', () =>
         HttpResponse.json({ success: true, tracks: [{ track_name: 'Xtal' }] }),
       ),
     );
-    await expect(fetchDeepCuts()).resolves.toHaveLength(1);
+    const outcome = await fetchDeepCuts();
+    expect(outcome.kind).toBe('ok');
+    expect(outcome.kind === 'ok' && (outcome.data as { tracks: unknown[] }).tracks).toHaveLength(1);
   });
 
-  it('label-explorer returns both lists, or two empties', async () => {
-    server.use(
-      http.get('/api/discover/label-explorer', () =>
-        HttpResponse.json({ success: true, albums: [{ name: 'A' }], labels: ['Warp'] }),
-      ),
-    );
-    await expect(fetchLabelExplorer()).resolves.toEqual({
-      albums: [{ name: 'A' }],
-      labels: ['Warp'],
-    });
-
+  it('never throws, whatever the server does', async () => {
     server.use(http.get('/api/discover/label-explorer', () => HttpResponse.error()));
-    await expect(fetchLabelExplorer()).resolves.toEqual({ albums: [], labels: [] });
+    await expect(fetchLabelExplorer()).resolves.toMatchObject({ kind: 'error' });
+  });
+});
+
+describe('isSuccess mirrors the vanilla controller', () => {
+  it('treats an absent success key as SUCCESS', () => {
+    // _isSuccess ends `return true`. Absent-as-failure would blank any
+    // endpoint answering with a bare {tracks: [...]}.
+    expect(isSuccess({ tracks: [] })).toBe(true);
+  });
+
+  it('honours an explicit flag either way', () => {
+    expect(isSuccess({ success: true })).toBe(true);
+    expect(isSuccess({ success: false })).toBe(false);
+  });
+
+  it('treats a missing payload as failure', () => {
+    expect(isSuccess(null)).toBe(false);
+    expect(isSuccess(undefined)).toBe(false);
   });
 });
 

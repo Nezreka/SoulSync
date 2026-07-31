@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import type { DiscoverSectionId } from './-discover.layout';
+import type { ResolvedSection, SectionOutcome } from './-discover.section-state';
 
 import {
   fetchAdventurousness,
@@ -22,8 +23,8 @@ import {
   fetchYourAlbums,
   fetchYourArtists,
 } from './-discover.api';
-import { isSectionVisible } from './-discover.layout';
 import { discoverLimiter } from './-discover.limiter';
+import { resolveSection } from './-discover.section-state';
 
 /**
  * The discover page's load orchestration.
@@ -108,6 +109,8 @@ export interface DiscoverPageController {
   aboveFoldSettled: boolean;
   /** Does this section have anything to render? Drives `buildLayoutRows`. */
   hasContent: (id: DiscoverSectionId) => boolean;
+  /** Full render state for a section — phase, copy, poll/toast flags. */
+  sectionState: (id: DiscoverSectionId) => ResolvedSection<unknown>;
   sections: Record<string, Section<unknown>>;
 }
 
@@ -201,79 +204,106 @@ export function useDiscoverPage(): DiscoverPageController {
    *
    * `adv-wave` is always visible: the dial is a control, not a shelf.
    */
-  const nonEmpty = (v: unknown): boolean =>
-    Array.isArray(v) ? v.length > 0 : Boolean(v && typeof v === 'object');
-
-  const items: Partial<Record<DiscoverSectionId, unknown>> = {
-    'cache-genre-explorer': genreExplorer.data,
-    'year-mixes-section': decades.data,
-    'listening-recs-section': listeningRecs.data?.artists,
-    'recommended-artists-section': recommendedArtists.data?.artists,
-    'recent-releases': recentReleases.data,
-    'cache-genre-releases': genreNewReleases.data,
-    'seasonal-albums-section': seasonal.data?.albums,
-    'cache-undiscovered': undiscovered.data,
-    'cache-label-explorer': labelExplorer.data?.albums,
-    'your-albums-section': yourAlbums.data?.albums,
-    'your-artists-section': yourArtists.data?.artists,
-    'cache-deep-cuts': deepCuts.data,
+  /** Pull `key` off a payload as an array, tolerating anything else. */
+  const arr = (d: unknown, key: string): unknown[] => {
+    const v = (d as Record<string, unknown> | null | undefined)?.[key];
+    return Array.isArray(v) ? v : [];
   };
 
-  /** The query backing each section, so we know whether it has settled. */
-  const settled: Partial<Record<DiscoverSectionId, boolean>> = {
-    'cache-genre-explorer': !genreExplorer.isPending,
-    'year-mixes-section': !decades.isPending,
-    'listening-recs-section': !listeningRecs.isPending,
-    'recommended-artists-section': !recommendedArtists.isPending,
-    'recent-releases': !recentReleases.isPending,
-    'cache-genre-releases': !genreNewReleases.isPending,
-    'seasonal-albums-section': !seasonal.isPending && Boolean(seasonal.data?.success),
-    'cache-undiscovered': !undiscovered.isPending,
-    'cache-label-explorer': !labelExplorer.isPending,
-    'your-albums-section': !yourAlbums.isPending,
-    'your-artists-section': !yourArtists.isPending,
-    'cache-deep-cuts': !deepCuts.isPending,
+  /**
+   * How to pull the item list out of each section's payload.
+   *
+   * One per section, because the key genuinely differs — the vanilla made
+   * `extractItems` REQUIRED for exactly this reason: "the controller refusing
+   * to guess prevents silent wrong-key bugs".
+   */
+  const EXTRACT: Partial<Record<DiscoverSectionId, (d: unknown) => unknown[]>> = {
+    'cache-genre-explorer': (d) => arr(d, 'genres'),
+    'year-mixes-section': (d) => arr(d, 'decades'),
+    'listening-recs-section': (d) => arr(d, 'artists'),
+    'recommended-artists-section': (d) => arr(d, 'artists'),
+    'recent-releases': (d) => arr(d, 'albums'),
+    'cache-genre-releases': (d) => arr(d, 'albums'),
+    'seasonal-albums-section': (d) => arr(d, 'albums'),
+    'cache-undiscovered': (d) => arr(d, 'albums'),
+    'cache-label-explorer': (d) => arr(d, 'albums'),
+    'your-albums-section': (d) => arr(d, 'albums'),
+    'your-artists-section': (d) => arr(d, 'artists'),
+    'cache-deep-cuts': (d) => arr(d, 'tracks'),
+  };
+
+  /** The query behind each section. */
+  const QUERY: Partial<Record<DiscoverSectionId, { data: unknown; isPending: boolean }>> = {
+    'cache-genre-explorer': genreExplorer,
+    'year-mixes-section': decades,
+    'listening-recs-section': listeningRecs,
+    'recommended-artists-section': recommendedArtists,
+    'recent-releases': recentReleases,
+    'cache-genre-releases': genreNewReleases,
+    'seasonal-albums-section': seasonal,
+    'cache-undiscovered': undiscovered,
+    'cache-label-explorer': labelExplorer,
+    'your-albums-section': yourAlbums,
+    'your-artists-section': yourArtists,
+    'cache-deep-cuts': deepCuts,
+  };
+
+  /**
+   * Resolve one section to its full render state — loading / rendered / empty /
+   * stale / error — with the vanilla's per-section copy, hide rule and toast
+   * policy. See -discover.section-state.ts.
+   */
+  const sectionState = (id: DiscoverSectionId): ResolvedSection<unknown> => {
+    const q = QUERY[id];
+    const extract = EXTRACT[id] ?? (() => []);
+    return resolveSection(
+      id,
+      q?.data as SectionOutcome<unknown> | undefined,
+      extract,
+      Boolean(q?.isPending),
+    );
   };
 
   const hasContent = (id: DiscoverSectionId): boolean => {
+    if (id === 'adv-wave') return true;
+
     if (id === 'your-mixes-section') {
       /**
-       * Not a shelf — a REGISTRY.
+       * Not a shelf — a REGISTRY. Seven live loaders each call
+       * `_upsertMixCard({key, ...})`; the section shows if ANY produced a mix.
        *
-       * The vanilla has no single loader for this section. Seven live loaders
-       * each call `_upsertMixCard({key, ...})`, which pushes into
-       * `_discoverMixRegistry` and reveals the section. So it is present if ANY
-       * feeder produced a mix, and hidden only when none did.
-       *
-       * Ported feeders (keys as the vanilla registers them):
-       *   popular_picks      loadPersonalizedPopularPicks
-       *   hidden_gems        loadPersonalizedHiddenGems
-       *   discovery_shuffle  loadDiscoveryShuffle
-       *   listening_mix      loadPersonalizedListeningMix
-       *
-       * STILL TO COME, and each must be added here when its phase lands or the
-       * shelf will wrongly hide for users who only have that one:
-       *   release_radar      loadDiscoverReleaseRadar  (slow-external tier)
-       *   discovery_weekly   loadDiscoverWeekly        (slow-external tier)
-       *   seasonal_playlist  loadSeasonalPlaylist      (below-fold)
-       *
-       * `daily_mixes` is deliberately absent — loadPersonalizedDailyMixes is
-       * dead code that Discover 2.0 orphaned.
+       * Ported feeders: popular_picks, hidden_gems, discovery_shuffle,
+       * listening_mix. STILL TO COME (add here with their phases, or the shelf
+       * wrongly hides for a user who only has that one): release_radar,
+       * discovery_weekly, seasonal_playlist. `daily_mixes` is dead code.
        */
-      return (
-        nonEmpty(popularPicks.data) ||
-        nonEmpty(hiddenGems.data) ||
-        nonEmpty(shuffle.data) ||
-        nonEmpty(listeningMix.data)
+      return [popularPicks, hiddenGems, shuffle, listeningMix].some(
+        (q) =>
+          arr(
+            (q.data as SectionOutcome<unknown> | undefined)?.kind === 'ok'
+              ? (q.data as { data: unknown }).data
+              : undefined,
+            'tracks',
+          ).length > 0,
       );
     }
-    return isSectionVisible(id, nonEmpty(items[id]), Boolean(settled[id]));
+
+    // Sections whose phases have not landed yet stay out of the layout —
+    // better absent than an empty frame.
+    if (!QUERY[id]) return false;
+
+    const s = sectionState(id);
+    // `hidden` is the vanilla's hideWhenEmpty flip; loading/stale/error all
+    // still occupy their slot, exactly as the controller leaves them.
+    if (s.phase === 'empty' && s.hidden) return false;
+    return true;
   };
 
   return {
     hero,
     aboveFoldSettled,
     hasContent,
+    sectionState,
     sections: {
       adventurousness,
       genreExplorer,

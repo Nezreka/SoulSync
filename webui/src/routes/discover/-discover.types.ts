@@ -127,36 +127,73 @@ export interface DiscoverTrack {
 
 // ── Your Albums (the one paginated shelf) ─────────────────────────────────
 
+export interface YourAlbumsStats {
+  total: number;
+  owned: number;
+  missing: number;
+}
+
+/**
+ * TRACED against the your-albums handler.
+ *
+ * The counts are NESTED under `stats`, not top-level. An earlier version of
+ * this interface put `owned` and `missing` at the top level and omitted
+ * `total` entirely — reading `data.owned` would have been undefined forever,
+ * and the index-signature-free shape here is what stops that recurring.
+ *
+ * Note `total` and `stats.total` differ on purpose: `total` is the count AFTER
+ * the status filter, `stats.total` is the unfiltered library total. The header
+ * shows one and the pager uses the other.
+ */
 export interface YourAlbumsResponse extends DiscoverEnvelope {
   albums?: DiscoverAlbum[];
+  /** Filtered total — what the current status filter matched. */
+  total?: number;
   page?: number;
   per_page?: number;
-  /** Totals for the header counts. */
-  owned?: number;
-  missing?: number;
   /**
    * The cache is mid-rebuild. The grid still renders what it has AND shows a
    * refreshing state — they are not mutually exclusive.
    */
   stale?: boolean;
-  stats?: Record<string, unknown>;
+  /** Unfiltered library counts, for the header. */
+  stats?: YourAlbumsStats;
 }
 
-/** your-albums/sources and your-artists/sources share this shape. */
+/**
+ * your-albums/sources and your-artists/sources.
+ *
+ * TRACED: `{success, enabled, connected}`. `enabled` is the user's configured
+ * source list (a comma-separated config value, split server-side); `connected`
+ * is which of those are actually authenticated RIGHT NOW. A source can be
+ * enabled but not connected, which is exactly the state the sources modal
+ * exists to show.
+ */
 export interface SourcesResponse extends DiscoverEnvelope {
-  /** Sources the user has switched on. */
   enabled?: string[];
-  /** Sources that are actually authenticated and reachable right now. */
   connected?: string[];
 }
 
 // ── Seasonal ──────────────────────────────────────────────────────────────
 
+/**
+ * TRACED against the seasonal/current handler.
+ *
+ * Two distinct shapes come back and the difference matters:
+ *   • NO current season -> {success, season: null, albums: [], playlist_available: false}
+ *     and NOTHING else — no name, description or icon at all
+ *   • a season -> all fields present
+ *
+ * So `season === null` is the real "there is no season" signal, not an empty
+ * albums array. The vanilla's loader bails on that branch before ever showing
+ * the section, which is why seasonal can be absent rather than empty.
+ */
 export interface SeasonalResponse extends DiscoverEnvelope {
+  /** null when there is no current season — the branch that renders nothing. */
+  season?: string | null;
   name?: string;
   description?: string;
   icon?: string;
-  season?: string;
   albums?: DiscoverAlbum[];
   /** False when the season has albums but no generated playlist to sync. */
   playlist_available?: boolean;

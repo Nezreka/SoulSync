@@ -19,6 +19,7 @@
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { SectionOutcome } from './-discover.section-state';
 import type {
   DiscoverAlbum,
   DiscoverArtist,
@@ -40,18 +41,21 @@ export interface DiscoverResult {
 /**
  * Read helper for the SHELF endpoints.
  *
- * Every shelf on this page is independently optional: the vanilla wrapped each
- * loader in its own try/catch and simply left the section empty on failure,
- * because one dead external service (Last.fm, ListenBrainz) must not take the
- * whole page down. `empty` is what that section renders as nothing.
+ * Returns the OUTCOME, not just the data. An earlier version swallowed every
+ * failure into an empty array, which collapsed two distinct user-visible states
+ * into one: the vanilla renders its EMPTY copy for `success: false` but its
+ * ERROR copy (plus a toast on most sections) when the request actually throws.
+ * `resolveSection` in -discover.section-state.ts needs to tell those apart, so
+ * this hands back the raw payload or the error and decides nothing itself.
+ *
+ * Still never throws — one dead external service must not take the page down.
  */
-async function shelf<T>(path: string, key: string, empty: T): Promise<T> {
+async function section<T>(path: string): Promise<SectionOutcome<T>> {
   try {
-    const data = await readJson<Record<string, unknown>>(apiClient.get(path));
-    if (!isSuccess(data)) return empty;
-    return (data[key] as T) ?? empty;
-  } catch {
-    return empty;
+    const data = await readJson<T>(apiClient.get(path));
+    return { kind: 'ok', data };
+  } catch (error) {
+    return { kind: 'error', error };
   }
 }
 
@@ -63,7 +67,7 @@ async function shelf<T>(path: string, key: string, empty: T): Promise<T> {
  * SUCCESS, not a failure. Treating absent-as-failure would silently blank any
  * endpoint that returns a bare `{albums: [...]}`.
  */
-function isSuccess(data: Record<string, unknown> | null | undefined): boolean {
+export function isSuccess(data: Record<string, unknown> | null | undefined): boolean {
   if (!data) return false;
   if (Object.prototype.hasOwnProperty.call(data, 'success')) return Boolean(data.success);
   return true;
@@ -187,49 +191,41 @@ export function fetchListeningRecommendations(): Promise<
 }
 
 export const fetchListeningMix = () =>
-  shelf<DiscoverTrack[]>('discover/personalized/listening-mix', 'tracks', []);
+  section<Record<string, unknown>>('discover/personalized/listening-mix');
 export const fetchPopularPicks = () =>
-  shelf<DiscoverTrack[]>('discover/personalized/popular-picks', 'tracks', []);
+  section<Record<string, unknown>>('discover/personalized/popular-picks');
 export const fetchHiddenGems = () =>
-  shelf<DiscoverTrack[]>('discover/personalized/hidden-gems', 'tracks', []);
+  section<Record<string, unknown>>('discover/personalized/hidden-gems');
 
 /** The shuffle shelf asks for a fixed limit — the vanilla hard-coded it inline. */
 export const fetchDiscoveryShuffle = () =>
-  shelf<DiscoverTrack[]>(
+  section<Record<string, unknown>>(
     `discover/personalized/discovery-shuffle?limit=${DISCOVERY_SHUFFLE_LIMIT}`,
-    'tracks',
-    [],
   );
 
 export const fetchBecauseYouListenTo = () =>
-  shelf<unknown[]>('discover/because-you-listen-to', 'sections', []);
+  section<Record<string, unknown>>('discover/because-you-listen-to');
 
 // ── Cache-backed browse shelves ───────────────────────────────────────────
 
 export const fetchUndiscoveredAlbums = () =>
-  shelf<DiscoverAlbum[]>('discover/undiscovered-albums', 'albums', []);
+  section<Record<string, unknown>>('discover/undiscovered-albums');
 export const fetchGenreNewReleases = () =>
-  shelf<DiscoverAlbum[]>('discover/genre-new-releases', 'albums', []);
-export const fetchDeepCuts = () => shelf<DiscoverTrack[]>('discover/deep-cuts', 'tracks', []);
-export const fetchGenreExplorer = () => shelf<unknown[]>('discover/genre-explorer', 'genres', []);
+  section<Record<string, unknown>>('discover/genre-new-releases');
+export const fetchDeepCuts = () => section<Record<string, unknown>>('discover/deep-cuts');
+export const fetchGenreExplorer = () => section<Record<string, unknown>>('discover/genre-explorer');
 export const fetchRecentReleases = () =>
-  shelf<DiscoverAlbum[]>('discover/recent-releases', 'albums', []);
+  section<Record<string, unknown>>('discover/recent-releases');
 
-/** Label explorer returns two lists from one call. */
-export async function fetchLabelExplorer(): Promise<{
-  albums: DiscoverAlbum[];
-  labels: unknown[];
-}> {
-  try {
-    const d = await readJson<{ success?: boolean; albums?: DiscoverAlbum[]; labels?: unknown[] }>(
-      apiClient.get('discover/label-explorer'),
-    );
-    return d?.success
-      ? { albums: d.albums ?? [], labels: d.labels ?? [] }
-      : { albums: [], labels: [] };
-  } catch {
-    return { albums: [], labels: [] };
-  }
+/**
+ * Label explorer returns two lists from one call.
+ *
+ * Still an outcome like every other section — an earlier version swallowed
+ * failures into two empty arrays, which is the exact bug this rework exists to
+ * remove. The caller picks `albums` / `labels` off the payload.
+ */
+export function fetchLabelExplorer(): Promise<SectionOutcome<Record<string, unknown>>> {
+  return section<Record<string, unknown>>('discover/label-explorer');
 }
 
 export function fetchGenreDeepDive(
@@ -274,7 +270,7 @@ export function fetchSeasonalCurrent(): Promise<SeasonalResponse> {
 // ── Decades (the Time Machine shelf) ──────────────────────────────────────
 
 export const fetchAvailableDecades = () =>
-  shelf<number[]>('discover/decades/available', 'decades', []);
+  section<Record<string, unknown>>('discover/decades/available');
 
 export function fetchDecadeTracks(
   decade: number,
@@ -325,11 +321,11 @@ export function generateBuildPlaylist(
 // ── ListenBrainz ──────────────────────────────────────────────────────────
 
 export const fetchLbCreatedFor = () =>
-  shelf<unknown[]>('discover/listenbrainz/created-for', 'playlists', []);
+  section<Record<string, unknown>>('discover/listenbrainz/created-for');
 export const fetchLbUserPlaylists = () =>
-  shelf<unknown[]>('discover/listenbrainz/user-playlists', 'playlists', []);
+  section<Record<string, unknown>>('discover/listenbrainz/user-playlists');
 export const fetchLbCollaborative = () =>
-  shelf<unknown[]>('discover/listenbrainz/collaborative', 'playlists', []);
+  section<Record<string, unknown>>('discover/listenbrainz/collaborative');
 
 export function fetchLbPlaylist(
   mbid: string,
