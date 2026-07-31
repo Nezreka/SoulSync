@@ -1,6 +1,6 @@
 # discover page → React: status
 
-Branch `react-migration-discover`, 22 commits, **not pushed**.
+Branch `react-migration-discover`, 27 commits, **not pushed**.
 
 ## the honest summary
 
@@ -9,7 +9,7 @@ nothing is mountable**, so there is nothing for you to click yet. discover.js is
 12,319 lines — the largest file on the music side — and about 4,500 of those are
 the two canvas/sigma visualisations, which are untouched.
 
-Full suite: **2,528 tests / 127 files green.** Every module below was written by
+Full suite: **2,714 tests / 131 files green.** Every module below was written by
 reading its vanilla source end to end first, then mutation-tested — a mutation
 that survives means the test was vacuous, and each pass is recorded in its
 commit.
@@ -18,7 +18,7 @@ commit.
 
 | module | covers | notes |
 |---|---|---|
-| `-discover.helpers.ts` | 8 pure helpers | **137 differential tests** against the real discover.js |
+| `-discover.helpers.ts` | 8 pure helpers | part of the **218 differential tests** against the real discover.js |
 | `-discover.types.ts` | response shapes | traced to handlers, not invented |
 | `-discover.api.ts` | 40+ endpoints | outcome-returning; dead endpoints marked |
 | `-discover.layout.ts` | section order + pairing | order pinned verbatim |
@@ -36,6 +36,10 @@ commit.
 | `-discover.cache-sections.ts` | 5 cache sections + Genre Deep Dive | |
 | `-discover.build-playlist.ts` | seed picker + generator | |
 | `-discover.bylt.ts` | Because You Listen To | **1 bug fix** |
+| `-discover.adventurousness.ts` | the dial + the bounded loader pool | wave maths differentially tested |
+| `-discover.recommended.ts` | both recommendation carousels | |
+| `-discover.seasonal.ts` | seasonal albums/playlist + artist context | context differentially tested (27 cases) |
+| `-discover.listenbrainz-cache.ts` | the LB cross-file cache contract | closes a carried requirement |
 
 ### bugs found and fixed (all pinned by a test that names them)
 
@@ -76,9 +80,9 @@ listed that feeder as live a commit earlier.
 * **Artist Map** (canvas, 5829-6523) and **Artist Web** (sigma.js, 6523-10361) —
   ~4,500 lines, untouched. The CDN→npm decision (bundle graphology/sigma) is
   made but not executed.
-* Remaining live sections not yet ported: the Adventurousness dial, Recommended
-  For You, Last.fm Track Radio, ListenBrainz playlists, Seasonal, the
-  personalized playlists loaders.
+* Remaining live sections not yet ported: Last.fm Track Radio (3235-3395) and
+  the ListenBrainz playlists section (3397-4259). Both were read this session
+  but not yet transcribed.
 * PR 2 (delete discover.js + the dead code) — not started.
 
 ## outstanding requirements — do not lose these
@@ -86,9 +90,15 @@ listed that feeder as live a commit earlier.
 * ~~`checkForActiveDiscoverSyncs`~~ — **done**, in `-discover.playlist-sync.ts`.
 * ~~your-mixes feeders~~ — **done**; there are eight call sites but only SEVEN
   live feeders (`daily_mix_*` is dead). `YOUR_MIX_FEEDERS` carries a `live` flag.
-* **`window.listenbrainzTracksCache` / `listenbrainzPlaylistsCache`** must be
-  read/written on `window` by the LB phase — shared contract with the Sync tab. A
-  `typeof`-guarded consumer degrades SILENTLY, which is worse than a loud break.
+* ~~`window.listenbrainzTracksCache` / `listenbrainzPlaylistsCache`~~ — **done**,
+  in `-discover.listenbrainz-cache.ts`. Two traps now pinned: `init.js` clears
+  both caches IN PLACE, so identity must be stable (`= {}` orphans its
+  reference); and `sync-listenbrainz.js` forks its OWN cache if ours is
+  undefined when it runs, with no error, so Sync and Discover silently stop
+  sharing. Still OPEN and deliberately unfixed: the two writers disagree on the
+  cached track shape (discover writes the raw payload, sync writes a normalised
+  row with `recording_mbid` renamed to `mbid`). Unifying them changes what every
+  existing discover reader sees — its own change, with its own testing.
 * **item-level types still unverified**: `DiscoverArtist`, `DiscoverTrack`.
   Trace each against its handler before building its cards. `DiscoverAlbum`,
   `DiscoverHeroArtist`, `YourAlbumsResponse`, `SourcesResponse` and
