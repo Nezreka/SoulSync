@@ -221,3 +221,167 @@ export function mixActions(mix: DiscoverMix): MixAction[] {
     { label: MIX_ACTION_SYNC, primary: true, isSync: true, onclick: 'sync' },
   ];
 }
+
+// ── The live shelf feeders (found missing by the coverage audit) ────────────
+
+export interface MixFeederDef {
+  key: string;
+  title: string;
+  subtitle: string;
+  syncKey: string;
+  fetchUrl: string;
+  /** DOM container the old (now collapsed) per-mix table lived in. */
+  contentEl: string;
+  loadingMessage?: string;
+  emptyMessage?: string;
+  errorMessage?: string;
+}
+
+/**
+ * The four feeders whose loaders live outside the personalized block.
+ *
+ * Release Radar (2060) and Weekly (2089) go through the section controller and
+ * render '' — their only job is to fill the module track array and upsert a mix
+ * card. Popular Picks (4553) and Hidden Gems (4580) hand-roll the same shape
+ * without a controller.
+ *
+ * All four then `_collapseOldMixSection` their container: the per-mix table is
+ * redundant now that the card opens the tracks in a modal, and collapsing also
+ * strips the duplicate sync-status ids that would otherwise shadow the modal's.
+ */
+export const MIX_FEEDERS: MixFeederDef[] = [
+  {
+    key: 'release_radar',
+    title: 'Fresh Tape',
+    subtitle: 'New releases from artists you follow',
+    syncKey: 'release_radar',
+    fetchUrl: '/api/discover/release-radar',
+    contentEl: '#release-radar-playlist',
+    loadingMessage: 'Loading release radar...',
+    emptyMessage: 'No new releases available',
+    errorMessage: 'Failed to load release radar',
+  },
+  {
+    key: 'discovery_weekly',
+    title: 'The Archives',
+    subtitle: 'A weekly dig through artists across your library',
+    syncKey: 'discovery_weekly',
+    fetchUrl: '/api/discover/weekly',
+    contentEl: '#discovery-weekly-playlist',
+    loadingMessage: 'Curating your discovery playlist...',
+    emptyMessage: 'No tracks available yet',
+    errorMessage: 'Failed to load discovery weekly',
+  },
+  {
+    key: 'popular_picks',
+    title: 'Popular Picks',
+    subtitle: 'Popular tracks from artists you love',
+    syncKey: 'popular_picks',
+    fetchUrl: '/api/discover/personalized/popular-picks',
+    contentEl: '#personalized-popular-picks',
+  },
+  {
+    key: 'hidden_gems',
+    title: 'Hidden Gems',
+    subtitle: 'Deeper cuts you might have missed',
+    syncKey: 'hidden_gems',
+    fetchUrl: '/api/discover/personalized/hidden-gems',
+    contentEl: '#personalized-hidden-gems',
+  },
+];
+
+/**
+ * A feeder upserts its card ONLY with tracks (2078, 4562).
+ *
+ * An empty response is not a card with "0 tracks" — the shelf simply never
+ * learns about that mix. The personalized pair additionally hides its whole
+ * legacy section on empty.
+ */
+export function feederShouldUpsert(tracks: unknown[] | null | undefined): boolean {
+  return Array.isArray(tracks) && tracks.length > 0;
+}
+
+/** `!data.success || !data.tracks || !data.tracks.length` (4562). */
+export function feederTracks(
+  data: { success?: boolean; tracks?: unknown[] } | null | undefined,
+): unknown[] {
+  if (!data?.success || !Array.isArray(data.tracks)) return [];
+  return data.tracks;
+}
+
+// ── The mix modal's track table (4692) ─────────────────────────────────────
+
+export interface CompactRow {
+  index: number;
+  /** 1-based, shown to the user. */
+  position: number;
+  name: string;
+  artist: string;
+  album: string;
+  cover: string;
+  /** EMPTY for a zero/unknown length rather than "0:00". */
+  duration: string;
+  selectable: boolean;
+}
+
+/**
+ * `renderCompactPlaylist` (4692).
+ *
+ * `selectable` is opt-in per call: the mix modal passes it (that is #1079), the
+ * plain playlist renderers do not. When set, each row gains a checkbox and a
+ * preview button, and the row itself gets `has-select` so the grid reflows.
+ */
+export function compactRows(tracks: unknown[], selectable = false): CompactRow[] {
+  return tracks.map((track, index) => {
+    const t = normalizeTrack(track as never);
+    const ms = t.durationMs;
+    const min = Math.floor(ms / 60000);
+    const sec = Math.floor((ms % 60000) / 1000);
+    return {
+      index,
+      position: index + 1,
+      name: t.name,
+      artist: t.artist,
+      album: t.album,
+      cover: t.cover || MIX_COVER_PLACEHOLDER,
+      duration: ms > 0 ? `${min}:${sec.toString().padStart(2, '0')}` : '',
+      selectable,
+    };
+  });
+}
+
+// ── #1079: the selection bar (4772-4806) ───────────────────────────────────
+
+export const MIX_SEL_IDLE_LABEL = 'Download selected';
+export const MIX_TRACK_GONE = 'Track is no longer available';
+export const MIX_NO_PLAYBACK = 'Playback is not available here';
+
+export interface MixSelectionBar {
+  count: number;
+  countLabel: string;
+  downloadLabel: string;
+  downloadDisabled: boolean;
+  /** The header checkbox is checked only when EVERY row is (4802). */
+  selectAllChecked: boolean;
+}
+
+/**
+ * `_updateMixSelBar` (4792).
+ *
+ * The select-all box requires `total > 0` as well as `count === total` —
+ * without it an empty list would show select-all ticked, since 0 === 0.
+ */
+export function mixSelectionBar(count: number, total: number): MixSelectionBar {
+  return {
+    count,
+    countLabel: `${count} selected`,
+    downloadLabel: count > 0 ? `Download selected (${count})` : MIX_SEL_IDLE_LABEL,
+    downloadDisabled: count === 0,
+    selectAllChecked: total > 0 && count === total,
+  };
+}
+
+/** Select-all / clear set every box (4780, 4785); clear also unticks the header. */
+export function mixSetAllSelected(total: number, checked: boolean): number[] {
+  return checked ? Array.from({ length: total }, (_, i) => i) : [];
+}

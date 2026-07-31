@@ -22,6 +22,15 @@ import {
   shelfMixes,
   shelfVisible,
   upsertShelfMix,
+  MIX_FEEDERS,
+  MIX_SEL_IDLE_LABEL,
+  MIX_NO_PLAYBACK,
+  MIX_TRACK_GONE,
+  compactRows,
+  feederShouldUpsert,
+  feederTracks,
+  mixSelectionBar,
+  mixSetAllSelected,
 } from './-discover.mixes';
 
 const track = (cover?: string) => ({ track_name: 't', album_cover_url: cover });
@@ -233,5 +242,120 @@ describe('the mix modal', () => {
 
   it('respects an explicitly EMPTY action list', () => {
     expect(mixActions(mix({ actions: [], syncKey: 'x' }))).toEqual([]);
+  });
+});
+
+describe('the live shelf feeders', () => {
+  it('covers the four the audit found missing', () => {
+    expect(MIX_FEEDERS.map((f) => f.key)).toEqual([
+      'release_radar',
+      'discovery_weekly',
+      'popular_picks',
+      'hidden_gems',
+    ]);
+  });
+
+  it('every feeder matches a LIVE entry in the inventory', () => {
+    // A feeder def for a dead key would resurrect a section users never see.
+    const liveKeys = LIVE_MIX_FEEDERS.map((f) => f.key);
+    for (const f of MIX_FEEDERS) expect(liveKeys).toContain(f.key);
+  });
+
+  it('carries each title, subtitle and syncKey verbatim', () => {
+    const byKey = Object.fromEntries(MIX_FEEDERS.map((f) => [f.key, f]));
+    expect(byKey.release_radar.title).toBe('Fresh Tape');
+    expect(byKey.release_radar.subtitle).toBe('New releases from artists you follow');
+    expect(byKey.discovery_weekly.title).toBe('The Archives');
+    expect(byKey.popular_picks.subtitle).toBe('Popular tracks from artists you love');
+    expect(byKey.hidden_gems.subtitle).toBe('Deeper cuts you might have missed');
+    for (const f of MIX_FEEDERS) expect(f.syncKey).toBe(f.key);
+  });
+
+  it('upserts a card ONLY when there are tracks', () => {
+    // An empty response must not produce a "0 tracks" card — the shelf simply
+    // never learns about that mix.
+    expect(feederShouldUpsert([{}])).toBe(true);
+    expect(feederShouldUpsert([])).toBe(false);
+    expect(feederShouldUpsert(null)).toBe(false);
+  });
+
+  it('reads tracks only from a successful response', () => {
+    expect(feederTracks({ success: true, tracks: [{}, {}] })).toHaveLength(2);
+    expect(feederTracks({ success: false, tracks: [{}] })).toEqual([]);
+    expect(feederTracks({ success: true })).toEqual([]);
+    expect(feederTracks(null)).toEqual([]);
+  });
+});
+
+describe('the modal track table', () => {
+  const t = (over = {}) => ({
+    track_name: 'Xtal',
+    artist_name: 'Aphex',
+    album_name: 'SAW',
+    ...over,
+  });
+
+  it('numbers rows 1-based while keeping the 0-based index', () => {
+    const rows = compactRows([t(), t()]);
+    expect(rows.map((r) => r.position)).toEqual([1, 2]);
+    expect(rows.map((r) => r.index)).toEqual([0, 1]);
+  });
+
+  it('formats duration as m:ss', () => {
+    expect(compactRows([t({ duration_ms: 305000 })])[0].duration).toBe('5:05');
+    expect(compactRows([t({ duration_ms: 61000 })])[0].duration).toBe('1:01');
+  });
+
+  it('is EMPTY for an unknown length, not "0:00"', () => {
+    expect(compactRows([t({ duration_ms: 0 })])[0].duration).toBe('');
+    expect(compactRows([t()])[0].duration).toBe('');
+  });
+
+  it('falls back to the placeholder cover', () => {
+    expect(compactRows([t()])[0].cover).toBe(MIX_COVER_PLACEHOLDER);
+  });
+
+  it('is NOT selectable by default — that is opt-in per call', () => {
+    // The mix modal passes selectable (#1079); the plain renderers do not.
+    expect(compactRows([t()])[0].selectable).toBe(false);
+    expect(compactRows([t()], true)[0].selectable).toBe(true);
+  });
+});
+
+describe('the #1079 selection bar', () => {
+  it('labels the count and the button', () => {
+    expect(mixSelectionBar(3, 10)).toMatchObject({
+      countLabel: '3 selected',
+      downloadLabel: 'Download selected (3)',
+      downloadDisabled: false,
+    });
+  });
+
+  it('disables and un-counts the button at zero', () => {
+    expect(mixSelectionBar(0, 10)).toMatchObject({
+      countLabel: '0 selected',
+      downloadLabel: MIX_SEL_IDLE_LABEL,
+      downloadDisabled: true,
+    });
+  });
+
+  it('ticks select-all only when every row is selected', () => {
+    expect(mixSelectionBar(10, 10).selectAllChecked).toBe(true);
+    expect(mixSelectionBar(9, 10).selectAllChecked).toBe(false);
+  });
+
+  it('does NOT tick select-all for an empty list', () => {
+    // 0 === 0 would otherwise show select-all ticked with nothing to select.
+    expect(mixSelectionBar(0, 0).selectAllChecked).toBe(false);
+  });
+
+  it('select-all picks every index; clear picks none', () => {
+    expect(mixSetAllSelected(3, true)).toEqual([0, 1, 2]);
+    expect(mixSetAllSelected(3, false)).toEqual([]);
+  });
+
+  it('keeps the preview failure copy', () => {
+    expect(MIX_TRACK_GONE).toBe('Track is no longer available');
+    expect(MIX_NO_PLAYBACK).toBe('Playback is not available here');
   });
 });
