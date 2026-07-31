@@ -205,6 +205,14 @@ export function artMapWasTouchDrag(
  * rather than imported so the wiring can be driven in a test without a canvas
  * renderer, and so a React component can route these to its own state.
  */
+/**
+ * What the map asks of its page.
+ *
+ * Declared as function PROPERTIES rather than method shorthand: a test that
+ * reaches for `host.render` to assert on it is reaching for an unbound method
+ * under the shorthand form, which the linter rightly objects to. Nothing here is
+ * ever called with a meaningful `this`.
+ */
 export interface ArtMapInteractionHost {
   /**
    * Whether the map is on screen (10018).
@@ -215,18 +223,18 @@ export interface ArtMapInteractionHost {
    * own state instead of a hard-coded element id, and so the shortcuts stay dead
    * while the Artist Web overlay is on top of a merely-hidden map.
    */
-  isVisible(): boolean;
-  render(): void;
-  ensureAmbient(): void;
-  emitRipple(wx: number, wy: number, hue?: number | null): void;
-  showTooltip(e: { clientX: number; clientY: number } | null, node: ArtMapNode | null): void;
-  showPanelArtist(node: ArtMapNode): void;
-  animateConstellation(): void;
-  showContextMenu(e: MouseEvent, node: ArtMapNode): void;
-  hideContextMenu(): void;
-  close(): void;
-  zoom(factor: number): void;
-  fitToView(): void;
+  isVisible: () => boolean;
+  render: () => void;
+  ensureAmbient: () => void;
+  emitRipple: (wx: number, wy: number, hue?: number | null) => void;
+  showTooltip: (e: { clientX: number; clientY: number } | null, node: ArtMapNode | null) => void;
+  showPanelArtist: (node: ArtMapNode) => void;
+  animateConstellation: () => void;
+  showContextMenu: (e: MouseEvent, node: ArtMapNode) => void;
+  hideContextMenu: () => void;
+  close: () => void;
+  zoom: (factor: number) => void;
+  fitToView: () => void;
   /**
    * Focus the toolbar search box; returns whether there was one to focus.
    *
@@ -234,11 +242,11 @@ export interface ArtMapInteractionHost {
    * `if (input)` (10026-10029) — so with no search box on the page, 's' still
    * types an s. The return value carries that.
    */
-  focusSearch(): boolean;
-  toggleSimilar(): void;
-  islandNav(dir: number): void;
+  focusSearch: () => boolean;
+  toggleSimilar: () => void;
+  islandNav: (dir: number) => void;
   /** Re-measure and re-frame after a resize settles. */
-  resized(): void;
+  resized: () => void;
 }
 
 /**
