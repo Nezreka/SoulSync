@@ -270,9 +270,39 @@ section shell's re-test of `loaded` (unreachable behind `isSectionVisible`).
   passing an `emptyMessage` that `SECTION_EMPTY_POLICY` already owns; the mutants
   that survived were pointing at the duplication, not at a missing test.
 
+### what verification found afterwards
+
+Running a real audit over the finished components turned up defects that every
+behavioural test had passed:
+
+- **The playlist builder was written from the module contracts without reading
+  its markup** — against the rule this whole port runs on. It invented nearly
+  every id and class (`#build-playlist-input` for `#build-playlist-search`,
+  `.bp-seeds` for `.build-playlist-selected-artists`). Rewritten against
+  index.html 5012-5121.
+- **The download bar is a SIDEBAR** (`#discover-download-sidebar`) with a header
+  and a live count, hidden by a class the stylesheet transitions. It also handed
+  `bubbleBackground`'s CSS *declaration string* to React's `style` prop, which
+  ignores strings silently.
+- **Two ids were emitted twice** — the map overlay kept placeholder tooltip and
+  search-results divs while the chrome components rendered the real ones.
+- **Five type ERRORS sat in a committed test**, because the lint checks had been
+  grepping `::warning` only.
+
+`-ui/artefact-parity.test.ts` now holds ids at zero-unknown and zero-duplicate.
+
+### the styling debt, which blocks the route flip
+
+94 class names in the components have **no CSS**. They are semantic names that
+replaced the vanilla's INLINE styles (the map and web panels build their markup
+in JS with `style="…"` on every node). Those elements render structurally
+correct and visually bare. The gate ratchets the number; writing that CSS is a
+prerequisite of the flip, not polish.
+
 ### still to build
 
-**`route.tsx` + the manifest flip (#251).** This is the whole remaining piece:
+**The CSS above (#258), then `route.tsx` + the manifest flip (#251).** The flip
+is the whole remaining piece:
 a page hook that owns the state every component above takes as props, then
 mounting it and flipping the manifest so discover.js stops loading. Nothing is
 mounted yet, so the vanilla page is still what users get and nothing
