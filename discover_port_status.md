@@ -205,12 +205,52 @@ vacuous: `SOURCE.toContain('ratio: ' + WEB_CAMERA.cameraToRatio)` passed a
 0.12 → 0.15 mutation, because `artWebFocusNode` genuinely uses 0.15 elsewhere in
 the file. All three are literals now.
 
-## what is left
+## the UI phase (in progress)
 
-**The React page itself.** `src/routes/discover/` still has no `route.tsx` and no
-`-ui/` components — the whole page is logic modules. That is the next phase and
-it is large: every section plus both visualisation shells, then the manifest
-flip, then PR 2's cleanup (delete discover.js + the 37 dead functions).
+`src/routes/discover/-ui/` now exists. Done, each with a full mutation pass
+against a green baseline:
+
+| component | mutants |
+| --- | --- |
+| `artist-map-hub` / `artist-map-panel` | earlier phases |
+| `artist-map-overlay` — canvas lifecycle shell | 26/26 |
+| `artist-map-chrome` — tooltip, context menu, shortcuts, search | 29/29 |
+| `-discover.artist-web.lifecycle` — sigma/FA2/frame loop | 40/40 |
+| …its keyboard half | 19/19 |
+| `artist-web-overlay` — toolbar, sidebar, legend, host | 29/29 |
+| `artist-web-panel` — three cards, path, guide, hints | 34/34 |
+| `discover-section` + `discover-hero` | 32/32 |
+| `recommended-shelf` — both recommendation shelves | 25/25 |
+| `recommended-modal` | 23/23 |
+
+Two equivalent mutants are recorded in the code rather than papered over: the
+context menu's inner `hasId` check (unreachable behind `disabled`) and the
+section shell's re-test of `loaded` (unreachable behind `isSectionVisible`).
+
+### findings from this phase
+
+- **`artist.name` does not exist.** The hero response has `artist_name`, and
+  `DiscoverHeroArtist`'s index signature means tsc never objects. The types file
+  already warned about this class of invention; it caught me anyway.
+- **Section ids are used verbatim.** `DiscoverSectionId` already matches the
+  vanilla's DOM ids, several of which end in `-section`. Appending another
+  produces `listening-recs-section-section` and detaches every rule naming it.
+- **The Artist Web's KEY zoom ratios are 0.77/1.3**, not the toolbar buttons'
+  0.7/1.4 — a held key repeats, so it steps smaller.
+- **`webMountSigma` returns a disposer** instead of carrying the vanilla's
+  `_mouseBound` flag, for the same reason the map's canvas guard was dropped:
+  React builds a new host per mount, so the flag would bind the first and skip
+  every later one.
+- **`finishLayout` was missing from both fallback paths** in the first draft of
+  the web lifecycle. Nothing throws; selections just stop fanning out. The
+  vanilla differential caught it.
+
+### still to build
+
+`your-artists` / `your-albums`, `recent-releases` / `seasonal` / decade shelf,
+mixes / Last.fm radio / ListenBrainz, the adventurousness dial / build-playlist /
+download bar, then `route.tsx` + the manifest flip, then PR 2's cleanup (delete
+discover.js + the 37 dead functions).
 
 **Deletion hazard, unchanged:** `startDecadeSync`, `startDecadeSyncPolling` and
 `openDownloadModalForDecade` are LIVE despite sitting inside the dead region.
