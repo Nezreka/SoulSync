@@ -29,6 +29,8 @@ import type {
   YourAlbumsResponse,
 } from './-discover.types';
 
+import { DISCOVERY_SHUFFLE_LIMIT, YOUR_ALBUMS_PAGE_SIZE } from './-discover.types';
+
 /** The `{success, error}` envelope every discover endpoint answers with. */
 export interface DiscoverResult {
   success?: boolean;
@@ -90,7 +92,7 @@ export interface YourAlbumsQuery {
 export function fetchYourAlbums(query: YourAlbumsQuery = {}): Promise<YourAlbumsResponse> {
   const searchParams: Record<string, string | number> = {
     page: query.page ?? 1,
-    per_page: query.per_page ?? 48,
+    per_page: query.per_page ?? YOUR_ALBUMS_PAGE_SIZE,
   };
   if (query.status) searchParams.status = query.status;
   if (query.search) searchParams.search = query.search;
@@ -177,9 +179,13 @@ export const fetchPopularPicks = () =>
 export const fetchHiddenGems = () =>
   shelf<DiscoverTrack[]>('discover/personalized/hidden-gems', 'tracks', []);
 
-/** The shuffle shelf asks for a fixed 50 — the vanilla hard-coded it. */
+/** The shuffle shelf asks for a fixed limit — the vanilla hard-coded it inline. */
 export const fetchDiscoveryShuffle = () =>
-  shelf<DiscoverTrack[]>('discover/personalized/discovery-shuffle?limit=50', 'tracks', []);
+  shelf<DiscoverTrack[]>(
+    `discover/personalized/discovery-shuffle?limit=${DISCOVERY_SHUFFLE_LIMIT}`,
+    'tracks',
+    [],
+  );
 
 export const fetchBecauseYouListenTo = () =>
   shelf<unknown[]>('discover/because-you-listen-to', 'sections', []);

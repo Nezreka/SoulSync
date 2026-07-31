@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { DiscoverSectionId } from './-discover.layout';
 
 import {
+  fetchAdventurousness,
   fetchAvailableDecades,
   fetchDeepCuts,
   fetchDiscoveryShuffle,
@@ -21,6 +22,7 @@ import {
   fetchYourAlbums,
   fetchYourArtists,
 } from './-discover.api';
+import { discoverLimiter } from './-discover.limiter';
 
 /**
  * The discover page's load orchestration.
@@ -39,11 +41,19 @@ import {
  *                   — the vanilla's comment records that letting them gate the
  *                   layout caused a visible "reshuffle on load".
  *
- * Tier 2 is gated on tier 1 settling, which is the part that matters. What is
- * NOT reproduced is the vanilla's hand-rolled 5-at-a-time pool: react-query owns
- * fetching here, and the browser already caps concurrency per origin (~6 on
- * HTTP/1.1, multiplexed on HTTP/2). That pool existed to protect time-to-usable
- * top, which the tiering delivers on its own.
+ * Tier 2 is gated on tier 1 SETTLING (not succeeding — a failed shelf must
+ * still release the tier, or one dead endpoint strands the bottom of the page).
+ *
+ * The vanilla's 5-at-a-time pool IS reproduced, via `discoverLimiter`. An
+ * earlier draft of this hook dropped it on the reasoning that browsers already
+ * cap per-origin concurrency; that was wrong, and the vanilla says why:
+ *
+ *     ~20 heavy DB/consensus queries contend on the backend (Flask + GIL) and
+ *     each ends up slow — the page took tens of seconds to become usable
+ *
+ * The cap protects the SERVER. Browser limits are beside the point, and on
+ * HTTP/2 they do nothing at all — every request multiplexes down one connection
+ * and lands on Flask together, which is exactly what the pool prevented.
  *
  * Every section fails independently — see `shelf()` in -discover.api.ts. One
  * dead external service leaves one empty shelf, never a broken page.
@@ -66,11 +76,16 @@ export interface DiscoverPageController {
   sections: Record<string, Section<unknown>>;
 }
 
-/** A query that never retries — a dead shelf should fail fast and stay empty. */
+/**
+ * A query that never retries, and that leaves through the shared limiter.
+ *
+ * No retry: a dead shelf should fail fast and stay empty rather than spend
+ * three attempts holding a slot that another shelf could use.
+ */
 function shelfQuery<T>(key: string, fn: () => Promise<T>, enabled = true) {
   return {
     queryKey: ['discover', key] as const,
-    queryFn: fn,
+    queryFn: () => discoverLimiter.run(fn),
     staleTime: SHELF_STALE_MS,
     retry: false,
     enabled,
@@ -80,6 +95,14 @@ function shelfQuery<T>(key: string, fn: () => Promise<T>, enabled = true) {
 export function useDiscoverPage(): DiscoverPageController {
   // ── Tier 1: above the fold ────────────────────────────────────────────
   const hero = useQuery(shelfQuery('hero', fetchHero));
+  /**
+   * The adventurousness dial's saved value.
+   *
+   * Above the fold in the vanilla (`loadAdventurousnessDial`) because the dial
+   * is visible immediately and would otherwise render at a default before
+   * snapping to the user's real setting.
+   */
+  const adventurousness = useQuery(shelfQuery('adventurousness', fetchAdventurousness));
   const genreExplorer = useQuery(shelfQuery('genre-explorer', fetchGenreExplorer));
   const listeningRecs = useQuery(shelfQuery('listening-recs', fetchListeningRecommendations));
   const recommendedArtists = useQuery(shelfQuery('similar-artists', fetchSimilarArtists));
@@ -92,6 +115,7 @@ export function useDiscoverPage(): DiscoverPageController {
 
   const aboveFold = [
     hero,
+    adventurousness,
     genreExplorer,
     listeningRecs,
     recommendedArtists,
@@ -187,6 +211,7 @@ export function useDiscoverPage(): DiscoverPageController {
     aboveFoldSettled,
     hasContent,
     sections: {
+      adventurousness,
       genreExplorer,
       listeningRecs,
       recommendedArtists,

@@ -1,16 +1,18 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
+import { DISCOVER_REQUEST_LIMIT, discoverLimiter } from './-discover.limiter';
 import { useDiscoverPage } from './-discover.use-page';
 
 /** Endpoints the above-the-fold tier hits. */
 const ABOVE_FOLD = [
   '/api/discover/hero',
+  '/api/discover/adventurousness',
   '/api/discover/genre-explorer',
   '/api/discover/listening-recommendations',
   '/api/discover/similar-artists',
@@ -84,6 +86,13 @@ beforeEach(() => {
   stub();
 });
 
+afterEach(() => {
+  // The limiter is a module-level singleton, so anything it still has queued
+  // would otherwise fire AFTER this test tore its MSW handlers down and land
+  // as an "unhandled request" against the next test.
+  discoverLimiter.reset();
+});
+
 describe('the load tiering', () => {
   it('does not touch a below-the-fold endpoint until the top has settled', async () => {
     // The whole point: the top of the page is usable in a couple of seconds
@@ -120,6 +129,37 @@ describe('the load tiering', () => {
     await waitFor(() =>
       expect(hits.filter((h) => BELOW_FOLD.includes(h)).length).toBeGreaterThan(0),
     );
+  });
+
+  it('never has more than the pool size in flight at once', async () => {
+    // Proves the hook actually goes THROUGH the limiter rather than merely
+    // importing it. Without this, removing `discoverLimiter.run` from
+    // shelfQuery passes the whole suite — it did, until this test existed.
+    //
+    // Tier 1 alone is 11 queries. Unlimited, all 11 land on Flask together,
+    // which is the contention the vanilla's pool was added to prevent.
+    let inFlight = 0;
+    let peak = 0;
+    const hold: (() => void)[] = [];
+    server.use(
+      ...[...ABOVE_FOLD, ...BELOW_FOLD].map((path) =>
+        http.get(path, async () => {
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise<void>((resolve) => hold.push(resolve));
+          inFlight--;
+          return HttpResponse.json({ success: true, artists: [], tracks: [], albums: [] });
+        }),
+      ),
+    );
+
+    render();
+    await waitFor(() => expect(hold.length).toBeGreaterThan(0));
+    // Let every queued request that COULD start, start.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(peak).toBeLessThanOrEqual(DISCOVER_REQUEST_LIMIT);
+
+    hold.forEach((release) => release());
   });
 
   it('survives every endpoint failing', async () => {
@@ -171,6 +211,38 @@ describe('hasContent drives which sections render', () => {
     );
     const { result } = render();
     await waitFor(() => expect(result.current.hasContent('your-mixes-section')).toBe(true));
+  });
+
+  it('loads the dial value, which the vanilla put above the fold', async () => {
+    // hasContent('adv-wave') is always true, so the dial always renders — which
+    // means its saved value has to be fetched or it renders at a default and
+    // then snaps. It is the vanilla's 11th above-fold loader.
+    server.use(
+      http.get('/api/discover/adventurousness', () =>
+        HttpResponse.json({ success: true, value: 0.42 }),
+      ),
+    );
+    const { result } = render();
+    await waitFor(() =>
+      expect(
+        (result.current.sections.adventurousness.data as { value?: number } | undefined)?.value,
+      ).toBe(0.42),
+    );
+  });
+
+  it('accepts a dial value of 0, which is a real setting', async () => {
+    // Least adventurous. The vanilla guarded with `typeof value === 'number'`
+    // precisely so a falsy check could not drop it.
+    server.use(
+      http.get('/api/discover/adventurousness', () =>
+        HttpResponse.json({ success: true, value: 0 }),
+      ),
+    );
+    const { result } = render();
+    await waitFor(() => expect(result.current.aboveFoldSettled).toBe(true));
+    expect(
+      (result.current.sections.adventurousness.data as { value?: number } | undefined)?.value,
+    ).toBe(0);
   });
 
   it('reports false for sections whose phases have not landed yet', async () => {
