@@ -220,10 +220,7 @@ export const ADV_REFETCH_BYPASSES_COALESCE = true;
  * section loaders at once put ~20 heavy queries in contention on Flask+GIL and
  * the page took tens of seconds to become usable.
  */
-export async function runLoadersLimited(
-  thunks: (() => unknown)[],
-  limit = 5,
-): Promise<void> {
+export async function runLoadersLimited(thunks: (() => unknown)[], limit = 5): Promise<void> {
   let cursor = 0;
   async function worker(): Promise<void> {
     while (cursor < thunks.length) {
