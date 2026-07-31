@@ -125,7 +125,8 @@ export interface ArtistWebState {
   spreadSet: Set<string> | null;
   spreadPush: number;
   spreadActive: Set<string> | null;
-  fa2: { kill(): void } | null;
+  /** Property-style, so a test can reference `fa2.kill` to assert on it. */
+  fa2: { kill: () => void } | null;
   fa2Timer: ReturnType<typeof setTimeout> | null;
   previewAudio: HTMLAudioElement | null;
   previewKey: string | null;
