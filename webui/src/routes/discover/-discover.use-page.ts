@@ -58,6 +58,21 @@ import { discoverLimiter } from './-discover.limiter';
  *
  * Every section fails independently — see `shelf()` in -discover.api.ts. One
  * dead external service leaves one empty shelf, never a broken page.
+ *
+ * ── NOT YET PORTED: resuming an in-flight sync ──────────────────────────────
+ *
+ * `loadDiscoverPage` ends by calling `checkForActiveDiscoverSyncs()`, which
+ * polls three endpoints and, if a sync is mid-flight, re-shows its status
+ * display, disables its sync button and restarts polling:
+ *
+ *     /api/sync/status/discover_release_radar      (Fresh Tape)
+ *     /api/sync/status/discover_discovery_weekly   (The Archives)
+ *     /api/sync/status/discover_seasonal_playlist
+ *
+ * Without it, reloading mid-sync makes a running sync look like it stopped.
+ * All three belong to sections in later phases (release radar, weekly,
+ * seasonal playlist), so there is nothing to attach it to yet — it lands with
+ * the FIRST of those phases, and must not be dropped on the floor when it does.
  */
 
 /**
