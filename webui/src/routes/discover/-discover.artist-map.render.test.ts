@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type ArtMapNode, artMap } from './-discover.artist-map';
 import {
+  artMapAnimateConstellation,
+  artMapRender,
   ARTMAP_CAMERA_MS,
   ARTMAP_IMAGE_CONCURRENCY,
   ARTMAP_REDRAW_THROTTLE_MS,
@@ -214,6 +216,70 @@ describe('artMapStartLoop', () => {
     artMapStartLoop();
     flushFrame(1000); //  before the node's start time — still "active"
     expect(artMap._anim.running).toBe(true);
+  });
+});
+
+describe('artMapRender', () => {
+  it('coalesces a burst of requests into ONE frame', () => {
+    // Pan, hover and animation all call this; without the guard a single
+    // mousemove burst would draw several times per frame.
+    resetMap();
+    artMapRender();
+    artMapRender();
+    artMapRender();
+    expect(frames).toHaveLength(1);
+  });
+
+  it('re-arms once the frame has run', () => {
+    resetMap();
+    artMapRender();
+    flushFrame(1000);
+    expect(artMap._rafPending).toBeNull();
+    artMapRender();
+    expect(frames).toHaveLength(1);
+  });
+});
+
+describe('artMapAnimateConstellation', () => {
+  it('fades IN by 0.08 a frame and stops at 1', () => {
+    resetMap({ _constellationActive: true, _constellationFade: 0 });
+    artMapAnimateConstellation();
+    expect(artMap._constellationFade).toBeCloseTo(0.08, 6);
+    resetMap({ _constellationActive: true, _constellationFade: 0.97 });
+    artMapAnimateConstellation();
+    expect(artMap._constellationFade).toBe(1);
+  });
+
+  it('fades OUT by 0.1 a frame — deliberately faster than it lights up', () => {
+    resetMap({ _constellationActive: false, _constellationFade: 1 });
+    artMapAnimateConstellation();
+    expect(artMap._constellationFade).toBeCloseTo(0.9, 6);
+    // The two rates differ on purpose; equalising them is a visible change.
+    expect(0.1).not.toBe(0.08);
+  });
+
+  it('keeps the cache until the fade actually reaches zero', () => {
+    resetMap({
+      _constellationActive: false,
+      _constellationFade: 0.2,
+      _constellationCache: { nodeId: 1, nodes: [] },
+    });
+    artMapAnimateConstellation();
+    expect(artMap._constellationFade).toBeCloseTo(0.1, 6);
+    expect(artMap._constellationCache).not.toBeNull(); //  still fading
+
+    artMapAnimateConstellation();
+    expect(artMap._constellationFade).toBe(0);
+    expect(artMap._constellationCache).toBeNull(); //  dropped only at zero
+  });
+
+  it('does nothing once a fade has settled at either end', () => {
+    resetMap({ _constellationActive: true, _constellationFade: 1 });
+    artMapAnimateConstellation();
+    expect(frames).toHaveLength(0);
+    resetMap({ _constellationActive: false, _constellationFade: 0 });
+    artMapAnimateConstellation();
+    expect(frames).toHaveLength(0);
   });
 });
 
